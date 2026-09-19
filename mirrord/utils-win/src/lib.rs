@@ -14,6 +14,7 @@ pub mod diagnostics;
 pub mod error;
 #[cfg(windows)]
 pub mod fixed_buf;
+pub mod internal_thread;
 #[cfg(windows)]
 pub mod modules;
 #[cfg(windows)]

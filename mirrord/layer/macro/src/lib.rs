@@ -108,6 +108,97 @@ pub fn hook_fn(
     proc_macro::TokenStream::from(output)
 }
 
+/// `#[internal_bypass(ORIGINAL)]` marks a layer-win detour so a call that belongs to mirrord
+/// skips straight to the original function.
+///
+/// It answers that question twice, because a call belongs to mirrord in two ways.
+///
+/// 1. The thread is mirrord's own. The layer enables every hook before its startup worker connects
+///    to the proxy; without this, that worker's own socket and file calls would be intercepted and
+///    routed back through the not-yet-established connection. See
+///    `utils-win/src/internal_thread.rs`, which `layer-win` re-exports as
+///    `crate::hooks::internal_thread`.
+/// 2. A detour is already running on the thread. A detour body reads the configuration, allocates,
+///    logs, and talks to the proxy, and each of those can reach an API this layer hooks. Without
+///    this the nested call comes back into the hook and the layer answers its own request with
+///    remote state. See `layer-win/src/hooks/reentrancy.rs`, the port of the unix layer's
+///    `DETOUR_BYPASS` and `#[hook_guard_fn]`.
+///
+/// The second mark lasts for one call. It is released while a detour body calls back into
+/// application code; `reentrancy::ApplicationCallback` does that, and `socket::addrinfo_ex` is
+/// the one place that needs it.
+///
+/// Do not put this on a hook that dispatches on what it was given rather than on who called it.
+/// The list of those, and the reason for each, is in `utils-win/src/internal_thread.rs`.
+///
+/// `ORIGINAL` names the `OnceLock<&Fn>` static that `apply_hook!` fills at hook
+/// creation (e.g. `SOCKET_ORIGINAL`). The annotated body is preserved verbatim and
+/// only runs when neither mark is set.
+///
+/// Place this attribute as the outermost attribute on the function; it re-emits any
+/// attributes below it (e.g. `#[instrument]`) so they still expand.
+///
+/// Only layer-win hooks have the `crate::hooks::internal_thread` and
+/// `crate::hooks::reentrancy` modules; applying this in the unix layer will not compile.
+#[proc_macro_attribute]
+pub fn internal_bypass(
+    args: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let item = syn::parse_macro_input!(input as syn::ItemFn);
+    let original = syn::parse_macro_input!(args as syn::Ident);
+
+    let attrs = &item.attrs;
+    let vis = &item.vis;
+    let sig = &item.sig;
+    let block = &item.block;
+
+    let arg_names = sig
+        .inputs
+        .iter()
+        .map(|input| match input {
+            syn::FnArg::Receiver(_) => {
+                panic!("internal_bypass cannot wrap a function taking `self`")
+            }
+            syn::FnArg::Typed(pat_type) => match pat_type.pat.as_ref() {
+                syn::Pat::Ident(pat_ident) => pat_ident.ident.clone(),
+                other => panic!(
+                    "internal_bypass requires plain identifier parameters, found `{}`",
+                    quote::quote!(#other)
+                ),
+            },
+        })
+        .collect::<Vec<_>>();
+
+    let call_original = quote::quote! {
+        let original = #original
+            .get()
+            .expect("internal_bypass: original function not set; hooks must be created before they can fire");
+        return unsafe { original(#(#arg_names),*) };
+    };
+
+    let expanded = quote::quote! {
+        #(#attrs)*
+        #vis #sig {
+            // Question one: is this thread mirrord's own?
+            if crate::hooks::internal_thread::is_internal() {
+                #call_original
+            }
+
+            // Question two: is a detour already running on this thread? The guard holds the mark
+            // for the whole body, so every nested hooked call the body makes reaches the original.
+            let __reentrancy = crate::hooks::reentrancy::BypassGuard::enter();
+            if __reentrancy.is_none() {
+                #call_original
+            }
+
+            #block
+        }
+    };
+
+    proc_macro::TokenStream::from(expanded)
+}
+
 /// Same as above but calls the original function if detour guard is active.
 #[proc_macro_attribute]
 pub fn hook_guard_fn(

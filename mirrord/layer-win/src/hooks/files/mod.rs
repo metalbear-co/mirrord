@@ -61,6 +61,7 @@ use self::types::*;
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
+#[mirrord_layer_macro::internal_bypass(NT_CREATE_FILE_ORIGINAL)]
 unsafe extern "system" fn nt_create_file_hook(
     file_handle: PHANDLE,
     desired_access: ACCESS_MASK,
@@ -92,6 +93,7 @@ unsafe extern "system" fn nt_create_file_hook(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[mirrord_layer_macro::internal_bypass(NT_READ_FILE_ORIGINAL)]
 unsafe extern "system" fn nt_read_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -119,6 +121,7 @@ unsafe extern "system" fn nt_read_file_hook(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[mirrord_layer_macro::internal_bypass(NT_WRITE_FILE_ORIGINAL)]
 unsafe extern "system" fn nt_write_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -145,6 +148,7 @@ unsafe extern "system" fn nt_write_file_hook(
     }
 }
 
+#[mirrord_layer_macro::internal_bypass(NT_SET_INFORMATION_FILE_ORIGINAL)]
 unsafe extern "system" fn nt_set_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -163,6 +167,7 @@ unsafe extern "system" fn nt_set_information_file_hook(
     }
 }
 
+#[mirrord_layer_macro::internal_bypass(NT_SET_VOLUME_INFORMATION_FILE_ORIGINAL)]
 unsafe extern "system" fn nt_set_volume_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -181,6 +186,7 @@ unsafe extern "system" fn nt_set_volume_information_file_hook(
     }
 }
 
+#[mirrord_layer_macro::internal_bypass(NT_SET_QUOTA_INFORMATION_FILE_ORIGINAL)]
 unsafe extern "system" fn nt_set_quota_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -190,6 +196,7 @@ unsafe extern "system" fn nt_set_quota_information_file_hook(
     unsafe { ops::stubs::set_quota_information(file, io_status_block, buffer, length) }
 }
 
+#[mirrord_layer_macro::internal_bypass(NT_QUERY_INFORMATION_FILE_ORIGINAL)]
 unsafe extern "system" fn nt_query_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -208,6 +215,7 @@ unsafe extern "system" fn nt_query_information_file_hook(
     }
 }
 
+#[mirrord_layer_macro::internal_bypass(NT_QUERY_ATTRIBUTES_FILE_ORIGINAL)]
 unsafe extern "system" fn nt_query_attributes_file_hook(
     object_attributes: POBJECT_ATTRIBUTES,
     file_basic_info: PFILE_BASIC_INFORMATION,
@@ -215,6 +223,7 @@ unsafe extern "system" fn nt_query_attributes_file_hook(
     unsafe { ops::stubs::query_attributes(object_attributes, file_basic_info) }
 }
 
+#[mirrord_layer_macro::internal_bypass(NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL)]
 unsafe extern "system" fn nt_query_volume_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -234,6 +243,7 @@ unsafe extern "system" fn nt_query_volume_information_file_hook(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[mirrord_layer_macro::internal_bypass(NT_QUERY_QUOTA_INFORMATION_FILE_ORIGINAL)]
 unsafe extern "system" fn nt_query_quota_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -260,11 +270,13 @@ unsafe extern "system" fn nt_query_quota_information_file_hook(
     }
 }
 
+#[mirrord_layer_macro::internal_bypass(NT_DELETE_FILE_ORIGINAL)]
 unsafe extern "system" fn nt_delete_file_hook(object_attributes: POBJECT_ATTRIBUTES) -> NTSTATUS {
     unsafe { ops::stubs::delete_file(object_attributes) }
 }
 
 #[allow(clippy::too_many_arguments)]
+#[mirrord_layer_macro::internal_bypass(NT_DEVICE_IO_CONTROL_FILE_ORIGINAL)]
 unsafe extern "system" fn nt_device_io_control_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -294,6 +306,7 @@ unsafe extern "system" fn nt_device_io_control_file_hook(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[mirrord_layer_macro::internal_bypass(NT_LOCK_FILE_ORIGINAL)]
 unsafe extern "system" fn nt_lock_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -322,6 +335,8 @@ unsafe extern "system" fn nt_lock_file_hook(
     }
 }
 
+// Not `internal_bypass`-annotated: dispatches on the handle, not the caller.
+// See `utils_win::internal_thread`.
 unsafe extern "system" fn nt_unlock_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -332,10 +347,14 @@ unsafe extern "system" fn nt_unlock_file_hook(
     unsafe { ops::stubs::unlock_file(file, io_status_block, byte_offset, length, key) }
 }
 
+// Not `internal_bypass`-annotated: dispatches on the handle, not the caller.
+// See `utils_win::internal_thread`.
 unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     unsafe { ops::close::handle(handle) }
 }
 
+// Not `internal_bypass`-annotated: dispatches on the handle, not the caller.
+// See `utils_win::internal_thread`.
 unsafe extern "system" fn nt_cancel_io_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -343,6 +362,8 @@ unsafe extern "system" fn nt_cancel_io_file_hook(
     unsafe { ops::cancel::handle(file, io_status_block) }
 }
 
+// Not `internal_bypass`-annotated: dispatches on the handle, not the caller.
+// See `utils_win::internal_thread`.
 unsafe extern "system" fn nt_wait_for_single_object_hook(
     handle: HANDLE,
     alertable: BOOLEAN,

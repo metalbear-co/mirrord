@@ -55,7 +55,7 @@ exec.workspace = true
 str-win = { path = "../str-win" }
 utils-win = { path = "../utils-win" }
 winapi.workspace = true
-dll-syringe.workspace = true
+stork.workspace = true
 windows-strings.workspace = true
 
 [dev-dependencies]

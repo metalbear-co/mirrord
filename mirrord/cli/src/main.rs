@@ -453,6 +453,12 @@ async fn exec_process(
         env_vars.remove(key);
     }
 
+    #[cfg(windows)]
+    env_vars.insert(
+        mirrord_layer_lib::process::windows::injection::MIRRORD_INJECTION_METHOD_ENV.to_owned(),
+        args.injection_method.to_string(),
+    );
+
     // Put original executable in argv[0] even if actually running patched version.
     let binary_args = std::iter::once(&args.binary)
         .chain(args.binary_args.iter())
@@ -631,7 +637,7 @@ where
     .map_err(|e| {
         error!("Failed to create process: {:?}", e);
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
-        CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
+        CliError::WindowsBinaryExecuteFailed(binary.clone(), e)
     })?;
 
     // Exit with the same code as the child process

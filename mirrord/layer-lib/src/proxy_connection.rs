@@ -214,6 +214,35 @@ impl ResponseManager {
     }
 }
 
+/// Time a hooked call waits for the proxy connection to be established before falling
+/// back to the pre-connection error path. Matches the worker's own connect timeout.
+const PROXY_CONNECTION_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Resolve the global proxy connection, waiting for the layer worker to establish it.
+///
+/// The Windows layer installs hooks before the proxy connection exists (so app code that
+/// starts early - APC/IAT injection - is still intercepted), which means a hooked call can
+/// arrive while [`PROXY_CONNECTION`] is unset. Waiting keeps that early call remote instead
+/// of silently falling back to a local operation. Trace-only mode never connects, and
+/// non-Windows layers establish the connection before any hook can fire, so both keep the
+/// instant error.
+#[allow(static_mut_refs)]
+fn proxy_connection() -> HookResult<&'static ProxyConnection> {
+    #[cfg(target_os = "windows")]
+    if !crate::trace_only::is_trace_only_mode() {
+        let deadline = std::time::Instant::now() + PROXY_CONNECTION_WAIT_TIMEOUT;
+        while unsafe { PROXY_CONNECTION.get() }.is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or(HookError::CannotGetProxyConnection)
+    }
+}
+
 /// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
 /// Blocks until the proxy responds.
 pub fn make_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
@@ -221,15 +250,9 @@ where
     T: IsLayerRequestWithResponse + Debug,
     T::Response: Debug,
 {
-    // SAFETY: mutation happens only on initialization.
-    #[allow(static_mut_refs)]
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .make_request_with_response(request)
-            .map_err(Into::into)
-    }
+    proxy_connection()?
+        .make_request_with_response(request)
+        .map_err(Into::into)
 }
 
 /// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
@@ -237,13 +260,7 @@ where
 pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
     request: T,
 ) -> HookResult<MessageId> {
-    // SAFETY: mutation happens only on initialization.
-    #[allow(static_mut_refs)]
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .make_request_no_response(request)
-            .map_err(Into::into)
-    }
+    proxy_connection()?
+        .make_request_no_response(request)
+        .map_err(Into::into)
 }

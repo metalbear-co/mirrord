@@ -126,7 +126,14 @@ pub fn serve(listener: TcpListener, root_pid: u32, config: MonitorConfig) -> io:
         match incoming {
             Ok(mut stream) => {
                 if let Err(error) = accept(&mut stream, &config, &registry) {
-                    tracing::warn!(%error, "crash monitor: failed to accept a registration");
+                    if client_went_away(&error) {
+                        tracing::debug!(
+                            %error,
+                            "crash monitor: a process went away before it finished registering"
+                        );
+                    } else {
+                        tracing::warn!(%error, "crash monitor: failed to accept a registration");
+                    }
                 }
             }
             Err(error) => tracing::warn!(%error, "crash monitor: accept error"),
@@ -134,6 +141,31 @@ pub fn serve(listener: TcpListener, root_pid: u32, config: MonitorConfig) -> io:
     }
 
     Ok(())
+}
+
+/// Whether a failed registration means the process on the other end is gone, rather than a fault.
+///
+/// A process that exits during its own startup is ordinary: a short-lived program connects here
+/// from its layer and dies before the handshake finishes. There is nothing left to watch and
+/// nothing to fix, so it must not read as a fault. Every other error keeps its warning, which is
+/// what makes that warning worth reading.
+///
+/// A timeout is not in this set, and that is deliberate. `accept` gives the socket a read timeout
+/// so that one stalled client cannot wedge the whole loop, so a timeout here means a process
+/// connected and then went quiet while it was still alive. That is a hang worth reading about, and
+/// it is the opposite of a process that went away.
+///
+/// # Arguments
+///
+/// * `error` - the error a registration failed with.
+fn client_went_away(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::UnexpectedEof
+    )
 }
 
 /// Handles one registration: record it, prepare the objects, ack, and spawn the watcher.
@@ -171,14 +203,19 @@ fn accept(
     } else {
         ACK_FAILED
     };
-    stream.write_all(&[ack])?;
-    stream.flush()?;
 
+    // The watcher starts before the ack goes out. A process that dies in between leaves its node in
+    // the registry either way, and only the watcher can give that node an exit code — without it
+    // the report tree shows a process that nobody watched and that never exited. The watcher waits
+    // on the crash event, which the layer sets only on a crash, so it is harmless this early.
     if let Some(watch) = watch {
         let config = Arc::clone(config);
         let registry = Arc::clone(registry);
         std::thread::spawn(move || watch.run(config, registry));
     }
+
+    stream.write_all(&[ack])?;
+    stream.flush()?;
 
     Ok(())
 }
@@ -304,7 +341,15 @@ enum DeathVerdict {
     DebuggerStop,
     /// The exit code is a runtime-defined exception or a Ctrl-C the runtime reports itself.
     ApplicationLevel,
-    /// No clean signal, no debugger, no application-level code: an external kill to report.
+    /// Ended from outside, but with a success code, so nothing went wrong.
+    ///
+    /// An external kill runs no `DLL_PROCESS_DETACH`, so the layer never sets the clean-shutdown
+    /// event however well the process did. Build tools end helper processes this way as a matter
+    /// of course: MSBuild stops its Roslyn compiler server and its worker nodes when it is done,
+    /// and each of them exits `0`. Those are not faults, and a crash bundle for each one buries
+    /// the real failure in a build.
+    TerminatedButSucceeded,
+    /// No clean signal, no debugger, no application-level code, and a failure exit code.
     Reportable,
 }
 
@@ -329,6 +374,8 @@ fn classify_death(clean: bool, debugged: bool, exit_code: u32) -> DeathVerdict {
         DeathVerdict::DebuggerStop
     } else if report::is_app_level_exit(exit_code) {
         DeathVerdict::ApplicationLevel
+    } else if exit_code == 0 {
+        DeathVerdict::TerminatedButSucceeded
     } else {
         DeathVerdict::Reportable
     }
@@ -394,6 +441,16 @@ impl PidWatch {
                             name = %self.name,
                             exit,
                             "crash monitor: layer process exited with an application-level code",
+                        );
+                    }
+                    DeathVerdict::TerminatedButSucceeded => {
+                        // Killed by whoever started it, with nothing to report. Kept at debug so
+                        // the process is still accounted for when reading a session's log.
+                        tracing::debug!(
+                            pid = self.pid,
+                            name = %self.name,
+                            exit,
+                            "crash monitor: layer process was ended from outside with a success code, so no report is written",
                         );
                     }
                     DeathVerdict::Reportable if !reported => {
@@ -689,6 +746,39 @@ mod tests {
     const FAIL_FAST: u32 = 0xC000_0409;
     const CTRL_C: u32 = 0xC000_013A;
 
+    /// A process that exits during its own registration is ordinary, and a real fault is not.
+    ///
+    /// The stress matrix reaches the first case: `os error 10054` arrives when a short-lived child
+    /// dies between its connect and its handshake. Only the second case is worth a warning.
+    #[test]
+    fn a_dead_client_is_not_a_fault() {
+        for kind in [
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::BrokenPipe,
+            io::ErrorKind::UnexpectedEof,
+        ] {
+            assert!(
+                client_went_away(&io::Error::new(kind, "peer")),
+                "{kind:?} means the process is gone"
+            );
+        }
+
+        // What the reader must still be warned about. A timeout is in this list because the read
+        // timeout exists to catch a client that stalls while it is still alive, which is a hang.
+        for kind in [
+            io::ErrorKind::TimedOut,
+            io::ErrorKind::WouldBlock,
+            io::ErrorKind::InvalidData,
+            io::ErrorKind::PermissionDenied,
+        ] {
+            assert!(
+                !client_went_away(&io::Error::new(kind, "fault")),
+                "{kind:?} must keep its warning"
+            );
+        }
+    }
+
     #[test]
     fn clean_shutdown_wins_over_everything() {
         // A clean signal is a normal close regardless of debugger state or a fault-looking code.
@@ -714,9 +804,20 @@ mod tests {
     }
 
     #[test]
-    fn bare_death_is_reportable() {
-        // No clean signal, not debugged, an ordinary exit code: an external kill.
-        assert_eq!(classify_death(false, false, 0), DeathVerdict::Reportable);
+    fn bare_death_with_a_failure_code_is_reportable() {
+        // No clean signal, not debugged, a failure exit code: an external kill worth a report.
+        assert_eq!(classify_death(false, false, 1), DeathVerdict::Reportable);
         assert_eq!(classify_death(false, false, 7), DeathVerdict::Reportable);
+    }
+
+    #[test]
+    fn bare_death_with_a_success_code_is_not_reported() {
+        // MSBuild ends its Roslyn compiler server and its worker nodes when a build finishes.
+        // Each is killed from outside, so none of them runs its detach, and each exits 0. A
+        // crash bundle for every one of those buries the one process that really failed.
+        assert_eq!(
+            classify_death(false, false, 0),
+            DeathVerdict::TerminatedButSucceeded
+        );
     }
 }

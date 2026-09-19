@@ -10,7 +10,7 @@
 //! current-user-only [`SECURITY_ATTRIBUTES`] usable for any kernel object (files, mutexes,
 //! more pipes, …). When a second consumer shows up, lift it out into its own
 //! `mirrord-win-utils`-style crate. We don't want to put it in `mirrord-layer-lib`: that
-//! crate exists to support the injected layer (frida-gum, dll-syringe, mirrord-sip), and
+//! crate exists to support the injected layer (frida-gum, stork, mirrord-sip), and
 //! pulling those into the intproxy compile graph for one DACL helper would be heavy.
 
 #![cfg(windows)]
