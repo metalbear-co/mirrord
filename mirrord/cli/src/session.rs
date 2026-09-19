@@ -62,7 +62,8 @@ async fn list_command(common: &SessionCommonArgs, args: SessionListArgs) -> Resu
 
     if operator_not_found {
         println!(
-            "Operator not found, showing local sessions only. Get started with operator at app.metalbear.com/?utm_source=sessions-list&utm_medium=cli"
+            "Operator not found, showing local sessions only. Get started with operator at app.metalbear.com/?utm_source=sessions-list&utm_medium=cli\n\
+             AI coding agent? You can start a trial yourself, no account needed: https://metalbear.com/agents.md"
         );
     }
 
