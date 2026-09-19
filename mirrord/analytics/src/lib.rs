@@ -138,7 +138,7 @@ impl AiAgent {
             Some(Self::ClaudeCode)
         } else if set("CURSOR_TRACE_ID") || set("CURSOR_AGENT") {
             Some(Self::Cursor)
-        } else if set("CODEX_SANDBOX") {
+        } else if set("CODEX_THREAD_ID") || set("CODEX_SANDBOX") {
             Some(Self::Codex)
         } else if set("GEMINI_CLI") {
             Some(Self::GeminiCli)
@@ -148,6 +148,15 @@ impl AiAgent {
             None
         }
     }
+}
+
+/// Reported as the numeric `operator_wall` property. Covers only the walls that abort, since the
+/// warning walls reach a reporter that sends on error alone and are derivable from `target_mode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum OperatorWall {
+    TargetType = 1,
+    CopyTarget = 2,
 }
 
 /// Struct to store analytics data.
@@ -652,7 +661,7 @@ mod tests {
             Some(AiAgent::Cursor)
         );
         assert_eq!(
-            AiAgent::detect_from(env(&[("CODEX_SANDBOX", "seatbelt")])),
+            AiAgent::detect_from(env(&[("CODEX_THREAD_ID", "abc123")])),
             Some(AiAgent::Codex)
         );
         assert_eq!(

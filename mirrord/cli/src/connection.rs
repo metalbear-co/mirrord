@@ -1,7 +1,7 @@
 use std::{collections::HashSet, ops::Not, time::Duration};
 
 use kube::Api;
-use mirrord_analytics::Reporter;
+use mirrord_analytics::{OperatorWall, Reporter};
 use mirrord_config::{
     LayerConfig,
     agent::AgentFileConfig,
@@ -23,7 +23,7 @@ use mirrord_operator::{
 };
 use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress, ProgressTracker,
-    messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
+    messages::{AGENT_TRIAL_HINT, HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     utm_medium,
 };
 use tracing::Level;
@@ -318,7 +318,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         });
     }
 
-    process_config_oss(config, progress)?;
+    process_config_oss(config, progress, analytics)?;
 
     let k8s_api = KubernetesAPI::create(config, progress)
         .await
@@ -412,11 +412,20 @@ async fn apply_auto_mount_for_target<P: Progress>(
 
 /// Verifies and adjusts the [`LayerConfig`] after we've determined that this run does not use the
 /// operator.
-fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -> CliResult<()> {
+fn process_config_oss<P: Progress, R: Reporter>(
+    config: &mut LayerConfig,
+    progress: &mut P,
+    analytics: &mut R,
+) -> CliResult<()> {
+    let mut record_wall = |wall: OperatorWall| {
+        analytics.get_mut().add("operator_wall", wall as u32);
+    };
+
     // operator is disabled, but target requires it.
     if let Some(target) = config.target.path.as_ref()
         && Target::requires_operator(target)
     {
+        record_wall(OperatorWall::TargetType);
         send_upgrade_ide_message(
             progress,
             &format!(
@@ -432,6 +441,7 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
     }
 
     if config.feature.copy_target.enabled {
+        record_wall(OperatorWall::CopyTarget);
         send_upgrade_ide_message(
             progress,
             "copy_target requires the mirrord operator, which is part of mirrord for Teams.",
@@ -513,6 +523,7 @@ where
     progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
     progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
     progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=cli");
+    progress.print(AGENT_TRIAL_HINT);
     Ok(())
 }
 
@@ -540,11 +551,13 @@ where
     progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
     progress.print("considering mirrord for Teams, which is better suited to shared environments.");
     progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=httpfilter&utm_medium=cli");
+    progress.print(AGENT_TRIAL_HINT);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use mirrord_analytics::{NullReporter, Reporter};
     use mirrord_config::{
         LayerFileConfig,
         config::{ConfigContext, MirrordConfig},
@@ -573,10 +586,20 @@ mod tests {
         .generate_config(&mut cfg_context)
         .unwrap();
         let mut progress = NullProgress {};
+        let mut analytics = NullReporter::default();
 
         assert_eq!(
-            process_config_oss(&mut config, &mut progress).is_ok(),
+            process_config_oss(&mut config, &mut progress, &mut analytics).is_ok(),
             allowed
+        );
+
+        assert_eq!(
+            serde_json::to_value(analytics.get_mut())
+                .unwrap()
+                .get("operator_wall")
+                .is_some(),
+            !allowed,
+            "a target that needs the operator should leave a record of the wall it hit"
         )
     }
 }

@@ -17,6 +17,7 @@ use mirrord_operator::{
     client::error::{HttpError, OperatorApiError, OperatorOperation},
     crd::preview::PreviewPodLogs,
 };
+use mirrord_progress::messages::AGENT_TRIAL_HINT;
 use mirrord_protocol_io::ProtocolError;
 use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
@@ -402,9 +403,28 @@ pub(crate) enum CliError {
     #[error("Feature `{0}` requires using mirrord operator")]
     #[diagnostic(help(
         "The mirrord operator is part of mirrord for Teams. \
-        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=requiresoperator&utm_medium=cli"
+        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=requiresoperator&utm_medium=cli\n\
+        {AGENT_TRIAL_HINT}"
     ))]
     FeatureRequiresOperatorError(String),
+
+    #[error("Failed to start a mirrord for Teams trial: {0}")]
+    #[diagnostic(help(
+        "Start one from https://app.metalbear.com/account/sign-up instead.{GENERAL_HELP}"
+    ))]
+    TrialSignupFailed(String),
+
+    #[error("This network has already started five mirrord for Teams trials in the past hour.")]
+    #[diagnostic(help(
+        "Don't retry in a loop. Tell the user, and use https://app.metalbear.com/account/sign-up instead."
+    ))]
+    TrialSignupRateLimited,
+
+    #[error("Self-serve trial signup is currently turned off.")]
+    #[diagnostic(help(
+        "Use https://app.metalbear.com/account/sign-up instead and let the user sign up."
+    ))]
+    TrialSignupUnavailable,
 
     #[error("Feature `{feature}` is not supported in mirrord operator {operator_version}.")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -494,7 +514,7 @@ pub(crate) enum CliError {
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
         "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
-        Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.{GENERAL_HELP}"
+        Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.\n{AGENT_TRIAL_HINT}{GENERAL_HELP}"
     ))]
     OperatorNotInstalled,
 
