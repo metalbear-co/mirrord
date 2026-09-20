@@ -297,7 +297,7 @@ pub(crate) enum CliError {
 
     #[cfg(windows)]
     #[error("Failed to execute binary `{0}`: {1}")]
-    WindowsBinaryExecuteFailed(String, #[source] mirrord_layer_lib::error::LayerError),
+    WindowsBinaryExecuteFailed(String, #[source] Box<mirrord_layer_lib::error::LayerError>),
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[error("Binary is SIP protected and rosetta is missing")]

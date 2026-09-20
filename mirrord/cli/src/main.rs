@@ -637,7 +637,7 @@ where
     .map_err(|e| {
         error!("Failed to create process: {:?}", e);
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
-        CliError::WindowsBinaryExecuteFailed(binary.clone(), e)
+        CliError::WindowsBinaryExecuteFailed(binary.clone(), Box::new(e))
     })?;
 
     // Exit with the same code as the child process

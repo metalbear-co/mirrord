@@ -48,8 +48,8 @@ use super::server::start_periodic_rescan;
 use super::{
     UiCliError, UiServerError, db_portforwards,
     server::{
-        AppState, SessionNotification, build_router, scan_existing_sessions, start_idle_shutdown,
-        start_filesystem_watcher, start_operator_watcher, token_auth,
+        AppState, SessionNotification, build_router, scan_existing_sessions,
+        start_filesystem_watcher, start_idle_shutdown, start_operator_watcher, token_auth,
     },
 };
 use crate::{
@@ -781,7 +781,11 @@ async fn daemon_shutdown(
     if query.only_if_idle {
         let sessions: Vec<String> = state.sessions.read().await.keys().cloned().collect();
         if !sessions.is_empty() {
-            return (StatusCode::CONFLICT, Json(DaemonShutdownBlocked { sessions })).into_response();
+            return (
+                StatusCode::CONFLICT,
+                Json(DaemonShutdownBlocked { sessions }),
+            )
+                .into_response();
         }
     }
 

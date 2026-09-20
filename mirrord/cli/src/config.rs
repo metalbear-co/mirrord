@@ -28,7 +28,9 @@ use mirrord_config::{
     target::TargetType,
 };
 #[cfg(windows)]
-use mirrord_layer_lib::process::windows::injection::{InjectionMethod, MIRRORD_INJECTION_METHOD_ENV};
+use mirrord_layer_lib::process::windows::injection::{
+    InjectionMethod, MIRRORD_INJECTION_METHOD_ENV,
+};
 use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
@@ -2187,14 +2189,8 @@ mod tests {
         assert_eq!(args.injection_method.to_string(), "apc");
 
         // explicit flag beats the environment
-        let cli = Cli::try_parse_from([
-            "mirrord",
-            "exec",
-            "--injection-method",
-            "iat",
-            "cmd.exe",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["mirrord", "exec", "--injection-method", "iat", "cmd.exe"])
+            .unwrap();
         let Commands::Exec(args) = cli.commands else {
             panic!("expected exec")
         };

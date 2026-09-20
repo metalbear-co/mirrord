@@ -216,6 +216,7 @@ impl ResponseManager {
 
 /// Time a hooked call waits for the proxy connection to be established before falling
 /// back to the pre-connection error path. Matches the worker's own connect timeout.
+#[cfg(target_os = "windows")]
 const PROXY_CONNECTION_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Resolve the global proxy connection, waiting for the layer worker to establish it.

@@ -86,10 +86,10 @@ where
             });
     // Selecting APC attests the IDE's pre-application primary-thread stop.
     let result = unsafe { args.injection_method.injector().inject(&target, &lib_path) };
-    if let Some(event) = remote_event {
-        if result.is_ok() || result.as_ref().is_err_and(|e| e.is_pending()) {
-            event.retain();
-        }
+    if let Some(event) = remote_event
+        && (result.is_ok() || result.as_ref().is_err_and(|e| e.is_pending()))
+    {
+        event.retain();
     }
     let injected = result.map_err(|e| CliError::AttachStorkFailed(args.pid, e))?;
     if injected.timing == stork::LoadTiming::OnResume {
