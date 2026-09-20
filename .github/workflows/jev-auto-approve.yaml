@@ -1,8 +1,6 @@
-# Approves a pull request on demand, when Jev is confident it needs no human reviewer.
-#
-# Triggered by an org owner or member commenting `/jev-approve` on the pull request. `issue_comment`
-# runs from the default branch with secrets available, so the command works on fork pull requests
-# without ever running fork code or exposing secrets to it.
+# `issue_comment` rather than `pull_request`: it runs from the default branch with secrets
+# available, which is what makes an approval command safe to expose on fork pull requests. Fork code
+# never runs here, and nothing happens at all unless someone deliberately asks for it.
 name: Jev auto-approve
 
 on:
@@ -14,7 +12,9 @@ permissions:
 
 jobs:
   auto-approve:
-    # Pull requests only, the command only, and only from someone inside the org.
+    # Running the command is an org member delegating a review they could have done by hand, so the
+    # commenter's association is what is checked. The author's is deliberately not: approving an
+    # outside contribution this way is a call the member makes.
     if: >-
       github.event.issue.pull_request &&
       startsWith(github.event.comment.body, '/jev-approve') &&
@@ -44,8 +44,10 @@ jobs:
           criteria: >-
             No human reviewer is required when all of these hold. The pull request makes no
             externally visible change: no change to the mirrord config schema, CLI flags or their
-            behaviour, the agent/layer protocol, or the public API of a published crate. The change
-            is verified: tests were added or updated for the behaviour that changed, or the
-            description records manual testing that exercises it. Any user-visible change carries a
-            changelog fragment under changelog.d/. Nothing raised in the discussion is left
-            unanswered.
+            behaviour, the agent/layer protocol, or the public API of a published crate. It leaves
+            privileged automation alone: anything under .github/, the release, publishing, signing
+            or credential configuration, and anything else that runs with write-capable credentials,
+            always needs a human whatever else the change does. The change is verified: tests were
+            added or updated for the behaviour that changed, or the description records manual
+            testing that exercises it. Any user-visible change carries a changelog fragment under
+            changelog.d/. Nothing raised in the discussion is left unanswered.
