@@ -134,7 +134,7 @@ async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord network diagnosis");
 
     let mut context = ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config);
-    let mut config = LayerConfig::resolve(&mut context)?;
+    let mut config = crate::util::resolve_layer_config(&mut context).await?;
 
     if !config.use_proxy {
         remove_proxy_env();

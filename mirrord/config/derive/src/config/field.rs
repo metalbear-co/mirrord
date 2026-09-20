@@ -110,6 +110,7 @@ impl ConfigField {
             #(#docs)*
             #deprecated
             #rename
+            #[serde(default, skip_serializing_if = "Option::is_none")]
             #vis #ident: Option<#target>
         }
     }

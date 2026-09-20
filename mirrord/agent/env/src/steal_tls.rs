@@ -66,6 +66,16 @@ pub struct TlsServerVerification {
     /// Optional. Defaults to `false`.
     #[serde(default, skip_serializing_if = "Not::not")]
     pub accept_any_cert: bool,
+    /// Name the server's certificate is verified against, and sent in the SNI extension, when
+    /// the original client sent no SNI.
+    ///
+    /// Use it when the certificate is issued for a DNS name and the original clients do not
+    /// send SNI, in which case the agent would otherwise verify against the destination IP.
+    ///
+    /// Optional. The agent uses the SNI from the original client, then this name, then the
+    /// request's host, then the original destination IP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_name: Option<String>,
     /// Paths to PEM files and directories with PEM files containing allowed root certificates.
     ///
     /// Directories are not traversed recursively.

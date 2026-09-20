@@ -487,6 +487,7 @@ mod tests {
                 config_mounts: Vec::new(),
                 secret_mounts: Vec::new(),
                 idle: None,
+                cronjob: None,
             },
             status: None,
         };

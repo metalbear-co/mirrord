@@ -54,6 +54,13 @@ mod chaos;
 mod interceptor;
 mod net_protocol_ext;
 
+/// Name of the directory below `TMPDIR` that holds Unix listener pathnames.
+///
+/// The container CLI uses this to mount the directory into both the internal proxy sidecar and
+/// the application container, because Unix sockets require their pathname to be on a shared
+/// filesystem.
+pub const UNIX_STREAMS_DIRNAME: &str = "mirrord-unix-sockets";
+
 /// Errors that can occur when handling the `outgoing` feature.
 #[derive(Error, Debug)]
 pub enum OutgoingProxyError {

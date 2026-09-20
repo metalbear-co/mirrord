@@ -8,6 +8,7 @@ use crate::config::{self, ConfigError};
 #[serde(deny_unknown_fields)]
 pub struct CronJobTarget {
     pub cron_job: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
 }
 

@@ -7,7 +7,6 @@ use futures::{
 };
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter};
 use mirrord_config::{
-    LayerConfig,
     config::ConfigContext,
     target::{Target, TargetConfig},
 };
@@ -27,8 +26,8 @@ use tracing::info;
 
 use super::config::DumpArgs;
 use crate::{
-    CliError, connection::create_and_connect, error::CliResult,
-    kube::kube_client_from_layer_config, user_data::UserData,
+    CliError, connection::create_and_connect, data::UserData, error::CliResult,
+    kube::kube_client_from_layer_config,
 };
 
 /// Implements the `mirrord dump` command.
@@ -45,7 +44,7 @@ pub async fn dump_command(
     // Set up configuration similar to exec command
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
 
-    let mut config = LayerConfig::resolve(&mut cfg_context)?;
+    let mut config = crate::util::resolve_layer_config(&mut cfg_context).await?;
 
     let mut progress = ProgressTracker::from_env("mirrord dump");
     let mut analytics = AnalyticsReporter::new(

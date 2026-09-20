@@ -284,7 +284,7 @@ use mirrord_analytics::{
     read_correlation_id_from_env,
 };
 use mirrord_config::{
-    LayerConfig,
+    LayerConfig, LayerFileConfig,
     config::ConfigContext,
     feature::{
         database_branches::{DatabaseBranchConfig, RedisBranchConfig},
@@ -326,6 +326,7 @@ mod connector;
 mod container;
 #[cfg(windows)]
 mod crash_monitor;
+mod data;
 mod db_branches;
 mod diagnose;
 mod dump;
@@ -357,7 +358,6 @@ mod teams;
 mod tui;
 mod ui;
 mod up;
-mod user_data;
 mod util;
 mod verify_config;
 mod vpn;
@@ -373,9 +373,9 @@ use verify_config::verify_config;
 use crate::{
     ci::{MirrordCi, ci_api_key_available},
     config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
+    data::{UserData, global_config_command},
     newsletter::suggest_newsletter_signup,
     queue_splitting::suggest_queue_splitting,
-    user_data::UserData,
     util::apply_test_env_overrides,
 };
 
@@ -799,7 +799,7 @@ async fn exec(
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     cfg_context = apply_test_env_overrides(cfg_context);
 
-    let (config_file_path, mut config) = util::resolve_config(&mut cfg_context)?;
+    let (config_file_path, mut config) = util::resolve_config(&mut cfg_context).await?;
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
@@ -951,7 +951,7 @@ async fn port_forward(
         )
         .override_env_opt("MIRRORD_KUBE_CONTEXT", args.context.as_ref())
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.as_ref());
-    let mut config = LayerConfig::resolve(&mut cfg_context)?;
+    let mut config = util::resolve_layer_config(&mut cfg_context).await?;
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::new(
@@ -1059,7 +1059,6 @@ fn main() -> miette::Result<()> {
             .await
             .inspect_err(|fail| trace!(?fail, "Failed initializing `UserData`!"))
             .unwrap_or_default();
-
         match cli.commands {
             Commands::Exec(args) => {
                 if ci_api_key_available()?.is_some() {
@@ -1191,6 +1190,7 @@ fn main() -> miette::Result<()> {
             Commands::Ci(args) => windows_unsupported!(args, "ci", {
                 ci::ci_command(*args, watch, &mut user_data).await?
             }),
+            Commands::GlobalConfig(args) => global_config_command(*args).await?,
             Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
             Commands::Subscribe(args) => subscribe::subscribe_command(*args).await?,
             Commands::Up(args) => up::up_command(*args, watch, &user_data).await?,
@@ -1227,6 +1227,10 @@ fn main() -> miette::Result<()> {
                     container_name,
                     process_pid,
                 );
+            }
+            Commands::PrintSchema => {
+                let schema = schemars::schema_for!(LayerFileConfig);
+                println!("{}", serde_json::to_string_pretty(&schema).unwrap());
             }
         };
 

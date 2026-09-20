@@ -32,9 +32,12 @@ use kube::{
     config::{Config, KubeConfigOptions, Kubeconfig},
 };
 use mirrord_config::target::{Target, TargetDisplay};
-use mirrord_operator::crd::{
-    MirrordOperatorCrd, OPERATOR_STATUS_NAME, PreviewSessionInfo, Session, SessionHttpFilter,
-    preview::PreviewSessionPhase,
+use mirrord_operator::{
+    client::add_baggage_header,
+    crd::{
+        MirrordOperatorCrd, OPERATOR_STATUS_NAME, PreviewSessionInfo, Session, SessionHttpFilter,
+        preview::PreviewSessionPhase,
+    },
 };
 use mirrord_session_monitor_client::{
     SESSION_SENTINEL_EXTENSION, SessionClient, SessionEndpoint, connect_to_session,
@@ -52,11 +55,11 @@ use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
 use crate::{
+    data::UserData,
     ui::{
         MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, daemon, db_portforwards,
         error::ApiError, wizard::wizard_router,
     },
-    user_data::UserData,
 };
 
 mod v2;
@@ -569,6 +572,35 @@ async fn get_session(State(state): State<AppState>, Path(id): Path<String>) -> R
     }
 }
 
+/// Channel depth for an SSE proxy, bounding how far a browser may fall behind before the proxy
+/// task blocks.
+const SSE_CHANNEL_CAPACITY: usize = 256;
+
+const SSE_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Sender half of an [`sse_channel`], held by the task producing the events.
+pub(crate) type SseSender = mpsc::Sender<Result<sse::Event, Infallible>>;
+
+/// Receiver half of an [`sse_channel`], consumed by [`sse_response`].
+pub(crate) type SseReceiver = mpsc::Receiver<Result<sse::Event, Infallible>>;
+
+/// Channel an SSE proxy task writes its events into, sized for a browser `EventSource`.
+pub(crate) fn sse_channel() -> (SseSender, SseReceiver) {
+    mpsc::channel(SSE_CHANNEL_CAPACITY)
+}
+
+/// Serves the events written into [`sse_channel`], keeping the connection alive through idle
+/// stretches so an intermediary doesn't drop it.
+pub(crate) fn sse_response(rx: SseReceiver) -> Response {
+    sse::Sse::new(ReceiverStream::new(rx))
+        .keep_alive(
+            sse::KeepAlive::new()
+                .interval(SSE_KEEP_ALIVE_INTERVAL)
+                .text("ping"),
+        )
+        .into_response()
+}
+
 async fn session_events_sse(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     let (buffered_events, client) = {
         let sessions = state.sessions.read().await;
@@ -578,7 +610,7 @@ async fn session_events_sse(State(state): State<AppState>, Path(id): Path<String
         }
     };
 
-    let (tx, rx) = mpsc::channel::<Result<sse::Event, Infallible>>(256);
+    let (tx, rx) = sse_channel();
 
     tokio::spawn(async move {
         for event in buffered_events {
@@ -617,13 +649,7 @@ async fn session_events_sse(State(state): State<AppState>, Path(id): Path<String
         }
     });
 
-    sse::Sse::new(ReceiverStream::new(rx))
-        .keep_alive(
-            sse::KeepAlive::new()
-                .interval(Duration::from_secs(15))
-                .text("ping"),
-        )
-        .into_response()
+    sse_response(rx)
 }
 
 #[derive(Serialize, Clone)]
@@ -676,8 +702,8 @@ async fn auth_token(State(state): State<AppState>) -> axum::Json<TokenResponse> 
 }
 
 async fn current_user() -> axum::Json<CurrentUserResponse> {
-    let client = match Client::try_default().await {
-        Ok(c) => c,
+    let client = match client_for_context(None).await {
+        Ok(client) => client,
         Err(err) => {
             return axum::Json(CurrentUserResponse {
                 k8s_username: None,
@@ -742,25 +768,55 @@ struct NamespacesResponse {
     context: Option<String>,
 }
 
+/// How long building a kube client may take before the context counts as unreachable. Bounds an
+/// auth-exec plugin that blocks on an expired credential.
+const CLIENT_BUILD_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// Builds a kube client for the given context, or for the kubeconfig's current context when
 /// `context` is `None`.
 pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client> {
-    match context {
+    tokio::time::timeout(CLIENT_BUILD_TIMEOUT, build_client(context))
+        .await
+        .map_err(|_| ApiError::Timeout {
+            what: "kube client initialization",
+            secs: CLIENT_BUILD_TIMEOUT.as_secs(),
+        })?
+}
+
+async fn build_client(context: Option<&str>) -> UiResult<Client> {
+    let mut config = match context {
         Some(context) => {
             let options = KubeConfigOptions {
                 context: Some(context.to_owned()),
                 ..Default::default()
             };
-            let config = Config::from_kubeconfig(&options).await.map_err(|source| {
-                ApiError::LoadContext {
+            Config::from_kubeconfig(&options)
+                .await
+                .map_err(|source| ApiError::LoadContext {
                     context: context.to_owned(),
                     source,
-                }
-            })?;
-            Ok(Client::try_from(config)?)
+                })?
         }
-        None => Ok(Client::try_default().await?),
-    }
+        None => Config::infer().await.map_err(ApiError::InferKubeconfig)?,
+    };
+    add_baggage_header(&mut config, baggage_from_env().as_deref())
+        .map_err(|error| ApiError::InvalidBaggage(error.to_string()))?;
+
+    // Building the client runs the context's auth-exec plugin synchronously, which must not hold
+    // the runtime thread.
+    tokio::task::spawn_blocking(move || Client::try_from(config))
+        .await
+        .expect("building a kube client does not panic")
+        .map_err(ApiError::from)
+}
+
+/// The baggage the daemon was started with: `mirrord ui -f <config>` resolves the config file's
+/// `baggage` into `MIRRORD_BAGGAGE` before spawning it, and setting the variable directly works
+/// too.
+fn baggage_from_env() -> Option<String> {
+    std::env::var("MIRRORD_BAGGAGE")
+        .ok()
+        .filter(|baggage| !baggage.is_empty())
 }
 
 /// Lists the namespaces visible to the user in the requested context (or the current context when
@@ -1086,7 +1142,7 @@ pub(crate) fn start_filesystem_watcher(
 
 pub(crate) fn start_operator_watcher(state: AppState) {
     tokio::spawn(async move {
-        let client = match Client::try_default().await {
+        let client = match client_for_context(None).await {
             Ok(client) => client,
             Err(err) => {
                 let reason = format!("kube client init failed: {err}");

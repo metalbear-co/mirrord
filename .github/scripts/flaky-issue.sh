@@ -11,7 +11,7 @@
 # A test already tracked by an open issue is counted on it however rarely it flaked, so <threshold>
 # gates filing a new issue and nothing else.
 #
-# Usage: flaky-issue.sh <repo> <team-key> <package> <test> <retries> <threshold> <run-url>
+# Usage: flaky-issue.sh <repo> <team-key> <package> <test> <retries> <threshold> <run-url> [failure-url]
 #
 # Prints `new\t<identifier>\t<url>`, `repeat\t<identifier>\t<url>`, `stale\t<identifier>\t<url>` for a
 # repeat whose tally could not be advanced, or `below\t\t` for a test that flaked too rarely to be worth
@@ -26,6 +26,8 @@ name=$4
 retries=$5
 threshold=$6
 run_url=$7
+failure_url=${8:-}
+current_failure_url=$failure_url
 
 short=${repo#*/}
 
@@ -68,17 +70,25 @@ api() {
 # it, which narrows the build from the whole workspace to the one crate.
 run_command="cargo nextest run -p ${package%%::*} -E 'binary_id(=$package) and test(=$name)'"
 
+failure_link() {
+  local url=$1
+  if [ -n "$url" ]; then
+    printf '\n\n[Captured failure output](%s)' "$url"
+  fi
+}
+
 # Rewritten on every sighting, which is what the note at the foot warns anyone editing it about.
 body() {
   printf 'Failed %s× across all observed runs.\n\n### Running in isolation\n\n```\n%s\n```\n\n_This issue was generated automatically. Do not edit by hand, as it may be overridden._' \
     "$1" "$run_command"
+  failure_link "$failure_url"
 }
 
 metadata() {
   jq -n --arg repo "$repo" --arg package "$package" --arg test "$name" --arg seen "$seen" \
-    --argjson occurrences "$1" \
+    --arg failure "$failure_url" --argjson occurrences "$1" \
     '{source: "flaky-test-report", repository: $repo, package: $package, test: $test,
-      occurrences: $occurrences, lastSeen: $seen}'
+      occurrences: $occurrences, lastSeen: $seen, failureUrl: $failure}'
 }
 
 # Open states are listed rather than closed ones: Linear has a `duplicate` type alongside `completed`
@@ -96,12 +106,20 @@ existing=$(api "$(jq -n --arg url "$key_url" '{
    | select(.issue.state.type as $type
             | ["triage", "backlog", "unstarted", "started"] | index($type))
    | {attachment: .id, occurrences: (.metadata.occurrences // 1),
+      failureUrl: (.metadata.failureUrl // ""),
       issue: .issue.id, identifier: .issue.identifier, url: .issue.url}][0] // empty
   | @json')
 
 if [ -n "$existing" ]; then
   identifier=$(jq -r .identifier <<< "$existing")
-  occurrences=$(( $(jq -r .occurrences <<< "$existing") + retries ))
+  occurrences=$(($(jq -r .occurrences <<< "$existing") + retries))
+
+  # The description is rewritten in full on every sighting, so a run that resolved no link
+  # would drop the one the issue already carries. The last link stays until a newer one
+  # replaces it, because a link into an older failure still shows what this test does.
+  if [ -z "$failure_url" ]; then
+    failure_url=$(jq -r .failureUrl <<< "$existing")
+  fi
 
   # The tally sits on top of an issue that already exists and already says what is wrong, so
   # failing to refresh it is not worth failing the report over.
@@ -139,8 +157,11 @@ if [ -n "$existing" ]; then
   # Posted last, so that anyone following the issue arrives at a body already carrying this sighting.
   # The channel stays quiet for repeats; this is how the people who care about a given test hear.
   noted=$(api "$(jq -n --arg id "$(jq -r .issue <<< "$existing")" \
-    --arg body "$(printf 'Failed again in [this run](%s). Now %s× across all observed runs.' \
-      "$run_url" "$occurrences")" '{
+    --arg body "$(
+      printf 'Failed again in [this run](%s). Now %s× across all observed runs.' \
+        "$run_url" "$occurrences"
+      failure_link "$current_failure_url"
+    )" '{
     query: "mutation($id: String!, $body: String!) {
       commentCreate(input: { issueId: $id, body: $body }) { success }
     }",

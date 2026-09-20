@@ -19,7 +19,7 @@
 //!   CRD, so a stateless per-context fetch is the natural fit.
 //! - `kube/*`     — kubeconfig/cluster metadata used to populate the context and namespace pickers.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use axum::{
     Router,
@@ -33,7 +33,7 @@ use kube::{
     config::Kubeconfig,
 };
 use mirrord_operator::crd::{
-    MirrordOperatorCrd, OPERATOR_STATUS_NAME, SessionHttpFilter,
+    MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME, SessionHttpFilter,
     preview::{
         PreviewPodLogs,
         view::{PreviewEnv, PreviewEnvStatus, PreviewMessageKind},
@@ -49,6 +49,7 @@ use super::{
 };
 use crate::ui::error::ApiError;
 
+mod events;
 mod targets;
 
 /// Routes for `/api/v2`. State is supplied by the outer router's `with_state`, matching the other
@@ -64,6 +65,7 @@ pub(super) fn v2_router() -> Router<AppState> {
         )
         .route("/local/sessions/{id}/events", get(session_events_sse))
         .route("/operator/sessions", get(operator_sessions))
+        .route("/operator/events", get(events::operator_events_sse))
         .route("/operator/previews/{id}", get(operator_preview_detail))
         .route("/operator/license", get(operator_license))
         .route("/kube/contexts", get(kube_contexts))
@@ -182,7 +184,17 @@ struct OperatorStatusSummary {
     sessions: Vec<OperatorSessionSummary>,
     preview_sessions: Vec<OperatorPreviewSession>,
     license: OperatorLicense,
+    /// What this operator advertises it can do, so a view can tell whether it is serviceable.
+    supported_features: Vec<NewOperatorFeature>,
+    /// The operator's own version, so a view it can't serve can say what is installed.
+    version: String,
 }
+
+/// How long the operator's status may take to arrive before the context counts as unreachable.
+///
+/// Client construction has its own bound; this covers an API server that accepts the connection and
+/// then never answers.
+const OPERATOR_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Fetches the operator's live sessions and license for `context` in one request. Returns a
 /// human-readable reason when the context is unreachable or the operator isn't installed.
@@ -194,19 +206,28 @@ async fn fetch_operator(
         .await
         .map_err(|err| format!("kube client init failed: {err}"))?;
     let api: Api<MirrordOperatorCrd> = Api::all(client);
-    let operator = match api.get(OPERATOR_STATUS_NAME).await {
-        Ok(operator) => operator,
-        Err(err) => {
-            // The cached client may be the cause; drop it so the next poll rebuilds it.
-            evict_client(state, context).await;
-            return Err(format!("operator not available: {err}"));
-        }
-    };
+    let operator =
+        match tokio::time::timeout(OPERATOR_READ_TIMEOUT, api.get(OPERATOR_STATUS_NAME)).await {
+            Ok(Ok(operator)) => operator,
+            Ok(Err(err)) => {
+                // The cached client may be the cause; drop it so the next poll rebuilds it.
+                evict_client(state, context).await;
+                return Err(format!("operator not available: {err}"));
+            }
+            Err(_) => {
+                evict_client(state, context).await;
+                return Err(format!(
+                    "operator not available: no answer within {}s",
+                    OPERATOR_READ_TIMEOUT.as_secs()
+                ));
+            }
+        };
 
     let license = OperatorLicense {
         fingerprint: operator.spec.license.fingerprint.clone(),
         organization: operator.spec.license.organization.clone(),
     };
+    let supported_features = operator.spec.supported_features();
     let status = operator.status.as_ref();
     let sessions = status
         .map(|status| status.sessions.as_slice())
@@ -225,6 +246,8 @@ async fn fetch_operator(
         sessions,
         preview_sessions,
         license,
+        supported_features,
+        version: operator.spec.operator_version.to_string(),
     })
 }
 

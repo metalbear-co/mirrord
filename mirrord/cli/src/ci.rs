@@ -25,7 +25,7 @@ use tokio::fs::create_dir_all;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Level;
 
-use crate::{CliError, CliResult, ci::error::CiError, config::ci::*, user_data::UserData};
+use crate::{CliError, CliResult, ci::error::CiError, config::ci::*, data::UserData};
 
 pub(crate) mod container;
 pub(crate) mod error;
@@ -84,9 +84,11 @@ async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
 
     let mut cfg_context =
         ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config_file);
-    let layer_config = LayerConfig::resolve(&mut cfg_context).inspect_err(|error| {
-        progress.failure(Some(&format!("failed to read config from env: {error}")));
-    })?;
+    let layer_config = crate::util::resolve_layer_config(&mut cfg_context)
+        .await
+        .inspect_err(|error| {
+            progress.failure(Some(&format!("failed to read config from env: {error}")));
+        })?;
 
     let operator_api = OperatorApi::try_new(&layer_config, &mut NullReporter::default(), &progress)
         .await?

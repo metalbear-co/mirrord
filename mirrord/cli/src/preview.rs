@@ -41,9 +41,10 @@ use mirrord_operator::{
     crd::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
-            PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIdleConfig,
-            PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs, PreviewQueueSplittingConfig,
-            PreviewSecretMountFile, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
+            PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvVarsConfig,
+            PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs,
+            PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
+            PreviewSessionPhase, PreviewSessionSpec,
             view::{PreviewEnv, PreviewMessageKind},
         },
         session::{KubeResourceTarget, SessionTarget},
@@ -59,8 +60,8 @@ use crate::{
         PreviewArgs, PreviewCommand, PreviewCommonArgs, PreviewLogsArgs, PreviewStartArgs,
         PreviewStatusArgs, PreviewStopArgs,
     },
+    data::UserData,
     error::{CliError, CliResult, format_preview_logs},
-    user_data::UserData,
 };
 
 mod multicluster;
@@ -106,7 +107,7 @@ async fn preview_start(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview start");
 
-    let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
+    let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -119,6 +120,14 @@ async fn preview_start(
     let (operator_api, api) =
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
     operator_api.check_feature_support(&layer_config, false)?;
+
+    let is_cronjob_target = matches!(layer_config.target.path, Some(Target::CronJob(_)));
+    if is_cronjob_target {
+        operator_api
+            .operator()
+            .spec
+            .require_feature(NewOperatorFeature::PreviewCronJobTarget)?;
+    }
 
     // Create the `PreviewSession` resource in the cluster. The CR name is derived from
     // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).
@@ -228,16 +237,38 @@ async fn preview_start(
         wake_timeout_secs: idle_config.wake_timeout_secs,
     });
 
+    // A CronJob preview has no long-running pod to steal traffic to, so incoming is never
+    // sent (the config check already warned when the user configured it). The `cronjob`
+    // block travels only for cronjob targets, so the CR stays identical to what older CLIs
+    // send for every other kind.
+    let (incoming, cronjob) = if is_cronjob_target {
+        (
+            None,
+            Some(PreviewCronJobConfig {
+                schedule: layer_config.feature.preview.cronjob.schedule.clone(),
+                // Only the opt-out travels: the CR stays identical to what older CLIs send
+                // for the default, and `None` means "trigger" on the operator side.
+                trigger_on_start: (!layer_config.feature.preview.cronjob.trigger_on_start)
+                    .then_some(false),
+            }),
+        )
+    } else {
+        (
+            PreviewIncomingConfig::from_config(
+                &layer_config.feature.network.incoming,
+                layer_config.key.as_str(),
+            ),
+            None,
+        )
+    };
+
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
         target: session_target,
         ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
         replicas: layer_config.feature.preview.replicas,
-        incoming: PreviewIncomingConfig::from_config(
-            &layer_config.feature.network.incoming,
-            layer_config.key.as_str(),
-        ),
+        incoming,
         queue_splitting: PreviewQueueSplittingConfig::from_config(
             &layer_config.feature.split_queues,
         ),
@@ -263,6 +294,7 @@ async fn preview_start(
             .collect::<Result<Vec<_>, _>>()?,
         secret_mounts,
         idle,
+        cronjob,
     };
 
     let annotations = operator_api
@@ -523,7 +555,7 @@ async fn preview_status(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview status");
 
-    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
+    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -745,7 +777,7 @@ async fn preview_logs(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview logs");
 
-    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
+    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -870,7 +902,7 @@ async fn preview_stop(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview stop");
 
-    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
+    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -1027,7 +1059,7 @@ async fn resolve_config_target(
     }
 }
 
-fn load_preview_config(
+async fn load_preview_config(
     env_overrides: HashMap<&OsStr, Cow<'_, OsStr>>,
     progress: &mut ProgressTracker,
 ) -> CliResult<LayerConfig> {
@@ -1035,9 +1067,11 @@ fn load_preview_config(
 
     let mut cfg_context = ConfigContext::default().override_envs(env_overrides);
 
-    let config = LayerConfig::resolve(&mut cfg_context).inspect_err(|_| {
-        subtask.failure(None);
-    })?;
+    let config = crate::util::resolve_layer_config(&mut cfg_context)
+        .await
+        .inspect_err(|_| {
+            subtask.failure(None);
+        })?;
 
     let result = config.verify_for_preview_env(&mut cfg_context);
     for warning in cfg_context.into_warnings() {

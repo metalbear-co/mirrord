@@ -5,10 +5,10 @@ use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 use crate::{
     CliResult,
     config::ExtensionExecArgs,
+    data::UserData,
     execution::{CrashReporting, MirrordExecution},
     print_config,
     queue_splitting::suggest_queue_splitting,
-    user_data::UserData,
 };
 
 /// Actually facilitate execution after all preparations were complete
@@ -79,7 +79,7 @@ pub(crate) async fn extension_exec(
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.clone())
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", args.target);
 
-    let mut config = LayerConfig::resolve(&mut cfg_context)?;
+    let mut config = crate::util::resolve_layer_config(&mut cfg_context).await?;
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(

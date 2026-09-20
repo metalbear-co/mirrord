@@ -94,7 +94,7 @@ pub enum DnsFilterConfig {
 /// - DNS filter currently works only with frameworks that use `getaddrinfo`/`gethostbyname`
 ///   functions.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[config(map_to = "DnsFileConfig", derive = "JsonSchema")]
+#[config(map_to = "DnsFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct DnsConfig {
     #[config(env = "MIRRORD_REMOTE_DNS", default = true)]

@@ -12,7 +12,7 @@
 # Reports every test that was retried at all, leaving the threshold to whoever decides what is worth
 # filing: a test already tracked by an open issue is counted on it however rarely it flakes.
 #
-# Writes a markdown table to stdout. On $GITHUB_OUTPUT it sets `count` and `tests`, the latter
+# Writes captured failure output and a markdown table to stdout. On $GITHUB_OUTPUT it sets `count` and `tests`, the latter
 # `<retries>\t<package>\t<test>` lines, most retried first.
 
 set -euo pipefail
@@ -53,13 +53,14 @@ else
   echo "::warning::run $run_id published no $ARTIFACT artifact" >&2
 fi
 
-python3 - "$work/reports" "$work/ranked.tsv" <<'PY'
+python3 - "$work/reports" "$work/ranked.tsv" << 'PY'
 import pathlib, sys
 from collections import Counter
 from xml.etree import ElementTree
 
 reports, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 retries = Counter()
+failures = {}
 
 for report in reports.rglob("*.xml"):
     try:
@@ -70,15 +71,37 @@ for report in reports.rglob("*.xml"):
     for case in root.iter("testcase"):
         attempts = len(case.findall("flakyFailure")) + len(case.findall("rerunFailure"))
         if attempts:
-            retries[(case.get("classname", "?"), case.get("name", "?"))] += attempts
+            key = (case.get("classname", "?"), case.get("name", "?"))
+            retries[key] += attempts
+            output = failures.setdefault(key, [])
+            for attempt in list(case):
+                if attempt.tag not in ("failure", "error", "flakyFailure", "flakyError", "rerunFailure", "rerunError"):
+                    continue
+                output.append(f"--- {attempt.tag}: {attempt.get('message', '')} ---")
+                if attempt.text and attempt.text.strip():
+                    output.append(attempt.text.strip())
+                for stream in ("system-out", "system-err"):
+                    # Initial failures store output on the testcase; retries carry their own.
+                    parent = case if attempt.tag in ("failure", "error") else attempt
+                    for captured in parent.findall(stream):
+                        if captured.text:
+                            output.extend((f"--- {stream} ---", captured.text))
 
 ranked = sorted(retries.items(), key=lambda kv: (-kv[1], kv[0]))
 out.write_text("".join(f"{count}\t{pkg}\t{test}\n" for (pkg, test), count in ranked))
+# Prefix every captured line so test output cannot issue Actions workflow commands.
+for (pkg, test), _ in ranked:
+    print(f"Test failure: {pkg}/{test}")
+    for line in "\n".join(failures[(pkg, test)]).splitlines():
+        print(f"| {line}")
+
 PY
 
-echo "| retries | test |"
-echo "|---:|---|"
-awk -F'\t' '{printf "| %s | `%s`/`%s` |\n", $1, $2, $3}' "$work/ranked.tsv"
+{
+  echo "| retries | test |"
+  echo "|---:|---|"
+  awk -F'\t' '{printf "| %s | `%s`/`%s` |\n", $1, $2, $3}' "$work/ranked.tsv"
+} | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   {

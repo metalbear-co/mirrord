@@ -26,11 +26,11 @@ use crate::{
     ci::MirrordCiManagedContainer,
     config::{ContainerRuntime, ExecParams, RuntimeArgs},
     container::{command_builder::RuntimeCommandBuilder, sidecar::IntproxySidecar},
+    data::UserData,
     ensure_not_nested,
     error::{CliResult, ContainerError},
     execution::{LINUX_INJECTION_ENV_VAR, MirrordExecution},
     logging::pipe_intproxy_sidecar_logs,
-    user_data::UserData,
     util::MIRRORD_CONSOLE_ADDR_ENV,
     wsl::adjust_container_config_for_wsl,
 };
@@ -110,7 +110,7 @@ async fn create_config_and_analytics(
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<(LayerConfig, AnalyticsReporter)> {
-    let (_, mut config) = crate::util::resolve_config(&mut cfg_context)?;
+    let (_, mut config) = crate::util::resolve_config(&mut cfg_context).await?;
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
     // Initialize only error analytics, extproxy will be the full AnalyticsReporter.

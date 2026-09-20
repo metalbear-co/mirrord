@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::{
     config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpSubcommand},
+    data::UserData,
     ui::ui_command,
-    user_data::UserData,
 };
 
 /// Context for sessions started by `mirrord up`.
@@ -136,6 +136,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         tokio::spawn(async move {
             match ui_command(
                 UiCommonArgs {
+                    config_file: None,
                     port: UI_DEFAULT_PORT,
                     no_browser: true,
                 },
@@ -252,7 +253,8 @@ mod tests {
 
     #[test]
     fn parse_error_buckets_as_config_validation() {
-        let parse_err: serde_yaml::Error = serde_yaml::from_str::<i32>("not a number").unwrap_err();
+        let parse_err: serde_saphyr::Error =
+            serde_saphyr::from_str::<i32>("not a number").unwrap_err();
         let v = category(UpCliError::Up(UpError::Parse(parse_err)));
         assert_eq!(v["error_category"], ErrorCategory::ConfigValidation as u32);
     }
