@@ -1,0 +1,53 @@
+# `issue_comment` rather than `pull_request`: it runs from the default branch with secrets
+# available, which is what makes an approval command safe to expose on fork pull requests. Fork code
+# never runs here, and nothing happens at all unless someone deliberately asks for it.
+name: Jev auto-approve
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  auto-approve:
+    # Running the command is an org member delegating a review they could have done by hand, so the
+    # commenter's association is what is checked. The author's is deliberately not: approving an
+    # outside contribution this way is a call the member makes.
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/jev-approve') &&
+      contains(fromJSON('["OWNER", "MEMBER"]'), github.event.comment.author_association)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # The pull request, its discussion, and its diff are read with the workflow token; the review
+      # itself is submitted by the app token below.
+      pull-requests: read
+    steps:
+      - name: Get token for the cubby-mb app
+        id: app-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          permission-pull-requests: write
+
+      - name: Ask Jev whether this needs a human
+        uses: metalbear-co/jev-auto-approve@6c1afaa35ef3de29df188714a98e9e51a3786e68
+        with:
+          jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
+          # An app installation token has no user identity, so `approver` is deliberately unset.
+          approve-token: ${{ steps.app-token.outputs.token }}
+          confidence-threshold: '0.95'
+          criteria: >-
+            No human reviewer is required when all of these hold. The pull request makes no
+            externally visible change: no change to the mirrord config schema, CLI flags or their
+            behaviour, the agent/layer protocol, or the public API of a published crate. It leaves
+            privileged automation alone: anything under .github/, the release, publishing, signing
+            or credential configuration, and anything else that runs with write-capable credentials,
+            always needs a human whatever else the change does. The change is verified: tests were
+            added or updated for the behaviour that changed, or the description records manual
+            testing that exercises it. Any user-visible change carries a changelog fragment under
+            changelog.d/. Nothing raised in the discussion is left unanswered.
