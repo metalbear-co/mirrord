@@ -37,7 +37,7 @@ use mirrord_config::{
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
-    client::{NoClientCert, OperatorApi},
+    client::{NoClientCert, OperatorApi, connect_params::BranchDbNames},
     crd::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
@@ -219,9 +219,15 @@ async fn preview_start(
         labels
     };
 
-    let branch_db_names = operator_api
-        .prepare_branch_dbs(&layer_config, &progress)
-        .await?;
+    // Branch preparation reads a single workload out of the target, so it only runs when the
+    // config asks for branches. A label target names no single workload and must not reach it.
+    let branch_db_names = if layer_config.feature.db_branches.is_empty() {
+        BranchDbNames::default()
+    } else {
+        operator_api
+            .prepare_branch_dbs(&layer_config, &progress)
+            .await?
+    };
 
     // The namespace the session (and therefore the preview pod) lands in.
     let session_namespace = preview_namespace(&operator_api, &layer_config);
