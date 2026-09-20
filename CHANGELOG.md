@@ -8,6 +8,32 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.262.0](https://github.com/metalbear-co/mirrord/tree/3.262.0) - 2026-09-20
+
+
+### Added
+
+- Added `--unmatched` and `--session-key-field` to `mirrord subscribe`,
+  reporting queue messages no filter took and naming the session each event
+  belongs to.
+- Added an Events tab to `mirrord ui`, listing the HTTP and queue messages the
+  operator intercepted across every cluster session.
+
+
+### Fixed
+
+- Fixed `mirrord subscribe` and `mirrord ui` ignoring the configured `baggage`,
+  so neither could reach an operator you are running yourself.
+- Fixed `mirrord ui` hanging indefinitely when the selected kube context's
+  credentials have expired, instead of reporting it as unreachable.
+- Fixed node-local UDP routing through the operator by preserving the target
+  pod's HostIP metadata when resolving its runtime state.
+- Fixed unix stream socket pathname truncation when clients like PHP report
+  `addrlen` without the trailing NUL, allowing the complete path to reach
+  outgoing matching and forwarding.
+- HTTPS stealing works when the original client sends no SNI and the
+  certificate names a host: set `serverName` in the TLS steal config.
+
 ## [3.261.0](https://github.com/metalbear-co/mirrord/tree/3.261.0) - 2026-09-17
 
 
