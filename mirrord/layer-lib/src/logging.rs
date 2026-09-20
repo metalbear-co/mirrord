@@ -14,7 +14,7 @@
 //!
 //! - `std::thread::current` and `std::thread::park`.
 //! - `tracing_subscriber`'s `with_thread_ids` and `with_thread_names`, which call it. Use
-//!   [`OsThreadId`] instead.
+//!   `OsThreadId` instead.
 //! - `std::io::stderr` and `std::io::stdout`, and the `println!` and `eprintln!` macros, which take
 //!   a reentrant lock that calls it. Use [`report_to_stderr`] instead.
 //!
