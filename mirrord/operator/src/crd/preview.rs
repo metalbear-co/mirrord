@@ -33,7 +33,7 @@ use serde_json::json;
 pub mod view;
 use uuid::Uuid;
 
-use super::session::KubeResourceTarget;
+use super::session::SessionTarget;
 #[cfg(feature = "client")]
 use crate::client::connect_params::BranchDbNames;
 
@@ -66,7 +66,11 @@ pub struct PreviewSessionSpec {
 
     /// Target to copy pod configuration from (deployment, pod, statefulset, etc.).
     /// The preview pod will be a copy of the target's pod spec with the user's image.
-    pub target: KubeResourceTarget,
+    ///
+    /// A pod-set target (label selector) takes traffic from every matching pod, whichever
+    /// workloads own them. The pod spec is copied from one of the matching pods, and an empty
+    /// `container` lets the operator pick the container in each pod on its own.
+    pub target: SessionTarget,
 
     /// How long (in seconds) this session is allowed to live.
     /// Values >= `u32::MAX` are treated as infinite.
@@ -181,7 +185,7 @@ impl PreviewSessionSpec {
         1
     }
 
-    /// Convert the [`KubeResourceTarget`] into a [`mirrord_config::target::Target`].
+    /// Convert the [`SessionTarget`] into a [`mirrord_config::target::Target`].
     pub fn config_target(&self) -> Option<Target> {
         self.target.clone().into_config()
     }
@@ -507,7 +511,10 @@ impl PreviewIncomingConfig {
 
 #[cfg(test)]
 mod tests {
+    use mirrord_config::target::label::LabelTarget;
+
     use super::*;
+    use crate::crd::session::KubeResourceTarget;
 
     #[test]
     fn steal_without_explicit_filter_defaults_to_baggage_header() {
@@ -624,6 +631,67 @@ mod tests {
         .expect("spec created by an older CLI should deserialize");
 
         assert_eq!(spec.idle, None);
+    }
+
+    /// Sessions created before label targets existed store a single Kubernetes resource under
+    /// `target`. They stay in the cluster across operator upgrades, so they must keep reading as
+    /// that same resource and must serialize back to the same JSON.
+    #[test]
+    fn single_resource_target_keeps_its_wire_shape() {
+        let target = json!({
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "name": "app",
+            "container": "app",
+        });
+        let spec: PreviewSessionSpec = serde_json::from_value(json!({
+            "image": "nginx",
+            "key": "pr-123",
+            "target": target,
+            "ttlSecs": 3600,
+        }))
+        .expect("spec with a single resource target should deserialize");
+
+        assert_eq!(
+            spec.target,
+            SessionTarget::KubeResource(KubeResourceTarget {
+                api_version: "apps/v1".to_owned(),
+                kind: "Deployment".to_owned(),
+                name: "app".to_owned(),
+                container: "app".to_owned(),
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&spec.target).expect("target should serialize"),
+            target
+        );
+    }
+
+    /// A label target with no container round-trips back into the same config target, so the
+    /// operator resolves exactly the selector the user wrote and picks containers per pod.
+    #[test]
+    fn label_target_round_trips_to_config() {
+        let spec: PreviewSessionSpec = serde_json::from_value(json!({
+            "image": "nginx",
+            "key": "pr-123",
+            "target": {
+                "labelSelector": { "matchLabels": { "app": "checkout", "tier": "web" } },
+                "container": "",
+            },
+            "ttlSecs": 3600,
+        }))
+        .expect("spec with a label target should deserialize");
+
+        assert_eq!(
+            spec.config_target(),
+            Some(Target::Label(LabelTarget {
+                labels: BTreeMap::from([
+                    ("app".to_owned(), "checkout".to_owned()),
+                    ("tier".to_owned(), "web".to_owned()),
+                ]),
+                container: None,
+            }))
+        );
     }
 
     #[test]

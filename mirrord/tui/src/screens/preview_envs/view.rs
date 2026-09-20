@@ -1012,10 +1012,10 @@ fn card_content(session: &PreviewSession, expanded: bool) -> Vec<Line<'static>> 
     if expanded {
         lines.push(field_line("IMAGE", session.spec.image.clone()));
         lines.push(field_line("REPLICAS", session.spec.replicas.to_string()));
-        if !session.spec.target.container.is_empty() {
+        if !session.spec.target.container().is_empty() {
             lines.push(field_line(
                 "CONTAINER",
-                session.spec.target.container.clone(),
+                session.spec.target.container().to_owned(),
             ));
         }
         if let Some(share_host) = session

@@ -1184,12 +1184,6 @@ impl LayerConfig {
     /// This is used to notify the user about settings that don't make sense in the context of
     /// preview environments, since it's already running in the cluster.
     pub fn verify_for_preview_env(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
-        if matches!(self.target.path, Some(Target::Label(_))) {
-            return Err(ConfigError::Conflict(
-                "Preview environments are not yet supported with label targets.".to_owned(),
-            ));
-        }
-
         let ignored = |field: &str| {
             format!("`{field}` is ignored in preview environments and will not be used.")
         };
@@ -2609,6 +2603,27 @@ mod tests {
             matches!(&error, ConfigError::TargetRequiresOperator),
             "unexpected error: {error}"
         );
+    }
+
+    /// A preview can target a label selector: one session takes traffic from every pod the
+    /// selector matches, so the preview checks must let the label target through.
+    #[test]
+    fn label_target_is_accepted_for_preview_env() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "target": { "path": { "labels": { "app": "checkout" } } },
+                "feature": { "preview": { "image": "checkout:pr-123" } }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+
+        resolved
+            .verify_for_preview_env(&mut context)
+            .expect("a label target should be accepted for preview environments");
     }
 
     /// Serializes the magic.aws tests that mutate the global `HOME` /

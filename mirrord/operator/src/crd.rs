@@ -783,6 +783,11 @@ pub enum NewOperatorFeature {
     /// Deployment. Gated so the CLI fails fast on older operators, which reject CronJob
     /// targets at resolution time and would only report it as a failed session.
     PreviewCronJobTarget,
+    /// This operator accepts `label/<selector>` preview targets: one preview session takes
+    /// traffic from every pod matching the selector, whichever workloads own them. Gated so the
+    /// CLI fails fast: an older operator cannot read a `PreviewSession` whose target is a label
+    /// selector, and one such resource stops it from listing every other preview session too.
+    PreviewLabelTarget,
 
     /// The interception event stream serves every session at once when given no key, honors
     /// `include_session_key` and `include_unmatched`, and carries the ids pairing an HTTP request
@@ -863,6 +868,7 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
             NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
+            NewOperatorFeature::PreviewLabelTarget => "label preview targets",
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
             NewOperatorFeature::Unknown => "unknown feature",
         };
