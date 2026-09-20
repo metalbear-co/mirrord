@@ -237,7 +237,7 @@ serde_yaml = "0.9"
 sha2 = "0.10"
 shellexpand = "3"
 socket2 = { version = "0.5", features = ["all"] }
-stork = { git = "https://github.com/metalbear-co/stork.git", rev = "484e481fa52b828eb3cc845a9cd767cf5f7c9e9f" }
+stork = { git = "https://github.com/metalbear-co/stork.git", rev = "8e1f3aadfa2d63574c10c56cbd26ce4abd74aa6f" }
 strum = "0.27.1"
 strum_macros = "0.27.1"
 syn = { version = "2", features = ["full", "extra-traits"] }
