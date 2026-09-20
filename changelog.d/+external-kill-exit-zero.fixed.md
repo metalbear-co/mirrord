@@ -1,1 +1,0 @@
-Fixed a successful `dotnet build` on Windows writing a crash report for the Roslyn compiler server. A process ended from outside runs no `DLL_PROCESS_DETACH`, so the layer cannot signal a clean shutdown; one that exits with a success code is no longer reported as a crash.

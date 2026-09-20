@@ -1,1 +1,0 @@
-`mirrord attach` on Windows now says why it could not attach. It waited only for the layer to report readiness, so a layer that failed inside `DllMain`, and a target that exited, both spent the whole timeout and were then reported as a timeout. It watches the failure event and the target process as well, and names what happened.

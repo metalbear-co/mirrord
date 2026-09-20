@@ -1,1 +1,0 @@
-Fixed the Windows layer log path mixing separators. With no `MIRRORD_LAYER_LOG_PATH` set, the CLI made the session directory by joining one string that held a forward slash, so every child was given a path like `C:\Users\you\AppData\Local\Temp\mirrord/session-1234-5678`. That path reached every message, every crash bundle and every comparison against it.

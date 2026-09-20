@@ -1,1 +1,0 @@
-Windows layer DLL injection now uses the `stork` crate instead of `dll-syringe`; `exec`, `attach`, and `pitm` gain hidden `--injection-method` selection (load-library default; attach: load-library/apc, exec/pitm: + iat), propagated to hook-created children through `MIRRORD_INJECTION_METHOD`.

@@ -1,1 +1,0 @@
-Fixed the Windows layer dropping the current directory of each drive (`=C:` entries) from the environment it gives a child process, and made the environment block it builds sorted instead of randomly ordered.

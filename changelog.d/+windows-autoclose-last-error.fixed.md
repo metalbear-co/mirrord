@@ -1,1 +1,0 @@
-Fixed the Windows `accept` hook losing the error code it reports. The hook closes the accepted socket through an RAII wrapper, and that close runs after the hook has set `WSAECONNABORTED` and computed its return value. The close and its log line each set the thread's error, so the caller read whichever of those happened last. The wrapper now keeps the error the hook left.

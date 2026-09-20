@@ -1,1 +1,0 @@
-The Windows process hook records what it was asked to start: the application name, the command line, the current directory, the creation flags and whether handles are inherited. A `CreateProcess` that fails now names the program in the layer log, where before a bundle carried only the parent's pid and a count of environment variables.
