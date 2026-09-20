@@ -35,19 +35,45 @@ jobs:
           permission-pull-requests: write
 
       - name: Ask Jev whether this needs a human
-        uses: metalbear-co/jev-auto-approve@6c1afaa35ef3de29df188714a98e9e51a3786e68
+        uses: metalbear-co/jev-auto-approve@5c58e7b3a3c9977a7e646504190457773d1d87fa # v2.0.0
         with:
           jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
           # An app installation token has no user identity, so `approver` is deliberately unset.
           approve-token: ${{ steps.app-token.outputs.token }}
           confidence-threshold: '0.95'
-          criteria: >-
-            No human reviewer is required when all of these hold. The pull request makes no
-            externally visible change: no change to the mirrord config schema, CLI flags or their
-            behaviour, the agent/layer protocol, or the public API of a published crate. It leaves
-            privileged automation alone: anything under .github/, the release, publishing, signing
-            or credential configuration, and anything else that runs with write-capable credentials,
-            always needs a human whatever else the change does. The change is verified: tests were
-            added or updated for the behaviour that changed, or the description records manual
-            testing that exercises it. Any user-visible change carries a changelog fragment under
-            changelog.d/. Nothing raised in the discussion is left unanswered.
+          # One question per thing worth being sure about; each has to clear the threshold on
+          # its own. Reaching outside the repository is weighed against how well the change
+          # accounts for the people it affects. Privileged automation is not weighed at all.
+          questions: |
+            {
+              "ready_to_merge": {
+                "instructions": "Is this pull request ready to be merged as it stands?",
+                "approve_when": "yes",
+                "yes": "Yes: the change is finished. Nothing in it is a draft, a debugging leftover, a placeholder, or work the author is still deciding about.",
+                "no": "No: the change is unfinished, or something in it looks like it was not meant to merge."
+              },
+              "tests_sufficient": {
+                "instructions": "Is the behaviour this pull request changes covered by testing?",
+                "approve_when": "yes",
+                "yes": "Yes: tests were added or updated that exercise what changed, or tests already in the repository cover it, or the pull request records manual testing that actually exercises the change.",
+                "no": "No: behaviour changed and nothing shown here exercises it."
+              },
+              "callers_accounted_for": {
+                "instructions": "Does this pull request account for everyone affected by what it changes outside this repository?",
+                "approve_when": "yes",
+                "yes": "Yes: either it changes nothing users or callers depend on - the mirrord config schema, CLI flags and their behaviour, the agent/layer protocol, a published crate's public API - or it does, and the change is deliberate and the pull request says what it means for them.",
+                "no": "No: it changes something users or callers depend on, and what that means for them is not accounted for."
+              },
+              "touches_privileged_automation": {
+                "instructions": "Does this pull request change anything that runs with write-capable credentials?",
+                "approve_when": "no",
+                "yes": "Yes: it changes something under .github/, or the release, publishing, signing or credential configuration.",
+                "no": "No: it leaves that configuration alone."
+              },
+              "needs_human_review": {
+                "instructions": "Does this pull request require a human reviewer before it can be merged?",
+                "approve_when": "no",
+                "yes": "Yes: this pull request should be read by a human before it is merged.",
+                "no": "No: this pull request needs no human intervention. It can be approved as it stands."
+              }
+            }
