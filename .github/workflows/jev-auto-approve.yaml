@@ -35,16 +35,45 @@ jobs:
           permission-pull-requests: write
 
       - name: Ask Jev whether this needs a human
-        uses: metalbear-co/jev-auto-approve@6c1afaa35ef3de29df188714a98e9e51a3786e68
+        uses: metalbear-co/jev-auto-approve@5c58e7b3a3c9977a7e646504190457773d1d87fa # v2.0.0
         with:
           jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
           # An app installation token has no user identity, so `approver` is deliberately unset.
           approve-token: ${{ steps.app-token.outputs.token }}
           confidence-threshold: '0.95'
-          # Both sides of the answer, so what `yes` covers is stated rather than implied. An
-          # interface change is weighed here rather than vetoed; privileged automation is not.
-          criteria: |
+          # One question per thing worth being sure about; each has to clear the threshold on
+          # its own. Reaching outside the repository is weighed against how well the change
+          # accounts for the people it affects. Privileged automation is not weighed at all.
+          questions: |
             {
-              "false": "No: the change is verified, and how far it reaches is understood. Behaviour that changed is covered by tests that were added or updated, or by manual testing the pull request records. Where a human has already reviewed it, what they raised was addressed - in the code, or in an answer that holds up. Where the change reaches past this repository - the mirrord config schema, CLI flags or their behaviour, the agent/layer protocol, the public API of a published crate - it is small and deliberate, and the pull request accounts for the callers it affects. Any user-visible change carries a changelog fragment under changelog.d/. Nothing in it touches privileged automation.",
-              "true": "Yes: something about the change is unsettled, or it reaches somewhere no machine should sign off. Behaviour changed with neither tests nor a record of manual testing. Or something raised in review is unaddressed, or answered in a way that does not hold up. Or the change alters something others depend on - config schema, CLI flags, the agent/layer protocol, a published crate's public API - and the consequences for them are not accounted for. Or a user-visible change has no changelog fragment under changelog.d/. Or it touches privileged automation: anything under .github/, the release, publishing, signing or credential configuration, or anything else running with write-capable credentials, whatever else the change does. Or the pull request does not show enough to tell which of these is the case."
+              "ready_to_merge": {
+                "instructions": "Is this pull request ready to be merged as it stands?",
+                "approve_when": "yes",
+                "yes": "Yes: the change is finished. Nothing in it is a draft, a debugging leftover, a placeholder, or work the author is still deciding about.",
+                "no": "No: the change is unfinished, or something in it looks like it was not meant to merge."
+              },
+              "tests_sufficient": {
+                "instructions": "Is the behaviour this pull request changes covered by testing?",
+                "approve_when": "yes",
+                "yes": "Yes: tests were added or updated that exercise what changed, or tests already in the repository cover it, or the pull request records manual testing that actually exercises the change.",
+                "no": "No: behaviour changed and nothing shown here exercises it."
+              },
+              "callers_accounted_for": {
+                "instructions": "Does this pull request account for everyone affected by what it changes outside this repository?",
+                "approve_when": "yes",
+                "yes": "Yes: either it changes nothing users or callers depend on - the mirrord config schema, CLI flags and their behaviour, the agent/layer protocol, a published crate's public API - or it does, and the change is deliberate and the pull request says what it means for them.",
+                "no": "No: it changes something users or callers depend on, and what that means for them is not accounted for."
+              },
+              "touches_privileged_automation": {
+                "instructions": "Does this pull request change anything that runs with write-capable credentials?",
+                "approve_when": "no",
+                "yes": "Yes: it changes something under .github/, or the release, publishing, signing or credential configuration.",
+                "no": "No: it leaves that configuration alone."
+              },
+              "needs_human_review": {
+                "instructions": "Does this pull request require a human reviewer before it can be merged?",
+                "approve_when": "no",
+                "yes": "Yes: this pull request should be read by a human before it is merged.",
+                "no": "No: this pull request needs no human intervention. It can be approved as it stands."
+              }
             }
