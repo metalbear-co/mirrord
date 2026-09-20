@@ -12,6 +12,8 @@ use mirrord_config::{
 };
 use serde_json::{Map, Value};
 use thiserror::Error;
+use tokio::sync::OnceCell;
+use tracing::trace;
 
 use super::{default_path, initialize_empty_json_at_path, update_at_path_strict};
 use crate::config::global_config::{
@@ -20,6 +22,7 @@ use crate::config::global_config::{
 
 /// "~/.mirrord/mirrord.json"
 static GLOBAL_CONFIG_PATH: LazyLock<PathBuf> = LazyLock::new(|| default_path("mirrord.json"));
+static GLOBAL_CONFIG: OnceCell<GlobalConfig> = OnceCell::const_new();
 
 /// A regular mirrord configuration loaded from the user-wide config path.
 #[derive(Debug)]
@@ -54,6 +57,18 @@ impl Default for GlobalConfig {
 }
 
 impl GlobalConfig {
+    /// Loads the process-wide global configuration when a layer configuration needs its defaults.
+    pub(crate) async fn load() -> &'static Self {
+        GLOBAL_CONFIG
+            .get_or_init(|| async {
+                Self::from_default_path()
+                    .await
+                    .inspect_err(|fail| trace!(?fail, "Failed initializing `GlobalConfig`!"))
+                    .unwrap_or_default()
+            })
+            .await
+    }
+
     /// Creates [`GlobalConfig`] from the default file path.
     pub(crate) async fn from_default_path() -> io::Result<Self> {
         Self::from_path(GLOBAL_CONFIG_PATH.as_path()).await

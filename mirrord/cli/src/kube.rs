@@ -1,10 +1,9 @@
 use std::fmt::Debug;
 
-use kube::{Config, Resource, api::ListParams, client::ClientBuilder};
+use kube::{Resource, api::ListParams, client::ClientBuilder};
 use mirrord_config::LayerConfig;
 use mirrord_kube::{
-    api::kubernetes::create_kube_config, error::Result as KubeApiResult,
-    retry::retry_policy_from_config,
+    api::kubernetes::create_kube_config, error::KubeApiError, retry::retry_policy_from_config,
 };
 use mirrord_operator::client::add_baggage_header;
 use mirrord_progress::Progress;
@@ -13,11 +12,8 @@ use tower::{buffer::BufferLayer, retry::RetryLayer};
 
 use crate::error::CliError;
 
-/// Create a kube client according to the layer config, and with a request buffer of 1024 requests
-/// and a retry policy according to the layer config. The configured baggage rides on every
-/// request, since the commands using this client read operator resources that another operator
-/// instance may be serving for that baggage, such as one run through mirrord on top of the
-/// deployed one.
+/// Create a kube client according to the layer config, carrying its `baggage`, with a request
+/// buffer of 1024 requests and a retry policy according to the layer config.
 pub(crate) async fn kube_client_from_layer_config(
     layer_config: &LayerConfig,
 ) -> Result<kube::Client, CliError> {
@@ -30,17 +26,17 @@ pub(crate) async fn kube_client_from_layer_config(
     .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
     add_baggage_header(&mut config, layer_config.baggage.as_deref())?;
 
-    build_client(config, layer_config)
+    ClientBuilder::try_from(config)
+        .map_err(KubeApiError::from)
+        .and_then(|builder| {
+            Ok(builder
+                .with_layer(&BufferLayer::new(1024))
+                .with_layer(&RetryLayer::new(retry_policy_from_config(
+                    &layer_config.startup_retry,
+                )?))
+                .build())
+        })
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))
-}
-
-fn build_client(config: Config, layer_config: &LayerConfig) -> KubeApiResult<kube::Client> {
-    Ok(ClientBuilder::try_from(config)?
-        .with_layer(&BufferLayer::new(1024))
-        .with_layer(&RetryLayer::new(retry_policy_from_config(
-            &layer_config.startup_retry,
-        )?))
-        .build())
 }
 
 /// Get a vector of `T`s if T is defined on the cluster. If the list request returns a 404, assume

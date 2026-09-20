@@ -1,23 +1,27 @@
 //! Utilities for handling multiple network protocol stacks within one
 //! [`OutgoingProxy`](super::OutgoingProxy).
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(unix)]
 use std::{env, path::PathBuf};
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     time::Duration,
 };
+#[cfg(unix)]
+use std::{os::unix::fs::PermissionsExt, path::Path};
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(unix)]
 use ::tokio::fs;
 use ::tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream, UdpSocket},
 };
 use bytes::{Bytes, BytesMut};
+#[cfg(unix)]
+use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
 use mirrord_intproxy_protocol::NetProtocol;
-#[cfg(not(target_os = "windows"))]
+#[cfg(unix)]
 use mirrord_protocol::outgoing::UnixAddr;
 use mirrord_protocol::{
     ClientMessage, ConnectionId,
@@ -27,13 +31,43 @@ use mirrord_protocol::{
     },
     uid::Uid,
 };
-#[cfg(not(target_os = "windows"))]
+#[cfg(unix)]
 use rand::distr::{Alphanumeric, SampleString};
 use socket2::SockRef;
-#[cfg(not(target_os = "windows"))]
+#[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
 #[cfg(all(unix, not(target_os = "macos")))]
 use tokio_seqpacket::{UnixSeqpacket, UnixSeqpacketListener};
+
+#[cfg(unix)]
+use super::UNIX_STREAMS_DIRNAME;
+
+#[cfg(unix)]
+const CONTAINER_UNIX_SOCKET_MODE: u32 = 0o666;
+
+#[cfg(unix)]
+fn intproxy_container_mode() -> bool {
+    env::var(MIRRORD_INTPROXY_CONTAINER_MODE_ENV)
+        .ok()
+        .and_then(|value| value.parse::<bool>().ok())
+        .unwrap_or_default()
+}
+
+/// Makes a Unix bridge listener connectable by an application container running as another UID.
+///
+/// Container mode shares a per-session anonymous volume with the application, while host-mode
+/// sockets can have stronger local-user isolation and therefore keep their default permissions.
+#[cfg(unix)]
+fn make_unix_listener_connectable(path: &Path, container_mode: bool) -> io::Result<()> {
+    if container_mode {
+        std::fs::set_permissions(
+            path,
+            std::fs::Permissions::from_mode(CONTAINER_UNIX_SOCKET_MODE),
+        )?;
+    }
+
+    Ok(())
+}
 
 /// Trait for [`NetProtocol`] that handles differences in [`mirrord_protocol::outgoing`] between
 /// network protocols. Allows to unify logic.
@@ -150,7 +184,9 @@ impl NetProtocolExt for NetProtocol {
             SocketAddress::Unix(..) => match self {
                 Self::Stream => {
                     let path = PreparedSocket::generate_uds_path().await?;
-                    PreparedSocket::UnixListener(UnixListener::bind(path)?)
+                    let listener = UnixListener::bind(&path)?;
+                    make_unix_listener_connectable(&path, intproxy_container_mode())?;
+                    PreparedSocket::UnixListener(listener)
                 }
                 Self::Datagrams => {
                     tracing::error!(
@@ -162,7 +198,9 @@ impl NetProtocolExt for NetProtocol {
                     #[cfg(all(unix, not(target_os = "macos")))]
                     {
                         let path = PreparedSocket::generate_uds_path().await?;
-                        PreparedSocket::UnixSeqpacketListener(UnixSeqpacketListener::bind(path)?)
+                        let listener = UnixSeqpacketListener::bind(&path)?;
+                        make_unix_listener_connectable(&path, intproxy_container_mode())?;
+                        PreparedSocket::UnixSeqpacketListener(listener)
                     }
 
                     #[cfg(any(not(unix), target_os = "macos"))]
@@ -200,13 +238,9 @@ pub enum PreparedSocket {
 }
 
 impl PreparedSocket {
-    /// For unix listeners, relative to the temp dir.
-    #[cfg(not(target_os = "windows"))]
-    const UNIX_STREAMS_DIRNAME: &'static str = "mirrord-unix-sockets";
-
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(unix)]
     async fn generate_uds_path() -> io::Result<PathBuf> {
-        let tmp_dir = env::temp_dir().join(Self::UNIX_STREAMS_DIRNAME);
+        let tmp_dir = env::temp_dir().join(UNIX_STREAMS_DIRNAME);
         if !tmp_dir.exists() {
             fs::create_dir_all(&tmp_dir).await?;
         }
@@ -394,5 +428,96 @@ impl ConnectedSocket {
             InnerConnectedSocket::UnixSeqpacket(..) => Ok(()),
             InnerConnectedSocket::UdpSocket(..) => Ok(()),
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::{ffi::OsString, ops::Not, os::unix::fs::PermissionsExt, sync::Mutex};
+
+    use tempfile::tempdir;
+
+    use super::{
+        CONTAINER_UNIX_SOCKET_MODE, MIRRORD_INTPROXY_CONTAINER_MODE_ENV, intproxy_container_mode,
+        make_unix_listener_connectable,
+    };
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvVarRestore(Option<OsString>);
+
+    impl Drop for EnvVarRestore {
+        fn drop(&mut self) {
+            // SAFETY: ENV_LOCK serializes the test's environment mutations, and this restores
+            // the original value before the lock is released.
+            unsafe {
+                match self.0.take() {
+                    Some(value) => std::env::set_var(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, value),
+                    None => std::env::remove_var(MIRRORD_INTPROXY_CONTAINER_MODE_ENV),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn container_mode_requires_an_explicit_true_value() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _restore = EnvVarRestore(std::env::var_os(MIRRORD_INTPROXY_CONTAINER_MODE_ENV));
+
+        // SAFETY: ENV_LOCK serializes the test's environment mutations, and EnvVarRestore
+        // restores the original value before the lock is released.
+        unsafe {
+            std::env::remove_var(MIRRORD_INTPROXY_CONTAINER_MODE_ENV);
+        }
+        let absent = intproxy_container_mode();
+
+        // SAFETY: see above.
+        unsafe {
+            std::env::set_var(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "invalid");
+        }
+        let invalid = intproxy_container_mode();
+
+        // SAFETY: see above.
+        unsafe {
+            std::env::set_var(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "false");
+        }
+        let false_value = intproxy_container_mode();
+
+        // SAFETY: see above.
+        unsafe {
+            std::env::set_var(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "true");
+        }
+        let true_value = intproxy_container_mode();
+
+        assert!(absent.not());
+        assert!(invalid.not());
+        assert!(false_value.not());
+        assert!(true_value);
+    }
+
+    #[test]
+    fn listener_permissions_change_only_in_container_mode() {
+        let directory = tempdir().expect("create temporary directory");
+        let socket_path = directory.path().join("listener.sock");
+        let _listener =
+            std::os::unix::net::UnixListener::bind(&socket_path).expect("bind Unix listener");
+
+        std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
+            .expect("set socket permissions");
+        make_unix_listener_connectable(&socket_path, false).expect("preserve socket permissions");
+        let host_mode = std::fs::metadata(&socket_path)
+            .expect("read host-mode socket metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(host_mode, 0o600);
+
+        make_unix_listener_connectable(&socket_path, true).expect("relax socket permissions");
+        let container_mode = std::fs::metadata(&socket_path)
+            .expect("read container-mode socket metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(container_mode, CONTAINER_UNIX_SOCKET_MODE);
     }
 }

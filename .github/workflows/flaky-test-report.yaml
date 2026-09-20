@@ -19,9 +19,13 @@ permissions:
   actions: read
 
 jobs:
-  report:
+  collect:
+    name: Collect flaky failures
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion != 'skipped' }}
     runs-on: ubuntu-24.04
+    outputs:
+      count: ${{ steps.collect.outputs.count }}
+      tests: ${{ steps.collect.outputs.tests }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: "Collect retried tests"
@@ -32,11 +36,23 @@ jobs:
         run: |
           .github/scripts/flaky-tests.sh \
             "$GITHUB_REPOSITORY" \
-            "$RUN_ID" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: "File issues and notify #ci-alerts"
-        if: ${{ steps.collect.outputs.count != '0' }}
+            "$RUN_ID"
+  report:
+    needs: collect
+    if: ${{ needs.collect.outputs.count != '0' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # The collector must finish before GitHub makes its complete log available for line lookup.
+      - name: Resolve failure log links
+        id: links
         env:
-          CI_FLAKY_TESTS: ${{ steps.collect.outputs.tests }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FLAKY_TESTS: ${{ needs.collect.outputs.tests }}
+        run: python3 .github/scripts/flaky-links.py
+      - name: "File issues and notify #ci-alerts"
+        env:
+          CI_FLAKY_TESTS: ${{ steps.links.outputs.tests }}
           CI_FLAKY_THRESHOLD: ${{ inputs.threshold || vars.CI_FLAKY_THRESHOLD || '1' }}
           LINEAR_APP_CLIENT_ID: ${{ secrets.LINEAR_APP_CLIENT_ID }}
           LINEAR_APP_CLIENT_SECRET: ${{ secrets.LINEAR_APP_CLIENT_SECRET }}
@@ -68,7 +84,7 @@ jobs:
           : > new.tsv
           stale=false
 
-          while IFS=$'\t' read -r retries package test; do
+          while IFS=$'\t' read -r retries package test failure_url; do
             [ -n "$test" ] || continue
 
             if [ -z "${LINEAR_APP_TOKEN:-}" ]; then
@@ -80,7 +96,7 @@ jobs:
 
             if ! filed=$(.github/scripts/flaky-issue.sh \
               "$GITHUB_REPOSITORY" MBE "$package" "$test" "$retries" "$CI_FLAKY_THRESHOLD" \
-              "$run_url"); then
+              "$run_url" "$failure_url"); then
               echo "::warning::could not reach Linear for $package/$test"
               if [ "$retries" -ge "$CI_FLAKY_THRESHOLD" ]; then
                 printf '%s\t%s\t\t\n' "$package" "$test" >> new.tsv

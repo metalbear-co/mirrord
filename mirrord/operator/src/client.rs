@@ -78,8 +78,8 @@ pub mod error;
 
 const BAGGAGE_HEADER: &str = "baggage";
 
-/// Adds the configured baggage as a header on every request of a kube client, so the operator
-/// sees it on each request, the same as on the session-creating ones.
+/// Adds the `baggage` header every request in `config` will carry, so the operator it names
+/// serves them.
 pub fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> OperatorApiResult<()> {
     if let Some(baggage) = baggage {
         config.headers.push((

@@ -363,7 +363,7 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.clone())
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace.clone());
 
-    let layer_config = LayerConfig::resolve(&mut cfg_context)?;
+    let layer_config = crate::util::resolve_layer_config(&mut cfg_context).await?;
 
     let client = kube_client_from_layer_config(&layer_config).await?;
 
@@ -471,7 +471,7 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &[String]) -> 
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.clone())
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace.clone());
 
-    let layer_config = LayerConfig::resolve(&mut cfg_context)?;
+    let layer_config = crate::util::resolve_layer_config(&mut cfg_context).await?;
 
     let client = kube_client_from_layer_config(&layer_config).await?;
     let default_ns = layer_config

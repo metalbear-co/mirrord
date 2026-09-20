@@ -23,7 +23,11 @@ use std::{env, io::Read, str::FromStr};
 use futures::future::join_all;
 use miette::Diagnostic;
 use mirrord_analytics::{AnalyticsReporter, ExecutionKind};
-use mirrord_config::util::VecOrSingle;
+use mirrord_config::{
+    LayerConfig,
+    config::{ConfigContext, ConfigError},
+    util::VecOrSingle,
+};
 use mirrord_intproxy::session_monitor::chaos::rules::{ChaosRule, ChaosRuleRequest};
 use mirrord_session_monitor_client::{
     Response, SessionClient, SessionError, session_endpoints, sessions_dir,
@@ -113,6 +117,9 @@ pub enum UiCliError {
     /// Errors from making requests to the session monitor in `mirrord chaos`
     #[error(transparent)]
     Chaos(#[from] ChaosApiError),
+
+    #[error("failed to read the config file: {0}")]
+    Config(#[from] ConfigError),
 }
 
 impl From<SessionError> for UiCliError {
@@ -184,10 +191,24 @@ fn ui_start_printout(
 /// `open_path` selects which page the browser opens on when the daemon starts (`/` for the session
 /// monitor, `/wizard` for the config wizard). It has no effect on [`UiSubcommand::Stop`].
 pub async fn ui_command(
-    UiCommonArgs { port, no_browser }: UiCommonArgs,
+    UiCommonArgs {
+        port,
+        no_browser,
+        config_file,
+    }: UiCommonArgs,
     command: Option<UiSubcommand>,
     open_path: &str,
 ) -> Result<(), UiCliError> {
+    // Inherited by the daemon, which reads its baggage from the environment.
+    if let Some(config_file) = &config_file {
+        let mut context =
+            ConfigContext::default().override_env(LayerConfig::FILE_PATH_ENV, config_file);
+        if let Some(baggage) = LayerConfig::resolve(&mut context)?.baggage {
+            // SAFETY: single-threaded at this point, before the daemon is spawned.
+            unsafe { env::set_var("MIRRORD_BAGGAGE", baggage) };
+        }
+    }
+
     match command.unwrap_or(UiSubcommand::Start) {
         UiSubcommand::Start => {
             if let Ok(port) = env::var(MIRRORD_SERVER_PORT_ENV_NAME) {
@@ -197,6 +218,13 @@ pub async fn ui_command(
                 match ui_start(port, no_browser, open_path).await {
                     Ok(details) => {
                         ui_start_printout(&details);
+                        if details.already_running && config_file.is_some() {
+                            eprintln!(
+                                "* The running daemon keeps the config it was started with; run \
+                                 `mirrord ui stop` first to apply this one"
+                            );
+                        }
+
                         Ok(())
                     }
                     Err(error) => {

@@ -107,7 +107,7 @@ async fn preview_start(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview start");
 
-    let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
+    let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -555,7 +555,7 @@ async fn preview_status(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview status");
 
-    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
+    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -777,7 +777,7 @@ async fn preview_logs(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview logs");
 
-    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
+    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -902,7 +902,7 @@ async fn preview_stop(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview stop");
 
-    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress)?;
+    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -1059,7 +1059,7 @@ async fn resolve_config_target(
     }
 }
 
-fn load_preview_config(
+async fn load_preview_config(
     env_overrides: HashMap<&OsStr, Cow<'_, OsStr>>,
     progress: &mut ProgressTracker,
 ) -> CliResult<LayerConfig> {
@@ -1067,9 +1067,11 @@ fn load_preview_config(
 
     let mut cfg_context = ConfigContext::default().override_envs(env_overrides);
 
-    let config = LayerConfig::resolve(&mut cfg_context).inspect_err(|_| {
-        subtask.failure(None);
-    })?;
+    let config = crate::util::resolve_layer_config(&mut cfg_context)
+        .await
+        .inspect_err(|_| {
+            subtask.failure(None);
+        })?;
 
     let result = config.verify_for_preview_env(&mut cfg_context);
     for warning in cfg_context.into_warnings() {

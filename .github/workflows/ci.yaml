@@ -68,6 +68,7 @@ jobs:
       windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
+      flaky_report_changed: ${{ steps.changed-flaky-report.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
@@ -122,6 +123,16 @@ jobs:
         with:
           files: |
             .github/workflows/**
+      - name: get changed flaky report files
+        id: changed-flaky-report
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          files: |
+            .github/scripts/flaky-*
+            .github/scripts/test_flaky_report.py
+            .github/workflows/check-flaky-report.yaml
+            .github/workflows/flaky-test-report.yaml
+            .github/workflows/ci.yaml
       - name: get changed rs files
         id: changed-rs
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -312,6 +323,13 @@ jobs:
     with:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
 
+  check-flaky-report:
+    needs: [plan]
+    if: ${{ needs.plan.outputs.flaky_report_changed == 'true' }}
+    uses: ./.github/workflows/check-flaky-report.yaml
+    with:
+      runner: ${{ needs.plan.outputs.runner_4 }}
+
   check-rust-docs:
     needs: [plan]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
@@ -473,6 +491,7 @@ jobs:
         test_agent,
         lint,
         check-rust-docs,
+        check-flaky-report,
         cargo-deny,
         windows_tests,
         install_script,
