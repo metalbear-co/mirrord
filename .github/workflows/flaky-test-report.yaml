@@ -22,10 +22,14 @@ jobs:
   collect:
     name: Collect flaky failures
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion != 'skipped' }}
+<<<<<<< HEAD
     runs-on: ubuntu-24.04
     outputs:
       count: ${{ steps.collect.outputs.count }}
       tests: ${{ steps.collect.outputs.tests }}
+=======
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+>>>>>>> 5f64efa5 (MBE-2077: migrate supporting CI workflows to Blacksmith)
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: "Collect retried tests"

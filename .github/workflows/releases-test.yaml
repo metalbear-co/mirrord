@@ -14,7 +14,7 @@ jobs:
   # 1) Check latest GitHub Release has all required assets
   # ============================================================
   check_latest_release:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       tag: ${{ steps.check.outputs.tag }}
       html_url: ${{ steps.check.outputs.html_url }}
@@ -190,7 +190,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest]
+        os: [blacksmith-4vcpu-ubuntu-2404, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Show env + release info
@@ -436,7 +436,7 @@ jobs:
   # ============================================================
   check_version_endpoint:
     needs: check_latest_release
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Check version endpoint vs release download URLs
         id: version
