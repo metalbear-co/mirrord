@@ -47,9 +47,9 @@ jobs:
           - { name: "linux x86_64 / zsh", os: blacksmith-4vcpu-ubuntu-2404, sh: "zsh" }
           - { name: "linux x86_64 / busybox ash", os: blacksmith-4vcpu-ubuntu-2404, sh: "busybox sh" }
           - { name: "linux aarch64 / sh", os: blacksmith-8vcpu-ubuntu-2404-arm, sh: "sh" }
-          - { name: "mac aarch64 / sh", os: macos-latest, sh: "sh" }
-          - { name: "mac aarch64 / bash", os: macos-latest, sh: "bash" }
-          - { name: "mac aarch64 / zsh", os: macos-latest, sh: "zsh" }
+          - { name: "mac aarch64 / sh", os: blacksmith-6vcpu-macos-latest, sh: "sh" }
+          - { name: "mac aarch64 / bash", os: blacksmith-6vcpu-macos-latest, sh: "bash" }
+          - { name: "mac aarch64 / zsh", os: blacksmith-6vcpu-macos-latest, sh: "zsh" }
           - { name: "mac x86_64 / sh", os: macos-15-intel, sh: "sh" }
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

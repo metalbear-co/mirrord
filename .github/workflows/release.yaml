@@ -234,7 +234,7 @@ jobs:
   build_binaries_windows:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: windows-latest
+    runs-on: blacksmith-8vcpu-windows-2025
     permissions:
       # Needed to mint the OIDC token that authenticates against Azure Artifact Signing.
       id-token: write
@@ -469,7 +469,7 @@ jobs:
   build_layer_macos_aarch64:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -506,7 +506,7 @@ jobs:
 
   # Stage 2: Link universal layer from pre-built layers
   link_layer_macos_universal:
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     needs: [validate_release_request, build_layer_macos_x86_64, build_layer_macos_aarch64]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
@@ -607,7 +607,7 @@ jobs:
 
   # Stage 3: Build aarch64 CLI (runs in parallel)
   build_cli_macos_aarch64:
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     needs: [validate_release_request, link_layer_macos_universal]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
@@ -661,7 +661,7 @@ jobs:
 
   # Stage 4: Merge universal CLI from pre-built CLIs
   merge_cli_macos_universal:
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     needs:
       [
         validate_release_request,
@@ -1172,7 +1172,7 @@ jobs:
 
   release_chocolatey:
     needs: [validate_release_request, release_gh]
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -1300,7 +1300,7 @@ jobs:
 
   release_winget:
     needs: [validate_release_request, release_gh]
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

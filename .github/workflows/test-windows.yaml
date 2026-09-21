@@ -18,7 +18,7 @@ env:
 
 jobs:
   windows-tests:
-    runs-on: windows-latest
+    runs-on: blacksmith-8vcpu-windows-2025
     env:
       MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord.exe
       MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/mirrord_layer_win.dll
