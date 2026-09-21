@@ -719,6 +719,7 @@ pub fn extract_literal_param_values(
     }
 
     for param in [
+        &mut config.params.url,
         &mut config.params.host,
         &mut config.params.port,
         &mut config.params.user,
@@ -780,6 +781,7 @@ pub fn replace_values_with_secret_refs(
         }
         CrdConnectionSource::Params(params) => {
             for kind in [
+                &mut params.url,
                 &mut params.host,
                 &mut params.port,
                 &mut params.user,

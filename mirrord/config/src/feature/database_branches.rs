@@ -678,6 +678,13 @@ impl DatabaseBranchConfig {
         )
     }
 
+    /// True when this branch's connection params declare a `url` base. The CLI uses it to
+    /// refuse the config on an operator that predates the param.
+    pub fn uses_url_param(&self) -> bool {
+        self.connection_params()
+            .is_some_and(|params| params.url.is_some())
+    }
+
     /// True when any of this branch's connection params is a `configmap` source. The CLI uses
     /// it to refuse the config on an operator that predates the source kind.
     pub fn uses_config_map_source(&self) -> bool {
@@ -801,6 +808,7 @@ impl TargetEnvironmentVariableSource {
 impl ConnectionParamsVars {
     fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
         [
+            &self.url,
             &self.host,
             &self.port,
             &self.user,
@@ -818,6 +826,7 @@ impl ConnectionParamsVars {
     /// analytics even though most of them are not redirected locally.
     fn all_sources(&self) -> impl Iterator<Item = &ParamSource> {
         [
+            &self.url,
             &self.host,
             &self.port,
             &self.user,
@@ -1317,6 +1326,16 @@ pub struct ConnectionParamsConfig {
     pub params: ConnectionParamsVars,
 }
 
+/// The URL with a leading `jdbc:` removed, case-insensitively, or the URL unchanged.
+///
+/// A JDBC URL is not a base URL: without stripping the prefix the whole authority lands in the
+/// path and the URL resolves to no host at all.
+pub fn strip_jdbc_prefix(url: &str) -> &str {
+    url.get(..5)
+        .filter(|prefix| prefix.eq_ignore_ascii_case("jdbc:"))
+        .map_or(url, |prefix| &url[prefix.len()..])
+}
+
 /// <!--${internal}-->
 /// A connection parameter source: a plain env var name (string), an env var with a literal
 /// value override (object with `variable` and optional `value`), or a Kubernetes Secret
@@ -1573,6 +1592,8 @@ pub fn extract_pattern_param<'v>(
 /// Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct ConnectionParamsVars {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<SingleOrVec<ParamSource>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<SingleOrVec<ParamSource>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2328,6 +2349,7 @@ mod tests {
             ConnectionSource::Params(Box::new(ConnectionParamsConfig {
                 source_type: Some(ConnectionSourceType::Env),
                 params: ConnectionParamsVars {
+                    url: None,
                     host: None,
                     port: None,
                     user: None,
@@ -2433,6 +2455,7 @@ mod tests {
         let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: None,
             params: ConnectionParamsVars {
+                url: None,
                 host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
                 port: None,
                 user: None,
@@ -2616,6 +2639,7 @@ mod tests {
         let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: None,
             params: ConnectionParamsVars {
+                url: None,
                 host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
                 port: None,
                 user: Some(ParamSource::Variable("DB_USER".to_owned()).into()),
@@ -2763,6 +2787,7 @@ mod tests {
         let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: None,
             params: ConnectionParamsVars {
+                url: None,
                 host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
                 port: None,
                 user: None,
@@ -3032,6 +3057,7 @@ mod tests {
             pg_branch_with_connection(ConnectionSource::Params(Box::new(ConnectionParamsConfig {
                 source_type: None,
                 params: ConnectionParamsVars {
+                    url: None,
                     host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
                     port: None,
                     user: Some(ParamSource::Variable("DB_USER".to_owned()).into()),
