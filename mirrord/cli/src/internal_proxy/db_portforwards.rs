@@ -7,8 +7,9 @@ use std::{
 use mirrord_config::{
     LayerConfig,
     feature::database_branches::{
-        ConnectionParamsVars, ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig,
-        ParamSource, RedisBranchConfig, TargetEnvironmentVariableSource, extract_pattern_param,
+        ConnectionSource, DatabaseBranchConfig, DatabaseBranchesConfig, ParamSource,
+        RedisBranchConfig, SingleOrVec, TargetEnvironmentVariableSource, extract_pattern_param,
+        strip_jdbc_prefix,
     },
 };
 use mirrord_intproxy::agent_conn::AgentConnection;
@@ -94,10 +95,11 @@ impl ParamVar {
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
-struct ParamsEnvs {
-    host: ParamVar,
-    /// The port param. `None` when host and port share one variable as `host:port`
-    /// (Spanner's `SPANNER_EMULATOR_HOST`); then `host`'s value is split.
+struct Envs {
+    url: Option<ParamVar>,
+    host: Option<ParamVar>,
+    /// `None` when `url` supplies the port, or when the host variable carries `host:port`
+    /// (Spanner's `SPANNER_EMULATOR_HOST`) and its value is split.
     port: Option<ParamVar>,
     user: Option<ParamVar>,
     password: Option<ParamVar>,
@@ -105,10 +107,25 @@ struct ParamsEnvs {
     scheme: Option<&'static str>,
 }
 
-#[derive(PartialEq, Eq, Hash, Debug, Clone)]
-enum Envs {
-    Url(String),
-    Params(Box<ParamsEnvs>),
+impl Envs {
+    fn variables(&self) -> Vec<String> {
+        self.url
+            .iter()
+            .map(|param| param.variable.clone())
+            .chain(
+                [
+                    self.host.as_ref(),
+                    self.port.as_ref(),
+                    self.user.as_ref(),
+                    self.password.as_ref(),
+                    self.database.as_ref(),
+                ]
+                .into_iter()
+                .flatten()
+                .map(|param| param.variable.clone()),
+            )
+            .collect()
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -126,6 +143,9 @@ enum ConnInfo {
     /// The original URL with host:port to be replaced with local address.
     ReplaceInUrl {
         url: Url,
+        /// The `jdbc:` prefix stripped before parsing, restored when the string is built. A
+        /// JDBC driver rejects the bare scheme.
+        prefix: String,
         query_overrides: BTreeMap<String, Option<String>>,
     },
     /// All params available to build a URL from scratch.
@@ -189,6 +209,7 @@ impl ConnInfo {
         match self {
             ConnInfo::ReplaceInUrl {
                 url,
+                prefix,
                 query_overrides,
             } => {
                 let mut url = url.clone();
@@ -198,7 +219,7 @@ impl ConnInfo {
                 };
                 if url.set_host(Some(&host)).is_ok() && url.set_port(Some(local.port())).is_ok() {
                     apply_query_overrides(&mut url, query_overrides);
-                    url.to_string()
+                    format!("{prefix}{url}")
                 } else {
                     local.to_string()
                 }
@@ -265,14 +286,15 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
         if let DatabaseBranchConfig::Spanner(db) = branch {
             let db_id = resolve_branch_id(&db.base.id, key, &NullProgress).into();
             portforwards.insert(Pf {
-                envs: Envs::Params(Box::new(ParamsEnvs {
-                    host: ParamVar::plain(db.emulator_host.clone()),
+                envs: Envs {
+                    url: None,
+                    host: Some(ParamVar::plain(db.emulator_host.clone())),
                     port: None,
                     user: None,
                     password: None,
                     database: None,
                     scheme: None,
-                })),
+                },
                 db_id,
                 query_overrides: BTreeMap::new(),
             });
@@ -308,9 +330,15 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
         let envs = match &database.connection {
             ConnectionSource::Url { url } => match url {
                 TargetEnvironmentVariableSource::Env { variable, .. }
-                | TargetEnvironmentVariableSource::EnvFrom { variable, .. } => {
-                    Envs::Url(variable.clone())
-                }
+                | TargetEnvironmentVariableSource::EnvFrom { variable, .. } => Envs {
+                    url: Some(ParamVar::plain(variable.clone())),
+                    host: None,
+                    port: None,
+                    user: None,
+                    password: None,
+                    database: None,
+                    scheme,
+                },
                 TargetEnvironmentVariableSource::Secret { .. }
                 | TargetEnvironmentVariableSource::GcpSecretManager { .. }
                 | TargetEnvironmentVariableSource::AwsSecretsManager { .. } => {
@@ -321,51 +349,45 @@ fn extract_portforward_configs(config: &DatabaseBranchesConfig, key: &str) -> Ha
                 let Some(first_url) = url.first() else {
                     continue;
                 };
-                Envs::Url(first_url.clone())
+                Envs {
+                    url: Some(ParamVar::plain(first_url.clone())),
+                    host: None,
+                    port: None,
+                    user: None,
+                    password: None,
+                    database: None,
+                    scheme,
+                }
             }
             ConnectionSource::Params(config) => {
-                let ConnectionParamsVars {
-                    host: Some(host),
-                    port: Some(port),
-                    user,
-                    password,
-                    database,
-                    extra: _,
-                } = &config.params
-                else {
-                    continue;
+                let first = |sources: &Option<SingleOrVec<ParamSource>>| {
+                    ParamVar::from_source(sources.as_ref()?.first()?)
                 };
 
-                let (Some(host), Some(port)) = (
-                    host.first().and_then(ParamVar::from_source),
-                    port.first().and_then(ParamVar::from_source),
-                ) else {
+                // Sources the CLI cannot read off the target (`configmap`, `secret`, the
+                // secret managers) yield no variable, exactly as they do in URL mode.
+                let url = first(&config.params.url);
+
+                let host = first(&config.params.host);
+                let port = first(&config.params.port);
+
+                // Without a URL to fall back on, the address has to come from the params.
+                if url.is_none() && (host.is_none() || port.is_none()) {
                     continue;
-                };
+                }
 
-                let user = user
-                    .as_ref()
-                    .and_then(|om| om.first())
-                    .and_then(ParamVar::from_source);
-                let password = password
-                    .as_ref()
-                    .and_then(|om| om.first())
-                    .and_then(ParamVar::from_source);
-                let database = database
-                    .as_ref()
-                    .and_then(|om| om.first())
-                    .and_then(ParamVar::from_source);
-
-                Envs::Params(Box::new(ParamsEnvs {
+                Envs {
+                    url,
                     host,
-                    port: Some(port),
-                    user,
-                    password,
-                    database,
+                    port,
+                    user: first(&config.params.user),
+                    password: first(&config.params.password),
+                    database: first(&config.params.database),
                     scheme,
-                }))
+                }
             }
         };
+
         let db_id = resolve_branch_id(&base.id, key, &NullProgress).into();
         let query_overrides = match branch {
             DatabaseBranchConfig::Pg(db) => db
@@ -407,122 +429,148 @@ fn resolve_port_mappings(
                 db_id,
                 query_overrides,
             } = pf;
-            let (host, port, conn_info) = match envs {
-                Envs::Url(url_var) => {
-                    let url = vars
-                        .get(&url_var)?
+            let Envs {
+                url,
+                host,
+                port,
+                user,
+                password,
+                database,
+                scheme,
+            } = envs;
+
+            let mut url_prefix = String::new();
+            let mut url = match url {
+                Some(param) => Some({
+                    let raw = param.resolve(vars, "url")?;
+                    let stripped = strip_jdbc_prefix(raw);
+                    url_prefix = raw[..raw.len() - stripped.len()].to_owned();
+
+                    stripped
                         .parse::<Url>()
                         .inspect_err(|e| {
                             tracing::warn!(
                                 ?e,
-                                env_var = %url_var,
+                                env_var = %param.variable,
                                 "failed to parse url for db branch connection string, \
+                                 portforward will not be made"
+                            )
+                        })
+                        .ok()?
+                }),
+                None => None,
+            };
+
+            let to_remote = |value: &str| {
+                value
+                    .parse()
+                    .map(RemoteAddr::Ip)
+                    .unwrap_or_else(|_| RemoteAddr::Hostname(value.to_owned()))
+            };
+
+            let resolved_port: Option<u16> = match &port {
+                Some(param) => Some(
+                    param
+                        .resolve(vars, "port")?
+                        .parse()
+                        .inspect_err(|e| {
+                            tracing::warn!(
+                                env_var = %param.variable,
+                                ?e,
+                                "failed to parse u16 from db branch port env var, \
+                                 portforward will not be made"
+                            )
+                        })
+                        .ok()?,
+                ),
+                None => None,
+            };
+
+            let (remote_host, port_val) = match (&url, &host) {
+                // Host and port share one var as `host:port`; split on the last colon so IPv6
+                // hosts (which contain colons) still parse.
+                (None, Some(host)) if resolved_port.is_none() => {
+                    let value = host.resolve(vars, "host")?;
+                    let (host_str, port_str) = value.rsplit_once(':')?;
+                    let port_val: u16 = port_str
+                        .parse()
+                        .inspect_err(|e| {
+                            tracing::warn!(
+                                env_var = %host.variable,
+                                ?e,
+                                "failed to parse port from db branch host:port env var, \
                                  portforward will not be made"
                             )
                         })
                         .ok()?;
 
-                    let host = url.host_str()?;
-
-                    let host = host
-                        .parse()
-                        .map(RemoteAddr::Ip)
-                        .unwrap_or_else(|_| RemoteAddr::Hostname(host.to_owned()));
-
-                    let port = url.port()?;
-
-                    (
-                        host,
-                        port,
-                        ConnInfo::ReplaceInUrl {
-                            url,
-                            query_overrides,
-                        },
-                    )
+                    (to_remote(host_str), port_val)
                 }
-                Envs::Params(params) => {
-                    let ParamsEnvs {
-                        host: host_var,
-                        port: port_var,
-                        user,
-                        password,
-                        database,
-                        scheme,
-                    } = *params;
-                    let (remote_host, port_val) = match port_var {
-                        Some(port_var) => {
-                            let port_val: u16 = port_var
-                                .resolve(vars, "port")?
-                                .parse()
-                                .inspect_err(|e| {
-                                    tracing::warn!(
-                                        env_var = %port_var.variable,
-                                        ?e,
-                                        "failed to parse u16 from db branch port env var, \
-                                         portforward will not be made"
-                                    )
-                                })
-                                .ok()?;
-                            let host_val = host_var.resolve(vars, "host")?;
-                            let remote_host = host_val
-                                .parse()
-                                .map(RemoteAddr::Ip)
-                                .unwrap_or_else(|_| RemoteAddr::Hostname(host_val.to_owned()));
-                            (remote_host, port_val)
-                        }
-                        None => {
-                            // Host and port share one var as `host:port`; split on the last colon
-                            // so IPv6 hosts (which contain colons) still parse.
-                            let value = host_var.resolve(vars, "host")?;
-                            let (host_str, port_str) = value.rsplit_once(':')?;
-                            let port_val: u16 = port_str
-                                .parse()
-                                .inspect_err(|e| {
-                                    tracing::warn!(
-                                        env_var = %host_var.variable,
-                                        ?e,
-                                        "failed to parse port from db branch host:port env var, \
-                                         portforward will not be made"
-                                    )
-                                })
-                                .ok()?;
-                            let remote_host = host_str
-                                .parse()
-                                .map(RemoteAddr::Ip)
-                                .unwrap_or_else(|_| RemoteAddr::Hostname(host_str.to_owned()));
-                            (remote_host, port_val)
-                        }
+                _ => {
+                    let host_val = match &host {
+                        Some(host) => host.resolve(vars, "host")?.to_owned(),
+                        None => url.as_ref()?.host_str()?.to_owned(),
+                    };
+                    let port_val = match resolved_port {
+                        Some(port) => port,
+                        None => url.as_ref()?.port()?,
                     };
 
-                    let conn_info = scheme
-                        .zip(user)
-                        .zip(password)
-                        .and_then(|((scheme, user_var), pass_var)| {
-                            let user = user_var.resolve(vars, "user")?.to_owned();
-                            let password = pass_var.resolve(vars, "password")?.to_owned();
-                            let database = database
-                                .and_then(|d| d.resolve(vars, "database").map(str::to_owned));
-                            Some(if scheme == "mssql" {
-                                ConnInfo::BuildMssql {
-                                    user,
-                                    password,
-                                    database,
-                                }
-                            } else {
-                                ConnInfo::BuildUrl {
-                                    scheme,
-                                    user,
-                                    password,
-                                    database,
-                                    query_overrides,
-                                }
-                            })
-                        })
-                        .unwrap_or(ConnInfo::HostPort);
-
-                    (remote_host, port_val, conn_info)
+                    (to_remote(&host_val), port_val)
                 }
             };
+
+            let user = user.and_then(|param| param.resolve(vars, "user").map(str::to_owned));
+            let password =
+                password.and_then(|param| param.resolve(vars, "password").map(str::to_owned));
+            let database =
+                database.and_then(|param| param.resolve(vars, "database").map(str::to_owned));
+
+            let conn_info = match &mut url {
+                // The source URL is kept whole so its query params and scheme survive; only
+                // what a param resolved is written over it.
+                Some(url) => {
+                    if let Some(database) = &database {
+                        url.set_path(database);
+                    }
+                    if let Some(user) = &user {
+                        let _ = url.set_username(user);
+                    }
+                    if let Some(password) = &password {
+                        let _ = url.set_password(Some(password));
+                    }
+
+                    ConnInfo::ReplaceInUrl {
+                        url: url.clone(),
+                        prefix: url_prefix,
+                        query_overrides,
+                    }
+                }
+                None => scheme
+                    .zip(user)
+                    .zip(password)
+                    .map(|((scheme, user), password)| {
+                        if scheme == "mssql" {
+                            ConnInfo::BuildMssql {
+                                user,
+                                password,
+                                database,
+                            }
+                        } else {
+                            ConnInfo::BuildUrl {
+                                scheme,
+                                user,
+                                password,
+                                database,
+                                query_overrides,
+                            }
+                        }
+                    })
+                    .unwrap_or(ConnInfo::HostPort),
+            };
+
+            let (host, port) = (remote_host, port_val);
+
             Some(((host, port), PortMapping { db_id, conn_info }))
         })
         .collect()
@@ -559,20 +607,7 @@ pub(super) async fn setup(
 
     let env_vars_select = portforwards
         .iter()
-        .flat_map(|pf| match &pf.envs {
-            Envs::Url(u) => vec![u.clone()],
-            Envs::Params(params) => [
-                Some(&params.host),
-                params.port.as_ref(),
-                params.user.as_ref(),
-                params.password.as_ref(),
-                params.database.as_ref(),
-            ]
-            .into_iter()
-            .flatten()
-            .map(|param| param.variable.clone())
-            .collect(),
-        })
+        .flat_map(|pf| pf.envs.variables())
         .collect();
 
     conn.connection
@@ -741,7 +776,18 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         let pf = result.into_iter().next().unwrap();
-        assert_eq!(pf.envs, Envs::Url("DB_URL".to_owned()));
+        assert_eq!(
+            pf.envs,
+            Envs {
+                url: Some(ParamVar::plain("DB_URL".to_owned())),
+                host: None,
+                port: None,
+                user: None,
+                password: None,
+                database: None,
+                scheme: Some("mysql"),
+            }
+        );
         assert_eq!(pf.db_id, "db1");
     }
 
@@ -763,6 +809,7 @@ mod tests {
         let conn = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: None,
             params: ConnectionParamsVars {
+                url: None,
                 host: Some(ParamSource::Variable("H".to_owned()).into()),
                 port: Some(ParamSource::Variable("P".to_owned()).into()),
                 user: Some(ParamSource::Variable("U".to_owned()).into()),
@@ -778,14 +825,15 @@ mod tests {
         let pf = result.into_iter().next().unwrap();
         assert_eq!(
             pf.envs,
-            Envs::Params(Box::new(ParamsEnvs {
-                host: var("H"),
+            Envs {
+                url: None,
+                host: Some(var("H")),
                 port: Some(var("P")),
                 user: Some(var("U")),
                 password: Some(var("PW")),
                 database: Some(var("DB")),
                 scheme: Some("mysql"),
-            }))
+            }
         );
     }
 
@@ -796,6 +844,7 @@ mod tests {
         let conn = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: None,
             params: ConnectionParamsVars {
+                url: None,
                 host: Some(ParamSource::Variable("H".to_owned()).into()),
                 port: Some(ParamSource::Variable("P".to_owned()).into()),
                 user: Some(ParamSource::Variable("U".to_owned()).into()),
@@ -811,14 +860,15 @@ mod tests {
         let pf = result.into_iter().next().unwrap();
         assert_eq!(
             pf.envs,
-            Envs::Params(Box::new(ParamsEnvs {
-                host: var("H"),
+            Envs {
+                url: None,
+                host: Some(var("H")),
                 port: Some(var("P")),
                 user: Some(var("U")),
                 password: Some(var("PW")),
                 database: Some(var("DB")),
                 scheme: Some("postgresql"),
-            }))
+            }
         );
     }
 
@@ -831,6 +881,7 @@ mod tests {
         let conn = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: None,
             params: ConnectionParamsVars {
+                url: None,
                 host: Some(
                     ParamSource::Pattern {
                         env_var_name: "COCKROACH_URL".to_owned(),
@@ -858,14 +909,15 @@ mod tests {
         let pf = result.into_iter().next().unwrap();
         assert_eq!(
             pf.envs,
-            Envs::Params(Box::new(ParamsEnvs {
-                host: pattern_var("COCKROACH_URL", "@(?P<host>[^:/]+)"),
+            Envs {
+                url: None,
+                host: Some(pattern_var("COCKROACH_URL", "@(?P<host>[^:/]+)")),
                 port: Some(pattern_var("COCKROACH_URL", ":(?P<port>[0-9]+)/")),
                 user: None,
                 password: None,
                 database: None,
                 scheme: Some("postgresql"),
-            }))
+            }
         );
     }
 
@@ -874,7 +926,15 @@ mod tests {
     #[test]
     fn resolve_url_happy_path() {
         let pf = Pf {
-            envs: Envs::Url("DB_URL".to_owned()),
+            envs: Envs {
+                url: Some(ParamVar::plain("DB_URL".to_owned())),
+                host: None,
+                port: None,
+                user: None,
+                password: None,
+                database: None,
+                scheme: None,
+            },
             db_id: "branch-1".to_owned(),
             query_overrides: BTreeMap::new(),
         };
@@ -892,17 +952,196 @@ mod tests {
         assert!(matches!(mapping.conn_info, ConnInfo::ReplaceInUrl { .. }));
     }
 
+    /// A `url` param need not carry every component - a port or database declared beside it
+    /// wins, the same way it does when the operator builds the source connection. Without
+    /// this the forward is dropped outright, because a portless URL has nothing to bind.
+    #[test]
+    fn resolve_url_takes_port_and_database_from_declared_params() {
+        let pf = Pf {
+            envs: Envs {
+                url: Some(ParamVar::plain("DB_URL".to_owned())),
+                host: None,
+                port: Some(var("DB_PORT")),
+                user: None,
+                password: None,
+                database: Some(var("DB_NAME")),
+                scheme: None,
+            },
+            db_id: "branch-1".to_owned(),
+            query_overrides: BTreeMap::new(),
+        };
+        let vars = HashMap::from([
+            (
+                "DB_URL".to_owned(),
+                "mysql://user:pass@db.example.com/from_url".to_owned(),
+            ),
+            ("DB_PORT".to_owned(), "3307".to_owned()),
+            ("DB_NAME".to_owned(), "from_param".to_owned()),
+        ]);
+
+        let result = resolve_port_mappings([pf].into(), &vars);
+
+        let key = (RemoteAddr::Hostname("db.example.com".to_owned()), 3307);
+        let mapping = result.get(&key).expect("declared port should be used");
+        let ConnInfo::ReplaceInUrl { url, .. } = &mapping.conn_info else {
+            panic!("expected ReplaceInUrl, got {:?}", mapping.db_id);
+        };
+        assert_eq!(url.path(), "/from_param");
+    }
+
+    /// A `user` or `password` declared beside a `url` wins over the credentials the URL itself
+    /// carries, like every other component.
+    #[test]
+    fn resolve_url_takes_credentials_from_declared_params() {
+        let pf = Pf {
+            envs: Envs {
+                url: Some(ParamVar::plain("DB_URL".to_owned())),
+                host: None,
+                port: None,
+                user: Some(var("DB_USER")),
+                password: Some(var("DB_PASS")),
+                database: None,
+                scheme: Some("mysql"),
+            },
+            db_id: "branch-1".to_owned(),
+            query_overrides: BTreeMap::new(),
+        };
+        let vars = HashMap::from([
+            (
+                "DB_URL".to_owned(),
+                "mysql://url_user:url_pass@db.example.com:3306/appdb".to_owned(),
+            ),
+            ("DB_USER".to_owned(), "param_user".to_owned()),
+            ("DB_PASS".to_owned(), "param_pass".to_owned()),
+        ]);
+
+        let result = resolve_port_mappings([pf].into(), &vars);
+
+        let key = (RemoteAddr::Hostname("db.example.com".to_owned()), 3306);
+        let mapping = result.get(&key).expect("forward should be made");
+        let ConnInfo::ReplaceInUrl { url, .. } = &mapping.conn_info else {
+            panic!("expected ReplaceInUrl");
+        };
+        assert_eq!(url.username(), "param_user");
+        assert_eq!(url.password(), Some("param_pass"));
+        assert_eq!(
+            url.path(),
+            "/appdb",
+            "database should still come from the url"
+        );
+    }
+
+    /// The operator hands the app back its own URL shape, so a JDBC app's redirect env var
+    /// carries a `jdbc:` prefix. Parsed raw it yields no host at all and the forward vanishes
+    /// with no warning, because `Url::parse` succeeds on a cannot-be-a-base URL.
+    #[test]
+    fn resolve_url_reads_a_jdbc_prefixed_value() {
+        let pf = Pf {
+            envs: Envs {
+                url: Some(ParamVar::plain("DB_URL".to_owned())),
+                host: None,
+                port: None,
+                user: None,
+                password: None,
+                database: None,
+                scheme: Some("mysql"),
+            },
+            db_id: "branch-1".to_owned(),
+            query_overrides: BTreeMap::new(),
+        };
+        let vars = HashMap::from([(
+            "DB_URL".to_owned(),
+            "jdbc:mysql://db.example.com:3306/app_db?useSSL=false".to_owned(),
+        )]);
+
+        let result = resolve_port_mappings([pf].into(), &vars);
+
+        let key = (RemoteAddr::Hostname("db.example.com".to_owned()), 3306);
+        let mapping = result.get(&key).expect("a jdbc url must produce a forward");
+        let local = "127.0.0.1:5000".parse().unwrap();
+        let published = mapping.conn_info.connection_string(local);
+        // A connection string can carry credentials, so the failure message reports only
+        // whether the expected prefix is there, never the string itself.
+        let expected = "jdbc:mysql://127.0.0.1:5000";
+
+        assert!(
+            published.starts_with(expected),
+            "the published string must start with `{expected}`, which a jdbc driver needs"
+        );
+    }
+
+    /// A `url` param carries a `value_pattern` like every other slot: the URL lives in a span
+    /// of a larger value, and the operator rewrites that same span. Parsing the whole value
+    /// would fail and drop the forward.
+    #[test]
+    fn resolve_url_extracts_from_a_pattern_source() {
+        let pf = Pf {
+            envs: Envs {
+                url: Some(pattern_var("APP_CONN", "url=(?P<url>[^;]+)")),
+                host: None,
+                port: None,
+                user: None,
+                password: None,
+                database: None,
+                scheme: Some("mysql"),
+            },
+            db_id: "branch-1".to_owned(),
+            query_overrides: BTreeMap::new(),
+        };
+        let vars = HashMap::from([(
+            "APP_CONN".to_owned(),
+            "driver=mysql;url=mysql://db.example.com:3306/app_db;pool=10".to_owned(),
+        )]);
+
+        let result = resolve_port_mappings([pf].into(), &vars);
+
+        assert!(
+            result.contains_key(&(RemoteAddr::Hostname("db.example.com".to_owned()), 3306)),
+            "pattern-sourced url should resolve"
+        );
+    }
+
+    /// The URL still supplies what no param overrides.
+    #[test]
+    fn resolve_url_keeps_its_own_port_without_an_override() {
+        let pf = Pf {
+            envs: Envs {
+                url: Some(ParamVar::plain("DB_URL".to_owned())),
+                host: None,
+                port: None,
+                user: None,
+                password: None,
+                database: None,
+                scheme: None,
+            },
+            db_id: "branch-1".to_owned(),
+            query_overrides: BTreeMap::new(),
+        };
+        let vars = HashMap::from([(
+            "DB_URL".to_owned(),
+            "mysql://user:pass@db.example.com:3306/appdb".to_owned(),
+        )]);
+
+        let result = resolve_port_mappings([pf].into(), &vars);
+
+        assert!(
+            result.contains_key(&(RemoteAddr::Hostname("db.example.com".to_owned()), 3306)),
+            "url port should be used when nothing overrides it"
+        );
+    }
+
     #[test]
     fn resolve_params_build_url() {
         let pf = Pf {
-            envs: Envs::Params(Box::new(ParamsEnvs {
-                host: var("H"),
+            envs: Envs {
+                url: None,
+                host: Some(var("H")),
                 port: Some(var("P")),
                 user: Some(var("U")),
                 password: Some(var("PW")),
                 database: Some(var("DB")),
                 scheme: Some("postgresql"),
-            })),
+            },
             db_id: "branch-2".to_owned(),
             query_overrides: BTreeMap::new(),
         };
@@ -932,14 +1171,15 @@ mod tests {
     #[test]
     fn resolve_params_mssql_build() {
         let pf = Pf {
-            envs: Envs::Params(Box::new(ParamsEnvs {
-                host: var("H"),
+            envs: Envs {
+                url: None,
+                host: Some(var("H")),
                 port: Some(var("P")),
                 user: Some(var("U")),
                 password: Some(var("PW")),
                 database: None,
                 scheme: Some("mssql"),
-            })),
+            },
             db_id: "mssql-branch".to_owned(),
             query_overrides: BTreeMap::new(),
         };
@@ -960,14 +1200,15 @@ mod tests {
     #[test]
     fn resolve_combined_host_port() {
         let pf = Pf {
-            envs: Envs::Params(Box::new(ParamsEnvs {
-                host: var("SPANNER_EMULATOR_HOST"),
+            envs: Envs {
+                url: None,
+                host: Some(var("SPANNER_EMULATOR_HOST")),
                 port: None,
                 user: None,
                 password: None,
                 database: None,
                 scheme: None,
-            })),
+            },
             db_id: "spanner-branch".to_owned(),
             query_overrides: BTreeMap::new(),
         };
@@ -991,14 +1232,15 @@ mod tests {
     #[test]
     fn resolve_pattern_params_extracts_from_rewritten_url() {
         let pf = Pf {
-            envs: Envs::Params(Box::new(ParamsEnvs {
-                host: pattern_var("COCKROACH_URL", "@(?P<host>[^:/]+)"),
+            envs: Envs {
+                url: None,
+                host: Some(pattern_var("COCKROACH_URL", "@(?P<host>[^:/]+)")),
                 port: Some(pattern_var("COCKROACH_URL", ":(?P<port>[0-9]+)/")),
                 user: None,
                 password: None,
                 database: None,
                 scheme: Some("postgresql"),
-            })),
+            },
             db_id: "crdb-branch".to_owned(),
             query_overrides: BTreeMap::new(),
         };
@@ -1023,14 +1265,15 @@ mod tests {
     #[test]
     fn resolve_pattern_params_without_a_match_skips_the_forward() {
         let pf = Pf {
-            envs: Envs::Params(Box::new(ParamsEnvs {
-                host: pattern_var("COCKROACH_URL", "@(?P<host>[^:/]+)"),
+            envs: Envs {
+                url: None,
+                host: Some(pattern_var("COCKROACH_URL", "@(?P<host>[^:/]+)")),
                 port: Some(pattern_var("COCKROACH_URL", ":(?P<port>[0-9]+)/")),
                 user: None,
                 password: None,
                 database: None,
                 scheme: Some("postgresql"),
-            })),
+            },
             db_id: "crdb-branch".to_owned(),
             query_overrides: BTreeMap::new(),
         };
@@ -1071,6 +1314,7 @@ mod tests {
     #[test]
     fn replace_in_url_applies_query_override() {
         let conn_info = ConnInfo::ReplaceInUrl {
+            prefix: String::new(),
             url: "postgresql://user:pass@db.example.com:5432/mydb?sslmode=require&app=x"
                 .parse()
                 .unwrap(),
@@ -1087,6 +1331,7 @@ mod tests {
     #[test]
     fn replace_in_url_without_overrides_keeps_query_verbatim() {
         let conn_info = ConnInfo::ReplaceInUrl {
+            prefix: String::new(),
             url: "postgresql://user:pass@db.example.com:5432/mydb?sslmode=require"
                 .parse()
                 .unwrap(),
@@ -1176,6 +1421,7 @@ mod tests {
         let local: SocketAddr = "127.0.0.1:5555".parse().unwrap();
 
         let conn_info = ConnInfo::ReplaceInUrl {
+            prefix: String::new(),
             url: "mongodb://cluster0.example.mongodb.net:27017/appdb?authSource=%24external&authMechanism=MONGODB-AWS&retryWrites=true"
                 .parse()
                 .unwrap(),
@@ -1188,6 +1434,7 @@ mod tests {
 
         // Removing every pair must drop the query entirely, not leave a dangling `?`.
         let conn_info = ConnInfo::ReplaceInUrl {
+            prefix: String::new(),
             url: "mongodb://cluster0.example.mongodb.net:27017/appdb?authSource=%24external&authMechanism=MONGODB-AWS"
                 .parse()
                 .unwrap(),
