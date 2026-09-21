@@ -234,7 +234,7 @@ jobs:
   build_binaries_windows:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: blacksmith-8vcpu-windows-2025
+    runs-on: windows-latest
     permissions:
       # Needed to mint the OIDC token that authenticates against Azure Artifact Signing.
       id-token: write
@@ -1172,7 +1172,7 @@ jobs:
 
   release_chocolatey:
     needs: [validate_release_request, release_gh]
-    runs-on: blacksmith-4vcpu-windows-2025
+    runs-on: windows-latest
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -1300,7 +1300,7 @@ jobs:
 
   release_winget:
     needs: [validate_release_request, release_gh]
-    runs-on: blacksmith-4vcpu-windows-2025
+    runs-on: windows-latest
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

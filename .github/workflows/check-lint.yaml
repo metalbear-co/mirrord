@@ -143,7 +143,7 @@ jobs:
             target: x86_64-apple-darwin
           - os: blacksmith-6vcpu-macos-latest
             target: aarch64-apple-darwin
-          - os: blacksmith-8vcpu-windows-2025
+          - os: windows-latest
             target: x86_64-pc-windows-msvc
           - os: blacksmith-8vcpu-ubuntu-2404-arm
             target: aarch64-unknown-linux-gnu
