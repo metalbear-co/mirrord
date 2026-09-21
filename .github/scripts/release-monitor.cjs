@@ -26,13 +26,17 @@ function transition(previous, results) {
   return { status, notify }
 }
 
-async function readState({ github, context }) {
+// Artifact pagination order is not a freshness guarantee. Select by upload time
+// across all pages, including when an older workflow run is rerun.
+async function stateArtifacts({ github, context }) {
   const { owner, repo } = context.repo
   const { data: currentRun } = await github.rest.actions.getWorkflowRun({
     owner,
     repo,
     run_id: context.runId,
   })
+  const artifacts = []
+  const workflows = new Map([[context.runId, currentRun.workflow_id]])
   for await (const page of github.paginate.iterator(
     github.rest.actions.listArtifactsForRepo,
     { owner, repo, name: artifactName, per_page: 100 },
@@ -42,42 +46,66 @@ async function readState({ github, context }) {
         artifact.expired ||
         artifact.workflow_run?.head_branch !==
           context.payload.repository.default_branch
-      ) {
-        continue
-      }
-      const { data: run } = await github.rest.actions.getWorkflowRun({
-        owner,
-        repo,
-        run_id: artifact.workflow_run.id,
-      })
-      if (run.workflow_id !== currentRun.workflow_id) continue
-      const { data } = await github.rest.actions.downloadArtifact({
-        owner,
-        repo,
-        artifact_id: artifact.id,
-        archive_format: 'zip',
-      })
-      const directory = fs.mkdtempSync(
-        path.join(os.tmpdir(), 'release-monitor-'),
       )
-      try {
-        const archive = path.join(directory, 'state.zip')
-        fs.writeFileSync(archive, Buffer.from(data))
-        const state = JSON.parse(
-          execFileSync('unzip', ['-p', archive, stateFile], {
-            encoding: 'utf8',
-          }),
-        )
-        if (!['healthy', 'warning', 'failure'].includes(state.status)) {
-          throw new Error('Invalid release monitor state')
-        }
-        return state
-      } finally {
-        fs.rmSync(directory, { recursive: true, force: true })
+        continue
+      const runId = artifact.workflow_run.id
+      if (!workflows.has(runId)) {
+        const { data: run } = await github.rest.actions.getWorkflowRun({
+          owner,
+          repo,
+          run_id: runId,
+        })
+        workflows.set(runId, run.workflow_id)
       }
+      if (workflows.get(runId) === currentRun.workflow_id)
+        artifacts.push(artifact)
     }
   }
-  return null
+  return artifacts.sort(
+    (a, b) =>
+      Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id,
+  )
+}
+
+async function readState({ github, context }) {
+  const [artifact] = await stateArtifacts({ github, context })
+  if (!artifact) return null
+  const { data } = await github.rest.actions.downloadArtifact({
+    ...context.repo,
+    artifact_id: artifact.id,
+    archive_format: 'zip',
+  })
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'release-monitor-'))
+  try {
+    const archive = path.join(directory, 'state.zip')
+    fs.writeFileSync(archive, Buffer.from(data))
+    const state = JSON.parse(
+      execFileSync('unzip', ['-p', archive, stateFile], { encoding: 'utf8' }),
+    )
+    if (!['healthy', 'warning', 'failure'].includes(state.status)) {
+      throw new Error('Invalid release monitor state')
+    }
+    return state
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+}
+
+// Called only after upload succeeds, so cleanup cannot remove the last saved
+// state when notification delivery or its replacement upload fails.
+async function pruneState({ github, context, artifactId }) {
+  const artifacts = await stateArtifacts({ github, context })
+  if (artifacts[0]?.id !== artifactId) {
+    throw new Error(
+      'Uploaded state is not the latest artifact; refusing cleanup',
+    )
+  }
+  for (const artifact of artifacts.slice(1)) {
+    await github.rest.actions.deleteArtifact({
+      ...context.repo,
+      artifact_id: artifact.id,
+    })
+  }
 }
 
 async function notify({ github, context, core }) {
@@ -101,7 +129,12 @@ async function notify({ github, context, core }) {
     }[next.status]
     const details = Object.entries(results)
       .filter(([, check]) => check.result !== 'success')
-      .map(([name, check]) => `• ${name}: ${check.result}`)
+      .map(([name, check]) => {
+        if (check.result === 'skipped') return `• Not run: ${name} (skipped)`
+        if (check.result === 'cancelled')
+          return `• Not completed: ${name} (cancelled)`
+        return `• Failed: ${name}`
+      })
     const text = [
       `*${title} for \`${context.repo.owner}/${context.repo.repo}\`*`,
       `• Release: ${tag || 'unknown'}`,
@@ -137,4 +170,4 @@ async function notify({ github, context, core }) {
   fs.writeFileSync(stateFile, JSON.stringify({ status: next.status }))
 }
 
-module.exports = { transition, readState, notify }
+module.exports = { transition, readState, pruneState, notify }

@@ -88,7 +88,8 @@ You can manually trigger workflows for testing purposes.
 
 The monitor checks release assets, installation on Linux and macOS, and version
 endpoint downloads every five minutes. Installer checks retry up to three times
-before reporting failure. Check jobs remain red while a problem persists.
+before reporting failure, including binary validation. Check jobs remain red while
+a problem persists.
 
 One notification job groups failures into an incident. It sends an opening alert,
 remains quiet while the incident persists (including across release tags), and
@@ -98,8 +99,10 @@ links to the monitor run for diagnostics.
 
 Runs are serialized. The notification state is stored in the
 `release-monitor-state` artifact after Slack acknowledges delivery, and the
-artifact sweeper preserves it. A failed delivery leaves the previous state intact
-so the next run can retry. State expires after 90 days without a successful
+artifact sweeper preserves it. After each successful upload, the notification job
+deletes older state artifacts from the same workflow and default branch. State
+restoration selects the newest upload across all pages. A failed delivery leaves
+the previous state intact so the next run can retry. State expires after 90 days without a successful
 notification job; without prior state, unhealthy checks alert and healthy checks
 stay quiet. Only runs on the default branch send notifications or save state.
 
