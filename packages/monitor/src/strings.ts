@@ -37,6 +37,31 @@ export const strings = {
       info: 'Info',
     },
   },
+  subscribeEvents: {
+    allTypes: 'All types',
+    time: 'Time',
+    sessionKey: 'Session key',
+    type: 'Type',
+    source: 'Source',
+    status: 'Status',
+    emptyCell: '—',
+    operatorUnreachable:
+      "Can't read the operator in this context. Pick another in the header.",
+    operatorUnsupported: (installed: string, required: string) =>
+      installed === ''
+        ? `This operator is too old to show events here. Upgrade to ${required} or newer.`
+        : `This operator is ${installed}. Showing events here needs ${required} or newer.`,
+    sortNewestFirst: 'Sort oldest first',
+    sortOldestFirst: 'Sort newest first',
+    filterPlaceholder: 'Filter by session key, service or source',
+    service: 'Service',
+    routingConsumed: 'Consumed',
+    routingFiltered: 'Filtered',
+    routingBoth: 'Consumed + filtered',
+    shownSuffix: 'shown',
+    routingHint:
+      'Filtered messages are the ones no session filter took; asking for them makes the operator report them',
+  },
   sidebar: {
     countSingular: 'session',
     countPlural: 'sessions',

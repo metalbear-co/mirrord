@@ -1,7 +1,7 @@
-// Calls `connect(2)` on a unix socket twice with the same `sun_path` but
-// different `addrlen` values: first the exact length, then `sizeof(struct
-// sockaddr_un)` so `sun_path` carries trailing null bytes. The layer is
-// expected to send the same trimmed pathname to the agent in both cases.
+// Calls `connect(2)` on a Unix socket with the same `sun_path` but different
+// `addrlen` values: the exact length, a padded `sockaddr_un`, and PHP's
+// `offsetof(sockaddr_un, sun_path) + strlen(path)` form that omits the NUL.
+// The layer is expected to send the same complete pathname to the agent.
 
 #include <stddef.h>
 #include <stdio.h>
@@ -36,6 +36,10 @@ int main(void) {
     try_connect(exact, "exact");
 
     try_connect((socklen_t)sizeof(struct sockaddr_un), "padded");
+
+    socklen_t php_style =
+        (socklen_t)(offsetof(struct sockaddr_un, sun_path) + strlen(SOCKET_PATH));
+    try_connect(php_style, "php-style");
 
     return 0;
 }
