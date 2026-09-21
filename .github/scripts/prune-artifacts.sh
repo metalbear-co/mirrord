@@ -32,7 +32,7 @@ trap 'rm -rf "$work"' EXIT
 # reachable by anything.
 keep() {
   case "$1" in
-    nextest-junit|intproxy_logs_*) return 0 ;;
+    nextest-junit|intproxy_logs_*|release-monitor-state) return 0 ;;
     *) return 1 ;;
   esac
 }

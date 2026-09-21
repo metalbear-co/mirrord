@@ -83,3 +83,26 @@ You can manually trigger workflows for testing purposes.
 *   **Trigger**: Manually via GitHub Actions UI.
 *   **Behavior**: It mimics a release but runs on the current branch.
 *   **Note**: Ensure you understand that it might try to push Docker images or publish packages if not carefully fenced by conditionals (mostly protected by `github.event_name != 'workflow_dispatch'` checks for dangerous steps).
+
+## Release monitor notifications (`releases-test.yaml`)
+
+The monitor checks release assets, installation on Linux and macOS, and version
+endpoint downloads every five minutes. Installer checks retry up to three times
+before reporting failure. Check jobs remain red while a problem persists.
+
+One notification job groups failures into an incident. It sends an opening alert,
+remains quiet while the incident persists (including across release tags), and
+announces recovery only when every check and optional asset check passes. An
+optional-asset warning can escalate to a failure once per incident. Each message
+links to the monitor run for diagnostics.
+
+Runs are serialized. The notification state is stored in the
+`release-monitor-state` artifact after Slack acknowledges delivery, and the
+artifact sweeper preserves it. A failed delivery leaves the previous state intact
+so the next run can retry. State expires after 90 days without a successful
+notification job; without prior state, unhealthy checks alert and healthy checks
+stay quiet. Only runs on the default branch send notifications or save state.
+
+Run the notification and installer retry tests with
+`node --test .github/scripts/release-monitor.test.cjs`. These tests mock downloads
+and Slack; they do not install mirrord or send messages.
