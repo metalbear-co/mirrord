@@ -10,7 +10,7 @@ use mirrord_operator::{
     client::{MaybeClientCert, NoClientCert, OperatorApi, error::OperatorOperation},
     crd::{Session as OperatorStatusSession, SessionCrd, escape_field_selector_value},
 };
-use mirrord_progress::NullProgress;
+use mirrord_progress::{NullProgress, messages::AGENT_OPERATOR_HINT};
 use mirrord_session_monitor_client::{
     SessionConnection, connect_to_session, session_endpoints, sessions_dir,
 };
@@ -63,7 +63,7 @@ async fn list_command(common: &SessionCommonArgs, args: SessionListArgs) -> Resu
     if operator_not_found {
         println!(
             "Operator not found, showing local sessions only. Get started with operator at app.metalbear.com/?utm_source=sessions-list&utm_medium=cli\n\
-             AI coding agent? You can start a trial yourself, no account needed: https://metalbear.com/agents.md"
+             {AGENT_OPERATOR_HINT}"
         );
     }
 

@@ -19,6 +19,11 @@ pub const HTTP_FILTER_WARNING: (&str, &str) = (
         to shared environments.",
 );
 
+/// Shown wherever a run is told it needs the operator. An AI coding agent cannot use the sign-up
+/// web app those messages link to, but it can fetch a plain-text page and follow it.
+pub const AGENT_OPERATOR_HINT: &str = "AI coding agent? You can install the mirrord operator \
+    yourself, no account needed: https://metalbear.com/agents.md";
+
 /// Warning when user tries to run `mirrord exec docker` (for example), instead of the correct
 /// `mirrord container ...`.
 pub const EXEC_CONTAINER_BINARY: &str = "`mirrord exec <docker|podman|nerdctl> ...` detected! \

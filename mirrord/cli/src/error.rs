@@ -17,6 +17,7 @@ use mirrord_operator::{
     client::error::{HttpError, OperatorApiError, OperatorOperation},
     crd::preview::PreviewPodLogs,
 };
+use mirrord_progress::messages::AGENT_OPERATOR_HINT;
 use mirrord_protocol_io::ProtocolError;
 use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
@@ -403,7 +404,7 @@ pub(crate) enum CliError {
     #[diagnostic(help(
         "The mirrord operator is part of mirrord for Teams. \
         You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=requiresoperator&utm_medium=cli\n\
-        Running as an AI coding agent? You can start a trial yourself, no account needed: https://metalbear.com/agents.md"
+        {AGENT_OPERATOR_HINT}"
     ))]
     FeatureRequiresOperatorError(String),
 
@@ -495,7 +496,7 @@ pub(crate) enum CliError {
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
         "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
-        Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.{GENERAL_HELP}"
+        Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.\n{AGENT_OPERATOR_HINT}{GENERAL_HELP}"
     ))]
     OperatorNotInstalled,
 
