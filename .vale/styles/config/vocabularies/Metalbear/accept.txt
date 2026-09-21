@@ -165,6 +165,7 @@ sbt
 protoc
 nixpkgs
 WinGet
+wingetcreate
 Chocolatey
 choco
 asdf
