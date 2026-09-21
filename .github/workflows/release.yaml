@@ -1350,7 +1350,7 @@ jobs:
           # Update manifest and submit a PR to microsoft/winget-pkgs
           $output = & .\wingetcreate.exe update $packageId `
             --version $version `
-            --urls $installerUrl `
+            --urls "$installerUrl|x64|machine" `
             --submit `
             --token $env:WINGET_TOKEN 2>&1
 
