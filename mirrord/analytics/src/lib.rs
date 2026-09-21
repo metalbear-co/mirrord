@@ -150,8 +150,11 @@ impl AiAgent {
     }
 }
 
-/// Reported as the numeric `operator_wall` property. Covers only the walls that abort, since the
-/// warning walls reach a reporter that sends on error alone and are derivable from `target_mode`.
+/// Which operator-only feature an open-source run asked for before it was aborted, reported as the
+/// numeric `operator_wall` property.
+///
+/// The multi-pod and HTTP filter cases are left out: they only warn and the session continues, so
+/// its `target_mode` and `http_filter` analytics already cover them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum OperatorWall {

@@ -1,1 +1,0 @@
-Added `mirrord trial start`, which begins an Enterprise trial of mirrord for Teams and prints the operator install recipe plus a claim link. The open-source warnings shown when a feature needs the operator now point AI coding agents at it.

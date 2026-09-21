@@ -23,7 +23,7 @@ use mirrord_operator::{
 };
 use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress, ProgressTracker,
-    messages::{AGENT_TRIAL_HINT, HTTP_FILTER_WARNING, MULTIPOD_WARNING},
+    messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     utm_medium,
 };
 use tracing::Level;
@@ -523,7 +523,6 @@ where
     progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
     progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
     progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=cli");
-    progress.print(AGENT_TRIAL_HINT);
     Ok(())
 }
 
@@ -551,7 +550,6 @@ where
     progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
     progress.print("considering mirrord for Teams, which is better suited to shared environments.");
     progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=httpfilter&utm_medium=cli");
-    progress.print(AGENT_TRIAL_HINT);
     Ok(())
 }
 
