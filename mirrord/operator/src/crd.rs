@@ -777,6 +777,12 @@ pub enum NewOperatorFeature {
     /// never reconciles it, which the CLI would only see as a creation timeout.
     DbBranchConfigMapSource,
 
+    /// This operator layers a branch's connection params over a `url` param. Gated so the CLI
+    /// fails fast on older operators: the branch CRD schema lets the param through, and an
+    /// older operator ignores it and provisions from the remaining params, which points the
+    /// branch at the wrong source rather than failing.
+    DbBranchUrlParam,
+
     /// This operator understands `flavor: liquibase` in a branch's `migrations`. Gated so the
     /// CLI fails fast: an older operator's CRD schema constrains the flavor to the values it
     /// knows, so the API server rejects the branch with a schema error instead of anything the
@@ -872,6 +878,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
+            NewOperatorFeature::DbBranchUrlParam => "DB branching url connection param",
             NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
             NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
