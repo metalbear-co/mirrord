@@ -235,6 +235,9 @@ jobs:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: windows-latest
+    # Azure trusts the OIDC subject of this environment for signing; its protection
+    # rules live in metalbear-co/infra (environments/github).
+    environment: release
     permissions:
       # Needed to mint the OIDC token that authenticates against Azure Artifact Signing.
       id-token: write
