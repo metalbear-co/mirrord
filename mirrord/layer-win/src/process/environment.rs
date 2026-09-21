@@ -11,10 +11,11 @@ use winapi::um::winbase::CREATE_UNICODE_ENVIRONMENT;
 
 /// Filter environment strings according to Windows requirements and log invalid entries
 ///
-/// Windows environment variables must:
-/// - Not be empty (except for special empty environment case)
-/// - Not start with '=' (reserved syntax)
-/// - Contain at least one '=' (key=value format)
+/// An entry is valid when it is not empty and carries a non-empty name before a `=`.
+///
+/// An entry that starts with `=` is valid and must be kept. Windows records the current directory
+/// of each drive in the environment block, as `=C:=C:/work`, and the C runtime reads them back to
+/// resolve a drive-relative path. Dropping them changes where a child process resolves such a path.
 fn filter_environment_strings<T: MultiBufferChar>(strings: Vec<String>) -> Vec<String> {
     let original_count = strings.len();
     let mut filtered_strings = Vec::new();
@@ -27,7 +28,7 @@ fn filter_environment_strings<T: MultiBufferChar>(strings: Vec<String>) -> Vec<S
     };
 
     for s in strings {
-        if !s.is_empty() && !s.starts_with('=') && s.contains('=') {
+        if environment_name_of(&s).is_some() {
             filtered_strings.push(s);
         } else {
             filtered_count += 1;
@@ -106,14 +107,31 @@ unsafe fn parse_environment_block_typed<T: MultiBufferChar>(
 fn build_environment_map(env_strings: Vec<String>) -> HashMap<String, String> {
     let mut env_map = HashMap::new();
     for env_string in env_strings {
-        if let Some((name, value)) = env_string.split_once('=') {
-            // Only insert if name is non-empty (additional safety check)
-            if !name.is_empty() {
-                env_map.insert(name.to_owned(), value.to_owned());
-            }
+        if let Some(name) = environment_name_of(&env_string) {
+            let value = env_string[name.len() + 1..].to_owned();
+            env_map.insert(name.to_owned(), value);
         }
     }
     env_map
+}
+
+/// Returns the name part of an environment entry, without the `=` that ends it.
+///
+/// A leading `=` belongs to the name, not to the separator. Windows records the current directory
+/// of a drive as `=C:=C:/work`, whose name is `=C:`.
+///
+/// # Arguments
+///
+/// * `entry` - one `name=value` entry from an environment block.
+///
+/// # Returns
+///
+/// The name, or `None` when the entry has no separator or an empty name.
+fn environment_name_of(entry: &str) -> Option<&str> {
+    let start = usize::from(entry.starts_with('='));
+    let separator = entry[start..].find('=')? + start;
+
+    (separator > start).then(|| &entry[..separator])
 }
 
 #[cfg(test)]
@@ -228,5 +246,55 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result.get("PATH"), Some(&"C:\\bin".to_owned()));
         assert_eq!(result.get("USER"), Some(&"test".to_owned()));
+    }
+
+    #[test]
+    fn keeps_the_current_directory_of_each_drive() {
+        let entries = vec![
+            "=C:=C:/work".to_owned(),
+            "=D:=D:/".to_owned(),
+            "=ExitCode=00000000".to_owned(),
+            "PATH=C:/Windows".to_owned(),
+        ];
+
+        let map = build_environment_map(filter_environment_strings::<u16>(entries));
+
+        assert_eq!(map.get("=C:").map(String::as_str), Some("C:/work"));
+        assert_eq!(map.get("=D:").map(String::as_str), Some("D:/"));
+        assert_eq!(map.get("=ExitCode").map(String::as_str), Some("00000000"));
+        assert_eq!(map.get("PATH").map(String::as_str), Some("C:/Windows"));
+    }
+
+    #[test]
+    fn drops_entries_without_a_name() {
+        let entries = vec![
+            "".to_owned(),
+            "no-separator".to_owned(),
+            "=".to_owned(),
+            "==value".to_owned(),
+            "PATH=C:/Windows".to_owned(),
+        ];
+
+        let map = build_environment_map(filter_environment_strings::<u16>(entries));
+
+        assert_eq!(map.len(), 1, "only PATH is a valid entry: {map:?}");
+        assert!(map.contains_key("PATH"));
+    }
+
+    #[test]
+    fn keeps_an_empty_value() {
+        let map =
+            build_environment_map(filter_environment_strings::<u16>(vec!["EMPTY=".to_owned()]));
+
+        assert_eq!(map.get("EMPTY").map(String::as_str), Some(""));
+    }
+
+    #[test]
+    fn keeps_a_value_that_holds_separators() {
+        let map = build_environment_map(filter_environment_strings::<u16>(vec![
+            "PATH=C:/a;C:/b=c".to_owned(),
+        ]));
+
+        assert_eq!(map.get("PATH").map(String::as_str), Some("C:/a;C:/b=c"));
     }
 }

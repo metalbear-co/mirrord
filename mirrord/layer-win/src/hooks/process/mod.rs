@@ -25,9 +25,11 @@ use winapi::{
         winnt::PHANDLE,
     },
 };
+use windows_strings::PCWSTR;
 
 use crate::{
     apply_hook,
+    hooks::log_without_disturbing_caller,
     process::{environment::parse_environment_block, get_module_name},
 };
 
@@ -47,6 +49,30 @@ static GET_PROC_ADDRESS_ORIGINAL: OnceLock<&GetProcAddressType> = OnceLock::new(
 /// This function intercepts calls to the internal Windows process creation API
 /// and redirects them through our unified mirrord process creation system.
 /// Falls back to the original implementation if unified creation fails.
+/// Reads one of the caller's null-terminated wide arguments, for the log only.
+///
+/// # Safety
+///
+/// `argument` must be null, or a pointer to a null-terminated wide string that stays valid for
+/// this call. Every `CreateProcessInternalW` argument this is used on carries that contract.
+///
+/// # Arguments
+///
+/// * `argument` - an `LPCWSTR` the caller passed. Every one of these is allowed to be null.
+///
+/// # Returns
+///
+/// The text, or `None` for a null pointer.
+unsafe fn wide_argument(argument: *const u16) -> Option<String> {
+    if argument.is_null() {
+        return None;
+    }
+
+    // Bound to a local: `as_wide` borrows from the `PCWSTR`, so a temporary would not outlive it.
+    let wide = PCWSTR(argument);
+    Some(str_win::u16_buffer_to_string(unsafe { wide.as_wide() }))
+}
+
 unsafe extern "system" fn create_process_internal_w_hook(
     user_token: HANDLE,
     application_name: LPCWSTR,
@@ -61,18 +87,27 @@ unsafe extern "system" fn create_process_internal_w_hook(
     process_information: LPPROCESS_INFORMATION,
     restricted_user_token: PHANDLE,
 ) -> BOOL {
-    tracing::debug!("CreateProcessInternalW hook intercepted process creation");
-
     // Get the original function pointer
     let original = CREATE_PROCESS_INTERNAL_W_ORIGINAL.get().unwrap();
 
     // Parse environment from Windows API call - check creation flags for format
     let env_vars = unsafe { parse_environment_block(environment as *mut _, creation_flags) };
 
+    // Every argument that names the child, because a bundle has to say which program failed to
+    // start. A customer bundle holds a `CreateProcess` that failed with "The system cannot find
+    // the file specified" and nothing recorded what it was trying to run (COR-1878).
+    //
+    // Three string conversions in a hook this hot are affordable because `tracing` builds a
+    // field only when something is listening, and nothing listens at debug in a default run.
     tracing::debug!(
-        "Windows CreateProcess parameters: parent_pid={}, env_count={}",
-        std::process::id(),
-        env_vars.len()
+        parent_pid = std::process::id(),
+        env_count = env_vars.len(),
+        application = ?unsafe { wide_argument(application_name) },
+        command_line = ?unsafe { wide_argument(command_line) },
+        current_directory = ?unsafe { wide_argument(current_directory) },
+        creation_flags = format!("{creation_flags:#010x}"),
+        inherit_handles = inherit_handles != 0,
+        "CreateProcessInternalW: creating a process"
     );
 
     // Execute process using closure to preserve all original parameters
@@ -126,7 +161,9 @@ unsafe extern "system" fn create_process_internal_w_hook(
             unsafe {
                 *process_information = proc_info;
             }
-            tracing::debug!("Hook succeeded via unified creation");
+            log_without_disturbing_caller(|| {
+                tracing::debug!("Hook succeeded via unified creation")
+            });
             TRUE
         }
         Err(e) => {
@@ -152,11 +189,16 @@ unsafe extern "system" fn create_process_internal_w_hook(
                 )
             };
 
-            if result != 0 {
-                tracing::debug!("Fallback to original API succeeded");
-            } else {
-                tracing::error!("Both unified creation and fallback failed");
-            }
+            // The caller reads the thread's last error when this returns `FALSE`, and the
+            // original call above is what set it. Logging here would overwrite the reason the
+            // process could not start with whatever the log write left behind.
+            log_without_disturbing_caller(|| {
+                if result != 0 {
+                    tracing::debug!("Fallback to original API succeeded");
+                } else {
+                    tracing::error!("Both unified creation and fallback failed");
+                }
+            });
 
             result
         }
@@ -180,7 +222,9 @@ unsafe extern "system" fn loadlibrary_w_detour(lpLibFileName: *const u16) -> HMO
 
         if !lib_name.is_empty() {
             // Trace library loading for debugging
-            tracing::trace!("LoadLibraryW: module='{}' handle={:?}", lib_name, result);
+            log_without_disturbing_caller(|| {
+                tracing::trace!("LoadLibraryW: module='{}' handle={:?}", lib_name, result)
+            });
         }
     }
 
@@ -219,26 +263,30 @@ unsafe extern "system" fn getprocaddress_detour(
         let ordinal = is_ordinal.then_some(lpProcName as u16);
 
         if let Some(number) = ordinal {
-            tracing::trace!(
-                "GetProcAddress: module={:?} ptr={:?} ordinal='{}' address={:?}",
-                get_module_name(hModule as _),
-                hModule,
-                number,
-                original_result
-            );
+            log_without_disturbing_caller(|| {
+                tracing::trace!(
+                    "GetProcAddress: module={:?} ptr={:?} ordinal='{}' address={:?}",
+                    get_module_name(hModule as _),
+                    hModule,
+                    number,
+                    original_result
+                )
+            });
         } else {
             // Convert the function name to a string for logging
             let function_name = unsafe { str_win::u8_ptr_to_string(lpProcName) };
 
             if !function_name.is_empty() {
                 // Trace function resolution for debugging
-                tracing::trace!(
-                    "GetProcAddress: module={:?} ptr={:?} function='{}' address={:?}",
-                    get_module_name(hModule as _),
-                    hModule,
-                    function_name,
-                    original_result
-                );
+                log_without_disturbing_caller(|| {
+                    tracing::trace!(
+                        "GetProcAddress: module={:?} ptr={:?} function='{}' address={:?}",
+                        get_module_name(hModule as _),
+                        hModule,
+                        function_name,
+                        original_result
+                    )
+                });
             }
         }
     }

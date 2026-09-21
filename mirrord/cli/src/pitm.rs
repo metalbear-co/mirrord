@@ -41,6 +41,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use mirrord_layer_lib::process::windows::{
     command_line::build_command_line,
     execution::{LayerManagedProcess, MIRRORD_LAYER_FILE_ENV},
+    injection::{InjectionMethod, MIRRORD_INJECTION_METHOD_ENV},
 };
 use mirrord_progress::NullProgress;
 use serde::Deserialize;
@@ -112,7 +113,10 @@ pub(crate) fn run_as_java_launcher() -> Option<miette::Result<()>> {
     let mut command = vec![real_java];
     command.extend(std::env::args().skip(1));
 
-    let args = PitmArgs { command };
+    let args = PitmArgs {
+        command,
+        injection_method: InjectionMethod::default(),
+    };
     Some(pitm_command(args).map_err(Into::into))
 }
 
@@ -143,6 +147,11 @@ pub(crate) fn pitm_command(args: PitmArgs) -> CliResult<()> {
     env_vars.insert(
         MIRRORD_LAYER_FILE_ENV.to_owned(),
         lib_path.to_string_lossy().into_owned(),
+    );
+
+    env_vars.insert(
+        MIRRORD_INJECTION_METHOD_ENV.to_owned(),
+        args.injection_method.to_string(),
     );
 
     let command_line = build_command_line(exe, extra_args);

@@ -68,9 +68,12 @@ use winapi::{
     },
 };
 
-use crate::managed::{
-    ManagedRegistry,
-    handle::{CounterAllocated, ManagedHandleKey},
+use crate::{
+    hooks::reentrancy::ApplicationCallback,
+    managed::{
+        ManagedRegistry,
+        handle::{CounterAllocated, ManagedHandleKey},
+    },
 };
 
 /// The completion routine ABI: `void CALLBACK(DWORD error, DWORD bytes, LPWSAOVERLAPPED ov)`.
@@ -145,6 +148,16 @@ impl AsyncQuery {
                 };
             }
         }
+
+        // From here on the target's own code runs, so it must see the hooks that the rest of the
+        // process sees. .NET's completion routine calls `FreeAddrInfoExW`, and a bypassed
+        // `FreeAddrInfoExW` hands a chain this layer allocated to `ws2_32`, which frees it with
+        // the wrong allocator and leaves a stale `MANAGED_ADDRINFO` entry. That is the
+        // `0xC0000374` heap corruption the thread-wide marker caused on the task-pool workers.
+        //
+        // On the worker there is no mark to leave, so this costs one thread-local write. On the
+        // `GetAddrInfoExCancel` path there is: `cancel` delivers from inside that detour.
+        let _application = ApplicationCallback::enter();
 
         if self.routine != 0 {
             // SAFETY: `routine` was produced from a valid CompletionRoutineFn
@@ -459,6 +472,8 @@ mod tests {
         ov: OVERLAPPED,
         called: AtomicU32,
         last_err: AtomicU32,
+        /// Whether the detour mark was set while the routine ran. `u32::MAX` until it runs.
+        mark_seen: AtomicU32,
     }
 
     impl TestCtx {
@@ -468,6 +483,7 @@ mod tests {
                 ov: unsafe { std::mem::zeroed() },
                 called: AtomicU32::new(0),
                 last_err: AtomicU32::new(u32::MAX),
+                mark_seen: AtomicU32::new(u32::MAX),
             }
         }
     }
@@ -480,9 +496,11 @@ mod tests {
         // `overlapped` points at `TestCtx.ov`, the first field, so it is also a
         // `*mut TestCtx`.
         let ctx = overlapped as *mut TestCtx;
+        let mark = u32::from(crate::hooks::reentrancy::is_in_detour());
         unsafe {
             (*ctx).called.fetch_add(1, Ordering::SeqCst);
             (*ctx).last_err.store(error, Ordering::SeqCst);
+            (*ctx).mark_seen.store(mark, Ordering::SeqCst);
         }
     }
 
@@ -526,6 +544,38 @@ mod tests {
         // OVERLAPPED.Pointer (the contract field) round-trips the result head.
         let pointer = unsafe { *ctx.ov.u.Pointer_mut() } as usize;
         assert_eq!(pointer, SENTINEL_HEAD, "OVERLAPPED.Pointer = *ppResult");
+    }
+
+    /// Application code that `deliver` calls must see the hooks the rest of the process sees.
+    ///
+    /// .NET frees the chain from inside this routine. With the detour mark still set, that free
+    /// would skip the layer's own `FreeAddrInfoExW` hook and hand memory Rust's allocator owns to
+    /// `ws2_32` - the `0xC0000374` double free that a thread-wide marker once caused. `cancel`
+    /// reaches `deliver` from inside the `GetAddrInfoExCancel` detour, so the mark is genuinely
+    /// held on that path.
+    #[test]
+    fn the_completion_routine_runs_without_the_detour_mark() {
+        let mut ctx = TestCtx::new();
+        let mut slot: PADDRINFOEXW = ptr::null_mut();
+        let query = query_with(&mut ctx, true, &mut slot);
+        let head = SENTINEL_HEAD as PADDRINFOEXW;
+
+        let guard = crate::hooks::reentrancy::BypassGuard::enter().expect("this call owns it");
+        assert!(query.claim(), "first claim must win");
+        unsafe { query.deliver(0, head) };
+
+        assert!(
+            crate::hooks::reentrancy::is_in_detour(),
+            "the layer's own work is marked again after the callback"
+        );
+        drop(guard);
+
+        assert_eq!(ctx.called.load(Ordering::SeqCst), 1, "routine called once");
+        assert_eq!(
+            ctx.mark_seen.load(Ordering::SeqCst),
+            0,
+            "application code must run with no detour mark"
+        );
     }
 
     /// With no routine, deliver() signals the OVERLAPPED's event instead.

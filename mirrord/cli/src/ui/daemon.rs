@@ -18,7 +18,7 @@ use std::{
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     middleware,
     response::{IntoResponse, Response},
@@ -49,7 +49,7 @@ use super::{
     UiCliError, UiServerError, db_portforwards,
     server::{
         AppState, SessionNotification, build_router, scan_existing_sessions,
-        start_filesystem_watcher, start_operator_watcher, token_auth,
+        start_filesystem_watcher, start_idle_shutdown, start_operator_watcher, token_auth,
     },
 };
 use crate::{
@@ -239,6 +239,7 @@ pub(super) async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
     start_periodic_rescan(sessions_dir.clone(), state.clone());
     start_filesystem_watcher(&sessions_dir, state.clone())?;
     start_operator_watcher(state.clone());
+    start_idle_shutdown(state.clone());
 
     let app = build_router(state);
 
@@ -528,12 +529,28 @@ impl DaemonClient {
         ))
     }
 
+    /// Asks the daemon to stop if nothing is using it, and to stay up otherwise.
+    ///
+    /// Used by a session on its way out, to stop a daemon it started rather than waiting for the
+    /// idle timer. Unlike [`Self::request_shutdown`], this also refuses while any session is
+    /// tracked, so ending one session never takes the daemon away from another.
+    pub(crate) async fn request_shutdown_if_idle(&self) -> Result<(), UiCliError> {
+        self.post_shutdown(true).await
+    }
+
     /// Asks the daemon to stop. The daemon performs the claim check and shutdown transition under
     /// the same registry lock used by new DB-forward attachments.
     async fn request_shutdown(&self) -> Result<(), UiCliError> {
+        self.post_shutdown(false).await
+    }
+
+    async fn post_shutdown(&self, only_if_idle: bool) -> Result<(), UiCliError> {
         let response = self
             .client
-            .post(format!("http://{}/api/internal/shutdown", self.info.addr))
+            .post(format!(
+                "http://{}/api/internal/shutdown?only_if_idle={only_if_idle}",
+                self.info.addr
+            ))
             .header(TOKEN_HEADER_NAME, &self.token)
             .send()
             .await?;
@@ -578,11 +595,14 @@ impl DaemonClient {
 /// file supplies authentication. Existing discovery data is trusted only after an authenticated
 /// ping succeeds. Otherwise this starts a daemon without opening a browser, then reads the newly
 /// published discovery information. Incompatible protocol versions are never reused.
-pub(crate) async fn ensure_daemon() -> Result<DaemonClient, UiCliError> {
+pub(crate) async fn ensure_daemon() -> Result<EnsuredDaemon, UiCliError> {
     if let Some(daemon) = DaemonClient::discover()?
         && daemon.ping().await
     {
-        return Ok(daemon);
+        return Ok(EnsuredDaemon {
+            client: daemon,
+            started_here: false,
+        });
     }
 
     let details = ui_start(UI_DEFAULT_PORT, true, "").await?;
@@ -592,11 +612,45 @@ pub(crate) async fn ensure_daemon() -> Result<DaemonClient, UiCliError> {
                 .to_owned(),
         )
     })?;
-    Ok(DaemonClient {
-        client: reqwest::Client::builder().build()?,
-        info,
-        token: details.token,
+    Ok(EnsuredDaemon {
+        client: DaemonClient {
+            client: reqwest::Client::builder().build()?,
+            info,
+            token: details.token,
+        },
+        started_here: !details.already_running,
     })
+}
+
+/// A daemon handle plus who is responsible for stopping it.
+pub(crate) struct EnsuredDaemon {
+    pub(crate) client: DaemonClient,
+    /// `true` when this call started the daemon, rather than finding one already running.
+    ///
+    /// Only the process that started it asks it to stop on the way out. A daemon the user
+    /// started with `mirrord ui` belongs to the user, and a session ending must not take it
+    /// away. Even then the request is the idle-only one, so a daemon another session is using
+    /// stays up.
+    pub(crate) started_here: bool,
+}
+
+impl EnsuredDaemon {
+    /// Stops the daemon if this process started it and nothing else is using it.
+    ///
+    /// Best effort and never fatal: the daemon's own idle timer is the backstop, and it is what
+    /// covers a session that is killed before it reaches this.
+    pub(crate) async fn stop_if_ours(&self) {
+        if !self.started_here {
+            return;
+        }
+
+        match self.client.request_shutdown_if_idle().await {
+            Ok(()) => tracing::debug!("stopped the local mirrord daemon this session started"),
+            Err(error) => {
+                tracing::debug!(%error, "left the local mirrord daemon running")
+            }
+        }
+    }
 }
 
 /// Stops the local daemon during failed startup or explicit internal cleanup.
@@ -712,7 +766,29 @@ struct DaemonShutdownBlocked {
     sessions: Vec<String>,
 }
 
-async fn daemon_shutdown(State(state): State<AppState>) -> Response {
+#[derive(Debug, Default, Deserialize)]
+struct ShutdownQuery {
+    /// When set, the daemon stays up while any session is tracked, not only while a session
+    /// claims a DB port forward. A session ending must not stop a daemon another one is using.
+    #[serde(default)]
+    only_if_idle: bool,
+}
+
+async fn daemon_shutdown(
+    State(state): State<AppState>,
+    Query(query): Query<ShutdownQuery>,
+) -> Response {
+    if query.only_if_idle {
+        let sessions: Vec<String> = state.sessions.read().await.keys().cloned().collect();
+        if !sessions.is_empty() {
+            return (
+                StatusCode::CONFLICT,
+                Json(DaemonShutdownBlocked { sessions }),
+            )
+                .into_response();
+        }
+    }
+
     match db_portforwards::request_daemon_shutdown(&state.db_portforwards, &state.shutdown).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(sessions) => (

@@ -204,7 +204,13 @@ pub fn install(options: InstallOptions) -> bool {
     // reuses our stem, so its dump/report/modules files cluster with the record file named above.
     let monitor = options.monitor.and_then(|(address, mut registration)| {
         registration.stem = stem.clone();
-        super::monitor::register(address, &registration)
+        match super::monitor::register(address, &registration) {
+            Ok(channel) => Some(channel),
+            Err(error) => {
+                tracing::debug!(%error, %address, "crash handler: the monitor took no registration");
+                None
+            }
+        }
     });
     if monitor.is_some() {
         tracing::debug!("crash handler: registered with the out-of-process monitor");
@@ -330,6 +336,13 @@ unsafe extern "system" fn vectored_handler(info: *mut EXCEPTION_POINTERS) -> LON
 
 /// Produces the crash record, stderr stub, and dump. Runs at most once per process.
 unsafe fn handle_crash(info: *mut EXCEPTION_POINTERS) {
+    // This runs on the faulting thread, which is one of the target's. The report below is
+    // written with `CreateFileW` and `WriteFile`, and in an injected process those are hooked:
+    // without this marker the write goes to the agent, and a proxy round-trip inside an
+    // exception handler is the opposite of the allocation-free local write this module
+    // promises. Outside an injected process the marker costs one thread-local store.
+    let _internal = crate::internal_thread::InternalGuard::enter();
+
     // A fault inside the handler re-enters here. Bail rather than loop.
     if IN_HANDLER.swap(true, Ordering::SeqCst) {
         return;

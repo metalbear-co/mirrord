@@ -16,15 +16,19 @@ pub mod process;
 mod subprocess;
 mod task_pool;
 
-use std::{io::Write, thread};
+use std::{sync::OnceLock, thread};
 
 use libc::EXIT_FAILURE;
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_config::util::read_resolved_config;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},
-    logging::init_tracing,
-    process::windows::{execution::debug::should_wait_for_debugger, sync::LayerInitEvent},
+    logging::{init_console_logger, init_tracing_sinks},
+    process::windows::{
+        execution::debug::should_wait_for_debugger,
+        injection::MIRRORD_INJECTION_METHOD_ENV,
+        sync::{LayerInitEvent, signal_init_failure_to_parent},
+    },
     proxy_connection::PROXY_CONNECTION,
     setup::init_layer_setup,
     trace_only::is_trace_only_mode,
@@ -39,6 +43,11 @@ use crate::{
     subprocess::{create_proxy_connection, detect_process_context},
 };
 pub static mut DETOUR_GUARD: Option<DetourGuard> = None;
+
+/// The readiness event for this process, claimed while the parent is certain to still hold it.
+///
+/// Empty when nobody is waiting, which is normal for a process mirrord did not create.
+static INIT_EVENT: OnceLock<LayerInitEvent> = OnceLock::new();
 
 fn initialize_detour_guard() -> LayerResult<()> {
     unsafe {
@@ -80,13 +89,90 @@ fn initialize_windows_proxy_connection() -> LayerResult<()> {
     Ok(())
 }
 
-fn layer_start() -> LayerResult<()> {
-    let init_event = LayerInitEvent::for_child()?;
+/// Synchronous part of layer startup, run inside [`dll_attach`].
+///
+/// Everything here is loader-lock-safe (env parsing, `GetProcAddress` on already
+/// imported modules, in-process detour patches) and MUST complete before `DllMain`
+/// returns: the loader then continues into the target's `main`, so any work left for
+/// later would race application code.
+///
+/// Every injection method already loads the layer before the target's first instruction
+/// (APC at thread start, IAT during import resolution, remote thread while the main
+/// thread is suspended, debugger early stop for attach). What running here adds is the
+/// removal of a second race: once `DllMain` returns, the loader goes straight into the
+/// entry point, so a spawned worker has no guarantee of being scheduled first. Doing the
+/// install here is what makes the ordering certain rather than usually-wins.
+///
+/// # Loader lock
+///
+/// Nothing here may load a module, wait for a thread, or call `eprintln!`. See the warning
+/// at the top of `layer-lib`'s `logging` for why, and `init_tracing_sinks` for the split
+/// that keeps the console logger's socket off this path.
+fn initialize_layer_sync() -> LayerResult<()> {
+    init_tracing_sinks();
 
+    // Which injection method brought this layer in (the launching CLI sets it on the
+    // child environment). Logged first so every layer log identifies its load path.
+    tracing::info!(
+        injection_method = std::env::var(MIRRORD_INJECTION_METHOD_ENV)
+            .as_deref()
+            .unwrap_or("unset"),
+        "layer loading"
+    );
+
+    // Deliberately here and not on the worker thread. It is heavy for this phase: a
+    // machine-wide process walk, a loader-list enumeration, and a disk open per loaded module
+    // to read its version resource. Moving it to the worker made the loader lock safer and cost
+    // every short-lived process its snapshot entirely - measured at 55 log lines down to 28,
+    // with the whole module inventory gone - because such a process exits before the worker
+    // runs. The inventory is worth more than the margin.
     diagnostics::log_early_snapshot();
+
+    // Claim the parent's readiness event here, not on the worker thread.
+    //
+    // The parent creates this event immediately before it injects this layer, and drops it as
+    // soon as its wait ends. A worker thread that opens it later races that drop, and a process
+    // that loses the race finds no event although one existed when it was injected. Holding a
+    // handle from here keeps the name alive for as long as this layer needs it. Opening a named
+    // event loads no module, so it is safe under the loader lock.
+    match LayerInitEvent::for_child() {
+        Ok(event) => {
+            let _ = INIT_EVENT.set(event);
+        }
+        // Not a reason to stop. Nothing is waiting for a signal that nobody will read, and the
+        // layer has everything else it needs from the environment.
+        Err(error) => tracing::warn!(
+            %error,
+            "no parent is waiting for this layer, so it reports no readiness"
+        ),
+    }
 
     let config = read_resolved_config().map_err(LayerError::Config)?;
     init_layer_setup(config, false);
+
+    initialize_detour_guard()?;
+    tracing::info!("DetourGuard initialized");
+
+    let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
+    initialize_hooks(guard)?;
+    tracing::info!("Hooks initialized");
+
+    Ok(())
+}
+
+/// Asynchronous part of layer startup, on a worker thread spawned by [`dll_attach`].
+///
+/// Network-bound and monitor work that must not hold the loader lock. The whole body
+/// runs under the internal-thread marker so its own socket/file traffic bypasses the
+/// (already live) hooks instead of recursing through the not-yet-established proxy
+/// connection.
+fn initialize_layer_async() -> LayerResult<()> {
+    let _internal = hooks::internal_thread::InternalGuard::enter();
+
+    // Opens a socket, so it cannot run while `DllMain` holds the loader lock.
+    init_console_logger();
+
+    diagnostics::install_crash_handler();
 
     if is_trace_only_mode() {
         tracing::info!("Running in trace-only mode - skipping proxy connection initialization");
@@ -96,15 +182,10 @@ fn layer_start() -> LayerResult<()> {
         tracing::info!("ProxyConnection initialized");
     }
 
-    initialize_detour_guard()?;
-    tracing::info!("DetourGuard initialized");
-
-    let guard = unsafe { DETOUR_GUARD.as_mut().unwrap() };
-    initialize_hooks(guard)?;
-    tracing::info!("Hooks initialized");
-
-    // Signal that initialization is complete.
-    init_event.signal_complete()?;
+    // Signal that initialization is complete, for whoever is waiting.
+    if let Some(init_event) = INIT_EVENT.get() {
+        init_event.signal_complete()?;
+    }
 
     if is_trace_only_mode() {
         tracing::info!("mirrord-layer-win fully initialized in trace-only mode");
@@ -128,21 +209,35 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
         wait_for_debug!();
     }
 
-    // Avoid running logic in [`DllMain`] to prevent exceptions.
+    // Install everything the target must not be able to run ahead of - all hook
+    // families - before returning to the loader. Failing that, run the process
+    // without mirrord rather than half-initialized.
+    if let Err(error) = initialize_layer_sync() {
+        tracing::error!("Synchronous layer initialization failed: {error}");
+        // The parent turns this into a crash report. Nothing richer is possible from here: the
+        // crash monitor is reached by opening a socket, which must not happen under the loader
+        // lock, and the `FALSE` below unmaps this module at once, so a thread of our own would run
+        // in freed memory. Setting a named event needs no module load.
+        signal_init_failure_to_parent();
+        return FALSE;
+    }
+
+    // The rest (crash monitor registration, proxy connection, ready signal) is
+    // network-bound; keep it off the loader lock. Mirrord's own traffic bypasses
+    // the hooks through the internal-thread marker; the target's early calls hit
+    // the hooks and wait for the proxy connection to come up.
+    // Rust claims this thread's handle slot on entry and aborts the process when a hook claimed
+    // it first, so keep hooks off Rust thread state - see the warning in `layer-lib::logging`.
     let _ = thread::spawn(move || {
-        init_tracing();
-
-        // Install the crash handler before any injection work so an early fault is captured.
-        diagnostics::install_crash_handler();
-
-        if let Err(e) = layer_start() {
+        if let Err(e) = initialize_layer_async() {
             let reason = e.to_string();
             tracing::error!("Failed call to layer_start: {reason}");
             // Tell the monitor this is an init failure before exiting; otherwise the exit runs
             // `DLL_PROCESS_DETACH`, signals a clean shutdown, and the failure is lost.
             diagnostics::signal_init_failure(&reason);
-            let _ = std::io::stdout().flush();
-            let _ = std::io::stderr().flush();
+            // Nothing to flush: the layer's sinks are an unbuffered `File` and a raw
+            // `WriteFile` to the standard error handle. `std::io::stdout`/`stderr` would only
+            // take the reentrant lock this layer must never take.
             std::process::exit(EXIT_FAILURE);
         }
     });
@@ -207,3 +302,7 @@ entry_point!(|module, reason_for_call, reserved| {
         _ => FALSE,
     }
 });
+
+/// Import-table injection resolves this marker through ordinal 1.
+#[unsafe(no_mangle)]
+pub extern "system" fn mirrord_stork_marker() {}

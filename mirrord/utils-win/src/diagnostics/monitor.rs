@@ -25,20 +25,94 @@
 //! ## Layout
 //!
 //! This file is the shared protocol both sides agree on: the per-pid object names, the
-//! [`CrashInfo`] shared-section layout, the [`Registration`] wire format, and its codec. The two
-//! sides live in submodules: [`channel`] is what a registered layer holds and signals through,
-//! [`server`] is the monitor's accept-and-watch loop.
+//! `CrashInfo` shared-section layout, the [`Registration`] wire format, and its codec. The two
+//! sides live in submodules: `channel` is what a registered layer holds and signals through,
+//! `server` is the monitor's accept-and-watch loop.
 
 use std::{
     io::{self, Read, Write},
-    net::TcpStream,
+    net::{SocketAddr, TcpStream},
 };
+
+use mirrord_config::MIRRORD_LAYER_CRASH_MONITOR_ADDR;
 
 mod channel;
 mod server;
 
 pub use channel::{MonitorChannel, register};
 pub use server::{MonitorConfig, serve};
+
+/// Reports a layer-initialization failure for another process, on that process's behalf.
+///
+/// A layer that fails inside `DllMain` cannot register here itself. Registration opens a socket,
+/// which must not run under the loader lock, and the module unmaps as soon as `DLL_PROCESS_ATTACH`
+/// returns `FALSE`, so no thread of its own could do it later either. All it can do is set a named
+/// event. Whoever waited on that event calls this, from a place with neither constraint.
+///
+/// The monitor takes a registration as data and never checks who sent it, so the incident it
+/// composes names the process that failed, not the caller.
+///
+/// The report carries no layer log. Only the failed process knows the file name its logger chose,
+/// and it is gone by now, so the reason text has to point the reader at the log directory instead.
+///
+/// # Arguments
+///
+/// * `pid` - the process whose layer failed.
+/// * `parent_pid` - the caller, recorded as that process's parent in the report tree.
+/// * `reason` - the text the report shows.
+///
+/// # Returns
+///
+/// `true` when the monitor accepted it. `false` when no monitor is configured, or when the process
+/// died before the monitor could open a handle to it, which leaves nothing to report against.
+pub fn report_init_failure_for(pid: u32, parent_pid: u32, reason: &str) -> bool {
+    // This is mirrord's own traffic, and it runs wherever the caller waited for the child - which
+    // for the process hook is a detour on one of the target's threads, with every hook live. The
+    // socket below would then be intercepted and routed to the cluster, where nothing is listening
+    // on the monitor's port. The marker sends it straight to `ws2_32` instead, the same way the
+    // crash handler's own registration reaches the monitor from the layer's worker thread.
+    let _internal = crate::internal_thread::InternalGuard::enter();
+
+    let Some(address) = std::env::var(MIRRORD_LAYER_CRASH_MONITOR_ADDR)
+        .ok()
+        .and_then(|value| value.parse::<SocketAddr>().ok())
+    else {
+        return false;
+    };
+
+    let name = crate::process::process_status(pid).name;
+    let name = if name.is_empty() {
+        format!("pid {pid}")
+    } else {
+        name
+    };
+
+    let registration = Registration {
+        pid,
+        parent_pid,
+        name: name.clone(),
+        role: "child (layer failed to start)".to_owned(),
+        stem: format!(
+            "mirrord-crash_{}_{}_pid{pid}",
+            super::timestamp(),
+            super::sanitize_name(&name)
+        ),
+        log_path: None,
+    };
+
+    match register(address, &registration) {
+        Ok(channel) => channel.signal_init_failure(reason),
+        Err(error) => {
+            tracing::warn!(
+                pid,
+                %address,
+                %error,
+                "the crash monitor took no report for a layer that failed to start"
+            );
+            false
+        }
+    }
+}
 
 /// Name prefix for the per-pid crash event. The handler sets it; the monitor waits on it.
 const CRASH_EVENT_PREFIX: &str = "mirrord_crash_event_";

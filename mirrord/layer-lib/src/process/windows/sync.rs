@@ -3,7 +3,10 @@
 /// Provides Windows-specific process synchronization between parent and child processes
 /// using named events. Both sides derive the event name from the child's PID
 /// (`mirrord_layer_init_{child_pid}`), so no environment variable handoff is needed.
-use std::ffi::CString;
+use std::{
+    ffi::CString,
+    os::windows::io::{AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle},
+};
 
 use utils_win::process::process_status;
 use winapi::{
@@ -12,10 +15,16 @@ use winapi::{
         winerror::WAIT_TIMEOUT,
     },
     um::{
-        handleapi::CloseHandle,
-        synchapi::{CreateEventA, OpenEventA, SetEvent, WaitForSingleObject},
+        handleapi::{CloseHandle, DuplicateHandle},
+        processthreadsapi::{GetCurrentProcess, GetProcessId, OpenProcess},
+        synchapi::{
+            CreateEventA, OpenEventA, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
+        },
         winbase::{INFINITE, WAIT_OBJECT_0},
-        winnt::{EVENT_ALL_ACCESS, HANDLE},
+        winnt::{
+            DUPLICATE_CLOSE_SOURCE, DUPLICATE_SAME_ACCESS, EVENT_ALL_ACCESS, EVENT_MODIFY_STATE,
+            HANDLE, PROCESS_DUP_HANDLE,
+        },
     },
 };
 
@@ -34,6 +43,28 @@ enum EventRole {
     Child,
 }
 
+/// Outcome of a parent wait that also watches the target process handle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InitWaitOutcome {
+    /// The layer signaled initialization complete.
+    Signaled,
+    /// The layer signaled that it could not initialize.
+    Failed,
+    /// The target process exited before the layer reported ready.
+    ProcessExited,
+}
+
+/// Which of the two events a child and its parent agree on.
+///
+/// Both are named after the child's pid, so neither side needs an environment variable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EventKind {
+    /// The layer finished initializing.
+    Ready,
+    /// The layer gave up. See [`signal_init_failure_to_parent`].
+    Failed,
+}
+
 /// Managed layer initialization event with RAII resource management.
 ///
 /// Provides a type-safe API for Windows event-based process synchronization
@@ -43,8 +74,67 @@ enum EventRole {
 /// (`mirrord_layer_init_{child_pid}`), so no environment variable handoff is needed.
 pub struct LayerInitEvent {
     handle: HANDLE,
+    /// The child's failure event, on the parent side. Null for a child, which sets it through
+    /// [`signal_init_failure_to_parent`] instead of holding it open.
+    failed: HANDLE,
     name: String,
     role: EventRole,
+}
+
+// SAFETY: the value holds Windows handles, which belong to the process and not to the thread that
+// opened them. Every method calls a thread-safe Win32 function on them (`SetEvent`, the wait
+// family, `CloseHandle` once, from `Drop`). The type is not `Send` on its own only because a raw
+// `HANDLE` is a pointer type.
+//
+// The layer needs this: it claims the event while `DllMain` runs, which is the last moment the
+// parent is certain to still hold it, and signals it later from its worker thread.
+unsafe impl Send for LayerInitEvent {}
+// SAFETY: as above. Every method takes `&self` and does nothing but a thread-safe Win32 call.
+unsafe impl Sync for LayerInitEvent {}
+
+/// Keeps the APC readiness events alive after attach returns to the debugger.
+/// The target owns the retained references until it exits.
+///
+/// Both events travel together. A layer that fails inside `DllMain` reports through the failure
+/// one, so it must outlive attach exactly as the readiness one does.
+pub struct RemoteLayerInitEvent {
+    process: OwnedHandle,
+    handles: [HANDLE; 2],
+    release_on_drop: bool,
+}
+
+impl RemoteLayerInitEvent {
+    /// Transfer event lifetime to the target after loading has been queued.
+    pub fn retain(mut self) {
+        self.release_on_drop = false;
+    }
+}
+
+impl Drop for RemoteLayerInitEvent {
+    fn drop(&mut self) {
+        if self.release_on_drop {
+            for handle in self.handles {
+                if handle.is_null() {
+                    continue;
+                }
+                let mut local = std::ptr::null_mut();
+                unsafe {
+                    if DuplicateHandle(
+                        self.process.as_raw_handle().cast(),
+                        handle,
+                        GetCurrentProcess(),
+                        &mut local,
+                        0,
+                        FALSE,
+                        DUPLICATE_CLOSE_SOURCE | DUPLICATE_SAME_ACCESS,
+                    ) != 0
+                    {
+                        CloseHandle(local);
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl LayerInitEvent {
@@ -54,10 +144,13 @@ impl LayerInitEvent {
     /// before injecting the layer DLL, then call [`wait_for_signal`](Self::wait_for_signal)
     /// to wait for the child to finish initialization.
     pub fn for_parent(child_pid: u32) -> LayerResult<Self> {
-        let name = event_name(child_pid);
+        let name = event_name(EventKind::Ready, child_pid);
+        let failed_name = event_name(EventKind::Failed, child_pid);
 
         unsafe {
             let name_cstr = CString::new(name.clone())
+                .map_err(|_| LayerError::GlobalAlreadyInitialized("Failed to create event name"))?;
+            let failed_cstr = CString::new(failed_name.clone())
                 .map_err(|_| LayerError::GlobalAlreadyInitialized("Failed to create event name"))?;
 
             let handle = CreateEventA(std::ptr::null_mut(), TRUE, FALSE, name_cstr.as_ptr());
@@ -68,18 +161,92 @@ impl LayerInitEvent {
                 ));
             }
 
+            // Both events exist before injection, because a layer that fails inside `DllMain` has
+            // only this to report with, and it has no chance to wait for the parent to catch up.
+            let failed = CreateEventA(std::ptr::null_mut(), TRUE, FALSE, failed_cstr.as_ptr());
+
+            if failed.is_null() {
+                CloseHandle(handle);
+                return Err(LayerError::GlobalAlreadyInitialized(
+                    "Failed to create parent layer failure event",
+                ));
+            }
+
             tracing::debug!(
                 event_name = %name,
+                failed_event_name = %failed_name,
                 role = ?EventRole::Parent,
-                "created layer initialization event"
+                "created layer initialization events"
             );
 
             Ok(Self {
                 handle,
+                failed,
                 name,
                 role: EventRole::Parent,
             })
         }
+    }
+
+    /// Duplicate the readiness event so an IDE can resume after attach exits.
+    pub fn keep_alive_in_process(
+        &self,
+        process: BorrowedHandle<'_>,
+    ) -> LayerResult<RemoteLayerInitEvent> {
+        let pid = unsafe { GetProcessId(process.as_raw_handle().cast()) };
+        if pid == 0 {
+            return Err(LayerError::ProcessSynchronization(format!(
+                "query event target pid: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        // Injection handles need not carry the independent duplicate-handle right.
+        let raw = unsafe { OpenProcess(PROCESS_DUP_HANDLE, FALSE, pid) };
+        if raw.is_null() {
+            return Err(LayerError::ProcessSynchronization(format!(
+                "open event target: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        let process = unsafe { OwnedHandle::from_raw_handle(raw.cast()) };
+        let mut handles = [std::ptr::null_mut(); 2];
+        for (source, target) in [self.handle, self.failed]
+            .into_iter()
+            .zip(handles.iter_mut())
+        {
+            if source.is_null() {
+                continue;
+            }
+            if unsafe {
+                DuplicateHandle(
+                    GetCurrentProcess(),
+                    source,
+                    process.as_raw_handle().cast(),
+                    target,
+                    0,
+                    FALSE,
+                    DUPLICATE_SAME_ACCESS,
+                )
+            } == 0
+            {
+                // Whatever already crossed is released by the `Drop` of the value below, which is
+                // why it is built before the error is returned.
+                let _released = RemoteLayerInitEvent {
+                    process,
+                    handles,
+                    release_on_drop: true,
+                };
+                return Err(LayerError::ProcessSynchronization(format!(
+                    "duplicate readiness event into target: {}",
+                    std::io::Error::last_os_error()
+                )));
+            }
+        }
+        Ok(RemoteLayerInitEvent {
+            process,
+            handles,
+            release_on_drop: true,
+        })
     }
 
     /// Open the existing event for the child (injected layer) process.
@@ -91,7 +258,7 @@ impl LayerInitEvent {
     /// Returns `Err` if no matching event exists (i.e. no parent is waiting).
     pub fn for_child() -> LayerResult<Self> {
         let pid = std::process::id();
-        let name = event_name(pid);
+        let name = event_name(EventKind::Ready, pid);
 
         unsafe {
             let name_cstr = CString::new(name.clone())
@@ -118,6 +285,7 @@ impl LayerInitEvent {
 
             Ok(Self {
                 handle,
+                failed: std::ptr::null_mut(),
                 name,
                 role: EventRole::Child,
             })
@@ -196,11 +364,92 @@ impl LayerInitEvent {
             }
         }
     }
+
+    /// Wait for the event to be signaled, or the target process to exit, whichever comes first.
+    ///
+    /// Watching the process handle turns a child that dies during (async) layer initialization
+    /// into a fast, explicit failure instead of a full-timeout stall on an event nobody will
+    /// ever signal.
+    ///
+    /// # Returns
+    /// - `Ok(Some(InitWaitOutcome::Signaled))` when the layer reported ready.
+    /// - `Ok(Some(InitWaitOutcome::Failed))` when the layer reported that it could not start.
+    /// - `Ok(Some(InitWaitOutcome::ProcessExited))` when the process ended first.
+    /// - `Ok(None)` if the timeout elapsed with none of them happening.
+    /// - `Err(_)` if waiting failed.
+    pub fn wait_for_signal_or_process_exit(
+        &self,
+        process: HANDLE,
+        timeout_ms: Option<u32>,
+    ) -> LayerResult<Option<InitWaitOutcome>> {
+        unsafe {
+            let wait_timeout = timeout_ms.unwrap_or(INFINITE);
+            // The order is the priority order: a layer that both failed and died is a failure, and
+            // `WaitForMultipleObjects` answers with the lowest signaled index.
+            let handles = [self.handle, self.failed, process];
+            let wait_result =
+                WaitForMultipleObjects(handles.len() as u32, handles.as_ptr(), FALSE, wait_timeout);
+            const WAIT_OBJECT_1: u32 = WAIT_OBJECT_0 + 1;
+            const WAIT_OBJECT_2: u32 = WAIT_OBJECT_0 + 2;
+
+            match wait_result {
+                WAIT_OBJECT_0 => {
+                    tracing::debug!(
+                        event_name = %self.name,
+                        role = ?self.role,
+                        "layer initialization event signaled successfully"
+                    );
+                    Ok(Some(InitWaitOutcome::Signaled))
+                }
+                WAIT_OBJECT_1 => {
+                    tracing::debug!(
+                        event_name = %self.name,
+                        role = ?self.role,
+                        "the layer reported that it could not initialize"
+                    );
+                    Ok(Some(InitWaitOutcome::Failed))
+                }
+                WAIT_OBJECT_2 => {
+                    tracing::debug!(
+                        event_name = %self.name,
+                        role = ?self.role,
+                        "target process exited before layer initialization completed"
+                    );
+                    Ok(Some(InitWaitOutcome::ProcessExited))
+                }
+                WAIT_TIMEOUT => {
+                    tracing::warn!(
+                        event_name = %self.name,
+                        role = ?self.role,
+                        timeout_ms = wait_timeout,
+                        "timeout waiting for layer initialization event"
+                    );
+                    Ok(None)
+                }
+                _ => {
+                    let error_msg = format!(
+                        "error waiting for layer initialization event '{}': result code {}",
+                        self.name, wait_result
+                    );
+                    tracing::error!(
+                        event_name = %self.name,
+                        role = ?self.role,
+                        result_code = wait_result,
+                        "failed to wait for layer initialization event"
+                    );
+                    Err(LayerError::ProcessSynchronization(error_msg))
+                }
+            }
+        }
+    }
 }
 
 impl Drop for LayerInitEvent {
     fn drop(&mut self) {
         unsafe {
+            if !self.failed.is_null() {
+                CloseHandle(self.failed);
+            }
             if !self.handle.is_null() {
                 CloseHandle(self.handle);
                 tracing::debug!(
@@ -214,8 +463,55 @@ impl Drop for LayerInitEvent {
 }
 
 /// Derive the event name both parent and child agree on.
-fn event_name(child_pid: u32) -> String {
-    format!("mirrord_layer_init_{child_pid}")
+fn event_name(kind: EventKind, child_pid: u32) -> String {
+    match kind {
+        EventKind::Ready => format!("mirrord_layer_init_{child_pid}"),
+        EventKind::Failed => format!("mirrord_layer_init_failed_{child_pid}"),
+    }
+}
+
+/// Tells the waiting parent that this process's layer could not initialize.
+///
+/// The layer calls this from `DllMain` when the work it must finish before the target runs fails.
+/// Nothing richer is possible there. Registering with the crash monitor opens a socket, which must
+/// not happen under the loader lock, and returning `FALSE` from `DLL_PROCESS_ATTACH` unmaps the
+/// module at once, so no thread of the layer's own could outlive the call either. Opening a named
+/// event and setting it loads no module, which leaves it the one signal available.
+///
+/// The parent turns this into a report. It has neither constraint.
+///
+/// # Returns
+///
+/// `true` when the event was found and set. `false` when no parent is waiting, which is the normal
+/// answer for a process mirrord did not create.
+pub fn signal_init_failure_to_parent() -> bool {
+    let pid = std::process::id();
+    let name = event_name(EventKind::Failed, pid);
+
+    let Ok(name_cstr) = CString::new(name.clone()) else {
+        return false;
+    };
+
+    unsafe {
+        let handle = OpenEventA(EVENT_MODIFY_STATE, FALSE, name_cstr.as_ptr());
+        if handle.is_null() {
+            tracing::debug!(
+                event_name = %name,
+                "no parent is waiting for this layer, so its failure is not reported"
+            );
+            return false;
+        }
+
+        let signaled = SetEvent(handle) != 0;
+        CloseHandle(handle);
+
+        if signaled {
+            tracing::info!(event_name = %name, "told the parent that layer initialization failed");
+        } else {
+            tracing::warn!(event_name = %name, "failed to signal the layer failure event");
+        }
+        signaled
+    }
 }
 
 /// Describes the parent process's identity and liveness for a `for_child` failure.
@@ -252,5 +548,111 @@ fn parent_liveness(role: &SessionRole) -> String {
         )
     } else {
         format!("parent pid={parent_pid} gone (no handle)")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use winapi::um::winnt::SYNCHRONIZE;
+
+    use super::*;
+
+    /// Both event names are derived from this process's own pid, so the tests that use them cannot
+    /// run at the same time as each other.
+    static EVENT_NAMES: Mutex<()> = Mutex::new(());
+
+    /// The two events must never share a name, or a failure would read as readiness.
+    #[test]
+    fn the_two_events_have_different_names() {
+        let ready = event_name(EventKind::Ready, 4242);
+        let failed = event_name(EventKind::Failed, 4242);
+
+        assert_ne!(ready, failed);
+        assert!(ready.ends_with("4242"), "{ready}");
+        assert!(failed.ends_with("4242"), "{failed}");
+        assert_ne!(
+            event_name(EventKind::Failed, 1),
+            event_name(EventKind::Failed, 2),
+            "the name carries the pid"
+        );
+    }
+
+    /// A layer that fails inside `DllMain` has only this signal, so it has to reach the parent.
+    ///
+    /// Both sides run here, named after this process's own pid. The two cases share one test
+    /// because they are a sequence: the answer to "is a parent waiting" changes in the middle.
+    #[test]
+    fn a_child_tells_its_parent_that_the_layer_failed() {
+        let _names = EVENT_NAMES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        // No parent yet. A process mirrord did not create must get this answer, not an error.
+        assert!(
+            !signal_init_failure_to_parent(),
+            "nobody is waiting, so there is nothing to signal"
+        );
+
+        let pid = std::process::id();
+        let parent = LayerInitEvent::for_parent(pid).expect("create the event pair");
+
+        assert!(
+            signal_init_failure_to_parent(),
+            "the parent's event is there to be set"
+        );
+
+        // A real handle to this process. It stays unsignaled while the test runs, which is what
+        // makes the failure event the only thing the wait can return.
+        let process = unsafe { OpenProcess(SYNCHRONIZE, FALSE, pid) };
+        assert!(!process.is_null(), "open this process");
+
+        let outcome = parent
+            .wait_for_signal_or_process_exit(process, Some(0))
+            .expect("wait on the pair");
+        unsafe { CloseHandle(process) };
+
+        assert_eq!(
+            outcome,
+            Some(InitWaitOutcome::Failed),
+            "the parent must read a failure, not readiness and not an exit"
+        );
+    }
+
+    /// A layer must claim the readiness event while the parent still holds it, not later.
+    ///
+    /// The parent creates the event immediately before it injects the layer, and drops it as soon
+    /// as its wait ends. A layer that waits for its worker thread to open the event races that
+    /// drop, and the loser used to end the target process with "No init event found for pid ...".
+    /// That is COR-1494. Claiming it while `DllMain` runs keeps the name alive instead.
+    #[test]
+    fn a_claimed_event_survives_the_parent_letting_go() {
+        let _names = EVENT_NAMES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let pid = std::process::id();
+
+        // What the layer does now: claim it while the parent is certain to still hold it.
+        let parent = LayerInitEvent::for_parent(pid).expect("create the event pair");
+        let claimed = LayerInitEvent::for_child().expect("the child claims it in time");
+
+        // The parent's wait ends and it lets go.
+        drop(parent);
+
+        // A late signal still reaches the object, because this handle kept it alive.
+        claimed
+            .signal_complete()
+            .expect("a claimed event still signals after the parent let go");
+        drop(claimed);
+
+        // What the layer used to do: open it only on the worker thread. With the parent gone and
+        // nothing else holding the name, there is nothing left to open.
+        let parent = LayerInitEvent::for_parent(pid).expect("create the event pair again");
+        drop(parent);
+        assert!(
+            LayerInitEvent::for_child().is_err(),
+            "an event opened too late is gone, which is the race this claim removes"
+        );
     }
 }

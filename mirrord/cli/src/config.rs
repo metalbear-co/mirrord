@@ -27,6 +27,10 @@ use mirrord_config::{
     },
     target::TargetType,
 };
+#[cfg(windows)]
+use mirrord_layer_lib::process::windows::injection::{
+    InjectionMethod, MIRRORD_INJECTION_METHOD_ENV,
+};
 use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
@@ -600,6 +604,20 @@ impl ExecParams {
 // `mirrord exec` command
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
+    /// Windows DLL injection method.
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`. The env fallback lets setups that cannot change
+    /// the CLI invocation (launchers, IDEs) still select the method.
+    #[cfg(windows)]
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library"
+    )]
+    pub injection_method: InjectionMethod,
+
     #[clap(flatten)]
     pub params: Box<ExecParams>,
 
@@ -1784,6 +1802,20 @@ pub(super) enum UpSubcommand {
 #[cfg(windows)]
 #[derive(Args, Debug)]
 pub(super) struct AttachArgs {
+    /// APC selection attests a debugger stop before application execution.
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`. `attach` is invoked by the IDE extension, which is
+    /// exactly the case the env fallback exists for.
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library",
+        value_parser = InjectionMethod::parse_attach
+    )]
+    pub injection_method: InjectionMethod,
+
     /// PID of the target process to attach to.
     pub pid: u32,
 }
@@ -1792,6 +1824,19 @@ pub(super) struct AttachArgs {
 #[cfg(windows)]
 #[derive(Args, Debug)]
 pub(super) struct PitmArgs {
+    /// Windows DLL injection method.
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`.
+    #[cfg(windows)]
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library"
+    )]
+    pub injection_method: InjectionMethod,
+
     /// Target executable followed by its arguments. Everything after `--`
     /// is forwarded verbatim to the child process.
     #[arg(
@@ -2075,6 +2120,100 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_injection_methods_are_hidden_and_validated() {
+        for method in ["load-library", "apc", "iat"] {
+            for command in ["exec", "pitm"] {
+                let cli = Cli::try_parse_from([
+                    "mirrord",
+                    command,
+                    "--injection-method",
+                    method,
+                    "cmd.exe",
+                ])
+                .unwrap();
+                let selected = match cli.commands {
+                    Commands::Exec(args) => args.injection_method,
+                    Commands::Pitm(args) => args.injection_method,
+                    _ => panic!("unexpected command"),
+                };
+                assert_eq!(selected.to_string(), method);
+            }
+        }
+        for method in ["load-library", "apc"] {
+            let cli =
+                Cli::try_parse_from(["mirrord", "attach", "--injection-method", method, "123"])
+                    .unwrap();
+            let Commands::Attach(args) = cli.commands else {
+                panic!("expected attach")
+            };
+            assert_eq!(args.injection_method.to_string(), method);
+        }
+        assert!(
+            Cli::try_parse_from(["mirrord", "attach", "--injection-method", "iat", "123"]).is_err()
+        );
+        for command in ["exec", "pitm", "attach"] {
+            assert!(
+                Cli::try_parse_from(["mirrord", command, "--injection-method", "unknown", "123"])
+                    .is_err()
+            );
+            let mut definition = Cli::command();
+            let subcommand = definition.find_subcommand_mut(command).unwrap();
+            assert!(
+                !subcommand
+                    .render_long_help()
+                    .to_string()
+                    .contains("injection-method")
+            );
+        }
+    }
+
+    /// `exec` falls back to `MIRRORD_INJECTION_METHOD` when the flag is absent, and an
+    /// explicit flag always wins over the environment.
+    #[cfg(windows)]
+    #[test]
+    fn exec_injection_method_falls_back_to_environment() {
+        use mirrord_layer_lib::process::windows::injection::MIRRORD_INJECTION_METHOD_ENV;
+
+        let previous = std::env::var(MIRRORD_INJECTION_METHOD_ENV).ok();
+
+        // env present, no flag -> env wins over the default
+        // SAFETY: single-threaded test setup; no other test reads this variable.
+        unsafe { std::env::set_var(MIRRORD_INJECTION_METHOD_ENV, "apc") };
+        let cli = Cli::try_parse_from(["mirrord", "exec", "cmd.exe"]).unwrap();
+        let Commands::Exec(args) = cli.commands else {
+            panic!("expected exec")
+        };
+        assert_eq!(args.injection_method.to_string(), "apc");
+
+        // explicit flag beats the environment
+        let cli = Cli::try_parse_from(["mirrord", "exec", "--injection-method", "iat", "cmd.exe"])
+            .unwrap();
+        let Commands::Exec(args) = cli.commands else {
+            panic!("expected exec")
+        };
+        assert_eq!(args.injection_method.to_string(), "iat");
+
+        // invalid env value surfaces as a parse error instead of a silent default
+        unsafe { std::env::set_var(MIRRORD_INJECTION_METHOD_ENV, "bogus") };
+        assert!(
+            Cli::try_parse_from(["mirrord", "exec", "cmd.exe"]).is_err(),
+            "invalid MIRRORD_INJECTION_METHOD must fail parse"
+        );
+
+        match previous {
+            Some(value) => {
+                // SAFETY: restoring the previous value.
+                unsafe { std::env::set_var(MIRRORD_INJECTION_METHOD_ENV, value) };
+            }
+            None => {
+                // SAFETY: restoring the previous absence.
+                unsafe { std::env::remove_var(MIRRORD_INJECTION_METHOD_ENV) };
+            }
+        }
+    }
 
     /// Guards the clap definition, in particular the coexistence of `up`'s
     /// positional `services` list with the `init` subcommand.
