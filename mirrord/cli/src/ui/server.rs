@@ -33,7 +33,7 @@ use kube::{
 };
 use mirrord_config::target::{Target, TargetDisplay};
 use mirrord_operator::{
-    client::add_baggage_header,
+    client::{add_baggage_header, operator_installed},
     crd::{
         MirrordOperatorCrd, OPERATOR_STATUS_NAME, PreviewSessionInfo, Session, SessionHttpFilter,
         preview::PreviewSessionPhase,
@@ -1106,10 +1106,45 @@ pub(crate) fn start_operator_watcher(state: AppState) {
                     *state.operator_watch_status.write().await = OperatorWatchStatus::Watching;
                     reconcile_operator_sessions(&state, &operator).await;
                 }
-                Err(kube::Error::Api(response)) if response.code == 404 => {
-                    let reason = "mirrord operator is not installed in this context".to_owned();
-                    *state.operator_watch_status.write().await =
-                        OperatorWatchStatus::Unavailable { reason };
+                Err(ref error @ kube::Error::Api(ref response)) if response.code == 404 => {
+                    match tokio::time::timeout(
+                        CLIENT_BUILD_TIMEOUT,
+                        operator_installed(client.as_ref().expect("kube client was initialized")),
+                    )
+                    .await
+                    {
+                        Ok(Ok(false)) => {
+                            let reason =
+                                "mirrord operator is not installed in this context".to_owned();
+                            *state.operator_watch_status.write().await =
+                                OperatorWatchStatus::Unavailable { reason };
+                        }
+                        Ok(Ok(true)) => {
+                            let message =
+                                format!("mirrord operator status is not available: {error}");
+                            *state.operator_watch_status.write().await =
+                                OperatorWatchStatus::Error { message };
+                        }
+                        Ok(Err(error)) => {
+                            let message = format!(
+                                "Kubernetes access failed while checking for the mirrord operator: {error}"
+                            );
+                            warn!("{message}");
+                            *state.operator_watch_status.write().await =
+                                OperatorWatchStatus::Error { message };
+                            client = None;
+                        }
+                        Err(_) => {
+                            let message = format!(
+                                "Kubernetes access failed: no answer within {}s",
+                                CLIENT_BUILD_TIMEOUT.as_secs()
+                            );
+                            warn!("{message}");
+                            *state.operator_watch_status.write().await =
+                                OperatorWatchStatus::Error { message };
+                            client = None;
+                        }
+                    }
                 }
                 Err(err) => {
                     let message = format!("Kubernetes access failed: {err}");

@@ -32,11 +32,14 @@ use kube::{
     api::{ListParams, PostParams},
     config::Kubeconfig,
 };
-use mirrord_operator::crd::{
-    MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME, SessionHttpFilter,
-    preview::{
-        PreviewPodLogs,
-        view::{PreviewEnv, PreviewEnvStatus, PreviewMessageKind},
+use mirrord_operator::{
+    client::operator_installed,
+    crd::{
+        MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME, SessionHttpFilter,
+        preview::{
+            PreviewPodLogs,
+            view::{PreviewEnv, PreviewEnvStatus, PreviewMessageKind},
+        },
     },
 };
 use serde::{Deserialize, Serialize};
@@ -129,6 +132,7 @@ enum OperatorStatus {
     Available,
     NotInstalled,
     KubernetesUnavailable,
+    OperatorUnavailable,
 }
 
 #[derive(Serialize)]
@@ -198,6 +202,8 @@ enum OperatorFetchError {
     NotInstalled,
     #[error("{0}")]
     Kubernetes(String),
+    #[error("{0}")]
+    Operator(String),
 }
 
 /// How long the operator's status may take to arrive before the context counts as unreachable.
@@ -215,29 +221,46 @@ async fn fetch_operator(
     let client = cached_client(state, context).await.map_err(|err| {
         OperatorFetchError::Kubernetes(format!("Kubernetes access failed: {err}"))
     })?;
-    let api: Api<MirrordOperatorCrd> = Api::all(client);
-    let operator =
-        match tokio::time::timeout(OPERATOR_READ_TIMEOUT, api.get(OPERATOR_STATUS_NAME)).await {
-            Ok(Ok(operator)) => operator,
-            Ok(Err(err)) => {
-                // The cached client may be the cause; drop it so the next poll rebuilds it.
-                evict_client(state, context).await;
-                return Err(
-                    if matches!(&err, kube::Error::Api(response) if response.code == 404) {
-                        OperatorFetchError::NotInstalled
-                    } else {
-                        OperatorFetchError::Kubernetes(format!("Kubernetes access failed: {err}"))
-                    },
-                );
+    let api: Api<MirrordOperatorCrd> = Api::all(client.clone());
+    let operator = match tokio::time::timeout(OPERATOR_READ_TIMEOUT, api.get(OPERATOR_STATUS_NAME))
+        .await
+    {
+        Ok(Ok(operator)) => operator,
+        Ok(Err(err)) => {
+            // The cached client may be the cause; drop it so the next poll rebuilds it.
+            evict_client(state, context).await;
+            if matches!(&err, kube::Error::Api(response) if response.code == 404) {
+                return match tokio::time::timeout(
+                    OPERATOR_READ_TIMEOUT,
+                    operator_installed(&client),
+                )
+                .await
+                {
+                    Ok(Ok(false)) => Err(OperatorFetchError::NotInstalled),
+                    Ok(Ok(true)) => Err(OperatorFetchError::Operator(format!(
+                        "mirrord operator status is not available: {err}"
+                    ))),
+                    Ok(Err(error)) => Err(OperatorFetchError::Kubernetes(format!(
+                        "Kubernetes access failed while checking for the mirrord operator: {error}"
+                    ))),
+                    Err(_) => Err(OperatorFetchError::Kubernetes(format!(
+                        "Kubernetes access failed: no answer within {}s",
+                        OPERATOR_READ_TIMEOUT.as_secs()
+                    ))),
+                };
             }
-            Err(_) => {
-                evict_client(state, context).await;
-                return Err(OperatorFetchError::Kubernetes(format!(
-                    "Kubernetes access failed: no answer within {}s",
-                    OPERATOR_READ_TIMEOUT.as_secs()
-                )));
-            }
-        };
+            return Err(OperatorFetchError::Kubernetes(format!(
+                "Kubernetes access failed: {err}"
+            )));
+        }
+        Err(_) => {
+            evict_client(state, context).await;
+            return Err(OperatorFetchError::Kubernetes(format!(
+                "Kubernetes access failed: no answer within {}s",
+                OPERATOR_READ_TIMEOUT.as_secs()
+            )));
+        }
+    };
 
     let license = OperatorLicense {
         fingerprint: operator.spec.license.fingerprint.clone(),
@@ -304,6 +327,7 @@ async fn operator_sessions(
             let status = match &error {
                 OperatorFetchError::NotInstalled => OperatorStatus::NotInstalled,
                 OperatorFetchError::Kubernetes(_) => OperatorStatus::KubernetesUnavailable,
+                OperatorFetchError::Operator(_) => OperatorStatus::OperatorUnavailable,
             };
             let reason = error.to_string();
             warn!(context = ?query.context, "{reason}");
@@ -822,6 +846,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(OperatorStatus::KubernetesUnavailable).unwrap(),
             serde_json::json!("kubernetesUnavailable")
+        );
+        assert_eq!(
+            serde_json::to_value(OperatorStatus::OperatorUnavailable).unwrap(),
+            serde_json::json!("operatorUnavailable")
         );
     }
 }
