@@ -713,6 +713,7 @@ impl IntProxy {
                     self.monitor_tx.emit(MonitorEvent::PortSubscription {
                         port: sub.listening_on.port(),
                         mode: mode.to_owned(),
+                        hit_count: None,
                     });
                 }
                 self.task_txs
