@@ -77,6 +77,8 @@ pub mod database_branches;
 mod discovery;
 pub mod error;
 
+pub use discovery::operator_installed;
+
 const BAGGAGE_HEADER: &str = "baggage";
 
 /// Adds the `baggage` header every request in `config` will carry, so the operator it names
