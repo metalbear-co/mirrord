@@ -705,17 +705,6 @@ impl IntProxy {
                     .await
             }
             LayerToProxyMessage::Incoming(req) => {
-                if let IncomingRequest::PortSubscribe(ref sub) = req {
-                    let mode = match &sub.subscription {
-                        mirrord_intproxy_protocol::PortSubscription::Steal(_) => "steal",
-                        mirrord_intproxy_protocol::PortSubscription::Mirror(_) => "mirror",
-                    };
-                    self.monitor_tx.emit(MonitorEvent::PortSubscription {
-                        port: sub.listening_on.port(),
-                        mode: mode.to_owned(),
-                        hit_count: None,
-                    });
-                }
                 self.task_txs
                     .incoming
                     .send(IncomingProxyMessage::LayerRequest(
