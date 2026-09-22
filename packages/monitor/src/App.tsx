@@ -247,10 +247,18 @@ export default function App({
     }
   }, [effectiveContext])
 
-  const refreshOperatorSessions = useCallback(() => {
-    api
-      .listOperatorSessions(effectiveContext, selectedNamespace)
-      .then((resp) => {
+  useEffect(() => {
+    let cancelled = false
+    let timeout: ReturnType<typeof setTimeout> | undefined
+
+    const poll = async () => {
+      try {
+        const resp = await api.listOperatorSessions(
+          effectiveContext,
+          selectedNamespace,
+        )
+        if (cancelled) return
+
         setOperatorSessions(
           withPreviewSessions(resp.sessions, resp.previewSessions),
         )
@@ -274,18 +282,23 @@ export default function App({
                       : 'Could not read the mirrord operator status'),
                 },
         )
-      })
-      .catch((err: unknown) => {
+      } catch (err: unknown) {
+        if (cancelled) return
         console.error(err)
         setWatchStatus({ status: 'error', message: String(err) })
-      })
-  }, [effectiveContext, selectedNamespace])
+      } finally {
+        if (!cancelled) {
+          timeout = setTimeout(() => void poll(), OPERATOR_POLL_INTERVAL)
+        }
+      }
+    }
 
-  useEffect(() => {
-    refreshOperatorSessions()
-    const t = setInterval(refreshOperatorSessions, OPERATOR_POLL_INTERVAL)
-    return () => clearInterval(t)
-  }, [refreshOperatorSessions])
+    void poll()
+    return () => {
+      cancelled = true
+      if (timeout !== undefined) clearTimeout(timeout)
+    }
+  }, [effectiveContext, selectedNamespace])
 
   const refreshExtensionState = useCallback(async () => {
     const state = await pingExtension()
