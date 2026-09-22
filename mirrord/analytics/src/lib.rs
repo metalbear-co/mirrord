@@ -150,11 +150,17 @@ impl AiAgent {
     }
 }
 
+/// The point at which an open-source run learned it needed the operator, reported as
+/// `operator_wall`. The first three end the run; the last two only warn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum OperatorWall {
     TargetType = 1,
     CopyTarget = 2,
+    /// `operator: true` in the config, but no operator in the cluster.
+    OperatorRequested = 3,
+    MultiPod = 4,
+    HttpFilter = 5,
 }
 
 /// Struct to store analytics data.

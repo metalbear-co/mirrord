@@ -92,6 +92,9 @@ where
     let api = match OperatorApi::try_new(layer_config, analytics, progress).await? {
         Some(api) => api,
         None if layer_config.operator == Some(true) => {
+            analytics
+                .get_mut()
+                .add("operator_wall", OperatorWall::OperatorRequested as u32);
             send_upgrade_ide_message(
                 progress,
                 "mirrord operator was not found in the cluster.",
@@ -468,13 +471,21 @@ fn process_config_oss<P: Progress, R: Reporter>(
         (true, true) => {
             // only show user one of the two msgs - each user should always be shown same msg
             if user_persistent_random_message_select() {
+                record_wall(OperatorWall::MultiPod);
                 show_multipod_warning(progress)?
             } else {
+                record_wall(OperatorWall::HttpFilter);
                 show_http_filter_warning(progress)?
             }
         }
-        (true, false) => show_multipod_warning(progress)?,
-        (false, true) => show_http_filter_warning(progress)?,
+        (true, false) => {
+            record_wall(OperatorWall::MultiPod);
+            show_multipod_warning(progress)?
+        }
+        (false, true) => {
+            record_wall(OperatorWall::HttpFilter);
+            show_http_filter_warning(progress)?
+        }
         _ => (),
     };
 
@@ -555,16 +566,47 @@ where
 
 #[cfg(test)]
 mod tests {
-    use mirrord_analytics::{NullReporter, Reporter};
+    use mirrord_analytics::{NullReporter, OperatorWall, Reporter};
     use mirrord_config::{
         LayerFileConfig,
         config::{ConfigContext, MirrordConfig},
-        target::{Target, TargetFileConfig, pod::PodTarget, service::ServiceTarget},
+        target::{
+            Target, TargetFileConfig, deployment::DeploymentTarget, pod::PodTarget,
+            service::ServiceTarget,
+        },
     };
     use mirrord_progress::NullProgress;
     use rstest::rstest;
 
     use crate::connection::process_config_oss;
+
+    /// A wall that only warns still leaves its record, on a run that goes on.
+    #[test]
+    fn soft_walls_are_recorded_without_stopping_the_run() {
+        let mut cfg_context = ConfigContext::default().strict_env(true);
+        let mut config = LayerFileConfig {
+            target: Some(TargetFileConfig::Simple(Some(Target::Deployment(
+                DeploymentTarget {
+                    deployment: "my-deployment".into(),
+                    container: None,
+                },
+            )))),
+            ..Default::default()
+        }
+        .generate_config(&mut cfg_context)
+        .unwrap();
+        let mut progress = NullProgress {};
+        let mut analytics = NullReporter::default();
+
+        assert!(process_config_oss(&mut config, &mut progress, &mut analytics).is_ok());
+        assert_eq!(
+            serde_json::to_value(analytics.get_mut())
+                .unwrap()
+                .get("operator_wall")
+                .and_then(serde_json::Value::as_u64),
+            Some(OperatorWall::MultiPod as u64),
+        );
+    }
 
     /// Ensure that when `process_config_oss` is called, operator-only target types are disallowed.
     /// This occurs when `create_and_connect` fails to establish a connection with the operator.
