@@ -1079,40 +1079,44 @@ pub(crate) fn start_filesystem_watcher(
 
 pub(crate) fn start_operator_watcher(state: AppState) {
     tokio::spawn(async move {
-        let client = match client_for_context(None).await {
-            Ok(client) => client,
-            Err(err) => {
-                let reason = format!("kube client init failed: {err}");
-                warn!("{reason}");
-                *state.operator_watch_status.write().await =
-                    OperatorWatchStatus::Unavailable { reason };
-                return;
-            }
-        };
-
-        let api: Api<MirrordOperatorCrd> = Api::all(client);
-
-        if let Err(err) = api.get(OPERATOR_STATUS_NAME).await {
-            let reason = format!("operator not available: {err}");
-            warn!("{reason}");
-            *state.operator_watch_status.write().await =
-                OperatorWatchStatus::Unavailable { reason };
-            return;
-        }
-
-        *state.operator_watch_status.write().await = OperatorWatchStatus::Watching;
-
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut client = None;
+
         loop {
             interval.tick().await;
+
+            if client.is_none() {
+                match client_for_context(None).await {
+                    Ok(new_client) => client = Some(new_client),
+                    Err(err) => {
+                        let message = format!("Kubernetes access failed: {err}");
+                        warn!("{message}");
+                        *state.operator_watch_status.write().await =
+                            OperatorWatchStatus::Error { message };
+                        continue;
+                    }
+                }
+            }
+
+            let api: Api<MirrordOperatorCrd> =
+                Api::all(client.clone().expect("kube client was initialized"));
             match api.get(OPERATOR_STATUS_NAME).await {
-                Ok(operator) => reconcile_operator_sessions(&state, &operator).await,
-                Err(err) => {
-                    let reason = format!("operator status fetch error: {err}");
-                    warn!("{reason}");
+                Ok(operator) => {
+                    *state.operator_watch_status.write().await = OperatorWatchStatus::Watching;
+                    reconcile_operator_sessions(&state, &operator).await;
+                }
+                Err(kube::Error::Api(response)) if response.code == 404 => {
+                    let reason = "mirrord operator is not installed in this context".to_owned();
                     *state.operator_watch_status.write().await =
-                        OperatorWatchStatus::Error { message: reason };
+                        OperatorWatchStatus::Unavailable { reason };
+                }
+                Err(err) => {
+                    let message = format!("Kubernetes access failed: {err}");
+                    warn!("{message}");
+                    *state.operator_watch_status.write().await =
+                        OperatorWatchStatus::Error { message };
+                    client = None;
                 }
             }
         }

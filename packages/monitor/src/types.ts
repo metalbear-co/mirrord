@@ -144,10 +144,9 @@ export interface OperatorSessionSummary {
   preview?: OperatorPreviewSession
 }
 
-// Reachability of the operator, as the sidebar consumes it. The v2 server only ever produces
-// `watching`/`unavailable` (each poll is a one-shot fetch that either reached the operator or
-// didn't); `not_started`/`error` remain in the type for the sidebar's transient-state handling but
-// are not emitted.
+// Reachability of the operator, as the sidebar consumes it. Each v2 poll becomes `watching`,
+// `unavailable` when the operator CRD is absent, or `error` when Kubernetes itself cannot be read.
+// `not_started` remains for the sidebar's transient state.
 export const OPERATOR_WATCH = {
   NotStarted: 'not_started',
   Watching: 'watching',
@@ -169,7 +168,7 @@ export interface OperatorLicense {
 // v2 `GET /api/v2/operator/sessions?context&namespace`
 export interface OperatorSessionsResponse {
   context: string | null
-  status: 'available' | 'unavailable'
+  status: 'available' | 'notInstalled' | 'kubernetesUnavailable'
   reason?: string
   sessions: OperatorSessionSummary[]
   // Absent against operators that don't report preview environments separately.

@@ -40,6 +40,7 @@ use mirrord_operator::crd::{
     },
 };
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tracing::warn;
 
 use super::{
@@ -126,7 +127,8 @@ struct OperatorSessionsQuery {
 #[serde(rename_all = "camelCase")]
 enum OperatorStatus {
     Available,
-    Unavailable,
+    NotInstalled,
+    KubernetesUnavailable,
 }
 
 #[derive(Serialize)]
@@ -190,6 +192,14 @@ struct OperatorStatusSummary {
     version: String,
 }
 
+#[derive(Debug, Error)]
+enum OperatorFetchError {
+    #[error("mirrord operator is not installed in this context")]
+    NotInstalled,
+    #[error("{0}")]
+    Kubernetes(String),
+}
+
 /// How long the operator's status may take to arrive before the context counts as unreachable.
 ///
 /// Client construction has its own bound; this covers an API server that accepts the connection and
@@ -201,10 +211,10 @@ const OPERATOR_READ_TIMEOUT: Duration = Duration::from_secs(10);
 async fn fetch_operator(
     state: &AppState,
     context: Option<&str>,
-) -> Result<OperatorStatusSummary, String> {
-    let client = cached_client(state, context)
-        .await
-        .map_err(|err| format!("kube client init failed: {err}"))?;
+) -> Result<OperatorStatusSummary, OperatorFetchError> {
+    let client = cached_client(state, context).await.map_err(|err| {
+        OperatorFetchError::Kubernetes(format!("Kubernetes access failed: {err}"))
+    })?;
     let api: Api<MirrordOperatorCrd> = Api::all(client);
     let operator =
         match tokio::time::timeout(OPERATOR_READ_TIMEOUT, api.get(OPERATOR_STATUS_NAME)).await {
@@ -212,14 +222,20 @@ async fn fetch_operator(
             Ok(Err(err)) => {
                 // The cached client may be the cause; drop it so the next poll rebuilds it.
                 evict_client(state, context).await;
-                return Err(format!("operator not available: {err}"));
+                return Err(
+                    if matches!(&err, kube::Error::Api(response) if response.code == 404) {
+                        OperatorFetchError::NotInstalled
+                    } else {
+                        OperatorFetchError::Kubernetes(format!("Kubernetes access failed: {err}"))
+                    },
+                );
             }
             Err(_) => {
                 evict_client(state, context).await;
-                return Err(format!(
-                    "operator not available: no answer within {}s",
+                return Err(OperatorFetchError::Kubernetes(format!(
+                    "Kubernetes access failed: no answer within {}s",
                     OPERATOR_READ_TIMEOUT.as_secs()
-                ));
+                )));
             }
         };
 
@@ -284,11 +300,16 @@ async fn operator_sessions(
                 preview_sessions,
             }
         }
-        Err(reason) => {
+        Err(error) => {
+            let status = match &error {
+                OperatorFetchError::NotInstalled => OperatorStatus::NotInstalled,
+                OperatorFetchError::Kubernetes(_) => OperatorStatus::KubernetesUnavailable,
+            };
+            let reason = error.to_string();
             warn!(context = ?query.context, "{reason}");
             OperatorSessionsResponse {
                 context: query.context,
-                status: OperatorStatus::Unavailable,
+                status,
                 reason: Some(reason),
                 sessions: Vec::new(),
                 preview_sessions: Vec::new(),
@@ -788,7 +809,6 @@ mod tests {
         );
     }
 
-    /// `available`/`unavailable` are the only two states v2 emits.
     #[test]
     fn operator_status_serializes_lowercase() {
         assert_eq!(
@@ -796,8 +816,12 @@ mod tests {
             serde_json::json!("available")
         );
         assert_eq!(
-            serde_json::to_value(OperatorStatus::Unavailable).unwrap(),
-            serde_json::json!("unavailable")
+            serde_json::to_value(OperatorStatus::NotInstalled).unwrap(),
+            serde_json::json!("notInstalled")
+        );
+        assert_eq!(
+            serde_json::to_value(OperatorStatus::KubernetesUnavailable).unwrap(),
+            serde_json::json!("kubernetesUnavailable")
         );
     }
 }
