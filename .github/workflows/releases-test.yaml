@@ -131,7 +131,7 @@ jobs:
     # failed, and the runner never sets empty outputs, so a leg cannot clear the other's
     # error. See "Using job outputs in a matrix job" in the GitHub Actions workflow syntax docs.
     outputs:
-      error_linux: "${{ runner.os == 'Linux' && (steps.curl.outputs.error || steps.brew.outputs.error) && format('Linux: {0} {1}', steps.curl.outputs.error, steps.brew.outputs.error) || '' }}"
+      error_linux: "${{ runner.os == 'Linux' && (steps.curl.outputs.error || steps.brew_setup.outputs.error || steps.brew.outputs.error) && format('Linux: {0} {1} {2}', steps.curl.outputs.error, steps.brew_setup.outputs.error, steps.brew.outputs.error) || '' }}"
       error_macos: "${{ runner.os == 'macOS' && (steps.curl.outputs.error || steps.brew.outputs.error) && format('macOS: {0} {1}', steps.curl.outputs.error, steps.brew.outputs.error) || '' }}"
     steps:
       - name: Show env + release info
@@ -200,12 +200,21 @@ jobs:
           hash -r || true
 
       - name: Install Homebrew on Linux if missing
+        id: brew_setup
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
+          # A failure here is a problem with the runner, not the release, so the alert says so.
+          trap 'echo "error=Homebrew setup failed on the runner, so the brew install path was not tested." >> "$GITHUB_OUTPUT"' ERR
 
-          if command -v brew >/dev/null 2>&1; then
+          # Runner images can ship Linuxbrew off PATH and owned by a user other than the job's,
+          # and brew refuses to run on a prefix it cannot write to.
+          if [ -d "/home/linuxbrew/.linuxbrew" ]; then
+            sudo chown -R "$(id -un):$(id -gn)" /home/linuxbrew/.linuxbrew
+          fi
+
+          if [ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]; then
             echo "Homebrew already installed on this Linux runner."
           else
             echo "Installing Homebrew on Linux (non-interactive)..."
@@ -413,8 +422,11 @@ jobs:
             | [.value.outputs | to_entries[] | select((.key | startswith("error")) and .value != "") | .value | gsub(" +"; " ")] as $errors
             | "• \(.key) (\(.value.result))\(if $errors == [] then "" else ": " + ($errors | join("; ")) end)"' <<<"$NEEDS")"
           # Cancelled runs were superseded before finishing and say nothing about the status.
-          previous="$(gh run list --workflow releases-test.yaml --branch main --status completed --limit 20 \
-            --json conclusion --jq '[.[].conclusion | select(. == "success" or . == "failure")][0] // ""')"
+          # Branch and status are filtered here rather than with --branch/--status: the API's
+          # filtered run listing intermittently returns runs that are days old as the latest.
+          previous="$(gh run list --workflow releases-test.yaml --limit 20 --json headBranch,status,conclusion \
+            --jq '[.[] | select(.headBranch == "main" and .status == "completed" and (.conclusion == "success" or .conclusion == "failure"))][0].conclusion // ""')"
+          echo "Previous run status: ${previous:-none}"
           links="<$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID|Monitor run logs>${HTML_URL:+ · <$HTML_URL|Release page>}"
 
           if [ -n "$failed" ] && [ "$previous" != failure ]; then
