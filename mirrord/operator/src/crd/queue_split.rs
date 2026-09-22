@@ -4,7 +4,10 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::crd::session::{SessionOwner, SessionTarget};
+use crate::crd::{
+    queue_filter::{MessageFilter, message_filter_crd_schema},
+    session::{SessionOwner, SessionTarget},
+};
 
 /// Read-only view of a live queue-splitting session, served by the operator's
 /// queue-splitting status API and browsed with `mirrord queues`.
@@ -44,12 +47,28 @@ pub struct QueueSplitFilter {
     pub id: String,
     /// Broker type, e.g. `SQS` or `Kafka`.
     pub queue_type: String,
-    /// Header/attribute regex filters: attribute name -> regex pattern.
+    /// Header/attribute regex filters: attribute name -> regex pattern. Set when the session
+    /// was requested with the legacy `message_filter` map.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub message_filter: BTreeMap<String, String>,
+    /// The composable filter tree. Set when the session was requested with the `filter` shape;
+    /// `message_filter` is empty then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "message_filter_crd_schema")]
+    pub filter: Option<MessageFilter>,
     /// Optional jq filter applied to the structured message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jq_filter: Option<String>,
+}
+
+impl QueueSplitFilter {
+    /// The requested filter as one tree, whichever shape it was requested in. `None` when the
+    /// queue has no attribute filter at all (jq only, or nothing).
+    pub fn message_filter(&self) -> Option<MessageFilter> {
+        self.filter
+            .clone()
+            .or_else(|| (!self.message_filter.is_empty()).then(|| (&self.message_filter).into()))
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
