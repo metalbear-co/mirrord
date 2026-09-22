@@ -263,8 +263,15 @@ export default function App({
                   reason: resp.reason ?? 'operator not available',
                 }
               : {
-                  status: 'error',
-                  message: resp.reason ?? 'Kubernetes access failed',
+                  status:
+                    resp.status === 'kubernetesUnavailable'
+                      ? 'kubernetes_unavailable'
+                      : 'error',
+                  message:
+                    resp.reason ??
+                    (resp.status === 'kubernetesUnavailable'
+                      ? 'Kubernetes access failed'
+                      : 'Could not read the mirrord operator status'),
                 },
         )
       })
@@ -458,7 +465,7 @@ export default function App({
             />
           ) : showFunnelHero ? (
             <FunnelHero onConnect={() => setConnectModalOpen(true)} />
-          ) : watchStatus?.status === 'error' ? (
+          ) : watchStatus?.status === 'kubernetes_unavailable' ? (
             <div className="flex h-full items-center justify-center p-8">
               <div className="border-destructive/40 bg-destructive/5 flex max-w-xl gap-4 rounded-lg border p-5">
                 <CloudOff className="text-destructive mt-0.5 h-6 w-6 shrink-0" />
