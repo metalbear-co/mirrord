@@ -16,10 +16,6 @@ const AUTH_HEADER_NAME: HeaderName = HeaderName::from_static("x-mirrord-sm-auth"
 
 /// Sends a fixed shared secret on every sessions-manager request, for deployments that put
 /// an authenticating proxy or load balancer in front of it.
-///
-/// This is distinct from the per-assignment authorization the control plane hands out: the
-/// proxy decides whether a request reaches sessions-manager at all, and has to make that
-/// call without understanding the control-plane or data-plane protocol.
 pub struct SharedSecretCredentials {
     value: HeaderValue,
 }

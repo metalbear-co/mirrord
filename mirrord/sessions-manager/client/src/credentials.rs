@@ -20,8 +20,9 @@ use crate::error::SessionsManagerClientError;
 ///
 /// The two planes are asked separately because they do not authenticate against the same thing.
 /// The control plane is a plain HTTP/SSE API that has to establish the caller's identity from
-/// scratch on every request; the data-plane upgrade instead presents the single-use credential
-/// the control plane just minted for that one assignment, under `authorization`. A credential
+/// scratch on every request; the data-plane upgrade sends its headers alongside the single-use
+/// credential the control plane minted for that one assignment, which is always sent under
+/// `authorization` and replaces any `authorization` header the provider returns. A credential
 /// that belongs to only one of the two would otherwise have to be filtered out by the transport
 /// that must not send it.
 ///
