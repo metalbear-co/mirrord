@@ -150,10 +150,6 @@ impl AiAgent {
     }
 }
 
-/// Operator-only feature that aborted an open-source run, sent as the `operator_wall` property.
-///
-/// Multi-pod targets and HTTP filters only warn and the run continues, so the `target_mode` and
-/// `http` properties already record them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum OperatorWall {
