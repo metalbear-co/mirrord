@@ -424,7 +424,10 @@ jobs:
           # Cancelled runs were superseded before finishing and say nothing about the status.
           # Branch and status are filtered here rather than with --branch/--status: the API's
           # filtered run listing intermittently returns runs that are days old as the latest.
-          previous="$(gh run list --workflow releases-test.yaml --limit 20 --json headBranch,status,conclusion \
+          # One full API page misses the latest completed main run only if 100 newer runs (branch
+          # dispatches or superseded runs) were created after it; then previous is empty and a
+          # failure still alerts.
+          previous="$(gh run list --workflow releases-test.yaml --limit 100 --json headBranch,status,conclusion \
             --jq '[.[] | select(.headBranch == "main" and .status == "completed" and (.conclusion == "success" or .conclusion == "failure"))][0].conclusion // ""')"
           echo "Previous run status: ${previous:-none}"
           links="<$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID|Monitor run logs>${HTML_URL:+ · <$HTML_URL|Release page>}"
