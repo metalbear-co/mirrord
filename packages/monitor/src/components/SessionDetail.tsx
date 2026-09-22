@@ -79,7 +79,11 @@ export default function SessionDetail({
           info.port_subscriptions,
           'port_subscriptions',
           info,
-        ).map((p) => ({ port: p.port, mode: p.mode }))
+        ).map((p) => ({
+          port: p.port,
+          mode: p.mode,
+          hit_count: p.hit_count,
+        }))
         if (ports.length > 0) setPortSubs(ports)
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err)
@@ -106,8 +110,23 @@ export default function SessionDetail({
         case EventType.PortSubscription:
           setPortSubs((prev) =>
             prev.some((p) => p.port === event.port)
-              ? prev
-              : [...prev, { port: event.port, mode: event.mode }],
+              ? prev.map((p) =>
+                  p.port === event.port
+                    ? {
+                        port: event.port,
+                        mode: event.mode,
+                        hit_count: event.hit_count,
+                      }
+                    : p,
+                )
+              : [
+                  ...prev,
+                  {
+                    port: event.port,
+                    mode: event.mode,
+                    hit_count: event.hit_count,
+                  },
+                ],
           )
           break
         case EventType.LayerConnected:
@@ -245,7 +264,13 @@ function metadataItems(
   if (portSubs.length > 0) {
     items.push({
       label: portSubs.length === 1 ? 'Port' : 'Ports',
-      value: portSubs.map((p) => `:${p.port}`).join(' · '),
+      value: portSubs
+        .map((p) =>
+          p.hit_count === undefined
+            ? `:${p.port}`
+            : `:${p.port} · ${p.hit_count} ${p.hit_count === 1 ? 'hit' : 'hits'}`,
+        )
+        .join(' · '),
     })
     items.push({
       label: 'Mode',

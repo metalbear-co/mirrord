@@ -127,6 +127,8 @@ pub struct OperatorLockedPort {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_count: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -277,6 +279,7 @@ impl OperatorSessionSummary {
                             port: lp.port,
                             kind: lp.kind,
                             filter: lp.filter,
+                            hit_count: lp.hit_count,
                         }
                     })
                     .collect()
@@ -453,6 +456,40 @@ async fn buffer_session_events(session_id: &str, values: Vec<serde_json::Value>,
     let Some(session) = sessions.get_mut(session_id) else {
         return;
     };
+    for value in &values {
+        if value.get("type").and_then(|value| value.as_str()) != Some("port_subscription") {
+            continue;
+        }
+        let Some(port) = value
+            .get("port")
+            .and_then(|value| value.as_u64())
+            .and_then(|port| u16::try_from(port).ok())
+        else {
+            continue;
+        };
+        let Some(mode) = value.get("mode").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let hit_count = value.get("hit_count").and_then(|value| value.as_u64());
+        match session
+            .info
+            .port_subscriptions
+            .iter_mut()
+            .find(|subscription| subscription.port == port)
+        {
+            Some(subscription) => {
+                subscription.mode = mode.to_owned();
+                subscription.hit_count = hit_count;
+            }
+            None => session.info.port_subscriptions.push(
+                mirrord_session_monitor_protocol::PortSubscription {
+                    port,
+                    mode: mode.to_owned(),
+                    hit_count,
+                },
+            ),
+        }
+    }
     session.events.extend(values);
     if session.events.len() > MAX_EVENTS_PER_SESSION {
         session
