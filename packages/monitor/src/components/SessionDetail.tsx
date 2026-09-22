@@ -54,6 +54,7 @@ export default function SessionDetail({
     setFormRequest(null)
 
     let cancelled = false
+    let eventSource: EventSource | undefined
 
     async function hydrateFromSnapshot() {
       try {
@@ -94,77 +95,82 @@ export default function SessionDetail({
         })
       }
     }
-    void hydrateFromSnapshot()
+    void hydrateFromSnapshot().then(() => {
+      if (cancelled) return
 
-    const eventSource = new EventSource(api.eventStreamUrl(session.session_id))
+      eventSource = new EventSource(api.eventStreamUrl(session.session_id))
 
-    eventSource.onmessage = (e) => {
-      let event: MonitorEvent
-      try {
-        event = JSON.parse(e.data as string) as MonitorEvent
-      } catch {
-        return
-      }
-
-      switch (event.type) {
-        case EventType.PortSubscription:
-          setPortSubs((prev) =>
-            prev.some((p) => p.port === event.port)
-              ? prev.map((p) =>
-                  p.port === event.port
-                    ? {
-                        port: event.port,
-                        mode: event.mode,
-                        hit_count: event.hit_count,
-                      }
-                    : p,
-                )
-              : [
-                  ...prev,
-                  {
-                    port: event.port,
-                    mode: event.mode,
-                    hit_count: event.hit_count,
-                  },
-                ],
-          )
-          break
-        case EventType.LayerConnected:
-          setProcesses((prev) =>
-            prev.some((p) => p.pid === event.pid)
-              ? prev
-              : [...prev, { pid: event.pid, process_name: event.process_name }],
-          )
-          break
-        case EventType.LayerDisconnected:
-          setProcesses((prev) => prev.filter((p) => p.pid !== event.pid))
-          break
-        case EventType.OutgoingConnection: {
-          const host = formatHostPort(event.address, event.port)
-          setSeenHosts((prev) =>
-            prev.includes(host) || prev.length >= MAX_SEEN_HOSTS
-              ? prev
-              : [...prev, host],
-          )
-          break
+      eventSource.onmessage = (e) => {
+        let event: MonitorEvent
+        try {
+          event = JSON.parse(e.data as string) as MonitorEvent
+        } catch {
+          return
         }
-        case EventType.FileOp:
-        case EventType.DnsQuery:
-        case EventType.IncomingRequest:
-        case EventType.EnvVar:
-          break
-        default:
-          break
-      }
-    }
 
-    eventSource.onerror = () => {
-      eventSource.close()
-    }
+        switch (event.type) {
+          case EventType.PortSubscription:
+            setPortSubs((prev) =>
+              prev.some((p) => p.port === event.port)
+                ? prev.map((p) =>
+                    p.port === event.port
+                      ? {
+                          port: event.port,
+                          mode: event.mode,
+                          hit_count: event.hit_count,
+                        }
+                      : p,
+                  )
+                : [
+                    ...prev,
+                    {
+                      port: event.port,
+                      mode: event.mode,
+                      hit_count: event.hit_count,
+                    },
+                  ],
+            )
+            break
+          case EventType.LayerConnected:
+            setProcesses((prev) =>
+              prev.some((p) => p.pid === event.pid)
+                ? prev
+                : [
+                    ...prev,
+                    { pid: event.pid, process_name: event.process_name },
+                  ],
+            )
+            break
+          case EventType.LayerDisconnected:
+            setProcesses((prev) => prev.filter((p) => p.pid !== event.pid))
+            break
+          case EventType.OutgoingConnection: {
+            const host = formatHostPort(event.address, event.port)
+            setSeenHosts((prev) =>
+              prev.includes(host) || prev.length >= MAX_SEEN_HOSTS
+                ? prev
+                : [...prev, host],
+            )
+            break
+          }
+          case EventType.FileOp:
+          case EventType.DnsQuery:
+          case EventType.IncomingRequest:
+          case EventType.EnvVar:
+            break
+          default:
+            break
+        }
+      }
+
+      eventSource.onerror = () => {
+        eventSource?.close()
+      }
+    })
 
     return () => {
       cancelled = true
-      eventSource.close()
+      eventSource?.close()
     }
   }, [session.session_id])
 
