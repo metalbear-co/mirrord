@@ -24,7 +24,12 @@ bytes.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-rustls.workspace = true
-hyper-util = { workspace = true, features = ["client", "client-legacy", "http1", "tokio"] }
+hyper-util = { workspace = true, features = [
+  "client",
+  "client-legacy",
+  "http1",
+  "tokio",
+] }
 tokio.workspace = true
 tokio-retry.workspace = true
 eventsource-stream.workspace = true
@@ -33,6 +38,7 @@ tokio-tungstenite.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde.workspace = true
+slug.workspace = true
 serde_json.workspace = true
 tokio-util.workspace = true
 reqwest.workspace = true
