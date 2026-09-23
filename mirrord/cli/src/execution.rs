@@ -3,6 +3,7 @@ use std::ffi::OsString;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
+    ops::Not,
     time::Duration,
 };
 
@@ -13,9 +14,9 @@ use mirrord_analytics::{
 #[cfg(any(windows, test))]
 use mirrord_config::MIRRORD_LAYER_CRASH_REPORTING;
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
-    external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
-    util::GIT_BRANCH,
+    LayerConfig, MIRRORD_FS_PREFETCH_DIR, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR,
+    config::ConfigError, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM,
+    feature::env::mapper::EnvVarsRemapper, util::GIT_BRANCH,
 };
 #[cfg(windows)]
 use mirrord_config::{MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR};
@@ -47,6 +48,7 @@ use crate::{
     connection::{AGENT_CONNECT_INFO_ENV_KEY, ConnectData, create_and_connect},
     error::CliError,
     extract::extract_library,
+    prefetch::prefetch_remote_paths,
     up::MirrordUp,
     util::remove_proxy_env,
 };
@@ -488,6 +490,15 @@ impl MirrordExecution {
                 .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
         };
 
+        // The copies would live on this machine, where the user process cannot reach them: it runs
+        // inside a container, with a filesystem of its own.
+        if config.feature.fs.prefetch.is_empty().not() {
+            progress.warning(
+                "`feature.fs.prefetch` is not supported when running in a container, \
+                 and will be ignored.",
+            );
+        }
+
         let encoded_config = config.encode()?;
 
         let mut proxy_command =
@@ -634,6 +645,20 @@ impl MirrordExecution {
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
         };
+
+        // Prefetching happens before the internal proxy and the user process start, so that even
+        // the application's first read of a prefetched path is served from the local copy.
+        if config.feature.fs.prefetch.is_empty().not() && config.feature.fs.is_active() {
+            let timeout = Duration::from_secs(config.feature.fs.prefetch_timeout);
+            let directory =
+                prefetch_remote_paths(&client, &config.feature.fs.prefetch, timeout, progress)
+                    .await?;
+
+            env_vars.insert(
+                MIRRORD_FS_PREFETCH_DIR.into(),
+                directory.display().to_string(),
+            );
+        }
 
         let encoded_config = config.encode()?;
 

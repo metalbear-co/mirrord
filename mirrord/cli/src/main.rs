@@ -348,6 +348,7 @@ mod operator;
 #[cfg(windows)]
 mod pitm;
 mod port_forward;
+mod prefetch;
 mod preview;
 mod profile;
 mod queue_splitting;

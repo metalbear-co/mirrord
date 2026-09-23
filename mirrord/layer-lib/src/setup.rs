@@ -5,7 +5,7 @@ use mirrord_config::{
     experimental::ExperimentalConfig,
     feature::{
         env::EnvConfig,
-        fs::{FsConfig, FsModeConfig, READONLY_FILE_BUFFER_DEFAULT},
+        fs::{FsConfig, FsModeConfig, PREFETCH_TIMEOUT_DEFAULT, READONLY_FILE_BUFFER_DEFAULT},
         network::{
             NetworkConfig,
             incoming::{IncomingConfig, IncomingMode as ConfigIncomingMode},
@@ -51,6 +51,7 @@ pub fn init_layer_setup(mut config: LayerConfig, sip_only: bool) {
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
             prefetch: Default::default(),
+            prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
         };
     } else {
         if config.target.path.is_none() && config.feature.fs.mode.ne(&FsModeConfig::Local) {

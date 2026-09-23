@@ -1157,7 +1157,7 @@ mod test {
         #[case] write: bool,
         #[case] expected: DetourKind,
     ) {
-        use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
+        use mirrord_config::feature::fs::{PREFETCH_TIMEOUT_DEFAULT, READONLY_FILE_BUFFER_DEFAULT};
 
         let read_write = Some(VecOrSingle::Multiple(vec![
             r"/pain/read_write.*\.a".to_owned(),
@@ -1176,6 +1176,7 @@ mod test {
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
             prefetch: Default::default(),
+            prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
         };
 
         let file_filter = FileFilter::new(fs_config);

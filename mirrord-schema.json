@@ -314,7 +314,7 @@
         },
         "prefetch": {
           "title": "feature.fs.prefetch {#feature-fs-prefetch}",
-          "description": "Remote paths to download from the target before the local process starts.\n\nEach path is copied from the remote filesystem into a temporary local directory, along\nwith its permissions and other metadata. File operations on these paths are then served\nfrom that local copy, without involving the agent at all. Directories are copied\nrecursively.\n\nThis trades startup time for read throughput, and is meant for applications that\nrepeatedly read a small and stable set of remote files, e.g. an HTTP server that reads\n`/etc/ssl` on every request.\n\nBecause the copy is taken once, before the application starts, changes made to these\npaths in the pod afterwards are invisible to the application.\n\nPaths must be absolute, as they are resolved in the remote pod, where the local process's\nworking directory is meaningless.\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mode\": \"read\",\n      \"prefetch\": [ \"/etc/ssl\", \"/app/config.yaml\" ]\n    }\n  }\n}\n```",
+          "description": "Remote paths to download from the target before the local process starts.\n\nEach path is copied from the remote filesystem into a temporary local directory, along\nwith its permissions and other metadata. File operations on these paths are then served\nfrom that local copy, without involving the agent at all. Directories are copied\nrecursively.\n\nThis trades startup time for read throughput, and is meant for applications that\nrepeatedly read a small and stable set of remote files, e.g. an HTTP server that reads\n`/etc/ssl` on every request.\n\nBecause the copy is taken once, before the application starts, changes made to these\npaths in the pod afterwards are invisible to the application.\n\nPaths must start with `/`, as they are resolved in the remote pod, where the local\nprocess's working directory is meaningless.\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mode\": \"read\",\n      \"prefetch\": [ \"/etc/ssl\", \"/app/config.yaml\" ]\n    }\n  }\n}\n```",
           "type": [
             "array",
             "null"
@@ -322,6 +322,16 @@
           "items": {
             "type": "string"
           }
+        },
+        "prefetch_timeout": {
+          "title": "feature.fs.prefetch_timeout {#feature-fs-prefetch_timeout}",
+          "description": "How long to wait, in seconds, for each request to the agent made while copying\n[`prefetch`](#feature-fs-prefetch) paths. By default, the value is 30 seconds.\n\nThe limit is per request rather than for the whole copy, which makes many requests: one\nper directory listing, and one per chunk of every file. Raise it when copying from a slow\nor distant cluster, where a single request can outlast the default.\n\nA path that runs out of time is skipped with a warning, and is read from the remote as\nusual.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
         },
         "read_only": {
           "title": "feature.fs.read_only {#feature-fs-read_only}",

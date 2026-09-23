@@ -69,6 +69,14 @@ use crate::{
 /// Environment variable we use to pass the internal proxy address to the layer.
 pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
 
+/// Environment variable we use to pass the layer the directory holding the files copied from the
+/// target, as requested by `feature.fs.prefetch`.
+///
+/// The directory mirrors the remote layout, so the copy of remote `/etc/ssl/cert.pem` lives at
+/// `$MIRRORD_FS_PREFETCH_DIR/etc/ssl/cert.pem`. Paths that have no copy there were not prefetched,
+/// and are to be read from the remote as usual.
+pub const MIRRORD_FS_PREFETCH_DIR: &str = "MIRRORD_FS_PREFETCH_DIR";
+
 /// Environment variable we use to pass an already-running internal proxy address to the layer
 /// during exec-based tests.
 pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
@@ -1151,14 +1159,14 @@ impl LayerConfig {
             .fs
             .prefetch
             .iter()
-            .find(|path| Path::new(path).is_absolute().not())
+            .find(|path| Path::new(path).has_root().not())
         {
             return Err(ConfigError::InvalidValue {
                 name: "feature.fs.prefetch".into(),
                 provided: path.clone(),
                 error: "prefetched paths are resolved in the remote pod, \
                     where the local working directory has no meaning, \
-                    so they must be absolute."
+                    so they must start with `/`."
                     .into(),
             });
         }

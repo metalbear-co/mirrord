@@ -96,6 +96,7 @@ impl MirrordConfig for FsUserConfig {
                 mapping: None,
                 readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
                 prefetch: Default::default(),
+                prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
             },
             FsUserConfig::Advanced(advanced) => advanced.generate_config(context)?,
         };
@@ -126,6 +127,7 @@ impl MirrordToggleableConfig for FsUserConfig {
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
             prefetch: Default::default(),
+            prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
         })
     }
 }
@@ -142,6 +144,7 @@ mod tests {
         let expect = FsConfig {
             mode: FsModeConfig::Read,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
+            prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
             ..Default::default()
         };
 
