@@ -28,6 +28,8 @@ pub struct ProcessInfo {
 pub struct PortSubscription {
     pub port: u16,
     pub mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_count: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
