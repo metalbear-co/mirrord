@@ -69,7 +69,9 @@ fn update_ptr_from_bypass(ptr: *const c_char, bypass: &Bypass) -> *const c_char 
         // path.
         #[cfg(target_os = "macos")]
         Bypass::FileOperationInMirrordBinTempDir(stripped_ptr) => *stripped_ptr,
-        Bypass::RelativePath(path) | Bypass::IgnoredFile(path) => path.as_ptr(),
+        Bypass::RelativePath(path) | Bypass::IgnoredFile(path) | Bypass::PrefetchedFile(path) => {
+            path.as_ptr()
+        }
         _ => ptr,
     }
 }

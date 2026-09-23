@@ -1,7 +1,7 @@
-use std::{collections::HashSet, net::SocketAddr, ops::Not, sync::OnceLock};
+use std::{collections::HashSet, net::SocketAddr, ops::Not, path::PathBuf, sync::OnceLock};
 
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    LayerConfig, MIRRORD_FS_PREFETCH_DIR, MIRRORD_LAYER_INTPROXY_ADDR,
     experimental::ExperimentalConfig,
     feature::{
         env::EnvConfig,
@@ -23,7 +23,7 @@ use regex::RegexSet;
 
 use crate::{
     debugger_ports::DebuggerPorts,
-    file::{filter::FileFilter, mapper::FileRemapper},
+    file::{filter::FileFilter, mapper::FileRemapper, prefetched::PrefetchedFiles},
     socket::{OutgoingSelector, dns_selector::DnsSelector},
     trace_only::{is_trace_only_mode, modify_config_for_trace_only},
 };
@@ -80,6 +80,7 @@ pub struct LayerSetup {
     config: LayerConfig,
     file_filter: FileFilter,
     file_remapper: FileRemapper,
+    prefetched_files: PrefetchedFiles,
     debugger_ports: DebuggerPorts,
     remote_unix_streams: RegexSet,
     outgoing_selector: OutgoingSelector,
@@ -101,6 +102,10 @@ impl LayerSetup {
         let file_filter = FileFilter::new(config.feature.fs.clone());
         let file_remapper =
             FileRemapper::new(config.feature.fs.mapping.clone().unwrap_or_default());
+        let prefetched_files = PrefetchedFiles::new(
+            std::env::var_os(MIRRORD_FS_PREFETCH_DIR).map(PathBuf::from),
+            &config.feature.fs.prefetch,
+        );
 
         let remote_unix_streams = config
             .feature
@@ -133,6 +138,7 @@ impl LayerSetup {
             config,
             file_filter,
             file_remapper,
+            prefetched_files,
             debugger_ports,
             remote_unix_streams,
             outgoing_selector,
@@ -163,6 +169,10 @@ impl LayerSetup {
 
     pub fn file_remapper(&self) -> &FileRemapper {
         &self.file_remapper
+    }
+
+    pub fn prefetched_files(&self) -> &PrefetchedFiles {
+        &self.prefetched_files
     }
 
     pub fn network_config(&self) -> &NetworkConfig {

@@ -246,9 +246,22 @@ pub struct FsConfig {
     /// Remote paths to download from the target before the local process starts.
     ///
     /// Each path is copied from the remote filesystem into a temporary local directory, along
-    /// with its permissions and other metadata. File operations on these paths are then served
-    /// from that local copy, without involving the agent at all. Directories are copied
-    /// recursively.
+    /// with its permissions. Operations on these paths are then served from that local copy,
+    /// without involving the agent at all. Directories are copied recursively.
+    ///
+    /// Writes go to the copy as well, and are never sent to the target. The application reads
+    /// back whatever it wrote for the rest of the run, and the copy is abandoned when the run
+    /// ends, leaving the target untouched. A write reaches the copy only when the
+    /// [`mode`](#feature-fs-mode) would otherwise have sent it to the target, that is under
+    /// `write`; under the other modes writes stay on the local filesystem under their original
+    /// path, as they do for every other file.
+    ///
+    /// The copy keeps the permissions it had in the target, so a file that is read-only there is
+    /// read-only here, and writing to it fails locally much as it would remotely.
+    ///
+    /// Creating, deleting and renaming still act on the target: a file created under a prefetched
+    /// directory is not part of the copy, and deleting or renaming a prefetched path takes effect
+    /// remotely rather than in the copy.
     ///
     /// This trades startup time for read throughput, and is meant for applications that
     /// repeatedly read a small and stable set of remote files, e.g. an HTTP server that reads
