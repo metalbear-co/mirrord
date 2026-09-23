@@ -220,6 +220,7 @@ procfs = "0.17.0"
 prometheus = { version = "0.14", features = ["process"] }
 prost = "0.14"
 prost-reflect = "0.16"
+slug = "0.1.6"
 protox = "0.9"
 quote = "1"
 rand = "0.10"
