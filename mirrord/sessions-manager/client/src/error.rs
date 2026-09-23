@@ -54,8 +54,11 @@ pub enum SessionsManagerClientError {
     ApiKeyRejected,
     #[error("MetalBear token exchange returned {0}")]
     TokenExchangeStatus(reqwest::StatusCode),
-    #[error("MetalBear token exchange failed: {0}")]
-    TokenExchange(String),
+    /// Carries no source: the body is not echoed back, as it may hold a token.
+    #[error("MetalBear token exchange response did not contain a `token`")]
+    TokenExchangeMissingToken,
+    #[error("MetalBear token exchange returned a token that is not a valid header value")]
+    TokenNotHeaderValue,
     #[error("WebSocket request construction failed: {0}")]
     WebSocketRequest(#[from] tokio_tungstenite::tungstenite::http::Error),
     #[error("JSON serialization or deserialization failed: {0}")]
