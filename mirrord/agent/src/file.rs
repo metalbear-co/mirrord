@@ -269,8 +269,15 @@ impl FileManager {
 
     #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn new(pid: Option<u64>) -> Self {
-        let path_resolver = pid.map(InTargetPathResolver::new);
+        Self::with_resolver(pid.map(InTargetPathResolver::from_pid))
+    }
 
+    #[tracing::instrument(level = Level::TRACE, ret)]
+    pub fn new_workload_companion() -> Self {
+        Self::with_resolver(InTargetPathResolver::from_root().into())
+    }
+
+    fn with_resolver(path_resolver: Option<InTargetPathResolver>) -> Self {
         Self {
             path_resolver,
             open_files: Default::default(),
