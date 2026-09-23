@@ -14,7 +14,7 @@ use axum::{
         Path, Query, Request, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header, header::HeaderName},
     middleware::{self, Next},
     response::{IntoResponse, Redirect, Response, sse},
     routing::{get, post},
@@ -38,6 +38,7 @@ use mirrord_operator::{
         MirrordOperatorCrd, OPERATOR_STATUS_NAME, PreviewSessionInfo, Session, SessionHttpFilter,
         preview::PreviewSessionPhase,
     },
+    types::MIRRORD_CLI_VERSION_HEADER,
 };
 use mirrord_session_monitor_client::{
     SESSION_SENTINEL_EXTENSION, SessionClient, SessionEndpoint, connect_to_session,
@@ -847,6 +848,11 @@ async fn build_client(context: Option<&str>) -> UiResult<Client> {
     };
     add_baggage_header(&mut config, baggage_from_env().as_deref())
         .map_err(|error| ApiError::InvalidBaggage(error.to_string()))?;
+    // Without a client version, the operator returns legacy ports without hit counts.
+    config.headers.push((
+        HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER),
+        HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+    ));
 
     // Building the client runs the context's auth-exec plugin synchronously, which must not hold
     // the runtime thread.
