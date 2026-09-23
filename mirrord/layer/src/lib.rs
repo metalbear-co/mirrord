@@ -158,12 +158,6 @@ mod turbo;
 ))]
 mod go;
 
-#[cfg(all(
-    any(target_arch = "x86_64", target_arch = "aarch64"),
-    target_os = "linux"
-))]
-use crate::go::go_hooks;
-
 /// if this env var exists, we exit.
 /// This to allow a way to protect from mirrord being used in destructive tests and such.
 const FAILSAFE_ENV: &str = "MIRRORD_DONT_LOAD";
@@ -277,8 +271,10 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 /// `libuv` setting `O_NONBLOCK` on stdin), breaking the layer's connection to the internal proxy.
 /// Must be called before the layer creates any long-lived fd, most importantly the
 /// [`PROXY_CONNECTION`] socket.
-/// Gated behind
-/// [`ExperimentalConfig::guard_std_fds`](mirrord_config::experimental::ExperimentalConfig). See [#4622](https://github.com/metalbear-co/mirrord/issues/4622).
+/// Can still be opted out of with the deprecated
+/// [`ExperimentalConfig::guard_std_fds`](mirrord_config::experimental::ExperimentalConfig).
+///
+/// See [#4622](https://github.com/metalbear-co/mirrord/issues/4622).
 fn guard_std_fds() {
     for fd in 0..=2 {
         // SAFETY: `F_GETFD` accepts arbitrary descriptor numbers and reports closed ones with
@@ -295,7 +291,7 @@ fn guard_std_fds() {
 /// Initialize a new session with the internal proxy and set [`PROXY_CONNECTION`]
 /// if not in trace only mode.
 fn load_only_layer_start(config: &LayerConfig) {
-    if config.experimental.guard_std_fds.unwrap_or_default() {
+    if config.experimental.guard_std_fds {
         guard_std_fds();
     }
 
@@ -365,8 +361,7 @@ fn mirrord_layer_entry_point() {
 ///
 /// Sets up a few things based on the [`LayerConfig`] given by the user:
 ///
-/// 1. [`guard_std_fds`] (if `experimental.guard_std_fds` is enabled) so the layer's own fds cannot
-///    be assigned std fd numbers;
+/// 1. [`guard_std_fds`] so the layer's own fds cannot be assigned std fd numbers;
 ///
 /// 2. [`init_tracing`] for `tracing_subscriber` or `mirrord_console`
 ///
@@ -379,7 +374,7 @@ fn mirrord_layer_entry_point() {
 /// 6. Fetches remote environment from the agent (if enabled with
 ///    [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(config: LayerConfig) {
-    if config.experimental.guard_std_fds.unwrap_or_default() {
+    if config.experimental.guard_std_fds {
         guard_std_fds();
     }
     init_tracing();
@@ -664,7 +659,7 @@ fn enable_hooks(state: &LayerSetup) {
         target_os = "linux"
     ))]
     {
-        go_hooks::enable_hooks(
+        go::enable_hooks(
             &mut hook_manager,
             state.experimental().go_asmcgocall.unwrap_or_default(),
         );
@@ -991,7 +986,7 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
         .to_string_lossy()
         .into_owned();
     let go_asmcgocall = setup().experimental().go_asmcgocall.unwrap_or_default();
-    go_hooks::enable_hooks_in_loaded_module(&mut hook_manager, filename, go_asmcgocall);
+    go::enable_hooks_in_loaded_module(&mut hook_manager, filename, go_asmcgocall);
 
     handle
 }

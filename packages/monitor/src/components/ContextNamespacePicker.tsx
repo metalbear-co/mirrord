@@ -263,6 +263,39 @@ interface ContextNamespacePickerProps {
   namespacesError: boolean
 }
 
+interface ContextPickerProps {
+  contexts: KubeContext[]
+  currentContext: string | null
+  selectedContext: string | null
+  onSelectContext: (context: string | null) => void
+}
+
+/** The kube context picker on its own, for views that have no namespace of their own to scope. */
+export function ContextPicker({
+  contexts,
+  currentContext,
+  selectedContext,
+  onSelectContext,
+}: ContextPickerProps) {
+  const effectiveContext = selectedContext ?? currentContext
+  const contextOptions: DropdownOption[] = contexts.map((context) => ({
+    value: context.name,
+    label: context.name,
+    hint: context.name === currentContext ? 'current' : undefined,
+  }))
+
+  return (
+    <Dropdown
+      label="Context"
+      value={effectiveContext ?? 'default'}
+      options={contextOptions}
+      selected={effectiveContext}
+      onSelect={onSelectContext}
+      emptyLabel="No contexts in kubeconfig"
+    />
+  )
+}
+
 /**
  * Context and namespace pickers, rendered inline in the header next to the user menu. They scope the
  * cluster (operator) session view; local sessions are always shown regardless of the selection.
@@ -278,22 +311,13 @@ export default function ContextNamespacePicker({
   namespacesLoading,
   namespacesError,
 }: ContextNamespacePickerProps) {
-  const effectiveContext = selectedContext ?? currentContext
-  const contextOptions: DropdownOption[] = contexts.map((context) => ({
-    value: context.name,
-    label: context.name,
-    hint: context.name === currentContext ? 'current' : undefined,
-  }))
-
   return (
     <div className="hidden min-w-0 items-center gap-2 md:flex">
-      <Dropdown
-        label="Context"
-        value={effectiveContext ?? 'default'}
-        options={contextOptions}
-        selected={effectiveContext}
-        onSelect={onSelectContext}
-        emptyLabel="No contexts in kubeconfig"
+      <ContextPicker
+        contexts={contexts}
+        currentContext={currentContext}
+        selectedContext={selectedContext}
+        onSelectContext={onSelectContext}
       />
       <NamespaceCombobox
         selectedNamespace={selectedNamespace}

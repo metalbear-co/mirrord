@@ -52,7 +52,7 @@ schemars.workspace = true
 semver.workspace = true
 reqwest = { workspace = true, features = ["stream"] }
 const-random.workspace = true
-tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
+tokio = { workspace = true, features = ["rt", "net", "macros", "process", "sync"] }
 tokio-retry.workspace = true
 kube.workspace = true
 k8s-openapi.workspace = true
@@ -93,6 +93,7 @@ notify.workspace = true
 mime_guess.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 mirrord-session-monitor-client.workspace = true
+mirrord-sessions-manager-client.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
 hyper.workspace = true
 bytes.workspace = true

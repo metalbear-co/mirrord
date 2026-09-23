@@ -165,6 +165,7 @@ sbt
 protoc
 nixpkgs
 WinGet
+wingetcreate
 Chocolatey
 choco
 asdf
@@ -177,6 +178,7 @@ Bubblewrap
 greptile
 Greptile
 Liquibase
+Jev
 
 # Cloud services
 SNS

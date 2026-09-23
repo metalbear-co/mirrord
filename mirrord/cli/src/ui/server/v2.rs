@@ -19,7 +19,7 @@
 //!   CRD, so a stateless per-context fetch is the natural fit.
 //! - `kube/*`     — kubeconfig/cluster metadata used to populate the context and namespace pickers.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use axum::{
     Router,
@@ -32,14 +32,18 @@ use kube::{
     api::{ListParams, PostParams},
     config::Kubeconfig,
 };
-use mirrord_operator::crd::{
-    MirrordOperatorCrd, OPERATOR_STATUS_NAME, SessionHttpFilter,
-    preview::{
-        PreviewPodLogs,
-        view::{PreviewEnv, PreviewEnvStatus, PreviewMessageKind},
+use mirrord_operator::{
+    client::operator_installed,
+    crd::{
+        MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME, SessionHttpFilter,
+        preview::{
+            PreviewPodLogs,
+            view::{PreviewEnv, PreviewEnvStatus, PreviewMessageKind},
+        },
     },
 };
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tracing::warn;
 
 use super::{
@@ -49,6 +53,7 @@ use super::{
 };
 use crate::ui::error::ApiError;
 
+mod events;
 mod targets;
 
 /// Routes for `/api/v2`. State is supplied by the outer router's `with_state`, matching the other
@@ -64,6 +69,7 @@ pub(super) fn v2_router() -> Router<AppState> {
         )
         .route("/local/sessions/{id}/events", get(session_events_sse))
         .route("/operator/sessions", get(operator_sessions))
+        .route("/operator/events", get(events::operator_events_sse))
         .route("/operator/previews/{id}", get(operator_preview_detail))
         .route("/operator/license", get(operator_license))
         .route("/kube/contexts", get(kube_contexts))
@@ -124,7 +130,9 @@ struct OperatorSessionsQuery {
 #[serde(rename_all = "camelCase")]
 enum OperatorStatus {
     Available,
-    Unavailable,
+    NotInstalled,
+    KubernetesUnavailable,
+    OperatorUnavailable,
 }
 
 #[derive(Serialize)]
@@ -182,24 +190,75 @@ struct OperatorStatusSummary {
     sessions: Vec<OperatorSessionSummary>,
     preview_sessions: Vec<OperatorPreviewSession>,
     license: OperatorLicense,
+    /// What this operator advertises it can do, so a view can tell whether it is serviceable.
+    supported_features: Vec<NewOperatorFeature>,
+    /// The operator's own version, so a view it can't serve can say what is installed.
+    version: String,
 }
+
+#[derive(Debug, Error)]
+enum OperatorFetchError {
+    #[error("mirrord operator is not installed in this context")]
+    NotInstalled,
+    #[error("{0}")]
+    Kubernetes(String),
+    #[error("{0}")]
+    Operator(String),
+}
+
+/// How long the operator's status may take to arrive before the context counts as unreachable.
+///
+/// Client construction has its own bound; this covers an API server that accepts the connection and
+/// then never answers.
+const OPERATOR_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Fetches the operator's live sessions and license for `context` in one request. Returns a
 /// human-readable reason when the context is unreachable or the operator isn't installed.
 async fn fetch_operator(
     state: &AppState,
     context: Option<&str>,
-) -> Result<OperatorStatusSummary, String> {
-    let client = cached_client(state, context)
+) -> Result<OperatorStatusSummary, OperatorFetchError> {
+    let client = cached_client(state, context).await.map_err(|err| {
+        OperatorFetchError::Kubernetes(format!("Kubernetes access failed: {err}"))
+    })?;
+    let api: Api<MirrordOperatorCrd> = Api::all(client.clone());
+    let operator = match tokio::time::timeout(OPERATOR_READ_TIMEOUT, api.get(OPERATOR_STATUS_NAME))
         .await
-        .map_err(|err| format!("kube client init failed: {err}"))?;
-    let api: Api<MirrordOperatorCrd> = Api::all(client);
-    let operator = match api.get(OPERATOR_STATUS_NAME).await {
-        Ok(operator) => operator,
-        Err(err) => {
+    {
+        Ok(Ok(operator)) => operator,
+        Ok(Err(err)) => {
             // The cached client may be the cause; drop it so the next poll rebuilds it.
             evict_client(state, context).await;
-            return Err(format!("operator not available: {err}"));
+            if matches!(&err, kube::Error::Api(response) if response.code == 404) {
+                return match tokio::time::timeout(
+                    OPERATOR_READ_TIMEOUT,
+                    operator_installed(&client),
+                )
+                .await
+                {
+                    Ok(Ok(false)) => Err(OperatorFetchError::NotInstalled),
+                    Ok(Ok(true)) => Err(OperatorFetchError::Operator(format!(
+                        "mirrord operator status is not available: {err}"
+                    ))),
+                    Ok(Err(error)) => Err(OperatorFetchError::Kubernetes(format!(
+                        "Kubernetes access failed while checking for the mirrord operator: {error}"
+                    ))),
+                    Err(_) => Err(OperatorFetchError::Kubernetes(format!(
+                        "Kubernetes access failed: no answer within {}s",
+                        OPERATOR_READ_TIMEOUT.as_secs()
+                    ))),
+                };
+            }
+            return Err(OperatorFetchError::Kubernetes(format!(
+                "Kubernetes access failed: {err}"
+            )));
+        }
+        Err(_) => {
+            evict_client(state, context).await;
+            return Err(OperatorFetchError::Kubernetes(format!(
+                "Kubernetes access failed: no answer within {}s",
+                OPERATOR_READ_TIMEOUT.as_secs()
+            )));
         }
     };
 
@@ -207,6 +266,7 @@ async fn fetch_operator(
         fingerprint: operator.spec.license.fingerprint.clone(),
         organization: operator.spec.license.organization.clone(),
     };
+    let supported_features = operator.spec.supported_features();
     let status = operator.status.as_ref();
     let sessions = status
         .map(|status| status.sessions.as_slice())
@@ -225,6 +285,8 @@ async fn fetch_operator(
         sessions,
         preview_sessions,
         license,
+        supported_features,
+        version: operator.spec.operator_version.to_string(),
     })
 }
 
@@ -261,11 +323,17 @@ async fn operator_sessions(
                 preview_sessions,
             }
         }
-        Err(reason) => {
+        Err(error) => {
+            let status = match &error {
+                OperatorFetchError::NotInstalled => OperatorStatus::NotInstalled,
+                OperatorFetchError::Kubernetes(_) => OperatorStatus::KubernetesUnavailable,
+                OperatorFetchError::Operator(_) => OperatorStatus::OperatorUnavailable,
+            };
+            let reason = error.to_string();
             warn!(context = ?query.context, "{reason}");
             OperatorSessionsResponse {
                 context: query.context,
-                status: OperatorStatus::Unavailable,
+                status,
                 reason: Some(reason),
                 sessions: Vec::new(),
                 preview_sessions: Vec::new(),
@@ -765,7 +833,6 @@ mod tests {
         );
     }
 
-    /// `available`/`unavailable` are the only two states v2 emits.
     #[test]
     fn operator_status_serializes_lowercase() {
         assert_eq!(
@@ -773,8 +840,16 @@ mod tests {
             serde_json::json!("available")
         );
         assert_eq!(
-            serde_json::to_value(OperatorStatus::Unavailable).unwrap(),
-            serde_json::json!("unavailable")
+            serde_json::to_value(OperatorStatus::NotInstalled).unwrap(),
+            serde_json::json!("notInstalled")
+        );
+        assert_eq!(
+            serde_json::to_value(OperatorStatus::KubernetesUnavailable).unwrap(),
+            serde_json::json!("kubernetesUnavailable")
+        );
+        assert_eq!(
+            serde_json::to_value(OperatorStatus::OperatorUnavailable).unwrap(),
+            serde_json::json!("operatorUnavailable")
         );
     }
 }

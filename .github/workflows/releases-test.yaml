@@ -9,15 +9,22 @@ on:
 permissions:
   contents: read
 
+# The notify job reads the previous run's conclusion as the last known status, so runs
+# must not overlap.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # ============================================================
   # 1) Check latest GitHub Release has all required assets
   # ============================================================
   check_latest_release:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       tag: ${{ steps.check.outputs.tag }}
       html_url: ${{ steps.check.outputs.html_url }}
+      error: ${{ steps.check.outputs.error }}
     steps:
       - name: Check latest GitHub Release assets
         id: check
@@ -45,16 +52,15 @@ jobs:
               "mirrord_mac_universal.zip",
               "mirrord_mac_universal.shasum256",
               "mirrord_mac_universal",
-              "libmirrord_layer_mac_universal.dylib"
-            ];
+              "libmirrord_layer_mac_universal.dylib",
 
-            // === OPTIONAL ASSETS ===
-            // Windows artifacts: warn if missing, but don't fail the job.
-            const optionalAssets = [
+              // Windows
               "mirrord.exe",
               "mirrord.exe.sha256",
               "mirrord_layer_win.dll",
-              "mirrord_layer_win.dll.sha256"
+              "mirrord_layer_win.dll.sha256",
+              "mirrord.msi",
+              "mirrord.msi.sha256"
             ];
 
             core.info(`Checking latest release for ${owner}/${repo}...`);
@@ -71,7 +77,6 @@ jobs:
               core.setOutput("tag", "");
               core.setOutput("html_url", "");
               core.setOutput("missing_required", "");
-              core.setOutput("missing_optional", "");
               return;
             }
 
@@ -82,12 +87,10 @@ jobs:
             core.info(`Assets on release: ${assetNames.join(", ") || "(none)"}`);
 
             const missingRequired = requiredAssets.filter(name => !assetNames.includes(name));
-            const missingOptional = optionalAssets.filter(name => !assetNames.includes(name));
 
             core.setOutput("tag", tag);
             core.setOutput("html_url", htmlUrl);
             core.setOutput("missing_required", missingRequired.join(", "));
-            core.setOutput("missing_optional", missingOptional.join(", "));
 
             if (missingRequired.length > 0) {
               const msg = `Missing REQUIRED assets on latest release ${tag}: ${missingRequired.join(", ")}`;
@@ -95,91 +98,20 @@ jobs:
               core.setOutput("ok", "false");
               core.setOutput("error", msg);
             } else {
-              // All required are present. Optional may still be missing.
               core.info("All required assets are present on latest release.");
-              if (missingOptional.length > 0) {
-                core.warning(
-                  `Missing OPTIONAL (Windows) assets on latest release ${tag}: ${missingOptional.join(", ")}`
-                );
-              }
               core.setOutput("ok", "true");
               core.setOutput("error", "");
             }
 
-      # Hard failures: required assets missing or API failure
-      - name: Notify Slack on REQUIRED asset failure
+      - name: Fail on missing required assets
         if: steps.check.outputs.ok != 'true'
-        env:
-          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
-          TAG: ${{ steps.check.outputs.tag }}
-          HTML_URL: ${{ steps.check.outputs.html_url }}
-          ERROR: ${{ steps.check.outputs.error }}
-          MISSING_REQUIRED: ${{ steps.check.outputs.missing_required }}
-        shell: bash
-        run: |
-          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
-            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
-            exit 0
-          fi
-
-          repo="${GITHUB_REPOSITORY}"
-          tag="${TAG:-unknown}"
-          html_url="${HTML_URL:-https://github.com/$repo/releases}"
-          error="${ERROR:-Unknown error}"
-          missing_required="${MISSING_REQUIRED:-(none listed)}"
-
-          text=":rotating_light: *Release monitor FAILURE for \`$repo\`*\n\
-          • *Tag:* \`$tag\`\n\
-          • *Problem:* $error\n\
-          • *Missing REQUIRED assets:* $missing_required\n\
-          • *Release page:* $html_url"
-
-          payload=$(jq -Rn --arg text "$text" '{text: $text}')
-
-          curl -X POST -H 'Content-type: application/json' \
-               --data "$payload" \
-               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
-
-          # Mark the job as failed for required-asset issues
-          exit 1
-
-      # Soft warnings: only optional Windows assets missing
-      - name: Notify Slack on OPTIONAL Windows asset warning
-        if: steps.check.outputs.ok == 'true' && steps.check.outputs.missing_optional != ''
-        env:
-          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
-          TAG: ${{ steps.check.outputs.tag }}
-          HTML_URL: ${{ steps.check.outputs.html_url }}
-          MISSING_OPTIONAL: ${{ steps.check.outputs.missing_optional }}
-        shell: bash
-        run: |
-          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
-            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
-            exit 0
-          fi
-
-          repo="${GITHUB_REPOSITORY}"
-          tag="${TAG:-unknown}"
-          html_url="${HTML_URL:-https://github.com/$repo/releases}"
-          missing_optional="${MISSING_OPTIONAL:-(none listed)}"
-
-          text=":warning: *Release monitor WARNING for \`$repo\`*\n\
-          • *Tag:* \`$tag\`\n\
-          • *Missing OPTIONAL (Windows) assets:* $missing_optional\n\
-          • *Note:* Linux/macOS assets are OK. This is a warning only.\n\
-          • *Release page:* $html_url"
-
-          payload=$(jq -Rn --arg text "$text" '{text: $text}')
-
-          curl -X POST -H 'Content-type: application/json' \
-               --data "$payload" \
-               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
+        run: exit 1
 
       - name: Log success
-        if: steps.check.outputs.ok == 'true' && steps.check.outputs.missing_optional == ''
+        if: steps.check.outputs.ok == 'true'
         shell: bash
         run: |
-          echo "✅ Release monitor: all required and optional assets are present on latest release."
+          echo "✅ Release monitor: all required assets are present on latest release."
 
 
   # ============================================================
@@ -190,8 +122,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest]
+        os: [blacksmith-4vcpu-ubuntu-2404, blacksmith-6vcpu-macos-latest]
     runs-on: ${{ matrix.os }}
+    # A hung install would otherwise hold up the serialized runs behind it for hours.
+    timeout-minutes: 15
+    # One output per OS, since matrix legs overwrite each other's outputs of the same name.
+    # Every leg evaluates both, but each is empty except on its own OS when that install
+    # failed, and the runner never sets empty outputs, so a leg cannot clear the other's
+    # error. See "Using job outputs in a matrix job" in the GitHub Actions workflow syntax docs.
+    outputs:
+      error_linux: "${{ runner.os == 'Linux' && (steps.curl.outputs.error || steps.brew_setup.outputs.error || steps.brew.outputs.error) && format('Linux: {0} {1} {2}', steps.curl.outputs.error, steps.brew_setup.outputs.error, steps.brew.outputs.error) || '' }}"
+      error_macos: "${{ runner.os == 'macOS' && (steps.curl.outputs.error || steps.brew.outputs.error) && format('macOS: {0} {1}', steps.curl.outputs.error, steps.brew.outputs.error) || '' }}"
     steps:
       - name: Show env + release info
         shell: bash
@@ -283,12 +224,21 @@ jobs:
           hash -r || true
 
       - name: Install Homebrew on Linux if missing
+        id: brew_setup
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
+          # A failure here is a problem with the runner, not the release, so the alert says so.
+          trap 'echo "error=Homebrew setup failed on the runner, so the brew install path was not tested." >> "$GITHUB_OUTPUT"' ERR
 
-          if command -v brew >/dev/null 2>&1; then
+          # Runner images can ship Linuxbrew off PATH and owned by a user other than the job's,
+          # and brew refuses to run on a prefix it cannot write to.
+          if [ -d "/home/linuxbrew/.linuxbrew" ]; then
+            sudo chown -R "$(id -un):$(id -gn)" /home/linuxbrew/.linuxbrew
+          fi
+
+          if [ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]; then
             echo "Homebrew already installed on this Linux runner."
           else
             echo "Installing Homebrew on Linux (non-interactive)..."
@@ -469,7 +419,9 @@ jobs:
   # ============================================================
   check_version_endpoint:
     needs: check_latest_release
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      error: ${{ steps.version.outputs.error }}
     steps:
       - name: Check version endpoint vs release download URLs
         id: version
@@ -549,7 +501,7 @@ jobs:
             printf '  - %s\n' "${missing[@]}"
 
             echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "error=Some download URLs are missing or not reachable for version $ver" >> "$GITHUB_OUTPUT"
+            echo "error=Download URLs missing or unreachable for version $ver: ${missing[*]}" >> "$GITHUB_OUTPUT"
             printf 'missing_urls=%s\n' "$(IFS=','; echo "${missing[*]}")" >> "$GITHUB_OUTPUT"
           else
             echo "All download URLs for version $ver are reachable."
@@ -560,47 +512,66 @@ jobs:
 
           printf 'version=%s\n' "$ver" >> "$GITHUB_OUTPUT"
 
-      - name: Notify Slack on version API / URL mismatch
+      - name: Fail on version API or download errors
         if: steps.version.outputs.ok != 'true'
-        env:
-          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
-          TAG: ${{ needs.check_latest_release.outputs.tag }}
-          HTML_URL: ${{ needs.check_latest_release.outputs.html_url }}
-          VER: ${{ steps.version.outputs.version }}
-          ERROR: ${{ steps.version.outputs.error }}
-          MISSING_URLS: ${{ steps.version.outputs.missing_urls }}
-        shell: bash
-        run: |
-          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
-            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
-            exit 0
-          fi
-
-          repo="${GITHUB_REPOSITORY}"
-          tag="${TAG:-unknown}"
-          ver="${VER:-unknown}"
-          html_url="${HTML_URL:-https://github.com/$repo/releases}"
-          error="${ERROR:-Unknown error}"
-          missing_urls="${MISSING_URLS:-(none listed)}"
-
-          text=":rotating_light: *Version endpoint check FAILED for \`$repo\`*\n\
-          • *Version from API:* \`$ver\`\n\
-          • *Latest release tag (from monitor):* \`$tag\`\n\
-          • *Problem:* $error\n\
-          • *Missing/broken URLs:* $missing_urls\n\
-          • *Release page:* $html_url\n\
-          • *API endpoint:* https://version.mirrord.dev/v1/version"
-
-          payload=$(jq -Rn --arg text "$text" '{text: $text}')
-
-          curl -X POST -H 'Content-type: application/json' \
-               --data "$payload" \
-               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
-
-          exit 1
+        run: exit 1
 
       - name: Log version endpoint success
         if: steps.version.outputs.ok == 'true'
         shell: bash
         run: |
           echo "✅ Version endpoint check passed. version.mirrord.dev -> ${{ steps.version.outputs.version }}"
+
+  # ============================================================
+  # 4) Slack alert when the monitor starts failing or recovers
+  # ============================================================
+  # The previous run's conclusion is the last known status, so a persisting failure alerts
+  # once instead of on every run.
+  notify:
+    needs: [check_latest_release, test_install_paths, check_version_endpoint]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    # A stalled Slack or GitHub API call would otherwise hold up the serialized runs behind it.
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Notify Slack on status change
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NEEDS: ${{ toJSON(needs) }}
+          TAG: ${{ needs.check_latest_release.outputs.tag }}
+          HTML_URL: ${{ needs.check_latest_release.outputs.html_url }}
+          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
+        run: |
+          # One line per failing check, followed by the error outputs its job exports.
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success")
+            | [.value.outputs | to_entries[] | select((.key | startswith("error")) and .value != "") | .value | gsub(" +"; " ")] as $errors
+            | "• \(.key) (\(.value.result))\(if $errors == [] then "" else ": " + ($errors | join("; ")) end)"' <<<"$NEEDS")"
+          # Cancelled runs were superseded before finishing and say nothing about the status.
+          # Branch and status are filtered here rather than with --branch/--status: the API's
+          # filtered run listing intermittently returns runs that are days old as the latest.
+          # One full API page misses the latest completed main run only if 100 newer runs (branch
+          # dispatches or superseded runs) were created after it; then previous is empty and a
+          # failure still alerts.
+          previous="$(gh run list --workflow releases-test.yaml --limit 100 --json headBranch,status,conclusion \
+            --jq '[.[] | select(.headBranch == "main" and .status == "completed" and (.conclusion == "success" or .conclusion == "failure"))][0].conclusion // ""')"
+          echo "Previous run status: ${previous:-none}"
+          links="<$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID|Monitor run logs>${HTML_URL:+ · <$HTML_URL|Release page>}"
+
+          if [ -n "$failed" ] && [ "$previous" != failure ]; then
+            text=":rotating_light: *Release monitor FAILURE for \`$GITHUB_REPOSITORY\`* (release \`${TAG:-unknown}\`)
+          $failed
+          $links"
+          elif [ -z "$failed" ] && [ "$previous" = failure ]; then
+            text=":white_check_mark: *Release monitor RECOVERED for \`$GITHUB_REPOSITORY\`* (release \`$TAG\`)
+          All checks pass.
+          $links"
+          else
+            echo "Status unchanged since the previous run (${previous:-none}); not notifying."
+            exit 0
+          fi
+
+          curl -fsS --retry 3 --retry-all-errors --connect-timeout 10 --max-time 30 -H 'Content-type: application/json' \
+            --data "$(jq -n --arg text "$text" '{text: $text}')" "$SLACK_PROD_ALERTS_WEBHOOK_URL"

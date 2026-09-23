@@ -18,12 +18,12 @@ on:
         description: "Runner label to use. Callers pass the one `plan` picked."
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: "blacksmith-8vcpu-ubuntu-2404"
       blacksmith:
         description: "Whether `runner` is a Blacksmith runner, whose builder keeps the cache mounts on a sticky disk."
         required: false
         type: boolean
-        default: false
+        default: true
     outputs:
       built:
         description: "Whether the image was built and uploaded as an artifact, rather than left to be pulled."
@@ -58,8 +58,9 @@ jobs:
         if: ${{ steps.decide.outputs.build == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       # Two builders for one build: the Blacksmith pair keeps the Dockerfile's cache mounts on a
-      # sticky disk, which the stock actions cannot do, and the stock pair is what a fork's free
-      # runner can use. `uses:` takes no expression, so the choice has to be two sets of steps.
+      # sticky disk, which the stock actions cannot do. Keep the stock pair for callers that
+      # explicitly select a non-Blacksmith runner. `uses:` takes no expression, so the choice has
+      # to be two sets of steps.
       - name: Set up Docker Buildx
         if: ${{ steps.decide.outputs.build == 'true' && inputs.blacksmith }}
         uses: useblacksmith/setup-docker-builder@33803e640bd9d674f2843a8c323aa2a7da478d23 # v2.0.0

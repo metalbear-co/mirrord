@@ -52,7 +52,8 @@ use crate::{
         CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
         create_mongodb_branches, create_mysql_branches, create_pg_branches,
         ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
-        list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
+        list_reusable_mysql_branches, list_reusable_pg_branches,
+        relay_source_compatibility_warnings, wait_for_pending_branches,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -76,9 +77,13 @@ pub mod database_branches;
 mod discovery;
 pub mod error;
 
+pub use discovery::operator_installed;
+
 const BAGGAGE_HEADER: &str = "baggage";
 
-fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> OperatorApiResult<()> {
+/// Adds the `baggage` header every request in `config` will carry, so the operator it names
+/// serves them.
+pub fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> OperatorApiResult<()> {
     if let Some(baggage) = baggage {
         config.headers.push((
             HeaderName::from_static(BAGGAGE_HEADER),
@@ -1035,6 +1040,7 @@ where
                     "using branch database {} for id {id}: {origin}",
                     branch.name_any()
                 ));
+                relay_source_compatibility_warnings(branch, &subtask);
             }
 
             subtask.success(None);

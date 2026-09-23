@@ -17,7 +17,7 @@ use mirrord_tls_util::{
 };
 use rustls::{
     ClientConfig, RootCertStore, ServerConfig,
-    pki_types::CertificateDer,
+    pki_types::{CertificateDer, ServerName},
     server::{NoClientAuth, WebPkiClientVerifier, danger::ClientCertVerifier},
 };
 use tracing::Level;
@@ -80,6 +80,22 @@ impl StealTlsHandlerStore {
             Some(MaybeBuilt::Config(config)) => config.clone(),
         };
 
+        let server_name = config
+            .agent_as_client
+            .verification
+            .server_name
+            .as_deref()
+            .map(|name| {
+                ServerName::try_from(name)
+                    .map(|name| name.to_owned())
+                    .map_err(|error| StealTlsSetupErrorInner::InvalidServerName {
+                        name: name.to_owned(),
+                        error,
+                    })
+            })
+            .transpose()
+            .map_err(StealTlsSetupError::ClientSetupError)?;
+
         let (server_config, client_config) = tokio::try_join!(
             async {
                 self.build_server_config(config.agent_as_server)
@@ -96,6 +112,7 @@ impl StealTlsHandlerStore {
         let handler = StealTlsHandler {
             server_config,
             client_config,
+            server_name,
         };
 
         let handler_cloned = handler.clone();
@@ -194,6 +211,7 @@ impl StealTlsHandlerStore {
         let TlsServerVerification {
             accept_any_cert,
             trust_roots,
+            server_name: _,
         } = config.verification;
 
         let builder = if accept_any_cert {
@@ -255,7 +273,7 @@ impl Default for StealTlsHandlerStore {
         Self(Arc::new(State {
             by_port: Default::default(),
             // Does not matter, will never be used.
-            path_resolver: InTargetPathResolver::new(0),
+            path_resolver: InTargetPathResolver::from_pid(0),
         }))
     }
 }
