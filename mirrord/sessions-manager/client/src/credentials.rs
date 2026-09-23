@@ -133,8 +133,6 @@ pub(crate) fn credentials_from_env()
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use axum::http::StatusCode;
 
     use super::{
@@ -150,8 +148,7 @@ mod tests {
     /// only to the control plane.
     #[tokio::test]
     async fn both_mechanisms_can_be_configured_at_once() {
-        let endpoint =
-            TokenEndpoint::start([(StatusCode::OK, token(Duration::from_secs(600)))]).await;
+        let endpoint = TokenEndpoint::start([(StatusCode::OK, token("abc"))]).await;
         let credentials = EnvCredentials {
             shared_secret: Some(SharedSecretCredentials::new("shhh").unwrap()),
             cloud: Some(endpoint.credentials()),
