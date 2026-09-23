@@ -434,7 +434,7 @@ pub(crate) enum CliError {
 
     If you want to run without the operator, please set `\"operator\": false` in the mirrord configuration file.
 
-    Please remember that some features are supported only when using mirrord operator (https://metalbear.com/mirrord/docs/overview/teams?utm_source=erropfailed&utm_medium=cli#supported-features).{GENERAL_HELP}"))]
+    Please remember that some features are supported only when using mirrord operator (https://metalbear.com/mirrord/docs/getting-started/what-is-mirrord?utm_source=erropfailed&utm_medium=cli#mirrord-for-teams).{GENERAL_HELP}"))]
     OperatorApiFailed(OperatorOperation, kube::Error),
 
     #[error("mirrord operator rejected {0}: {1}")]
@@ -496,7 +496,7 @@ pub(crate) enum CliError {
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
         "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
-        Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.\n{AGENT_OPERATOR_HINT}{GENERAL_HELP}"
+        Read more here: https://metalbear.com/mirrord/docs/getting-started/installing-mirrord/operator\n{AGENT_OPERATOR_HINT}{GENERAL_HELP}"
     ))]
     OperatorNotInstalled,
 
