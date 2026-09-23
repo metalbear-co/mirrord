@@ -53,13 +53,9 @@ impl ControlPlaneApi {
 
             match endpoint {
                 ControlPlaneEndpoint::Assignments { scope } => {
-                    segments.extend([
-                        "env",
-                        &scope.environment,
-                        "service",
-                        &scope.service,
-                        "assignments",
-                    ]);
+                    let environment = slug::slugify(&scope.environment);
+                    let service = slug::slugify(&scope.service);
+                    segments.extend(["env", &environment, "service", &service, "assignments"]);
                 }
             }
         }
@@ -169,10 +165,20 @@ mod tests {
     }
 
     #[test]
-    fn assignments_endpoint_escapes_dynamic_segments() {
+    fn assignments_endpoint_slugifies_dynamic_segments() {
         assert_eq!(
-            assignments_endpoint("https://sessions.example.com", "prod/eu", "api #1").as_str(),
-            "https://sessions.example.com/v1/env/prod%2Feu/service/api%20%231/assignments"
+            assignments_endpoint("https://sessions.example.com", "prod/eu", "API #1").as_str(),
+            "https://sessions.example.com/v1/env/prod-eu/service/api-1/assignments"
+        );
+    }
+
+    /// Scopes are identified by their slug, so case and punctuation variants of a name share an
+    /// endpoint with each other and with the operator-hosted deployment.
+    #[test]
+    fn assignments_endpoint_treats_case_variants_as_one_scope() {
+        assert_eq!(
+            assignments_endpoint("https://sessions.example.com", "staging", "API"),
+            assignments_endpoint("https://sessions.example.com", "staging", "api"),
         );
     }
 
