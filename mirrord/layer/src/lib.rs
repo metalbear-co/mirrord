@@ -72,15 +72,18 @@ use std::{
     collections::{HashMap, HashSet},
     fs::File,
     io::Read,
-    net::SocketAddr,
-    os::{fd::IntoRawFd, unix::process::parent_id},
+    net::{IpAddr, SocketAddr},
+    os::{
+        fd::{IntoRawFd, RawFd},
+        unix::process::parent_id,
+    },
     panic,
-    sync::{Arc, OnceLock},
+    sync::{Arc, MutexGuard, OnceLock, PoisonError},
     time::Duration,
 };
 
 use ctor::ctor;
-use file::OPEN_FILES;
+use file::{OPEN_FILES, ops::RemoteFile};
 use hooks::HookManager;
 #[cfg(all(
     any(target_arch = "x86_64", target_arch = "aarch64"),
@@ -113,7 +116,7 @@ use nix::{
     fcntl::{OFlag, open},
     sys::stat::Mode,
 };
-use socket::SOCKETS;
+use socket::{SOCKETS, UserSocket};
 
 pub(crate) use crate::macros::*;
 use crate::{
@@ -392,6 +395,7 @@ fn layer_start(config: LayerConfig) {
 
     let state = setup();
     enable_hooks(state);
+    register_atfork_handlers();
 
     let _detour_guard = DetourGuard::new();
 
@@ -554,6 +558,7 @@ fn sip_only_layer_start(
     init_layer_setup(config, true);
 
     unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
+    register_atfork_handlers();
 
     if let Some(unset) = setup().env_config().unset.as_ref() {
         let unset = unset.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>();
@@ -747,20 +752,81 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     }
 }
 
+/// The layer's global mutexes, locked by [`atfork_prepare`] and released by [`atfork_release`].
+struct ForkGuards {
+    _sockets: MutexGuard<'static, HashMap<RawFd, Arc<UserSocket>>>,
+    _open_files: MutexGuard<'static, HashMap<RawFd, Arc<RemoteFile>>>,
+    _addr_info: MutexGuard<'static, HashSet<usize>>,
+    _dns_mapping: MutexGuard<'static, HashMap<IpAddr, String>>,
+}
+
+static mut FORK_GUARDS: Option<ForkGuards> = None;
+
+/// `prepare` handler for [`libc::pthread_atfork`].
+///
+/// When running in a multi-threaded app, another thread can hold one of our mutexes while the fork
+/// executes. The child only gets the forking thread, so there that mutex stays locked forever with
+/// no owner to unlock it, and the first hook that tries to take it deadlocks - see
+/// <https://github.com/metalbear-co/mirrord/issues/3659#issuecomment-3433990010>.
+///
+/// We acquire these locks across the `fork` syscall. The child inherits them locked right after
+/// the syscall. [`atfork_release`] unlocks them.
+///
+/// We can't lock these in [`fork_detour`] before calling FN_FORK. Because if the user app registers
+/// a fork handler that tries acquiring these locks, the app reaches a deadlock.
+///
+/// `prepare` handlers are ran in the reverse order of their registration. We register before
+/// user app starts so our handler runs after user apps' handlers.
+extern "C" fn atfork_prepare() {
+    // Poisoning doesn't matter here, we want the lock and not the data.
+    let guards = ForkGuards {
+        _sockets: SOCKETS.lock().unwrap_or_else(PoisonError::into_inner),
+        _open_files: OPEN_FILES.lock().unwrap_or_else(PoisonError::into_inner),
+        _addr_info: MANAGED_ADDRINFO
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner),
+        _dns_mapping: REMOTE_DNS_REVERSE_MAPPING
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner),
+    };
+
+    unsafe { FORK_GUARDS = Some(guards) };
+}
+
+/// `parent` and `child` handler for [`libc::pthread_atfork`], releasing what [`atfork_prepare`]
+/// took.
+extern "C" fn atfork_release() {
+    unsafe { FORK_GUARDS = None };
+}
+
+/// Registers [`atfork_prepare`] and [`atfork_release`] with `libc`.
+///
+/// Called from the layer's initialization.
+fn register_atfork_handlers() {
+    let result = unsafe {
+        libc::pthread_atfork(
+            Some(atfork_prepare),
+            Some(atfork_release),
+            Some(atfork_release),
+        )
+    };
+
+    if result != 0 {
+        tracing::error!(
+            result,
+            "Failed to register `fork` handlers, forking this process might deadlock it."
+        );
+    }
+}
+
 /// Hook for `libc::fork`.
+///
+/// Guarding layer's mutexes during fork syscall is handled by [`atfork_prepare`] and
+/// [`atfork_release`].
 ///
 /// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
-    // when running in multi-threaded app, we can have a scenario where another thread holds a mutex
-    // while the fork executes this leaves the mutex locked forever in the child process since
-    // there's no thread to unlock it so we need to grab all the mutexes we can here, and drop
-    // after the fork see https://github.com/metalbear-co/mirrord/issues/3659#issuecomment-3433990010
-    let sockets = SOCKETS.lock();
-    let open_files = OPEN_FILES.lock();
-    let addr_info = MANAGED_ADDRINFO.lock();
-    let dns_mapping = REMOTE_DNS_REVERSE_MAPPING.lock();
-
     unsafe {
         tracing::debug!("Process {} forking!.", std::process::id());
 
@@ -808,10 +874,6 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
             Ordering::Less => tracing::debug!("fork failed"),
         }
 
-        drop(sockets);
-        drop(open_files);
-        drop(addr_info);
-        drop(dns_mapping);
         res
     }
 }
