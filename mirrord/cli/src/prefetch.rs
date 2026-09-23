@@ -15,6 +15,7 @@ use std::{
     collections::HashSet,
     fs::{self, File},
     io::{self, Write},
+    mem,
     ops::Not,
     path::{Path, PathBuf},
     time::Duration,
@@ -22,6 +23,7 @@ use std::{
 #[cfg(unix)]
 use std::{fs::Permissions, os::unix::fs::PermissionsExt};
 
+use mirrord_config::MIRRORD_FS_PREFETCH_DIR;
 use mirrord_progress::Progress;
 use mirrord_protocol::file::{
     CloseDirRequest, CloseFileRequest, FdOpenDirRequest, MetadataInternal, OpenFileRequest,
@@ -150,19 +152,31 @@ fn independent_roots(paths: &[String]) -> Vec<&Path> {
     roots
 }
 
-/// Deletes the copies made by [`prefetch_remote_paths`] once the session is over.
-///
-/// The CLI cannot do this itself: it `execve`s into the user's binary, so it is long gone by the
-/// time the session ends, and its destructors never run. The internal proxy is the one process
-/// whose lifetime is the session, so it holds this guard and does the cleaning up.
-///
-/// A session that is killed outright leaves the copies behind, as nothing gets to run.
+/// Deletes the copies made by [`prefetch_remote_paths`] when whoever holds it gives up on them.
 pub(crate) struct PrefetchedFilesGuard(PathBuf);
 
 impl PrefetchedFilesGuard {
+    /// Takes ownership of `directory`.
+    pub(crate) fn new(directory: PathBuf) -> Self {
+        Self(directory)
+    }
+
     /// Takes ownership of the directory named by `MIRRORD_FS_PREFETCH_DIR`, when there is one.
     pub(crate) fn from_env() -> Option<Self> {
         std::env::var_os(MIRRORD_FS_PREFETCH_DIR).map(|directory| Self(directory.into()))
+    }
+
+    /// The directory held.
+    pub(crate) fn path(&self) -> &Path {
+        &self.0
+    }
+
+    /// Leaves the copies in place, for whoever is responsible for them next.
+    ///
+    /// This leaks the [`PathBuf`], a handful of bytes once per session, which is the price of not
+    /// running the deletion below on a directory that is still in use.
+    pub(crate) fn release(self) {
+        mem::forget(self);
     }
 }
 

@@ -646,19 +646,25 @@ impl MirrordExecution {
                 .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
         };
 
-        // Prefetching happens before the internal proxy and the user process start, so that even
-        // the application's first read of a prefetched path is served from the local copy.
-        if config.feature.fs.prefetch.is_empty().not() && config.feature.fs.is_active() {
-            let timeout = Duration::from_secs(config.feature.fs.prefetch_timeout);
-            let directory =
-                prefetch_remote_paths(&client, &config.feature.fs.prefetch, timeout, progress)
-                    .await?;
+        // Prefetching happens before the internal proxy and the user process start.
+        let prefetch_guard =
+            if config.feature.fs.prefetch.is_empty().not() && config.feature.fs.is_active() {
+                let timeout = Duration::from_secs(config.feature.fs.prefetch_timeout);
+                let directory =
+                    prefetch_remote_paths(&client, &config.feature.fs.prefetch, timeout, progress)
+                        .await?;
 
-            env_vars.insert(
-                MIRRORD_FS_PREFETCH_DIR.into(),
-                directory.display().to_string(),
-            );
-        }
+                env_vars.insert(
+                    MIRRORD_FS_PREFETCH_DIR.into(),
+                    directory.display().to_string(),
+                );
+
+                // Held here until the internal proxy is up and takes over, so that failing to
+                // start it does not leave copies of the target's files behind.
+                Some(crate::prefetch::PrefetchedFilesGuard::new(directory))
+            } else {
+                None
+            };
 
         let encoded_config = config.encode()?;
 
@@ -688,6 +694,10 @@ impl MirrordExecution {
             )
             .env(MIRRORD_KUBE_VERSION_MAJOR_ENV, api_version.0.to_string())
             .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string());
+
+        if let Some(directory) = prefetch_guard.as_ref().map(|guard| guard.path()) {
+            proxy_command.env(mirrord_config::MIRRORD_FS_PREFETCH_DIR, directory);
+        }
 
         // Use the operator session ID when available, otherwise preserve the sessions-manager
         // session ID chosen during connection setup or fall back to a local UUID.
@@ -743,6 +753,14 @@ impl MirrordExecution {
                     "failed to parse port number printed by proxy: {e}"
                 ))
             })?;
+
+        // The internal proxy is up, so its own guard owns the copies from here on. This process
+        // has to let go of them: the IDE flow returns from here normally while the session carries
+        // on, and a guard still held would delete the copies out from under it.
+        #[cfg(unix)]
+        if let Some(guard) = prefetch_guard {
+            guard.release();
+        }
 
         env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.into(), encoded_config);
         env_vars.insert(

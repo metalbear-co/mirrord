@@ -259,6 +259,11 @@ pub struct FsConfig {
     /// The copy keeps the permissions it had in the target, so a file that is read-only there is
     /// read-only here, and writing to it fails locally much as it would remotely.
     ///
+    /// **Do not prefetch secrets.** The copy is written to a temporary directory on the machine
+    /// running mirrord, guarded by nothing more than that machine's own permissions, rather than
+    /// by the cluster. It is deleted when the session ends, but a session that is killed outright
+    /// leaves it behind, since nothing gets to run.
+    ///
     /// Creating, deleting and renaming still act on the target: a file created under a prefetched
     /// directory is not part of the copy, and deleting or renaming a prefetched path takes effect
     /// remotely rather than in the copy.
