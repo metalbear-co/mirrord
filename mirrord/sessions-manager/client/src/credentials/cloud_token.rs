@@ -130,17 +130,11 @@ impl CloudTokenCredentials {
         // Deliberately not `Response::json`: a malformed body is a broken server rather than a
         // transient fault, and decoding it through `reqwest` would surface as a retryable error.
         let body = response.bytes().await?;
-        let TokenExchangeResponse { token } = serde_json::from_slice(&body).map_err(|_| {
-            SessionsManagerClientError::TokenExchange(
-                "response did not contain a `token`".to_owned(),
-            )
-        })?;
+        let TokenExchangeResponse { token } = serde_json::from_slice(&body)
+            .map_err(|_| SessionsManagerClientError::TokenExchangeMissingToken)?;
 
-        let mut header = HeaderValue::try_from(format!("Bearer {token}")).map_err(|_| {
-            SessionsManagerClientError::TokenExchange(
-                "token is not a valid header value".to_owned(),
-            )
-        })?;
+        let mut header = HeaderValue::try_from(format!("Bearer {token}"))
+            .map_err(|_| SessionsManagerClientError::TokenNotHeaderValue)?;
         header.set_sensitive(true);
 
         tracing::debug!("obtained a sessions-manager token from the MetalBear cloud");
@@ -362,8 +356,12 @@ pub(super) mod tests {
             .expect_err("a response without a token should fail the exchange");
 
         assert!(
-            matches!(error, SessionsManagerClientError::TokenExchange(_)),
-            "expected a token exchange error, got {error:?}"
+            matches!(error, SessionsManagerClientError::TokenExchangeMissingToken),
+            "expected a missing-token error, got {error:?}"
+        );
+        assert!(
+            !error.is_retryable(),
+            "a broken token endpoint should not be retried"
         );
     }
 
