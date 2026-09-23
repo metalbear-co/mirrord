@@ -5836,6 +5836,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-remote-layer-protocol"
+version = "3.259.0"
+dependencies = [
+ "bincode",
+]
+
+[[package]]
 name = "mirrord-session-monitor-client"
 version = "3.272.0"
 dependencies = [
@@ -5881,6 +5888,7 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
+ "slug",
  "thiserror 2.0.20",
  "tokio",
  "tokio-retry",

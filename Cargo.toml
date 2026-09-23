@@ -196,6 +196,7 @@ mirrord-session-monitor-client = { path = "mirrord/session-monitor-client" }
 mirrord-session-monitor-protocol = { path = "mirrord/session-monitor-protocol" }
 mirrord-sessions-manager-client = { path = "mirrord/sessions-manager/client" }
 mirrord-sessions-manager-protocol = { path = "mirrord/sessions-manager/protocol" }
+mirrord-remote-layer-protocol = { path = "mirrord/remote-layer-protocol" }
 mirrord-test-macros = { path = "mirrord/test-macros" }
 mockall = "0.13"
 nix = { version = "0.31", features = ["net"] }
@@ -221,6 +222,7 @@ procfs = "0.17.0"
 prometheus = { version = "0.14", features = ["process"] }
 prost = "0.14"
 prost-reflect = "0.16"
+slug = "0.1.6"
 protox = "0.9"
 quote = "1"
 rand = "0.10"
