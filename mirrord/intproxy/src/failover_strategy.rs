@@ -5,31 +5,16 @@ use mirrord_intproxy_protocol::{
     ProxyToLayerMessage,
 };
 use mirrord_protocol::FileRequest;
-#[cfg(unix)]
-use nix::{
-    errno::Errno,
-    sys::signal::{Signal, kill},
-    unistd::Pid,
-};
 use tokio::time;
-#[cfg(windows)]
-use winapi::{
-    shared::minwindef::FALSE,
-    um::{
-        errhandlingapi::GetLastError,
-        handleapi::CloseHandle,
-        processthreadsapi::{OpenProcess, TerminateProcess},
-        winnt::PROCESS_TERMINATE,
-    },
-};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
-    IntProxy,
+    IntProxy, LayerInitializerTask,
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     error::{ProxyRuntimeError, ProxyStartupError},
     layer_conn::LayerConnection,
-    layer_initializer::LayerInitializer,
     main_tasks::{FromLayer, MainTaskId, ProxyMessage},
+    process_termination, quiesce_and_collect_layers,
 };
 
 /// This struct is a strategy that handle failover logic for [`IntProxy`].
@@ -42,28 +27,21 @@ use crate::{
 /// All while continues to accept new connections from layers
 pub(super) struct FailoverStrategy {
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
-    layer_initializer: TaskSender<LayerInitializer>,
+    layer_initializer: LayerInitializerTask,
     layers: HashMap<LayerId, TaskSender<LayerConnection>>,
     pending_layers: Vec<(LayerId, MessageId)>,
     any_connection_accepted: bool,
     fail_cause: ProxyRuntimeError,
-    /// Processes of the layers still connected when the proxy failed.
+    /// Processes of the layers currently connected while the proxy is in failover.
     ///
     /// Only a terminal, non-recoverable agent failure reaches failover (a reconnectable session
     /// reconnects inside [`AgentConnection`](crate::agent_conn::AgentConnection) instead). Once
-    /// here, the failure has broken every mirrord-hooked path in these processes. We tear them
-    /// down instead of leaving silent zombies that keep holding their ports. See
-    /// [`Self::terminate_connected_processes`].
+    /// here, the failure has broken every mirrord-hooked path in these processes. Tracking both
+    /// the layers inherited from the failed proxy and layers accepted during failover lets every
+    /// shutdown path tear them down instead of leaving silent zombies that keep holding their
+    /// ports. See [`Self::terminate_connected_processes`].
     connected_layers: HashMap<LayerId, ProcessInfo>,
 }
-
-/// Grace period between the `SIGTERM` and the `SIGKILL` we send to the injected processes on a
-/// terminal failure, giving them a chance to run their own shutdown before we force the issue.
-/// Shortened under test so tests can exercise the real termination path without a slow wait.
-#[cfg(all(unix, not(test)))]
-const TERMINATION_GRACE: Duration = Duration::from_secs(2);
-#[cfg(all(unix, test))]
-const TERMINATION_GRACE: Duration = Duration::from_millis(50);
 
 impl FailoverStrategy {
     fn has_layer_connections(&self) -> bool {
@@ -73,7 +51,7 @@ impl FailoverStrategy {
     pub fn from_failed_proxy(failed_proxy: IntProxy, error: ProxyRuntimeError) -> Self {
         FailoverStrategy {
             background_tasks: failed_proxy.background_tasks,
-            layer_initializer: failed_proxy.task_txs._layer_initializer,
+            layer_initializer: failed_proxy.task_txs.layer_initializer,
             layers: failed_proxy.task_txs.layers,
             pending_layers: failed_proxy.pending_layers.into_iter().collect(),
             any_connection_accepted: failed_proxy.any_connection_accepted,
@@ -91,7 +69,7 @@ impl FailoverStrategy {
     /// it hangs forever as a zombie holding its ports. Rather than fail silently, we terminate
     /// every connected process so the failure is loud and nothing lingers.
     ///
-    /// See [`Self::signal_processes`] for the per-platform termination.
+    /// See [`process_termination::terminate_processes`] for the per-platform termination.
     async fn terminate_connected_processes(&self) {
         if self.connected_layers.is_empty() {
             return;
@@ -111,77 +89,14 @@ impl FailoverStrategy {
         );
 
         let pids = processes.into_iter().map(|(pid, _)| pid).collect();
-        Self::signal_processes(pids).await;
-    }
-
-    /// On unix, sends `SIGTERM` to the given processes, then `SIGKILL` to any survivors after
-    /// [`TERMINATION_GRACE`], so well-behaved processes get to run their shutdown first.
-    #[cfg(unix)]
-    async fn signal_processes(pids: Vec<i32>) {
-        if pids.is_empty() {
-            return;
-        }
-
-        for pid in &pids {
-            Self::send_signal(*pid, Signal::SIGTERM);
-        }
-
-        time::sleep(TERMINATION_GRACE).await;
-
-        for pid in pids {
-            Self::send_signal(pid, Signal::SIGKILL);
-        }
-    }
-
-    #[cfg(unix)]
-    fn send_signal(pid: i32, signal: Signal) {
-        match kill(Pid::from_raw(pid), signal) {
-            // `ESRCH` just means the process already exited, which is the outcome we want.
-            Ok(()) | Err(Errno::ESRCH) => {}
-            Err(error) => tracing::warn!(
-                pid,
-                ?signal,
-                %error,
-                "Failed to signal an injected process while tearing down a failed session",
-            ),
-        }
-    }
-
-    /// On Windows, calls `TerminateProcess` on each pid. No reliable graceful signal exists for an
-    /// arbitrary process here, so this matches the unix `SIGKILL` with no grace phase.
-    #[cfg(windows)]
-    async fn signal_processes(pids: Vec<i32>) {
-        for pid in pids {
-            // SAFETY: FFI. Every opened handle is closed. `GetLastError` is read immediately after
-            // the failing call, before anything else can clobber the thread-local error.
-            unsafe {
-                let handle = OpenProcess(PROCESS_TERMINATE, FALSE, pid as u32);
-                if handle.is_null() {
-                    // Most likely the process already exited (the `ESRCH` equivalent), but log the
-                    // error code so that case can be told apart from a real failure.
-                    tracing::warn!(
-                        pid,
-                        error = GetLastError(),
-                        "Failed to open an injected process while tearing down a failed session",
-                    );
-                    continue;
-                }
-                if TerminateProcess(handle, 1) == 0 {
-                    tracing::warn!(
-                        pid,
-                        error = GetLastError(),
-                        "Failed to terminate an injected process while tearing down a failed session",
-                    );
-                }
-                CloseHandle(handle);
-            }
-        }
+        process_termination::terminate_processes(pids).await;
     }
 
     pub async fn run(
         self,
         first_timeout: Duration,
         idle_timeout: Duration,
+        shutdown: &CancellationToken,
     ) -> Result<(), ProxyStartupError> {
         let mut failover = self;
 
@@ -206,6 +121,17 @@ impl FailoverStrategy {
                 },
                 _ = time::sleep(idle_timeout), if failover.any_connection_accepted && !failover.has_layer_connections() => {
                     tracing::info!("Reached the idle timeout with no active layer connections");
+                    break;
+                },
+                _ = shutdown.cancelled() => {
+                    let shutdown_layers = quiesce_and_collect_layers(
+                        &mut failover.background_tasks,
+                        &mut failover.layer_initializer,
+                        &failover.connected_layers,
+                    )
+                    .await;
+                    process_termination::terminate_processes(shutdown_layers.pids.clone()).await;
+                    std::mem::drop(shutdown_layers);
                     break;
                 },
             }
@@ -244,6 +170,7 @@ impl FailoverStrategy {
                     }
                 }
                 self.layers.remove(&LayerId(id));
+                self.connected_layers.remove(&LayerId(id));
             }
             (task_id, TaskUpdate::Finished(res)) => match res {
                 Ok(()) => {
@@ -265,12 +192,15 @@ impl FailoverStrategy {
         match msg {
             ProxyMessage::NewLayer(new_layer) => {
                 self.any_connection_accepted = true;
+                let layer_id = new_layer.id;
+                self.connected_layers
+                    .insert(layer_id, new_layer.process_info);
                 let tx = self.background_tasks.register(
-                    LayerConnection::new(new_layer.stream, new_layer.id),
-                    MainTaskId::LayerConnection(new_layer.id),
+                    LayerConnection::new(new_layer.stream, layer_id),
+                    MainTaskId::LayerConnection(layer_id),
                     IntProxy::CHANNEL_SIZE,
                 );
-                self.layers.insert(new_layer.id, tx);
+                self.layers.insert(layer_id, tx);
             }
             ProxyMessage::FromLayer(message) => {
                 self.update_layer_on_error(message).await;
@@ -318,53 +248,5 @@ impl FailoverStrategy {
                 );
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{process::Command, time::Duration};
-
-    use super::FailoverStrategy;
-
-    /// Spawns a real, long-lived child process for the current platform.
-    fn spawn_blocking_child() -> std::process::Child {
-        #[cfg(unix)]
-        {
-            Command::new("sleep").arg("30").spawn().unwrap()
-        }
-        #[cfg(windows)]
-        {
-            Command::new("cmd")
-                .args(["/C", "ping", "-n", "30", "127.0.0.1"])
-                .spawn()
-                .unwrap()
-        }
-    }
-
-    /// [`FailoverStrategy::signal_processes`] must actually terminate the given processes on the
-    /// platforms we support, not silently do nothing. Exercises the real (per-platform) kill path.
-    #[tokio::test]
-    async fn signal_processes_terminates_the_given_pids() {
-        let mut child = spawn_blocking_child();
-        let pid = child.id() as i32;
-
-        FailoverStrategy::signal_processes(vec![pid]).await;
-
-        let terminated = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if let Some(status) = child.try_wait().unwrap() {
-                    break status;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("child process was not terminated by signal_processes");
-
-        assert!(
-            !terminated.success(),
-            "child should have been killed, but it exited cleanly"
-        );
     }
 }
