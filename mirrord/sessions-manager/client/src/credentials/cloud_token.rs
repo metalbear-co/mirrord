@@ -1,16 +1,11 @@
 //! A short-lived MetalBear cloud token, exchanged for a long-lived API key.
 
-use std::{
-    env::VarError,
-    time::{Duration, SystemTime},
-};
+use std::{env::VarError, time::Duration};
 
-use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use futures::future::{BoxFuture, FutureExt};
 use reqwest::header::{HeaderMap, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 use url::Url;
 
 use super::{CredentialProvider, ready_headers};
@@ -32,10 +27,6 @@ const API_KEY_PREFIX: &str = "metalbear_key_";
 
 const TOKEN_EXCHANGE_SEGMENTS: [&str; 3] = ["api", "v2", "token"];
 
-/// How long before a token's `exp` it is replaced. Covers the request the token is about to be
-/// used for, plus clock skew between this process and whatever verifies the signature.
-const TOKEN_REFRESH_MARGIN: Duration = Duration::from_secs(60);
-
 const TOKEN_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Serialize)]
@@ -49,28 +40,6 @@ struct TokenExchangeResponse {
     token: String,
 }
 
-/// Scope of the API key agents and intproxies are meant to hold. Enforcing it is the job of the
-/// server that verifies the token; the client only warns on a mismatch, so that a key issued for
-/// the wrong purpose is diagnosable from the agent's own logs instead of only from a rejection.
-const EXPECTED_TOKEN_SCOPE: &str = "serverless_agent";
-
-/// The claims this client reads. The rest (`sub`, `aud`, ...) are for the server that verifies
-/// the token.
-#[derive(Deserialize)]
-struct TokenClaims {
-    exp: u64,
-    /// Tokens minted before scopes existed omit it.
-    scope: Option<String>,
-}
-
-struct CachedToken {
-    /// Complete `Bearer <jwt>` value, marked sensitive.
-    header: HeaderValue,
-    /// When the token stops being handed out, already reduced by [`TOKEN_REFRESH_MARGIN`], so
-    /// deciding whether to reuse it is a single comparison against the clock.
-    refresh_at: SystemTime,
-}
-
 /// Authenticates the client to sessions-manager itself, by trading a long-lived MetalBear API
 /// key for a short-lived token and sending it as `Authorization: Bearer <token>`.
 ///
@@ -78,9 +47,10 @@ struct CachedToken {
 /// must never leave this process by any other route — neither it nor the tokens it yields are
 /// ever logged.
 ///
-/// A token is fetched on first use and reused until [`TOKEN_REFRESH_MARGIN`] before its `exp`.
-/// The mutex is held across the exchange so that concurrent callers waiting on a cold or stale
-/// cache collapse into a single request rather than each starting one of their own.
+/// The token is opaque to the client: it is neither verified nor parsed here, since
+/// sessions-manager is the one that checks it. With nothing to learn its lifetime from, a fresh
+/// token is exchanged for every request that needs one. That is cheap because those requests are
+/// rare — sessions-manager connections are long-lived, and the token is only needed to open one.
 ///
 /// Control plane only: the data-plane upgrade already sends the single-use per-assignment
 /// credential under `authorization`, and must not have it replaced.
@@ -88,7 +58,6 @@ pub struct CloudTokenCredentials {
     client: reqwest::Client,
     pub(super) endpoint: Url,
     api_key: SecretString,
-    cached: Mutex<Option<CachedToken>>,
 }
 
 impl CloudTokenCredentials {
@@ -130,28 +99,12 @@ impl CloudTokenCredentials {
                 .build()?,
             endpoint,
             api_key: SecretString::from(api_key),
-            cached: Mutex::new(None),
         })
     }
 
-    async fn authorization(&self) -> Result<HeaderValue, SessionsManagerClientError> {
-        let mut cached = self.cached.lock().await;
-
-        if let Some(token) = cached
-            .as_ref()
-            .filter(|token| token.refresh_at > SystemTime::now())
-        {
-            return Ok(token.header.clone());
-        }
-
-        let token = self.exchange().await?;
-        let header = token.header.clone();
-        *cached = Some(token);
-
-        Ok(header)
-    }
-
-    async fn exchange(&self) -> Result<CachedToken, SessionsManagerClientError> {
+    /// Exchanges the API key for a token, returned as a complete `Bearer <token>` header value
+    /// marked sensitive.
+    async fn exchange(&self) -> Result<HeaderValue, SessionsManagerClientError> {
         tracing::debug!(
             endpoint = %self.endpoint,
             "exchanging the MetalBear API key for a sessions-manager token"
@@ -183,18 +136,6 @@ impl CloudTokenCredentials {
             )
         })?;
 
-        let claims = token_claims(&token)?;
-        if claims.scope.as_deref() != Some(EXPECTED_TOKEN_SCOPE) {
-            tracing::warn!(
-                scope = ?claims.scope,
-                expected = EXPECTED_TOKEN_SCOPE,
-                "the MetalBear API key is not a serverless agent key, sessions-manager is \
-                 expected to reject the token it was exchanged for; check \
-                 {SESSIONS_MANAGER_API_KEY_ENV}"
-            );
-        }
-        let expires_at = SystemTime::UNIX_EPOCH + Duration::from_secs(claims.exp);
-
         let mut header = HeaderValue::try_from(format!("Bearer {token}")).map_err(|_| {
             SessionsManagerClientError::TokenExchange(
                 "token is not a valid header value".to_owned(),
@@ -202,48 +143,10 @@ impl CloudTokenCredentials {
         })?;
         header.set_sensitive(true);
 
-        tracing::debug!(
-            ?expires_at,
-            "obtained a sessions-manager token from the MetalBear cloud"
-        );
+        tracing::debug!("obtained a sessions-manager token from the MetalBear cloud");
 
-        Ok(CachedToken {
-            header,
-            // Saturating, so a token that is already inside the margin is simply never reused.
-            refresh_at: expires_at
-                .checked_sub(TOKEN_REFRESH_MARGIN)
-                .unwrap_or(SystemTime::UNIX_EPOCH),
-        })
+        Ok(header)
     }
-}
-
-/// Reads [`TokenClaims`] out of a JWT payload *without verifying the signature*.
-///
-/// The client holds no public key and could not verify one; authenticity comes from TLS to the
-/// MetalBear cloud. The claims are read only to decide when to ask for a new token and whether to
-/// warn about the key's scope, so a payload this client mis-trusts costs at most an ill-timed
-/// refresh or a spurious warning — every party that acts on the token verifies it properly.
-fn token_claims(token: &str) -> Result<TokenClaims, SessionsManagerClientError> {
-    let mut segments = token.split('.');
-    let (Some(_header), Some(payload), Some(_signature), None) = (
-        segments.next(),
-        segments.next(),
-        segments.next(),
-        segments.next(),
-    ) else {
-        return Err(SessionsManagerClientError::TokenExchange(
-            "token is not a JWT".to_owned(),
-        ));
-    };
-
-    let payload = BASE64_URL_SAFE_NO_PAD.decode(payload).map_err(|_| {
-        SessionsManagerClientError::TokenExchange(
-            "token payload is not base64url-encoded".to_owned(),
-        )
-    })?;
-    serde_json::from_slice(&payload).map_err(|_| {
-        SessionsManagerClientError::TokenExchange("token payload has no `exp` claim".to_owned())
-    })
 }
 
 impl CredentialProvider for CloudTokenCredentials {
@@ -252,7 +155,7 @@ impl CredentialProvider for CloudTokenCredentials {
     ) -> BoxFuture<'_, Result<HeaderMap, SessionsManagerClientError>> {
         async move {
             let mut headers = HeaderMap::new();
-            headers.insert(reqwest::header::AUTHORIZATION, self.authorization().await?);
+            headers.insert(reqwest::header::AUTHORIZATION, self.exchange().await?);
             Ok(headers)
         }
         .boxed()
@@ -272,7 +175,6 @@ pub(super) mod tests {
         collections::VecDeque,
         net::{Ipv4Addr, SocketAddr},
         sync::{Arc, Mutex as BlockingMutex},
-        time::UNIX_EPOCH,
     };
 
     use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
@@ -354,47 +256,9 @@ pub(super) mod tests {
         }
     }
 
-    /// A token whose payload carries the claims sessions-manager issues. Only `exp` is read by
-    /// the client, and the signature is never checked, so it needs no key.
-    pub(in crate::credentials) fn token(expires_in: Duration) -> Value {
-        token_with_scope(expires_in, Some(EXPECTED_TOKEN_SCOPE))
-    }
-
-    fn token_with_scope(expires_in: Duration, scope: Option<&str>) -> Value {
-        let exp = (SystemTime::now() + expires_in)
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let payload = BASE64_URL_SAFE_NO_PAD
-            .encode(json!({ "sub": "org-1", "scope": scope, "exp": exp }).to_string());
-
-        json!({ "token": format!("eyJhbGciOiJFUzI1NiJ9.{payload}.c2lnbmF0dXJl") })
-    }
-
-    /// The scope check only warns: a token of another scope, or of none, is still handed to
-    /// sessions-manager, which is the one that decides whether to accept it.
-    #[tokio::test]
-    async fn a_token_of_another_scope_is_still_used() {
-        let endpoint = TokenEndpoint::start([
-            (
-                StatusCode::OK,
-                token_with_scope(Duration::from_secs(600), Some("operator")),
-            ),
-            (
-                StatusCode::OK,
-                token_with_scope(Duration::from_secs(600), None),
-            ),
-        ])
-        .await;
-
-        for _ in 0..2 {
-            let headers = endpoint
-                .credentials()
-                .control_plane_headers()
-                .await
-                .unwrap();
-            assert!(headers.contains_key(reqwest::header::AUTHORIZATION));
-        }
+    /// A token endpoint response carrying `token`, which the client passes on without reading.
+    pub(in crate::credentials) fn token(token: &str) -> Value {
+        json!({ "token": token })
     }
 
     fn bearer(headers: &HeaderMap) -> &HeaderValue {
@@ -405,8 +269,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn exchanges_the_api_key_as_the_server_expects() {
-        let endpoint =
-            TokenEndpoint::start([(StatusCode::OK, token(Duration::from_secs(600)))]).await;
+        let endpoint = TokenEndpoint::start([(StatusCode::OK, token("abc"))]).await;
 
         let headers = endpoint
             .credentials()
@@ -418,43 +281,26 @@ pub(super) mod tests {
             endpoint.state.requests.lock().unwrap().as_slice(),
             [json!({ "apiKey": TEST_API_KEY })]
         );
-        assert!(
-            bearer(&headers).to_str().unwrap().starts_with("Bearer eyJ"),
-            "the token should be sent as a bearer credential"
-        );
+        assert_eq!(bearer(&headers), "Bearer abc");
     }
 
+    /// Whatever the token is, including something that is not a JWT, is sent as-is: judging it
+    /// is up to sessions-manager.
     #[tokio::test]
-    async fn a_fresh_token_is_fetched_once_and_reused() {
-        let endpoint =
-            TokenEndpoint::start([(StatusCode::OK, token(Duration::from_secs(600)))]).await;
+    async fn every_request_exchanges_a_fresh_opaque_token() {
+        let endpoint = TokenEndpoint::start([
+            (StatusCode::OK, token("first")),
+            (StatusCode::OK, token("not.a.jwt")),
+        ])
+        .await;
         let credentials = endpoint.credentials();
 
         let first = credentials.control_plane_headers().await.unwrap();
         let second = credentials.control_plane_headers().await.unwrap();
 
-        assert_eq!(endpoint.exchanges(), 1, "the cached token should be reused");
-        assert_eq!(bearer(&first), bearer(&second));
-    }
-
-    /// The first token expires inside [`TOKEN_REFRESH_MARGIN`], so it is replaced on the next
-    /// use — and the replacement, which is not, is then reused like any other fresh token.
-    #[tokio::test]
-    async fn a_token_near_expiry_triggers_exactly_one_refresh() {
-        let endpoint = TokenEndpoint::start([
-            (StatusCode::OK, token(TOKEN_REFRESH_MARGIN / 2)),
-            (StatusCode::OK, token(Duration::from_secs(600))),
-        ])
-        .await;
-        let credentials = endpoint.credentials();
-
-        let expiring = credentials.control_plane_headers().await.unwrap();
-        let refreshed = credentials.control_plane_headers().await.unwrap();
-        let reused = credentials.control_plane_headers().await.unwrap();
-
         assert_eq!(endpoint.exchanges(), 2);
-        assert_ne!(bearer(&expiring), bearer(&refreshed));
-        assert_eq!(bearer(&refreshed), bearer(&reused));
+        assert_eq!(bearer(&first), "Bearer first");
+        assert_eq!(bearer(&second), "Bearer not.a.jwt");
     }
 
     #[tokio::test]
@@ -505,15 +351,15 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn a_response_that_is_not_a_jwt_is_rejected() {
+    async fn a_response_without_a_token_is_rejected() {
         let endpoint =
-            TokenEndpoint::start([(StatusCode::OK, json!({ "token": "not-a-jwt" }))]).await;
+            TokenEndpoint::start([(StatusCode::OK, json!({ "error": "no token" }))]).await;
 
         let error = endpoint
             .credentials()
             .control_plane_headers()
             .await
-            .expect_err("a malformed token should fail the exchange");
+            .expect_err("a response without a token should fail the exchange");
 
         assert!(
             matches!(error, SessionsManagerClientError::TokenExchange(_)),
@@ -523,8 +369,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn the_bearer_token_is_marked_sensitive_so_it_stays_out_of_logs() {
-        let endpoint =
-            TokenEndpoint::start([(StatusCode::OK, token(Duration::from_secs(600)))]).await;
+        let endpoint = TokenEndpoint::start([(StatusCode::OK, token("abc"))]).await;
 
         let headers = endpoint
             .credentials()
