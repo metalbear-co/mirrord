@@ -1,4 +1,8 @@
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+    time::Duration,
+};
 
 use mirrord_intproxy_protocol::{
     IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
@@ -60,7 +64,7 @@ impl FailoverStrategy {
         }
     }
 
-    /// Tears down every process mirrord is loaded into.
+    /// Collects every process mirrord is loaded into for failover-entry termination.
     ///
     /// `mirrord exec` replaces the CLI with the user binary via `execv`, so once a session is
     /// running the intproxy is the only mirrord-controlled process left that observes the agent
@@ -70,9 +74,9 @@ impl FailoverStrategy {
     /// every connected process so the failure is loud and nothing lingers.
     ///
     /// See [`process_termination::terminate_processes`] for the per-platform termination.
-    async fn terminate_connected_processes(&self) {
+    fn connected_processes(&self) -> HashSet<i32> {
         if self.connected_layers.is_empty() {
-            return;
+            return HashSet::new();
         }
 
         let processes = self
@@ -88,8 +92,7 @@ impl FailoverStrategy {
              process, as every mirrord-hooked path in them is now broken.",
         );
 
-        let pids = processes.into_iter().map(|(pid, _)| pid).collect();
-        process_termination::terminate_processes(pids).await;
+        processes.into_iter().map(|(pid, _)| pid).collect()
     }
 
     pub async fn run(
@@ -98,16 +101,64 @@ impl FailoverStrategy {
         idle_timeout: Duration,
         shutdown: &CancellationToken,
     ) -> Result<(), ProxyStartupError> {
+        self.run_with_termination(
+            first_timeout,
+            idle_timeout,
+            shutdown,
+            process_termination::terminate_processes,
+        )
+        .await
+    }
+
+    async fn run_with_termination<Terminate, Termination>(
+        self,
+        first_timeout: Duration,
+        idle_timeout: Duration,
+        shutdown: &CancellationToken,
+        mut terminate_processes: Terminate,
+    ) -> Result<(), ProxyStartupError>
+    where
+        Terminate: FnMut(HashSet<i32>) -> Termination,
+        Termination: Future<Output = ()>,
+    {
         let mut failover = self;
 
         while let Some((layer_id, message_id)) = failover.pending_layers.pop() {
             failover.send_error_to_layer(layer_id, message_id).await;
         }
 
-        failover.terminate_connected_processes().await;
+        // Cancellation must not restart an inherited PID's fixed TERM/KILL sequence: apart from
+        // adding a second grace period, a reused numeric PID could then target another process.
+        let mut terminated_pids = HashSet::new();
+        if !shutdown.is_cancelled() {
+            let inherited_pids = failover.connected_processes();
+            if !inherited_pids.is_empty() {
+                terminate_processes(inherited_pids.clone()).await;
+                terminated_pids.extend(inherited_pids);
+            }
+        }
 
+        let mut shutdown_error = None;
         loop {
             tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => {
+                    let mut shutdown_layers = quiesce_and_collect_layers(
+                        &mut failover.background_tasks,
+                        &mut failover.layer_initializer,
+                        &failover.connected_layers,
+                    )
+                    .await;
+                    shutdown_layers
+                        .pids
+                        .retain(|pid| !terminated_pids.contains(pid));
+                    if !shutdown_layers.pids.is_empty() {
+                        terminate_processes(shutdown_layers.pids.clone()).await;
+                    }
+                    shutdown_error = shutdown_layers.error.take();
+                    std::mem::drop(shutdown_layers);
+                    break;
+                },
                 Some((task_id, task_update)) = failover.background_tasks.next() => {
                     tracing::trace!(
                         %task_id,
@@ -121,17 +172,6 @@ impl FailoverStrategy {
                 },
                 _ = time::sleep(idle_timeout), if failover.any_connection_accepted && !failover.has_layer_connections() => {
                     tracing::info!("Reached the idle timeout with no active layer connections");
-                    break;
-                },
-                _ = shutdown.cancelled() => {
-                    let shutdown_layers = quiesce_and_collect_layers(
-                        &mut failover.background_tasks,
-                        &mut failover.layer_initializer,
-                        &failover.connected_layers,
-                    )
-                    .await;
-                    process_termination::terminate_processes(shutdown_layers.pids.clone()).await;
-                    std::mem::drop(shutdown_layers);
                     break;
                 },
             }
@@ -151,7 +191,10 @@ impl FailoverStrategy {
             );
         }
 
-        Ok(())
+        match shutdown_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     async fn handle_task_update(
@@ -159,6 +202,10 @@ impl FailoverStrategy {
         task_id: MainTaskId,
         update: TaskUpdate<ProxyMessage, ProxyRuntimeError>,
     ) {
+        if task_id == MainTaskId::LayerInitializer && matches!(&update, TaskUpdate::Finished(_)) {
+            self.layer_initializer.finished = true;
+        }
+
         match (task_id, update) {
             (MainTaskId::LayerConnection(LayerId(id)), TaskUpdate::Finished(result)) => {
                 match result {
@@ -248,5 +295,332 @@ impl FailoverStrategy {
                 );
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::{
+        collections::HashSet,
+        net::SocketAddr,
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+
+    use futures::{SinkExt, StreamExt};
+    use mirrord_config::{config::MirrordConfig, experimental::ExperimentalFileConfig};
+    use mirrord_intproxy_protocol::{
+        LayerId, LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo,
+        ProxyToLayerMessage,
+    };
+    use mirrord_protocol_io::Connection;
+    use nix::sys::signal::Signal;
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        sync::{Notify, watch},
+    };
+    use tokio_util::sync::CancellationToken;
+
+    use super::FailoverStrategy;
+    use crate::{
+        IntProxy, IntProxyIntervals,
+        agent_conn::{AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow},
+        error::ProxyRuntimeError,
+        layer_initializer::RegistrationGateControl,
+        session_monitor::{MonitorTx, chaos::ChaosWatcherRx},
+    };
+
+    const INHERITED_PID: i32 = 101;
+    const QUEUED_PID: i32 = 202;
+
+    async fn make_failover(
+        inherited_pids: impl IntoIterator<Item = i32>,
+    ) -> (FailoverStrategy, SocketAddr, RegistrationGateControl) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_addr = listener.local_addr().unwrap();
+        let (connection, _proxy_tx, _proxy_rx) = Connection::dummy();
+        let agent_conn = AgentConnection {
+            connection,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+        };
+        let (_, chaos_rx) = watch::channel(Default::default());
+        let mut proxy = IntProxy::new_with_connection(
+            agent_conn,
+            listener,
+            4096,
+            Default::default(),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
+            MonitorTx::disabled(),
+            ChaosWatcherRx::new(chaos_rx),
+        );
+
+        for (index, pid) in inherited_pids.into_iter().enumerate() {
+            proxy.connected_layers.insert(
+                LayerId(index as u64),
+                ProcessInfo {
+                    pid,
+                    parent_pid: 1,
+                    name: format!("inherited-{pid}"),
+                    cmdline: Vec::new(),
+                    loaded: true,
+                },
+            );
+        }
+
+        let registration_gate = proxy
+            .task_txs
+            .layer_initializer
+            .shutdown
+            .registration_gate();
+        let failover = FailoverStrategy::from_failed_proxy(
+            proxy,
+            ProxyRuntimeError::AgentFailed("test failure".to_owned()),
+        );
+
+        (failover, proxy_addr, registration_gate)
+    }
+
+    fn record_signals(pids: &HashSet<i32>, signal: Signal, signals: &Mutex<Vec<(i32, Signal)>>) {
+        signals
+            .lock()
+            .unwrap()
+            .extend(pids.iter().map(|pid| (*pid, signal)));
+    }
+
+    fn assert_one_signal_pair(signals: &[(i32, Signal)], pid: i32) {
+        assert_eq!(
+            signals
+                .iter()
+                .filter(|event| **event == (pid, Signal::SIGTERM))
+                .count(),
+            1,
+        );
+        assert_eq!(
+            signals
+                .iter()
+                .filter(|event| **event == (pid, Signal::SIGKILL))
+                .count(),
+            1,
+        );
+    }
+
+    /// Cancellation already visible at failover entry uses the quiesced shutdown path once rather
+    /// than first terminating the inherited set and then targeting it again.
+    #[tokio::test]
+    async fn shutdown_terminates_registered_layer_outside_process_group_failover_pre_cancelled_once()
+     {
+        let (failover, _proxy_addr, _registration_gate) = make_failover([INHERITED_PID]).await;
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        let invocations = Arc::new(Mutex::new(Vec::new()));
+        let signals = Arc::new(Mutex::new(Vec::new()));
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            failover.run_with_termination(
+                Duration::from_secs(60),
+                Duration::from_secs(60),
+                &shutdown,
+                {
+                    let invocations = invocations.clone();
+                    let signals = signals.clone();
+                    move |pids| {
+                        let invocations = invocations.clone();
+                        let signals = signals.clone();
+                        async move {
+                            invocations.lock().unwrap().push(pids.clone());
+                            record_signals(&pids, Signal::SIGTERM, &signals);
+                            record_signals(&pids, Signal::SIGKILL, &signals);
+                        }
+                    }
+                },
+            ),
+        )
+        .await
+        .expect("pre-cancelled failover did not shut down")
+        .unwrap();
+
+        let invocations = invocations.lock().unwrap();
+        assert_eq!(&*invocations, &[HashSet::from([INHERITED_PID])]);
+        assert!(invocations.iter().all(|pids| !pids.is_empty()));
+        let signals = signals.lock().unwrap();
+        assert_one_signal_pair(&signals, INHERITED_PID);
+        assert_eq!(signals.len(), 2);
+    }
+
+    /// Cancellation wins over an already-ready failover timeout and retains a decoded
+    /// registration whose producer is gated until quiescing has started.
+    #[tokio::test]
+    async fn shutdown_terminates_registered_layer_outside_process_group_failover_ready_timeout_registration_race()
+     {
+        let (failover, proxy_addr, registration_gate) = make_failover([]).await;
+        registration_gate.pause();
+        let conn = TcpStream::connect(proxy_addr).await.unwrap();
+        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+            LocalMessage<LayerToProxyMessage>,
+            LocalMessage<ProxyToLayerMessage>,
+        >(conn);
+        encoder
+            .send(LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                    process_info: ProcessInfo {
+                        pid: QUEUED_PID,
+                        parent_pid: 1,
+                        name: "ready-timeout-layer".to_owned(),
+                        cmdline: Vec::new(),
+                        loaded: true,
+                    },
+                    parent_layer: None,
+                }),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            decoder.next().await.unwrap().unwrap(),
+            LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::NewSession(_),
+            }
+        ));
+        registration_gate.wait_until_reached().await;
+
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        let invocations = Arc::new(Mutex::new(Vec::new()));
+        let failover_handle = tokio::spawn({
+            let invocations = invocations.clone();
+            async move {
+                failover
+                    .run_with_termination(Duration::ZERO, Duration::ZERO, &shutdown, move |pids| {
+                        let invocations = invocations.clone();
+                        async move {
+                            invocations.lock().unwrap().push(pids);
+                        }
+                    })
+                    .await
+            }
+        });
+        registration_gate.wait_for_shutdown_request().await;
+        registration_gate.release();
+
+        tokio::time::timeout(Duration::from_secs(5), failover_handle)
+            .await
+            .expect("ready timeout bypassed failover quiescing")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            invocations.lock().unwrap().as_slice(),
+            &[HashSet::from([QUEUED_PID])]
+        );
+
+        std::mem::drop((encoder, decoder));
+    }
+
+    /// A registration queued while the inherited set is in its fixed termination sequence is
+    /// drained after cancellation, and the two disjoint sets are each signalled exactly once.
+    #[tokio::test]
+    async fn shutdown_terminates_registered_layer_outside_process_group_failover_queued_registration_once()
+     {
+        let (failover, proxy_addr, registration_gate) = make_failover([INHERITED_PID]).await;
+        registration_gate.pause();
+        let shutdown = CancellationToken::new();
+        let invocations = Arc::new(Mutex::new(Vec::new()));
+        let signals = Arc::new(Mutex::new(Vec::new()));
+        let inherited_term_sent = Arc::new(Notify::new());
+        let finish_inherited_grace = Arc::new(Notify::new());
+
+        let failover_handle = tokio::spawn({
+            let shutdown = shutdown.clone();
+            let invocations = invocations.clone();
+            let signals = signals.clone();
+            let inherited_term_sent = inherited_term_sent.clone();
+            let finish_inherited_grace = finish_inherited_grace.clone();
+            async move {
+                failover
+                    .run_with_termination(
+                        Duration::from_secs(60),
+                        Duration::from_secs(60),
+                        &shutdown,
+                        move |pids| {
+                            let invocations = invocations.clone();
+                            let signals = signals.clone();
+                            let inherited_term_sent = inherited_term_sent.clone();
+                            let finish_inherited_grace = finish_inherited_grace.clone();
+                            async move {
+                                invocations.lock().unwrap().push(pids.clone());
+                                record_signals(&pids, Signal::SIGTERM, &signals);
+                                if pids.contains(&INHERITED_PID) {
+                                    inherited_term_sent.notify_one();
+                                    finish_inherited_grace.notified().await;
+                                }
+                                record_signals(&pids, Signal::SIGKILL, &signals);
+                            }
+                        },
+                    )
+                    .await
+            }
+        });
+
+        inherited_term_sent.notified().await;
+        let conn = TcpStream::connect(proxy_addr).await.unwrap();
+        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+            LocalMessage<LayerToProxyMessage>,
+            LocalMessage<ProxyToLayerMessage>,
+        >(conn);
+        encoder
+            .send(LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                    process_info: ProcessInfo {
+                        pid: QUEUED_PID,
+                        parent_pid: 1,
+                        name: "queued-layer".to_owned(),
+                        cmdline: Vec::new(),
+                        loaded: true,
+                    },
+                    parent_layer: None,
+                }),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            decoder.next().await.unwrap().unwrap(),
+            LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::NewSession(_),
+            }
+        ));
+        registration_gate.wait_until_reached().await;
+
+        shutdown.cancel();
+        finish_inherited_grace.notify_one();
+        registration_gate.wait_for_shutdown_request().await;
+        registration_gate.release();
+
+        tokio::time::timeout(Duration::from_secs(5), failover_handle)
+            .await
+            .expect("failover did not finish after draining the queued registration")
+            .unwrap()
+            .unwrap();
+
+        let invocations = invocations.lock().unwrap();
+        assert_eq!(
+            invocations.as_slice(),
+            &[HashSet::from([INHERITED_PID]), HashSet::from([QUEUED_PID]),]
+        );
+        assert!(invocations.iter().all(|pids| !pids.is_empty()));
+        let signals = signals.lock().unwrap();
+        assert_one_signal_pair(&signals, INHERITED_PID);
+        assert_one_signal_pair(&signals, QUEUED_PID);
+        assert_eq!(signals.len(), 4);
+
+        std::mem::drop((encoder, decoder));
     }
 }

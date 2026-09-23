@@ -57,8 +57,8 @@ impl LayerInitializerShutdown {
         self.request.cancel();
     }
 
-    pub(crate) async fn quiesced(&mut self) {
-        let _ = (&mut self.quiesced).await;
+    pub(crate) async fn quiesced(&mut self) -> Result<(), oneshot::error::RecvError> {
+        (&mut self.quiesced).await
     }
 
     #[cfg(test)]

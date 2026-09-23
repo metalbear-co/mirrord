@@ -1116,13 +1116,14 @@ fn main() -> miette::Result<()> {
                 ..
             } => {
                 let config = mirrord_config::util::read_resolved_config()?;
+                let shutdown_handler = internal_proxy::install_ci_shutdown_handler(mirrord_for_ci)?;
 
                 if mirrord_for_ci {
-                    MirrordCi::prepare_intproxy().await?;
+                    MirrordCi::prepare_intproxy(&shutdown_handler).await?;
                 }
 
                 logging::init_intproxy_tracing_registry(&config).await?;
-                internal_proxy::proxy(config, port, watch, &user_data).await?
+                internal_proxy::proxy(config, port, watch, &user_data, shutdown_handler).await?
             }
             #[cfg(windows)]
             Commands::CrashMonitor { port, root_pid, .. } => {

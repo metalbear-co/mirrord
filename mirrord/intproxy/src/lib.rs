@@ -107,6 +107,7 @@ fn file_request_path(req: &FileRequest) -> Option<String> {
 pub(crate) struct LayerInitializerTask {
     _sender: TaskSender<LayerInitializer>,
     shutdown: LayerInitializerShutdown,
+    finished: bool,
 }
 
 struct TaskTxs {
@@ -166,22 +167,37 @@ pub struct IntProxyIntervals {
 
 pub(crate) struct ShutdownLayers {
     pub(crate) pids: HashSet<i32>,
+    pub(crate) error: Option<ProxyStartupError>,
     _accepted_layers: Vec<NewLayer>,
 }
 
 fn collect_shutdown_update(
     update: (MainTaskId, TaskUpdate<ProxyMessage, ProxyRuntimeError>),
     shutdown_layers: &mut ShutdownLayers,
-) {
+) -> bool {
     match update {
         (_, TaskUpdate::Message(ProxyMessage::NewLayer(layer))) => {
             shutdown_layers.pids.insert(layer.process_info.pid);
             shutdown_layers._accepted_layers.push(layer);
+            false
+        }
+        (MainTaskId::LayerInitializer, TaskUpdate::Finished(result)) => {
+            tracing::trace!(
+                ?result,
+                "Layer initializer finished while acceptance was quiescing"
+            );
+            if let Err(error) = result {
+                shutdown_layers.error = Some(ProxyStartupError::LayerInitializerQuiescing(
+                    Box::new(error),
+                ));
+            }
+            true
         }
         (task_id, TaskUpdate::Finished(result)) => {
             tracing::trace!(%task_id, ?result, "Task finished while layer acceptance was quiescing");
+            false
         }
-        (_, TaskUpdate::Message(_)) => {}
+        (_, TaskUpdate::Message(_)) => false,
     }
 }
 
@@ -198,27 +214,43 @@ pub(crate) async fn quiesce_and_collect_layers(
 ) -> ShutdownLayers {
     let mut shutdown_layers = ShutdownLayers {
         pids: connected_layers.values().map(|info| info.pid).collect(),
+        error: None,
         _accepted_layers: Vec::new(),
     };
     let mut tasks_open = true;
+    let mut initializer_finished = layer_initializer.finished;
+    let mut quiesced = None;
 
     layer_initializer.shutdown.request();
     background_tasks.resume_messages(MainTaskId::LayerInitializer);
 
-    loop {
+    while quiesced.is_none() || !initializer_finished {
         tokio::select! {
-            () = layer_initializer.shutdown.quiesced() => break,
-            update = background_tasks.next(), if tasks_open => {
+            biased;
+            result = layer_initializer.shutdown.quiesced(), if quiesced.is_none() => {
+                quiesced = Some(result);
+            }
+            update = background_tasks.next(), if tasks_open && !initializer_finished => {
                 match update {
-                    Some(update) => collect_shutdown_update(update, &mut shutdown_layers),
-                    None => tasks_open = false,
+                    Some(update) => {
+                        initializer_finished = collect_shutdown_update(update, &mut shutdown_layers);
+                        layer_initializer.finished |= initializer_finished;
+                    }
+                    None => {
+                        tasks_open = false;
+                        initializer_finished = true;
+                    }
                 }
             }
         }
     }
 
     while let Some(Some(update)) = background_tasks.next().now_or_never() {
-        collect_shutdown_update(update, &mut shutdown_layers);
+        layer_initializer.finished |= collect_shutdown_update(update, &mut shutdown_layers);
+    }
+
+    if matches!(quiesced, Some(Err(_))) && shutdown_layers.error.is_none() {
+        shutdown_layers.error = Some(ProxyStartupError::LayerInitializerQuiescenceClosed);
     }
 
     shutdown_layers
@@ -330,6 +362,7 @@ impl IntProxy {
                 layer_initializer: LayerInitializerTask {
                     _sender: layer_initializer,
                     shutdown: layer_initializer_shutdown,
+                    finished: false,
                 },
                 agent,
                 simple,
@@ -414,15 +447,40 @@ impl IntProxy {
             .await;
 
         let mut proxy = self;
+        let mut shutdown_error = None;
 
         loop {
             tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => {
+                    let mut shutdown_layers = quiesce_and_collect_layers(
+                        &mut proxy.background_tasks,
+                        &mut proxy.task_txs.layer_initializer,
+                        &proxy.connected_layers,
+                    )
+                    .await;
+                    tracing::info!(
+                        pids = ?shutdown_layers.pids,
+                        "Shutdown requested. Terminating every injected process before closing \
+                         its layer connection.",
+                    );
+                    process_termination::terminate_processes(shutdown_layers.pids.clone()).await;
+                    shutdown_error = shutdown_layers.error.take();
+                    std::mem::drop(shutdown_layers);
+                    break;
+                },
+
                 Some((task_id, task_update)) = proxy.background_tasks.next() => {
                     tracing::trace!(
                         %task_id,
                         ?task_update,
                         "Received a task update",
                     );
+                    if task_id == MainTaskId::LayerInitializer
+                        && matches!(&task_update, TaskUpdate::Finished(_))
+                    {
+                        proxy.task_txs.layer_initializer.finished = true;
+                    }
                     if let Err(error) = proxy.handle_task_update(task_id, task_update).await {
                         tracing::error!(%error, "Proxy encountered a critical error, and is entering the failover state...");
                         return ControlFlow::Continue(FailoverStrategy::from_failed_proxy(proxy, error));
@@ -451,23 +509,6 @@ impl IntProxy {
                     tracing::info!("Reached the idle timeout with no active layer connections");
                     break;
                 },
-
-                _ = shutdown.cancelled() => {
-                    let shutdown_layers = quiesce_and_collect_layers(
-                        &mut proxy.background_tasks,
-                        &mut proxy.task_txs.layer_initializer,
-                        &proxy.connected_layers,
-                    )
-                    .await;
-                    tracing::info!(
-                        pids = ?shutdown_layers.pids,
-                        "Shutdown requested. Terminating every injected process before closing \
-                         its layer connection.",
-                    );
-                    process_termination::terminate_processes(shutdown_layers.pids.clone()).await;
-                    std::mem::drop(shutdown_layers);
-                    break;
-                },
             }
         }
 
@@ -484,7 +525,10 @@ impl IntProxy {
             );
         }
 
-        ControlFlow::Break(Ok(()))
+        ControlFlow::Break(match shutdown_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        })
     }
 
     /// Routes a [`ProxyMessage`] to the correct background task.
@@ -1388,8 +1432,8 @@ mod test {
         std::mem::drop((encoder, decoder));
     }
 
-    /// A registration decoded before quiescing remains a shutdown target even when its producer
-    /// cannot enqueue the registration until after cancellation has started.
+    /// Cancellation wins over an already-ready first-connection timeout and retains a decoded
+    /// registration whose producer is gated until quiescing has started.
     #[cfg(unix)]
     #[tokio::test]
     async fn shutdown_terminates_registered_layer_outside_process_group_registration_race() {
@@ -1428,23 +1472,6 @@ mod test {
 
         let mut child = Command::new("sleep").arg("30").spawn().unwrap();
         let child_pid = i32::try_from(child.id()).unwrap();
-        let shutdown = CancellationToken::new();
-        let proxy_handle = tokio::spawn(proxy.run_with_shutdown(
-            Duration::from_secs(60),
-            Duration::from_secs(60),
-            shutdown.clone(),
-        ));
-        assert!(matches!(
-            proxy_rx.next().await.unwrap(),
-            ClientMessage::SwitchProtocolVersion(_)
-        ));
-        proxy_tx
-            .send(DaemonMessage::SwitchProtocolVersionResponse(
-                mirrord_protocol::VERSION.clone(),
-            ))
-            .await
-            .unwrap();
-
         let conn = TcpStream::connect(proxy_addr).await.unwrap();
         let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
             LocalMessage<LayerToProxyMessage>,
@@ -1475,7 +1502,20 @@ mod test {
         ));
         registration_gate.wait_until_reached().await;
 
+        let shutdown = CancellationToken::new();
         shutdown.cancel();
+        let proxy_handle =
+            tokio::spawn(proxy.run_with_shutdown(Duration::ZERO, Duration::ZERO, shutdown.clone()));
+        assert!(matches!(
+            proxy_rx.next().await.unwrap(),
+            ClientMessage::SwitchProtocolVersion(_)
+        ));
+        proxy_tx
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
         registration_gate.wait_for_shutdown_request().await;
         registration_gate.release();
         tokio::time::timeout(Duration::from_secs(5), proxy_handle)
@@ -1497,6 +1537,127 @@ mod test {
         assert!(!status.success());
 
         std::mem::drop((encoder, decoder));
+    }
+
+    /// An initializer failure discovered during quiescing is reported only after every decoded
+    /// registration has completed its termination sequence.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shutdown_returns_quiescing_initializer_error_after_process_termination() {
+        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+            .await
+            .unwrap();
+        let proxy_addr = listener.local_addr().unwrap();
+        let (connection, _proxy_tx, proxy_rx) = Connection::dummy();
+        let agent_conn = AgentConnection {
+            connection,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+        };
+        let (_, chaos_rx) = watch::channel(Default::default());
+        let proxy = IntProxy::new_with_connection(
+            agent_conn,
+            listener,
+            4096,
+            Default::default(),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
+            MonitorTx::disabled(),
+            ChaosWatcherRx::new(chaos_rx),
+        );
+        let registration_gate = proxy
+            .task_txs
+            .layer_initializer
+            .shutdown
+            .registration_gate();
+        registration_gate.pause();
+
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let child_pid = i32::try_from(child.id()).unwrap();
+        let conn = TcpStream::connect(proxy_addr).await.unwrap();
+        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+            LocalMessage<LayerToProxyMessage>,
+            LocalMessage<ProxyToLayerMessage>,
+        >(conn);
+        encoder
+            .send(LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                    process_info: ProcessInfo {
+                        pid: child_pid,
+                        parent_pid: i32::try_from(std::process::id()).unwrap(),
+                        name: "quiescing-error-layer".to_owned(),
+                        cmdline: vec!["sleep".to_owned(), "30".to_owned()],
+                        loaded: true,
+                    },
+                    parent_layer: None,
+                }),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            decoder.next().await.unwrap().unwrap(),
+            LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::NewSession(_),
+            }
+        ));
+        registration_gate.wait_until_reached().await;
+
+        let invalid_conn = TcpStream::connect(proxy_addr).await.unwrap();
+        let (mut invalid_encoder, _invalid_decoder) =
+            mirrord_intproxy_protocol::codec::make_async_framed::<
+                LocalMessage<LayerToProxyMessage>,
+                LocalMessage<ProxyToLayerMessage>,
+            >(invalid_conn);
+        invalid_encoder
+            .send(LocalMessage {
+                message_id: 1,
+                inner: LayerToProxyMessage::File(FileRequest::StatFsV2(StatFsRequestV2 {
+                    path: PathBuf::from("/unexpected-before-registration"),
+                })),
+            })
+            .await
+            .unwrap();
+        registration_gate.wait_for_shutdown_request().await;
+
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        let proxy_handle =
+            tokio::spawn(proxy.run_with_shutdown(Duration::ZERO, Duration::ZERO, shutdown));
+        assert!(matches!(
+            proxy_rx.next().await.unwrap(),
+            ClientMessage::SwitchProtocolVersion(_)
+        ));
+        registration_gate.release();
+
+        let result = tokio::time::timeout(Duration::from_secs(5), proxy_handle)
+            .await
+            .expect("intproxy did not finish quiescing after the initializer failure")
+            .unwrap();
+        assert!(matches!(
+            result,
+            Err(crate::error::ProxyStartupError::LayerInitializerQuiescing(
+                _
+            ))
+        ));
+        let status = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break status;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("registered process survived the quiescing error cleanup");
+        assert!(!status.success());
+
+        std::mem::drop((encoder, decoder, invalid_encoder));
     }
 
     struct ReconnectTestSetup {

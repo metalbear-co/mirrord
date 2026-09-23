@@ -43,7 +43,9 @@ use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use mirrord_session_monitor_protocol::SessionInfo;
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
-use tokio::{net::TcpListener, sync::RwLock};
+#[cfg(unix)]
+use tokio::signal::unix::{SignalKind, signal};
+use tokio::{net::TcpListener, sync::RwLock, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{Level, warn};
 
@@ -111,6 +113,54 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
     let addr = listener.local_addr()?;
     println!("{addr}\n");
     Ok(())
+}
+
+/// Owns the CI-only signal bridge for the lifetime of the internal proxy setup and run.
+pub(crate) struct IntProxyShutdown {
+    token: CancellationToken,
+    signal_task: Option<JoinHandle<()>>,
+}
+
+impl IntProxyShutdown {
+    fn token(&self) -> CancellationToken {
+        self.token.clone()
+    }
+}
+
+impl Drop for IntProxyShutdown {
+    fn drop(&mut self) {
+        if let Some(signal_task) = self.signal_task.take() {
+            signal_task.abort();
+        }
+    }
+}
+
+/// Installs the signal handler before the CI intproxy pid becomes discoverable by `mirrord ci
+/// stop`. The returned owner also removes the receiver task on every natural or setup-error exit.
+pub(crate) fn install_ci_shutdown_handler(
+    mirrord_for_ci: bool,
+) -> Result<IntProxyShutdown, InternalProxyError> {
+    let token = CancellationToken::new();
+    #[cfg(unix)]
+    let signal_task = if mirrord_for_ci {
+        let mut sigterm =
+            signal(SignalKind::terminate()).map_err(InternalProxyError::SignalHandler)?;
+        let shutdown = token.clone();
+        Some(tokio::spawn(async move {
+            if sigterm.recv().await.is_some() {
+                shutdown.cancel();
+            }
+        }))
+    } else {
+        None
+    };
+    #[cfg(not(unix))]
+    let signal_task = {
+        let _ = mirrord_for_ci;
+        None
+    };
+
+    Ok(IntProxyShutdown { token, signal_task })
 }
 
 /// Starts the session monitor API server if enabled.
@@ -219,6 +269,7 @@ pub(crate) async fn proxy(
     listen_port: u16,
     watch: drain::Watch,
     user_data: &UserData,
+    shutdown_handler: IntProxyShutdown,
 ) -> Result<(), InternalProxyError> {
     tracing::info!(
         ?config,
@@ -334,6 +385,7 @@ pub(crate) async fn proxy(
     // Let it assign address for us then print it for the user.
     let listener = create_listen_socket(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_port))
         .map_err(InternalProxyError::ListenerSetup)?;
+    let shutdown = shutdown_handler.token();
     print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
     #[cfg(not(target_os = "windows"))]
@@ -366,7 +418,11 @@ pub(crate) async fn proxy(
         monitor_tx,
         chaos_rx,
     )
-    .run(first_connection_timeout, consecutive_connection_timeout)
+    .run_with_shutdown(
+        first_connection_timeout,
+        consecutive_connection_timeout,
+        shutdown,
+    )
     .await
     .map_err(From::from);
 
