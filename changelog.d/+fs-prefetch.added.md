@@ -1,0 +1,1 @@
+Added `feature.fs.prefetch`, a list of remote paths that mirrord copies into a local temporary directory before the process starts, so that operations on those paths are served locally instead of going through the agent. Writes land in the copy and are not sent to the target.
