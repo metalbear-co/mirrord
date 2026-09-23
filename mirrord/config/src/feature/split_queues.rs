@@ -141,7 +141,7 @@ impl QueueKind {
 /// and RabbitMQ headers, Pub/Sub attributes, Service Bus application properties, Temporal task
 /// metadata, top-level JSON fields for Redis Pub/Sub and BullMQ) rendered as
 /// `<name>: <value>`, the same way the HTTP filter sees headers. The message matches when any
-/// attribute line matches, so one regex can target an attribute by name (`^tenant: acme$`) or
+/// attribute line matches, so one regex can target an attribute by name (`^tenant: blue$`) or
 /// a value wherever it appears (`.*mirrord-session={{ key }}.*`). Matching is case sensitive.
 ///
 /// Use `filter` **or** the older `message_filter`, not both. `message_filter` is a map from an
@@ -155,7 +155,7 @@ impl QueueKind {
 ///       {
 ///         "queue_id": "*",
 ///         "queue_type": "SQS",
-///         "filter": { "metadata": "^tenant: acme-.*$" }
+///         "filter": { "metadata": "^tenant: blue-.*$" }
 ///       },
 ///       {
 ///         "queue_id": "*",
@@ -180,10 +180,16 @@ pub enum MessageFilterConfig {
     Metadata { metadata: String },
 
     /// The message must match every filter in the list. Cannot be empty.
-    AllOf { all_of: Vec<InnerMessageFilter> },
+    AllOf {
+        #[schemars(length(min = 1))]
+        all_of: Vec<InnerMessageFilter>,
+    },
 
     /// The message must match at least one filter in the list. Cannot be empty.
-    AnyOf { any_of: Vec<InnerMessageFilter> },
+    AnyOf {
+        #[schemars(length(min = 1))]
+        any_of: Vec<InnerMessageFilter>,
+    },
 }
 
 /// One filter inside `all_of` / `any_of`. Only `metadata` regexes for now; the list form leaves
@@ -1103,7 +1109,7 @@ mod test {
             {
                 "queue_id": "*",
                 "queue_type": "SQS",
-                "filter": { "metadata": "^tenant: acme-.*$" }
+                "filter": { "metadata": "^tenant: blue-.*$" }
             },
             {
                 "queue_id": "*",
@@ -1122,7 +1128,7 @@ mod test {
         assert!(config.uses_composed_filters());
         assert_eq!(
             config.splits().first().and_then(|s| s.filter.clone()),
-            Some(metadata("^tenant: acme-.*$"))
+            Some(metadata("^tenant: blue-.*$"))
         );
         assert_eq!(
             config.splits().get(1).and_then(|s| s.filter.clone()),
@@ -1153,8 +1159,8 @@ mod test {
     #[test]
     fn verify_rejects_both_filter_shapes_on_one_entry() {
         let config = SplitQueuesConfig::from_splits([QueueSplit {
-            message_filter: message_filter(&[("tenant", "^acme$")]),
-            filter: Some(metadata("^tenant: acme$")),
+            message_filter: message_filter(&[("tenant", "^blue$")]),
+            filter: Some(metadata("^tenant: blue$")),
             ..QueueSplit::new("orders", QueueKind::Sqs)
         }]);
 
@@ -1190,14 +1196,14 @@ mod test {
     #[test]
     fn verify_rejects_invalid_regex_in_either_shape() {
         let composed = SplitQueuesConfig::from_splits([QueueSplit {
-            filter: Some(metadata("^tenant: (acme$")),
+            filter: Some(metadata("^tenant: (blue$")),
             ..QueueSplit::new("orders", QueueKind::Sqs)
         }]);
         let error = verify(&composed).unwrap_err().to_string();
         assert!(error.contains("orders.filter.metadata"), "{error}");
 
         let legacy = SplitQueuesConfig::from_splits([QueueSplit {
-            message_filter: message_filter(&[("tenant", "(acme")]),
+            message_filter: message_filter(&[("tenant", "(blue")]),
             ..QueueSplit::new("orders", QueueKind::Sqs)
         }]);
         let error = verify(&legacy).unwrap_err().to_string();
@@ -1425,7 +1431,7 @@ mod test {
         let value = serde_json::json!({
             "orders": {
                 "queue_type": "SQS",
-                "message_filter": { "tenant": "^acme$" },
+                "message_filter": { "tenant": "^blue$" },
                 "jq_filter": ".Body | fromjson | .x == 1"
             },
             "events": {

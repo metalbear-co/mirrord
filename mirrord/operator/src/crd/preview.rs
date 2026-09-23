@@ -30,7 +30,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::crd::queue_filter::{MessageFilter, message_filter_crd_schema};
+use crate::crd::queue_filter::{MessageFilter, QueueType, message_filter_crd_schema};
 
 pub mod view;
 use uuid::Uuid;
@@ -509,6 +509,10 @@ impl PreviewIncomingConfig {
 
 #[cfg(test)]
 mod tests {
+    use mirrord_config::feature::split_queues::{
+        MessageFilterConfig, QueueKind, QueueSplit, SplitQueuesConfig,
+    };
+
     use super::*;
 
     /// Legacy entries keep riding the per-broker maps older operators read; composed entries go
@@ -516,10 +520,6 @@ mod tests {
     /// of a composed one.
     #[test]
     fn composed_split_queues_go_to_the_queues_list_only() {
-        use mirrord_config::feature::split_queues::{
-            MessageFilterConfig, QueueKind, QueueSplit, SplitQueuesConfig,
-        };
-
         let config = SplitQueuesConfig::from_splits([
             QueueSplit {
                 message_filter: Some([("client".to_owned(), "^a$".to_owned())].into()),
@@ -551,7 +551,7 @@ mod tests {
             preview.queues,
             vec![PreviewSplitQueue {
                 queue_id: "composed".to_owned(),
-                queue_type: QueueKind::Kafka,
+                queue_type: QueueType::Kafka,
                 filter: MessageFilter::Metadata {
                     pattern: "^client: b$".to_owned()
                 },
@@ -777,10 +777,12 @@ pub struct PreviewQueueSplittingConfig {
 
     /// Queues requested with the composable `filter` shape, for every broker.
     ///
-    /// The per-broker maps above are the legacy wire: they can only carry the `message_filter`
-    /// map and a map collapses duplicate ids, so composed filters go here as a list. Entries in
-    /// this list never repeat in the maps. Older operators ignore this field, which the CLI
-    /// prevents by requiring `QueueSplittingWithComposedFilters` first.
+    /// Wire invariant: an operator that predates this field reads only the per-broker
+    /// `<broker>QueueFilters` maps (and `kafkaQueueJqFilters`), which can carry nothing but the
+    /// `message_filter` map and collapse duplicate ids. So a legacy entry lives in its broker's
+    /// map and nowhere else, and a composed entry lives in this list and nowhere else. The CLI
+    /// refuses to create a session with this field against an operator that does not advertise
+    /// `QueueSplittingWithComposedFilters`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queues: Vec<PreviewSplitQueue>,
 }
@@ -791,9 +793,8 @@ pub struct PreviewQueueSplittingConfig {
 pub struct PreviewSplitQueue {
     /// Queue id from the user's config, `*` for every queue of the broker.
     pub queue_id: QueueId,
-    /// The broker, using the config's own names (`SQS`, `Kafka`, ...). Those names are the
-    /// public config contract, so they are as stable as any CRD enum.
-    pub queue_type: QueueKind,
+    /// The broker, in the wire's own enum (the config's `queue_type` names).
+    pub queue_type: QueueType,
     /// The composed filter tree.
     #[schemars(schema_with = "message_filter_crd_schema")]
     pub filter: MessageFilter,
@@ -835,7 +836,7 @@ impl PreviewQueueSplittingConfig {
             .filter_map(|split| {
                 Some(PreviewSplitQueue {
                     queue_id: split.queue_id.clone(),
-                    queue_type: split.queue_type,
+                    queue_type: split.queue_type.into(),
                     filter: split.filter.as_ref()?.into(),
                     jq_filter: split.jq_filter.clone(),
                     mode: split.queue_mode,

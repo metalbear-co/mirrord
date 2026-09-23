@@ -10,9 +10,65 @@
 
 use std::{collections::BTreeMap, fmt};
 
-use mirrord_config::feature::split_queues::{InnerMessageFilter, MessageFilterConfig};
+use mirrord_config::feature::split_queues::{
+    InnerMessageFilter, MessageFilterConfig, QueueKind as ConfigQueueKind,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+/// The broker a queue lives on, as the wire names it.
+///
+/// Carries the config's own `queue_type` values (`SQS`, `Kafka`, ...), which are a public
+/// contract and therefore as stable as any CRD enum, but is a separate type so the config enum
+/// can change freely and stored resources keep deserializing: a value this operator does not
+/// know reads as [`QueueType::Unknown`] and is skipped instead of failing the whole resource.
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash, PartialOrd, Ord,
+)]
+pub enum QueueType {
+    #[serde(rename = "SQS")]
+    Sqs,
+    #[serde(rename = "Kafka")]
+    Kafka,
+    #[serde(rename = "RMQ")]
+    Rmq,
+    #[serde(rename = "GCPPubSub")]
+    GcpPubSub,
+    #[serde(rename = "RedisPubSub")]
+    RedisPubSub,
+    #[serde(rename = "AzureServiceBus")]
+    AzureServiceBus,
+    #[serde(rename = "Temporal")]
+    Temporal,
+    #[serde(rename = "BullMQ")]
+    BullMq,
+    #[serde(rename = "NATS")]
+    Nats,
+    #[serde(rename = "NATSPubSub")]
+    NatsPubSub,
+    /// A broker this build does not know, written by a newer client.
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
+}
+
+impl From<ConfigQueueKind> for QueueType {
+    fn from(kind: ConfigQueueKind) -> Self {
+        match kind {
+            ConfigQueueKind::Sqs => Self::Sqs,
+            ConfigQueueKind::Kafka => Self::Kafka,
+            ConfigQueueKind::Rmq => Self::Rmq,
+            ConfigQueueKind::GcpPubSub => Self::GcpPubSub,
+            ConfigQueueKind::RedisPubSub => Self::RedisPubSub,
+            ConfigQueueKind::AzureServiceBus => Self::AzureServiceBus,
+            ConfigQueueKind::Temporal => Self::Temporal,
+            ConfigQueueKind::BullMq => Self::BullMq,
+            ConfigQueueKind::Nats => Self::Nats,
+            ConfigQueueKind::NatsPubSub => Self::NatsPubSub,
+            ConfigQueueKind::Unknown => Self::Unknown,
+        }
+    }
+}
 
 /// A tree of regex leaves combined with `allOf` / `anyOf`.
 ///
@@ -118,7 +174,7 @@ impl From<&InnerMessageFilter> for MessageFilter {
 }
 
 /// Renders the tree the way `mirrord queues` and the TUI show it, e.g.
-/// `any of (baggage: .*mirrord-session=abc.*), (all of (tenant=^acme$), (region: eu))`.
+/// `any of (baggage: .*mirrord-session=abc.*), (all of (tenant=^blue$), (region: eu))`.
 impl fmt::Display for MessageFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -173,7 +229,7 @@ mod tests {
     /// map is lossless.
     #[test]
     fn legacy_map_lowers_to_all_of_attributes_and_back() {
-        let legacy = map(&[("tenant", "^acme$"), ("type", "^premium$")]);
+        let legacy = map(&[("tenant", "^blue$"), ("type", "^premium$")]);
 
         let filter = MessageFilter::from(&legacy);
         assert_eq!(
@@ -182,7 +238,7 @@ mod tests {
                 filters: vec![
                     MessageFilter::Attribute {
                         key: "tenant".to_owned(),
-                        pattern: "^acme$".to_owned()
+                        pattern: "^blue$".to_owned()
                     },
                     MessageFilter::Attribute {
                         key: "type".to_owned(),
@@ -218,7 +274,7 @@ mod tests {
                 MessageFilter::AllOf {
                     filters: vec![MessageFilter::Attribute {
                         key: "tenant".to_owned(),
-                        pattern: "^acme$".to_owned(),
+                        pattern: "^blue$".to_owned(),
                     }],
                 },
             ],
@@ -231,14 +287,14 @@ mod tests {
                 "filters": [
                     { "type": "metadata", "pattern": "^baggage: .*$" },
                     { "type": "allOf", "filters": [
-                        { "type": "attribute", "key": "tenant", "pattern": "^acme$" }
+                        { "type": "attribute", "key": "tenant", "pattern": "^blue$" }
                     ] }
                 ]
             })
         );
         assert_eq!(
             filter.to_string(),
-            "any of (^baggage: .*$), (all of (tenant=^acme$))"
+            "any of (^baggage: .*$), (all of (tenant=^blue$))"
         );
     }
 

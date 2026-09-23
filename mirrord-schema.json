@@ -4231,7 +4231,7 @@
     },
     "MessageFilterConfig": {
       "title": "feature.split_queues.{}.filter {#feature-split_queues-queue_id-filter}",
-      "description": "A composable message filter, shaped like the HTTP `http_filter`: one `metadata` regex, or an\n`all_of` / `any_of` list of `metadata` regexes.\n\nA `metadata` regex is matched against every message attribute (SQS message attributes, Kafka\nand RabbitMQ headers, Pub/Sub attributes, Service Bus application properties, Temporal task\nmetadata, top-level JSON fields for Redis Pub/Sub and BullMQ) rendered as\n`<name>: <value>`, the same way the HTTP filter sees headers. The message matches when any\nattribute line matches, so one regex can target an attribute by name (`^tenant: acme$`) or\na value wherever it appears (`.*mirrord-session={{ key }}.*`). Matching is case sensitive.\n\nUse `filter` **or** the older `message_filter`, not both. `message_filter` is a map from an\nexact attribute name to a regex on its value, and is equivalent to an `all_of` of one\n`metadata` filter per entry.\n\n```json\n{\n  \"feature\": {\n    \"split_queues\": [\n      {\n        \"queue_id\": \"*\",\n        \"queue_type\": \"SQS\",\n        \"filter\": { \"metadata\": \"^tenant: acme-.*$\" }\n      },\n      {\n        \"queue_id\": \"*\",\n        \"queue_type\": \"Temporal\",\n        \"filter\": {\n          \"any_of\": [\n            { \"metadata\": \"^header.baggage: .*mirrord-session={{ key }}.*$\" },\n            { \"metadata\": \"^header.test: .*mirrord-session={{ key }}.*$\" }\n          ]\n        }\n      }\n    ]\n  }\n}\n```",
+      "description": "A composable message filter, shaped like the HTTP `http_filter`: one `metadata` regex, or an\n`all_of` / `any_of` list of `metadata` regexes.\n\nA `metadata` regex is matched against every message attribute (SQS message attributes, Kafka\nand RabbitMQ headers, Pub/Sub attributes, Service Bus application properties, Temporal task\nmetadata, top-level JSON fields for Redis Pub/Sub and BullMQ) rendered as\n`<name>: <value>`, the same way the HTTP filter sees headers. The message matches when any\nattribute line matches, so one regex can target an attribute by name (`^tenant: blue$`) or\na value wherever it appears (`.*mirrord-session={{ key }}.*`). Matching is case sensitive.\n\nUse `filter` **or** the older `message_filter`, not both. `message_filter` is a map from an\nexact attribute name to a regex on its value, and is equivalent to an `all_of` of one\n`metadata` filter per entry.\n\n```json\n{\n  \"feature\": {\n    \"split_queues\": [\n      {\n        \"queue_id\": \"*\",\n        \"queue_type\": \"SQS\",\n        \"filter\": { \"metadata\": \"^tenant: blue-.*$\" }\n      },\n      {\n        \"queue_id\": \"*\",\n        \"queue_type\": \"Temporal\",\n        \"filter\": {\n          \"any_of\": [\n            { \"metadata\": \"^header.baggage: .*mirrord-session={{ key }}.*$\" },\n            { \"metadata\": \"^header.test: .*mirrord-session={{ key }}.*$\" }\n          ]\n        }\n      }\n    ]\n  }\n}\n```",
       "anyOf": [
         {
           "description": "A regex matched against each message attribute rendered as `<name>: <value>`. Supports\nthe syntax of the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/)\ncrate.",
@@ -4254,7 +4254,8 @@
               "type": "array",
               "items": {
                 "$ref": "#/$defs/InnerMessageFilter"
-              }
+              },
+              "minItems": 1
             }
           },
           "additionalProperties": false,
@@ -4270,7 +4271,8 @@
               "type": "array",
               "items": {
                 "$ref": "#/$defs/InnerMessageFilter"
-              }
+              },
+              "minItems": 1
             }
           },
           "additionalProperties": false,

@@ -14,7 +14,7 @@ use mirrord_config::{
 use serde::Serialize;
 
 use crate::crd::{
-    queue_filter::MessageFilter,
+    queue_filter::{MessageFilter, QueueType},
     session::{SessionCiInfo, UpSessionInfo},
 };
 
@@ -152,10 +152,13 @@ pub struct ConnectParams<'a> {
 
     /// Queues requested with the composable `filter` shape, for every broker.
     ///
-    /// The per-broker `*_splits` params above are the legacy wire and can only carry the
-    /// `message_filter` map, so composed filters ride here. An entry is in exactly one of the
-    /// two. Older operators ignore this param, which the CLI prevents by requiring
-    /// [`NewOperatorFeature::QueueSplittingWithComposedFilters`] first.
+    /// Wire invariant: an operator that predates this param reads only the per-broker
+    /// `<broker>_splits` / `<broker>_jq_filters` params, which can carry nothing but the
+    /// `message_filter` map. So a legacy entry goes there and nowhere else, a composed entry goes
+    /// here and nowhere else, and a composed entry's jq program travels with it, never in the
+    /// legacy jq params where an old operator would run it without the attribute filter. The
+    /// CLI refuses to send this param to an operator that does not advertise
+    /// [`NewOperatorFeature::QueueSplittingWithComposedFilters`].
     ///
     /// [`NewOperatorFeature::QueueSplittingWithComposedFilters`]: crate::crd::NewOperatorFeature::QueueSplittingWithComposedFilters
     #[serde(
@@ -255,7 +258,7 @@ pub struct KafkaProtobufDecoding<'a> {
 #[derive(Serialize, Debug)]
 pub struct ComposedQueueFilter<'a> {
     pub queue_id: &'a str,
-    pub queue_type: QueueKind,
+    pub queue_type: QueueType,
     pub filter: MessageFilter,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jq_filter: Option<&'a str>,
@@ -399,7 +402,7 @@ impl<'a> ConnectParams<'a> {
                 .filter_map(|split| {
                     Some(ComposedQueueFilter {
                         queue_id: split.queue_id.as_str(),
-                        queue_type: split.queue_type,
+                        queue_type: split.queue_type.into(),
                         filter: split.filter.as_ref()?.into(),
                         jq_filter: split.jq_filter.as_deref(),
                     })
@@ -549,7 +552,7 @@ mod tests {
             .filter_map(|split| {
                 Some(ComposedQueueFilter {
                     queue_id: split.queue_id.as_str(),
-                    queue_type: split.queue_type,
+                    queue_type: split.queue_type.into(),
                     filter: split.filter.as_ref()?.into(),
                     jq_filter: split.jq_filter.as_deref(),
                 })
