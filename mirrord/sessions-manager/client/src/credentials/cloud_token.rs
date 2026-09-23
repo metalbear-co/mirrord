@@ -52,8 +52,11 @@ struct TokenExchangeResponse {
 /// token is exchanged for every request that needs one. That is cheap because those requests are
 /// rare — sessions-manager connections are long-lived, and the token is only needed to open one.
 ///
-/// Control plane only: the data-plane upgrade already sends the single-use per-assignment
-/// credential under `authorization`, and must not have it replaced.
+/// Control plane only. The data plane is authenticated through the control plane rather than
+/// alongside it: the single-use per-assignment credential the upgrade presents is minted by a
+/// control-plane request that this token already authenticated, so it vouches for the same
+/// caller while also binding the connection to one assignment and one consumer. That credential
+/// owns `authorization` on the upgrade, and must not have it replaced.
 pub struct CloudTokenCredentials {
     client: reqwest::Client,
     pub(super) endpoint: Url,
@@ -185,7 +188,8 @@ impl CredentialProvider for CloudTokenCredentials {
     }
 
     /// Nothing: the data-plane upgrade authenticates with the single-use credential minted for
-    /// its assignment, which occupies this same header name.
+    /// its assignment by a cloud-token-authenticated control-plane request, and that credential
+    /// occupies this same header name.
     fn data_plane_headers(&self) -> BoxFuture<'_, Result<HeaderMap, SessionsManagerClientError>> {
         ready_headers(HeaderMap::new())
     }
