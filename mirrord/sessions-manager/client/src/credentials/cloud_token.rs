@@ -6,7 +6,7 @@ use futures::future::{BoxFuture, FutureExt};
 use reqwest::header::{HeaderMap, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
-use url::Url;
+use url::{Host, Url};
 
 use super::{CredentialProvider, ready_headers};
 use crate::error::SessionsManagerClientError;
@@ -84,8 +84,8 @@ impl CloudTokenCredentials {
         }
 
         let mut endpoint = Url::parse(cloud_url)?;
-        if !matches!(endpoint.scheme(), "http" | "https") || endpoint.cannot_be_a_base() {
-            return Err(SessionsManagerClientError::InvalidBaseUrlScheme(endpoint));
+        if !is_secure_cloud_url(&endpoint, cfg!(debug_assertions)) {
+            return Err(SessionsManagerClientError::InsecureCloudUrl(endpoint));
         }
         endpoint
             .path_segments_mut()
@@ -96,6 +96,10 @@ impl CloudTokenCredentials {
         Ok(Self {
             client: reqwest::Client::builder()
                 .timeout(TOKEN_EXCHANGE_TIMEOUT)
+                // A 307/308 replays the POST body, API key included, to wherever it points, and
+                // reqwest only strips sensitive *headers* across origins. The token endpoint is a
+                // fixed path that has no reason to redirect.
+                .redirect(reqwest::redirect::Policy::none())
                 .build()?,
             endpoint,
             api_key: SecretString::from(api_key),
@@ -143,6 +147,31 @@ impl CloudTokenCredentials {
     }
 }
 
+/// Whether the API key may be sent to `url`. It is long-lived and travels in the request body,
+/// so anything but TLS exposes it to the network; plain HTTP is tolerated only on loopback,
+/// where there is no network to expose it to (tests, or a locally-run app-server).
+///
+/// `allow_any_http` lifts the loopback restriction for debug builds, so a developer can point a
+/// locally-built agent at an app-server reachable only over plain HTTP. Release builds, the only
+/// ones that ship, never do.
+fn is_secure_cloud_url(url: &Url, allow_any_http: bool) -> bool {
+    if url.cannot_be_a_base() {
+        return false;
+    }
+
+    match url.scheme() {
+        "https" => true,
+        "http" if allow_any_http => true,
+        "http" => match url.host() {
+            Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+            Some(Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        },
+        _ => false,
+    }
+}
+
 impl CredentialProvider for CloudTokenCredentials {
     fn control_plane_headers(
         &self,
@@ -171,7 +200,13 @@ pub(super) mod tests {
         sync::{Arc, Mutex as BlockingMutex},
     };
 
-    use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
+    use axum::{
+        Json, Router,
+        extract::State,
+        http::StatusCode,
+        response::Redirect,
+        routing::{any, post},
+    };
     use serde_json::{Value, json};
 
     use super::*;
@@ -405,6 +440,79 @@ pub(super) mod tests {
             matches!(error, SessionsManagerClientError::InvalidApiKey),
             "expected a config error, got {error:?}"
         );
+    }
+
+    /// A redirect would replay the body, API key included, to wherever the endpoint points it.
+    #[tokio::test]
+    async fn a_redirect_is_not_followed() {
+        let followed = Arc::new(BlockingMutex::new(0));
+        let app = Router::new()
+            .route(
+                "/api/v2/token",
+                post(|| async { Redirect::temporary("/elsewhere") }),
+            )
+            .route(
+                "/elsewhere",
+                any({
+                    let followed = followed.clone();
+                    move || async move {
+                        *followed.lock().unwrap() += 1;
+                        Json(token("leaked"))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+            .await
+            .unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let error = CloudTokenCredentials::new(&origin, TEST_API_KEY.to_owned())
+            .unwrap()
+            .control_plane_headers()
+            .await
+            .expect_err("a redirect should fail the exchange");
+        server.abort();
+
+        assert_eq!(*followed.lock().unwrap(), 0, "the redirect was followed");
+        assert!(
+            matches!(
+                error,
+                SessionsManagerClientError::TokenExchangeStatus(StatusCode::TEMPORARY_REDIRECT)
+            ),
+            "expected the redirect status as an error, got {error:?}"
+        );
+    }
+
+    #[test]
+    fn plain_http_is_accepted_only_on_loopback_unless_allowed() {
+        let secure = |origin, allow_any_http| {
+            is_secure_cloud_url(&Url::parse(origin).unwrap(), allow_any_http)
+        };
+
+        for allow_any_http in [false, true] {
+            assert!(secure("https://app.metalbear.com", allow_any_http));
+            assert!(secure("http://localhost:8080", allow_any_http));
+            assert!(secure("http://127.0.0.1:8080", allow_any_http));
+            assert!(secure("http://[::1]:8080", allow_any_http));
+            assert!(!secure("ftp://app.metalbear.com", allow_any_http));
+            assert!(!secure("mailto:dev@metalbear.com", allow_any_http));
+        }
+
+        for origin in ["http://app.metalbear.com", "http://10.0.0.1"] {
+            assert!(!secure(origin, false), "{origin} should be refused");
+            assert!(secure(origin, true), "{origin} should be allowed");
+        }
+    }
+
+    #[test]
+    fn an_insecure_cloud_url_is_refused_as_such() {
+        assert!(matches!(
+            CloudTokenCredentials::new("ftp://app.metalbear.com", TEST_API_KEY.to_owned()),
+            Err(SessionsManagerClientError::InsecureCloudUrl(_))
+        ));
     }
 
     #[test]
