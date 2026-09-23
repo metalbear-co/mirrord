@@ -160,7 +160,7 @@ impl Subscription {
             .agent_subscribe(protocol_version)
     }
 
-    pub fn count_hit(&mut self) -> u64 {
+    pub fn add_new_hit(&mut self) -> u64 {
         self.hit_count = self.hit_count.saturating_add(1);
         self.hit_count
     }
@@ -199,7 +199,7 @@ impl SubscriptionsManager {
     pub fn count_hit(&mut self, port: Port) -> Option<u64> {
         self.subscriptions
             .get_mut(&port)
-            .map(Subscription::count_hit)
+            .map(Subscription::add_new_hit)
     }
 
     /// Registers a new port subscription in this struct.
