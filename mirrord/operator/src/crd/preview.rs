@@ -186,6 +186,11 @@ impl PreviewSessionSpec {
     }
 
     /// Convert the [`SessionTarget`] into a [`mirrord_config::target::Target`].
+    ///
+    /// `None` when the stored target has no config form: a resource kind this build does not
+    /// know, or a pod-set selector that uses `matchExpressions` or has no `matchLabels`. Such a
+    /// session was written by a different client or by hand; callers fail it with a message
+    /// naming the supported shape instead of guessing a target.
     pub fn config_target(&self) -> Option<Target> {
         self.target.clone().into_config()
     }

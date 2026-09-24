@@ -159,14 +159,22 @@ impl FromStr for OperatorSessionTarget {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match Target::from_str(s) {
-            Ok(Target::Targetless) | Err(_) => Err(()),
-            Ok(target) => Ok(OperatorSessionTarget {
-                kind: target.type_().to_owned(),
-                name: target.name().to_owned(),
-                container: String::new(),
-            }),
-        }
+        // The operator lists a pod-set target as its bare selector (`app=api`), which is the
+        // `label/` target path without its prefix.
+        let target = Target::from_str(s)
+            .or_else(|_| Target::from_str(&format!("label/{s}")))
+            .map_err(|_| ())?;
+        let name = match &target {
+            Target::Targetless => return Err(()),
+            // `name()` is the constant "label"; the selector is what tells previews apart.
+            Target::Label(label) => label.selector(),
+            target => target.name().to_owned(),
+        };
+        Ok(OperatorSessionTarget {
+            kind: target.type_().to_owned(),
+            name,
+            container: String::new(),
+        })
     }
 }
 
@@ -1551,6 +1559,23 @@ mod tests {
     fn validate_ws_origin_accepts_missing_origin() {
         let headers = HeaderMap::new();
         assert!(validate_ws_origin(&headers));
+    }
+
+    /// The operator lists a pod-set preview target as its bare selector, not as a `label/`
+    /// path. Parsed only as a canonical target path it fails, and the browser then shows the
+    /// preview with no target at all.
+    #[test]
+    fn operator_session_target_parses_bare_label_selector() {
+        let target = OperatorSessionTarget::from_str("app=api,tier=web/container/api").unwrap();
+        assert_eq!(target.kind, "label");
+        assert_eq!(target.name, "app=api,tier=web");
+
+        let target = OperatorSessionTarget::from_str("deployment/api/container/api").unwrap();
+        assert_eq!(target.kind, "deployment");
+        assert_eq!(target.name, "api");
+
+        assert!(OperatorSessionTarget::from_str("targetless").is_err());
+        assert!(OperatorSessionTarget::from_str("not a target").is_err());
     }
 
     /// The frontend reads the ws `session_added` payload as a flat [`SessionInfo`], the same
