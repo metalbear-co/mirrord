@@ -68,6 +68,7 @@ extern crate core;
 ))]
 use std::ffi::c_void;
 use std::{
+    cell::Cell,
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fs::File,
@@ -760,7 +761,15 @@ struct ForkGuards {
     _dns_mapping: MutexGuard<'static, HashMap<IpAddr, String>>,
 }
 
-static mut FORK_GUARDS: Option<ForkGuards> = None;
+thread_local! {
+    /// Holds the [`ForkGuards`] from [`atfork_prepare`] until [`atfork_release`].
+    ///
+    /// `Some` means the locks are held, and taking the value unlocks them.
+    ///
+    /// This is thread local because `prepare` and `parent`/`child` handlers run on the same
+    /// forking thread, and one thread must **not** set or unset another forking thread's guards.
+    static FORK_GUARDS: Cell<Option<ForkGuards>> = const { Cell::new(None) };
+}
 
 /// `prepare` handler for [`libc::pthread_atfork`].
 ///
@@ -790,13 +799,13 @@ extern "C" fn atfork_prepare() {
             .unwrap_or_else(PoisonError::into_inner),
     };
 
-    unsafe { FORK_GUARDS = Some(guards) };
+    FORK_GUARDS.set(Some(guards));
 }
 
 /// `parent` and `child` handler for [`libc::pthread_atfork`], releasing what [`atfork_prepare`]
 /// took.
 extern "C" fn atfork_release() {
-    unsafe { FORK_GUARDS = None };
+    drop(FORK_GUARDS.take());
 }
 
 /// Registers [`atfork_prepare`] and [`atfork_release`] with `libc`.
