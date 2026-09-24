@@ -24,6 +24,30 @@ interface TimestampedEvent {
   seq: number
 }
 
+export function appendToEventBuffer(
+  events: TimestampedEvent[],
+  next: TimestampedEvent,
+): TimestampedEvent[] {
+  let buffered: TimestampedEvent[]
+  if (next.event.type === EventType.PortSubscription) {
+    const port = next.event.port
+    // Every hit sends a port subscription event. Keeping them all would reach the size limit
+    // and remove older traffic events, so keep only the latest event for each port.
+    buffered = events.filter(
+      ({ event }) =>
+        event.type !== EventType.PortSubscription || event.port !== port,
+    )
+  } else {
+    buffered = [...events]
+  }
+
+  buffered.push(next)
+  if (buffered.length > MAX_EVENTS) {
+    buffered.splice(0, buffered.length - MAX_EVENTS)
+  }
+  return buffered
+}
+
 interface Props {
   session: SessionInfo
   chaosRules?: ClientChaosRule[] | undefined
@@ -63,15 +87,13 @@ export default function EventStream({
       } catch {
         return
       }
-      setEvents((prev) => {
-        // Append the new event and cap the buffer at MAX_EVENTS by dropping
-        // the oldest entries. Keeps memory bounded for long-running sessions.
-        const next = [
-          ...prev,
-          { event, receivedAt: new Date(), seq: seqRef.current++ },
-        ]
-        return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next
-      })
+      setEvents((prev) =>
+        appendToEventBuffer(prev, {
+          event,
+          receivedAt: new Date(),
+          seq: seqRef.current++,
+        }),
+      )
     }
 
     eventSource.onerror = () => {

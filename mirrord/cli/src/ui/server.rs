@@ -127,6 +127,8 @@ pub struct OperatorLockedPort {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_count: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -285,6 +287,7 @@ impl OperatorSessionSummary {
                             port: lp.port,
                             kind: lp.kind,
                             filter: lp.filter,
+                            hit_count: lp.hit_count,
                         }
                     })
                     .collect()
@@ -461,7 +464,50 @@ async fn buffer_session_events(session_id: &str, values: Vec<serde_json::Value>,
     let Some(session) = sessions.get_mut(session_id) else {
         return;
     };
-    session.events.extend(values);
+    for value in values {
+        let port =
+            if value.get("type").and_then(|value| value.as_str()) == Some("port_subscription") {
+                value
+                    .get("port")
+                    .and_then(|value| value.as_u64())
+                    .and_then(|port| u16::try_from(port).ok())
+            } else {
+                None
+            };
+
+        if let Some(port) = port {
+            if let Some(mode) = value.get("mode").and_then(|value| value.as_str()) {
+                let hit_count = value.get("hit_count").and_then(|value| value.as_u64());
+                match session
+                    .info
+                    .port_subscriptions
+                    .iter_mut()
+                    .find(|subscription| subscription.port == port)
+                {
+                    Some(subscription) => {
+                        subscription.mode = mode.to_owned();
+                        subscription.hit_count = hit_count;
+                    }
+                    None => session.info.port_subscriptions.push(
+                        mirrord_session_monitor_protocol::PortSubscription {
+                            port,
+                            mode: mode.to_owned(),
+                            hit_count,
+                        },
+                    ),
+                }
+            }
+
+            // Every hit sends a port subscription event. Keeping them all would fill this buffer
+            // and remove older traffic events, so keep only the latest event for each port.
+            session.events.retain(|buffered| {
+                buffered.get("type").and_then(|value| value.as_str()) != Some("port_subscription")
+                    || buffered.get("port").and_then(|value| value.as_u64())
+                        != Some(u64::from(port))
+            });
+        }
+        session.events.push(value);
+    }
     if session.events.len() > MAX_EVENTS_PER_SESSION {
         session
             .events
@@ -1330,6 +1376,90 @@ mod tests {
             .await
             .unwrap()
             .status()
+    }
+
+    #[tokio::test]
+    async fn event_buffer_keeps_only_the_latest_port_subscription_per_port() {
+        let state = test_state();
+        let session_id = "test-session";
+        let endpoint = SessionEndpoint::for_session(session_id, std::path::Path::new("/tmp"));
+        state.sessions.write().await.insert(
+            session_id.to_owned(),
+            TrackedSession {
+                info: SessionInfo {
+                    session_id: session_id.to_owned(),
+                    key: None,
+                    target: "deployment/test".to_owned(),
+                    namespace: None,
+                    context: None,
+                    started_at: "2026-09-22T12:00:00Z".to_owned(),
+                    mirrord_version: "0.0.0".to_owned(),
+                    is_operator: false,
+                    processes: Vec::new(),
+                    port_subscriptions: Vec::new(),
+                    config: serde_json::Value::Null,
+                },
+                endpoint: endpoint.clone(),
+                events: vec![
+                    serde_json::json!({"type": "file_op", "path": "/visible"}),
+                    serde_json::json!({
+                        "type": "port_subscription",
+                        "port": 80,
+                        "mode": "steal",
+                        "hit_count": 1
+                    }),
+                ],
+                client: SessionClient::new(endpoint),
+            },
+        );
+
+        buffer_session_events(
+            session_id,
+            vec![
+                serde_json::json!({
+                    "type": "port_subscription",
+                    "port": 81,
+                    "mode": "mirror",
+                    "hit_count": 3
+                }),
+                serde_json::json!({
+                    "type": "port_subscription",
+                    "port": 80,
+                    "mode": "steal",
+                    "hit_count": 2
+                }),
+            ],
+            &state,
+        )
+        .await;
+
+        let sessions = state.sessions.read().await;
+        let session = sessions.get(session_id).unwrap();
+        assert_eq!(
+            session.events,
+            vec![
+                serde_json::json!({"type": "file_op", "path": "/visible"}),
+                serde_json::json!({
+                    "type": "port_subscription",
+                    "port": 81,
+                    "mode": "mirror",
+                    "hit_count": 3
+                }),
+                serde_json::json!({
+                    "type": "port_subscription",
+                    "port": 80,
+                    "mode": "steal",
+                    "hit_count": 2
+                }),
+            ]
+        );
+        assert_eq!(
+            serde_json::to_value(&session.info.port_subscriptions).unwrap(),
+            serde_json::json!([
+                {"port": 81, "mode": "mirror", "hit_count": 3},
+                {"port": 80, "mode": "steal", "hit_count": 2},
+            ])
+        );
     }
 
     /// `/health` is intentionally outside the auth middleware so k8s probes can hit it.

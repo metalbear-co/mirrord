@@ -1,0 +1,1 @@
+Prevent repeated release monitor alerts, retry installer checks, and announce recovery.

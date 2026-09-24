@@ -63,7 +63,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.261.0"
+version = "3.262.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -197,6 +197,7 @@ pin-project-lite = "0.2"
 pnet_packet = "0.35"
 portable-pty = "0.9"
 prettytable-rs = "0.10"
+process-wrap = { version = "10.0.0", default-features = false, features = ["tokio1", "process-group", "job-object", "kill-on-drop"] }
 proc-macro2 = "1"
 proc-macro2-diagnostics = "0.10"
 procfs = "0.17.0"
