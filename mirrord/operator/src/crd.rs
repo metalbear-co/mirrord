@@ -131,6 +131,7 @@ impl TargetCrd {
             Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
             Target::Label(_) => return LABEL_TARGET_NAME.to_owned(),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_owned(),
+            Target::Serverless(target) => ("serverless", &target.serverless, &target.container),
         };
 
         if let Some(container) = container {
@@ -450,6 +451,8 @@ pub struct LockedPort {
     pub port: u16,
     pub kind: String,
     pub filter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_count: Option<u64>,
 }
 
 /// Compatibility enum for LockedPort that can handle both old tuple format and new struct format.
@@ -486,6 +489,7 @@ impl LockedPortCompat {
                 port: *port,
                 kind: kind.clone(),
                 filter: filter.clone(),
+                hit_count: None,
             },
         }
     }
@@ -773,6 +777,22 @@ pub enum NewOperatorFeature {
     /// never reconciles it, which the CLI would only see as a creation timeout.
     DbBranchConfigMapSource,
 
+    /// This operator understands `flavor: liquibase` in a branch's `migrations`. Gated so the
+    /// CLI fails fast: an older operator's CRD schema constrains the flavor to the values it
+    /// knows, so the API server rejects the branch with a schema error instead of anything the
+    /// user can act on.
+    LiquibaseMigrations,
+    /// This operator accepts `cronjob/<name>` preview targets: the preview is an isolated copy
+    /// of the source CronJob (with the optional `spec.cronjob.schedule` override) instead of a
+    /// Deployment. Gated so the CLI fails fast on older operators, which reject CronJob
+    /// targets at resolution time and would only report it as a failed session.
+    PreviewCronJobTarget,
+
+    /// The interception event stream serves every session at once when given no key, honors
+    /// `include_session_key` and `include_unmatched`, and carries the ids pairing an HTTP request
+    /// with its response.
+    SubscribeEventOptions,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -845,6 +865,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
+            NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
+            NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
+            NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

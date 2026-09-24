@@ -40,18 +40,35 @@ pub(super) enum ApiError {
     #[error("kube resource lookup failed: {0}")]
     KubeResource(#[from] KubeApiError),
 
+    /// Inferring the kube config (in-cluster, then kubeconfig) failed.
+    #[error("failed to infer kube config: {0}")]
+    InferKubeconfig(#[source] kube::config::InferConfigError),
+
+    /// The `baggage` the daemon was started with is not a usable HTTP header value.
+    #[error("the configured baggage is not a valid header value: {0}")]
+    InvalidBaggage(String),
+
     /// The cluster answered, but holds no resource of `kind` with the requested id.
     #[error("no {kind} with id {id:?}")]
     NotFound { kind: &'static str, id: String },
+
+    /// A cluster operation did not answer in time. Most often a kubeconfig whose auth-exec plugin
+    /// blocks on an expired credential, which never returns on its own.
+    #[error("{what} timed out after {secs}s")]
+    Timeout { what: &'static str, secs: u64 },
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match &self {
-            Self::ReadKubeconfig(_) | Self::KubeClient(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::ReadKubeconfig(_)
+            | Self::InferKubeconfig(_)
+            | Self::InvalidBaggage(_)
+            | Self::KubeClient(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::LoadContext { .. } => StatusCode::BAD_REQUEST,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
             Self::KubeApi(_) | Self::KubeResource(_) => StatusCode::BAD_GATEWAY,
+            Self::Timeout { .. } => StatusCode::GATEWAY_TIMEOUT,
         };
 
         (

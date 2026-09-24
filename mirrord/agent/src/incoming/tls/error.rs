@@ -1,7 +1,7 @@
 use std::{io, path::PathBuf, sync::PoisonError};
 
 use mirrord_tls_util::FromPemError;
-use rustls::server::VerifierBuilderError;
+use rustls::{pki_types::InvalidDnsNameError, server::VerifierBuilderError};
 use thiserror::Error;
 use tokio::task::JoinError;
 
@@ -34,6 +34,12 @@ pub enum StealTlsSetupErrorInner {
     },
     #[error("no good trust root certificate was found")]
     NoGoodRoot,
+    #[error("`{name}` is not a valid server name: {error}")]
+    InvalidServerName {
+        name: String,
+        #[source]
+        error: InvalidDnsNameError,
+    },
     #[error("generated an invalid dummy certificate: {0}")]
     GeneratedInvalidDummy(#[source] rustls::Error),
     #[error("failed to generate a dummy certificate: {0}")]

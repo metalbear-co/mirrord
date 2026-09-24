@@ -6,7 +6,7 @@
 //!
 //! ```sh
 //! cd rust-project
-//! medschool
+//! medschool --root-type DocsRootType
 //! ```
 //!
 //! It'll look into `rust-project/src` and produce `rust-project/configuration.md`.
@@ -25,7 +25,6 @@ mod error;
 mod parse;
 mod types;
 
-// TODO(alex): Support specifying a path.
 /// Converts all files in the [`glob::glob`] pattern defined within, in the current directory,
 /// into a `Result<Vec<syn::File>, DocsError>`.
 #[tracing::instrument(level = "trace", ret)]
@@ -48,6 +47,10 @@ pub(crate) fn parse_files(path: PathBuf) -> Result<Vec<syn::File>, DocsError> {
 #[derive(clap::Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct MedschoolArgs {
+    /// Rust type at the root of the generated documentation.
+    #[arg(long)]
+    root_type: String,
+
     /// Adds the file contents as a header to the generated markdown.
     #[arg(short, long)]
     prepend: Option<PathBuf>,
@@ -90,6 +93,7 @@ fn main() -> Result<(), DocsError> {
         .init();
 
     let MedschoolArgs {
+        root_type,
         prepend,
         output,
         input,
@@ -97,17 +101,17 @@ fn main() -> Result<(), DocsError> {
 
     let files = parse_files(input.unwrap_or_else(|| PathBuf::from("./src")))?;
     let type_docs = parse_docs_into_set(files)?;
-    let resolved = resolve_references(type_docs.clone());
+    let resolved =
+        resolve_references(type_docs, &root_type).ok_or(DocsError::RootTypeNotFound(root_type))?;
 
-    if let Some(produced) = resolved {
-        let mut final_docs = produced.produce_docs();
-        if let Some(header) = prepend {
-            let header = fs::read_to_string(header)?;
-            final_docs.insert_str(0, &(header + "\n"));
-        }
-        let output = output.unwrap_or_else(|| PathBuf::from("./configuration.md"));
-        fs::write(output, final_docs)?;
+    let mut final_docs = resolved.produce_docs();
+    if let Some(header) = prepend {
+        let header = fs::read_to_string(header)?;
+        final_docs.insert_str(0, &(header + "\n"));
     }
+    let output = output.unwrap_or_else(|| PathBuf::from("./configuration.md"));
+    fs::write(output, final_docs)?;
+
     Ok(())
 }
 
@@ -148,7 +152,7 @@ mod test {
     struct Root {
         /// ## Root - e_field
         e_field: Root_E_Edge,
-        
+
         /// ## Root - root_field
         ///
         /// Root - edge - root_field
@@ -243,11 +247,11 @@ mod test {
 
         /// ## UnorderedField - a
         a_field: ExampleEnum,
-    }    
+    }
 
     /// # Example Enum
-    enum ExampleEnum {        
-        A,        
+    enum ExampleEnum {
+        A,
         B,
     }
     "#,
@@ -298,7 +302,7 @@ mod test {
         let type_docs = super::parse_docs_into_set(files).unwrap();
         println!("parsed {type_docs:#?}");
 
-        let root_type = resolve_references(type_docs.clone()).unwrap();
+        let root_type = resolve_references(type_docs, "Root").unwrap();
 
         let final_docs = root_type.produce_docs();
         println!("final_docs {final_docs:#?}");
@@ -316,21 +320,20 @@ mod test {
             files.sort_unstable_by_key(|_| rand::random::<i32>());
 
             let type_docs = super::parse_docs_into_set(files).unwrap();
-            let root_type = resolve_references(type_docs.clone()).unwrap();
+            let root_type = resolve_references(type_docs, "Root").unwrap();
             let final_docs = root_type.produce_docs();
 
             assert_eq!(final_docs, EXPECTED);
         }
     }
 
-    /// Test that determines whether we pick the pick the correct root based on the level of
-    /// recursion and all the recursive fields are correctly resolved from the given files.
+    /// Ensures fields are resolved recursively from the root.
     #[test]
     fn randomly_ordered_fields() {
         let files = parse_string_files(UNORDERED_FILES.map(ToOwned::to_owned).to_vec());
 
         let type_docs = super::parse_docs_into_set(files).unwrap();
-        let root_type = resolve_references(type_docs.clone()).unwrap();
+        let root_type = resolve_references(type_docs, "UnorderedStructC").unwrap();
         let final_docs = root_type.produce_docs();
         assert_eq!(final_docs, UNORDERED_EXPECTED);
     }

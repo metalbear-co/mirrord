@@ -40,6 +40,7 @@ use mirrord_kube::{
     resolved::{ResolvedResource, ResolvedTarget},
     retry::retry_policy_from_config,
 };
+use mirrord_operator_websocket::{connection::OperatorConnection, upgrade};
 use mirrord_progress::Progress;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -47,14 +48,12 @@ use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
 use crate::{
-    client::{
-        connection::OperatorConnection,
-        database_branches::{
-            CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
-            create_mongodb_branches, create_mysql_branches, create_pg_branches,
-            ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
-            list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
-        },
+    client::database_branches::{
+        CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
+        create_mongodb_branches, create_mysql_branches, create_pg_branches,
+        ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
+        list_reusable_mysql_branches, list_reusable_pg_branches,
+        relay_source_compatibility_warnings, wait_for_pending_branches,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -73,17 +72,17 @@ use crate::{
 };
 
 pub mod connect_params;
-pub mod connection;
 mod credentials;
 pub mod database_branches;
 mod discovery;
 pub mod error;
-mod upgrade;
+
+pub use discovery::operator_installed;
 
 const BAGGAGE_HEADER: &str = "baggage";
 
-/// Adds the configured baggage as a header on every request of a kube client, so the operator
-/// sees it on each request, the same as on the session-creating ones.
+/// Adds the `baggage` header every request in `config` will carry, so the operator it names
+/// serves them.
 pub fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> OperatorApiResult<()> {
     if let Some(baggage) = baggage {
         config.headers.push((
@@ -172,7 +171,7 @@ pub struct OperatorSession {
     operator_license_fingerprint: Option<String>,
     /// Version of the operator, right now only for [`fmt::Debug`] implementation.
     operator_version: Version,
-    /// Version of [`mirrord_protocol`] used by the operator.
+    /// Version of `mirrord_protocol` used by the operator.
     pub operator_protocol_version: Option<Version>,
     /// Allow the layer to attempt reconnection
     pub allow_reconnect: bool,
@@ -866,6 +865,20 @@ where
                 .require_feature(NewOperatorFeature::DbBranchConfigMapSource)?;
         }
 
+        // The `liquibase` flavor is new to the branch CRD's migration schema; an older
+        // operator's schema rejects the value outright, which surfaces as a bare API validation
+        // error rather than a missing capability.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_liquibase_migrations)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::LiquibaseMigrations)?;
+        }
+
         let use_unified_crd = self
             .operator
             .spec
@@ -1027,6 +1040,7 @@ where
                     "using branch database {} for id {id}: {origin}",
                     branch.name_any()
                 ));
+                relay_source_compatibility_warnings(branch, &subtask);
             }
 
             subtask.success(None);
@@ -2731,7 +2745,7 @@ impl OperatorApi<PreparedClientCert> {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
             })
-            .map(OperatorConnection)
+            .map(OperatorConnection::new)
     }
 
     /// Opens a websocket to the operator's no-session ping endpoint, used by
@@ -2758,7 +2772,7 @@ impl OperatorApi<PreparedClientCert> {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
             })
-            .map(OperatorConnection)
+            .map(OperatorConnection::new)
     }
 }
 
@@ -3313,7 +3327,8 @@ mod test {
 
     #[test]
     fn auto_disable_drops_all_rmq_when_unsupported() {
-        let wildcard = SplitQueuesConfig::all_wildcard(&EnvKey::Provided("session".to_owned()));
+        let wildcard =
+            SplitQueuesConfig::all_wildcard_default_mode(&EnvKey::Provided("session".to_owned()));
 
         let filtered =
             disable_unsupported_auto_splits(&wildcard, &[]).expect("RMQ splits should be dropped");
@@ -3361,7 +3376,8 @@ mod test {
 
     #[test]
     fn auto_disable_noop_when_jq_supported() {
-        let wildcard = SplitQueuesConfig::all_wildcard(&EnvKey::Provided("session".to_owned()));
+        let wildcard =
+            SplitQueuesConfig::all_wildcard_default_mode(&EnvKey::Provided("session".to_owned()));
 
         let filtered = disable_unsupported_auto_splits(
             &wildcard,

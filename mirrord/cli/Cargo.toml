@@ -35,6 +35,7 @@ mirrord-tls-util = { path = "../tls-util" }
 mirrord-protocol-io = { path = "../protocol-io" }
 mirrord-auth = { path = "../auth" }
 mirrord-protocol-api = { path = "../protocol-api" }
+mirrord-operator-websocket = { path = "../operator-websocket" }
 
 actix-codec.workspace = true
 atomic-write-file.workspace = true
@@ -47,10 +48,11 @@ tracing-subscriber.workspace = true
 futures.workspace = true
 glob.workspace = true
 which.workspace = true
+schemars.workspace = true
 semver.workspace = true
 reqwest = { workspace = true, features = ["stream"] }
 const-random.workspace = true
-tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
+tokio = { workspace = true, features = ["rt", "net", "macros", "process", "sync"] }
 tokio-retry.workspace = true
 kube.workspace = true
 k8s-openapi.workspace = true
@@ -91,10 +93,10 @@ notify.workspace = true
 mime_guess.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 mirrord-session-monitor-client.workspace = true
+mirrord-sessions-manager-client.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
 hyper.workspace = true
 bytes.workspace = true
-serde_yaml.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
@@ -118,6 +120,7 @@ http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
+serde-saphyr.workspace = true
 
 [features]
 windows_build = []

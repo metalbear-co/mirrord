@@ -5,6 +5,8 @@ level: warning
 ignorecase: false
 action:
   name: replace
+exceptions:
+  - pathname
 swap:
   "(?:API Console|dev|developer) key": API key
   "(?:cell ?phone|smart ?phone)": phone|mobile phone

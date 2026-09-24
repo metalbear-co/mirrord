@@ -78,7 +78,7 @@ pub(crate) async fn up_command(
     // `config_validation` event; downgrade once the config is read.
     let mut analytics = AnalyticsReporter::for_up_event(true, watch, user_data.machine_id());
 
-    let result = run_up(args, &mut analytics).await;
+    let result = normalize_cancellation(run_up(args, &mut analytics).await);
 
     record_outcome(&result, analytics.get_mut());
     result
@@ -130,12 +130,12 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
 
     let ready = ReadyTracker::default();
 
-    // Run UI
-    analytics.get_mut().add("ui_enabled", args.ui);
-    if args.ui {
+    analytics.get_mut().add("ui_enabled", !args.no_ui);
+    if !args.no_ui {
         tokio::spawn(async move {
             match ui_command(
                 UiCommonArgs {
+                    config_file: None,
                     port: UI_DEFAULT_PORT,
                     no_browser: true,
                 },
@@ -211,6 +211,13 @@ impl From<&UpCliError> for ErrorCategory {
     }
 }
 
+fn normalize_cancellation(result: Result<(), UpCliError>) -> Result<(), UpCliError> {
+    match result {
+        Err(UpCliError::Up(error)) if error.is_user_cancelled() => Ok(()),
+        result => result,
+    }
+}
+
 fn record_outcome(result: &Result<(), UpCliError>, analytics: &mut Analytics) {
     analytics.add("success", result.is_ok());
     if let Err(err) = result {
@@ -238,9 +245,28 @@ mod tests {
     fn success_records_no_category() {
         let mut analytics = Analytics::default();
         record_outcome(&Ok(()), &mut analytics);
-        let v = serde_json::to_value(&analytics).unwrap();
-        assert_eq!(v["success"], true);
-        assert!(v.get("error_category").is_none());
+        let value = serde_json::to_value(&analytics).unwrap();
+        assert_eq!(value["success"], true);
+        assert!(value.get("error_category").is_none());
+    }
+
+    #[test]
+    fn wizard_exit_records_success_without_error_category() {
+        let result = normalize_cancellation(Err(UpCliError::Up(UpError::Exited)));
+        assert!(result.is_ok());
+        let mut analytics = Analytics::default();
+        record_outcome(&result, &mut analytics);
+        let value = serde_json::to_value(&analytics).unwrap();
+        assert_eq!(value["success"], true);
+        assert!(value.get("error_category").is_none());
+    }
+
+    #[test]
+    fn cancellation_normalization_preserves_failures() {
+        assert!(matches!(
+            normalize_cancellation(Err(UpCliError::ConfigNotFound)),
+            Err(UpCliError::ConfigNotFound)
+        ));
     }
 
     #[test]
@@ -252,7 +278,8 @@ mod tests {
 
     #[test]
     fn parse_error_buckets_as_config_validation() {
-        let parse_err: serde_yaml::Error = serde_yaml::from_str::<i32>("not a number").unwrap_err();
+        let parse_err: serde_saphyr::Error =
+            serde_saphyr::from_str::<i32>("not a number").unwrap_err();
         let v = category(UpCliError::Up(UpError::Parse(parse_err)));
         assert_eq!(v["error_category"], ErrorCategory::ConfigValidation as u32);
     }

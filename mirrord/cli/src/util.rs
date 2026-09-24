@@ -63,7 +63,7 @@ pub(crate) fn apply_test_env_overrides(mut cfg_context: ConfigContext) -> Config
 /// Produces the [`LayerConfig`] for a CLI command that may be running
 /// as a child of `mirrord up`, along with the config file path it was
 /// resolved from (if any).
-pub(crate) fn resolve_config(
+fn resolve_project_or_up_config(
     cfg_context: &mut ConfigContext,
 ) -> CliResult<(Option<String>, LayerConfig)> {
     match std::env::var(mirrord_up::RESOLVED_CONFIG_ENV) {
@@ -75,14 +75,26 @@ pub(crate) fn resolve_config(
     }
 }
 
+async fn apply_global_defaults(config: &mut LayerConfig) {
+    GlobalConfig::load().await.apply_to(config);
+}
+
 /// Resolves an exec config and fills unset fields from the global mirrord configuration.
-pub(crate) fn resolve_config_with_global_config(
+pub(crate) async fn resolve_config(
     cfg_context: &mut ConfigContext,
-    global_config: &GlobalConfig,
 ) -> CliResult<(Option<String>, LayerConfig)> {
-    let (path, mut config) = resolve_config(cfg_context)?;
-    global_config.apply_to(&mut config);
+    let (path, mut config) = resolve_project_or_up_config(cfg_context)?;
+    apply_global_defaults(&mut config).await;
     Ok((path, config))
+}
+
+/// Resolves a [`LayerConfig`] and fills unset fields from global configuration.
+pub(crate) async fn resolve_layer_config(
+    cfg_context: &mut ConfigContext,
+) -> CliResult<LayerConfig> {
+    let mut config = LayerConfig::resolve(cfg_context)?;
+    apply_global_defaults(&mut config).await;
+    Ok(config)
 }
 
 /// Removes `HTTP_PROXY` and `https_proxy` from the environment

@@ -17,7 +17,7 @@ pub struct InTargetPathResolver {
 
 impl InTargetPathResolver {
     #[tracing::instrument(level = Level::TRACE, ret)]
-    pub fn new(target_pid: u64) -> Self {
+    pub fn from_pid(target_pid: u64) -> Self {
         let root = format!("/proc/{target_pid}/root");
 
         Self {
@@ -25,8 +25,11 @@ impl InTargetPathResolver {
         }
     }
 
-    pub fn root_path(&self) -> &Path {
-        &self.root
+    #[tracing::instrument(level = Level::TRACE, ret)]
+    pub fn from_root() -> Self {
+        Self {
+            root: PathBuf::from("/"),
+        }
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
@@ -82,6 +85,27 @@ impl InTargetPathResolver {
 
         Ok(self.root.join(temp_path))
     }
+
+    /// Resolves `path` like [`Self::resolve`], but does not follow a symlink in the last
+    /// component.
+    ///
+    /// Meant for operations that act on the link itself, such as `lstat` and `readlink`. Joining
+    /// the unresolved path onto the target root is not enough for those: the kernel resolves
+    /// absolute symlinks in the intermediate components (e.g. `/var/run -> /run`) against the
+    /// agent's root instead of the target's.
+    ///
+    /// A trailing slash makes the last component follow symlinks, same as in the kernel.
+    #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
+    pub fn resolve_no_follow(&self, path: &Path) -> io::Result<PathBuf> {
+        if path.as_os_str().as_bytes().ends_with(b"/") {
+            return self.resolve(path);
+        }
+
+        match (path.parent(), path.file_name()) {
+            (Some(parent), Some(name)) => Ok(self.resolve(parent)?.join(name)),
+            _ => self.resolve(path),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -91,5 +115,68 @@ impl InTargetPathResolver {
     /// Makes it easy to test with [`tempfile::tempdir`].
     pub fn with_root_path(root: PathBuf) -> Self {
         Self { root }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, os::unix::fs::symlink};
+
+    use super::*;
+
+    /// Target root with `/var/run -> /run` (absolute) and `/run/secrets/token -> ..data/token`.
+    fn target_root() -> tempfile::TempDir {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("var")).unwrap();
+        fs::create_dir_all(root.path().join("run/secrets/..data")).unwrap();
+        fs::write(root.path().join("run/secrets/..data/token"), "secret").unwrap();
+        symlink("/run", root.path().join("var/run")).unwrap();
+        symlink("..data/token", root.path().join("run/secrets/token")).unwrap();
+        root
+    }
+
+    #[test]
+    fn no_follow_resolves_absolute_symlink_in_parent() {
+        let root = target_root();
+        let resolver = InTargetPathResolver::with_root_path(root.path().to_path_buf());
+
+        let resolved = resolver
+            .resolve_no_follow(Path::new("/var/run/secrets/token"))
+            .unwrap();
+
+        assert_eq!(resolved, root.path().join("run/secrets/token"));
+        assert!(resolved.symlink_metadata().unwrap().is_symlink());
+        assert_eq!(resolved.read_link().unwrap(), PathBuf::from("..data/token"));
+    }
+
+    #[test]
+    fn no_follow_keeps_last_component_symlink() {
+        let root = target_root();
+        let resolver = InTargetPathResolver::with_root_path(root.path().to_path_buf());
+
+        let resolved = resolver.resolve_no_follow(Path::new("/var/run")).unwrap();
+
+        assert_eq!(resolved, root.path().join("var/run"));
+        assert_eq!(resolved.read_link().unwrap(), PathBuf::from("/run"));
+    }
+
+    #[test]
+    fn no_follow_with_trailing_slash_follows_last_component() {
+        let root = target_root();
+        let resolver = InTargetPathResolver::with_root_path(root.path().to_path_buf());
+
+        let resolved = resolver.resolve_no_follow(Path::new("/var/run/")).unwrap();
+
+        assert!(resolved.symlink_metadata().unwrap().is_dir());
+    }
+
+    #[test]
+    fn no_follow_root() {
+        let root = target_root();
+        let resolver = InTargetPathResolver::with_root_path(root.path().to_path_buf());
+
+        let resolved = resolver.resolve_no_follow(Path::new("/")).unwrap();
+
+        assert!(resolved.symlink_metadata().unwrap().is_dir());
     }
 }

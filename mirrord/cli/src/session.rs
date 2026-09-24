@@ -10,7 +10,7 @@ use mirrord_operator::{
     client::{MaybeClientCert, NoClientCert, OperatorApi, error::OperatorOperation},
     crd::{Session as OperatorStatusSession, SessionCrd, escape_field_selector_value},
 };
-use mirrord_progress::NullProgress;
+use mirrord_progress::{NullProgress, messages::AGENT_OPERATOR_HINT};
 use mirrord_session_monitor_client::{
     SessionConnection, connect_to_session, session_endpoints, sessions_dir,
 };
@@ -62,7 +62,8 @@ async fn list_command(common: &SessionCommonArgs, args: SessionListArgs) -> Resu
 
     if operator_not_found {
         println!(
-            "Operator not found, showing local sessions only. Get started with operator at app.metalbear.com/?utm_source=sessions-list&utm_medium=cli"
+            "Operator not found, showing local sessions only. Get started with operator at app.metalbear.com/?utm_source=sessions-list&utm_medium=cli\n\
+             {AGENT_OPERATOR_HINT}"
         );
     }
 
@@ -256,7 +257,7 @@ async fn load_remote_sessions(
     common: &SessionCommonArgs,
     key: Option<&str>,
 ) -> Result<Vec<OperatorStatusSession>, CliError> {
-    let layer_config = resolve_layer_config(common)?;
+    let layer_config = resolve_layer_config(common).await?;
 
     if !layer_config.use_proxy {
         remove_proxy_env();
@@ -448,7 +449,7 @@ async fn try_kill_remote_session(
 async fn operator_api_with_client_certificate(
     args: &SessionCommonArgs,
 ) -> Result<Option<OperatorApi<MaybeClientCert>>, CliError> {
-    let layer_config = resolve_layer_config(args)?;
+    let layer_config = resolve_layer_config(args).await?;
 
     if !layer_config.use_proxy {
         remove_proxy_env();
@@ -477,12 +478,12 @@ async fn operator_api_with_client_certificate(
     Ok(Some(api))
 }
 
-fn resolve_layer_config(args: &SessionCommonArgs) -> Result<LayerConfig, CliError> {
+async fn resolve_layer_config(args: &SessionCommonArgs) -> Result<LayerConfig, CliError> {
     let mut cfg_context = ConfigContext::default()
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.clone())
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace.clone());
 
-    LayerConfig::resolve(&mut cfg_context).map_err(Into::into)
+    crate::util::resolve_layer_config(&mut cfg_context).await
 }
 
 async fn delete_remote_session_with_name(

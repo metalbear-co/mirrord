@@ -58,7 +58,7 @@ jobs:
   # ── plan ────────────────────────────────────────────────────────────
 
   plan:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     # don't run CI on drafts
     if: github.event.pull_request.draft == false
     outputs:
@@ -68,6 +68,7 @@ jobs:
       windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
+      flaky_report_changed: ${{ steps.changed-flaky-report.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
@@ -86,31 +87,18 @@ jobs:
       runner_16: ${{ steps.runners.outputs.runner_16 }}
       blacksmith: ${{ steps.runners.outputs.blacksmith }}
     steps:
-      # This repo is public, so a pull request from anyone can run its CI. Paid runners are for
-      # branches we own; everything from a fork gets the free ones. Every job takes its runner from
-      # here so the choice is made once.
-      - name: Pick the runners this run is allowed to use
+      # Keep runner sizing in one place so every Linux job uses the same Blacksmith runner labels,
+      # including pull requests from forks.
+      - name: Pick runners
         id: runners
-        env:
-          OURS: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          if [ "$OURS" = "true" ]; then
-            {
-              echo "runner_4=blacksmith-4vcpu-ubuntu-2404"
-              echo "runner_8=blacksmith-8vcpu-ubuntu-2404"
-              echo "runner_8_arm=blacksmith-8vcpu-ubuntu-2404-arm"
-              echo "runner_16=blacksmith-16vcpu-ubuntu-2404"
-              echo "blacksmith=true"
-            } >> "$GITHUB_OUTPUT"
-          else
-            {
-              echo "runner_4=ubuntu-24.04"
-              echo "runner_8=ubuntu-24.04"
-              echo "runner_8_arm=ubuntu-24.04-arm"
-              echo "runner_16=ubuntu-24.04"
-              echo "blacksmith=false"
-            } >> "$GITHUB_OUTPUT"
-          fi
+          {
+            echo "runner_4=blacksmith-4vcpu-ubuntu-2404"
+            echo "runner_8=blacksmith-8vcpu-ubuntu-2404"
+            echo "runner_8_arm=blacksmith-8vcpu-ubuntu-2404-arm"
+            echo "runner_16=blacksmith-16vcpu-ubuntu-2404"
+            echo "blacksmith=true"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
@@ -122,6 +110,16 @@ jobs:
         with:
           files: |
             .github/workflows/**
+      - name: get changed flaky report files
+        id: changed-flaky-report
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          files: |
+            .github/scripts/flaky-*
+            .github/scripts/test_flaky_report.py
+            .github/workflows/check-flaky-report.yaml
+            .github/workflows/flaky-test-report.yaml
+            .github/workflows/ci.yaml
       - name: get changed rs files
         id: changed-rs
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -312,6 +310,13 @@ jobs:
     with:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
 
+  check-flaky-report:
+    needs: [plan]
+    if: ${{ needs.plan.outputs.flaky_report_changed == 'true' }}
+    uses: ./.github/workflows/check-flaky-report.yaml
+    with:
+      runner: ${{ needs.plan.outputs.runner_4 }}
+
   check-rust-docs:
     needs: [plan]
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
@@ -360,7 +365,7 @@ jobs:
   # ── tests ───────────────────────────────────────────────────────────
 
   test_agent:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     needs: plan
     if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
     container:
@@ -473,11 +478,12 @@ jobs:
         test_agent,
         lint,
         check-rust-docs,
+        check-flaky-report,
         cargo-deny,
         windows_tests,
         install_script,
       ]
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
       actions: write

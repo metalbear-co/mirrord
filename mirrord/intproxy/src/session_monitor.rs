@@ -43,6 +43,8 @@ pub enum MonitorEvent {
     PortSubscription {
         port: u16,
         mode: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hit_count: Option<u64>,
     },
     EnvVar {
         vars: RedactedVarNames,

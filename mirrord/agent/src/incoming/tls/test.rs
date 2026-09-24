@@ -4,7 +4,7 @@ use mirrord_agent_env::steal_tls::{
     AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication,
     TlsClientVerification, TlsServerVerification,
 };
-use mirrord_tls_util::generate_cert;
+use mirrord_tls_util::{DangerousNoVerifierServer, generate_cert};
 use pem::{EncodeConfig, LineEnding, Pem};
 use rcgen::{CertifiedKey, KeyPair};
 use rustls::{
@@ -135,6 +135,7 @@ async fn server_authentication(
             agent_as_client: AgentClientConfig {
                 authentication: None,
                 verification: TlsServerVerification {
+                    server_name: None,
                     accept_any_cert: true,
                     trust_roots: Default::default(),
                 },
@@ -212,6 +213,7 @@ async fn client_verification(
             agent_as_client: AgentClientConfig {
                 authentication: None,
                 verification: TlsServerVerification {
+                    server_name: None,
                     accept_any_cert: true,
                     trust_roots: Default::default(),
                 },
@@ -283,6 +285,7 @@ async fn client_authentication(
                     key_pem: "/auth.pem".into(),
                 }),
                 verification: TlsServerVerification {
+                    server_name: None,
                     accept_any_cert: true,
                     trust_roots: Default::default(),
                 },
@@ -365,6 +368,7 @@ async fn server_verification(
                     key_pem: "/auth.pem".into(),
                 }),
                 verification: TlsServerVerification {
+                    server_name: None,
                     accept_any_cert,
                     trust_roots: vec!["/root.pem".into()],
                 },
@@ -456,6 +460,105 @@ async fn agent_connects_with_original_params() {
     assert_eq!(server_agent.get_ref().1.server_name(), Some("server"));
 }
 
+/// Verifies that a configured `server_name` is what the agent verifies the original destination
+/// against when the original client sent no SNI, and that an SNI the client did send wins.
+#[rstest::rstest]
+#[case::configured(Some("server"), None, Some("server"), true)]
+#[case::not_configured(None, None, None, false)]
+#[case::sni_wins(Some("configured.invalid"), Some("server"), Some("server"), true)]
+#[tokio::test]
+async fn configured_server_name_fills_in_for_missing_sni(
+    #[case] server_name: Option<&str>,
+    #[case] client_sni: Option<&str>,
+    #[case] expected_name: Option<&str>,
+    #[case] expect_accepted: bool,
+) {
+    let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
+
+    let root_dir = tempfile::tempdir().unwrap();
+
+    let trusted_root = generate_cert("root", None, true).unwrap();
+    let root_pem = root_dir.path().join("root.pem");
+    fs::write(root_pem, trusted_root.cert.pem()).unwrap();
+
+    let agent_chain = CertChainWithKey::new("server", Some(&trusted_root));
+    let auth_pem = root_dir.path().join("auth.pem");
+    agent_chain.to_file(&auth_pem);
+
+    let store = StealTlsHandlerStore::new(
+        vec![StealPortTlsConfig {
+            port: 443,
+            agent_as_server: AgentServerConfig {
+                authentication: TlsAuthentication {
+                    cert_pem: "/auth.pem".into(),
+                    key_pem: "/auth.pem".into(),
+                },
+                alpn_protocols: Default::default(),
+                verification: None,
+            },
+            agent_as_client: AgentClientConfig {
+                authentication: None,
+                verification: TlsServerVerification {
+                    server_name: server_name.map(str::to_owned),
+                    accept_any_cert: false,
+                    trust_roots: vec!["/root.pem".into()],
+                },
+            },
+        }],
+        InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+    );
+    let handler = store.get(443).await.unwrap().unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    // Without an SNI of its own, the original client connects by IP.
+    let client_sni = client_sni.map(str::to_owned);
+    let _client_handle = tokio::spawn(async move {
+        let mut client_config = ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(DangerousNoVerifierServer))
+            .with_no_client_auth();
+        client_config.enable_sni = client_sni.is_some();
+        let name = match client_sni {
+            Some(name) => ServerName::try_from(name).unwrap(),
+            None => ServerName::from(addr.ip()),
+        };
+        let client_agent = TcpStream::connect(addr).await.unwrap();
+        TlsConnector::from(Arc::new(client_config))
+            .connect(name, client_agent)
+            .await
+    });
+
+    let agent_client = listener.accept().await.unwrap().0;
+    let agent_client = handler.acceptor().accept(agent_client).await.unwrap();
+
+    let acceptor = {
+        let server_chain = CertChainWithKey::new("server", Some(&trusted_root));
+        let config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(server_chain.certs, server_chain.key)
+            .unwrap();
+        TlsAcceptor::from(Arc::new(config))
+    };
+    let server_handle = tokio::spawn(async move {
+        let server_agent = listener.accept().await.unwrap().0;
+        acceptor.accept(server_agent).await
+    });
+
+    let connector = handler.connector(agent_client.get_ref().1);
+    let expected_name = expected_name.map(|name| ServerName::try_from(name.to_owned()).unwrap());
+    assert_eq!(connector.server_name(), expected_name.as_ref());
+
+    let agent_server = TcpStream::connect(addr).await.unwrap();
+    let result = connector.connect(addr.ip(), None, agent_server).await;
+    assert_eq!(result.is_ok(), expect_accepted, "{result:?}");
+
+    if expect_accepted {
+        server_handle.await.unwrap().unwrap();
+    }
+}
+
 pub struct SimpleStore {
     _certs_dir: TempDir,
     pub store: StealTlsHandlerStore,
@@ -501,6 +604,7 @@ impl SimpleStore {
                         key_pem: "/auth.pem".into(),
                     }),
                     verification: TlsServerVerification {
+                        server_name: None,
                         accept_any_cert: false,
                         trust_roots: vec!["/root.pem".into()],
                     },

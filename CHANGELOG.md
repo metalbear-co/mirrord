@@ -8,6 +8,136 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.263.0](https://github.com/metalbear-co/mirrord/tree/3.263.0) - 2026-09-24
+
+
+### Added
+
+- The mirrord UI now shows how many incoming traffic deliveries each active
+  port subscription receives.
+- mirrord now warns when a database branch's image runs a different server
+  version than the source database, naming both versions.
+
+
+### Changed
+
+- Messages that say a run needs the operator, and `mirrord session list`, tell
+  AI coding agents they can install the operator themselves, pointing at
+  `https://metalbear.com/agents.md`.
+- The `guard_std_fds` experimental config is now deprecated and enabled for all
+  users by default.
+- `mirrord up` now starts `mirrord ui` in the background by default.
+
+
+### Fixed
+
+- Fixed a deadlock when a process with an active gRPC channel forks.
+- The mirrord UI now distinguishes a missing operator from lost Kubernetes
+  access, shows the Kubernetes error with re-authentication guidance, and
+  retries with refreshed credentials.
+- `mirrord up` now gracefully stops all managed services when interrupted,
+  instead of reporting user-ended sessions as failures or leaving child
+  processes running.
+
+## [3.262.0](https://github.com/metalbear-co/mirrord/tree/3.262.0) - 2026-09-20
+
+
+### Added
+
+- Added `--unmatched` and `--session-key-field` to `mirrord subscribe`,
+  reporting queue messages no filter took and naming the session each event
+  belongs to.
+- Added an Events tab to `mirrord ui`, listing the HTTP and queue messages the
+  operator intercepted across every cluster session.
+
+
+### Fixed
+
+- Fixed `mirrord subscribe` and `mirrord ui` ignoring the configured `baggage`,
+  so neither could reach an operator you are running yourself.
+- Fixed `mirrord ui` hanging indefinitely when the selected kube context's
+  credentials have expired, instead of reporting it as unreachable.
+- Fixed node-local UDP routing through the operator by preserving the target
+  pod's HostIP metadata when resolving its runtime state.
+- Fixed unix stream socket pathname truncation when clients like PHP report
+  `addrlen` without the trailing NUL, allowing the complete path to reach
+  outgoing matching and forwarding.
+- HTTPS stealing works when the original client sends no SNI and the
+  certificate names a host: set `serverName` in the TLS steal config.
+
+## [3.261.0](https://github.com/metalbear-co/mirrord/tree/3.261.0) - 2026-09-17
+
+
+### Changed
+
+- Add `/var/run/secrets/` and `/run/secrets/` to read remote by default list.
+
+
+### Fixed
+
+- Fixed `mirrord container` connections to outgoing unix stream and
+  `SOCK_SEQPACKET` sockets by sharing the temporary bridge socket with the app
+  container.
+
+## [3.260.0](https://github.com/metalbear-co/mirrord/tree/3.260.0) - 2026-09-16
+
+
+### Changed
+
+- Apply global configuration consistently to every mirrord command that
+  resolves configuration while preserving explicit
+  project configuration, environment variables, and CLI flags.
+
+
+### Fixed
+
+- Fixed `xcrun`, `make`, `git` and other developer command line tools failing
+  under mirrord on macOS 27 with an architecture mismatch when loading
+  `libxcrun.dylib`.
+
+## [3.259.0](https://github.com/metalbear-co/mirrord/tree/3.259.0) - 2026-09-16
+
+
+### Added
+
+- mirrord's anonymous usage analytics now report whether a session was launched
+  by an AI coding agent (Claude Code, Cursor, Codex, Gemini CLI, Amp), detected
+  from environment variables the agents set, in the same best-effort way as the
+  existing CI detection.
+
+
+### Fixed
+
+- Fixed remote `lstat` and `readlink` failing with `ENOENT` when a parent
+  directory is an absolute symlink, such as `/var/run -> /run`. This broke PHP
+  `file_get_contents` on files like
+  `/var/run/secrets/eks.amazonaws.com/serviceaccount/token`.
+
+## [3.258.0](https://github.com/metalbear-co/mirrord/tree/3.258.0) - 2026-09-15
+
+
+### Added
+
+- Add `mirrord config set` and `mirrord config unset` commands for updating
+  user-wide mirrord configuration.
+- Added `mirror` mode to `mirrord up`. Use it in the command (`--mode mirror`)
+  or the config file (`default_mode: mirror`).
+- Preview environments can target a CronJob (`cronjob/<name>`), with
+  `feature.preview.cronjob.schedule` overriding the inherited schedule.
+
+
+### Fixed
+
+- Fixed SIP patching on macOS when system binaries contain the newer
+  `arm64e.x1` architecture slice.
+
+## [3.257.0](https://github.com/metalbear-co/mirrord/tree/3.257.0) - 2026-09-14
+
+
+### Added
+
+- Added Liquibase migration support.
+
 ## [3.256.0](https://github.com/metalbear-co/mirrord/tree/3.256.0) - 2026-09-09
 
 

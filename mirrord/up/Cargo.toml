@@ -26,18 +26,26 @@ k8s-openapi.workspace = true
 kube.workspace = true
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_yaml.workspace = true
+serde-saphyr.workspace = true
 serde_json.workspace = true
 miette = { workspace = true, features = ["fancy"] }
+process-wrap.workspace = true
 thiserror.workspace = true
 strum_macros.workspace = true
 strum.workspace = true
-tokio = { workspace = true, features = ["process", "rt"] }
+tokio = { workspace = true, features = ["process", "rt", "signal", "sync", "time"] }
 clap.workspace = true
 inquire.workspace = true
 uuid.workspace = true
 yamlpatch.workspace = true
 yamlpath.workspace = true
 tera.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["signal", "process"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+tempfile.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

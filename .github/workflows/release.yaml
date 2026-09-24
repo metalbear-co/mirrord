@@ -21,7 +21,7 @@ env:
 
 jobs:
   validate_release_request:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
     outputs:
@@ -161,7 +161,7 @@ jobs:
   build_binaries_aarch64-unknown-linux-gnu:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -201,7 +201,7 @@ jobs:
   build_binaries_x86_64-unknown-linux-gnu:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -469,7 +469,7 @@ jobs:
   build_layer_macos_aarch64:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -506,7 +506,7 @@ jobs:
 
   # Stage 2: Link universal layer from pre-built layers
   link_layer_macos_universal:
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     needs: [validate_release_request, build_layer_macos_x86_64, build_layer_macos_aarch64]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
@@ -607,7 +607,7 @@ jobs:
 
   # Stage 3: Build aarch64 CLI (runs in parallel)
   build_cli_macos_aarch64:
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     needs: [validate_release_request, link_layer_macos_universal]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     steps:
@@ -661,7 +661,7 @@ jobs:
 
   # Stage 4: Merge universal CLI from pre-built CLIs
   merge_cli_macos_universal:
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     needs:
       [
         validate_release_request,
@@ -720,7 +720,7 @@ jobs:
   release_docker_image:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     permissions:
       packages: write
       contents: read
@@ -844,7 +844,7 @@ jobs:
   release_cli_docker_image:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     permissions:
       packages: write
       contents: read
@@ -960,7 +960,7 @@ jobs:
   check_for_new_docs:
     needs: [validate_release_request]
     if: needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
     steps:
@@ -978,7 +978,7 @@ jobs:
           base_sha: latest
 
   update_config_docs:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [validate_release_request, check_for_new_docs]
     if: needs.validate_release_request.outputs.should_release == 'true' && needs.check_for_new_docs.outputs.config_schema_changed == 'true'
     permissions:
@@ -1024,7 +1024,7 @@ jobs:
         release_docker_image,
         release_cli_docker_image,
       ]
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: needs.validate_release_request.outputs.should_release == 'true'
     permissions:
       packages: write
@@ -1131,7 +1131,7 @@ jobs:
 
   release_homebrew:
     needs: [validate_release_request, release_gh]
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -1350,7 +1350,7 @@ jobs:
           # Update manifest and submit a PR to microsoft/winget-pkgs
           $output = & .\wingetcreate.exe update $packageId `
             --version $version `
-            --urls $installerUrl `
+            --urls "$installerUrl|x64|machine" `
             --submit `
             --token $env:WINGET_TOKEN 2>&1
 
@@ -1372,7 +1372,7 @@ jobs:
 
   update_latest:
     needs: [validate_release_request, release_homebrew, check_for_new_docs]
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: needs.validate_release_request.outputs.should_release == 'true'
     permissions:
       contents: write
@@ -1399,7 +1399,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   update_infra_cli_version:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [validate_release_request, release_homebrew, check_for_new_docs, update_latest]
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
@@ -1426,7 +1426,7 @@ jobs:
             -f inputs[cli_version]=${{ needs.validate_release_request.outputs.version }}
 
   linear_release:
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
     needs: [validate_release_request, release_homebrew, check_for_new_docs, update_latest]
