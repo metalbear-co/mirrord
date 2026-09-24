@@ -21,6 +21,15 @@ pub const METALBEAR_CLOUD_URL_ENV: &str = "MIRRORD_METALBEAR_CLOUD_URL";
 
 const METALBEAR_CLOUD_URL_DEFAULT: &str = "https://app.metalbear.com";
 
+/// Development-only mirrord session key. When set, the token exchange is tagged with
+/// `baggage: mirrord-session=<value>` so it routes to a locally-run app-server under mirrord
+/// instead of the deployed one — the operator's `OPERATOR_CLOUD_BAGGAGE_SESSION` for the same
+/// purpose. Unset in production.
+pub const METALBEAR_CLOUD_BAGGAGE_SESSION_ENV: &str = "MIRRORD_METALBEAR_CLOUD_BAGGAGE_SESSION";
+
+/// Name of the W3C baggage header, which mirrord's traffic-stealing filter matches on.
+const BAGGAGE_HEADER: &str = "baggage";
+
 /// Every MetalBear API key carries this prefix. Checking it up front turns "the key in your
 /// environment is not a key at all" into a config error at startup instead of a 401 later.
 const API_KEY_PREFIX: &str = "metalbear_key_";
@@ -61,6 +70,10 @@ pub struct CloudTokenCredentials {
     client: reqwest::Client,
     pub(super) endpoint: Url,
     api_key: SecretString,
+    /// Development-only; see [`METALBEAR_CLOUD_BAGGAGE_SESSION_ENV`]. Held as a finished header
+    /// value so a session key that cannot be one is refused at construction rather than failing
+    /// every exchange.
+    baggage: Option<HeaderValue>,
 }
 
 impl CloudTokenCredentials {
@@ -77,8 +90,13 @@ impl CloudTokenCredentials {
 
         let cloud_url = std::env::var(METALBEAR_CLOUD_URL_ENV)
             .unwrap_or_else(|_| METALBEAR_CLOUD_URL_DEFAULT.to_owned());
+        let baggage_session = std::env::var(METALBEAR_CLOUD_BAGGAGE_SESSION_ENV)
+            .ok()
+            .filter(|session| !session.trim().is_empty());
 
-        Self::new(&cloud_url, api_key).map(Some)
+        Self::new(&cloud_url, api_key)?
+            .with_baggage_session(baggage_session.as_deref())
+            .map(Some)
     }
 
     pub fn new(cloud_url: &str, api_key: String) -> Result<Self, SessionsManagerClientError> {
@@ -106,7 +124,27 @@ impl CloudTokenCredentials {
                 .build()?,
             endpoint,
             api_key: SecretString::from(api_key),
+            baggage: None,
         })
+    }
+
+    /// Development-only: routes the token exchange to a locally-run app-server under mirrord by
+    /// tagging it with `baggage: mirrord-session=<session>`. A no-op when `session` is [`None`].
+    ///
+    /// Only the exchange is tagged. Requests to sessions-manager itself are addressed by
+    /// `MIRRORD_SESSIONS_MANAGER_URL`, which already points wherever a developer wants them.
+    pub fn with_baggage_session(
+        mut self,
+        session: Option<&str>,
+    ) -> Result<Self, SessionsManagerClientError> {
+        self.baggage = session
+            .map(|session| {
+                HeaderValue::from_str(&format!("mirrord-session={session}"))
+                    .map_err(|_| SessionsManagerClientError::InvalidCloudBaggageSession)
+            })
+            .transpose()?;
+
+        Ok(self)
     }
 
     /// Exchanges the API key for a token, returned as a complete `Bearer <token>` header value
@@ -117,14 +155,17 @@ impl CloudTokenCredentials {
             "exchanging the MetalBear API key for a sessions-manager token"
         );
 
-        let response = self
+        let mut request = self
             .client
             .post(self.endpoint.clone())
             .json(&TokenExchangeRequest {
                 api_key: self.api_key.expose_secret(),
-            })
-            .send()
-            .await?;
+            });
+        if let Some(baggage) = &self.baggage {
+            request = request.header(BAGGAGE_HEADER, baggage);
+        }
+
+        let response = request.send().await?;
 
         let status = response.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
@@ -225,6 +266,7 @@ pub(super) mod tests {
     struct TokenEndpointState {
         responses: BlockingMutex<VecDeque<(StatusCode, Value)>>,
         requests: BlockingMutex<Vec<Value>>,
+        baggage: BlockingMutex<Vec<Option<String>>>,
     }
 
     pub(in crate::credentials) struct TokenEndpoint {
@@ -246,6 +288,7 @@ pub(super) mod tests {
             let state = Arc::new(TokenEndpointState {
                 responses: BlockingMutex::new(responses.into_iter().collect()),
                 requests: BlockingMutex::new(Vec::new()),
+                baggage: BlockingMutex::new(Vec::new()),
             });
             let app = Router::new()
                 .route("/api/v2/token", post(Self::handle))
@@ -268,8 +311,14 @@ pub(super) mod tests {
 
         async fn handle(
             State(state): State<Arc<TokenEndpointState>>,
+            headers: reqwest::header::HeaderMap,
             Json(body): Json<Value>,
         ) -> (StatusCode, Json<Value>) {
+            state.baggage.lock().unwrap().push(
+                headers
+                    .get("baggage")
+                    .map(|value| value.to_str().unwrap().to_owned()),
+            );
             state.requests.lock().unwrap().push(body);
             let (status, body) = state
                 .responses
@@ -286,6 +335,11 @@ pub(super) mod tests {
 
         fn exchanges(&self) -> usize {
             self.state.requests.lock().unwrap().len()
+        }
+
+        /// The `baggage` header seen on each exchange, in order.
+        fn baggage(&self) -> Vec<Option<String>> {
+            self.state.baggage.lock().unwrap().clone()
         }
     }
 
@@ -430,6 +484,63 @@ pub(super) mod tests {
             endpoint.exchanges(),
             0,
             "the data plane should not even trigger an exchange"
+        );
+    }
+
+    /// The whole point of the session key: a developer running app-server locally under mirrord
+    /// needs the exchange to carry the baggage their steal filter matches on.
+    #[tokio::test]
+    async fn a_configured_session_routes_the_exchange_to_a_local_app_server() {
+        let endpoint = TokenEndpoint::start([(StatusCode::OK, token("abc"))]).await;
+
+        endpoint
+            .credentials()
+            .with_baggage_session(Some("mbe2092"))
+            .unwrap()
+            .control_plane_headers()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            endpoint.baggage(),
+            [Some("mirrord-session=mbe2092".to_owned())]
+        );
+    }
+
+    /// Production sends no baggage at all, so nothing about a deployed agent's traffic invites
+    /// interception.
+    #[tokio::test]
+    async fn no_session_means_no_baggage_header() {
+        let endpoint = TokenEndpoint::start([(StatusCode::OK, token("abc"))]).await;
+
+        endpoint
+            .credentials()
+            .with_baggage_session(None)
+            .unwrap()
+            .control_plane_headers()
+            .await
+            .unwrap();
+
+        assert_eq!(endpoint.baggage(), [None]);
+    }
+
+    #[test]
+    fn a_session_that_cannot_be_a_header_value_is_refused() {
+        let credentials = CloudTokenCredentials::new(
+            "https://app.staging.metalbear.com",
+            TEST_API_KEY.to_owned(),
+        )
+        .unwrap();
+
+        let Err(error) = credentials.with_baggage_session(Some("new\nline")) else {
+            panic!("a session key that cannot be a header value should be refused");
+        };
+        assert!(
+            matches!(
+                error,
+                SessionsManagerClientError::InvalidCloudBaggageSession
+            ),
+            "expected a config error, got {error:?}"
         );
     }
 
