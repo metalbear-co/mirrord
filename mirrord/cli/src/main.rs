@@ -343,6 +343,7 @@ mod kube;
 mod list;
 mod local_redis;
 mod logging;
+mod login;
 mod newsletter;
 mod operator;
 #[cfg(windows)]
@@ -1191,6 +1192,7 @@ fn main() -> miette::Result<()> {
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             Commands::Queues(args) => queues::queues_command(*args).await?,
             Commands::Fix(args) => fix::fix_command(args).await?,
+            Commands::Login(args) => login::login_command(*args).await?,
             #[cfg(windows)]
             Commands::Attach(args) => {
                 let progress = ProgressTracker::from_env("mirrord attach");

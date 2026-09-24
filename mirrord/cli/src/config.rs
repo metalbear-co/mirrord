@@ -30,6 +30,7 @@ use mirrord_config::{
 use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
+use url::Url;
 
 use crate::{
     config::{ci::CiArgs, global_config::GlobalConfigArgs},
@@ -273,6 +274,12 @@ pub(super) enum Commands {
 
     /// Fix issues related to mirrord.
     Fix(FixArgs),
+
+    /// Log in to mirrord Cloud.
+    ///
+    /// Opens the browser to approve the login, and stores the auth token locally.
+    #[command(hide = true)] // the flow is not released yet
+    Login(Box<LoginArgs>),
 
     /// Attach mirrord layer to an already-running process by PID.
     ///
@@ -1368,6 +1375,14 @@ pub(super) struct PreviewArgs {
     /// Subcommand to use with `mirrord preview`.
     #[command(subcommand)]
     pub command: PreviewCommand,
+}
+
+/// Arguments for the `mirrord login` command.
+#[derive(Args, Debug)]
+pub(super) struct LoginArgs {
+    /// URL of the authentication backend.
+    #[arg(long, hide = true, default_value = "https://app.metalbear.com")]
+    pub url: Url,
 }
 
 /// Arguments for the `mirrord subscribe` command.

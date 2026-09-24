@@ -97,6 +97,8 @@ mirrord-sessions-manager-client.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
 hyper.workspace = true
 bytes.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+sha2.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
