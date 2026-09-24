@@ -14,9 +14,9 @@ use mirrord_analytics::{
 #[cfg(any(windows, test))]
 use mirrord_config::MIRRORD_LAYER_CRASH_REPORTING;
 use mirrord_config::{
-    LayerConfig, MIRRORD_FS_PREFETCH_DIR, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR,
-    config::ConfigError, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM,
-    feature::env::mapper::EnvVarsRemapper, util::GIT_BRANCH,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
+    external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
+    util::GIT_BRANCH,
 };
 #[cfg(windows)]
 use mirrord_config::{MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR};
@@ -48,7 +48,6 @@ use crate::{
     connection::{AGENT_CONNECT_INFO_ENV_KEY, ConnectData, create_and_connect},
     error::CliError,
     extract::extract_library,
-    prefetch::prefetch_remote_paths,
     up::MirrordUp,
     util::remove_proxy_env,
 };
@@ -647,15 +646,20 @@ impl MirrordExecution {
         };
 
         // Prefetching happens before the internal proxy and the user process start.
+        #[cfg(unix)]
         let prefetch_guard =
             if config.feature.fs.prefetch.is_empty().not() && config.feature.fs.is_active() {
                 let timeout = Duration::from_secs(config.feature.fs.prefetch_timeout);
-                let directory =
-                    prefetch_remote_paths(&client, &config.feature.fs.prefetch, timeout, progress)
-                        .await?;
+                let directory = crate::prefetch::prefetch_remote_paths(
+                    &client,
+                    &config.feature.fs.prefetch,
+                    timeout,
+                    progress,
+                )
+                .await?;
 
                 env_vars.insert(
-                    MIRRORD_FS_PREFETCH_DIR.into(),
+                    mirrord_config::MIRRORD_FS_PREFETCH_DIR.into(),
                     directory.display().to_string(),
                 );
 
@@ -695,6 +699,7 @@ impl MirrordExecution {
             .env(MIRRORD_KUBE_VERSION_MAJOR_ENV, api_version.0.to_string())
             .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string());
 
+        #[cfg(unix)]
         if let Some(directory) = prefetch_guard.as_ref().map(|guard| guard.path()) {
             proxy_command.env(mirrord_config::MIRRORD_FS_PREFETCH_DIR, directory);
         }

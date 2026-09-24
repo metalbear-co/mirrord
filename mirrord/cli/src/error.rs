@@ -31,7 +31,6 @@ use crate::{
     dump::DumpSessionError,
     fix::FixKubeconfigError,
     port_forward::PortForwardError,
-    prefetch::PrefetchError,
     profile::ProfileError,
     tui::TuiCliError,
     ui::UiCliError,
@@ -317,12 +316,13 @@ pub(crate) enum CliError {
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(#[from] mirrord_config::config::ConfigError),
 
+    #[cfg(unix)]
     #[error("Failed to prefetch remote files: {0}")]
     #[diagnostic(help(
         "Please check that the paths in `feature.fs.prefetch` exist in the target, and that \
         there is room in your temporary directory.{GENERAL_HELP}"
     ))]
-    Prefetch(#[from] PrefetchError),
+    Prefetch(#[from] crate::prefetch::PrefetchError),
 
     #[error("Failed to run command `{command}` due to missing argument `{arg}`")]
     MissingArg { command: String, arg: String },

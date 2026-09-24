@@ -348,6 +348,9 @@ mod operator;
 #[cfg(windows)]
 mod pitm;
 mod port_forward;
+// Prefetched files exist for the layer to serve in place of remote ones, and the layer is unix
+// only, so copying them anywhere else would be work nothing can use.
+#[cfg(unix)]
 mod prefetch;
 mod preview;
 mod profile;

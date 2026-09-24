@@ -229,6 +229,7 @@ pub(crate) async fn proxy(
 
     // Held for the whole session, so that the files copied for `feature.fs.prefetch` are removed
     // however this function returns.
+    #[cfg(unix)]
     let _prefetched_files = crate::prefetch::PrefetchedFilesGuard::from_env();
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS

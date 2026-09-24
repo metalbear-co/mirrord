@@ -1179,6 +1179,13 @@ impl LayerConfig {
             );
         }
 
+        #[cfg(windows)]
+        if self.feature.fs.prefetch.is_empty().not() {
+            context.add_warning(
+                "`feature.fs.prefetch` is not supported on Windows and will be ignored.".to_owned(),
+            );
+        }
+
         if let (Some(profile), true) = (&self.profile, context.has_warnings()) {
             // It might be that the user config is fine,
             // but the mirrord profile introduced changes that triggered the warnings.

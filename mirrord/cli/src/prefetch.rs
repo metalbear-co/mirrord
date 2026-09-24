@@ -1,5 +1,7 @@
 //! Copying of remote files into a local directory, before the user process starts.
 //!
+//! Unix only: the copies exist for the file hooks to serve, and those are unix only.
+//!
 //! Applications that repeatedly read the same remote files (e.g. an HTTP server reading
 //! `/etc/ssl` on every request) pay a round trip to the agent on every read. The paths listed in
 //! `feature.fs.prefetch` are instead copied once, here, into a private temporary directory. The
@@ -13,15 +15,14 @@
 
 use std::{
     collections::HashSet,
-    fs::{self, File},
+    fs::{self, File, Permissions},
     io::{self, Write},
     mem,
     ops::Not,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     time::Duration,
 };
-#[cfg(unix)]
-use std::{fs::Permissions, os::unix::fs::PermissionsExt};
 
 use mirrord_config::MIRRORD_FS_PREFETCH_DIR;
 use mirrord_progress::Progress;
@@ -492,7 +493,6 @@ impl Downloader<'_> {
 /// Only permissions are restored. [`MetadataInternal`]'s timestamps carry just the sub-second
 /// component of the remote ones (they come from `st_atime_nsec` and friends), so there is no
 /// meaningful time to restore from them.
-#[cfg(unix)]
 fn set_permissions(path: &Path, mode: u32) -> Result<(), PrefetchError> {
     fs::set_permissions(path, Permissions::from_mode(mode & PERMISSION_MASK))
         .map_err(|error| PrefetchError::SetPermissions(path.to_path_buf(), error))

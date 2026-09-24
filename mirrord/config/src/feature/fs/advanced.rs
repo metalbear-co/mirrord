@@ -278,6 +278,8 @@ pub struct FsConfig {
     /// Paths must start with `/`, as they are resolved in the remote pod, where the local
     /// process's working directory is meaningless.
     ///
+    /// Not supported on Windows, where the option is ignored.
+    ///
     /// ```json
     /// {
     ///   "feature": {

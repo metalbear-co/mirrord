@@ -1,7 +1,7 @@
-use std::{collections::HashSet, net::SocketAddr, ops::Not, path::PathBuf, sync::OnceLock};
+use std::{collections::HashSet, net::SocketAddr, ops::Not, sync::OnceLock};
 
 use mirrord_config::{
-    LayerConfig, MIRRORD_FS_PREFETCH_DIR, MIRRORD_LAYER_INTPROXY_ADDR,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
     experimental::ExperimentalConfig,
     feature::{
         env::EnvConfig,
@@ -23,7 +23,7 @@ use regex::RegexSet;
 
 use crate::{
     debugger_ports::DebuggerPorts,
-    file::{filter::FileFilter, mapper::FileRemapper, prefetched::PrefetchedFiles},
+    file::{filter::FileFilter, mapper::FileRemapper},
     socket::{OutgoingSelector, dns_selector::DnsSelector},
     trace_only::{is_trace_only_mode, modify_config_for_trace_only},
 };
@@ -80,7 +80,9 @@ pub struct LayerSetup {
     config: LayerConfig,
     file_filter: FileFilter,
     file_remapper: FileRemapper,
-    prefetched_files: PrefetchedFiles,
+    /// The copies the file hooks serve in place of remote files, for `feature.fs.prefetch`.
+    #[cfg(unix)]
+    prefetched_files: crate::file::prefetched::PrefetchedFiles,
     debugger_ports: DebuggerPorts,
     remote_unix_streams: RegexSet,
     outgoing_selector: OutgoingSelector,
@@ -102,8 +104,9 @@ impl LayerSetup {
         let file_filter = FileFilter::new(config.feature.fs.clone());
         let file_remapper =
             FileRemapper::new(config.feature.fs.mapping.clone().unwrap_or_default());
-        let prefetched_files = PrefetchedFiles::new(
-            std::env::var_os(MIRRORD_FS_PREFETCH_DIR).map(PathBuf::from),
+        #[cfg(unix)]
+        let prefetched_files = crate::file::prefetched::PrefetchedFiles::new(
+            std::env::var_os(mirrord_config::MIRRORD_FS_PREFETCH_DIR).map(std::path::PathBuf::from),
             &config.feature.fs.prefetch,
         );
 
@@ -138,6 +141,7 @@ impl LayerSetup {
             config,
             file_filter,
             file_remapper,
+            #[cfg(unix)]
             prefetched_files,
             debugger_ports,
             remote_unix_streams,
@@ -171,7 +175,8 @@ impl LayerSetup {
         &self.file_remapper
     }
 
-    pub fn prefetched_files(&self) -> &PrefetchedFiles {
+    #[cfg(unix)]
+    pub fn prefetched_files(&self) -> &crate::file::prefetched::PrefetchedFiles {
         &self.prefetched_files
     }
 
