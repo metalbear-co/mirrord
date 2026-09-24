@@ -33,11 +33,11 @@ use mirrord_config::{
     LayerConfig,
     config::{ConfigContext, EnvKey},
     feature::preview::{ConfigMount, ConfigMountType},
-    target::{Target, TargetDisplay},
+    target::{Target, TargetDisplay, label::LabelTarget},
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
-    client::{NoClientCert, OperatorApi},
+    client::{NoClientCert, OperatorApi, connect_params::BranchDbNames},
     crd::{
         NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
@@ -47,7 +47,7 @@ use mirrord_operator::{
             PreviewSessionPhase, PreviewSessionSpec,
             view::{PreviewEnv, PreviewMessageKind},
         },
-        session::{KubeResourceTarget, SessionTarget},
+        session::{PodSetTarget, SessionTarget},
     },
     types::OPERATOR_OWNERSHIP_LABEL,
 };
@@ -127,6 +127,12 @@ async fn preview_start(
             .operator()
             .spec
             .require_feature(NewOperatorFeature::PreviewCronJobTarget)?;
+    }
+    if matches!(layer_config.target.path, Some(Target::Label(_))) {
+        operator_api
+            .operator()
+            .spec
+            .require_feature(NewOperatorFeature::PreviewLabelTarget)?;
     }
 
     // Create the `PreviewSession` resource in the cluster. The CR name is derived from
@@ -213,9 +219,15 @@ async fn preview_start(
         labels
     };
 
-    let branch_db_names = operator_api
-        .prepare_branch_dbs(&layer_config, &progress)
-        .await?;
+    // Branch preparation reads a single workload out of the target, so it only runs when the
+    // config asks for branches. A label target names no single workload and must not reach it.
+    let branch_db_names = if layer_config.feature.db_branches.is_empty() {
+        BranchDbNames::default()
+    } else {
+        operator_api
+            .prepare_branch_dbs(&layer_config, &progress)
+            .await?
+    };
 
     // The namespace the session (and therefore the preview pod) lands in.
     let session_namespace = preview_namespace(&operator_api, &layer_config);
@@ -1014,17 +1026,25 @@ async fn preview_stop(
     Ok(())
 }
 
-/// Resolves a [`Target`] to a [`KubeResourceTarget`] by fetching the target from the
-/// operator's GET TargetCrd API. The operator validates the target exists and resolves
-/// the container if not specified. Works for both single-cluster and multi-cluster.
+/// Resolves a [`Target`] to a [`SessionTarget`] by fetching the target from the operator's
+/// GET TargetCrd API. The operator validates the target exists and resolves the container if
+/// not specified. Works for both single-cluster and multi-cluster.
 ///
 /// Falls back to local `runtime_data` resolution if the operator didn't resolve the
 /// container (backwards compatibility with older operators).
+///
+/// A label target is sent as written: it has no single workload for the operator to fetch,
+/// and the pods it matches can each name their container differently. The operator reports
+/// a selector that matches no ready pod as a failed session.
 async fn resolve_config_target(
     config_target: &Target,
     client: &kube::Client,
     namespace: Option<&str>,
-) -> CliResult<KubeResourceTarget> {
+) -> CliResult<SessionTarget> {
+    if let Target::Label(label_target) = config_target {
+        return Ok(label_session_target(label_target));
+    }
+
     let ns = namespace.unwrap_or(client.default_namespace());
     let target_api: Api<TargetCrd> = Api::namespaced(client.clone(), ns);
     let target_crd = target_api
@@ -1048,15 +1068,18 @@ async fn resolve_config_target(
         target.set_container(runtime_data.container_name);
     }
 
-    match SessionTarget::from_config(target) {
-        Some(SessionTarget::KubeResource(target)) => Ok(target),
-        Some(SessionTarget::PodSet(_)) => Err(CliError::PreviewTargetResolutionFailed(
-            "pod-set targets are not supported by preview environments".to_owned(),
-        )),
-        None => Err(CliError::PreviewTargetResolutionFailed(
-            "no valid container found".to_owned(),
-        )),
-    }
+    SessionTarget::from_config(target).ok_or_else(|| {
+        CliError::PreviewTargetResolutionFailed("no valid container found".to_owned())
+    })
+}
+
+/// Builds the session target for a label target. An empty container tells the operator to
+/// pick the container in each matching pod on its own.
+fn label_session_target(label_target: &LabelTarget) -> SessionTarget {
+    SessionTarget::PodSet(PodSetTarget::new(
+        label_target.labels.clone().into_iter().collect(),
+        label_target.container.clone().unwrap_or_default(),
+    ))
 }
 
 async fn load_preview_config(
@@ -1289,4 +1312,27 @@ async fn fetch_preview_logs_best_effort(
         .await
         .inspect_err(|error| tracing::debug!(%error, "failed to read preview pod logs"))
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    /// The operator rebuilds the config target from the session target. A label target with no
+    /// container must come back with no container, so each matching pod picks its own instead
+    /// of all pods being required to have a container the user never named.
+    #[test]
+    fn label_target_without_container_reaches_the_operator_unchanged() {
+        let label_target = LabelTarget {
+            labels: BTreeMap::from([("app".to_owned(), "checkout".to_owned())]),
+            container: None,
+        };
+
+        assert_eq!(
+            label_session_target(&label_target).into_config(),
+            Some(Target::Label(label_target))
+        );
+    }
 }

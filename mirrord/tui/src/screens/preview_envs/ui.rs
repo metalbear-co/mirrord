@@ -458,7 +458,10 @@ mod tests {
     #![allow(clippy::indexing_slicing)]
     use std::sync::Arc;
 
-    use mirrord_operator::crd::{preview::PreviewSession, session::KubeResourceTarget};
+    use mirrord_operator::crd::{
+        preview::PreviewSession,
+        session::{KubeResourceTarget, SessionTarget},
+    };
 
     use super::*;
 
@@ -472,11 +475,11 @@ mod tests {
             spec: mirrord_operator::crd::preview::PreviewSessionSpec {
                 image: "test".to_owned(),
                 key: key.to_owned(),
-                target: KubeResourceTarget {
+                target: SessionTarget::KubeResource(KubeResourceTarget {
                     kind: kind.to_owned(),
                     name: target_name.to_owned(),
                     ..Default::default()
-                },
+                }),
                 ttl_secs: 3600,
                 replicas: 1,
                 incoming: None,

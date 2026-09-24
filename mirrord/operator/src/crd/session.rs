@@ -130,6 +130,12 @@ impl fmt::Display for PodSetTarget {
     }
 }
 
+impl From<KubeResourceTarget> for SessionTarget {
+    fn from(target: KubeResourceTarget) -> Self {
+        Self::KubeResource(target)
+    }
+}
+
 impl fmt::Display for SessionTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
