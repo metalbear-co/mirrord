@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-09-16T00:00:00.000Z
+lastmod: 2026-09-24T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -639,8 +639,7 @@ the internal proxy) from being assigned a std fd number and reconfigured by the
 application's runtime, e.g. `libuv` setting `O_NONBLOCK` on what it considers stdin.
 <https://github.com/metalbear-co/mirrord/issues/4622>
 
-Defaults to `true` in OSS.
-Defaults to `false` in mfT.
+DEPRECATED, WILL BE REMOVED
 
 ### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
 
@@ -4316,6 +4315,7 @@ The JSON configuration supports:
 | statefulset | `{ "target": { "stateful_set": "statefulset-name", "container": "container-name" } }` |
 | service | `{ "target": { "service": "service-name", "container": "container-name" } }` |
 | label | `{ "target": { "labels": { "key": "value" }, "container": "container-name" } }` |
+| serverless | `{ "target": { "service": "service-name", "container": "replice-id" } }` |
 
 Please note that:
 
@@ -4407,11 +4407,13 @@ Namespace where the target lives.
 
 For targetless runs, this the namespace in which remote networking is done.
 
+For Serverless runs, can be used as the environment name in mirrord Cloud
+
 Defaults to the Kubernetes user's default namespace (defined in Kubernetes context).
 
 ### target.path {#target-path}
 
-Specifies the Kubernetes resource to target.
+Specifies the resource to target, can be a Kubernetes resource or mirrord Serverless one.
 
 If not given, defaults to `targetless`.
 
@@ -4433,6 +4435,7 @@ Supports:
 | service | mirrord Operator | `{ "service": "service-name", "container": "container-name" }` |
 | replicaset | mirrord Operator | `{ "replica_set": "replicaset-name", "container": "container-name" }` |
 | label | mirrord Operator | `{ "labels": { "app": "api", "tier": "web" }, "container": "api" }` |
+| serverless | mirrord Cloud | `{ "service": "service-name", "container": "replace-id" }` |
 
 ## telemetry {#root-telemetry}
 Controls whether or not mirrord sends telemetry data to MetalBear cloud.
