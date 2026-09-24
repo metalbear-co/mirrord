@@ -163,14 +163,18 @@ impl HttpControlPlaneClient {
             subscription = ?subscription,
             "requesting sessions-manager assignments"
         );
+        // The whole attempt, credentials included, shares one deadline: a provider that has to
+        // fetch something before it can answer is part of what makes subscribing slow.
+        let deadline = Instant::now() + RESPONSE_HEADER_TIMEOUT;
+        let credentials =
+            with_deadline(Some(deadline), self.credentials.control_plane_headers()).await??;
         let request = self
             .client
             .get(endpoint)
             .query(subscription)
-            .headers(self.credentials.headers()?)
+            .headers(credentials)
             .header(reqwest::header::ACCEPT, "text/event-stream")
             .send();
-        let deadline = Instant::now() + RESPONSE_HEADER_TIMEOUT;
         let response = with_deadline(Some(deadline), request).await??;
         tracing::debug!(
             status = %response.status(),
