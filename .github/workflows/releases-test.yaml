@@ -147,23 +147,47 @@ jobs:
         run: |
           set -euo pipefail
           url="https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh"
+          log=/tmp/install_sh.log
 
-          # Downloads from GitHub occasionally fail transiently, so retry before declaring
-          # failure; a genuinely broken installer or release fails every attempt.
+          # The installer downloads Cargo.toml and the binary from GitHub, which now and
+          # then answers 5xx or drops the connection for a few minutes even though the
+          # assets are there (check_latest_release already saw them through the API).
+          # Retry, and if every attempt died on such a GitHub-side error, warn instead
+          # of paging: there is nothing on our side to fix. One attempt failing for any
+          # other reason still pages, even if a later attempt hit GitHub.
+          #
+          # curl exit codes that mean "could not talk to the server":
+          #   7 connect failed, 28 timeout, 35 TLS handshake, 52 empty reply,
+          #   55 send failed, 56 receive failed
+          github_down='curl: \(22\) The requested URL returned error: 5[0-9][0-9]|curl: \((7|28|35|52|55|56)\) '
+
           echo "Installing mirrord via curl|bash from: $url"
+          installed=false
+          github_down_only=true
           for attempt in 1 2 3; do
-            if curl -fsSL "$url" | bash >/tmp/install_sh.log 2>&1; then
+            echo "curl|bash install attempt ${attempt}/3"
+            if { curl -fsSL "$url" | bash; } >"$log" 2>&1; then
+              installed=true
               break
             fi
-            echo "----- installer output (attempt ${attempt}/3) -----"
-            cat /tmp/install_sh.log || true
-            if [ "$attempt" -eq 3 ]; then
-              echo "ok=false" >> "$GITHUB_OUTPUT"
-              echo "error=curl|bash installer failed 3 times from $url. See logs in this step." >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            sleep 5
+            echo "----- installer output (attempt ${attempt}) -----"
+            cat "$log" || true
+            grep -qE "$github_down" "$log" || github_down_only=false
+            sleep 15
           done
+
+          if [ "$installed" != "true" ] && [ "$github_down_only" = "true" ]; then
+            echo "::warning::curl|bash installer failed 3 times on a GitHub-side error. Not alerting."
+            echo "ok=transient" >> "$GITHUB_OUTPUT"
+            echo "error=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$installed" != "true" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "error=curl|bash installer failed from $url after 3 attempts. See logs in this step." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # Verify mirrord is on PATH and prints a version
           if ! command -v mirrord >/dev/null 2>&1; then
@@ -289,15 +313,105 @@ jobs:
           echo "ok=true" >> "$GITHUB_OUTPUT"
           echo "error=" >> "$GITHUB_OUTPUT"
 
-      - name: Fail on install errors
-        if: steps.curl.outputs.ok != 'true' || steps.brew.outputs.ok != 'true'
-        run: exit 1
-
-      - name: Log install success
-        if: steps.curl.outputs.ok == 'true' && steps.brew.outputs.ok == 'true'
+      - name: Notify Slack on install failures
+        # Fail if curl fails or brew fails (on any OS in the matrix).
+        # A curl result of "transient" is a GitHub-side outage and only warns.
+        if: steps.curl.outputs.ok == 'false' || steps.brew.outputs.ok == 'false'
+        env:
+          SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
+          BREW_OK: ${{ steps.brew.outputs.ok }}
+          BREW_ERROR: ${{ steps.brew.outputs.error }}
+          CURL_OK: ${{ steps.curl.outputs.ok }}
+          CURL_ERROR: ${{ steps.curl.outputs.error }}
+          TAG: ${{ needs.check_latest_release.outputs.tag }}
+          HTML_URL: ${{ needs.check_latest_release.outputs.html_url }}
+          RUNNER_OS: ${{ runner.os }}
         shell: bash
         run: |
-          echo "✅ Install monitor: curl and Homebrew installers succeeded on ${{ runner.os }}."
+          if [ -z "$SLACK_PROD_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_PROD_ALERTS_WEBHOOK_URL is not set. Skipping Slack notification."
+            exit 0
+          fi
+
+          repo="${GITHUB_REPOSITORY}"
+          tag="${TAG:-unknown}"
+          html_url="${HTML_URL:-https://github.com/$repo/releases}"
+          brew_status="${BREW_OK:-not-run}"
+          curl_status="${CURL_OK:-unknown}"
+          brew_error="${BREW_ERROR:-none}"
+          curl_error="${CURL_ERROR:-none}"
+          os="${RUNNER_OS:-unknown}"
+
+          # Pretty Block Kit payload
+          payload=$(jq -n \
+            --arg repo "$repo" \
+            --arg os "$os" \
+            --arg tag "$tag" \
+            --arg curl_status "$curl_status" \
+            --arg curl_error "$curl_error" \
+            --arg brew_status "$brew_status" \
+            --arg brew_error "$brew_error" \
+            --arg html_url "$html_url" \
+            '{
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":warning: *Release install-path check FAILED for `\($repo)` on `\($os)`*"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Tag (from monitor):*\n`\($tag)`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*OS:*\n`\($os)`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*curl|bash installer ok?:*\n\($curl_status)"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*curl error:*\n\($curl_error)"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*brew install ok?:*\n\($brew_status)"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*brew error:*\n\($brew_error)"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Release page:*\n<\($html_url)|Open latest release>"
+                  }
+                }
+              ]
+            }')
+
+          curl -X POST -H 'Content-type: application/json' \
+               --data "$payload" \
+               "$SLACK_PROD_ALERTS_WEBHOOK_URL"
+
+          # Mark job as failed if any required path failed.
+          exit 1
+
+      - name: Log install success
+        if: steps.curl.outputs.ok != 'false' && steps.brew.outputs.ok != 'false'
+        shell: bash
+        run: |
+          echo "✅ Install monitor on ${{ runner.os }}: curl|bash=${{ steps.curl.outputs.ok }} brew=${{ steps.brew.outputs.ok }}."
 
 
   # ============================================================
@@ -317,7 +431,7 @@ jobs:
           api_url="https://version.mirrord.dev/v1/version"
           echo "Fetching version from: $api_url"
 
-          retry_opts=(--retry 3 --retry-delay 5 --retry-all-errors --connect-timeout 10 --max-time 30)
+          retry_opts=(--retry 5 --retry-delay 10 --retry-all-errors --connect-timeout 10 --max-time 30)
 
           err_file="$(mktemp)"
 
@@ -358,15 +472,29 @@ jobs:
           echo "Checking URLs:"
           printf '  - %s\n' "${urls[@]}"
 
+          # GitHub answers 5xx or drops the connection on these URLs for a few minutes
+          # now and then while the assets are there (check_latest_release already saw
+          # them through the API). Only a 404 means a download is really gone; any other
+          # failure after retries is GitHub-side and gets a warning instead of a page.
           missing=()
+          transient=()
           for u in "${urls[@]}"; do
             # HEAD to avoid downloading full binaries
-            if ! code="$(curl -fsSIL "${retry_opts[@]}" -w '%{http_code}' -o /dev/null "$u" 2>"$err_file")"; then
-              echo "URL appears unreachable after retries (HTTP ${code:-000}): $u"
-              cat "$err_file"
+            if code="$(curl -fsSIL "${retry_opts[@]}" -w '%{http_code}' -o /dev/null "$u" 2>"$err_file")"; then
+              continue
+            fi
+            echo "URL check failed after retries (HTTP ${code:-000}): $u"
+            cat "$err_file"
+            if [ "$code" = "404" ]; then
               missing+=("$u")
+            else
+              transient+=("$u")
             fi
           done
+
+          if [ "${#transient[@]}" -gt 0 ]; then
+            echo "::warning::GitHub-side errors on download URLs of version $ver, assets are present per the release API. Not alerting: ${transient[*]}"
+          fi
 
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "Some URLs are missing or unreachable for version $ver:"
