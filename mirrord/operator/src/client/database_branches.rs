@@ -1173,6 +1173,26 @@ pub async fn create_branches<P: Progress>(
     Ok(outcome)
 }
 
+/// Condition type the operator sets to `False` on a branch whose source differs from it in a way
+/// a copy cannot paper over, such as the server versions. The branch still comes up.
+const SOURCE_COMPATIBLE_CONDITION: &str = "SourceCompatible";
+
+/// Shows the operator's verdict on `db` to whoever is about to use it.
+///
+/// The condition is advisory and the operator states it once, when the branch comes up, so a
+/// session that reuses an existing branch has to read it off the resource or never hear about it.
+/// Call this for every branch a session takes on, whichever path produced it, not only the ones
+/// this session created.
+pub fn relay_source_compatibility_warnings<P: Progress>(db: &BranchDatabase, progress: &P) {
+    let conditions = db.status.iter().flat_map(|status| &status.conditions);
+
+    for condition in conditions {
+        if condition.type_ == SOURCE_COMPATIBLE_CONDITION && condition.status == "False" {
+            progress.warning(&format!("{}: {}", db.spec.id, condition.message));
+        }
+    }
+}
+
 /// Branches found under the user-specified ids, sorted by what the caller does with them.
 #[derive(Default)]
 pub struct ExistingBranches {

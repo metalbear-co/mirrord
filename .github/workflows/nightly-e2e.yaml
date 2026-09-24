@@ -28,7 +28,7 @@ jobs:
     name: Nightly E2E
     if: always()
     needs: [build-agent-image, e2e]
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Check required jobs passed
         env:
@@ -44,7 +44,7 @@ jobs:
     name: "Notify #ci-alerts"
     if: ${{ always() && github.event_name == 'schedule' && needs.nightly-e2e-success.result == 'failure' }}
     needs: [nightly-e2e-success]
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Send Slack notification
         env:

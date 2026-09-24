@@ -10,7 +10,7 @@ on:
 
 jobs:
   ci-images:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     permissions:
       packages: write
       contents: read

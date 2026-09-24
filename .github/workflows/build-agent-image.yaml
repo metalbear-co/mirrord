@@ -7,7 +7,7 @@ on:
         description: "Runner label to use. Callers pass the one `plan` picked."
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: "blacksmith-8vcpu-ubuntu-2404"
 
 permissions:
   contents: read

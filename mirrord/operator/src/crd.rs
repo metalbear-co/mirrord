@@ -451,6 +451,8 @@ pub struct LockedPort {
     pub port: u16,
     pub kind: String,
     pub filter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_count: Option<u64>,
 }
 
 /// Compatibility enum for LockedPort that can handle both old tuple format and new struct format.
@@ -487,6 +489,7 @@ impl LockedPortCompat {
                 port: *port,
                 kind: kind.clone(),
                 filter: filter.clone(),
+                hit_count: None,
             },
         }
     }

@@ -7,7 +7,7 @@ on:
         description: "Runner label to use. Callers pass the one `plan` picked."
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: "blacksmith-16vcpu-ubuntu-2404"
       runner_image_built:
         description: "Whether the runner image comes from an uploaded artifact rather than the published one."
         required: false
