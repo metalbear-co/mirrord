@@ -17,9 +17,15 @@ use std::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{default_path, update_owner_only_at_path};
+use super::update_owner_only_at_path;
+use crate::util::mirrord_dir;
 
-static AUTH_STORE_PATH: LazyLock<PathBuf> = LazyLock::new(|| default_path("auth.json"));
+/// `~/.mirrord/auth.json`, or [`None`] when the home directory is unknown.
+///
+/// Unlike other mirrord documents, the store does not fall back to a relative `~` directory, which
+/// would put credentials under whatever directory `mirrord login` happens to run in.
+static AUTH_STORE_PATH: LazyLock<Option<PathBuf>> =
+    LazyLock::new(|| mirrord_dir::get_path().map(|dir| dir.join("auth.json")));
 
 /// Contents of `~/.mirrord/auth.json`.
 #[derive(Default, Serialize, Deserialize)]
@@ -67,7 +73,14 @@ impl AuthStore {
         organization_id: String,
         token: StoredLoginToken,
     ) -> io::Result<()> {
-        Self::save_at(&AUTH_STORE_PATH, issuer, organization_id, token, Utc::now()).await
+        let path = AUTH_STORE_PATH.as_deref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "could not determine the home directory",
+            )
+        })?;
+
+        Self::save_at(path, issuer, organization_id, token, Utc::now()).await
     }
 
     async fn save_at(
@@ -220,8 +233,11 @@ mod tests {
         std::fs::create_dir(&directory).unwrap();
         std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o755)).unwrap();
         let path = directory.join("auth.json");
-        std::fs::write(&path, "{}").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let lock_path = path.with_extension("lock");
+        for file in [&path, &lock_path] {
+            std::fs::write(file, "{}").unwrap();
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
 
         let now = Utc::now();
         AuthStore::save_at(
@@ -237,6 +253,6 @@ mod tests {
         let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&directory), 0o700);
         assert_eq!(mode(&path), 0o600);
-        assert_eq!(mode(&path.with_extension("lock")), 0o600);
+        assert_eq!(mode(&lock_path), 0o600);
     }
 }

@@ -1,8 +1,8 @@
 //! `mirrord login`: authenticates the user with mirrord Cloud,
 //! and stores the resulting login token in [`AuthStore`].
 //!
-//! The login is a browser approval bound to a [RFC 7636](https://www.rfc-editor.org/info/rfc7636/) PKCE verifier,
-//! following [RFC 8252](https://www.rfc-editor.org/info/rfc8252/) for native apps:
+//! The login is a browser approval bound to a PKCE verifier ([RFC 7636]), following [RFC 8252] for
+//! native apps:
 //!
 //! 1. The CLI generates a verifier, listens on an ephemeral loopback port, and opens the backend's
 //!    `/auth-cli` page with the verifier's S256 challenge and its callback URI.
@@ -12,6 +12,9 @@
 //!
 //! The verifier never leaves the CLI, so a grant intercepted on its way to the callback is useless
 //! by itself.
+//!
+//! [RFC 7636]: https://www.rfc-editor.org/info/rfc7636/
+//! [RFC 8252]: https://www.rfc-editor.org/info/rfc8252/
 
 use std::{io, net::Ipv4Addr, time::Duration};
 
@@ -23,7 +26,7 @@ use axum::{
     routing::get,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, Utc};
 use miette::Diagnostic;
 use mirrord_progress::{Progress, ProgressTracker};
 use rand::RngExt;
@@ -100,8 +103,15 @@ pub(crate) async fn login_command(args: LoginArgs) -> Result<(), LoginError> {
 
     let mut subtask = progress.subtask("Exchanging grant for the auth token");
     let token = exchange_grant(&args.url, &grant, &verifier, &callback_uri).await?;
-    let claims = decode_claims(&token).ok_or(LoginError::MalformedToken)?;
-    let expires_at = DateTime::from_timestamp(claims.exp, 0).ok_or(LoginError::MalformedToken)?;
+    let claims = decode_claims(&token).ok_or_else(|| LoginError::BadToken("malformed".into()))?;
+    let expires_at = DateTime::from_timestamp(claims.exp, 0)
+        .ok_or_else(|| LoginError::BadToken("expiration time out of valid range".into()))?;
+    if expires_at <= Utc::now() {
+        return Err(LoginError::BadToken(format!(
+            "expired at {}",
+            expires_at.with_timezone(&Local).format("%Y-%m-%d %H:%M %Z"),
+        )));
+    }
     subtask.success(Some("Token received"));
 
     let mut subtask = progress.subtask("Saving the token");
@@ -264,8 +274,8 @@ pub(crate) enum LoginError {
     #[error("failed to exchange the login approval for a login token: {0}")]
     Exchange(#[from] reqwest::Error),
 
-    #[error("received a malformed login token")]
-    MalformedToken,
+    #[error("received a bad login token: {0}")]
+    BadToken(String),
 
     #[error("failed to store the login token: {0}")]
     Store(#[source] io::Error),

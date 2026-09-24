@@ -19,6 +19,8 @@ use tracing::trace;
 mod auth_store;
 mod global_config;
 mod user_data;
+#[cfg(windows)]
+mod windows_acl;
 
 pub(crate) use auth_store::{AuthStore, StoredLoginToken};
 pub(crate) use global_config::{GlobalConfig, GlobalConfigError, global_config_command};
@@ -80,9 +82,11 @@ where
 ///
 /// On unix, the document and its lock are `0600` and their directory is `0700`. Each commit
 /// replaces the document with a new file, which is created with `0600` rather than inheriting the
-/// mode of the file it replaces. Windows has no mode bits, so there the document relies on the ACL
-/// it inherits from the user's profile directory, which only grants access to the user, `SYSTEM`
-/// and administrators.
+/// mode of the file it replaces.
+///
+/// On Windows, the directory gets a protected DACL that grants access only to the current user,
+/// and that the document, its lock and the temporary files of each commit inherit when they are
+/// created.
 pub(crate) async fn update_owner_only_at_path<T, E>(
     path: &Path,
     update: impl FnOnce(&mut T) -> Result<(), E> + Send + 'static,
@@ -134,15 +138,18 @@ fn create_owner_only_parent(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
+/// Creates the document's parent directory, and restricts it to the current user.
+#[cfg(windows)]
 fn create_owner_only_parent(path: &Path) -> io::Result<()> {
-    if let Some(parent) = path
+    let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent)?;
-    }
-    Ok(())
+    else {
+        return Ok(());
+    };
+
+    fs::create_dir_all(parent)?;
+    windows_acl::restrict_to_current_user(parent)
 }
 
 fn create_parent_for_missing_target(path: &Path) -> io::Result<()> {
@@ -188,17 +195,17 @@ where
         }
 
         let lock_path = path.with_extension("lock");
-        let mut lock_options = OpenOptions::new();
-        lock_options
+        let lock_file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .truncate(false);
+            .truncate(false)
+            .open(lock_path)?;
+        // Also restricts a lock created before the document held credentials.
         #[cfg(unix)]
         if owner_only {
-            lock_options.mode(0o600);
+            lock_file.set_permissions(fs::Permissions::from_mode(0o600))?;
         }
-        let lock_file = lock_options.open(lock_path)?;
         lock_file.lock_exclusive()?;
 
         let previous = match fs::read(&path) {

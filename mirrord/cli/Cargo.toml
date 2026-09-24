@@ -104,6 +104,7 @@ sha2.workspace = true
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
 utils-win = { path = "../utils-win" }
 dll-syringe = { workspace = true }
+winapi = { workspace = true, features = ["accctrl"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { workspace = true, features = ["process", "resource", "signal"] }
