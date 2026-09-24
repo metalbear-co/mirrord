@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { CloudOff } from 'lucide-react'
 import type {
   OperatorSessionSummary,
   OperatorWatchStatus,
@@ -24,6 +25,7 @@ import { api } from './api'
 import { selectKubeContext, useKubeContexts } from './contextStore'
 import { collectEvents } from './eventsStore'
 import { useTelemetryPref } from './hooks/useTelemetryPref'
+import { strings } from './strings'
 import {
   pingExtension,
   joinViaExtension,
@@ -245,33 +247,58 @@ export default function App({
     }
   }, [effectiveContext])
 
-  const refreshOperatorSessions = useCallback(() => {
-    api
-      .listOperatorSessions(effectiveContext, selectedNamespace)
-      .then((resp) => {
+  useEffect(() => {
+    let cancelled = false
+    let timeout: ReturnType<typeof setTimeout> | undefined
+
+    const poll = async () => {
+      try {
+        const resp = await api.listOperatorSessions(
+          effectiveContext,
+          selectedNamespace,
+        )
+        if (cancelled) return
+
         setOperatorSessions(
           withPreviewSessions(resp.sessions, resp.previewSessions),
         )
         setWatchStatus(
           resp.status === 'available'
             ? { status: 'watching' }
-            : {
-                status: 'unavailable',
-                reason: resp.reason ?? 'operator not available',
-              },
+            : resp.status === 'notInstalled'
+              ? {
+                  status: 'unavailable',
+                  reason: resp.reason ?? 'operator not available',
+                }
+              : {
+                  status:
+                    resp.status === 'kubernetesUnavailable'
+                      ? 'kubernetes_unavailable'
+                      : 'error',
+                  message:
+                    resp.reason ??
+                    (resp.status === 'kubernetesUnavailable'
+                      ? 'Kubernetes access failed'
+                      : 'Could not read the mirrord operator status'),
+                },
         )
-      })
-      .catch((err: unknown) => {
+      } catch (err: unknown) {
+        if (cancelled) return
         console.error(err)
-        setWatchStatus({ status: 'unavailable', reason: String(err) })
-      })
-  }, [effectiveContext, selectedNamespace])
+        setWatchStatus({ status: 'error', message: String(err) })
+      } finally {
+        if (!cancelled) {
+          timeout = setTimeout(() => void poll(), OPERATOR_POLL_INTERVAL)
+        }
+      }
+    }
 
-  useEffect(() => {
-    refreshOperatorSessions()
-    const t = setInterval(refreshOperatorSessions, OPERATOR_POLL_INTERVAL)
-    return () => clearInterval(t)
-  }, [refreshOperatorSessions])
+    void poll()
+    return () => {
+      cancelled = true
+      if (timeout !== undefined) clearTimeout(timeout)
+    }
+  }, [effectiveContext, selectedNamespace])
 
   const refreshExtensionState = useCallback(async () => {
     const state = await pingExtension()
@@ -451,6 +478,23 @@ export default function App({
             />
           ) : showFunnelHero ? (
             <FunnelHero onConnect={() => setConnectModalOpen(true)} />
+          ) : watchStatus?.status === 'kubernetes_unavailable' ? (
+            <div className="flex h-full items-center justify-center p-8">
+              <div className="border-destructive/40 bg-destructive/5 flex max-w-xl gap-4 rounded-lg border p-5">
+                <CloudOff className="text-destructive mt-0.5 h-6 w-6 shrink-0" />
+                <div>
+                  <h2 className="text-sm font-semibold">
+                    {strings.kubernetesAccess.title}
+                  </h2>
+                  <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
+                    {strings.kubernetesAccess.help}
+                  </p>
+                  <pre className="bg-muted text-muted-foreground mt-3 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded p-3 text-xs">
+                    {watchStatus.message}
+                  </pre>
+                </div>
+              </div>
+            </div>
           ) : (
             <EmptySessionState />
           )}

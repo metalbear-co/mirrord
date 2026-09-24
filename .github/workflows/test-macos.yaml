@@ -18,7 +18,7 @@ env:
 
 jobs:
   macos-tests:
-    runs-on: macos-latest
+    runs-on: blacksmith-6vcpu-macos-latest
     env:
       MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/universal-apple-darwin/debug/libmirrord_layer.dylib
       MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/aarch64-apple-darwin/debug/libmirrord_layer.dylib

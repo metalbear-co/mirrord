@@ -117,7 +117,7 @@ macro_rules! replace_with_fallback {
     }};
 }
 
-/// Used by `go_hooks` to hook go syscalls with
+/// Used by `mirrord-layer-go` to hook go syscalls with
 /// `HookManager::hook_symbol_main_module`.
 ///
 /// ## Parameters

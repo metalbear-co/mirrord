@@ -77,12 +77,17 @@ export const strings = {
     emptyBody: 'Start mirrord to see sessions here',
     noSearchMatch: 'No sessions match your search.',
     clusterSide: 'Cluster-side',
-    operatorError: 'Operator error',
+    operatorError: 'Could not reach the mirrord UI server',
+    kubernetesError: 'Kubernetes access failed',
     connecting: 'Connecting to operator…',
     reconnecting: 'Reconnecting to operator…',
     showingYours: 'Showing only your sessions.',
     connectOperator: 'Connect operator →',
     zeroSessions: '0 sessions · operator not connected',
+  },
+  kubernetesAccess: {
+    title: 'Kubernetes access was lost',
+    help: 'Check your Kubernetes credentials. You may need to re-authenticate. mirrord will retry automatically.',
   },
   session: {
     kill: 'Stop session',

@@ -68,19 +68,23 @@ extern crate core;
 ))]
 use std::ffi::c_void;
 use std::{
+    cell::Cell,
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fs::File,
     io::Read,
-    net::SocketAddr,
-    os::{fd::IntoRawFd, unix::process::parent_id},
+    net::{IpAddr, SocketAddr},
+    os::{
+        fd::{IntoRawFd, RawFd},
+        unix::process::parent_id,
+    },
     panic,
-    sync::{Arc, OnceLock},
+    sync::{Arc, MutexGuard, OnceLock, PoisonError},
     time::Duration,
 };
 
 use ctor::ctor;
-use file::OPEN_FILES;
+use file::{OPEN_FILES, ops::RemoteFile};
 use hooks::HookManager;
 #[cfg(all(
     any(target_arch = "x86_64", target_arch = "aarch64"),
@@ -113,7 +117,7 @@ use nix::{
     fcntl::{OFlag, open},
     sys::stat::Mode,
 };
-use socket::SOCKETS;
+use socket::{SOCKETS, UserSocket};
 
 pub(crate) use crate::macros::*;
 use crate::{
@@ -157,12 +161,6 @@ mod turbo;
     target_os = "linux"
 ))]
 mod go;
-
-#[cfg(all(
-    any(target_arch = "x86_64", target_arch = "aarch64"),
-    target_os = "linux"
-))]
-use crate::go::go_hooks;
 
 /// if this env var exists, we exit.
 /// This to allow a way to protect from mirrord being used in destructive tests and such.
@@ -277,8 +275,10 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
 /// `libuv` setting `O_NONBLOCK` on stdin), breaking the layer's connection to the internal proxy.
 /// Must be called before the layer creates any long-lived fd, most importantly the
 /// [`PROXY_CONNECTION`] socket.
-/// Gated behind
-/// [`ExperimentalConfig::guard_std_fds`](mirrord_config::experimental::ExperimentalConfig). See [#4622](https://github.com/metalbear-co/mirrord/issues/4622).
+/// Can still be opted out of with the deprecated
+/// [`ExperimentalConfig::guard_std_fds`](mirrord_config::experimental::ExperimentalConfig).
+///
+/// See [#4622](https://github.com/metalbear-co/mirrord/issues/4622).
 fn guard_std_fds() {
     for fd in 0..=2 {
         // SAFETY: `F_GETFD` accepts arbitrary descriptor numbers and reports closed ones with
@@ -295,7 +295,7 @@ fn guard_std_fds() {
 /// Initialize a new session with the internal proxy and set [`PROXY_CONNECTION`]
 /// if not in trace only mode.
 fn load_only_layer_start(config: &LayerConfig) {
-    if config.experimental.guard_std_fds.unwrap_or_default() {
+    if config.experimental.guard_std_fds {
         guard_std_fds();
     }
 
@@ -365,8 +365,7 @@ fn mirrord_layer_entry_point() {
 ///
 /// Sets up a few things based on the [`LayerConfig`] given by the user:
 ///
-/// 1. [`guard_std_fds`] (if `experimental.guard_std_fds` is enabled) so the layer's own fds cannot
-///    be assigned std fd numbers;
+/// 1. [`guard_std_fds`] so the layer's own fds cannot be assigned std fd numbers;
 ///
 /// 2. [`init_tracing`] for `tracing_subscriber` or `mirrord_console`
 ///
@@ -379,7 +378,7 @@ fn mirrord_layer_entry_point() {
 /// 6. Fetches remote environment from the agent (if enabled with
 ///    [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(config: LayerConfig) {
-    if config.experimental.guard_std_fds.unwrap_or_default() {
+    if config.experimental.guard_std_fds {
         guard_std_fds();
     }
     init_tracing();
@@ -397,6 +396,7 @@ fn layer_start(config: LayerConfig) {
 
     let state = setup();
     enable_hooks(state);
+    register_atfork_handlers();
 
     let _detour_guard = DetourGuard::new();
 
@@ -559,6 +559,7 @@ fn sip_only_layer_start(
     init_layer_setup(config, true);
 
     unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
+    register_atfork_handlers();
 
     if let Some(unset) = setup().env_config().unset.as_ref() {
         let unset = unset.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>();
@@ -664,7 +665,7 @@ fn enable_hooks(state: &LayerSetup) {
         target_os = "linux"
     ))]
     {
-        go_hooks::enable_hooks(
+        go::enable_hooks(
             &mut hook_manager,
             state.experimental().go_asmcgocall.unwrap_or_default(),
         );
@@ -752,20 +753,89 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     }
 }
 
+/// The layer's global mutexes, locked by [`atfork_prepare`] and released by [`atfork_release`].
+struct ForkGuards {
+    _sockets: MutexGuard<'static, HashMap<RawFd, Arc<UserSocket>>>,
+    _open_files: MutexGuard<'static, HashMap<RawFd, Arc<RemoteFile>>>,
+    _addr_info: MutexGuard<'static, HashSet<usize>>,
+    _dns_mapping: MutexGuard<'static, HashMap<IpAddr, String>>,
+}
+
+thread_local! {
+    /// Holds the [`ForkGuards`] from [`atfork_prepare`] until [`atfork_release`].
+    ///
+    /// `Some` means the locks are held, and taking the value unlocks them.
+    ///
+    /// This is thread local because `prepare` and `parent`/`child` handlers run on the same
+    /// forking thread, and one thread must **not** set or unset another forking thread's guards.
+    static FORK_GUARDS: Cell<Option<ForkGuards>> = const { Cell::new(None) };
+}
+
+/// `prepare` handler for [`libc::pthread_atfork`].
+///
+/// When running in a multi-threaded app, another thread can hold one of our mutexes while the fork
+/// executes. The child only gets the forking thread, so there that mutex stays locked forever with
+/// no owner to unlock it, and the first hook that tries to take it deadlocks - see
+/// <https://github.com/metalbear-co/mirrord/issues/3659#issuecomment-3433990010>.
+///
+/// We acquire these locks across the `fork` syscall. The child inherits them locked right after
+/// the syscall. [`atfork_release`] unlocks them.
+///
+/// We can't lock these in [`fork_detour`] before calling FN_FORK. Because if the user app registers
+/// a fork handler that tries acquiring these locks, the app reaches a deadlock.
+///
+/// `prepare` handlers are ran in the reverse order of their registration. We register before
+/// user app starts so our handler runs after user apps' handlers.
+extern "C" fn atfork_prepare() {
+    // Poisoning doesn't matter here, we want the lock and not the data.
+    let guards = ForkGuards {
+        _sockets: SOCKETS.lock().unwrap_or_else(PoisonError::into_inner),
+        _open_files: OPEN_FILES.lock().unwrap_or_else(PoisonError::into_inner),
+        _addr_info: MANAGED_ADDRINFO
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner),
+        _dns_mapping: REMOTE_DNS_REVERSE_MAPPING
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner),
+    };
+
+    FORK_GUARDS.set(Some(guards));
+}
+
+/// `parent` and `child` handler for [`libc::pthread_atfork`], releasing what [`atfork_prepare`]
+/// took.
+extern "C" fn atfork_release() {
+    drop(FORK_GUARDS.take());
+}
+
+/// Registers [`atfork_prepare`] and [`atfork_release`] with `libc`.
+///
+/// Called from the layer's initialization.
+fn register_atfork_handlers() {
+    let result = unsafe {
+        libc::pthread_atfork(
+            Some(atfork_prepare),
+            Some(atfork_release),
+            Some(atfork_release),
+        )
+    };
+
+    if result != 0 {
+        tracing::error!(
+            result,
+            "Failed to register `fork` handlers, forking this process might deadlock it."
+        );
+    }
+}
+
 /// Hook for `libc::fork`.
+///
+/// Guarding layer's mutexes during fork syscall is handled by [`atfork_prepare`] and
+/// [`atfork_release`].
 ///
 /// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
-    // when running in multi-threaded app, we can have a scenario where another thread holds a mutex
-    // while the fork executes this leaves the mutex locked forever in the child process since
-    // there's no thread to unlock it so we need to grab all the mutexes we can here, and drop
-    // after the fork see https://github.com/metalbear-co/mirrord/issues/3659#issuecomment-3433990010
-    let sockets = SOCKETS.lock();
-    let open_files = OPEN_FILES.lock();
-    let addr_info = MANAGED_ADDRINFO.lock();
-    let dns_mapping = REMOTE_DNS_REVERSE_MAPPING.lock();
-
     unsafe {
         tracing::debug!("Process {} forking!.", std::process::id());
 
@@ -813,10 +883,6 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
             Ordering::Less => tracing::debug!("fork failed"),
         }
 
-        drop(sockets);
-        drop(open_files);
-        drop(addr_info);
-        drop(dns_mapping);
         res
     }
 }
@@ -991,7 +1057,7 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
         .to_string_lossy()
         .into_owned();
     let go_asmcgocall = setup().experimental().go_asmcgocall.unwrap_or_default();
-    go_hooks::enable_hooks_in_loaded_module(&mut hook_manager, filename, go_asmcgocall);
+    go::enable_hooks_in_loaded_module(&mut hook_manager, filename, go_asmcgocall);
 
     handle
 }

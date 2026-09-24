@@ -30,6 +30,7 @@ use crate::{
     background_tasks::BackgroundTasks,
     main_tasks::{ProxyMessage, ToLayer},
     proxies::incoming::{IncomingProxy, IncomingProxyError, IncomingProxyMessage},
+    session_monitor::{MonitorEvent, MonitorTx},
 };
 
 /// Dummy service mocking a server sent events HTTP server.
@@ -62,10 +63,11 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
     let local_addr = local_listener.local_addr().unwrap();
 
     let (conn, _, out) = Connection::dummy();
+    let (monitor_tx, mut monitor_rx) = tokio::sync::broadcast::channel(8);
     let proxy = IncomingProxy::new(
         Duration::from_secs(3),
         Default::default(),
-        crate::session_monitor::MonitorTx::disabled(),
+        MonitorTx::from_sender(monitor_tx),
     );
     let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =
         BackgroundTasks::new(conn.tx_handle());
@@ -93,6 +95,14 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
         out.next().await.unwrap(),
         ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(steal_type)),
     );
+    assert!(matches!(
+        monitor_rx.recv().await.unwrap(),
+        MonitorEvent::PortSubscription {
+            port: 80,
+            ref mode,
+            hit_count: Some(0),
+        } if mode == "steal"
+    ));
     proxy
         .send(IncomingProxyMessage::AgentSteal(
             DaemonTcp::SubscribeResult(Ok(80)),
@@ -144,6 +154,18 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
             })),
         ))
         .await;
+    assert!(matches!(
+        monitor_rx.recv().await.unwrap(),
+        MonitorEvent::IncomingRequest { .. }
+    ));
+    assert!(matches!(
+        monitor_rx.recv().await.unwrap(),
+        MonitorEvent::PortSubscription {
+            port: 80,
+            ref mode,
+            hit_count: Some(1),
+        } if mode == "steal"
+    ));
 
     // In the background, consume HTTP response messages produced by the intproxy.
     // This ensures that the intproxy does not choke.
