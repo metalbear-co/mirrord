@@ -131,6 +131,7 @@ impl TargetCrd {
             Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
             Target::Label(_) => return LABEL_TARGET_NAME.to_owned(),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_owned(),
+            Target::Serverless(target) => ("serverless", &target.serverless, &target.container),
         };
 
         if let Some(container) = container {
@@ -450,6 +451,8 @@ pub struct LockedPort {
     pub port: u16,
     pub kind: String,
     pub filter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_count: Option<u64>,
 }
 
 /// Compatibility enum for LockedPort that can handle both old tuple format and new struct format.
@@ -486,6 +489,7 @@ impl LockedPortCompat {
                 port: *port,
                 kind: kind.clone(),
                 filter: filter.clone(),
+                hit_count: None,
             },
         }
     }

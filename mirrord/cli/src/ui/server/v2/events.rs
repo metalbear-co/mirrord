@@ -14,7 +14,7 @@ use mirrord_operator::crd::NewOperatorFeature;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use super::{AppState, OperatorStatusSummary, cached_client, fetch_operator};
+use super::{AppState, OperatorFetchError, OperatorStatusSummary, cached_client, fetch_operator};
 use crate::{
     subscribe::{EventStreamOptions, operator_event_stream},
     ui::server::{SseSender, sse_channel, sse_response},
@@ -44,7 +44,7 @@ struct Reachability {
 }
 
 impl Reachability {
-    fn of(operator: &Result<OperatorStatusSummary, String>) -> Self {
+    fn of(operator: &Result<OperatorStatusSummary, OperatorFetchError>) -> Self {
         match operator {
             Ok(operator) => Self {
                 available: true,
@@ -54,11 +54,11 @@ impl Reachability {
                 version: Some(operator.version.clone()),
                 reason: None,
             },
-            Err(reason) => Self {
+            Err(error) => Self {
                 available: false,
                 supported: false,
                 version: None,
-                reason: Some(reason.clone()),
+                reason: Some(error.to_string()),
             },
         }
     }
