@@ -49,12 +49,13 @@ const GRANT_EXCHANGE_PATH: &str = "api/v1/cli-login/token";
 pub(crate) async fn login_command(args: LoginArgs) -> Result<(), LoginError> {
     let mut progress = ProgressTracker::from_env("mirrord login");
 
-    let callback = LoginCallbackServer::prepare().await?;
+    let login_page = args.url.join(LOGIN_PAGE_PATH)?;
+    let callback = LoginCallbackServer::prepare(&login_page).await?;
     let callback_uri = callback.url();
     let verifier = Verifier::random();
 
     // User logs in and the browser delivers the grant to the loopback callback server.
-    let mut approval_url = args.url.join(LOGIN_PAGE_PATH)?;
+    let mut approval_url = login_page;
     approval_url
         .query_pairs_mut()
         .append_pair("code_challenge", &verifier.code_challenge)
