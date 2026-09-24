@@ -41,6 +41,7 @@ secrecy.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 
 [lib]
