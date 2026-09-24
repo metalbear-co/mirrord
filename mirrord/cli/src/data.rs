@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt as _, PermissionsExt};
 use std::{
     any::type_name,
     env::home_dir,
@@ -7,14 +9,20 @@ use std::{
 };
 
 use atomic_write_file::AtomicWriteFile;
+#[cfg(unix)]
+use atomic_write_file::unix::OpenOptionsExt as _;
 use fs4::fs_std::FileExt;
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::task;
 use tracing::trace;
 
+mod auth_store;
 mod global_config;
 mod user_data;
+#[cfg(windows)]
+mod windows_acl;
 
+pub(crate) use auth_store::{AuthStore, StoredLoginToken};
 pub(crate) use global_config::{GlobalConfig, GlobalConfigError, global_config_command};
 pub(crate) use user_data::UserData;
 
@@ -38,7 +46,15 @@ where
     T: Default + DeserializeOwned + Serialize + Send + 'static,
     E: From<io::Error> + Send + 'static,
 {
-    update_at_path_inner(path, update, true).await
+    update_at_path_inner(
+        path,
+        update,
+        UpdateOptions {
+            recover_invalid: true,
+            owner_only: false,
+        },
+    )
+    .await
 }
 
 /// Loads and atomically updates a JSON document, failing if the existing contents cannot be
@@ -51,7 +67,89 @@ where
     T: Default + DeserializeOwned + Serialize + Send + 'static,
     E: From<io::Error> + Send + 'static,
 {
-    update_at_path_inner(path, update, false).await
+    update_at_path_inner(
+        path,
+        update,
+        UpdateOptions {
+            recover_invalid: false,
+            owner_only: false,
+        },
+    )
+    .await
+}
+
+/// Like [`update_at_path`], for documents that hold credentials.
+///
+/// On unix, the document and its lock are `0600` and their directory is `0700`. Each commit
+/// replaces the document with a new file, which is created with `0600` rather than inheriting the
+/// mode of the file it replaces.
+///
+/// On Windows, the directory gets a protected DACL that grants access only to the current user,
+/// and that the document, its lock and the temporary files of each commit inherit when they are
+/// created.
+pub(crate) async fn update_owner_only_at_path<T, E>(
+    path: &Path,
+    update: impl FnOnce(&mut T) -> Result<(), E> + Send + 'static,
+) -> Result<T, E>
+where
+    T: Default + DeserializeOwned + Serialize + Send + 'static,
+    E: From<io::Error> + Send + 'static,
+{
+    update_at_path_inner(
+        path,
+        update,
+        UpdateOptions {
+            recover_invalid: true,
+            owner_only: true,
+        },
+    )
+    .await
+}
+
+#[derive(Clone, Copy)]
+struct UpdateOptions {
+    /// Replace contents that cannot be represented by the document type with its defaults,
+    /// instead of failing.
+    recover_invalid: bool,
+    /// See [`update_owner_only_at_path`].
+    owner_only: bool,
+}
+
+/// Creates the document's parent directory with `0700`, or restricts an existing one to it.
+#[cfg(unix)]
+fn create_owner_only_parent(path: &Path) -> io::Result<()> {
+    let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return Ok(());
+    };
+
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(parent)?;
+
+    let permissions = fs::metadata(parent)?.permissions();
+    if permissions.mode() & 0o077 != 0 {
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+    }
+
+    Ok(())
+}
+
+/// Creates the document's parent directory, and restricts it to the current user.
+#[cfg(windows)]
+fn create_owner_only_parent(path: &Path) -> io::Result<()> {
+    let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return Ok(());
+    };
+
+    fs::create_dir_all(parent)?;
+    windows_acl::restrict_to_current_user(parent)
 }
 
 fn create_parent_for_missing_target(path: &Path) -> io::Result<()> {
@@ -79,7 +177,10 @@ fn canonical_json<T: Serialize + ?Sized>(value: &T) -> io::Result<Vec<u8>> {
 async fn update_at_path_inner<T, E>(
     path: &Path,
     update: impl FnOnce(&mut T) -> Result<(), E> + Send + 'static,
-    recover_invalid: bool,
+    UpdateOptions {
+        recover_invalid,
+        owner_only,
+    }: UpdateOptions,
 ) -> Result<T, E>
 where
     T: Default + DeserializeOwned + Serialize + Send + 'static,
@@ -87,7 +188,11 @@ where
 {
     let path = path.to_owned();
     task::spawn_blocking(move || {
-        create_parent_for_missing_target(&path).map_err(E::from)?;
+        if owner_only {
+            create_owner_only_parent(&path).map_err(E::from)?;
+        } else {
+            create_parent_for_missing_target(&path).map_err(E::from)?;
+        }
 
         let lock_path = path.with_extension("lock");
         let lock_file = OpenOptions::new()
@@ -96,6 +201,11 @@ where
             .create(true)
             .truncate(false)
             .open(lock_path)?;
+        // Also restricts a lock created before the document held credentials.
+        #[cfg(unix)]
+        if owner_only {
+            lock_file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        }
         lock_file.lock_exclusive()?;
 
         let previous = match fs::read(&path) {
@@ -123,7 +233,13 @@ where
 
         let contents = canonical_json(&data).map_err(E::from)?;
         if previous.as_deref() != Some(contents.as_slice()) {
-            let mut store_file = AtomicWriteFile::open(&path).map_err(E::from)?;
+            let mut store_options = AtomicWriteFile::options();
+            store_options.read(false);
+            #[cfg(unix)]
+            if owner_only {
+                store_options.mode(0o600).preserve_mode(false);
+            }
+            let mut store_file = store_options.open(&path).map_err(E::from)?;
             store_file.write_all(&contents).map_err(E::from)?;
             store_file.commit().map_err(E::from)?;
         }

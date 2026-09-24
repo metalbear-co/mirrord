@@ -97,11 +97,14 @@ mirrord-sessions-manager-client.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
 hyper.workspace = true
 bytes.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+sha2.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
 utils-win = { path = "../utils-win" }
 dll-syringe = { workspace = true }
+winapi = { workspace = true, features = ["accctrl"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { workspace = true, features = ["process", "resource", "signal"] }
