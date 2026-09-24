@@ -141,7 +141,7 @@ fn generate_verifier() -> String {
 /// This is what:
 /// 1. the CLI sends to the backend
 /// 2. the backend includes in the grant
-/// 3. the CLI cross-checks
+/// 3. the backend checks against the raw verifier during the grant<->token exchange
 fn code_challenge(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(verifier))
 }
@@ -314,7 +314,7 @@ mod tests {
         let claims = decode_claims(&format!("header.{payload}.signature")).unwrap();
 
         assert_eq!(claims.iss, "https://app.metalbear.com");
-        assert_eq!(claims.email, "mieszko@example.com");
+        assert_eq!(claims.email, "mieszko@polska.pl");
         assert_eq!(claims.organization_id, "org-polanie");
         assert_eq!(claims.exp, 86400);
         assert!(decode_claims("not-a-jwt").is_none());

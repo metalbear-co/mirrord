@@ -227,6 +227,7 @@ where
         let contents = canonical_json(&data).map_err(E::from)?;
         if previous.as_deref() != Some(contents.as_slice()) {
             let mut store_options = AtomicWriteFile::options();
+            store_options.read(false);
             #[cfg(unix)]
             if owner_only {
                 store_options.mode(0o600).preserve_mode(false);

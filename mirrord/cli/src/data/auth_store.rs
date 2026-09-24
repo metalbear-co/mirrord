@@ -112,6 +112,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use chrono::TimeDelta;
+    #[cfg(unix)]
     use tempfile::tempdir;
 
     use super::*;
