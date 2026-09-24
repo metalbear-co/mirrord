@@ -474,17 +474,30 @@ jobs:
 
           # GitHub answers 5xx or drops the connection on these URLs for a few minutes
           # now and then while the assets are there (check_latest_release already saw
-          # them through the API). Only a 404 means a download is really gone; any other
-          # failure after retries is GitHub-side and gets a warning instead of a page.
+          # them through the API). Only a 404 means a download is really gone, so it ends
+          # the attempts for that URL right away and pages. Retrying by hand rather than
+          # with curl's --retry keeps that 404 from being buried under a later 5xx, which
+          # would leave the last status code as the only one we see.
           missing=()
           transient=()
           for u in "${urls[@]}"; do
-            # HEAD to avoid downloading full binaries
-            if code="$(curl -fsSIL "${retry_opts[@]}" -w '%{http_code}' -o /dev/null "$u" 2>"$err_file")"; then
+            reachable=false
+            for attempt in 1 2 3 4 5; do
+              # HEAD to avoid downloading full binaries
+              if code="$(curl -fsSIL --connect-timeout 10 --max-time 30 -w '%{http_code}' -o /dev/null "$u" 2>"$err_file")"; then
+                reachable=true
+                break
+              fi
+              echo "URL check attempt ${attempt}/5 failed (HTTP ${code:-000}): $u"
+              cat "$err_file"
+              if [ "$code" = "404" ]; then
+                break
+              fi
+              sleep 10
+            done
+            if [ "$reachable" = "true" ]; then
               continue
             fi
-            echo "URL check failed after retries (HTTP ${code:-000}): $u"
-            cat "$err_file"
             if [ "$code" = "404" ]; then
               missing+=("$u")
             else
