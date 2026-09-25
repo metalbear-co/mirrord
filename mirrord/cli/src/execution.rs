@@ -496,6 +496,7 @@ impl MirrordExecution {
                 "`feature.fs.prefetch` is not supported when running in a container, \
                  and will be ignored.",
             );
+            config.feature.fs.prefetch.clear();
         }
 
         let encoded_config = config.encode()?;
