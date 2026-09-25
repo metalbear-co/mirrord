@@ -71,7 +71,7 @@ pub(crate) async fn ci_command(
         .handle()
         .await?),
         CiCommand::Stop => Ok(stop::CiStopCommandHandler::new(
-            stop::default_store_path(),
+            MirrordCiStore::default_path(),
             stop::SHUTDOWN_GRACE,
             ProgressTracker::from_env("mirrord ci stop"),
         )
@@ -173,10 +173,14 @@ impl MirrordCiStore {
     /// [`MirrordCi`].
     const MIRRORD_FOR_CI_TMP_FILE_PATH: &str = "mirrord/mirrord-for-ci.json";
 
+    fn default_path() -> PathBuf {
+        temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH)
+    }
+
     /// Saves this [`MirrordCiStore`] to the file at [`Self::MIRRORD_FOR_CI_TMP_FILE_PATH`],
     /// creating a new file if it needed.
     async fn write_to_file(&self) -> CiResult<()> {
-        let file_path = temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH);
+        let file_path = Self::default_path();
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await?;
         }
@@ -196,15 +200,12 @@ impl MirrordCiStore {
         Ok(())
     }
 
-    /// Tries to read the [`MirrordCiStore`] from the path [`Self::MIRRORD_FOR_CI_TMP_FILE_PATH`],
-    /// if it doesn't exist, then we return a [`Default`].
-    async fn read_from_file_or_default() -> CiResult<Self> {
-        match fs::read(temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH)).await {
-            Ok(contents) => Ok(serde_json::from_slice(contents.as_slice())?),
-            Err(fail) if matches!(fail.kind(), std::io::ErrorKind::NotFound) => {
-                Ok(MirrordCiStore::default())
-            }
-            Err(fail) => Err(fail.into()),
+    /// Reads the persisted CI state at `path`; an absent file means there is nothing to stop.
+    async fn read_from_file_or_default(path: &Path) -> CiResult<Self> {
+        match fs::read(path).await {
+            Ok(contents) => Ok(serde_json::from_slice(&contents)?),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(error) => Err(error.into()),
         }
     }
 
@@ -303,7 +304,8 @@ impl MirrordCi {
     /// the pid before its SIGTERM handler is registered.
     #[tracing::instrument(level = Level::TRACE, skip(_shutdown_handler), err)]
     pub(super) async fn prepare_intproxy(_shutdown_handler: &IntProxyShutdown) -> CiResult<()> {
-        let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
+        let mut mirrord_ci_store =
+            MirrordCiStore::read_from_file_or_default(&MirrordCiStore::default_path()).await?;
         mirrord_ci_store.intproxy_pids.insert(std::process::id());
 
         mirrord_ci_store.write_to_file().await
@@ -332,7 +334,8 @@ impl MirrordCi {
             // when the last part is `..`
             .expect("failed to get file name of binary path")
             .to_string_lossy();
-        let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
+        let mut mirrord_ci_store =
+            MirrordCiStore::read_from_file_or_default(&MirrordCiStore::default_path()).await?;
 
         let ci_run_output_dir = Self::create_run_output_dir(
             progress,
@@ -427,7 +430,8 @@ impl MirrordCi {
             .file_name()
             .expect("failed to get file name of binary path")
             .to_string_lossy();
-        let mut mirrord_ci_store = MirrordCiStore::read_from_file_or_default().await?;
+        let mut mirrord_ci_store =
+            MirrordCiStore::read_from_file_or_default(&MirrordCiStore::default_path()).await?;
 
         if let Some(extproxy_pid) = extproxy_pid {
             mirrord_ci_store.extproxy_pids.insert(extproxy_pid);
@@ -545,7 +549,7 @@ impl MirrordCi {
     /// [`MirrordCi`].
     #[tracing::instrument(level = Level::TRACE, ret, err)]
     pub(super) async fn new(ci_common_args: CiCommonArgs) -> CiResult<Self> {
-        MirrordCiStore::read_from_file_or_default().await?;
+        MirrordCiStore::read_from_file_or_default(&MirrordCiStore::default_path()).await?;
 
         let ci_api_key = ci_api_key_available()?;
 

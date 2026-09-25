@@ -1,10 +1,5 @@
 #![cfg_attr(windows, allow(unused))]
-use std::{
-    collections::HashSet,
-    env::temp_dir,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{collections::HashSet, path::PathBuf, time::Duration};
 
 #[cfg(not(target_os = "windows"))]
 use futures::{StreamExt, stream};
@@ -208,7 +203,7 @@ impl CiStopCommandHandler {
         grace: Duration,
         progress: ProgressTracker,
     ) -> CiResult<Self> {
-        let store = read_store_or_default(&store_path).await?;
+        let store = MirrordCiStore::read_from_file_or_default(&store_path).await?;
 
         Ok(Self {
             store,
@@ -255,18 +250,6 @@ impl CiStopCommandHandler {
     #[cfg(target_os = "windows")]
     pub(super) async fn handle(self) -> CiResult<()> {
         unimplemented!("Command not supported on windows.");
-    }
-}
-
-pub(super) fn default_store_path() -> PathBuf {
-    temp_dir().join(MirrordCiStore::MIRRORD_FOR_CI_TMP_FILE_PATH)
-}
-
-async fn read_store_or_default(store_path: &Path) -> CiResult<MirrordCiStore> {
-    match tokio::fs::read(store_path).await {
-        Ok(contents) => Ok(serde_json::from_slice(&contents)?),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(MirrordCiStore::default()),
-        Err(error) => Err(error.into()),
     }
 }
 
