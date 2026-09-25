@@ -200,7 +200,8 @@ impl MirrordCiStore {
         Ok(())
     }
 
-    /// Reads the persisted CI state at `path`; an absent file means there is nothing to stop.
+    /// Tries to read the [`MirrordCiStore`] from `path` (normally [`Self::default_path`]).
+    /// If the file does not exist, returns a default, empty store so CI commands can proceed.
     async fn read_from_file_or_default(path: &Path) -> CiResult<Self> {
         match fs::read(path).await {
             Ok(contents) => Ok(serde_json::from_slice(&contents)?),

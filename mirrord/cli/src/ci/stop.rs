@@ -101,43 +101,43 @@ async fn terminate_targets(
     results
 }
 
-/// Terminates everything recorded in `store`, and removes its sidecar containers.
-///
-/// Kept separate from [`CiStopCommandHandler::handle`] so the state file is only deleted when the
-/// whole cleanup succeeded, letting the user retry `mirrord ci stop` when something survived.
 #[cfg(not(target_os = "windows"))]
-async fn terminate_store(store: MirrordCiStore, grace: Duration) -> CiResult<()> {
-    let MirrordCiStore {
-        intproxy_pids,
-        extproxy_pids,
-        sidecar_pids,
-        sidecar_containers,
-        user_process_groups,
-    } = store;
+impl MirrordCiStore {
+    /// Cleanup consumes the stored targets; the state file is removed only after cleanup succeeds,
+    /// so a failed `mirrord ci stop` can be retried.
+    async fn terminate(self, grace: Duration) -> CiResult<()> {
+        let MirrordCiStore {
+            intproxy_pids,
+            extproxy_pids,
+            sidecar_pids,
+            sidecar_containers,
+            user_process_groups,
+        } = self;
 
-    let targets = intproxy_pids
-        .into_iter()
-        .chain(extproxy_pids)
-        .chain(sidecar_pids)
-        .map(TerminationTarget::process)
-        .chain(
-            user_process_groups
-                .into_iter()
-                .map(TerminationTarget::process_group),
-        )
-        .collect::<HashSet<_>>();
+        let targets = intproxy_pids
+            .into_iter()
+            .chain(extproxy_pids)
+            .chain(sidecar_pids)
+            .map(TerminationTarget::process)
+            .chain(
+                user_process_groups
+                    .into_iter()
+                    .map(TerminationTarget::process_group),
+            )
+            .collect::<HashSet<_>>();
 
-    let targets_terminated = terminate_targets(targets, grace).await;
+        let targets_terminated = terminate_targets(targets, grace).await;
 
-    let sidecars_removed = stream::iter(sidecar_containers)
-        .then(runtime_remove_container)
-        .collect::<Vec<_>>()
-        .await;
+        let sidecars_removed = stream::iter(sidecar_containers)
+            .then(runtime_remove_container)
+            .collect::<Vec<_>>()
+            .await;
 
-    targets_terminated
-        .into_iter()
-        .try_collect::<_, (), _>()
-        .and(sidecars_removed.into_iter().try_collect::<_, (), _>())
+        targets_terminated
+            .into_iter()
+            .try_collect::<_, (), _>()
+            .and(sidecars_removed.into_iter().try_collect::<_, (), _>())
+    }
 }
 
 /// Kills the sidecars that were started by `mirrord ci container`.
@@ -238,7 +238,7 @@ impl CiStopCommandHandler {
             return Ok(());
         }
 
-        terminate_store(store, grace).await?;
+        store.terminate(grace).await?;
 
         MirrordCiStore::remove_file(&store_path).await?;
         progress.success(None);
@@ -272,7 +272,7 @@ mod tests {
         time::{Instant, timeout},
     };
 
-    use super::{CiStopCommandHandler, terminate_store};
+    use super::CiStopCommandHandler;
     use crate::ci::{MirrordCiStore, spawn_background_user_command};
 
     /// Short stand-in for [`super::SHUTDOWN_GRACE`], the production value would only make the
@@ -341,7 +341,7 @@ mod tests {
         .unwrap();
         let grandchild_pid = Pid::from_raw(grandchild_pid.trim().parse::<i32>().unwrap());
 
-        terminate_store(store, TEST_GRACE).await.unwrap();
+        store.terminate(TEST_GRACE).await.unwrap();
 
         timeout(Duration::from_secs(5), child.wait())
             .await
@@ -361,7 +361,7 @@ mod tests {
         )
         .await;
 
-        terminate_store(store, TEST_GRACE).await.unwrap();
+        store.terminate(TEST_GRACE).await.unwrap();
 
         let status = timeout(Duration::from_secs(5), child.wait())
             .await
@@ -382,7 +382,7 @@ mod tests {
         .await;
 
         let shutdown_started = Instant::now();
-        terminate_store(store, TEST_GRACE).await.unwrap();
+        store.terminate(TEST_GRACE).await.unwrap();
 
         let status = timeout(Duration::from_secs(5), child.wait())
             .await
@@ -409,7 +409,7 @@ mod tests {
 
         store.intproxy_pids = HashSet::from([pid]);
 
-        terminate_store(store, TEST_GRACE).await.unwrap();
+        store.terminate(TEST_GRACE).await.unwrap();
     }
 
     /// The second invocation must load the absence left by the first invocation, rather than reuse
