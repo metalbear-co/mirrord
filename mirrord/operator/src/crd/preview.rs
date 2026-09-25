@@ -35,7 +35,7 @@ use crate::crd::queue_filter::{MessageFilter, QueueType, message_filter_crd_sche
 pub mod view;
 use uuid::Uuid;
 
-use super::session::KubeResourceTarget;
+use super::{db_branching::core::ConnectionSource, session::KubeResourceTarget};
 #[cfg(feature = "client")]
 use crate::client::connect_params::BranchDbNames;
 
@@ -952,6 +952,17 @@ pub struct PreviewDbBranchingConfig {
     /// S3 branch bucket names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub s3_branch_names: Vec<String>,
+
+    /// This session's own connection mapping for the branches it reuses, keyed by branch
+    /// resource name.
+    ///
+    /// A branch's `spec.connectionSource` names the env vars of the workload that created it.
+    /// Another workload sharing the branch `id` reads its connection from differently named
+    /// vars (`AUDIT_DB_HOST` where the creator has `DB_HOST`), so the operator builds this
+    /// session's overrides from the mapping here instead of the branch spec. Branches this
+    /// session created are absent: their spec already is this mapping.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub connection_sources: BTreeMap<String, ConnectionSource>,
 }
 
 impl PreviewDbBranchingConfig {
@@ -976,6 +987,7 @@ impl PreviewDbBranchingConfig {
             clickhouse_branch_names,
             cockroachdb_branch_names,
             s3_branch_names,
+            connection_sources: _,
         } = self;
 
         [
@@ -1014,6 +1026,7 @@ impl PreviewDbBranchingConfig {
                 clickhouse_branch_names: branch_db_names.clickhouse,
                 cockroachdb_branch_names: branch_db_names.cockroachdb,
                 s3_branch_names: branch_db_names.s3,
+                connection_sources: branch_db_names.connection_sources,
             })
         }
     }
