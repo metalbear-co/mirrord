@@ -865,6 +865,20 @@ where
                 .require_feature(NewOperatorFeature::DbBranchConfigMapSource)?;
         }
 
+        // A `url` connection param needs an operator that layers the other params over it: an
+        // older operator ignores the param and builds the source connection from whatever else
+        // is declared, silently branching the wrong database.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_url_param)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchUrlParam)?;
+        }
+
         // The `liquibase` flavor is new to the branch CRD's migration schema; an older
         // operator's schema rejects the value outright, which surfaces as a bare API validation
         // error rather than a missing capability.

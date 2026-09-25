@@ -1054,6 +1054,16 @@
             }
           ]
         },
+        "url": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SingleOrVec_ParamSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "user": {
           "anyOf": [
             {
