@@ -118,10 +118,9 @@ pub(crate) async fn terminate_processes(pids: HashSet<i32>) {
 
 #[cfg(test)]
 mod tests {
-    use std::{process::Command, time::Duration};
-
     #[cfg(unix)]
     use std::collections::HashSet;
+    use std::{process::Command, time::Duration};
 
     use super::terminate_processes;
     #[cfg(unix)]
