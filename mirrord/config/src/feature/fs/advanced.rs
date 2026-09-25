@@ -90,7 +90,8 @@ pub const PREFETCH_TIMEOUT_DEFAULT: u64 = 30;
 ///       "read_write": ".+\\.json" ,
 ///       "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ],
 ///       "local": [ ".+\\.js", ".+\\.mjs" ],
-///       "not_found": [ "\\.config/gcloud" ]
+///       "not_found": [ "\\.config/gcloud" ],
+///       "prefetch": [ "/etc/ssl" ]
 ///     }
 ///   }
 /// }

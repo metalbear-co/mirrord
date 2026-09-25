@@ -282,7 +282,8 @@ pub const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
 ///       "mode": "write",
 ///       "read_write": ".+\\.json" ,
 ///       "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ],
-///       "local": [ ".+\\.js", ".+\\.mjs" ]
+///       "local": [ ".+\\.js", ".+\\.mjs" ],
+///       "prefetch": [ "/etc/ssl" ]
 ///     },
 ///     "network": {
 ///       "incoming": {

@@ -48,7 +48,8 @@ pub mod split_queues;
 ///       "mode": "write",
 ///       "read_write": ".+\\.json" ,
 ///       "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ],
-///       "local": [ ".+\\.js", ".+\\.mjs" ]
+///       "local": [ ".+\\.js", ".+\\.mjs" ],
+///       "prefetch": [ "/etc/ssl" ]
 ///     },
 ///     "network": {
 ///       "incoming": {
