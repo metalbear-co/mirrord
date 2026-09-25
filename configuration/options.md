@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-09-24T00:00:00.000Z
+lastmod: 2026-09-25T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -3153,9 +3153,38 @@ If you don't supply the server name:
    used;
 4. Otherwise, `localhost` will be used.
 
+If the local application's TLS server requires a client certificate (mutual TLS), give
+mirrord's TLS client one to present:
+```json
+{
+  "protocol": "tls",
+  "client_cert": "/path/to/client.cert.pem",
+  "client_key": "/path/to/client.key.pem"
+}
+```
+
+In preview sessions (`mirrord preview start`) the mirrord operator makes the TLS connection to
+the preview pod, so `client_cert` and `client_key` are read locally, stored in the session's
+Secret and presented by the operator. `server_name` is used the same way. The other settings
+do not apply to previews: the operator always delivers over TLS and does not verify the
+preview pod's certificate.
+
+##### feature.network.incoming.tls_delivery.client_cert {#feature-network-incoming-tls_delivery-client_cert}
+
+Path to a PEM file containing the certificate chain mirrord presents to the local
+application's TLS server, for applications that require a client certificate.
+
+This file must contain at least one certificate. Must be set together with `client_key`.
+
+##### feature.network.incoming.tls_delivery.client_key {#feature-network-incoming-tls_delivery-client_key}
+
+Path to a PEM file containing the private key of `client_cert`.
+
+This file must contain exactly one private key. Must be set together with `client_cert`.
+
 ##### feature.network.incoming.tls_delivery.protocol {#feature-network-incoming-tls_delivery-protocol}
 
-Protocol to use when delivering the TLS traffic locally.
+Protocol to use when delivering the TLS traffic locally. Defaults to `tls`.
 
 
 Path to a PEM file containing the certificate chain used by the local application's
@@ -3317,9 +3346,38 @@ If you don't supply the server name:
    used;
 4. Otherwise, `localhost` will be used.
 
+If the local application's TLS server requires a client certificate (mutual TLS), give
+mirrord's TLS client one to present:
+```json
+{
+  "protocol": "tls",
+  "client_cert": "/path/to/client.cert.pem",
+  "client_key": "/path/to/client.key.pem"
+}
+```
+
+In preview sessions (`mirrord preview start`) the mirrord operator makes the TLS connection to
+the preview pod, so `client_cert` and `client_key` are read locally, stored in the session's
+Secret and presented by the operator. `server_name` is used the same way. The other settings
+do not apply to previews: the operator always delivers over TLS and does not verify the
+preview pod's certificate.
+
+##### feature.network.incoming.tls_delivery.client_cert {#feature-network-incoming-tls_delivery-client_cert}
+
+Path to a PEM file containing the certificate chain mirrord presents to the local
+application's TLS server, for applications that require a client certificate.
+
+This file must contain at least one certificate. Must be set together with `client_key`.
+
+##### feature.network.incoming.tls_delivery.client_key {#feature-network-incoming-tls_delivery-client_key}
+
+Path to a PEM file containing the private key of `client_cert`.
+
+This file must contain exactly one private key. Must be set together with `client_cert`.
+
 ##### feature.network.incoming.tls_delivery.protocol {#feature-network-incoming-tls_delivery-protocol}
 
-Protocol to use when delivering the TLS traffic locally.
+Protocol to use when delivering the TLS traffic locally. Defaults to `tls`.
 
 
 Path to a PEM file containing the certificate chain used by the local application's
@@ -3811,10 +3869,10 @@ The queue splitting configuration. Each entry pairs a queue id with a filter tha
 messages from the original queue are delivered to the local application, based on message
 attributes or headers, and possibly on jq filters (for SQS and other body-aware brokers).
 
-The queue ids have to match those defined in the `MirrordWorkloadQueueRegistry` for SQS and
-RabbitMQ or `MirrordKafkaTopicsConsumer` for Kafka.
+The queue ids have to match those defined in the target's `MirrordSplitConfig` (or the legacy
+`MirrordWorkloadQueueRegistry` / `MirrordKafkaTopicsConsumer`).
 
-Two shapes are accepted. The classic map form keys each filter by its queue id, which means a
+Two shapes are accepted. The classic map form keys each entry by its queue id, which means a
 given id can appear only once:
 
 ```json
@@ -3823,7 +3881,7 @@ given id can appear only once:
     "split_queues": {
       "first-queue": {
         "queue_type": "SQS",
-        "message_filter": { "wows": "so wows", "coolz": "^very" }
+        "filter": { "metadata": "^wows: so wows$" }
       },
       "second-queue": {
         "queue_type": "Kafka",
@@ -3844,35 +3902,153 @@ example to split a queue with the same name on two different brokers:
       {
         "queue_id": "orders",
         "queue_type": "SQS",
-        "message_filter": { "region": "^eu" }
+        "filter": { "metadata": "^region: eu" }
       },
       {
         "queue_id": "orders",
         "queue_type": "Kafka",
-        "message_filter": { "region": "^us" }
+        "filter": { "metadata": "^region: us" }
       }
     ]
   }
 }
 ```
 
-A single queue splitting entry: the queue id together with its filter. Keeping the id next to
-the filter (instead of using it as a map key) is what lets the same id show up more than once,
-which a map cannot do.
+One queue to split: which broker it is on, which of its messages reach the local application,
+and what happens to those messages. The same struct backs both config shapes: in the list form
+it carries its `queue_id`, in the map form the id is the map key.
 
-The filter for this queue, tagged by its `queue_type`.
+Adding a broker is one [`QueueKind`] variant; adding a filter option is one field here, read by
+every broker through the operator's shared filter code.
+
+The composable filter. See `feature.split_queues.{}.filter`.
+
+### feature.split_queues.{}.filter {#feature-split_queues-queue_id-filter}
+
+A composable message filter, shaped like the HTTP `http_filter`: one `metadata` regex, or an
+`all_of` / `any_of` list of `metadata` regexes.
+
+A `metadata` regex is matched against every message attribute (SQS message attributes, Kafka
+and RabbitMQ headers, Pub/Sub attributes, Service Bus application properties, Temporal task
+metadata, top-level JSON fields for Redis Pub/Sub and BullMQ) rendered as
+`<name>: <value>`, the same way the HTTP filter sees headers. The message matches when any
+attribute line matches, so one regex can target an attribute by name (`^tenant: blue$`) or
+a value wherever it appears (`.*mirrord-session={{ key }}.*`). Matching is case sensitive.
+
+Use `filter` **or** the older `message_filter`, not both. `message_filter` is a map from an
+exact attribute name to a regex on its value, and is equivalent to an `all_of` of one
+`metadata` filter per entry.
+
+```json
+{
+  "feature": {
+    "split_queues": [
+      {
+        "queue_id": "*",
+        "queue_type": "SQS",
+        "filter": { "metadata": "^tenant: blue-.*$" }
+      },
+      {
+        "queue_id": "*",
+        "queue_type": "Temporal",
+        "filter": {
+          "any_of": [
+            { "metadata": "^header.baggage: .*mirrord-session={{ key }}.*$" },
+            { "metadata": "^header.test: .*mirrord-session={{ key }}.*$" }
+          ]
+        }
+      }
+    ]
+  }
+}
+```
+
+The message must match every filter in the list. Cannot be empty.
+
+One filter inside `all_of` / `any_of`. Only `metadata` regexes for now; the list form leaves
+room for other leaf kinds without changing the shape.
+
+A regex matched against each message attribute rendered as `<name>: <value>`.
+
+The message must match at least one filter in the list. Cannot be empty.
+
+One filter inside `all_of` / `any_of`. Only `metadata` regexes for now; the list form leaves
+room for other leaf kinds without changing the shape.
+
+A regex matched against each message attribute rendered as `<name>: <value>`.
+
+A regex matched against each message attribute rendered as `<name>: <value>`. Supports
+the syntax of the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/)
+crate.
+
+### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
+
+When this field is specified, for each message, the jq filter runs on a JSON
+representation of the message. If the jq program outputs `true`, that
+message is considered as matching the filter. Combined with `filter` or
+`message_filter`, a message must match both.
+
+For **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)
+is used.
+
+For **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)
+is used.
+
+For **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,
+`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8
+strings, or base64-encoded when not valid UTF-8. With `payload_protobuf` set, the
+object additionally has a `payload_decoded` field holding the payload decoded from
+protobuf.
+
+For **RabbitMQ**, an object with `headers` (the AMQP basic-properties headers table),
+`properties`, and `payload` fields is used. The `payload` and header values are UTF-8
+strings, or base64-encoded when not valid UTF-8.
+
+For **Azure Service Bus**, an object with `body`, `application_properties`,
+`message_id`, `content_type`, and `subject` fields is used.
+
+For **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose
+payload is not valid JSON never match.
+
+For **Temporal**, an object the operator builds for each task is used. Every object has
+a `task_type` field, set to either `"activity"` or `"workflow"`. Activity tasks also
+carry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,
+`activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).
+Workflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,
+`task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,
+`search_attributes`, `memo`, and `input`.
+
+For **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not
+valid JSON never match.
+
+For **NATS** and **NATSPubSub**, an object with `subject`, `headers`, and `payload`
+fields is used. `payload` is the message body parsed as JSON when the body is JSON, and
+a string otherwise (base64-encoded when not valid UTF-8). Unlike `NATS` (JetStream),
+core NATS pub/sub stores nothing, so delivery to the local application is best-effort:
+messages published while the split is being set up or torn down are not replayed.
+
+This can be used to filter messages based on their body content, for example.
+
+This filter, for example, will tell mirrord to only make available to this local
+application messages with a json in the message body, with a `customer_email` field
+that contains "metalbear.com": `".Body | fromjson | .customer_email |
+test(\"metalbear\\\\.com\")"`
 
 ### feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}
 
-For each queue, `message_filter` is a mapping between message attribute names and regexes they
-should match. The local application will only receive messages that match **all** of the given
-patterns. This means, only messages that have **all** of the attributes in the
-filter, with values of those attributes matching the respective patterns.
+The older filter shape: a mapping between message attribute (or header) names and regexes
+their values should match. The local application only receives messages that have
+**all** of the named attributes, each matching its pattern. Still supported; new configs
+should prefer `filter`, which can also match attributes without naming them and compose
+with `any_of` / `all_of`.
 
-### feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}
+For Temporal the names are `workflow_id`, `workflow_type`, `activity_type`,
+`header.<name>`, or a search attribute key. For Redis Pub/Sub and BullMQ they are
+top-level fields of the JSON payload.
 
-The type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might
-be added in the future.
+Decodes the raw protobuf payload into a `payload_decoded` field for `jq_filter`, for
+Kafka topics that carry plain protobuf instead of JSON. See
+`feature.split_queues.{}.payload_protobuf`.
 
 ### feature.split_queues.{}.payload_protobuf {#feature-split_queues-queue_id-payload_protobuf}
 
@@ -3917,56 +4093,13 @@ Path to the `.proto` file defining the payload's message type. Relative paths ar
 resolved against the current working directory. Not needed when `descriptor_base64` is
 provided.
 
-### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
-When this field is specified, for each message, the jq filter runs on a JSON
-representation of the message. If the jq program outputs `true`, that
-message is considered as matching the filter.
+### feature.split_queues.{}.queue_id {#feature-split_queues-queue_id-queue_id}
 
-For **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)
-is used.
+The id of the queue to split, as it appears in the target's split configuration. List form
+only: in the map form the id is the key. Does not have to be unique across entries. Use
+`*` to split every queue of the given `queue_type` with this filter.
 
-For **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)
-is used.
-
-For **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,
-`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8
-strings, or base64-encoded when not valid UTF-8. With `payload_protobuf` set, the
-object additionally has a `payload_decoded` field holding the payload decoded from
-protobuf.
-
-For **RabbitMQ**, an object with `headers` (the AMQP basic-properties headers table),
-`properties`, and `payload` fields is used. The `payload` and header values are UTF-8
-strings, or base64-encoded when not valid UTF-8.
-
-For **Azure Service Bus**, an object with `body`, `application_properties`,
-`message_id`, `content_type`, and `subject` fields is used.
-
-For **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose
-payload is not valid JSON never match.
-
-For **Temporal**, an object the operator builds for each task is used. Every object has
-a `task_type` field, set to either `"activity"` or `"workflow"`. Activity tasks also
-carry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,
-`activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).
-Workflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,
-`task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,
-`search_attributes`, `memo`, and `input`.
-
-For **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not
-valid JSON never match.
-
-For **NATS**, an object with `subject`, `headers`, and `payload` fields is used.
-`payload` is the message body parsed as JSON when the body is JSON, and a string
-otherwise (base64-encoded when not valid UTF-8).
-
-This can be used to filter messages based on their body content, for example.
-
-
-This filter, for example, will tell mirrord to only make available to this local application
-messages with a json in the message body, with a `customer_email` field that contains
-"metalbear.com": `".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"`
-
-The id of the queue to split. Does not have to be unique across entries.
+Empty only while a map-form entry is being read, before the key is copied in.
 
 Whether matched messages are stolen from the deployed application or mirrored to it.
 
@@ -3982,6 +4115,19 @@ Controls what happens to a message that matches this session's filter.
 Deliver matched messages to this session while the deployed application still gets them.
 
 Take matched messages away from the deployed application (current behavior).
+
+The broker this queue lives on.
+
+### feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}
+
+The broker the queue lives on. One of `SQS`, `Kafka`, `RMQ`, `GCPPubSub`, `RedisPubSub`,
+`AzureServiceBus`, `Temporal`, `BullMQ`, `NATS`, or `NATSPubSub`.
+
+The `Display` form is the snake_case name used in analytics keys and logs.
+
+A queue type this version of mirrord does not know. Produced when an older operator reads
+a config written by a newer client; it never comes from a user config, which `verify`
+rejects with a clear error.
 
 ## internal_proxy {#root-internal_proxy}
 
