@@ -27,7 +27,7 @@ impl PrefetchedFiles {
     }
 
     /// Where the copy of `path` would live, had it been prefetched.
-    fn copy_path(&self, path: &Path) -> Option<PathBuf> {
+    fn copied_path(&self, path: &Path) -> Option<PathBuf> {
         let root = self.root.as_ref()?;
 
         if self
@@ -44,7 +44,7 @@ impl PrefetchedFiles {
 
     /// The local copy of `path`, if there is one.
     pub fn local_copy(&self, path: &Path) -> Option<PathBuf> {
-        let copy = self.copy_path(path)?;
+        let copy = self.copied_path(path)?;
 
         copy.exists().then_some(copy)
     }
@@ -76,7 +76,7 @@ mod tests {
     #[case("/etc/sslkeys/key.pem", None)]
     fn copy_path(#[case] path: &str, #[case] expected: Option<&str>) {
         assert_eq!(
-            prefetched().copy_path(Path::new(path)),
+            prefetched().copied_path(Path::new(path)),
             expected.map(PathBuf::from)
         );
     }
@@ -86,7 +86,7 @@ mod tests {
         let prefetched = PrefetchedFiles::new(None, &["/etc/ssl".to_owned()]);
 
         assert_eq!(
-            prefetched.copy_path(Path::new("/etc/ssl/certs/ca.pem")),
+            prefetched.copied_path(Path::new("/etc/ssl/certs/ca.pem")),
             None
         );
     }
