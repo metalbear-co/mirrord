@@ -42,8 +42,8 @@ pub(super) struct FailoverStrategy {
     /// reconnects inside [`AgentConnection`](crate::agent_conn::AgentConnection) instead). Once
     /// here, the failure has broken every mirrord-hooked path in these processes. Tracking both
     /// the layers inherited from the failed proxy and layers accepted during failover lets every
-    /// shutdown path tear them down instead of leaving silent zombies that keep holding their
-    /// ports. See [`Self::terminate_connected_processes`].
+    /// shutdown path tear them down instead of leaving silent processes that keep holding their
+    /// ports.
     connected_layers: HashMap<LayerId, ProcessInfo>,
 }
 

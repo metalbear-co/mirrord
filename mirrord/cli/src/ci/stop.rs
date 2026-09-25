@@ -261,11 +261,9 @@ mod tests {
     };
 
     use mirrord_progress::ProgressTracker;
-    use nix::{
-        errno::Errno,
-        sys::signal::{Signal, kill},
-        unistd::Pid,
-    };
+    #[cfg(not(target_os = "linux"))]
+    use nix::{errno::Errno, sys::signal::kill};
+    use nix::{sys::signal::Signal, unistd::Pid};
     use tokio::{
         io::{AsyncBufReadExt, BufReader},
         process::{Child, ChildStdout, Command},
@@ -308,11 +306,25 @@ mod tests {
         (child, stdout)
     }
 
-    /// Polls until `pid` is gone, so that the assertions don't race with the kernel reaping a
-    /// process we just signaled.
+    /// Waits until the child has exited. In Linux CI containers, PID 1 may not reap an orphaned
+    /// child promptly, so a zombie still has a PID even though it cannot run or hold a port.
     async fn assert_gone(pid: Pid) {
         timeout(Duration::from_secs(5), async {
-            while kill(pid, None) != Err(Errno::ESRCH) {
+            loop {
+                #[cfg(target_os = "linux")]
+                let exited = match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+                    Ok(stat) => stat
+                        .rsplit_once(") ")
+                        .is_some_and(|(_, fields)| fields.starts_with("Z ")),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+                    Err(error) => panic!("failed to inspect process {pid}: {error}"),
+                };
+                #[cfg(not(target_os = "linux"))]
+                let exited = kill(pid, None) == Err(Errno::ESRCH);
+
+                if exited {
+                    break;
+                }
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
         })
