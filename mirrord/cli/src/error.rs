@@ -317,10 +317,11 @@ pub(crate) enum CliError {
     ConfigError(#[from] mirrord_config::config::ConfigError),
 
     #[cfg(unix)]
-    #[error("Failed to prefetch remote files: {0}")]
+    #[error("Failed to set up the local directory for prefetched files: {0}")]
     #[diagnostic(help(
-        "Please check that the paths in `feature.fs.prefetch` exist in the target, and that \
-        there is room in your temporary directory.{GENERAL_HELP}"
+        "The files listed in `feature.fs.prefetch` are copied into a new directory under your \
+        temporary directory (`$TMPDIR`, or `/tmp` when unset). Please check that it exists, is \
+        writable, and has free space.{GENERAL_HELP}"
     ))]
     Prefetch(#[from] crate::prefetch::PrefetchError),
 
