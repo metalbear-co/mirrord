@@ -8,6 +8,27 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.264.0](https://github.com/metalbear-co/mirrord/tree/3.264.0) - 2026-09-25
+
+
+### Added
+
+- Added `tls_delivery.client_cert` and `client_key` so stolen TLS traffic
+  reaches local and preview apps that require a client certificate.
+- Database branch connection parameters now accept a `url` base that the other
+  parameters override.
+- Queue splitting filters can now be composed with `any_of` / `all_of` and
+  match any message attribute via `metadata` regexes, aligned with the HTTP
+  filter shape.
+
+
+### Fixed
+
+- Fixed debugging Node apps from VS Code hanging when the app uses a fixed
+  inspector port.
+- Reject unsupported preview TLS delivery and incomplete client credentials
+  before replacing an existing preview.
+
 ## [3.263.0](https://github.com/metalbear-co/mirrord/tree/3.263.0) - 2026-09-24
 
 
