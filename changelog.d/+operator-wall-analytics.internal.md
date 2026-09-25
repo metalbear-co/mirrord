@@ -1,0 +1,1 @@
+Open-source runs that hit a wall on the way to the operator now report which one: a target type or `copy_target` that needs it, `operator: true` with no operator in the cluster, or the multi-pod and HTTP-filter warnings. The moment can be counted rather than inferred from clicks on the link it prints.

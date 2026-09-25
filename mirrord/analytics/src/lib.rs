@@ -138,7 +138,7 @@ impl AiAgent {
             Some(Self::ClaudeCode)
         } else if set("CURSOR_TRACE_ID") || set("CURSOR_AGENT") {
             Some(Self::Cursor)
-        } else if set("CODEX_SANDBOX") {
+        } else if set("CODEX_THREAD_ID") || set("CODEX_SANDBOX") {
             Some(Self::Codex)
         } else if set("GEMINI_CLI") {
             Some(Self::GeminiCli)
@@ -148,6 +148,19 @@ impl AiAgent {
             None
         }
     }
+}
+
+/// The point at which an open-source run learned it needed the operator, reported as
+/// `operator_wall`. The first three end the run; the last two only warn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum OperatorWall {
+    TargetType = 1,
+    CopyTarget = 2,
+    /// `operator: true` in the config, but no operator in the cluster.
+    OperatorRequested = 3,
+    MultiPod = 4,
+    HttpFilter = 5,
 }
 
 /// Struct to store analytics data.
@@ -652,7 +665,7 @@ mod tests {
             Some(AiAgent::Cursor)
         );
         assert_eq!(
-            AiAgent::detect_from(env(&[("CODEX_SANDBOX", "seatbelt")])),
+            AiAgent::detect_from(env(&[("CODEX_THREAD_ID", "abc123")])),
             Some(AiAgent::Codex)
         );
         assert_eq!(
