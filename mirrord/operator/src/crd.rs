@@ -660,6 +660,9 @@ pub enum NewOperatorFeature {
 
     PreviewEnv,
 
+    /// Prevents older operators from silently ignoring preview TLS client identity and SNI.
+    PreviewTlsDelivery,
+
     /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
     /// (`postgresOptions`, `mysqlOptions`, `mongodbOptions`) instead of the old separate
     /// `PgBranchDatabase`, `MysqlBranchDatabase`, `MongodbBranchDatabase` CRDs.
@@ -830,6 +833,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::S3Branching => "S3 branching",
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
             NewOperatorFeature::PreviewEnv => "preview environments",
+            NewOperatorFeature::PreviewTlsDelivery => "TLS delivery configuration for previews",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
             NewOperatorFeature::BypassCiCertificateVerification => {
                 "BypassCiCertificateVerification"
