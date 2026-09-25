@@ -34,6 +34,7 @@ pub mod kube_target;
 pub mod label_selector;
 pub mod preview;
 pub mod profile;
+pub mod queue_filter;
 pub mod queue_split;
 pub mod rabbitmq;
 
@@ -793,6 +794,13 @@ pub enum NewOperatorFeature {
     /// with its response.
     SubscribeEventOptions,
 
+    /// This operator accepts the composable `filter` shape in `feature.split_queues` (`metadata`
+    /// regexes combined with `any_of` / `all_of`), sent in the `queue_filters` connect param and
+    /// the preview session's `queues` list. Gated so the CLI fails fast: an older operator
+    /// ignores the param it does not know, and a copy target carrying the new field fails to
+    /// deserialize there.
+    QueueSplittingWithComposedFilters,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -868,6 +876,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
             NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
+            NewOperatorFeature::QueueSplittingWithComposedFilters => {
+                "queue splitting with composable message filters"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

@@ -262,15 +262,7 @@ enum FilterDetail {
 impl FilterDetail {
     fn value(self, filter: &QueueSplitFilter) -> Option<String> {
         match self {
-            Self::Filter => (!filter.message_filter.is_empty()).then(|| {
-                let joined = filter
-                    .message_filter
-                    .iter()
-                    .map(|(key, value)| format!("{key}={value}"))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                format!("{{{joined}}}")
-            }),
+            Self::Filter => filter.message_filter().map(|filter| filter.to_string()),
             Self::Jq => filter.jq_filter.clone(),
         }
     }
