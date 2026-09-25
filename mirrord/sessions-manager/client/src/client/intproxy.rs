@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{future::Future, time::Duration};
 
 use mirrord_operator_websocket::connection::OperatorConnection;
 use mirrord_protocol_io::Client;
@@ -9,13 +9,11 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
 use crate::{
-    client::ClientBuilder,
-    config::SessionsManagerConfig,
-    control_plane::{HttpControlPlaneClient, subscriber::ControlPlaneSubscriber},
-    credentials::{CredentialProvider, credentials_from_env},
-    data_plane::{DataPlaneConnectRequest, DataPlaneTransport, WebSocketDataPlaneTransport},
+    client::validate_scope,
+    control_plane::subscriber::ControlPlaneSubscriber,
     error::SessionsManagerClientError,
     retry::{RetryBudget, with_deadline},
+    transport::SessionsManagerTransport,
 };
 
 /// Describes the sessions-manager control-plane subscription an intproxy opens.
@@ -33,48 +31,29 @@ pub struct SessionsManagerConnectInfo {
 }
 
 /// Connects an intproxy to the data plane assigned by sessions-manager.
-pub struct IntproxyClient<T = WebSocketDataPlaneTransport> {
+pub struct IntproxyClient<T> {
+    scope: ServiceScope,
     /// The connection id isolates this client's allocation from other intproxies in the user
     /// session while staying stable across the control-plane subscriber's SSE reconnects.
     identity: IntproxyIdentity,
     replica_filter: Option<ReplicaId>,
-    builder: ClientBuilder<T>,
+    transport: T,
 }
 
-impl IntproxyClient<WebSocketDataPlaneTransport> {
+impl<T: SessionsManagerTransport> IntproxyClient<T> {
     pub fn new(
         connect_info: SessionsManagerConnectInfo,
+        transport: T,
     ) -> Result<Self, SessionsManagerClientError> {
         Ok(Self {
+            scope: validate_scope(connect_info.scope)?,
             identity: IntproxyIdentity {
                 user_session_id: connect_info.user_session_id,
                 intproxy_connection_id: uuid::Uuid::new_v4().to_string(),
             },
             replica_filter: connect_info.replica_filter,
-            builder: ClientBuilder {
-                config: SessionsManagerConfig::new(
-                    connect_info.scope,
-                    SessionsManagerConfig::base_url_from_env()?,
-                )?,
-                credentials: credentials_from_env()?,
-                transport: WebSocketDataPlaneTransport,
-            },
+            transport,
         })
-    }
-}
-
-impl<T: DataPlaneTransport> IntproxyClient<T> {
-    pub fn with_credentials(mut self, credentials: Arc<dyn CredentialProvider>) -> Self {
-        self.builder = self.builder.with_credentials(credentials);
-        self
-    }
-
-    pub fn with_transport<U: DataPlaneTransport>(self, transport: U) -> IntproxyClient<U> {
-        IntproxyClient {
-            identity: self.identity,
-            replica_filter: self.replica_filter,
-            builder: self.builder.with_transport(transport),
-        }
     }
 
     /// Waits for an assignment and connects to the data plane it names, retrying within `timeout`.
@@ -123,11 +102,7 @@ impl<T: DataPlaneTransport> IntproxyClient<T> {
 
         with_deadline(
             Some(self.connect_deadline(deadline)),
-            self.builder.transport.connect(DataPlaneConnectRequest {
-                control_plane_url: self.builder.config.base_url.clone(),
-                assignment,
-                credentials: self.builder.credentials.clone(),
-            }),
+            self.transport.connect_data_plane(assignment),
         )
         .await?
     }
@@ -136,10 +111,9 @@ impl<T: DataPlaneTransport> IntproxyClient<T> {
         &self,
         deadline: Instant,
     ) -> Result<ConnectionAssignment, SessionsManagerClientError> {
-        let client =
-            HttpControlPlaneClient::new(&self.builder.config, self.builder.credentials.clone())?;
         let mut assignments = ControlPlaneSubscriber::new(
-            client,
+            self.transport.clone(),
+            self.scope.clone(),
             AssignmentSubscription::Intproxy {
                 identity: self.identity.clone(),
                 agent_replica_filter: self.replica_filter.clone(),
@@ -154,7 +128,7 @@ impl<T: DataPlaneTransport> IntproxyClient<T> {
     /// out, which is the desired behavior. No explicit deadline check is needed.
     fn connect_deadline(&self, deadline: Instant) -> Instant {
         let remaining = deadline.saturating_duration_since(Instant::now());
-        Instant::now() + remaining.min(self.builder.transport.connect_timeout())
+        Instant::now() + remaining.min(self.transport.connect_timeout())
     }
 }
 

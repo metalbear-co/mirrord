@@ -5,27 +5,28 @@
 //! both peers.
 //!
 //! [`AgentClient`] registers an agent replica with the sessions-manager and
-//! starts an [`AgentControlPlane`], which receives connection assignments and
-//! establishes the corresponding data-plane connections. [`IntproxyClient`]
+//! runs its control plane in the background, receiving connection assignments
+//! and establishing the corresponding data-plane connections. [`IntproxyClient`]
 //! registers an intproxy connection, waits for its assignment, and connects to
 //! the assigned data plane.
 //!
 //! Communication with the sessions-manager is split into a control plane,
 //! responsible for registration and assignment, and a data plane, which carries
-//! the connection established for an assignment.
+//! the connection established for an assignment. Both planes are reached through
+//! a [`SessionsManagerTransport`]: [`DirectTransport`] for a standalone
+//! sessions-manager, [`OperatorTransport`] for the one hosted by the mirrord
+//! operator.
 
 mod assignments;
 mod client;
-mod config;
 mod control_plane;
 mod credentials;
-mod data_plane;
-
 mod error;
 mod retry;
+mod transport;
 
-pub use client::{AgentClient, AgentControlPlane, IntproxyClient, SessionsManagerConnectInfo};
+pub use client::{AgentClient, IntproxyClient, SessionsManagerConnectInfo};
 pub use credentials::{CredentialProvider, SharedSecretCredentials};
-pub use data_plane::{DataPlaneConnectRequest, DataPlaneTransport, WebSocketDataPlaneTransport};
 pub use error::{Result, SessionsManagerClientError};
 pub use mirrord_sessions_manager_protocol::{IntproxyIdentity, ReplicaId, ServiceScope};
+pub use transport::{DirectTransport, OperatorTransport, SessionsManagerTransport};

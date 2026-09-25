@@ -24,6 +24,7 @@ pub enum OperatorOperation {
     MysqlBranching,
     MongodbBranching,
     PreparingClientCertificate,
+    ServerlessSessionsManagerDiscovery,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -41,6 +42,9 @@ impl fmt::Display for OperatorOperation {
             Self::MysqlBranching => "MySQL branching",
             Self::MongodbBranching => "MongoDB branching",
             Self::PreparingClientCertificate => "preparing client certificate",
+            Self::ServerlessSessionsManagerDiscovery => {
+                "discovering the operator-hosted sessions-manager"
+            }
         };
 
         f.write_str(as_str)
@@ -76,6 +80,9 @@ pub enum OperatorApiError {
     /// enable it.
     #[error("feature {feature} is not enabled on this mirrord operator")]
     FeatureDisabled { feature: NewOperatorFeature },
+
+    #[error("mirrord operator does not serve the operator-hosted sessions-manager")]
+    ServerlessSessionsManagerNotServed,
 
     #[error("{operation} failed with code {}: {}", status.code, status.reason)]
     StatusFailure {

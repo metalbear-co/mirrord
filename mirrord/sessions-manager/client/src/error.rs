@@ -11,6 +11,13 @@ pub enum SessionsManagerClientError {
     Http(#[from] reqwest::Error),
     #[error("WebSocket data-plane upgrade failed: {0}")]
     WebSocketUpgrade(#[from] ConnectError),
+    #[error("Kubernetes request to the operator-hosted sessions-manager failed: {0}")]
+    Kube(Box<kube::Error>),
+    #[error(
+        "the mirrord operator does not serve sessions-manager routes (HTTP {0}); \
+         enable `sessionsManager.enabled` in the operator Helm chart"
+    )]
+    ServerlessSessionsManagerNotServed(reqwest::StatusCode),
 
     #[error("URL is invalid: {0}")]
     Url(#[from] url::ParseError),
@@ -20,6 +27,10 @@ pub enum SessionsManagerClientError {
     InvalidContentType(Option<String>),
     #[error(transparent)]
     SseEventStream(#[from] EventStreamError<reqwest::Error>),
+    #[error(transparent)]
+    KubeSseEventStream(Box<EventStreamError<kube::Error>>),
+    #[error("failed to encode the control-plane subscription query: {0}")]
+    QueryEncoding(#[from] serde_urlencoded::ser::Error),
     #[error("sessions-manager {0} stream ended")]
     SseStreamEnded(&'static str),
     #[error(
@@ -72,10 +83,18 @@ pub enum SessionsManagerClientError {
 impl SessionsManagerClientError {
     pub(crate) fn is_retryable(&self) -> bool {
         match self {
-            Self::HttpStatus(status) => {
-                *status == reqwest::StatusCode::REQUEST_TIMEOUT
-                    || *status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                    || status.is_server_error()
+            Self::HttpStatus(status) => is_retryable_status(*status),
+            // Statuses from kube-apiserver or the operator are retried like a standalone
+            // sessions-manager's, so e.g. missing RBAC fails fast; anything else is a transport
+            // failure on the way there.
+            Self::Kube(error) => match error.as_ref() {
+                kube::Error::Api(status) => {
+                    reqwest::StatusCode::from_u16(status.code).is_ok_and(is_retryable_status)
+                }
+                _ => true,
+            },
+            Self::KubeSseEventStream(error) => {
+                matches!(error.as_ref(), EventStreamError::Transport(_))
             }
             Self::WebSocket(_)
             | Self::Http(_)
@@ -86,6 +105,24 @@ impl SessionsManagerClientError {
             | Self::WebSocketUpgrade(_) => true,
             _ => false,
         }
+    }
+}
+
+fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::REQUEST_TIMEOUT
+        || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || status.is_server_error()
+}
+
+impl From<kube::Error> for SessionsManagerClientError {
+    fn from(error: kube::Error) -> Self {
+        Self::Kube(Box::new(error))
+    }
+}
+
+impl From<EventStreamError<kube::Error>> for SessionsManagerClientError {
+    fn from(error: EventStreamError<kube::Error>) -> Self {
+        Self::KubeSseEventStream(Box::new(error))
     }
 }
 

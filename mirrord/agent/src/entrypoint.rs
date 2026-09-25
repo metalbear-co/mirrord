@@ -22,7 +22,9 @@ use mirrord_agent_iptables::{
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use mirrord_protocol_io::{Agent, Connection};
-use mirrord_sessions_manager_client::{AgentClient, ServiceScope, SessionsManagerClientError};
+use mirrord_sessions_manager_client::{
+    AgentClient, DirectTransport, ServiceScope, SessionsManagerClientError,
+};
 use socket2::SockRef;
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
@@ -1237,15 +1239,15 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
     let replica_id = resolve_replica_id()
         .await
         .ok_or::<AgentError>(SessionsManagerClientError::MissingAgentReplicaID.into())?;
-    let mut control_plane = AgentClient::new(
+    let mut control_plane = AgentClient::start(
         ServiceScope {
             environment,
             service,
         },
         replica_id.into(),
+        DirectTransport::from_env()?,
         cancellation_token.clone(),
-    )?
-    .start_control_plane()?;
+    )?;
 
     let mut join_set: JoinSet<()> = JoinSet::new();
 

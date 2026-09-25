@@ -1,30 +1,27 @@
-//! HTTP/SSE control-plane transport.
+//! Transport-agnostic decoding of the control-plane SSE stream.
 
-mod api;
+pub(crate) mod api;
 mod event;
 pub(crate) mod subscriber;
 
 use std::{
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
 
-pub(crate) use api::AssignmentSubscription;
-use api::{ControlPlaneApi, ControlPlaneEndpoint};
+use api::ControlPlaneApi;
 pub(crate) use event::ControlPlaneEvent;
-use eventsource_stream::Eventsource;
+use eventsource_stream::{EventStreamError, Eventsource};
 use futures::{Stream, StreamExt};
+use hyper::{
+    StatusCode,
+    header::{CONTENT_TYPE, HeaderMap},
+};
 use tokio::{sync::watch, time::Instant};
 
-use crate::{
-    config::SessionsManagerConfig, credentials::CredentialProvider,
-    error::SessionsManagerClientError, retry::with_deadline,
-};
+use crate::error::SessionsManagerClientError;
 
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a connection may go without any activity before it's considered stalled. See
 /// [`ControlPlaneEventStream::next`].
 const EVENT_READ_TIMEOUT: Duration = Duration::from_secs(60);
@@ -34,15 +31,13 @@ const EVENT_READ_TIMEOUT: Duration = Duration::from_secs(60);
 /// decoded item (an event only dispatches once its `data:` field is non-empty), so this is the
 /// only point where they're observable at all — subscribers that need to distinguish a stalled
 /// connection from one that's alive but has nothing to say yet rely on this.
-struct ControlPlaneBytesStream {
-    inner: Pin<Box<dyn Stream<Item = reqwest::Result<bytes::Bytes>> + Send>>,
+struct ControlPlaneBytesStream<S> {
+    inner: Pin<Box<S>>,
     last_activity: watch::Sender<Instant>,
 }
 
-impl ControlPlaneBytesStream {
-    fn new(
-        inner: impl Stream<Item = reqwest::Result<bytes::Bytes>> + Send + 'static,
-    ) -> (Self, watch::Receiver<Instant>) {
+impl<S> ControlPlaneBytesStream<S> {
+    fn new(inner: S) -> (Self, watch::Receiver<Instant>) {
         let (last_activity, rx) = watch::channel(Instant::now());
         (
             Self {
@@ -54,8 +49,8 @@ impl ControlPlaneBytesStream {
     }
 }
 
-impl Stream for ControlPlaneBytesStream {
-    type Item = reqwest::Result<bytes::Bytes>;
+impl<S: Stream> Stream for ControlPlaneBytesStream<S> {
+    type Item = S::Item;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -70,13 +65,38 @@ impl Stream for ControlPlaneBytesStream {
 /// Decoded control-plane events, paired with a liveness signal ([`ControlPlaneBytesStream`])
 /// that a caller waiting indefinitely for the next event can use to tell a stalled connection
 /// apart from one that's alive but has nothing to say yet.
-pub(crate) struct ControlPlaneEventStream {
+///
+/// Produced by a [`crate::SessionsManagerTransport`]; public only because it appears in that
+/// trait's signature.
+pub struct ControlPlaneEventStream {
     events:
         Pin<Box<dyn Stream<Item = Result<ControlPlaneEvent, SessionsManagerClientError>> + Send>>,
     last_activity: watch::Receiver<Instant>,
 }
 
 impl ControlPlaneEventStream {
+    /// Decodes an SSE response body, whichever transport it arrived over.
+    pub(crate) fn from_bytes<E>(
+        bytes: impl Stream<Item = Result<bytes::Bytes, E>> + Send + 'static,
+    ) -> Self
+    where
+        E: Send + 'static,
+        SessionsManagerClientError: From<EventStreamError<E>>,
+    {
+        let (bytes, last_activity) = ControlPlaneBytesStream::new(bytes);
+        let events = Box::pin(bytes.eventsource().filter_map(|event| async move {
+            match event {
+                Ok(event) => ControlPlaneApi::decode_event(event).transpose(),
+                Err(error) => Some(Err(error.into())),
+            }
+        }));
+
+        Self {
+            events,
+            last_activity,
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn new(
         events: Pin<
@@ -126,91 +146,71 @@ impl ControlPlaneEventStream {
     }
 }
 
-/// Builds and opens HTTP/SSE requests to the sessions-manager control plane.
-#[derive(Clone)]
-pub(crate) struct HttpControlPlaneClient {
-    client: reqwest::Client,
-    api: ControlPlaneApi,
-    config: SessionsManagerConfig,
-    credentials: Arc<dyn CredentialProvider>,
-}
-
-impl HttpControlPlaneClient {
-    pub(crate) fn new(
-        config: &SessionsManagerConfig,
-        credentials: Arc<dyn CredentialProvider>,
-    ) -> Result<Self, SessionsManagerClientError> {
-        let client = reqwest::Client::builder()
-            .connect_timeout(CONNECT_TIMEOUT)
-            .build()?;
-        Ok(Self {
-            client,
-            api: ControlPlaneApi::new(config.base_url.clone()),
-            config: config.clone(),
-            credentials,
-        })
+pub(crate) fn verify_event_stream(
+    status: StatusCode,
+    headers: &HeaderMap,
+) -> Result<(), SessionsManagerClientError> {
+    tracing::debug!(
+        %status,
+        content_type = ?headers.get(CONTENT_TYPE),
+        "sessions-manager assignments response received"
+    );
+    if !status.is_success() {
+        return Err(SessionsManagerClientError::HttpStatus(status));
     }
 
-    pub(crate) async fn subscribe_assignments(
-        &self,
-        subscription: &AssignmentSubscription,
-    ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
-        let endpoint = self.api.endpoint(ControlPlaneEndpoint::Assignments {
-            scope: &self.config.scope,
-        })?;
-        tracing::debug!(
-            %endpoint,
-            subscription = ?subscription,
-            "requesting sessions-manager assignments"
+    let content_type = headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok());
+    if !content_type.is_some_and(|value| {
+        value
+            .split(';')
+            .next()
+            .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("text/event-stream"))
+    }) {
+        return Err(SessionsManagerClientError::InvalidContentType(
+            content_type.map(str::to_owned),
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::stream;
+
+    use super::*;
+
+    /// The body `sessionassignments` streams, split across chunks the way a transport may
+    /// deliver it, including a keep-alive comment and an event this client doesn't know.
+    #[tokio::test]
+    async fn operator_sse_body_decodes_into_assignment() {
+        let chunks = [
+            ": keep-alive\n\n",
+            "event: unknown\ndata: {}\n\n",
+            "event: assignment\ndata: {\"assignment_id\":\"assignment-1\",",
+            "\"data_plane_endpoint\":\"/apis/operator.metalbear.co/v1alpha1/sessiondataplanes/assignment-1\",",
+            "\"authorization\":\"Bearer secret\"}\n\n",
+            "event: superseded\ndata: {}\n\n",
+        ];
+        let mut events = ControlPlaneEventStream::from_bytes(stream::iter(
+            chunks.map(|chunk| Ok::<_, kube::Error>(bytes::Bytes::from(chunk))),
+        ));
+
+        let Some(Ok(ControlPlaneEvent::Assignment(assignment))) = events.next().await.unwrap()
+        else {
+            panic!("expected an assignment event");
+        };
+        assert_eq!(assignment.assignment_id.to_string(), "assignment-1");
+        assert_eq!(
+            assignment.data_plane_endpoint.as_str(),
+            "/apis/operator.metalbear.co/v1alpha1/sessiondataplanes/assignment-1"
         );
-        let request = self
-            .client
-            .get(endpoint)
-            .query(subscription)
-            .headers(self.credentials.headers()?)
-            .header(reqwest::header::ACCEPT, "text/event-stream")
-            .send();
-        let deadline = Instant::now() + RESPONSE_HEADER_TIMEOUT;
-        let response = with_deadline(Some(deadline), request).await??;
-        tracing::debug!(
-            status = %response.status(),
-            content_type = ?response.headers().get(reqwest::header::CONTENT_TYPE),
-            "sessions-manager assignments response received"
-        );
-        if !response.status().is_success() {
-            return Err(SessionsManagerClientError::HttpStatus(response.status()));
-        }
-        let content_type = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok());
-        if !content_type.is_some_and(|value| {
-            value
-                .split(';')
-                .next()
-                .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("text/event-stream"))
-        }) {
-            return Err(SessionsManagerClientError::InvalidContentType(
-                content_type.map(str::to_owned),
-            ));
-        }
-
-        let (bytes, last_activity) = ControlPlaneBytesStream::new(response.bytes_stream());
-
-        let api = self.api.clone();
-        let events = Box::pin(bytes.eventsource().filter_map(move |event| {
-            let api = api.clone();
-            async move {
-                match event {
-                    Ok(event) => api.decode_event(event).transpose(),
-                    Err(error) => Some(Err(error.into())),
-                }
-            }
-        }));
-
-        Ok(ControlPlaneEventStream {
-            events,
-            last_activity,
-        })
+        assert!(matches!(
+            events.next().await.unwrap(),
+            Some(Ok(ControlPlaneEvent::Superseded))
+        ));
+        assert!(events.next().await.unwrap().is_none());
     }
 }
