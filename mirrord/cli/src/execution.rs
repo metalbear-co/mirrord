@@ -3,7 +3,6 @@ use std::ffi::OsString;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
-    ops::Not,
     time::Duration,
 };
 
@@ -491,12 +490,11 @@ impl MirrordExecution {
 
         // The copies would live on this machine, where the user process cannot reach them: it runs
         // inside a container, with a filesystem of its own.
-        if config.feature.fs.prefetch.is_empty().not() {
+        if config.feature.fs.prefetch.take().is_some() {
             progress.warning(
                 "`feature.fs.prefetch` is not supported when running in a container, \
                  and will be ignored.",
             );
-            config.feature.fs.prefetch.clear();
         }
 
         let encoded_config = config.encode()?;
@@ -648,16 +646,12 @@ impl MirrordExecution {
 
         // Prefetching happens before the internal proxy and the user process start.
         #[cfg(unix)]
-        let prefetch_guard =
-            if config.feature.fs.prefetch.is_empty().not() && config.feature.fs.is_active() {
+        let prefetch_guard = match config.feature.fs.prefetch.as_deref() {
+            Some(prefetch) if config.feature.fs.is_active() => {
                 let timeout = Duration::from_secs(config.feature.fs.prefetch_timeout);
-                let directory = crate::prefetch::prefetch_remote_paths(
-                    &client,
-                    &config.feature.fs.prefetch,
-                    timeout,
-                    progress,
-                )
-                .await?;
+                let directory =
+                    crate::prefetch::prefetch_remote_paths(&client, prefetch, timeout, progress)
+                        .await?;
 
                 env_vars.insert(
                     mirrord_config::MIRRORD_FS_PREFETCH_DIR.into(),
@@ -667,9 +661,9 @@ impl MirrordExecution {
                 // Held here until the internal proxy is up and takes over, so that failing to
                 // start it does not leave copies of the target's files behind.
                 Some(crate::prefetch::PrefetchedFilesGuard::new(directory))
-            } else {
-                None
-            };
+            }
+            _ => None,
+        };
 
         let encoded_config = config.encode()?;
 

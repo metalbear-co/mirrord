@@ -290,8 +290,7 @@ pub struct FsConfig {
     ///   }
     /// }
     /// ```
-    #[config(default)]
-    pub prefetch: Vec<String>,
+    pub prefetch: Option<Vec<String>>,
 
     /// #### feature.fs.prefetch_timeout {#feature-fs-prefetch_timeout}
     ///
@@ -329,7 +328,7 @@ impl MirrordToggleableConfig for AdvancedFsUserConfig {
             not_found: None,
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
-            prefetch: Default::default(),
+            prefetch: None,
             prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
         })
     }
@@ -390,7 +389,10 @@ impl CollectAnalytics for &FsConfig {
                 .unwrap_or_default(),
         );
         analytics.add("readonly_file_buffer", self.readonly_file_buffer);
-        analytics.add("prefetch_paths", self.prefetch.len());
+        analytics.add(
+            "prefetch_paths",
+            self.prefetch.as_deref().map(<[_]>::len).unwrap_or_default(),
+        );
         analytics.add("prefetch_timeout", self.prefetch_timeout);
     }
 }

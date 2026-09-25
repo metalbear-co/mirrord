@@ -1159,6 +1159,7 @@ impl LayerConfig {
             .fs
             .prefetch
             .iter()
+            .flatten()
             .find(|path| Path::new(path).has_root().not())
         {
             return Err(ConfigError::InvalidValue {
@@ -1171,7 +1172,7 @@ impl LayerConfig {
             });
         }
 
-        if self.feature.fs.prefetch.is_empty().not() && self.feature.fs.is_active().not() {
+        if self.feature.fs.prefetch.is_some() && self.feature.fs.is_active().not() {
             context.add_warning(
                 "`feature.fs.prefetch` is ignored when `feature.fs.mode` is `local`, \
                  because no file operation is performed remotely."
@@ -1180,7 +1181,7 @@ impl LayerConfig {
         }
 
         #[cfg(windows)]
-        if self.feature.fs.prefetch.is_empty().not() {
+        if self.feature.fs.prefetch.is_some() {
             context.add_warning(
                 "`feature.fs.prefetch` is not supported on Windows and will be ignored.".to_owned(),
             );

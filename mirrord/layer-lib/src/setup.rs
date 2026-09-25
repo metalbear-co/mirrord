@@ -50,7 +50,7 @@ pub fn init_layer_setup(mut config: LayerConfig, sip_only: bool) {
             not_found: None,
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
-            prefetch: Default::default(),
+            prefetch: None,
             prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
         };
     } else {
@@ -107,7 +107,7 @@ impl LayerSetup {
         #[cfg(unix)]
         let prefetched_files = crate::file::prefetched::PrefetchedFiles::new(
             std::env::var_os(mirrord_config::MIRRORD_FS_PREFETCH_DIR).map(std::path::PathBuf::from),
-            &config.feature.fs.prefetch,
+            config.feature.fs.prefetch.as_deref().unwrap_or_default(),
         );
 
         let remote_unix_streams = config

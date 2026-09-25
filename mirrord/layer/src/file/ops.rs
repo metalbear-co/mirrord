@@ -1205,7 +1205,7 @@ mod test {
             mode,
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
-            prefetch: Default::default(),
+            prefetch: None,
             prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
         };
 

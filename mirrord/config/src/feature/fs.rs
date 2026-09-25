@@ -95,7 +95,7 @@ impl MirrordConfig for FsUserConfig {
                 not_found: None,
                 mapping: None,
                 readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
-                prefetch: Default::default(),
+                prefetch: None,
                 prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
             },
             FsUserConfig::Advanced(advanced) => advanced.generate_config(context)?,
@@ -126,7 +126,7 @@ impl MirrordToggleableConfig for FsUserConfig {
             not_found: None,
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
-            prefetch: Default::default(),
+            prefetch: None,
             prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
         })
     }
