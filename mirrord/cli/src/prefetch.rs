@@ -32,23 +32,10 @@ use mirrord_protocol::file::{
     ReadFileRequest, XstatRequest,
 };
 use mirrord_protocol_api::client::{ClientError, MirrordClient, MirrordClientRetry};
+use nix::libc;
 use thiserror::Error;
 use tracing::Level;
 use uuid::Uuid;
-
-/// Bits of [`MetadataInternal::mode`] that hold the file type (`S_IFMT`).
-///
-/// Spelled out here because the CLI does not depend on `libc`.
-const FILE_TYPE_MASK: u32 = 0o170000;
-
-/// File type bits of a directory (`S_IFDIR`).
-const FILE_TYPE_DIRECTORY: u32 = 0o040000;
-
-/// File type bits of a regular file (`S_IFREG`).
-const FILE_TYPE_REGULAR: u32 = 0o100000;
-
-/// Bits of [`MetadataInternal::mode`] that hold the permissions.
-const PERMISSION_MASK: u32 = 0o7777;
 
 /// How much of a file we ask for in a single [`ReadFileRequest`].
 const READ_CHUNK_SIZE: u64 = 128 * 1024;
@@ -288,8 +275,11 @@ impl Downloader<'_> {
         let metadata = self.xstat(remote).await?;
         let local = self.local_path(remote);
 
-        match metadata.mode & FILE_TYPE_MASK {
-            FILE_TYPE_DIRECTORY => {
+        // The mode is the target's and the constants are this machine's, which agree on these
+        // bits on every unix the CLI is built for. `mode_t` is `u16` on macOS and `u32` on Linux,
+        // hence a cast rather than a conversion.
+        match metadata.mode as libc::mode_t & libc::S_IFMT {
+            libc::S_IFDIR => {
                 if self
                     .visited_directories
                     .insert((metadata.device_id, metadata.inode))
@@ -310,7 +300,7 @@ impl Downloader<'_> {
                     .collect())
             }
 
-            FILE_TYPE_REGULAR => {
+            libc::S_IFREG => {
                 self.download_file(remote, &local, metadata.mode).await?;
 
                 Ok(Vec::new())
@@ -494,7 +484,12 @@ impl Downloader<'_> {
 /// component of the remote ones (they come from `st_atime_nsec` and friends), so there is no
 /// meaningful time to restore from them.
 fn set_permissions(path: &Path, mode: u32) -> Result<(), PrefetchError> {
-    fs::set_permissions(path, Permissions::from_mode(mode & PERMISSION_MASK))
+    // Everything but the file type is the permission bits. `mode_t` is `u16` on macOS, where the
+    // cast widens it, but `u32` on Linux, where clippy calls it useless.
+    #[allow(clippy::unnecessary_cast)]
+    let permissions = mode & !(libc::S_IFMT as u32);
+
+    fs::set_permissions(path, Permissions::from_mode(permissions))
         .map_err(|error| PrefetchError::SetPermissions(path.to_path_buf(), error))
 }
 
