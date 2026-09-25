@@ -32,7 +32,7 @@ use mirrord_analytics::{
 };
 use mirrord_config::{
     LayerConfig,
-    config::{ConfigContext, EnvKey},
+    config::{ConfigContext, ConfigError, EnvKey},
     feature::{
         network::incoming::tls_delivery::{LocalTlsDelivery, TlsDeliveryProtocol},
         preview::{ConfigMount, ConfigMountType},
@@ -43,7 +43,7 @@ use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
     crd::{
-        NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
+        MirrordOperatorSpec, NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
             PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvVarsConfig,
             PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs,
@@ -149,6 +149,56 @@ async fn preview_start(
         CliError::PreviewImageRequired
     })?;
 
+    // Reject unsupported or invalid delivery before replacing a running preview.
+    let mut secret_values = BTreeMap::new();
+    // A CronJob preview has no long-running pod to steal traffic to, so incoming is never
+    // sent (the config check already warned when the user configured it). The `cronjob`
+    // block travels only for cronjob targets, so the CR stays identical to what older CLIs
+    // send for every other kind.
+    let (incoming, cronjob) = if is_cronjob_target {
+        (
+            None,
+            Some(PreviewCronJobConfig {
+                schedule: layer_config.feature.preview.cronjob.schedule.clone(),
+                // Only the opt-out travels: the CR stays identical to what older CLIs send
+                // for the default, and `None` means "trigger" on the operator side.
+                trigger_on_start: (!layer_config.feature.preview.cronjob.trigger_on_start)
+                    .then_some(false),
+            }),
+        )
+    } else {
+        let mut incoming = PreviewIncomingConfig::from_config(
+            &layer_config.feature.network.incoming,
+            layer_config.key.as_str(),
+        );
+
+        if let Some(incoming) = incoming.as_mut() {
+            let tls_config = layer_config
+                .feature
+                .network
+                .incoming
+                .tls_delivery
+                .as_ref()
+                .or(layer_config
+                    .feature
+                    .network
+                    .incoming
+                    .https_delivery
+                    .as_ref());
+            let (tls_delivery, warnings) = resolve_tls_delivery(
+                tls_config,
+                &mut secret_values,
+                &operator_api.operator().spec,
+            )?;
+            for warning in warnings {
+                subtask.warning(&warning);
+            }
+            incoming.tls_delivery = tls_delivery;
+        }
+
+        (incoming, None)
+    };
+
     let session_target = resolve_config_target(
         config_target,
         operator_api.client(),
@@ -228,7 +278,6 @@ async fn preview_start(
     // the backing Secret, naming it after the session) once the session exists; the spec carries
     // only where each key mounts. The TLS client certificate for stolen traffic rides in the same
     // Secret.
-    let mut secret_values = BTreeMap::new();
     let secret_mounts = resolve_secret_mounts(
         std::mem::take(&mut layer_config.feature.preview.secret_mounts),
         &mut secret_values,
@@ -240,50 +289,6 @@ async fn preview_start(
         sleep_after_secs: idle_config.sleep_after_secs,
         wake_timeout_secs: idle_config.wake_timeout_secs,
     });
-
-    // A CronJob preview has no long-running pod to steal traffic to, so incoming is never
-    // sent (the config check already warned when the user configured it). The `cronjob`
-    // block travels only for cronjob targets, so the CR stays identical to what older CLIs
-    // send for every other kind.
-    let (incoming, cronjob) = if is_cronjob_target {
-        (
-            None,
-            Some(PreviewCronJobConfig {
-                schedule: layer_config.feature.preview.cronjob.schedule.clone(),
-                // Only the opt-out travels: the CR stays identical to what older CLIs send
-                // for the default, and `None` means "trigger" on the operator side.
-                trigger_on_start: (!layer_config.feature.preview.cronjob.trigger_on_start)
-                    .then_some(false),
-            }),
-        )
-    } else {
-        let mut incoming = PreviewIncomingConfig::from_config(
-            &layer_config.feature.network.incoming,
-            layer_config.key.as_str(),
-        );
-
-        if let Some(incoming) = incoming.as_mut() {
-            let tls_config = layer_config
-                .feature
-                .network
-                .incoming
-                .tls_delivery
-                .as_ref()
-                .or(layer_config
-                    .feature
-                    .network
-                    .incoming
-                    .https_delivery
-                    .as_ref());
-            let (tls_delivery, warnings) = resolve_tls_delivery(tls_config, &mut secret_values)?;
-            for warning in warnings {
-                subtask.warning(&warning);
-            }
-            incoming.tls_delivery = tls_delivery;
-        }
-
-        (incoming, None)
-    };
 
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
@@ -1219,10 +1224,24 @@ fn resolve_secret_mounts(
 fn resolve_tls_delivery(
     config: Option<&LocalTlsDelivery>,
     secret_values: &mut BTreeMap<String, ByteString>,
+    operator: &MirrordOperatorSpec,
 ) -> CliResult<(Option<PreviewTlsDelivery>, Vec<String>)> {
     let Some(config) = config else {
         return Ok((None, Vec::new()));
     };
+
+    // Previews deliver over TLS even when exec would ignore these fields for TCP.
+    if config.client_cert.is_some() != config.client_key.is_some() {
+        return Err(ConfigError::Conflict(
+            ".feature.network.incoming.tls_delivery.client_cert and \
+             .feature.network.incoming.tls_delivery.client_key must be set together"
+                .to_owned(),
+        )
+        .into());
+    }
+    if config.client_cert.is_some() || config.server_name.is_some() {
+        operator.require_feature(NewOperatorFeature::PreviewTlsDelivery)?;
+    }
 
     let mut warnings = Vec::new();
     if config.protocol == TlsDeliveryProtocol::Tcp {
@@ -1255,7 +1274,7 @@ fn resolve_tls_delivery(
                 key_secret_key: PreviewTlsClientAuth::KEY_SECRET_KEY.to_owned(),
             })
         }
-        // Config verification rejects one without the other.
+        // Pairing was checked above, including for TCP configuration.
         _ => None,
     };
 
@@ -1375,6 +1394,81 @@ mod tests {
 
     use super::*;
 
+    fn operator(supports_tls: bool) -> MirrordOperatorSpec {
+        let mut features = vec![NewOperatorFeature::PreviewEnv];
+        if supports_tls {
+            features.push(NewOperatorFeature::PreviewTlsDelivery);
+        }
+        serde_json::from_value(serde_json::json!({
+            "operator_version": "3.211.0",
+            "default_namespace": "default",
+            "supported_features": features,
+            "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn old_operator_rejects_tls_before_reading_credentials() {
+        for config in [
+            LocalTlsDelivery {
+                client_cert: Some(PathBuf::from("/missing.pem")),
+                client_key: Some(PathBuf::from("/missing.key")),
+                ..Default::default()
+            },
+            LocalTlsDelivery {
+                server_name: Some("app.example".to_owned()),
+                ..Default::default()
+            },
+        ] {
+            let mut values = BTreeMap::new();
+            let error =
+                resolve_tls_delivery(Some(&config), &mut values, &operator(false)).unwrap_err();
+            assert!(
+                matches!(error, CliError::FeatureNotSupportedInOperatorError { feature, .. } if feature == NewOperatorFeature::PreviewTlsDelivery.to_string())
+            );
+            assert!(values.is_empty());
+        }
+    }
+
+    #[test]
+    fn old_operator_accepts_preview_without_tls_overrides() {
+        for config in [
+            None,
+            Some(LocalTlsDelivery::default()),
+            Some(LocalTlsDelivery {
+                protocol: TlsDeliveryProtocol::Tcp,
+                ..Default::default()
+            }),
+        ] {
+            let mut values = BTreeMap::new();
+            let (delivery, _) =
+                resolve_tls_delivery(config.as_ref(), &mut values, &operator(false)).unwrap();
+            assert!(delivery.is_none());
+            assert!(values.is_empty());
+        }
+    }
+
+    #[test]
+    fn preview_rejects_incomplete_credentials_even_with_tcp() {
+        for protocol in [TlsDeliveryProtocol::Tcp, TlsDeliveryProtocol::Tls] {
+            for cert_only in [true, false] {
+                let config = LocalTlsDelivery {
+                    protocol: protocol.clone(),
+                    client_cert: cert_only.then(|| PathBuf::from("/missing.pem")),
+                    client_key: (!cert_only).then(|| PathBuf::from("/missing.key")),
+                    ..Default::default()
+                };
+                let mut values = BTreeMap::new();
+                assert!(matches!(
+                    resolve_tls_delivery(Some(&config), &mut values, &operator(true)),
+                    Err(CliError::ConfigError(ConfigError::Conflict(_)))
+                ));
+                assert!(values.is_empty());
+            }
+        }
+    }
+
     /// A preview delivers stolen TLS requests from the operator, which has no access to the
     /// user's files. The client certificate configured in `tls_delivery` must therefore be
     /// read by the CLI into the session's Secret, with the CR naming only the keys.
@@ -1394,7 +1488,7 @@ mod tests {
         };
         let mut secret_values = BTreeMap::new();
         let (tls_delivery, warnings) =
-            resolve_tls_delivery(Some(&config), &mut secret_values).unwrap();
+            resolve_tls_delivery(Some(&config), &mut secret_values, &operator(true)).unwrap();
 
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(
@@ -1428,7 +1522,7 @@ mod tests {
         };
         let mut secret_values = BTreeMap::new();
         let (tls_delivery, warnings) =
-            resolve_tls_delivery(Some(&config), &mut secret_values).unwrap();
+            resolve_tls_delivery(Some(&config), &mut secret_values, &operator(true)).unwrap();
 
         assert_eq!(tls_delivery, None);
         assert_eq!(warnings.len(), 2, "{warnings:?}");
@@ -1443,7 +1537,8 @@ mod tests {
             ..Default::default()
         };
         let mut secret_values = BTreeMap::new();
-        let error = resolve_tls_delivery(Some(&config), &mut secret_values).unwrap_err();
+        let error =
+            resolve_tls_delivery(Some(&config), &mut secret_values, &operator(true)).unwrap_err();
 
         assert!(
             matches!(&error, CliError::PreviewTlsClientAuthFile { path, .. } if path == Path::new("/definitely/missing.pem")),
