@@ -373,11 +373,8 @@ mod tests {
             );
         }
 
-        let registration_gate = proxy
-            .task_txs
-            .layer_initializer
-            .shutdown
-            .registration_gate();
+        let registration_gate =
+            RegistrationGateControl::new(&proxy.task_txs.layer_initializer.shutdown);
         let failover = FailoverStrategy::from_failed_proxy(
             proxy,
             ProxyRuntimeError::AgentFailed("test failure".to_owned()),

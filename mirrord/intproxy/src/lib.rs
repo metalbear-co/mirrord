@@ -221,13 +221,13 @@ pub(crate) async fn quiesce_and_collect_layers(
     let mut initializer_finished = layer_initializer.finished;
     let mut quiesced = None;
 
-    layer_initializer.shutdown.request();
+    layer_initializer.shutdown.cancellation.cancel();
     background_tasks.resume_messages(MainTaskId::LayerInitializer);
 
     while quiesced.is_none() || !initializer_finished {
         tokio::select! {
             biased;
-            result = layer_initializer.shutdown.quiesced(), if quiesced.is_none() => {
+            result = &mut layer_initializer.shutdown.quiesced, if quiesced.is_none() => {
                 quiesced = Some(result);
             }
             update = background_tasks.next(), if tasks_open && !initializer_finished => {
@@ -1022,6 +1022,8 @@ mod test {
     use tokio_util::sync::CancellationToken;
 
     #[cfg(unix)]
+    use crate::layer_initializer::RegistrationGateControl;
+    #[cfg(unix)]
     use crate::session_monitor::MonitorEvent;
     use crate::{
         IntProxy, IntProxyIntervals,
@@ -1463,11 +1465,8 @@ mod test {
             MonitorTx::disabled(),
             ChaosWatcherRx::new(chaos_rx),
         );
-        let registration_gate = proxy
-            .task_txs
-            .layer_initializer
-            .shutdown
-            .registration_gate();
+        let registration_gate =
+            RegistrationGateControl::new(&proxy.task_txs.layer_initializer.shutdown);
         registration_gate.pause();
 
         let mut child = Command::new("sleep").arg("30").spawn().unwrap();
@@ -1569,11 +1568,8 @@ mod test {
             MonitorTx::disabled(),
             ChaosWatcherRx::new(chaos_rx),
         );
-        let registration_gate = proxy
-            .task_txs
-            .layer_initializer
-            .shutdown
-            .registration_gate();
+        let registration_gate =
+            RegistrationGateControl::new(&proxy.task_txs.layer_initializer.shutdown);
         registration_gate.pause();
 
         let mut child = Command::new("sleep").arg("30").spawn().unwrap();

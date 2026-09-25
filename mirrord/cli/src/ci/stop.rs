@@ -31,7 +31,7 @@ use crate::ci::MirrordCiStore;
 /// an existence check races with pid reuse and only saves latency. The wait must stay comfortably
 /// longer than the grace an intproxy uses for its own registered processes, so a CI intproxy can
 /// finish terminating the layers it knows about before we kill it.
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+pub(super) const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
 /// Something `mirrord ci stop` has to terminate.
 ///
@@ -201,18 +201,9 @@ pub(super) struct CiStopCommandHandler {
 }
 
 impl CiStopCommandHandler {
-    /// Builds the [`MirrordCiStore`], checking if the mirrord-for-ci requirements have been met.
+    /// Loads the CI state from `store_path` for cleanup.
     #[tracing::instrument(level = Level::TRACE, err)]
-    pub(super) async fn new() -> CiResult<Self> {
-        Self::from_store_path(
-            default_store_path(),
-            SHUTDOWN_GRACE,
-            ProgressTracker::from_env("mirrord ci stop"),
-        )
-        .await
-    }
-
-    async fn from_store_path(
+    pub(super) async fn new(
         store_path: PathBuf,
         grace: Duration,
         progress: ProgressTracker,
@@ -254,7 +245,7 @@ impl CiStopCommandHandler {
 
         terminate_store(store, grace).await?;
 
-        remove_store_file(&store_path).await?;
+        MirrordCiStore::remove_file(&store_path).await?;
         progress.success(None);
 
         Ok(())
@@ -267,7 +258,7 @@ impl CiStopCommandHandler {
     }
 }
 
-fn default_store_path() -> PathBuf {
+pub(super) fn default_store_path() -> PathBuf {
     temp_dir().join(MirrordCiStore::MIRRORD_FOR_CI_TMP_FILE_PATH)
 }
 
@@ -275,18 +266,6 @@ async fn read_store_or_default(store_path: &Path) -> CiResult<MirrordCiStore> {
     match tokio::fs::read(store_path).await {
         Ok(contents) => Ok(serde_json::from_slice(&contents)?),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(MirrordCiStore::default()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-async fn remove_store_file(store_path: &Path) -> CiResult<()> {
-    if store_path == default_store_path() {
-        return MirrordCiStore::remove_file().await;
-    }
-
-    match tokio::fs::remove_file(store_path).await {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }
 }
@@ -468,13 +447,10 @@ mod tests {
             .await
             .unwrap();
 
-        let first = CiStopCommandHandler::from_store_path(
-            store_path.clone(),
-            TEST_GRACE,
-            ProgressTracker::null(),
-        )
-        .await
-        .unwrap();
+        let first =
+            CiStopCommandHandler::new(store_path.clone(), TEST_GRACE, ProgressTracker::null())
+                .await
+                .unwrap();
         assert!(first.store.is_empty().not());
         first.handle().await.unwrap();
 
@@ -484,13 +460,10 @@ mod tests {
             .unwrap();
         assert!(store_path.exists().not());
 
-        let second = CiStopCommandHandler::from_store_path(
-            store_path.clone(),
-            TEST_GRACE,
-            ProgressTracker::null(),
-        )
-        .await
-        .unwrap();
+        let second =
+            CiStopCommandHandler::new(store_path.clone(), TEST_GRACE, ProgressTracker::null())
+                .await
+                .unwrap();
         assert!(second.store.is_empty());
         second.handle().await.unwrap();
         assert!(store_path.exists().not());

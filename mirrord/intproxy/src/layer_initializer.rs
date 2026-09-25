@@ -1,11 +1,7 @@
-use std::{
-    io,
-    net::SocketAddr,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-};
+use std::{io, net::SocketAddr};
+
+#[cfg(test)]
+use std::sync::Arc;
 
 use futures::{SinkExt, TryStreamExt};
 use mirrord_intproxy_protocol::{
@@ -15,11 +11,16 @@ use mirrord_intproxy_protocol::{
 use thiserror::Error;
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::{Semaphore, oneshot},
+    sync::oneshot,
     task::{JoinError, JoinSet},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
+
+#[cfg(test)]
+mod test_support;
+#[cfg(test)]
+pub(crate) use test_support::{RegistrationGate, RegistrationGateControl};
 
 use crate::{
     ProxyMessage,
@@ -46,66 +47,10 @@ pub enum LayerInitializerError {
 /// Shutdown acknowledgement cannot share the registration channel: registrations already in
 /// flight may fill that channel precisely while the owner needs to wait for quiescence.
 pub(crate) struct LayerInitializerShutdown {
-    request: CancellationToken,
-    quiesced: oneshot::Receiver<()>,
+    pub(crate) cancellation: CancellationToken,
+    pub(crate) quiesced: oneshot::Receiver<()>,
     #[cfg(test)]
-    registration_gate: Arc<RegistrationGate>,
-}
-
-impl LayerInitializerShutdown {
-    pub(crate) fn request(&self) {
-        self.request.cancel();
-    }
-
-    pub(crate) async fn quiesced(&mut self) -> Result<(), oneshot::error::RecvError> {
-        (&mut self.quiesced).await
-    }
-
-    #[cfg(test)]
-    pub(crate) fn registration_gate(&self) -> RegistrationGateControl {
-        RegistrationGateControl {
-            gate: self.registration_gate.clone(),
-            shutdown: self.request.clone(),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct RegistrationGate {
-    paused: AtomicBool,
-    reached: Semaphore,
-    release: Semaphore,
-}
-
-#[cfg(test)]
-#[derive(Clone)]
-pub(crate) struct RegistrationGateControl {
-    gate: Arc<RegistrationGate>,
-    shutdown: CancellationToken,
-}
-
-#[cfg(test)]
-impl RegistrationGateControl {
-    pub(crate) fn pause(&self) {
-        self.gate.paused.store(true, Ordering::Relaxed);
-    }
-
-    pub(crate) async fn wait_until_reached(&self) {
-        self.gate
-            .reached
-            .acquire()
-            .await
-            .expect("registration gate unexpectedly closed")
-            .forget();
-    }
-
-    pub(crate) async fn wait_for_shutdown_request(&self) {
-        self.shutdown.cancelled().await;
-    }
-
-    pub(crate) fn release(&self) {
-        self.gate.release.add_permits(1);
-    }
+    pub(crate) registration_gate: Arc<RegistrationGate>,
 }
 
 #[derive(Debug)]
@@ -122,6 +67,7 @@ pub struct LayerInitializer {
     next_layer_id: LayerId,
     shutdown: CancellationToken,
     quiesced: Option<oneshot::Sender<()>>,
+    #[cfg(test)]
     registration_gate: Arc<RegistrationGate>,
 }
 
@@ -129,11 +75,8 @@ impl LayerInitializer {
     pub fn new(listener: TcpListener) -> (Self, LayerInitializerShutdown) {
         let shutdown = CancellationToken::new();
         let (quiesced_tx, quiesced_rx) = oneshot::channel();
-        let registration_gate = Arc::new(RegistrationGate {
-            paused: AtomicBool::new(false),
-            reached: Semaphore::new(0),
-            release: Semaphore::new(0),
-        });
+        #[cfg(test)]
+        let registration_gate = Arc::new(RegistrationGate::new());
 
         (
             Self {
@@ -141,10 +84,11 @@ impl LayerInitializer {
                 next_layer_id: LayerId(0),
                 shutdown: shutdown.clone(),
                 quiesced: Some(quiesced_tx),
+                #[cfg(test)]
                 registration_gate: registration_gate.clone(),
             },
             LayerInitializerShutdown {
-                request: shutdown,
+                cancellation: shutdown,
                 quiesced: quiesced_rx,
                 #[cfg(test)]
                 registration_gate,
@@ -163,7 +107,7 @@ impl LayerInitializer {
         layer_address: SocketAddr,
         id: LayerId,
         shutdown: CancellationToken,
-        registration_gate: Arc<RegistrationGate>,
+        #[cfg(test)] registration_gate: Arc<RegistrationGate>,
     ) -> Result<Option<InitializedLayer>, LayerInitializerError> {
         let mut decoder: AsyncDecoder<LocalMessage<LayerToProxyMessage>, _> =
             AsyncDecoder::new(stream);
@@ -192,15 +136,8 @@ impl LayerInitializer {
             .await
             .err();
 
-        if registration_gate.paused.load(Ordering::Relaxed) {
-            registration_gate.reached.add_permits(1);
-            registration_gate
-                .release
-                .acquire()
-                .await
-                .expect("registration gate unexpectedly closed")
-                .forget();
-        }
+        #[cfg(test)]
+        registration_gate.pause_after_decode().await;
 
         Ok(Some(InitializedLayer {
             layer: NewLayer {
@@ -255,12 +192,14 @@ impl BackgroundTask for LayerInitializer {
                             let id = self.next_layer_id;
                             self.next_layer_id.0 += 1;
                             let shutdown = self.shutdown.clone();
+                            #[cfg(test)]
                             let registration_gate = self.registration_gate.clone();
                             accepted.spawn(Self::handle_new_stream(
                                 stream,
                                 layer_address,
                                 id,
                                 shutdown,
+                                #[cfg(test)]
                                 registration_gate,
                             ));
                         }

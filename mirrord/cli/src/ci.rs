@@ -70,7 +70,14 @@ pub(crate) async fn ci_command(
         .await?
         .handle()
         .await?),
-        CiCommand::Stop => Ok(stop::CiStopCommandHandler::new().await?.handle().await?),
+        CiCommand::Stop => Ok(stop::CiStopCommandHandler::new(
+            stop::default_store_path(),
+            stop::SHUTDOWN_GRACE,
+            ProgressTracker::from_env("mirrord ci stop"),
+        )
+        .await?
+        .handle()
+        .await?),
         CiCommand::Container(container_args) => {
             Ok(
                 container::CiContainerCommandHandler::new(container_args, watch, user_data)
@@ -201,12 +208,12 @@ impl MirrordCiStore {
         }
     }
 
-    /// Removes the [`MirrordCiStore`] file at [`Self::MIRRORD_FOR_CI_TMP_FILE_PATH`].
-    async fn remove_file() -> CiResult<()> {
-        match tokio::fs::remove_file(temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH)).await {
-            Ok(_) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.into()),
+    /// Removes the persisted CI state at `path`, treating an absent file as already removed.
+    async fn remove_file(path: &Path) -> CiResult<()> {
+        match fs::remove_file(path).await {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
         }
     }
 
