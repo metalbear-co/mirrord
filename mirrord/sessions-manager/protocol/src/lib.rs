@@ -16,7 +16,9 @@ pub use control_plane::{
     AgentIdentity, AssignmentId, AssignmentRole, AssignmentSubscription, ControlPlaneEventName,
     IntproxyIdentity, ReplicaId, ServiceScope,
 };
-pub use data_plane::{DataPlaneAuthorization, DataPlaneEndpoint};
+pub use data_plane::{
+    DataPlaneAuthorization, DataPlaneEndpoint, OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER,
+};
 pub use error::SessionsManagerProtocolError;
 use serde::{Deserialize, Serialize};
 
