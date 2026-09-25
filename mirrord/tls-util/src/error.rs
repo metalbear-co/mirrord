@@ -36,6 +36,32 @@ impl From<JoinError> for FromPemError {
     }
 }
 
+/// Errors that can occur when parsing a certificate chain or a private key from PEM data that is
+/// already in memory. [`ParsePemError::in_file`] turns one into a [`FromPemError`] that names the
+/// file it came from.
+#[derive(Error, Debug)]
+pub enum ParsePemError {
+    #[error("failed to parse PEM data: {0}")]
+    Parse(#[source] io::Error),
+    #[error("no certificate was found")]
+    NoCert,
+    #[error("multiple private keys were found")]
+    MultipleKeys,
+    #[error("no private key was found")]
+    NoKey,
+}
+
+impl ParsePemError {
+    pub fn in_file(self, path: PathBuf) -> FromPemError {
+        match self {
+            Self::Parse(error) => FromPemError::ParseFileError { error, path },
+            Self::NoCert => FromPemError::NoCertFound(path),
+            Self::MultipleKeys => FromPemError::MultipleKeysFound(path),
+            Self::NoKey => FromPemError::NoKeyFound(path),
+        }
+    }
+}
+
 /// Errors that can occur when extracting Subject Alternate Names from a certificate.
 #[derive(Error, Debug)]
 pub enum GetSanError {
