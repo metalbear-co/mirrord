@@ -22,13 +22,15 @@ use mirrord_config::{
         env::EnvConfig,
         network::incoming::{IncomingConfig, IncomingMode, http_filter::HttpFilterConfig},
         preview::{ConfigMount, ConfigMountType, PreviewTtl},
-        split_queues::{QueueId, QueueMessageFilter, QueueMode, SplitQueuesConfig},
+        split_queues::{QueueId, QueueKind, QueueMode, QueueSplit, SplitQueuesConfig},
     },
     target::Target,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+use crate::crd::queue_filter::{MessageFilter, QueueType, message_filter_crd_schema};
 
 pub mod view;
 use uuid::Uuid;
@@ -448,6 +450,57 @@ pub struct PreviewIncomingConfig {
     /// and could break backwards compatibility if stored directly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_filter: Option<String>,
+
+    /// How the operator delivers stolen TLS traffic to the preview pod.
+    ///
+    /// `None` is the default: TLS, no verification of the pod's certificate, no client
+    /// certificate. Only ever `Some` for TLS-stolen ports; plain HTTP delivery ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_delivery: Option<PreviewTlsDelivery>,
+}
+
+/// The parts of the user's `feature.network.incoming.tls_delivery` that apply to a preview.
+///
+/// The operator, not the CLI, makes the TLS connection to the preview pod, so paths on the
+/// user's machine mean nothing here: the CLI reads the client certificate files and stores
+/// their contents in the session's secret mounts `Secret` (see [`secret_mounts_secret_name`]),
+/// and this only names the keys. `protocol`, `trust_roots` and `server_cert` have no preview
+/// counterpart: delivery is always TLS and the pod's certificate is never verified.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewTlsDelivery {
+    /// Server name (SNI) to send to the preview pod's TLS server.
+    ///
+    /// When unset, the original client's SNI is used, then the request URL's host, then
+    /// `localhost`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_name: Option<String>,
+
+    /// Client certificate the operator presents to the preview pod, for applications that
+    /// require one (mutual TLS). Without it the preview pod's TLS server rejects every stolen
+    /// request with a `BadCertificate` alert, which surfaces as a 502.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_auth: Option<PreviewTlsClientAuth>,
+}
+
+/// Keys in the session's secret mounts `Secret` holding the client certificate and its key.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewTlsClientAuth {
+    /// Key whose value is the PEM certificate chain.
+    pub cert_secret_key: String,
+
+    /// Key whose value is the PEM private key.
+    pub key_secret_key: String,
+}
+
+impl PreviewTlsClientAuth {
+    /// Secret key the CLI stores the certificate chain under. Secret mount files use `k<n>`
+    /// keys, so these never collide with them.
+    pub const CERT_SECRET_KEY: &str = "tls-client-cert";
+
+    /// Secret key the CLI stores the private key under.
+    pub const KEY_SECRET_KEY: &str = "tls-client-key";
 }
 
 impl PreviewIncomingConfig {
@@ -475,6 +528,9 @@ impl PreviewIncomingConfig {
                     .map(|http_filter| serde_json::to_string(&http_filter))
                     .transpose()
                     .expect("HttpFilterConfig serialization cannot fail"),
+                // Filled in by the CLI once the client certificate is stored in the
+                // session's Secret, see `PreviewTlsDelivery`.
+                tls_delivery: None,
             }),
         }
     }
@@ -507,7 +563,57 @@ impl PreviewIncomingConfig {
 
 #[cfg(test)]
 mod tests {
+    use mirrord_config::feature::split_queues::{
+        MessageFilterConfig, QueueKind, QueueSplit, SplitQueuesConfig,
+    };
+
     use super::*;
+
+    /// Legacy entries keep riding the per-broker maps older operators read; composed entries go
+    /// to the `queues` list only, so no entry is sent twice and an older operator never sees half
+    /// of a composed one.
+    #[test]
+    fn composed_split_queues_go_to_the_queues_list_only() {
+        let config = SplitQueuesConfig::from_splits([
+            QueueSplit {
+                message_filter: Some([("client".to_owned(), "^a$".to_owned())].into()),
+                jq_filter: Some(".x".to_owned()),
+                ..QueueSplit::new("legacy", QueueKind::Sqs)
+            },
+            QueueSplit {
+                filter: Some(MessageFilterConfig::Metadata {
+                    metadata: "^client: b$".to_owned(),
+                }),
+                jq_filter: Some(".y".to_owned()),
+                ..QueueSplit::new("composed", QueueKind::Kafka)
+            },
+        ]);
+
+        let preview = PreviewQueueSplittingConfig::from_config(&config).unwrap();
+
+        assert_eq!(preview.sqs_queue_filters.len(), 1);
+        assert_eq!(
+            preview
+                .sqs_queue_filters
+                .get("legacy")
+                .and_then(|f| f.jq_filter.as_deref()),
+            Some(".x")
+        );
+        assert!(preview.kafka_queue_filters.is_empty());
+        assert!(preview.kafka_queue_jq_filters.is_empty());
+        assert_eq!(
+            preview.queues,
+            vec![PreviewSplitQueue {
+                queue_id: "composed".to_owned(),
+                queue_type: QueueType::Kafka,
+                filter: MessageFilter::Metadata {
+                    pattern: "^client: b$".to_owned()
+                },
+                jq_filter: Some(".y".to_owned()),
+                mode: QueueMode::Steal,
+            }]
+        );
+    }
 
     #[test]
     fn steal_without_explicit_filter_defaults_to_baggage_header() {
@@ -722,78 +828,90 @@ pub struct PreviewQueueSplittingConfig {
     /// `steal`. Only non-default (`mirror`) entries are stored.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub queue_modes: BTreeMap<QueueId, QueueMode>,
+
+    /// Queues requested with the composable `filter` shape, for every broker.
+    ///
+    /// Wire invariant: an operator that predates this field reads only the per-broker
+    /// `<broker>QueueFilters` maps (and `kafkaQueueJqFilters`), which can carry nothing but the
+    /// `message_filter` map and collapse duplicate ids. So a legacy entry lives in its broker's
+    /// map and nowhere else, and a composed entry lives in this list and nowhere else. The CLI
+    /// refuses to create a session with this field against an operator that does not advertise
+    /// `QueueSplittingWithComposedFilters`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queues: Vec<PreviewSplitQueue>,
+}
+
+/// One queue of a preview session requested with the composable `filter` shape.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSplitQueue {
+    /// Queue id from the user's config, `*` for every queue of the broker.
+    pub queue_id: QueueId,
+    /// The broker, in the wire's own enum (the config's `queue_type` names).
+    pub queue_type: QueueType,
+    /// The composed filter tree.
+    #[schemars(schema_with = "message_filter_crd_schema")]
+    pub filter: MessageFilter,
+    /// A jq filter the message must also pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jq_filter: Option<String>,
+    /// Steal (default) or mirror matched messages.
+    #[serde(default, skip_serializing_if = "QueueMode::is_steal")]
+    pub mode: QueueMode,
 }
 
 impl PreviewQueueSplittingConfig {
     /// Converts from the user's split queues config. Returns `None` when no queues are configured.
+    ///
+    /// Legacy `message_filter` entries fill the per-broker maps older operators read; entries
+    /// using the composable `filter` shape go to [`Self::queues`].
     pub fn from_config(value: &SplitQueuesConfig) -> Option<Self> {
-        let mut sqs_queue_filters = BTreeMap::new();
+        let legacy = |kind| collect_queue_filters(value.of_kind(kind));
 
-        for (id, message_filter) in value.sqs() {
-            sqs_queue_filters
-                .entry(id.to_owned())
-                .or_insert_with(PreviewQueueFilter::default)
-                .message_filter = Some(message_filter.clone());
-        }
-
-        for (id, jq_filter) in value.sqs_jq_filters() {
-            sqs_queue_filters
-                .entry(id.to_owned())
-                .or_insert_with(PreviewQueueFilter::default)
-                .jq_filter = Some(jq_filter.to_owned());
-        }
-
-        let kafka_queue_filters: BTreeMap<_, _> = value
-            .kafka()
-            .map(|(id, filter)| (id.to_owned(), filter.clone()))
+        let kafka_queue_filters = value
+            .of_kind(QueueKind::Kafka)
+            .filter(|split| !split.has_composed_filter())
+            .filter_map(|split| Some((split.queue_id.clone(), split.message_filter.clone()?)))
             .collect();
-
-        let kafka_queue_jq_filters: BTreeMap<_, _> = value
-            .kafka_jq_filters()
-            .map(|(id, jq)| (id.to_owned(), jq.to_owned()))
+        let kafka_queue_jq_filters = value
+            .of_kind(QueueKind::Kafka)
+            .filter(|split| !split.has_composed_filter())
+            .filter_map(|split| Some((split.queue_id.clone(), split.jq_filter.clone()?)))
             .collect();
-
-        let rmq_queue_filters = collect_queue_filters(value.rmq(), value.rmq_jq_filters());
-
-        let gcp_pubsub_queue_filters =
-            collect_queue_filters(value.gcp_pubsub(), value.gcp_pubsub_jq_filters());
-
-        let azure_service_bus_queue_filters = collect_queue_filters(
-            value.azure_service_bus(),
-            value.azure_service_bus_jq_filters(),
-        );
-
-        let redis_pubsub_queue_filters =
-            collect_queue_filters(value.redis_pubsub(), value.redis_pubsub_jq_filters());
-
-        let temporal_queue_filters =
-            collect_queue_filters(value.temporal(), value.temporal_jq_filters());
-
-        let bullmq_queue_filters = collect_queue_filters(value.bullmq(), value.bullmq_jq_filters());
-
-        let nats_queue_filters = collect_queue_filters(value.nats(), value.nats_jq_filters());
-
-        let nats_pubsub_queue_filters =
-            collect_queue_filters(value.nats_pubsub(), value.nats_pubsub_jq_filters());
 
         let queue_modes = value
             .queue_modes()
             .map(|(id, mode)| (id.to_owned(), mode))
             .collect();
 
+        let queues = value
+            .splits()
+            .iter()
+            .filter_map(|split| {
+                Some(PreviewSplitQueue {
+                    queue_id: split.queue_id.clone(),
+                    queue_type: split.queue_type.into(),
+                    filter: split.filter.as_ref()?.into(),
+                    jq_filter: split.jq_filter.clone(),
+                    mode: split.queue_mode,
+                })
+            })
+            .collect();
+
         let config = Self {
-            sqs_queue_filters,
+            sqs_queue_filters: legacy(QueueKind::Sqs),
             kafka_queue_filters,
             kafka_queue_jq_filters,
-            rmq_queue_filters,
-            gcp_pubsub_queue_filters,
-            azure_service_bus_queue_filters,
-            redis_pubsub_queue_filters,
-            temporal_queue_filters,
-            bullmq_queue_filters,
-            nats_queue_filters,
-            nats_pubsub_queue_filters,
+            rmq_queue_filters: legacy(QueueKind::Rmq),
+            gcp_pubsub_queue_filters: legacy(QueueKind::GcpPubSub),
+            azure_service_bus_queue_filters: legacy(QueueKind::AzureServiceBus),
+            redis_pubsub_queue_filters: legacy(QueueKind::RedisPubSub),
+            temporal_queue_filters: legacy(QueueKind::Temporal),
+            bullmq_queue_filters: legacy(QueueKind::BullMq),
+            nats_queue_filters: legacy(QueueKind::Nats),
+            nats_pubsub_queue_filters: legacy(QueueKind::NatsPubSub),
             queue_modes,
+            queues,
         };
 
         if config == Self::default() {
@@ -821,26 +939,25 @@ pub struct PreviewQueueFilter {
     pub jq_filter: Option<String>,
 }
 
-/// Builds a `BTreeMap<QueueId, PreviewQueueFilter>` from header-filter and jq-filter iterators.
+/// The legacy per-broker map: every entry of the broker that is not using the composable
+/// `filter` shape, keyed by queue id. Composed entries travel in
+/// `PreviewQueueSplittingConfig::queues`.
 fn collect_queue_filters<'a>(
-    header_filters: impl Iterator<Item = (&'a str, &'a QueueMessageFilter)>,
-    jq_filters: impl Iterator<Item = (&'a str, &'a str)>,
+    splits: impl Iterator<Item = &'a QueueSplit>,
 ) -> BTreeMap<QueueId, PreviewQueueFilter> {
-    let mut map = BTreeMap::new();
-
-    for (id, message_filter) in header_filters {
-        map.entry(id.to_owned())
-            .or_insert_with(PreviewQueueFilter::default)
-            .message_filter = Some(message_filter.clone());
-    }
-
-    for (id, jq_filter) in jq_filters {
-        map.entry(id.to_owned())
-            .or_insert_with(PreviewQueueFilter::default)
-            .jq_filter = Some(jq_filter.to_owned());
-    }
-
-    map
+    splits
+        .filter(|split| !split.has_composed_filter())
+        .filter(|split| split.message_filter.is_some() || split.jq_filter.is_some())
+        .map(|split| {
+            (
+                split.queue_id.clone(),
+                PreviewQueueFilter {
+                    message_filter: split.message_filter.clone(),
+                    jq_filter: split.jq_filter.clone(),
+                },
+            )
+        })
+        .collect()
 }
 
 /// Database branching configuration for preview environments.
@@ -889,6 +1006,10 @@ pub struct PreviewDbBranchingConfig {
     /// S3 branch bucket names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub s3_branch_names: Vec<String>,
+
+    /// turbopuffer branch namespace names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turbopuffer_branch_names: Vec<String>,
 }
 
 impl PreviewDbBranchingConfig {
@@ -913,6 +1034,7 @@ impl PreviewDbBranchingConfig {
             clickhouse_branch_names,
             cockroachdb_branch_names,
             s3_branch_names,
+            turbopuffer_branch_names,
         } = self;
 
         [
@@ -927,6 +1049,7 @@ impl PreviewDbBranchingConfig {
             clickhouse_branch_names.iter(),
             cockroachdb_branch_names.iter(),
             s3_branch_names.iter(),
+            turbopuffer_branch_names.iter(),
         ]
         .into_iter()
         .flatten()
@@ -951,6 +1074,7 @@ impl PreviewDbBranchingConfig {
                 clickhouse_branch_names: branch_db_names.clickhouse,
                 cockroachdb_branch_names: branch_db_names.cockroachdb,
                 s3_branch_names: branch_db_names.s3,
+                turbopuffer_branch_names: branch_db_names.turbopuffer,
             })
         }
     }

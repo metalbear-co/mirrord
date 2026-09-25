@@ -712,6 +712,20 @@ pub(crate) enum CliError {
     ))]
     PreviewSecretMountFailed(String),
 
+    #[error(
+        "Failed to read the TLS client certificate file `{path}` for preview delivery: {error}"
+    )]
+    #[diagnostic(help(
+        "`feature.network.incoming.tls_delivery.client_cert` and `client_key` must be readable PEM \
+        files on this machine: the CLI stores their contents in the preview session's Secret so \
+        the operator can present them to the preview pod.{GENERAL_HELP}"
+    ))]
+    PreviewTlsClientAuthFile {
+        path: PathBuf,
+        #[source]
+        error: io::Error,
+    },
+
     #[error("Preview session failed: {message}{}", format_preview_logs(logs))]
     #[diagnostic(help(
         "The operator reported a failure while setting up the preview environment. \

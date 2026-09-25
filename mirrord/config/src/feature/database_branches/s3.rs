@@ -94,49 +94,15 @@ impl S3BranchConfig {
                     is required for s3 branches"
                 ))
             })?;
-        for source in &source.0 {
-            match source {
-                ParamSource::Secret {
-                    env_var_name: None, ..
-                }
-                | ParamSource::GcpSecretManager {
-                    env_var_name: None, ..
-                }
-                | ParamSource::AwsSecretsManager {
-                    env_var_name: None, ..
-                }
-                | ParamSource::ConfigMap {
-                    env_var_name: None, ..
-                } => {
-                    return Err(ConfigError::Conflict(format!(
-                        "for s3 branches, `feature.db_branches[].source.params.{BUCKET_PARAM}` \
-                        must specify the environment variable to fill with the name of the cloned bucket"
-                    )));
-                }
-
-                ParamSource::Variable(..)
-                | ParamSource::Pattern { .. }
-                | ParamSource::Env { .. }
-                | ParamSource::Secret {
-                    env_var_name: Some(..),
-                    ..
-                }
-                | ParamSource::GcpSecretManager {
-                    env_var_name: Some(..),
-                    ..
-                }
-                | ParamSource::AwsSecretsManager {
-                    env_var_name: Some(..),
-                    ..
-                }
-                | ParamSource::ConfigMap {
-                    env_var_name: Some(..),
-                    ..
-                } => {}
-            }
+        if !source.0.iter().all(ParamSource::names_env_var) {
+            return Err(ConfigError::Conflict(format!(
+                "for s3 branches, `feature.db_branches[].source.params.{BUCKET_PARAM}` \
+                must specify the environment variable to fill with the name of the cloned bucket"
+            )));
         }
 
         let unknown = [
+            ("url", params.url.as_ref()),
             ("host", params.host.as_ref()),
             ("port", params.port.as_ref()),
             ("user", params.user.as_ref()),

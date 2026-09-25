@@ -8,6 +8,37 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.263.0](https://github.com/metalbear-co/mirrord/tree/3.263.0) - 2026-09-24
+
+
+### Added
+
+- The mirrord UI now shows how many incoming traffic deliveries each active
+  port subscription receives.
+- mirrord now warns when a database branch's image runs a different server
+  version than the source database, naming both versions.
+
+
+### Changed
+
+- Messages that say a run needs the operator, and `mirrord session list`, tell
+  AI coding agents they can install the operator themselves, pointing at
+  `https://metalbear.com/agents.md`.
+- The `guard_std_fds` experimental config is now deprecated and enabled for all
+  users by default.
+- `mirrord up` now starts `mirrord ui` in the background by default.
+
+
+### Fixed
+
+- Fixed a deadlock when a process with an active gRPC channel forks.
+- The mirrord UI now distinguishes a missing operator from lost Kubernetes
+  access, shows the Kubernetes error with re-authentication guidance, and
+  retries with refreshed credentials.
+- `mirrord up` now gracefully stops all managed services when interrupted,
+  instead of reporting user-ended sessions as failures or leaving child
+  processes running.
+
 ## [3.262.0](https://github.com/metalbear-co/mirrord/tree/3.262.0) - 2026-09-20
 
 

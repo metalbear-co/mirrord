@@ -21,7 +21,6 @@ use http::{ClientStore, ResponseMode, StreamingBody};
 use http_gateway::HttpGatewayTask;
 use hyper::{HeaderMap, Method, Uri};
 use metadata_store::MetadataStore;
-use mirrord_config::feature::network::incoming::tls_delivery::LocalTlsDelivery;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
     ListeningOn, MessageId, PortSubscription, ProxyToLayerMessage,
@@ -236,12 +235,14 @@ impl IncomingProxy {
     /// Used when registering new tasks in the internal [`BackgroundTasks`] instance.
     const CHANNEL_SIZE: usize = 512;
 
+    /// `tls_setup` is how stolen TLS traffic reaches the local application, `None` meaning plain
+    /// TCP. Built from the user's config with [`LocalTlsSetup::from_config`], or directly by the
+    /// mirrord operator for preview sessions.
     pub fn new(
         idle_local_http_connection_timeout: Duration,
-        https_delivery: LocalTlsDelivery,
+        tls_setup: Option<Arc<LocalTlsSetup>>,
         monitor_tx: MonitorTx,
     ) -> Self {
-        let tls_setup = LocalTlsSetup::from_config(https_delivery);
         Self {
             subscriptions: Default::default(),
             metadata_store: Default::default(),
