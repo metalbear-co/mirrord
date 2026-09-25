@@ -1,1 +1,1 @@
-The agent will now correctly resolve chained symlinks and symlinks in paths.
+The agent now correctly resolves chained symlinks and symlinks in paths.
