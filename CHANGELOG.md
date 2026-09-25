@@ -8,6 +8,58 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.264.0](https://github.com/metalbear-co/mirrord/tree/3.264.0) - 2026-09-25
+
+
+### Added
+
+- Added `tls_delivery.client_cert` and `client_key` so stolen TLS traffic
+  reaches local and preview apps that require a client certificate.
+- Database branch connection parameters now accept a `url` base that the other
+  parameters override.
+- Queue splitting filters can now be composed with `any_of` / `all_of` and
+  match any message attribute via `metadata` regexes, aligned with the HTTP
+  filter shape.
+
+
+### Fixed
+
+- Fixed debugging Node apps from VS Code hanging when the app uses a fixed
+  inspector port.
+- Reject unsupported preview TLS delivery and incomplete client credentials
+  before replacing an existing preview.
+
+## [3.263.0](https://github.com/metalbear-co/mirrord/tree/3.263.0) - 2026-09-24
+
+
+### Added
+
+- The mirrord UI now shows how many incoming traffic deliveries each active
+  port subscription receives.
+- mirrord now warns when a database branch's image runs a different server
+  version than the source database, naming both versions.
+
+
+### Changed
+
+- Messages that say a run needs the operator, and `mirrord session list`, tell
+  AI coding agents they can install the operator themselves, pointing at
+  `https://metalbear.com/agents.md`.
+- The `guard_std_fds` experimental config is now deprecated and enabled for all
+  users by default.
+- `mirrord up` now starts `mirrord ui` in the background by default.
+
+
+### Fixed
+
+- Fixed a deadlock when a process with an active gRPC channel forks.
+- The mirrord UI now distinguishes a missing operator from lost Kubernetes
+  access, shows the Kubernetes error with re-authentication guidance, and
+  retries with refreshed credentials.
+- `mirrord up` now gracefully stops all managed services when interrupted,
+  instead of reporting user-ended sessions as failures or leaving child
+  processes running.
+
 ## [3.262.0](https://github.com/metalbear-co/mirrord/tree/3.262.0) - 2026-09-20
 
 

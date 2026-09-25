@@ -26,7 +26,7 @@ use mirrord_protocol_io::{Client, TxHandle};
 use ping_pong::{PingPong, PingPongMessage};
 use proxies::{
     files::{FilesProxy, FilesProxyMessage},
-    incoming::{IncomingProxy, IncomingProxyMessage},
+    incoming::{IncomingProxy, IncomingProxyMessage, tls::LocalTlsSetup},
     outgoing::{OutgoingProxy, OutgoingProxyMessage},
     simple::{SimpleProxy, SimpleProxyMessage},
 };
@@ -328,7 +328,7 @@ impl IntProxy {
         let incoming = background_tasks.register(
             IncomingProxy::new(
                 Duration::from_millis(experimental.idle_local_http_connection_timeout),
-                https_delivery,
+                LocalTlsSetup::from_config(https_delivery),
                 monitor_tx.clone(),
             ),
             MainTaskId::IncomingProxy,

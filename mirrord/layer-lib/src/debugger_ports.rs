@@ -104,19 +104,16 @@ pub enum DebuggerType {
     /// com.example.demo.DemoApplication
     JavaAgent,
     /// Used in node applications, the flags `--inspect`, `--inspect-brk` and `--inspect-wait`
-    /// invoke the inspector. Invoking them as command line arguments is deprecated, but they are
-    /// set into the NODE_OPTIONS env var as, for example, `--inspect=9230`
+    /// invoke the inspector (`--inspect-port` only sets the port). They're taken from all of:
     ///
-    /// the NODE_OPTIONS env var looks like this:
-    /// "NODE_OPTIONS": "--require=/Path/to/thing --inspect-publish-uid=http
-    /// --max-old-space-size=9216 --enable-source-maps --inspect=9994"
+    /// 1. The NODE_OPTIONS env var: "--require=/Path/to/thing --inspect-publish-uid=http
+    ///    --max-old-space-size=9216 --enable-source-maps --inspect=9994"
     ///
-    /// Alternatively, the process may be string on a different port with the NODE_INSPECTOR_INFO
-    /// env var set, with the port in the "inspectorURL" address
+    /// 2. The command line when `argv[0]` is node: `/path/to/node -r /path/to/register
+    ///    --inspect=localhost:9229 dist/main.js`
     ///
-    /// the NODE_INSPECTOR_INFO env var looks like this:
-    /// "NODE_INSPECTOR_INFO" : {"ipcAddress":"/Path/to/thing","pid":"75321",...
-    /// "inspectorURL":"ws://127.0.0.1:9229/8decd19b-8ea8-45f4-bf72-095ddbdad103"}
+    /// 3. The NODE_INSPECTOR_INFO env var: {"ipcAddress":"/Path/to/thing","pid":"75321",...
+    ///    "inspectorURL":"ws://127.0.0.1:9229/8decd19b-8ea8-45f4-bf72-095ddbdad103"}
     NodeInspector,
 }
 
@@ -260,27 +257,32 @@ impl DebuggerType {
                 .collect::<Vec<_>>()
             }
             Self::NodeInspector => {
-                match get_env("NODE_OPTIONS") { Some(value) => {
-                    // matching specific flags so we avoid matching on, for example,
-                    // `--inspect-publish-uid=http`
-                    value.split_ascii_whitespace()
-                    .filter_map(|flag| match flag.split_once('=') {
-                        Some(("--inspect" | "--inspect-brk" | "--inspect-wait", port)) => port.parse::<u16>().ok(),
-                        None if ["--inspect", "--inspect-brk", "--inspect-wait"].contains(&flag) => Some(NODE_INSPECTOR_DEFAULT_PORT),
-                        _ => None,
-                    })
+                let options = get_env("NODE_OPTIONS").unwrap_or_default();
+
+                // Flags passed directly to node, e.g. `node --inspect=localhost:9229 main.js`.
+                let args: &[String] = match args.split_first() {
+                    Some((arg0, rest)) if is_node_executable(arg0) => rest,
+                    _ => &[],
+                };
+
+                // NODE_OPTIONS goes first because node reads it before the command line. The
+                // order matters: when the port is set more than once, the last one wins.
+                let from_flags = node_inspector_port(
+                    options
+                        .split_ascii_whitespace()
+                        .chain(args.iter().map(String::as_str)),
+                );
+
+                // Set by VS Code's js-debug for its watchdog process, which connects to the
+                // inspector of the process being debugged.
+                let from_info = get_env("NODE_INSPECTOR_INFO")
+                    .and_then(|value| node_inspector_info_port(&value));
+
+                from_flags
+                    .into_iter()
+                    .chain(from_info)
                     .map(|port| SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port))
                     .collect::<Vec<_>>()
-                } _ => { match get_env("NODE_INSPECTOR_INFO") { Some(value) => {
-                    value.split(',').filter_map(|var| match var.split_once(':')? {
-                        ("inspectorURL", url) => url.parse::<Uri>().ok()?.port_u16(),
-                        _ => None,
-                    })
-                    .map(|port| SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port))
-                    .collect::<Vec<_>>()
-                } _ => {
-                    vec![]
-                }}}}
             }
         }.iter().filter_map(|addr| match addr.ip() {
             IpAddr::V4(Ipv4Addr::LOCALHOST) | IpAddr::V6(Ipv6Addr::LOCALHOST) => Some(addr.port()),
@@ -300,6 +302,75 @@ impl DebuggerType {
         };
         (ports, next_type)
     }
+}
+
+fn is_node_executable(arg0: &str) -> bool {
+    let file_name = arg0.rsplit(['/', '\\']).next().unwrap_or(arg0);
+    let stem = file_name
+        .rsplit_once('.')
+        .map_or(file_name, |(stem, _)| stem);
+
+    stem.eq_ignore_ascii_case("node")
+}
+
+/// Port of the node inspector enabled by the given node flags, if any.
+///
+/// Only when one of `INSPECT_FLAGS` is found, inspector is enabled. Setting `--inspect-port` alone
+/// takes no effect.
+///
+/// If inspect flag value does not contain port number, we use default node inspector port
+/// unless the port is set separately by `--inspect-port`.
+///
+/// If port is set more then once in `flags`, the last one is taken.
+fn node_inspector_port<'a>(flags: impl IntoIterator<Item = &'a str>) -> Option<u16> {
+    const INSPECT_FLAGS: [&str; 3] = ["--inspect", "--inspect-brk", "--inspect-wait"];
+
+    let mut enabled = false;
+    let mut port = NODE_INSPECTOR_DEFAULT_PORT;
+
+    let mut flags = flags.into_iter();
+    while let Some(flag) = flags.next() {
+        let (name, address) = match flag.split_once('=') {
+            Some((name, address)) => (name, Some(address)),
+            // `--inspect-port` can take the next argument as its value
+            None if flag == "--inspect-port" => (flag, flags.next()),
+            None => (flag, None),
+        };
+
+        if INSPECT_FLAGS.contains(&name) {
+            enabled = true;
+        } else if name != "--inspect-port" {
+            continue;
+        }
+
+        if let Some(address_port) = address.and_then(node_inspect_address_port) {
+            port = address_port;
+        }
+    }
+
+    (enabled && port != 0).then_some(port)
+}
+
+/// Port of a node inspector flag's `[host:]port` value, following node's `SplitHostPort`:
+/// `9229`, `localhost:9229` and `[::1]:9229` give their port, and a value with only a host,
+/// e.g. `localhost` or `[::1]`, gives the default port.
+fn node_inspect_address_port(address: &str) -> Option<u16> {
+    match address.rsplit_once(':') {
+        Some((_, port)) if !address.ends_with(']') => port.parse().ok(),
+        _ if address.bytes().all(|b| b.is_ascii_digit()) => address.parse().ok(),
+        _ => Some(NODE_INSPECTOR_DEFAULT_PORT),
+    }
+}
+
+/// Port of the `inspectorURL` in the JSON value of the `NODE_INSPECTOR_INFO` env var.
+fn node_inspector_info_port(info: &str) -> Option<u16> {
+    serde_json::from_str::<serde_json::Value>(info)
+        .ok()?
+        .get("inspectorURL")?
+        .as_str()?
+        .parse::<Uri>()
+        .ok()?
+        .port_u16()
 }
 
 /// Whether `arg0` (a process's `argv[0]`) is the Java launcher.
@@ -727,6 +798,17 @@ mod test {
         assert_eq!(is_java_launcher(arg0), expected);
     }
 
+    #[rstest]
+    #[case("node", true)]
+    #[case("NODE.EXE", true)]
+    #[case("/usr/local/bin/node", true)]
+    #[case(r"C:\Program Files\nodejs\node.exe", true)]
+    #[case("nodemon", false)]
+    #[case(r"C:\tools\nodemon.exe", false)]
+    fn node_executable_detection(#[case] arg0: &str, #[case] expected: bool) {
+        assert_eq!(is_node_executable(arg0), expected);
+    }
+
     // Windows: pitm spawns `java.exe`; the old `ends_with("java")` check missed it.
     #[test]
     fn detect_javaagent_port_windows_java_exe() {
@@ -822,7 +904,8 @@ mod test {
     #[rstest]
     #[case(("NODE_OPTIONS", Some("--require=/path --inspect-publish-uid=http --inspect=9994")), vec![9994])]
     #[case(("NODE_OPTIONS", Some("--require=/path --inspect-publish-uid=http --inspect")), vec![9229])]
-    #[case(("NODE_OPTIONS", Some("--require=/path --inspect-publish-uid=http --inspect=9994 --inspect-brk=9001")), vec![9994, 9001])]
+    #[case(("NODE_OPTIONS", Some("--require=/path --inspect-publish-uid=http --inspect=9994 --inspect-brk=9001")), vec![9001])]
+    #[case(("NODE_OPTIONS", Some("--require=/path --inspect-port=3000")), vec![])]
     fn detect_nodeinspector_port(#[case] env: (&str, Option<&str>), #[case] ports: Vec<u16>) {
         let debugger = DebuggerType::NodeInspector;
         let command = "/Path/to/node /Path/to/node/v20.17.0/bin/npx next dev";
@@ -845,6 +928,77 @@ mod test {
                 .0,
             ports
         )
+    }
+
+    #[rstest]
+    #[case("/usr/local/bin/node -r /path/to/register --inspect=localhost:9229 dist/main.js", vec![9229])]
+    #[case("/usr/local/bin/node --inspect-brk=[::1]:9230 main.js", vec![9230])]
+    #[case("/usr/local/bin/node --inspect main.js", vec![9229])]
+    #[case("/usr/local/bin/node --inspect=0 main.js", vec![])]
+    #[case("/usr/local/bin/node --inspect-port=3000 main.js", vec![])]
+    #[case("/usr/local/bin/node --inspect --inspect-port=9230 main.js", vec![9230])]
+    #[case("/usr/local/bin/node --inspect-port=localhost:9230 --inspect-brk main.js", vec![9230])]
+    #[case("/usr/local/bin/node --inspect --inspect-port=0 main.js", vec![])]
+    #[case("/usr/local/bin/node --inspect=9229 --inspect-port=9230 main.js", vec![9230])]
+    #[case("/usr/local/bin/node --inspect-port=9230 --inspect=9229 main.js", vec![9229])]
+    #[case("/usr/local/bin/node --inspect --inspect-port 9230 main.js", vec![9230])]
+    #[case("/usr/local/bin/node --inspect=localhost main.js", vec![9229])]
+    #[case("/usr/local/bin/node --inspect-port=9230 --inspect=localhost main.js", vec![9229])]
+    #[case("/usr/local/bin/node --inspect-port=9230 --inspect=[::1] main.js", vec![9229])]
+    #[case("/usr/local/bin/node --inspect-publish-uid=http main.js", vec![])]
+    #[case("/usr/local/bin/myapp --inspect=9230", vec![])]
+    fn detect_nodeinspector_port_from_args(#[case] command: &str, #[case] ports: Vec<u16>) {
+        let args = command
+            .split_ascii_whitespace()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            DebuggerType::NodeInspector.get_ports(&args, |_| None).0,
+            ports
+        );
+    }
+
+    #[rstest]
+    #[case("--inspect", vec![9230])]
+    #[case("--inspect=9229", vec![9230])]
+    fn detect_nodeinspector_port_from_options_and_args(
+        #[case] options: &str,
+        #[case] ports: Vec<u16>,
+    ) {
+        let args = ["/usr/local/bin/node", "--inspect-port=9230", "main.js"].map(str::to_owned);
+
+        assert_eq!(
+            DebuggerType::NodeInspector
+                .get_ports(&args, |name| {
+                    (name == "NODE_OPTIONS").then(|| options.to_owned())
+                })
+                .0,
+            ports
+        );
+    }
+
+    #[rstest]
+    #[case(
+        r#"{"ipcAddress":"/tmp/node-cdp.sock","pid":"75321","scriptName":"/path/to/main.js","inspectorURL":"ws://127.0.0.1:9229/8decd19b-8ea8-45f4-bf72-095ddbdad103","waitForDebugger":true}"#,
+        vec![9229]
+    )]
+    #[case(r#"{"ipcAddress":"/tmp/node-cdp.sock","pid":"75321"}"#, vec![])]
+    #[case("not json", vec![])]
+    fn detect_nodeinspector_port_from_inspector_info(#[case] info: &str, #[case] ports: Vec<u16>) {
+        let args = [
+            "/usr/local/bin/node".to_owned(),
+            "/path/to/watchdog.js".to_owned(),
+        ];
+
+        assert_eq!(
+            DebuggerType::NodeInspector
+                .get_ports(&args, |name| {
+                    (name == "NODE_INSPECTOR_INFO").then(|| info.to_owned())
+                })
+                .0,
+            ports
+        );
     }
 
     #[test]

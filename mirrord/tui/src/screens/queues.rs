@@ -856,8 +856,21 @@ fn details_lines(split: &QueueSplit) -> Vec<Line<'static>> {
     for filter in &spec.filters {
         lines.push(entry(&filter.id, &filter.queue_type));
 
-        for (attribute, pattern) in &filter.message_filter {
-            lines.push(field(4, attribute, pattern.clone(), Style::default()));
+        // A legacy map shows one attribute per line; a composed tree shows as one expression.
+        if let Some(message_filter) = filter.message_filter() {
+            match message_filter.as_attribute_map() {
+                Some(attributes) => {
+                    for (attribute, pattern) in attributes {
+                        lines.push(field(4, &attribute, pattern, Style::default()));
+                    }
+                }
+                None => lines.push(field(
+                    4,
+                    "filter",
+                    message_filter.to_string(),
+                    Style::default(),
+                )),
+            }
         }
         if let Some(jq_filter) = &filter.jq_filter {
             lines.push(field(4, "jq", jq_filter.clone(), Style::default()));

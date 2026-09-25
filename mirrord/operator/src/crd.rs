@@ -34,6 +34,7 @@ pub mod kube_target;
 pub mod label_selector;
 pub mod preview;
 pub mod profile;
+pub mod queue_filter;
 pub mod queue_split;
 pub mod rabbitmq;
 
@@ -660,6 +661,9 @@ pub enum NewOperatorFeature {
 
     PreviewEnv,
 
+    /// Prevents older operators from silently ignoring preview TLS client identity and SNI.
+    PreviewTlsDelivery,
+
     /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
     /// (`postgresOptions`, `mysqlOptions`, `mongodbOptions`) instead of the old separate
     /// `PgBranchDatabase`, `MysqlBranchDatabase`, `MongodbBranchDatabase` CRDs.
@@ -712,6 +716,13 @@ pub enum NewOperatorFeature {
     /// so the CLI can fail fast instead of creating a CRD an unsupporting operator would
     /// silently delete.
     S3Branching,
+
+    /// This operator supports branching turbopuffer namespaces via the `turbopufferOptions`
+    /// field on the unified `BranchDatabase` CRD. The branch namespace is a copy-on-write clone
+    /// made through turbopuffer's API, with no pod in the cluster. Advertised only when the
+    /// operator's `turbopufferBranching` flag is enabled, so the CLI can fail fast instead of
+    /// creating a CRD an unsupporting operator would silently delete.
+    TurbopufferBranching,
 
     /// This operator honors the `image` field on the unified `BranchDatabase` CRD, letting the
     /// user supply a full image reference for a built-in engine's branch pod. Gated so the CLI
@@ -777,6 +788,12 @@ pub enum NewOperatorFeature {
     /// never reconciles it, which the CLI would only see as a creation timeout.
     DbBranchConfigMapSource,
 
+    /// This operator layers a branch's connection params over a `url` param. Gated so the CLI
+    /// fails fast on older operators: the branch CRD schema lets the param through, and an
+    /// older operator ignores it and provisions from the remaining params, which points the
+    /// branch at the wrong source rather than failing.
+    DbBranchUrlParam,
+
     /// This operator understands `flavor: liquibase` in a branch's `migrations`. Gated so the
     /// CLI fails fast: an older operator's CRD schema constrains the flavor to the values it
     /// knows, so the API server rejects the branch with a schema error instead of anything the
@@ -792,6 +809,13 @@ pub enum NewOperatorFeature {
     /// `include_session_key` and `include_unmatched`, and carries the ids pairing an HTTP request
     /// with its response.
     SubscribeEventOptions,
+
+    /// This operator accepts the composable `filter` shape in `feature.split_queues` (`metadata`
+    /// regexes combined with `any_of` / `all_of`), sent in the `queue_filters` connect param and
+    /// the preview session's `queues` list. Gated so the CLI fails fast: an older operator
+    /// ignores the param it does not know, and a copy target carrying the new field fails to
+    /// deserialize there.
+    QueueSplittingWithComposedFilters,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -821,8 +845,10 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::PgBranching => "PostgreSQL branching",
             NewOperatorFeature::CockroachdbBranching => "CockroachDB branching",
             NewOperatorFeature::S3Branching => "S3 branching",
+            NewOperatorFeature::TurbopufferBranching => "turbopuffer branching",
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
             NewOperatorFeature::PreviewEnv => "preview environments",
+            NewOperatorFeature::PreviewTlsDelivery => "TLS delivery configuration for previews",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
             NewOperatorFeature::BypassCiCertificateVerification => {
                 "BypassCiCertificateVerification"
@@ -865,9 +891,13 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
+            NewOperatorFeature::DbBranchUrlParam => "DB branching url connection param",
             NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
             NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
+            NewOperatorFeature::QueueSplittingWithComposedFilters => {
+                "queue splitting with composable message filters"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
