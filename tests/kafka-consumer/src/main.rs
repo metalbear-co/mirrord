@@ -5,6 +5,7 @@ use figment::{Figment, providers::Env};
 use rdkafka::{
     ClientConfig,
     consumer::{Consumer, StreamConsumer},
+    error::KafkaError,
     message::{Headers, Message},
 };
 use serde::{Deserialize, Serialize};
@@ -129,7 +130,20 @@ async fn main() -> anyhow::Result<()> {
     let mut stdout = std::io::stdout();
 
     loop {
-        let msg = consumer.recv().await.context("failed to receive message")?;
+        let msg = match consumer.recv().await {
+            Ok(msg) => msg,
+            // A dropped broker connection (e.g. the mirrord session reconnecting after an
+            // operator restart) surfaces here as a non-fatal error while librdkafka
+            // reconnects on its own. Real consumers log it and keep polling, so do the same;
+            // only `MessageConsumptionFatal` and other error kinds end the run.
+            Err(KafkaError::MessageConsumption(code)) => {
+                eprintln!(
+                    "transient consumption error, waiting for librdkafka to reconnect: {code}"
+                );
+                continue;
+            }
+            Err(error) => return Err(error).context("failed to receive message"),
+        };
 
         serde_json::to_writer(
             &mut stdout,
