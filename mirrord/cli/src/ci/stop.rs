@@ -23,10 +23,10 @@ use crate::ci::MirrordCiStore;
 /// `SIGKILL`.
 ///
 /// Waited once for the whole batch: cleanup never probes whether a target is still alive, since
-/// an existence check races with pid reuse and only saves latency. The wait must stay comfortably
-/// longer than the grace an intproxy uses for its own registered processes, so a CI intproxy can
-/// finish terminating the layers it knows about before we kill it.
-pub(super) const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+/// an existence check races with pid reuse and only saves latency. Keeping this brief limits the
+/// time for a numeric pid to be reused. The extra second beyond the intproxy's grace gives it
+/// time to quiesce registrations and finish terminating injected processes before we kill it.
+pub(super) const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
 /// Something `mirrord ci stop` has to terminate.
 ///
@@ -74,9 +74,9 @@ impl TerminationTarget {
 /// Terminates every target, giving them `grace` to exit on their own first.
 ///
 /// `SIGTERM` goes to all targets, then we wait `grace` once for the whole batch, then `SIGKILL`
-/// goes to the same targets unconditionally. Signaling a target that already exited is harmless,
-/// so nothing is checked in between: a single flat wait is simpler than per-target liveness polling
-/// and ends in the same state.
+/// goes to the same numeric targets unconditionally. Liveness polling cannot reliably distinguish
+/// an exited target from a reused pid, so the brief grace limits that risk without claiming to
+/// eliminate it.
 ///
 /// Errors are collected instead of returned, so that one target we are not allowed to signal
 /// doesn't leave the remaining ones running.

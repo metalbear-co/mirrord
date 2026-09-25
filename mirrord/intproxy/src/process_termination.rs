@@ -36,7 +36,7 @@ use winapi::{
 /// them a chance to run their own shutdown before we force the issue.
 /// Shortened under test so tests can exercise the real termination path without a slow wait.
 #[cfg(all(unix, not(test)))]
-const TERMINATION_GRACE: Duration = Duration::from_secs(2);
+const TERMINATION_GRACE: Duration = Duration::from_secs(1);
 #[cfg(all(unix, test))]
 const TERMINATION_GRACE: Duration = Duration::from_millis(50);
 

@@ -147,6 +147,9 @@ pub(crate) struct MirrordCiManagedContainer {
 ///
 /// - Note that it does **not** store the [`CiApiKey`], this one lives only as an env var.
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
+// CI state survives across CLI invocations; missing fields must not prevent cleanup of known
+// targets.
+#[serde(default)]
 struct MirrordCiStore {
     /// pid of the intproxy, stored when the intproxy starts.
     intproxy_pids: HashSet<u32>,
@@ -601,6 +604,14 @@ mod tests {
     };
 
     use super::{MirrordCiStore, spawn_background_user_command};
+
+    #[test]
+    fn ci_store_defaults_missing_fields() {
+        let store: MirrordCiStore = serde_json::from_str(r#"{"intproxy_pids":[1234]}"#).unwrap();
+
+        assert_eq!(store.intproxy_pids, HashSet::from([1234]));
+        assert!(store.user_process_groups.is_empty());
+    }
 
     #[tokio::test]
     async fn ci_process_group_background_spawn_records_leader_and_owns_descendant() {
