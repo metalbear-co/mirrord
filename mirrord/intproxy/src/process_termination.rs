@@ -67,18 +67,6 @@ async fn terminate_processes_with(pids: HashSet<i32>, mut signal_process: impl F
     }
 }
 
-/// Runs the termination sequence against a recorder instead of operating-system processes.
-///
-/// Higher-level shutdown tests use this seam to verify that target sets are neither omitted nor
-/// signalled twice without exposing arbitrary test pids to the host signal API.
-#[cfg(all(unix, test))]
-pub(crate) async fn terminate_processes_with_signal_recorder(
-    pids: HashSet<i32>,
-    recorder: &mut Vec<(i32, Signal)>,
-) {
-    terminate_processes_with(pids, |pid, signal| recorder.push((pid, signal))).await;
-}
-
 #[cfg(unix)]
 fn send_signal(pid: i32, signal: Signal) {
     match kill(Pid::from_raw(pid), signal) {
@@ -134,7 +122,16 @@ mod tests {
 
     use super::terminate_processes;
     #[cfg(unix)]
-    use super::terminate_processes_with_signal_recorder;
+    use super::terminate_processes_with;
+
+    /// Records the signal phases without signalling arbitrary PIDs on the host.
+    #[cfg(unix)]
+    async fn terminate_processes_with_signal_recorder(
+        pids: HashSet<i32>,
+        recorder: &mut Vec<(i32, nix::sys::signal::Signal)>,
+    ) {
+        terminate_processes_with(pids, |pid, signal| recorder.push((pid, signal))).await;
+    }
 
     /// Spawns a shell script that announces readiness on stdout, and returns only once that
     /// announcement arrived.
