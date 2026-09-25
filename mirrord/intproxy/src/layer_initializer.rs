@@ -1,8 +1,5 @@
 use std::{io, net::SocketAddr};
 
-#[cfg(test)]
-use std::sync::Arc;
-
 use futures::{SinkExt, TryStreamExt};
 use mirrord_intproxy_protocol::{
     LayerId, LayerToProxyMessage, LocalMessage, NewSessionRequest, ProxyToLayerMessage,
@@ -16,9 +13,6 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
-
-#[cfg(test)]
-pub(crate) use tests::{RegistrationGate, RegistrationGateControl};
 
 use crate::{
     ProxyMessage,
@@ -47,8 +41,6 @@ pub enum LayerInitializerError {
 pub(crate) struct LayerInitializerShutdown {
     pub(crate) cancellation: CancellationToken,
     pub(crate) quiesced: oneshot::Receiver<()>,
-    #[cfg(test)]
-    pub(crate) registration_gate: Arc<RegistrationGate>,
 }
 
 #[derive(Debug)]
@@ -65,31 +57,22 @@ pub struct LayerInitializer {
     next_layer_id: LayerId,
     shutdown: CancellationToken,
     quiesced: Option<oneshot::Sender<()>>,
-    #[cfg(test)]
-    registration_gate: Arc<RegistrationGate>,
 }
 
 impl LayerInitializer {
     pub fn new(listener: TcpListener) -> (Self, LayerInitializerShutdown) {
         let shutdown = CancellationToken::new();
         let (quiesced_tx, quiesced_rx) = oneshot::channel();
-        #[cfg(test)]
-        let registration_gate = Arc::new(RegistrationGate::new());
-
         (
             Self {
                 listener,
                 next_layer_id: LayerId(0),
                 shutdown: shutdown.clone(),
                 quiesced: Some(quiesced_tx),
-                #[cfg(test)]
-                registration_gate: registration_gate.clone(),
             },
             LayerInitializerShutdown {
                 cancellation: shutdown,
                 quiesced: quiesced_rx,
-                #[cfg(test)]
-                registration_gate,
             },
         )
     }
@@ -99,13 +82,12 @@ impl LayerInitializer {
     /// Cancellation may discard a connection only while its registration is still undecoded.
     /// Once the process information is known, the result retains the socket and PID even when
     /// sending the handshake response fails, so shutdown can still account for that process.
-    #[tracing::instrument(level = Level::INFO, skip(stream, shutdown, registration_gate), ret, err)]
+    #[tracing::instrument(level = Level::INFO, skip(stream, shutdown), ret, err)]
     async fn handle_new_stream(
         stream: TcpStream,
         layer_address: SocketAddr,
         id: LayerId,
         shutdown: CancellationToken,
-        #[cfg(test)] registration_gate: Arc<RegistrationGate>,
     ) -> Result<Option<InitializedLayer>, LayerInitializerError> {
         let mut decoder: AsyncDecoder<LocalMessage<LayerToProxyMessage>, _> =
             AsyncDecoder::new(stream);
@@ -133,9 +115,6 @@ impl LayerInitializer {
             })
             .await
             .err();
-
-        #[cfg(test)]
-        registration_gate.pause_after_decode().await;
 
         Ok(Some(InitializedLayer {
             layer: NewLayer {
@@ -190,15 +169,11 @@ impl BackgroundTask for LayerInitializer {
                             let id = self.next_layer_id;
                             self.next_layer_id.0 += 1;
                             let shutdown = self.shutdown.clone();
-                            #[cfg(test)]
-                            let registration_gate = self.registration_gate.clone();
                             accepted.spawn(Self::handle_new_stream(
                                 stream,
                                 layer_address,
                                 id,
                                 shutdown,
-                                #[cfg(test)]
-                                registration_gate,
                             ));
                         }
                         Err(error) => {
@@ -246,85 +221,6 @@ impl LayerInitializer {
             Err(error) => {
                 first_error.get_or_insert(LayerInitializerError::Join(error));
             }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
-
-    use tokio::sync::Semaphore;
-    use tokio_util::sync::CancellationToken;
-
-    use super::LayerInitializerShutdown;
-
-    /// Pauses a registration after decoding its PID but before publishing it, so shutdown race
-    /// tests can verify that the initializer drains accepted registrations before quiescing.
-    #[derive(Debug)]
-    pub(crate) struct RegistrationGate {
-        paused: AtomicBool,
-        reached: Semaphore,
-        release: Semaphore,
-    }
-
-    impl RegistrationGate {
-        pub(crate) fn new() -> Self {
-            Self {
-                paused: AtomicBool::new(false),
-                reached: Semaphore::new(0),
-                release: Semaphore::new(0),
-            }
-        }
-
-        pub(crate) async fn pause_after_decode(&self) {
-            if self.paused.load(Ordering::Relaxed) {
-                self.reached.add_permits(1);
-                self.release
-                    .acquire()
-                    .await
-                    .expect("registration gate unexpectedly closed")
-                    .forget();
-            }
-        }
-    }
-
-    #[derive(Clone)]
-    pub(crate) struct RegistrationGateControl {
-        gate: Arc<RegistrationGate>,
-        cancellation: CancellationToken,
-    }
-
-    impl RegistrationGateControl {
-        pub(crate) fn new(shutdown: &LayerInitializerShutdown) -> Self {
-            Self {
-                gate: shutdown.registration_gate.clone(),
-                cancellation: shutdown.cancellation.clone(),
-            }
-        }
-
-        pub(crate) fn pause(&self) {
-            self.gate.paused.store(true, Ordering::Relaxed);
-        }
-
-        pub(crate) async fn wait_until_reached(&self) {
-            self.gate
-                .reached
-                .acquire()
-                .await
-                .expect("registration gate unexpectedly closed")
-                .forget();
-        }
-
-        pub(crate) async fn wait_for_shutdown_request(&self) {
-            self.cancellation.cancelled().await;
-        }
-
-        pub(crate) fn release(&self) {
-            self.gate.release.add_permits(1);
         }
     }
 }

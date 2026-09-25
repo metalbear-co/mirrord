@@ -326,7 +326,6 @@ mod tests {
         IntProxy, IntProxyIntervals,
         agent_conn::{AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow},
         error::ProxyRuntimeError,
-        layer_initializer::RegistrationGateControl,
         session_monitor::{MonitorTx, chaos::ChaosWatcherRx},
     };
 
@@ -335,7 +334,7 @@ mod tests {
 
     async fn make_failover(
         inherited_pids: impl IntoIterator<Item = i32>,
-    ) -> (FailoverStrategy, SocketAddr, RegistrationGateControl) {
+    ) -> (FailoverStrategy, SocketAddr) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let proxy_addr = listener.local_addr().unwrap();
         let (connection, _proxy_tx, _proxy_rx) = Connection::dummy();
@@ -373,14 +372,12 @@ mod tests {
             );
         }
 
-        let registration_gate =
-            RegistrationGateControl::new(&proxy.task_txs.layer_initializer.shutdown);
         let failover = FailoverStrategy::from_failed_proxy(
             proxy,
             ProxyRuntimeError::AgentFailed("test failure".to_owned()),
         );
 
-        (failover, proxy_addr, registration_gate)
+        (failover, proxy_addr)
     }
 
     fn record_signals(pids: &HashSet<i32>, signal: Signal, signals: &Mutex<Vec<(i32, Signal)>>) {
@@ -412,7 +409,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_terminates_registered_layer_outside_process_group_failover_pre_cancelled_once()
      {
-        let (failover, _proxy_addr, _registration_gate) = make_failover([INHERITED_PID]).await;
+        let (failover, _proxy_addr) = make_failover([INHERITED_PID]).await;
         let shutdown = CancellationToken::new();
         shutdown.cancel();
         let invocations = Arc::new(Mutex::new(Vec::new()));
@@ -451,13 +448,12 @@ mod tests {
         assert_eq!(signals.len(), 2);
     }
 
-    /// Cancellation wins over an already-ready failover timeout and retains a decoded
-    /// registration whose producer is gated until quiescing has started.
+    /// Cancellation wins over an already-ready failover timeout and drains a registration
+    /// acknowledged before failover begins.
     #[tokio::test]
     async fn shutdown_terminates_registered_layer_outside_process_group_failover_ready_timeout_registration_race()
      {
-        let (failover, proxy_addr, registration_gate) = make_failover([]).await;
-        registration_gate.pause();
+        let (failover, proxy_addr) = make_failover([]).await;
         let conn = TcpStream::connect(proxy_addr).await.unwrap();
         let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
             LocalMessage<LayerToProxyMessage>,
@@ -486,8 +482,6 @@ mod tests {
                 inner: ProxyToLayerMessage::NewSession(_),
             }
         ));
-        registration_gate.wait_until_reached().await;
-
         let shutdown = CancellationToken::new();
         shutdown.cancel();
         let invocations = Arc::new(Mutex::new(Vec::new()));
@@ -504,9 +498,6 @@ mod tests {
                     .await
             }
         });
-        registration_gate.wait_for_shutdown_request().await;
-        registration_gate.release();
-
         tokio::time::timeout(Duration::from_secs(5), failover_handle)
             .await
             .expect("ready timeout bypassed failover quiescing")
@@ -525,8 +516,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_terminates_registered_layer_outside_process_group_failover_queued_registration_once()
      {
-        let (failover, proxy_addr, registration_gate) = make_failover([INHERITED_PID]).await;
-        registration_gate.pause();
+        let (failover, proxy_addr) = make_failover([INHERITED_PID]).await;
         let shutdown = CancellationToken::new();
         let invocations = Arc::new(Mutex::new(Vec::new()));
         let signals = Arc::new(Mutex::new(Vec::new()));
@@ -594,12 +584,8 @@ mod tests {
                 inner: ProxyToLayerMessage::NewSession(_),
             }
         ));
-        registration_gate.wait_until_reached().await;
-
         shutdown.cancel();
         finish_inherited_grace.notify_one();
-        registration_gate.wait_for_shutdown_request().await;
-        registration_gate.release();
 
         tokio::time::timeout(Duration::from_secs(5), failover_handle)
             .await
