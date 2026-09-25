@@ -7,6 +7,13 @@ use url::Url;
 
 use crate::error::SessionsManagerProtocolError;
 
+/// Header carrying a [`DataPlaneAuthorization`] to the operator-hosted sessions-manager.
+///
+/// kube-apiserver authenticates the caller from `Authorization` and does not forward it to the
+/// operator's aggregated APIService, so the per-assignment credential needs a header of its own
+/// on that path. A standalone sessions-manager receives it in `Authorization`.
+pub const OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER: &str = "x-mirrord-data-plane-authorization";
+
 /// A credential whose value is exposed only at an explicit transport boundary.
 ///
 /// Serialization deliberately exposes the credential because [`crate::ConnectionAssignment`] is the

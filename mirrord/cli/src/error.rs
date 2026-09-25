@@ -447,6 +447,15 @@ pub(crate) enum CliError {
     ))]
     FeatureDisabledInOperatorError { feature: String },
 
+    #[error("mirrord operator does not serve the operator-hosted sessions-manager.")]
+    #[diagnostic(help(
+        "Serverless targets with `operator: true` connect through the sessions-manager hosted by \
+        the mirrord operator. Ask your cluster administrator to enable it with \
+        `sessionsManager.enabled=true` in the operator Helm chart, or set `operator: false` to \
+        use a standalone sessions-manager.{GENERAL_HELP}"
+    ))]
+    ServerlessSessionsManagerNotServed,
+
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorBranchCreationFailed(OperatorOperation, String),
@@ -908,6 +917,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::FeatureDisabled { feature } => Self::FeatureDisabledInOperatorError {
                 feature: feature.to_string(),
             },
+            OperatorApiError::ServerlessSessionsManagerNotServed => {
+                Self::ServerlessSessionsManagerNotServed
+            }
             OperatorApiError::CreateKubeClient(e) => {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
