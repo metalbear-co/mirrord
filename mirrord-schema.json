@@ -4069,13 +4069,30 @@
       "additionalProperties": false
     },
     "LocalTlsDelivery": {
-      "description": "Stolen TLS traffic can be delivered to the local application either as TLS or as plain TCP.\nNote that stealing TLS traffic requires mirrord Operator support.\n\nTo have the stolen TLS traffic delivered with plain TCP, use:\n\n```json\n{\n  \"protocol\": \"tcp\"\n}\n```\n\nTo have the traffic delivered with TLS, use:\n```json\n{\n  \"protocol\": \"tls\"\n}\n```\n\nBy default, the local mirrord TLS client will trust any certificate presented by the local\napplication's TLS server. To override this behavior, you can either:\n\n1. Specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file\n   directories. Each found certificate will be used as a trust anchor.\n2. Specify a path to the cartificate chain used by the server.\n\nExample with trust roots:\n```json\n{\n  \"protocol\": \"tls\",\n  \"trust_roots\": [\"/path/to/cert.pem\", \"/path/to/cert/dir\"]\n}\n```\n\nExample with certificate chain:\n```json\n{\n  \"protocol\": \"tls\",\n  \"server_cert\": \"/path/to/cert.pem\"\n}\n```\n\nTo make a TLS connection to the local application's server,\nmirrord's TLS client needs a server name. You can supply it manually like this:\n```json\n{\n  \"protocol\": \"tls\",\n  \"server_name\": \"my.test.server.name\"\n}\n```\n\nIf you don't supply the server name:\n\n1. If `server_cert` is given, and the found end-entity certificate contains a valid server name,\n   this server name will be used;\n2. Otherwise, if the original client supplied an SNI extension, the server name from that\n   extension will be used;\n3. Otherwise, if the stolen request's URL contains a valid server name, that server name will be\n   used;\n4. Otherwise, `localhost` will be used.",
+      "description": "Stolen TLS traffic can be delivered to the local application either as TLS or as plain TCP.\nNote that stealing TLS traffic requires mirrord Operator support.\n\nTo have the stolen TLS traffic delivered with plain TCP, use:\n\n```json\n{\n  \"protocol\": \"tcp\"\n}\n```\n\nTo have the traffic delivered with TLS, use:\n```json\n{\n  \"protocol\": \"tls\"\n}\n```\n\nBy default, the local mirrord TLS client will trust any certificate presented by the local\napplication's TLS server. To override this behavior, you can either:\n\n1. Specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file\n   directories. Each found certificate will be used as a trust anchor.\n2. Specify a path to the cartificate chain used by the server.\n\nExample with trust roots:\n```json\n{\n  \"protocol\": \"tls\",\n  \"trust_roots\": [\"/path/to/cert.pem\", \"/path/to/cert/dir\"]\n}\n```\n\nExample with certificate chain:\n```json\n{\n  \"protocol\": \"tls\",\n  \"server_cert\": \"/path/to/cert.pem\"\n}\n```\n\nTo make a TLS connection to the local application's server,\nmirrord's TLS client needs a server name. You can supply it manually like this:\n```json\n{\n  \"protocol\": \"tls\",\n  \"server_name\": \"my.test.server.name\"\n}\n```\n\nIf you don't supply the server name:\n\n1. If `server_cert` is given, and the found end-entity certificate contains a valid server name,\n   this server name will be used;\n2. Otherwise, if the original client supplied an SNI extension, the server name from that\n   extension will be used;\n3. Otherwise, if the stolen request's URL contains a valid server name, that server name will be\n   used;\n4. Otherwise, `localhost` will be used.\n\nIf the local application's TLS server requires a client certificate (mutual TLS), give\nmirrord's TLS client one to present:\n```json\n{\n  \"protocol\": \"tls\",\n  \"client_cert\": \"/path/to/client.cert.pem\",\n  \"client_key\": \"/path/to/client.key.pem\"\n}\n```\n\nIn preview sessions (`mirrord preview start`) the mirrord operator makes the TLS connection to\nthe preview pod, so `client_cert` and `client_key` are read locally, stored in the session's\nSecret and presented by the operator. `server_name` is used the same way. The other settings\ndo not apply to previews: the operator always delivers over TLS and does not verify the\npreview pod's certificate.",
       "type": "object",
       "properties": {
+        "client_cert": {
+          "title": "feature.network.incoming.tls_delivery.client_cert {#feature-network-incoming-tls_delivery-client_cert}",
+          "description": "Path to a PEM file containing the certificate chain mirrord presents to the local\napplication's TLS server, for applications that require a client certificate.\n\nThis file must contain at least one certificate. Must be set together with `client_key`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "client_key": {
+          "title": "feature.network.incoming.tls_delivery.client_key {#feature-network-incoming-tls_delivery-client_key}",
+          "description": "Path to a PEM file containing the private key of `client_cert`.\n\nThis file must contain exactly one private key. Must be set together with `client_cert`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "protocol": {
           "title": "feature.network.incoming.tls_delivery.protocol {#feature-network-incoming-tls_delivery-protocol}",
-          "description": "Protocol to use when delivering the TLS traffic locally.",
-          "$ref": "#/$defs/TlsDeliveryProtocol"
+          "description": "Protocol to use when delivering the TLS traffic locally. Defaults to `tls`.",
+          "$ref": "#/$defs/TlsDeliveryProtocol",
+          "default": "tls"
         },
         "server_cert": {
           "description": "Path to a PEM file containing the certificate chain used by the local application's\nTLS server.\n\nThis file must contain at least one certificate.\nIt can contain entries of other types, e.g private keys, which are ignored.",
@@ -4104,10 +4121,7 @@
           }
         }
       },
-      "additionalProperties": false,
-      "required": [
-        "protocol"
-      ]
+      "additionalProperties": false
     },
     "MagicFileConfig": {
       "description": "Sensible default behaviors that help most users. Disable individual flags only if they conflict\nwith your setup.\n\n```json\n{\n  \"feature\": {\n    \"magic\": {\n      \"aws\": true\n    }\n  }\n}\n```",
