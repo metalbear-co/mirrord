@@ -361,6 +361,24 @@ impl OperatorApi<NoClientCert> {
         })
     }
 
+    /// Builds a client for the operator-hosted sessions-manager routes, which kube-apiserver
+    /// authenticates on its own. Unlike [`Self::connect_in_existing_session`], it carries no client
+    /// certificate.
+    pub async fn serverless_sessions_manager_client(
+        layer_config: &LayerConfig,
+    ) -> OperatorApiResult<Client> {
+        let (config, _) = Self::base_client_config(layer_config).await?;
+
+        Ok(ClientBuilder::try_from(config)
+            .map_err(KubeApiError::from)
+            .map_err(OperatorApiError::CreateKubeClient)?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(retry_policy_from_config(
+                &layer_config.startup_retry,
+            )?))
+            .build())
+    }
+
     #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
     pub async fn with_ci_api_key<P, R>(
         self,
@@ -585,6 +603,19 @@ where
     /// Returns a reference to the [`Client`] used by this instance.
     pub fn client(&self) -> &Client {
         &self.client
+    }
+
+    /// Fails with [`OperatorApiError::ServerlessSessionsManagerNotServed`] unless this operator
+    /// serves the operator-hosted sessions-manager routes.
+    pub async fn check_serverless_sessions_manager_served(&self) -> OperatorApiResult<()> {
+        discovery::serverless_sessions_manager_served(&self.client)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::ServerlessSessionsManagerDiscovery,
+            })?
+            .then_some(())
+            .ok_or(OperatorApiError::ServerlessSessionsManagerNotServed)
     }
 
     /// Create a new CI api key by generating a random key pair, creating a certificate
