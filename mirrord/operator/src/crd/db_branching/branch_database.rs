@@ -10,7 +10,7 @@ use mirrord_config::feature::database_branches::{
     DynamodbBranchCopyConfig, MariadbBranchCopyConfig, MongodbBranchCopyConfig,
     MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig,
     RedisBranchCopyConfig, S3BranchCopyConfig, S3Provider as ConfigS3Provider, SingleOrVec,
-    SpannerBranchCopyConfig,
+    SpannerBranchCopyConfig, TurbopufferBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -103,6 +103,9 @@ pub struct BranchDatabaseSpec {
     /// S3-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub s3_options: Option<S3Options>,
+    /// turbopuffer-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turbopuffer_options: Option<TurbopufferOptions>,
     /// Generic (user-supplied image) branch options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generic_options: Option<GenericOptions>,
@@ -232,6 +235,8 @@ pub enum DialectConfig<'a> {
     Cockroachdb(&'a CockroachdbOptions),
     #[strum_discriminants(strum(to_string = "S3"))]
     S3(&'a S3Options),
+    #[strum_discriminants(strum(to_string = "turbopuffer"))]
+    Turbopuffer(&'a TurbopufferOptions),
     #[strum_discriminants(strum(to_string = "Generic"))]
     Generic(&'a GenericOptions),
 }
@@ -254,6 +259,7 @@ impl DatabaseDialect {
             DatabaseDialect::Clickhouse => "clickhouseOptions",
             DatabaseDialect::Cockroachdb => "cockroachdbOptions",
             DatabaseDialect::S3 => "s3Options",
+            DatabaseDialect::Turbopuffer => "turbopufferOptions",
             DatabaseDialect::Generic => "genericOptions",
         }
     }
@@ -446,6 +452,56 @@ pub enum S3Param {
 }
 
 impl ExtraParamSet for S3Param {
+    fn parse(key: &str) -> Option<Self> {
+        key.parse().ok()
+    }
+
+    fn valid_names() -> &'static [&'static str] {
+        Self::VARIANTS
+    }
+}
+
+/// turbopuffer-specific branch options.
+///
+/// The branch namespace is a copy-on-write clone made through turbopuffer's own API, so -
+/// like an S3 branch - it has no pod, and the spec's `version`/`image` stay unset. The source
+/// namespace, the API key and the endpoint all come in as `connectionSource` `extra` params
+/// (see [`TurbopufferParam`]), resolved from the target like any other connection param; once
+/// the branch exists, the operator points the namespace variable at it and leaves the rest
+/// alone.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TurbopufferOptions {
+    #[serde(default)]
+    pub copy: TurbopufferCopySpec,
+}
+
+/// The extra connection params a turbopuffer branch accepts, keyed into
+/// `ConnectionParamsSpec.extra`.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    strum_macros::Display,
+    strum_macros::EnumString,
+    strum_macros::EnumIter,
+    strum_macros::VariantNames,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum TurbopufferParam {
+    /// The source namespace, rewritten to the branch namespace on the app.
+    Namespace,
+    /// The API key the operator branches and deletes with. Read only.
+    ApiKey,
+    /// The turbopuffer region the namespace lives in. Read only.
+    Region,
+    /// The full API endpoint, for dedicated clusters. Read only.
+    BaseUrl,
+}
+
+impl ExtraParamSet for TurbopufferParam {
     fn parse(key: &str) -> Option<Self> {
         key.parse().ok()
     }
@@ -701,6 +757,9 @@ impl BranchDatabaseSpec {
                 .as_ref()
                 .map(DialectConfig::Cockroachdb),
             self.s3_options.as_ref().map(DialectConfig::S3),
+            self.turbopuffer_options
+                .as_ref()
+                .map(DialectConfig::Turbopuffer),
             self.generic_options.as_ref().map(DialectConfig::Generic),
         ]
         .into_iter()
@@ -765,6 +824,9 @@ impl BranchDatabaseSpec {
             }
             DialectConfig::Postgres(_) => check::<PgParam>(DatabaseDialect::Postgres, extra),
             DialectConfig::S3(_) => check::<S3Param>(DatabaseDialect::S3, extra),
+            DialectConfig::Turbopuffer(_) => {
+                check::<TurbopufferParam>(DatabaseDialect::Turbopuffer, extra)
+            }
             other => match extra.keys().next() {
                 Some(key) => Err(DialectValidationError::UnknownConnectionParam {
                     dialect: other.discriminant(),
@@ -927,6 +989,31 @@ impl Default for S3CopySpec {
         Self {
             mode: S3BranchCopyMode::Empty,
             objects: Default::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TurbopufferCopySpec {
+    pub mode: TurbopufferBranchCopyMode,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
+#[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "lowercase")]
+pub enum TurbopufferBranchCopyMode {
+    Empty,
+    All,
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
+}
+
+impl Default for TurbopufferCopySpec {
+    fn default() -> Self {
+        Self {
+            mode: TurbopufferBranchCopyMode::Empty,
         }
     }
 }
@@ -1161,6 +1248,19 @@ impl From<S3BranchCopyConfig> for S3CopySpec {
             S3BranchCopyConfig::All { objects } => S3CopySpec {
                 mode: S3BranchCopyMode::All,
                 objects,
+            },
+        }
+    }
+}
+
+impl From<TurbopufferBranchCopyConfig> for TurbopufferCopySpec {
+    fn from(config: TurbopufferBranchCopyConfig) -> Self {
+        match config {
+            TurbopufferBranchCopyConfig::Empty => TurbopufferCopySpec {
+                mode: TurbopufferBranchCopyMode::Empty,
+            },
+            TurbopufferBranchCopyConfig::All => TurbopufferCopySpec {
+                mode: TurbopufferBranchCopyMode::All,
             },
         }
     }
