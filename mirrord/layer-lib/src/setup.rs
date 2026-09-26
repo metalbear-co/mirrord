@@ -5,7 +5,7 @@ use mirrord_config::{
     experimental::ExperimentalConfig,
     feature::{
         env::EnvConfig,
-        fs::{FsConfig, FsModeConfig, READONLY_FILE_BUFFER_DEFAULT},
+        fs::{FsConfig, FsModeConfig, PREFETCH_TIMEOUT_DEFAULT, READONLY_FILE_BUFFER_DEFAULT},
         network::{
             NetworkConfig,
             incoming::{IncomingConfig, IncomingMode as ConfigIncomingMode},
@@ -50,6 +50,8 @@ pub fn init_layer_setup(mut config: LayerConfig, sip_only: bool) {
             not_found: None,
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
+            prefetch: None,
+            prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
         };
     } else {
         if config.target.path.is_none() && config.feature.fs.mode.ne(&FsModeConfig::Local) {
@@ -78,6 +80,9 @@ pub struct LayerSetup {
     config: LayerConfig,
     file_filter: FileFilter,
     file_remapper: FileRemapper,
+    /// The copies the file hooks serve in place of remote files, for `feature.fs.prefetch`.
+    #[cfg(unix)]
+    prefetched_files: crate::file::prefetched::PrefetchedFiles,
     debugger_ports: DebuggerPorts,
     remote_unix_streams: RegexSet,
     outgoing_selector: OutgoingSelector,
@@ -99,6 +104,11 @@ impl LayerSetup {
         let file_filter = FileFilter::new(config.feature.fs.clone());
         let file_remapper =
             FileRemapper::new(config.feature.fs.mapping.clone().unwrap_or_default());
+        #[cfg(unix)]
+        let prefetched_files = crate::file::prefetched::PrefetchedFiles::new(
+            std::env::var_os(mirrord_config::MIRRORD_FS_PREFETCH_DIR).map(std::path::PathBuf::from),
+            config.feature.fs.prefetch.as_deref().unwrap_or_default(),
+        );
 
         let remote_unix_streams = config
             .feature
@@ -131,6 +141,8 @@ impl LayerSetup {
             config,
             file_filter,
             file_remapper,
+            #[cfg(unix)]
+            prefetched_files,
             debugger_ports,
             remote_unix_streams,
             outgoing_selector,
@@ -161,6 +173,11 @@ impl LayerSetup {
 
     pub fn file_remapper(&self) -> &FileRemapper {
         &self.file_remapper
+    }
+
+    #[cfg(unix)]
+    pub fn prefetched_files(&self) -> &crate::file::prefetched::PrefetchedFiles {
+        &self.prefetched_files
     }
 
     pub fn network_config(&self) -> &NetworkConfig {

@@ -61,7 +61,7 @@ type stat64 = stat;
 ///
 /// When we're dealing with [`Bypass::RelativePath`] or [`Bypass::IgnoredFile`], and `fs.mapping` is
 /// being used, this means that we return the remapped path.
-fn update_ptr_from_bypass(ptr: *const c_char, bypass: &Bypass) -> *const c_char {
+pub(crate) fn update_ptr_from_bypass(ptr: *const c_char, bypass: &Bypass) -> *const c_char {
     match bypass {
         // For some reason, the program is trying to carry out an operation on a path that is
         // inside mirrord's temp bin dir. The detour has returned us the original path of the file
@@ -69,7 +69,9 @@ fn update_ptr_from_bypass(ptr: *const c_char, bypass: &Bypass) -> *const c_char 
         // path.
         #[cfg(target_os = "macos")]
         Bypass::FileOperationInMirrordBinTempDir(stripped_ptr) => *stripped_ptr,
-        Bypass::RelativePath(path) | Bypass::IgnoredFile(path) => path.as_ptr(),
+        Bypass::RelativePath(path) | Bypass::IgnoredFile(path) | Bypass::PrefetchedFile(path) => {
+            path.as_ptr()
+        }
         _ => ptr,
     }
 }

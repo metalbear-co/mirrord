@@ -316,6 +316,15 @@ pub(crate) enum CliError {
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(#[from] mirrord_config::config::ConfigError),
 
+    #[cfg(unix)]
+    #[error("Failed to set up the local directory for prefetched files: {0}")]
+    #[diagnostic(help(
+        "The files listed in `feature.fs.prefetch` are copied into a new directory under your \
+        temporary directory (`$TMPDIR`, or `/tmp` when unset). Please check that it exists, is \
+        writable, and has free space.{GENERAL_HELP}"
+    ))]
+    Prefetch(#[from] crate::prefetch::PrefetchError),
+
     #[error("Failed to run command `{command}` due to missing argument `{arg}`")]
     MissingArg { command: String, arg: String },
 

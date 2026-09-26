@@ -1,0 +1,1 @@
+Added `feature.fs.prefetch`, a list of remote paths that mirrord copies into a local temporary directory before the process starts, so that operations on those paths are served locally instead of going through the agent. Use cases speeding up include HTTP servers that re-read `/etc/ssl` from the filesystem on every request.
