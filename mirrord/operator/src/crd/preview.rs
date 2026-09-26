@@ -43,6 +43,7 @@ use crate::client::connect_params::BranchDbNames;
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[kube(
     group = "preview.mirrord.metalbear.co",
+    group_resolver = "crate::types::keyed_group",
     version = "v1alpha",
     kind = "PreviewSession",
     category = "mirrord",

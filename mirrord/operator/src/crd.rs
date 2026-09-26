@@ -1147,6 +1147,7 @@ pub struct WorkloadQueueRegistryStatus {
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "queues.mirrord.metalbear.co",
+    group_resolver = "crate::types::keyed_group",
     version = "v1alpha",
     kind = "MirrordWorkloadQueueRegistry",
     category = "mirrord",
@@ -1261,6 +1262,7 @@ pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "queues.mirrord.metalbear.co",
+    group_resolver = "crate::types::keyed_group",
     version = "v1alpha",
     kind = "MirrordSQSSession",
     category = "mirrord",
