@@ -85,6 +85,13 @@ or the previous agent failed to clean up before exit. \
 The leftover rules were cleaned and the agent is starting. \
 To allow concurrent sessions, consider using the operator available in mirrord for Teams: https://app.metalbear.com/?utm_source=dirtyiptables&utm_medium=agent";
 
+/// Sent to connected clients in [`DaemonMessage::Close`] when the agent shuts down while they are
+/// still connected.
+const AGENT_SHUTDOWN_MESSAGE: &str = "mirrord agent is shutting down";
+
+/// How long we wait for [`AGENT_SHUTDOWN_MESSAGE`] to be sent to a client before we give up.
+const AGENT_SHUTDOWN_NOTIFY_TIMEOUT: Duration = Duration::from_secs(1);
+
 struct IpVersionAvailability {
     v4: bool,
     v6: bool,
@@ -610,7 +617,20 @@ impl ClientConnectionHandler {
                     Ok(message) => self.respond(DaemonMessage::ReverseDnsLookup(Ok(message))).await?,
                     Err(e) => break e,
                 },
-                _ = cancellation_token.cancelled() => return Ok(()),
+                _ = cancellation_token.cancelled() => {
+                    let close = self.respond(DaemonMessage::Close(AGENT_SHUTDOWN_MESSAGE.to_owned()));
+                    match timeout(AGENT_SHUTDOWN_NOTIFY_TIMEOUT, close).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => {
+                            warn!(?error, "Failed to notify the client about the agent shutdown");
+                        }
+                        Err(..) => {
+                            warn!("Timed out notifying the client about the agent shutdown");
+                        }
+                    }
+
+                    return Ok(());
+                }
             }
         };
 

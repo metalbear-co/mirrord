@@ -318,7 +318,7 @@ impl BackgroundTask for AgentConnection {
     type MessageIn = AgentConnectionMessage;
     type MessageOut = ProxyMessage;
 
-    #[tracing::instrument(level = Level::INFO, name = "agent_connection_main_loop", skip_all, ret, err)]
+    #[tracing::instrument(level = Level::INFO, name = "agent_connection_main_loop", skip_all, ret)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
@@ -328,13 +328,14 @@ impl BackgroundTask for AgentConnection {
                         break Ok(());
                     },
                     Some(AgentConnectionMessage::RequestReconnect) => {
+                        tracing::warn!("{} connection was requested to reconnect", self.reconnect.kind());
                         break Err(AgentConnectionTaskError::RequestedReconnect(self.reconnect.kind()))
                     }
                 },
 
                 msg = self.connection.recv() => match msg {
                     None => {
-                        tracing::error!("failed to receive message from the {}, inner task down", self.reconnect.kind());
+                        tracing::warn!("failed to receive message from the {}, inner task down", self.reconnect.kind());
                         break Err(AgentConnectionTaskError::ChannelError(self.reconnect.kind()));
                     }
                     Some(msg) => message_bus.send(ProxyMessage::FromAgent(msg)).await,

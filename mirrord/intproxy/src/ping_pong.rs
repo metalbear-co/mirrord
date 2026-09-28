@@ -82,7 +82,7 @@ impl BackgroundTask for PingPong {
     ///
     /// When the time comes to ping the agent and the previous ping was not answered, this task
     /// exits with an error.
-    #[tracing::instrument(level = Level::INFO, name = "ping_pong_main_loop", skip_all, ret, err)]
+    #[tracing::instrument(level = Level::INFO, name = "ping_pong_main_loop", skip_all, ret)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
@@ -92,6 +92,11 @@ impl BackgroundTask for PingPong {
                     }).unwrap_or_default();
 
                     if self.awaiting_pongs > 0 && !other_messages_in_last_period {
+                        tracing::warn!(
+                            awaiting_pongs = self.awaiting_pongs,
+                            period = ?self.ticker.period(),
+                            "Agent did not respond to ping in time",
+                        );
                         break Err(PingPongError::PongTimeout);
                     } else {
                         tracing::debug!("Sending ping to the agent");

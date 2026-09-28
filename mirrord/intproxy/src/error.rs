@@ -66,6 +66,17 @@ impl ProxyRuntimeError {
     pub fn is_agent_reported(&self) -> bool {
         matches!(self, Self::AgentFailed(_))
     }
+
+    /// Whether this error means that the agent is gone.
+    pub fn is_agent_lost(&self) -> bool {
+        matches!(
+            self,
+            Self::AgentConnection(_)
+                | Self::AgentFailed(_)
+                | Self::AgentChannel(_)
+                | Self::PingPong(PingPongError::PongTimeout)
+        )
+    }
 }
 
 /// This kind of error causes a total failure of the proxy, meaning that for these errors doesn't

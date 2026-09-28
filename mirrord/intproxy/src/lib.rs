@@ -334,7 +334,20 @@ impl IntProxy {
                         "Received a task update",
                     );
                     if let Err(error) = proxy.handle_task_update(task_id, task_update).await {
-                        tracing::error!(%error, "Proxy encountered a critical error, and is entering the failover state...");
+                        // Lost the agent when all layers had already disconnected
+                        if error.is_agent_lost()
+                            && proxy.any_connection_accepted
+                            && !proxy.has_layer_connections()
+                        {
+                            tracing::warn!(
+                                %task_id,
+                                %error,
+                                "Lost the agent with no active layer connections, exiting",
+                            );
+                            break;
+                        }
+
+                        tracing::error!(%task_id, %error, "Proxy encountered a critical error, and is entering the failover state...");
                         return ControlFlow::Continue(FailoverStrategy::from_failed_proxy(proxy, error));
                     }
                 }
@@ -512,18 +525,9 @@ impl IntProxy {
             }
 
             (task_id, TaskUpdate::Finished(res)) => match res {
-                Ok(()) => {
-                    tracing::error!(%task_id, "One of the main tasks finished unexpectedly");
-                    Err(ProxyRuntimeError::TaskExit(task_id))?;
-                }
-                Err(TaskError::Error(error)) => {
-                    tracing::error!(%task_id, %error, "One of the main tasks failed");
-                    Err(error)?;
-                }
-                Err(TaskError::Panic) => {
-                    tracing::error!(%task_id, "One of the main tasks panicked");
-                    Err(ProxyRuntimeError::TaskPanic(task_id))?;
-                }
+                Ok(()) => Err(ProxyRuntimeError::TaskExit(task_id))?,
+                Err(TaskError::Error(error)) => Err(error)?,
+                Err(TaskError::Panic) => Err(ProxyRuntimeError::TaskPanic(task_id))?,
             },
 
             (_, TaskUpdate::Message(msg)) => self.handle(msg).await?,
