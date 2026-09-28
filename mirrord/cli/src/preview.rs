@@ -132,11 +132,21 @@ async fn preview_start(
             .spec
             .require_feature(NewOperatorFeature::PreviewCronJobTarget)?;
     }
-    if matches!(layer_config.target.path, Some(Target::Label(_))) {
+    if let Some(Target::Label(label_target)) = &layer_config.target.path {
         operator_api
             .operator()
             .spec
             .require_feature(NewOperatorFeature::PreviewLabelTarget)?;
+
+        // Branch preparation reads a single workload out of the target and a label selector
+        // names none, so it would fail later. Refuse here, before the existing session with the
+        // same key is replaced, so a bad config never tears down a running preview.
+        if !layer_config.feature.db_branches.is_empty() {
+            return Err(CliError::UnsupportedTargetConfig(format!(
+                "database branching does not support label target `{label_target}`; remove \
+                 `feature.db_branches` or target a single workload"
+            )));
+        }
     }
 
     // Create the `PreviewSession` resource in the cluster. The CR name is derived from
@@ -273,8 +283,8 @@ async fn preview_start(
         labels
     };
 
-    // Branch preparation reads a single workload out of the target, so it only runs when the
-    // config asks for branches. A label target names no single workload and must not reach it.
+    // Label targets with branches were rejected above, so an empty config is the only way a
+    // label target gets here and it skips branch preparation entirely.
     let branch_db_names = if layer_config.feature.db_branches.is_empty() {
         BranchDbNames::default()
     } else {
