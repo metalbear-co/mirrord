@@ -6,6 +6,7 @@ export interface ProcessInfo {
 export interface PortSubscription {
   port: number
   mode: string
+  hit_count?: number | undefined
 }
 
 export interface SessionInfo {
@@ -48,7 +49,12 @@ export type MonitorEvent =
       port: number
       chaos_rule?: string | null
     }
-  | { type: 'port_subscription'; port: number; mode: string }
+  | {
+      type: 'port_subscription'
+      port: number
+      mode: string
+      hit_count?: number | undefined
+    }
   | { type: 'env_var'; vars: string[] }
   | { type: 'layer_connected'; pid: number; process_name: string }
   | { type: 'layer_disconnected'; pid: number }
@@ -75,6 +81,7 @@ export interface OperatorLockedPort {
   port: number
   kind: string
   filter?: string | null
+  hitCount?: number
 }
 
 export interface OperatorQueueSplits {
@@ -144,15 +151,13 @@ export interface OperatorSessionSummary {
   preview?: OperatorPreviewSession
 }
 
-// Reachability of the operator, as the sidebar consumes it. The v2 server only ever produces
-// `watching`/`unavailable` (each poll is a one-shot fetch that either reached the operator or
-// didn't); `not_started`/`error` remain in the type for the sidebar's transient-state handling but
-// are not emitted.
+// Reachability of the operator, as the sidebar consumes it.
 export const OPERATOR_WATCH = {
   NotStarted: 'not_started',
   Watching: 'watching',
   Error: 'error',
   Unavailable: 'unavailable',
+  KubernetesUnavailable: 'kubernetes_unavailable',
 } as const
 
 export type OperatorWatchStatus =
@@ -160,6 +165,10 @@ export type OperatorWatchStatus =
   | { status: typeof OPERATOR_WATCH.Watching }
   | { status: typeof OPERATOR_WATCH.Error; message: string }
   | { status: typeof OPERATOR_WATCH.Unavailable; reason: string }
+  | {
+      status: typeof OPERATOR_WATCH.KubernetesUnavailable
+      message: string
+    }
 
 export interface OperatorLicense {
   fingerprint: string | null
@@ -169,7 +178,11 @@ export interface OperatorLicense {
 // v2 `GET /api/v2/operator/sessions?context&namespace`
 export interface OperatorSessionsResponse {
   context: string | null
-  status: 'available' | 'unavailable'
+  status:
+    | 'available'
+    | 'notInstalled'
+    | 'kubernetesUnavailable'
+    | 'operatorUnavailable'
   reason?: string
   sessions: OperatorSessionSummary[]
   // Absent against operators that don't report preview environments separately.

@@ -24,7 +24,7 @@ use mirrord_config::{
     LayerConfig,
     feature::{
         database_branches::{DatabaseBranchConfig, default_creation_timeout_secs},
-        split_queues::{QueueFilter, SplitQueuesConfig},
+        split_queues::{QueueKind, QueueSplit, SplitQueuesConfig},
     },
     target::{Target, TargetDisplay},
 };
@@ -52,7 +52,8 @@ use crate::{
         CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
         create_mongodb_branches, create_mysql_branches, create_pg_branches,
         ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
-        list_reusable_mysql_branches, list_reusable_pg_branches, wait_for_pending_branches,
+        list_reusable_mysql_branches, list_reusable_pg_branches,
+        relay_source_compatibility_warnings, wait_for_pending_branches,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -75,6 +76,8 @@ mod credentials;
 pub mod database_branches;
 mod discovery;
 pub mod error;
+
+pub use discovery::operator_installed;
 
 const BAGGAGE_HEADER: &str = "baggage";
 
@@ -862,6 +865,20 @@ where
                 .require_feature(NewOperatorFeature::DbBranchConfigMapSource)?;
         }
 
+        // A `url` connection param needs an operator that layers the other params over it: an
+        // older operator ignores the param and builds the source connection from whatever else
+        // is declared, silently branching the wrong database.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_url_param)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchUrlParam)?;
+        }
+
         // The `liquibase` flavor is new to the branch CRD's migration schema; an older
         // operator's schema rejects the value outright, which surfaces as a bare API validation
         // error rather than a missing capability.
@@ -1037,6 +1054,7 @@ where
                     "using branch database {} for id {id}: {origin}",
                     branch.name_any()
                 ));
+                relay_source_compatibility_warnings(branch, &subtask);
             }
 
             subtask.success(None);
@@ -1079,6 +1097,8 @@ where
                     names.generic.push(name);
                 } else if branch.spec.s3_options.is_some() {
                     names.s3.push(name);
+                } else if branch.spec.turbopuffer_options.is_some() {
+                    names.turbopuffer.push(name);
                 }
             }
             Ok(names)
@@ -1179,6 +1199,7 @@ where
                 cockroachdb: Vec::new(),
                 generic: Vec::new(),
                 s3: Vec::new(),
+                turbopuffer: Vec::new(),
             })
         }
     }
@@ -1273,149 +1294,73 @@ where
             return Ok(());
         }
 
-        if layer_config.feature.split_queues.sqs().next().is_some() {
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::SqsQueueSplitting)?;
-        }
+        let split_queues = &layer_config.feature.split_queues;
 
-        if layer_config
-            .feature
-            .split_queues
-            .kafka_queues()
-            .next()
-            .is_some()
-        {
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::KafkaQueueSplitting)?;
-        }
+        // One feature per broker (Azure Service Bus shipped without one, so it has no gate);
+        // brokers added later were born with jq, so only the early ones gate jq separately.
+        const BROKER_FEATURES: [(QueueKind, NewOperatorFeature); 9] = [
+            (QueueKind::Sqs, NewOperatorFeature::SqsQueueSplitting),
+            (QueueKind::Kafka, NewOperatorFeature::KafkaQueueSplitting),
+            (QueueKind::Rmq, NewOperatorFeature::RmqQueueSplitting),
+            (
+                QueueKind::GcpPubSub,
+                NewOperatorFeature::GcpPubSubQueueSplitting,
+            ),
+            (
+                QueueKind::Temporal,
+                NewOperatorFeature::TemporalQueueSplitting,
+            ),
+            (
+                QueueKind::RedisPubSub,
+                NewOperatorFeature::RedisPubSubQueueSplitting,
+            ),
+            (QueueKind::BullMq, NewOperatorFeature::BullMqQueueSplitting),
+            (QueueKind::Nats, NewOperatorFeature::NatsQueueSplitting),
+            (
+                QueueKind::NatsPubSub,
+                NewOperatorFeature::NatsPubSubQueueSplitting,
+            ),
+        ];
+        const JQ_FEATURES: [(QueueKind, NewOperatorFeature); 3] = [
+            (
+                QueueKind::Sqs,
+                NewOperatorFeature::SqsQueueSplittingWithJqFilter,
+            ),
+            (
+                QueueKind::Kafka,
+                NewOperatorFeature::KafkaQueueSplittingWithJqFilter,
+            ),
+            (
+                QueueKind::Rmq,
+                NewOperatorFeature::RmqQueueSplittingWithJqFilter,
+            ),
+        ];
 
-        if layer_config
-            .feature
-            .split_queues
-            .sqs_jq_filters()
-            .next()
-            .is_some()
-        {
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::SqsQueueSplittingWithJqFilter)?;
+        for (kind, feature) in BROKER_FEATURES {
+            if split_queues.of_kind(kind).next().is_some() {
+                self.operator.spec.require_feature(feature)?;
+            }
         }
-
-        if layer_config
-            .feature
-            .split_queues
-            .kafka_jq_filters()
-            .next()
-            .is_some()
-        {
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::KafkaQueueSplittingWithJqFilter)?;
+        for (kind, feature) in JQ_FEATURES {
+            if split_queues
+                .of_kind(kind)
+                .any(|split| split.jq_filter.is_some())
+            {
+                self.operator.spec.require_feature(feature)?;
+            }
         }
-
-        if layer_config
-            .feature
-            .split_queues
-            .rmq_queues()
-            .next()
-            .is_some()
-        {
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::RmqQueueSplitting)?;
-        }
-
-        if layer_config
-            .feature
-            .split_queues
-            .kafka_payload_protobuf()
-            .next()
-            .is_some()
+        if split_queues
+            .of_kind(QueueKind::Kafka)
+            .any(|split| split.payload_protobuf.is_some())
         {
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding)?;
         }
-
-        if layer_config
-            .feature
-            .split_queues
-            .rmq_jq_filters()
-            .next()
-            .is_some()
-        {
+        if split_queues.uses_composed_filters() {
             self.operator
                 .spec
-                .require_feature(NewOperatorFeature::RmqQueueSplittingWithJqFilter)?;
-        }
-
-        if layer_config
-            .feature
-            .split_queues
-            .gcp_pubsub_queues()
-            .next()
-            .is_some()
-        {
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::GcpPubSubQueueSplitting)?;
-        }
-        if layer_config
-            .feature
-            .split_queues
-            .temporal_queues()
-            .next()
-            .is_some()
-        {
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::TemporalQueueSplitting)?;
-        }
-        if layer_config
-            .feature
-            .split_queues
-            .redis_pubsub_queues()
-            .next()
-            .is_some()
-        {
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::RedisPubSubQueueSplitting)?;
-        }
-        if layer_config
-            .feature
-            .split_queues
-            .bullmq_queues()
-            .next()
-            .is_some()
-        {
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::BullMqQueueSplitting)?;
-        }
-        if layer_config
-            .feature
-            .split_queues
-            .nats_queues()
-            .next()
-            .is_some()
-        {
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::NatsQueueSplitting)?;
-        }
-        if layer_config
-            .feature
-            .split_queues
-            .nats_pubsub_queues()
-            .next()
-            .is_some()
-        {
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::NatsPubSubQueueSplitting)?;
+                .require_feature(NewOperatorFeature::QueueSplittingWithComposedFilters)?;
         }
 
         Ok(())
@@ -1498,6 +1443,7 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
         DatabaseBranchConfig::Mariadb(_) => Some(NewOperatorFeature::MariaDbBranching),
         DatabaseBranchConfig::Cockroachdb(_) => Some(NewOperatorFeature::CockroachdbBranching),
         DatabaseBranchConfig::S3(_) => Some(NewOperatorFeature::S3Branching),
+        DatabaseBranchConfig::Turbopuffer(_) => Some(NewOperatorFeature::TurbopufferBranching),
         DatabaseBranchConfig::Mssql(_)
         | DatabaseBranchConfig::Dynamodb(_)
         | DatabaseBranchConfig::Spanner(_)
@@ -1516,12 +1462,11 @@ const RMQ_AUTO_SPLITS_DISABLED_WARNING: &str = "The mirrord operator does not su
 /// when the operator does not advertise
 /// [`NewOperatorFeature::RmqQueueSplittingWithJqFilter`].
 ///
-/// Such an operator predates the `jq_filter` field on
-/// [`QueueFilter::Rmq`], and sending it RMQ splits fails because
+/// Such an operator predates the `jq_filter` field on RMQ entries of
+/// [`SplitQueuesConfig`], and sending it RMQ splits fails because
 /// [`CopyTargetSpec::split_queues`] carries the config verbatim, and
-/// the operator reads it with its own `mirrord-config`, where
-/// [`QueueFilter`] denies unknown fields and we get deserialization
-/// error.
+/// the operator reads it with its own `mirrord-config`, where the
+/// entry denies unknown fields and we get deserialization error.
 ///
 /// Only the entries such an operator cannot deserialize are dropped:
 /// ones carrying a `jq_filter` (unknown field) or carrying no filter
@@ -1532,21 +1477,13 @@ fn disable_unsupported_auto_splits(
     split_queues: &SplitQueuesConfig,
     supported_features: &[NewOperatorFeature],
 ) -> Option<SplitQueuesConfig> {
-    fn readable_by_old_operators(filter: &QueueFilter) -> bool {
-        match filter {
-            QueueFilter::Rmq {
-                message_filter,
-                jq_filter,
-            } => jq_filter.is_none() && message_filter.is_some(),
-            _ => true,
-        }
+    fn readable_by_old_operators(split: &QueueSplit) -> bool {
+        split.queue_type != QueueKind::Rmq
+            || (split.jq_filter.is_none() && split.message_filter.is_some())
     }
 
     if supported_features.contains(&NewOperatorFeature::RmqQueueSplittingWithJqFilter)
-        || split_queues
-            .splits()
-            .iter()
-            .all(|split| readable_by_old_operators(&split.filter))
+        || split_queues.splits().iter().all(readable_by_old_operators)
     {
         return None;
     }
@@ -1555,7 +1492,7 @@ fn disable_unsupported_auto_splits(
         split_queues
             .splits()
             .iter()
-            .filter(|split| readable_by_old_operators(&split.filter))
+            .filter(|split| readable_by_old_operators(split))
             .cloned(),
     ))
 }
@@ -2078,7 +2015,12 @@ impl OperatorApi<PreparedClientCert> {
         }
 
         if auto_queue_splitting.not() {
-            if config.feature.split_queues.sqs().next().is_some()
+            if config
+                .feature
+                .split_queues
+                .of_kind(QueueKind::Sqs)
+                .next()
+                .is_some()
                 && self
                     .operator
                     .spec
@@ -2090,7 +2032,12 @@ impl OperatorApi<PreparedClientCert> {
                 return Ok((true, Some("SQS splitting")));
             }
 
-            if config.feature.split_queues.kafka_queues().next().is_some()
+            if config
+                .feature
+                .split_queues
+                .of_kind(QueueKind::Kafka)
+                .next()
+                .is_some()
                 && self
                     .operator()
                     .spec
@@ -2218,7 +2165,12 @@ impl OperatorApi<PreparedClientCert> {
         }
 
         if auto_queue_splitting.not() {
-            if config.feature.split_queues.sqs().next().is_some()
+            if config
+                .feature
+                .split_queues
+                .of_kind(QueueKind::Sqs)
+                .next()
+                .is_some()
                 && self
                     .operator
                     .spec
@@ -2229,7 +2181,12 @@ impl OperatorApi<PreparedClientCert> {
                 return true;
             }
 
-            if config.feature.split_queues.kafka_queues().next().is_some()
+            if config
+                .feature
+                .split_queues
+                .of_kind(QueueKind::Kafka)
+                .next()
+                .is_some()
                 && self
                     .operator()
                     .spec
@@ -2377,10 +2334,11 @@ impl OperatorApi<PreparedClientCert> {
         use_proxy: bool,
         profile: Option<&str>,
         branch_name: Option<String>,
-        branch_db_names: BranchDbNames,
+        mut branch_db_names: BranchDbNames,
         session_ci_info: Option<SessionCiInfo>,
         key: &str,
     ) -> String {
+        let unified_branch_db_names = branch_db_names.unified();
         let name = crd
             .meta()
             .name
@@ -2421,12 +2379,13 @@ impl OperatorApi<PreparedClientCert> {
             nats_jq_filters: Default::default(),
             nats_pubsub_splits: Default::default(),
             nats_pubsub_jq_filters: Default::default(),
+            queue_filters: Default::default(),
             queue_modes: Default::default(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
-            branch_db_names: branch_db_names.mssql,
+            branch_db_names: unified_branch_db_names,
             session_ci_info,
             up_session_info: None,
             is_default_cluster: None,
@@ -2785,7 +2744,7 @@ mod test {
         env_key::EnvKey,
         feature::{
             network::incoming::ConcurrentSteal,
-            split_queues::{QueueFilter, QueueSplit, SplitQueuesConfig},
+            split_queues::{QueueKind, QueueSplit, SplitQueuesConfig},
         },
     };
     use mirrord_kube::resolved::{ResolvedResource, ResolvedTarget};
@@ -3031,6 +2990,7 @@ mod test {
                 cockroachdb: vec![],
                 generic: vec![],
                 s3: vec![],
+                turbopuffer: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\
@@ -3142,6 +3102,7 @@ mod test {
             nats_jq_filters: Default::default(),
             nats_pubsub_splits: Default::default(),
             nats_pubsub_jq_filters: Default::default(),
+            queue_filters: Default::default(),
             up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),
@@ -3285,6 +3246,7 @@ mod test {
             nats_jq_filters: Default::default(),
             nats_pubsub_splits: Default::default(),
             nats_pubsub_jq_filters: Default::default(),
+            queue_filters: Default::default(),
             up_session_info: None,
             multi_cluster: None,
             output_tmp_resources: Default::default(),
@@ -3329,25 +3291,28 @@ mod test {
         let filtered =
             disable_unsupported_auto_splits(&wildcard, &[]).expect("RMQ splits should be dropped");
 
-        assert_eq!(filtered.rmq_queues().count(), 0);
+        assert_eq!(filtered.of_kind(QueueKind::Rmq).count(), 0);
         assert_eq!(filtered.splits().len(), wildcard.splits().len() - 1);
         // Every other broker is left alone.
-        assert_eq!(filtered.sqs_jq_filters().count(), 1);
-        assert_eq!(filtered.kafka_jq_filters().count(), 1);
-        assert_eq!(filtered.bullmq_jq_filters().count(), 1);
+        for kind in [QueueKind::Sqs, QueueKind::Kafka, QueueKind::BullMq] {
+            assert_eq!(
+                filtered
+                    .of_kind(kind)
+                    .filter(|split| split.jq_filter.is_some())
+                    .count(),
+                1
+            );
+        }
     }
 
     /// Header-filter-only entries serialize exactly like the pre-jq shape, so operators without
     /// jq support still read and honor them - they must be kept.
     #[test]
     fn auto_disable_keeps_message_filter_rmq() {
-        let config = SplitQueuesConfig::from_splits([QueueSplit::from((
-            "orders".to_owned(),
-            QueueFilter::Rmq {
-                message_filter: Some([("region".to_owned(), "^eu".to_owned())].into()),
-                jq_filter: None,
-            },
-        ))]);
+        let config = SplitQueuesConfig::from_splits([QueueSplit {
+            message_filter: Some([("region".to_owned(), "^eu".to_owned())].into()),
+            ..QueueSplit::new("orders", QueueKind::Rmq)
+        }]);
 
         assert_eq!(disable_unsupported_auto_splits(&config, &[]), None);
     }
@@ -3356,18 +3321,12 @@ mod test {
     /// shape requires, so old operators cannot read it either - dropped like jq entries.
     #[test]
     fn auto_disable_drops_filterless_rmq() {
-        let config = SplitQueuesConfig::from_splits([QueueSplit::from((
-            "orders".to_owned(),
-            QueueFilter::Rmq {
-                message_filter: None,
-                jq_filter: None,
-            },
-        ))]);
+        let config = SplitQueuesConfig::from_splits([QueueSplit::new("orders", QueueKind::Rmq)]);
 
         let filtered = disable_unsupported_auto_splits(&config, &[])
             .expect("filterless RMQ splits should be dropped");
 
-        assert_eq!(filtered.rmq_queues().count(), 0);
+        assert_eq!(filtered.of_kind(QueueKind::Rmq).count(), 0);
     }
 
     #[test]
@@ -3386,13 +3345,10 @@ mod test {
     /// Without any RMQ entries there is nothing to disable, and the caller must not warn.
     #[test]
     fn auto_disable_noop_without_rmq_entries() {
-        let config = SplitQueuesConfig::from_splits([QueueSplit::from((
-            "orders".to_owned(),
-            QueueFilter::Sqs {
-                message_filter: None,
-                jq_filter: Some(".Body".to_owned()),
-            },
-        ))]);
+        let config = SplitQueuesConfig::from_splits([QueueSplit {
+            jq_filter: Some(".Body".to_owned()),
+            ..QueueSplit::new("orders", QueueKind::Sqs)
+        }]);
 
         assert_eq!(disable_unsupported_auto_splits(&config, &[]), None);
     }

@@ -17,6 +17,7 @@ use mirrord_operator::{
     client::error::{HttpError, OperatorApiError, OperatorOperation},
     crd::preview::PreviewPodLogs,
 };
+use mirrord_progress::messages::AGENT_OPERATOR_HINT;
 use mirrord_protocol_io::ProtocolError;
 use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
@@ -315,6 +316,15 @@ pub(crate) enum CliError {
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(#[from] mirrord_config::config::ConfigError),
 
+    #[cfg(unix)]
+    #[error("Failed to set up the local directory for prefetched files: {0}")]
+    #[diagnostic(help(
+        "The files listed in `feature.fs.prefetch` are copied into a new directory under your \
+        temporary directory (`$TMPDIR`, or `/tmp` when unset). Please check that it exists, is \
+        writable, and has free space.{GENERAL_HELP}"
+    ))]
+    Prefetch(#[from] crate::prefetch::PrefetchError),
+
     #[error("Failed to run command `{command}` due to missing argument `{arg}`")]
     MissingArg { command: String, arg: String },
 
@@ -402,7 +412,8 @@ pub(crate) enum CliError {
     #[error("Feature `{0}` requires using mirrord operator")]
     #[diagnostic(help(
         "The mirrord operator is part of mirrord for Teams. \
-        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=requiresoperator&utm_medium=cli"
+        You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=requiresoperator&utm_medium=cli\n\
+        {AGENT_OPERATOR_HINT}"
     ))]
     FeatureRequiresOperatorError(String),
 
@@ -494,7 +505,7 @@ pub(crate) enum CliError {
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
         "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
-        Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.{GENERAL_HELP}"
+        Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.\n{AGENT_OPERATOR_HINT}{GENERAL_HELP}"
     ))]
     OperatorNotInstalled,
 
@@ -700,6 +711,20 @@ pub(crate) enum CliError {
         Check that the operator is running and healthy, and see its logs for details.{GENERAL_HELP}"
     ))]
     PreviewSecretMountFailed(String),
+
+    #[error(
+        "Failed to read the TLS client certificate file `{path}` for preview delivery: {error}"
+    )]
+    #[diagnostic(help(
+        "`feature.network.incoming.tls_delivery.client_cert` and `client_key` must be readable PEM \
+        files on this machine: the CLI stores their contents in the preview session's Secret so \
+        the operator can present them to the preview pod.{GENERAL_HELP}"
+    ))]
+    PreviewTlsClientAuthFile {
+        path: PathBuf,
+        #[source]
+        error: io::Error,
+    },
 
     #[error("Preview session failed: {message}{}", format_preview_logs(logs))]
     #[diagnostic(help(

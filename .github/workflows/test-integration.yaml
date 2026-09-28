@@ -7,7 +7,7 @@ on:
         description: "Runner label to use. Callers pass the one `plan` picked."
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: "blacksmith-16vcpu-ubuntu-2404"
       runner_image_built:
         description: "Whether the runner image comes from an uploaded artifact rather than the published one."
         required: false
@@ -126,6 +126,11 @@ jobs:
         with:
           command: |
             cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-vpn
+      - name: mirrord up UT
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: |
+            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-up
       - name: mirrord tui build and UT
         uses: ./.github/actions/run-in-ci-runner
         with:

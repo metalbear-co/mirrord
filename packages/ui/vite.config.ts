@@ -34,6 +34,10 @@ export default defineConfig({
         __dirname,
         '../monitor/src/theme.ts',
       ),
+      '@mirrord/monitor/events': path.resolve(
+        __dirname,
+        '../monitor/src/events.tsx',
+      ),
       '@mirrord/monitor': path.resolve(__dirname, '../monitor/src/index.tsx'),
       '@mirrord/wizard': path.resolve(__dirname, '../wizard/src/index.tsx'),
     },

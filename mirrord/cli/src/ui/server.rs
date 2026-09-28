@@ -14,7 +14,7 @@ use axum::{
         Path, Query, Request, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header, header::HeaderName},
     middleware::{self, Next},
     response::{IntoResponse, Redirect, Response, sse},
     routing::{get, post},
@@ -33,11 +33,12 @@ use kube::{
 };
 use mirrord_config::target::{Target, TargetDisplay};
 use mirrord_operator::{
-    client::add_baggage_header,
+    client::{add_baggage_header, operator_installed},
     crd::{
         MirrordOperatorCrd, OPERATOR_STATUS_NAME, PreviewSessionInfo, Session, SessionHttpFilter,
         preview::PreviewSessionPhase,
     },
+    types::MIRRORD_CLI_VERSION_HEADER,
 };
 use mirrord_session_monitor_client::{
     SESSION_SENTINEL_EXTENSION, SessionClient, SessionEndpoint, connect_to_session,
@@ -127,6 +128,8 @@ pub struct OperatorLockedPort {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_count: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -159,14 +162,22 @@ impl FromStr for OperatorSessionTarget {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match Target::from_str(s) {
-            Ok(Target::Targetless) | Err(_) => Err(()),
-            Ok(target) => Ok(OperatorSessionTarget {
-                kind: target.type_().to_owned(),
-                name: target.name().to_owned(),
-                container: String::new(),
-            }),
-        }
+        // The operator lists a pod-set target as its bare selector (`app=api`), which is the
+        // `label/` target path without its prefix.
+        let target = Target::from_str(s)
+            .or_else(|_| Target::from_str(&format!("label/{s}")))
+            .map_err(|_| ())?;
+        let name = match &target {
+            Target::Targetless => return Err(()),
+            // `name()` is the constant "label"; the selector is what tells previews apart.
+            Target::Label(label) => label.selector(),
+            target => target.name().to_owned(),
+        };
+        Ok(OperatorSessionTarget {
+            kind: target.type_().to_owned(),
+            name,
+            container: String::new(),
+        })
     }
 }
 
@@ -277,6 +288,7 @@ impl OperatorSessionSummary {
                             port: lp.port,
                             kind: lp.kind,
                             filter: lp.filter,
+                            hit_count: lp.hit_count,
                         }
                     })
                     .collect()
@@ -453,7 +465,50 @@ async fn buffer_session_events(session_id: &str, values: Vec<serde_json::Value>,
     let Some(session) = sessions.get_mut(session_id) else {
         return;
     };
-    session.events.extend(values);
+    for value in values {
+        let port =
+            if value.get("type").and_then(|value| value.as_str()) == Some("port_subscription") {
+                value
+                    .get("port")
+                    .and_then(|value| value.as_u64())
+                    .and_then(|port| u16::try_from(port).ok())
+            } else {
+                None
+            };
+
+        if let Some(port) = port {
+            if let Some(mode) = value.get("mode").and_then(|value| value.as_str()) {
+                let hit_count = value.get("hit_count").and_then(|value| value.as_u64());
+                match session
+                    .info
+                    .port_subscriptions
+                    .iter_mut()
+                    .find(|subscription| subscription.port == port)
+                {
+                    Some(subscription) => {
+                        subscription.mode = mode.to_owned();
+                        subscription.hit_count = hit_count;
+                    }
+                    None => session.info.port_subscriptions.push(
+                        mirrord_session_monitor_protocol::PortSubscription {
+                            port,
+                            mode: mode.to_owned(),
+                            hit_count,
+                        },
+                    ),
+                }
+            }
+
+            // Every hit sends a port subscription event. Keeping them all would fill this buffer
+            // and remove older traffic events, so keep only the latest event for each port.
+            session.events.retain(|buffered| {
+                buffered.get("type").and_then(|value| value.as_str()) != Some("port_subscription")
+                    || buffered.get("port").and_then(|value| value.as_u64())
+                        != Some(u64::from(port))
+            });
+        }
+        session.events.push(value);
+    }
     if session.events.len() > MAX_EVENTS_PER_SESSION {
         session
             .events
@@ -572,6 +627,35 @@ async fn get_session(State(state): State<AppState>, Path(id): Path<String>) -> R
     }
 }
 
+/// Channel depth for an SSE proxy, bounding how far a browser may fall behind before the proxy
+/// task blocks.
+const SSE_CHANNEL_CAPACITY: usize = 256;
+
+const SSE_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Sender half of an [`sse_channel`], held by the task producing the events.
+pub(crate) type SseSender = mpsc::Sender<Result<sse::Event, Infallible>>;
+
+/// Receiver half of an [`sse_channel`], consumed by [`sse_response`].
+pub(crate) type SseReceiver = mpsc::Receiver<Result<sse::Event, Infallible>>;
+
+/// Channel an SSE proxy task writes its events into, sized for a browser `EventSource`.
+pub(crate) fn sse_channel() -> (SseSender, SseReceiver) {
+    mpsc::channel(SSE_CHANNEL_CAPACITY)
+}
+
+/// Serves the events written into [`sse_channel`], keeping the connection alive through idle
+/// stretches so an intermediary doesn't drop it.
+pub(crate) fn sse_response(rx: SseReceiver) -> Response {
+    sse::Sse::new(ReceiverStream::new(rx))
+        .keep_alive(
+            sse::KeepAlive::new()
+                .interval(SSE_KEEP_ALIVE_INTERVAL)
+                .text("ping"),
+        )
+        .into_response()
+}
+
 async fn session_events_sse(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     let (buffered_events, client) = {
         let sessions = state.sessions.read().await;
@@ -581,7 +665,7 @@ async fn session_events_sse(State(state): State<AppState>, Path(id): Path<String
         }
     };
 
-    let (tx, rx) = mpsc::channel::<Result<sse::Event, Infallible>>(256);
+    let (tx, rx) = sse_channel();
 
     tokio::spawn(async move {
         for event in buffered_events {
@@ -620,13 +704,7 @@ async fn session_events_sse(State(state): State<AppState>, Path(id): Path<String
         }
     });
 
-    sse::Sse::new(ReceiverStream::new(rx))
-        .keep_alive(
-            sse::KeepAlive::new()
-                .interval(Duration::from_secs(15))
-                .text("ping"),
-        )
-        .into_response()
+    sse_response(rx)
 }
 
 #[derive(Serialize, Clone)]
@@ -778,6 +856,11 @@ async fn build_client(context: Option<&str>) -> UiResult<Client> {
     };
     add_baggage_header(&mut config, baggage_from_env().as_deref())
         .map_err(|error| ApiError::InvalidBaggage(error.to_string()))?;
+    // Without a client version, the operator returns legacy ports without hit counts.
+    config.headers.push((
+        HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER),
+        HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+    ));
 
     // Building the client runs the context's auth-exec plugin synchronously, which must not hold
     // the runtime thread.
@@ -1056,40 +1139,79 @@ pub(crate) fn start_filesystem_watcher(
 
 pub(crate) fn start_operator_watcher(state: AppState) {
     tokio::spawn(async move {
-        let client = match client_for_context(None).await {
-            Ok(client) => client,
-            Err(err) => {
-                let reason = format!("kube client init failed: {err}");
-                warn!("{reason}");
-                *state.operator_watch_status.write().await =
-                    OperatorWatchStatus::Unavailable { reason };
-                return;
-            }
-        };
-
-        let api: Api<MirrordOperatorCrd> = Api::all(client);
-
-        if let Err(err) = api.get(OPERATOR_STATUS_NAME).await {
-            let reason = format!("operator not available: {err}");
-            warn!("{reason}");
-            *state.operator_watch_status.write().await =
-                OperatorWatchStatus::Unavailable { reason };
-            return;
-        }
-
-        *state.operator_watch_status.write().await = OperatorWatchStatus::Watching;
-
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut client = None;
+
         loop {
             interval.tick().await;
+
+            if client.is_none() {
+                match client_for_context(None).await {
+                    Ok(new_client) => client = Some(new_client),
+                    Err(err) => {
+                        let message = format!("Kubernetes access failed: {err}");
+                        warn!("{message}");
+                        *state.operator_watch_status.write().await =
+                            OperatorWatchStatus::Error { message };
+                        continue;
+                    }
+                }
+            }
+
+            let api: Api<MirrordOperatorCrd> =
+                Api::all(client.clone().expect("kube client was initialized"));
             match api.get(OPERATOR_STATUS_NAME).await {
-                Ok(operator) => reconcile_operator_sessions(&state, &operator).await,
+                Ok(operator) => {
+                    *state.operator_watch_status.write().await = OperatorWatchStatus::Watching;
+                    reconcile_operator_sessions(&state, &operator).await;
+                }
+                Err(ref error @ kube::Error::Api(ref response)) if response.code == 404 => {
+                    match tokio::time::timeout(
+                        CLIENT_BUILD_TIMEOUT,
+                        operator_installed(client.as_ref().expect("kube client was initialized")),
+                    )
+                    .await
+                    {
+                        Ok(Ok(false)) => {
+                            let reason =
+                                "mirrord operator is not installed in this context".to_owned();
+                            *state.operator_watch_status.write().await =
+                                OperatorWatchStatus::Unavailable { reason };
+                        }
+                        Ok(Ok(true)) => {
+                            let message =
+                                format!("mirrord operator status is not available: {error}");
+                            *state.operator_watch_status.write().await =
+                                OperatorWatchStatus::Error { message };
+                        }
+                        Ok(Err(error)) => {
+                            let message = format!(
+                                "Kubernetes access failed while checking for the mirrord operator: {error}"
+                            );
+                            warn!("{message}");
+                            *state.operator_watch_status.write().await =
+                                OperatorWatchStatus::Error { message };
+                            client = None;
+                        }
+                        Err(_) => {
+                            let message = format!(
+                                "Kubernetes access failed: no answer within {}s",
+                                CLIENT_BUILD_TIMEOUT.as_secs()
+                            );
+                            warn!("{message}");
+                            *state.operator_watch_status.write().await =
+                                OperatorWatchStatus::Error { message };
+                            client = None;
+                        }
+                    }
+                }
                 Err(err) => {
-                    let reason = format!("operator status fetch error: {err}");
-                    warn!("{reason}");
+                    let message = format!("Kubernetes access failed: {err}");
+                    warn!("{message}");
                     *state.operator_watch_status.write().await =
-                        OperatorWatchStatus::Error { message: reason };
+                        OperatorWatchStatus::Error { message };
+                    client = None;
                 }
             }
         }
@@ -1299,6 +1421,90 @@ mod tests {
             .await
             .unwrap()
             .status()
+    }
+
+    #[tokio::test]
+    async fn event_buffer_keeps_only_the_latest_port_subscription_per_port() {
+        let state = test_state();
+        let session_id = "test-session";
+        let endpoint = SessionEndpoint::for_session(session_id, std::path::Path::new("/tmp"));
+        state.sessions.write().await.insert(
+            session_id.to_owned(),
+            TrackedSession {
+                info: SessionInfo {
+                    session_id: session_id.to_owned(),
+                    key: None,
+                    target: "deployment/test".to_owned(),
+                    namespace: None,
+                    context: None,
+                    started_at: "2026-09-22T12:00:00Z".to_owned(),
+                    mirrord_version: "0.0.0".to_owned(),
+                    is_operator: false,
+                    processes: Vec::new(),
+                    port_subscriptions: Vec::new(),
+                    config: serde_json::Value::Null,
+                },
+                endpoint: endpoint.clone(),
+                events: vec![
+                    serde_json::json!({"type": "file_op", "path": "/visible"}),
+                    serde_json::json!({
+                        "type": "port_subscription",
+                        "port": 80,
+                        "mode": "steal",
+                        "hit_count": 1
+                    }),
+                ],
+                client: SessionClient::new(endpoint),
+            },
+        );
+
+        buffer_session_events(
+            session_id,
+            vec![
+                serde_json::json!({
+                    "type": "port_subscription",
+                    "port": 81,
+                    "mode": "mirror",
+                    "hit_count": 3
+                }),
+                serde_json::json!({
+                    "type": "port_subscription",
+                    "port": 80,
+                    "mode": "steal",
+                    "hit_count": 2
+                }),
+            ],
+            &state,
+        )
+        .await;
+
+        let sessions = state.sessions.read().await;
+        let session = sessions.get(session_id).unwrap();
+        assert_eq!(
+            session.events,
+            vec![
+                serde_json::json!({"type": "file_op", "path": "/visible"}),
+                serde_json::json!({
+                    "type": "port_subscription",
+                    "port": 81,
+                    "mode": "mirror",
+                    "hit_count": 3
+                }),
+                serde_json::json!({
+                    "type": "port_subscription",
+                    "port": 80,
+                    "mode": "steal",
+                    "hit_count": 2
+                }),
+            ]
+        );
+        assert_eq!(
+            serde_json::to_value(&session.info.port_subscriptions).unwrap(),
+            serde_json::json!([
+                {"port": 81, "mode": "mirror", "hit_count": 3},
+                {"port": 80, "mode": "steal", "hit_count": 2},
+            ])
+        );
     }
 
     /// `/health` is intentionally outside the auth middleware so k8s probes can hit it.
@@ -1528,6 +1734,23 @@ mod tests {
     fn validate_ws_origin_accepts_missing_origin() {
         let headers = HeaderMap::new();
         assert!(validate_ws_origin(&headers));
+    }
+
+    /// The operator lists a pod-set preview target as its bare selector, not as a `label/`
+    /// path. Parsed only as a canonical target path it fails, and the browser then shows the
+    /// preview with no target at all.
+    #[test]
+    fn operator_session_target_parses_bare_label_selector() {
+        let target = OperatorSessionTarget::from_str("app=api,tier=web/container/api").unwrap();
+        assert_eq!(target.kind, "label");
+        assert_eq!(target.name, "app=api,tier=web");
+
+        let target = OperatorSessionTarget::from_str("deployment/api/container/api").unwrap();
+        assert_eq!(target.kind, "deployment");
+        assert_eq!(target.name, "api");
+
+        assert!(OperatorSessionTarget::from_str("targetless").is_err());
+        assert!(OperatorSessionTarget::from_str("not a target").is_err());
     }
 
     /// The frontend reads the ws `session_added` payload as a flat [`SessionInfo`], the same

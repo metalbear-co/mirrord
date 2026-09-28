@@ -184,6 +184,11 @@ pub enum Bypass {
     #[cfg(unix)]
     RelativePath(CString),
 
+    /// The file was copied out of the target before the process started, as asked for by
+    /// `feature.fs.prefetch`, so the operation is carried out locally on that copy.
+    #[cfg(unix)]
+    PrefetchedFile(CString),
+
     /// Started mirrord with [`FsModeConfig`](mirrord_config::feature::fs::mode::FsModeConfig) set
     /// to [`FsModeConfig::Read`](mirrord_config::feature::fs::FsModeConfig::Read), but
     /// operation requires more file permissions.
@@ -261,6 +266,11 @@ impl Bypass {
 
     pub fn ignored_file(path: impl Into<Vec<u8>>) -> Self {
         Bypass::IgnoredFile(CString::new(path).expect("should be a valid C string"))
+    }
+
+    #[cfg(unix)]
+    pub fn prefetched_file(path: impl Into<Vec<u8>>) -> Self {
+        Bypass::PrefetchedFile(CString::new(path).expect("should be a valid C string"))
     }
 }
 

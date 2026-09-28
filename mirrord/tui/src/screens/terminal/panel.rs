@@ -185,6 +185,7 @@ mod tests {
             port_subscriptions: vec![PortSubscription {
                 port: 8080,
                 mode: "steal".to_owned(),
+                hit_count: None,
             }],
             config: serde_json::Value::Null,
         }

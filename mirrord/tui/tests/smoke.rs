@@ -289,6 +289,7 @@ fn a_session_under_the_shell_brings_the_panel_in() {
             port_subscriptions: vec![PortSubscription {
                 port: 8080,
                 mode: "steal".to_owned(),
+                hit_count: None,
             }],
             config: serde_json::Value::Null,
         },

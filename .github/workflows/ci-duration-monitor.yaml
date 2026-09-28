@@ -19,7 +19,7 @@ jobs:
     # healthiest-looking numbers exactly when CI is at its most broken. Those runs still reach the
     # script, which looks past the budgets for jobs GitHub killed at their timeout.
     if: ${{ github.event.workflow_run.conclusion != 'skipped' }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Compare the run against its budgets

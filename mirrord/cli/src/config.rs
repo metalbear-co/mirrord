@@ -31,7 +31,10 @@ use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
 
-use crate::config::{ci::CiArgs, global_config::GlobalConfigArgs};
+use crate::{
+    config::{ci::CiArgs, global_config::GlobalConfigArgs},
+    subscribe::EventStreamOptions,
+};
 
 pub(crate) mod ci;
 pub(crate) mod global_config;
@@ -1381,6 +1384,9 @@ pub(super) struct SubscribeArgs {
     #[arg(long)]
     pub pretty: bool,
 
+    #[command(flatten)]
+    pub event_stream_options: EventStreamOptions,
+
     /// Load config from config file.
     /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
@@ -1746,8 +1752,14 @@ pub(super) struct UpArgs {
     pub key: Option<String>,
 
     /// Start `mirrord ui` in the background.
-    #[arg(short = 'u', long)]
+    ///
+    /// *DEPRECATED*: `mirrord ui` is started by default in the background.
+    #[arg(short = 'u', long, hide = true)]
     pub ui: bool,
+
+    /// Don't start `mirrord ui` in the background.
+    #[arg(long, conflicts_with = "ui")]
+    pub no_ui: bool,
 
     /// Names of the services to launch. When omitted, every service in the
     /// config is launched, except those marked `skip: true`. Naming a

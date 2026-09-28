@@ -330,6 +330,7 @@ async fn info_reflects_port_subscription_upsert_by_port() {
     server.monitor_tx.emit(MonitorEvent::PortSubscription {
         port: 8080,
         mode: "mirror".to_owned(),
+        hit_count: Some(0),
     });
 
     let info = poll_until(Duration::from_secs(2), || async {
@@ -347,17 +348,19 @@ async fn info_reflects_port_subscription_upsert_by_port() {
         .expect("port subscription entry");
     assert_eq!(port_sub.port, 8080);
     assert_eq!(port_sub.mode, "mirror");
+    assert_eq!(port_sub.hit_count, Some(0));
 
     server.monitor_tx.emit(MonitorEvent::PortSubscription {
         port: 8080,
         mode: "steal".to_owned(),
+        hit_count: Some(2),
     });
 
     let info = poll_until(Duration::from_secs(2), || async {
         client.fetch_info().await.ok().filter(|info| {
             info.port_subscriptions
                 .first()
-                .map(|p| p.mode == "steal")
+                .map(|p| p.mode == "steal" && p.hit_count == Some(2))
                 .unwrap_or(false)
         })
     })

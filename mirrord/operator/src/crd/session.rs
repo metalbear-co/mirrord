@@ -130,6 +130,12 @@ impl fmt::Display for PodSetTarget {
     }
 }
 
+impl From<KubeResourceTarget> for SessionTarget {
+    fn from(target: KubeResourceTarget) -> Self {
+        Self::KubeResource(target)
+    }
+}
+
 impl fmt::Display for SessionTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -218,7 +224,7 @@ impl SessionTarget {
                 t.labels.into_iter().collect(),
                 t.container?,
             ))),
-            Target::Targetless => None,
+            Target::Targetless | Target::Serverless(_) => None,
         }
     }
 

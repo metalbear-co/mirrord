@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt,
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -13,10 +13,11 @@ use prost_reflect::DescriptorPool;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{
     Deserialize, Serialize,
-    de::{MapAccess, SeqAccess, Visitor},
+    de::{self, MapAccess, SeqAccess, Visitor},
     ser::SerializeMap,
 };
-use strum_macros::{EnumDiscriminants, EnumIter};
+use strum::IntoEnumIterator;
+use strum_macros::{Display, EnumIter};
 use thiserror::Error;
 
 use crate::{
@@ -25,6 +26,10 @@ use crate::{
 };
 
 pub type QueueId = String;
+
+/// The legacy per-attribute filter: attribute name to the regex its value must match. Every entry
+/// must match, so the map is an implicit `all_of` over exact attribute names.
+pub type QueueMessageFilter = BTreeMap<String, String>;
 
 /// ### feature.split_queues.{}.queue_mode {#feature-split_queues-queue_id-queue_mode}
 ///
@@ -52,14 +57,209 @@ impl QueueMode {
     }
 }
 
+/// ### feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}
+///
+/// The broker the queue lives on. One of `SQS`, `Kafka`, `RMQ`, `GCPPubSub`, `RedisPubSub`,
+/// `AzureServiceBus`, `Temporal`, `BullMQ`, `NATS`, or `NATSPubSub`.
+///
+/// The `Display` form is the snake_case name used in analytics keys and logs.
+#[derive(
+    Serialize,
+    Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    EnumIter,
+    Display,
+)]
+pub enum QueueKind {
+    #[serde(rename = "SQS")]
+    #[strum(serialize = "sqs")]
+    Sqs,
+    #[serde(rename = "Kafka")]
+    #[strum(serialize = "kafka")]
+    Kafka,
+    #[serde(rename = "RMQ")]
+    #[strum(serialize = "rmq")]
+    Rmq,
+    #[serde(rename = "GCPPubSub")]
+    #[strum(serialize = "gcp_pubsub")]
+    GcpPubSub,
+    #[serde(rename = "RedisPubSub")]
+    #[strum(serialize = "redis_pubsub")]
+    RedisPubSub,
+    #[serde(rename = "AzureServiceBus")]
+    #[strum(serialize = "azure_service_bus")]
+    AzureServiceBus,
+    #[serde(rename = "Temporal")]
+    #[strum(serialize = "temporal")]
+    Temporal,
+    #[serde(rename = "BullMQ")]
+    #[strum(serialize = "bullmq")]
+    BullMq,
+    #[serde(rename = "NATS")]
+    #[strum(serialize = "nats")]
+    Nats,
+    #[serde(rename = "NATSPubSub")]
+    #[strum(serialize = "nats_pubsub")]
+    NatsPubSub,
+
+    /// A queue type this version of mirrord does not know. Produced when an older operator reads
+    /// a config written by a newer client; it never comes from a user config, which `verify`
+    /// rejects with a clear error.
+    #[schemars(skip)]
+    #[serde(other)]
+    #[strum(serialize = "unknown")]
+    Unknown,
+}
+
+impl QueueKind {
+    /// Every broker kind a user can name in the config, in a stable order.
+    pub fn known() -> impl Iterator<Item = Self> {
+        Self::iter().filter(|kind| *kind != Self::Unknown)
+    }
+
+    /// Whether `payload_protobuf` makes sense for this broker: only Kafka carries raw protobuf
+    /// payloads the operator can decode before the jq filter runs.
+    fn supports_payload_protobuf(self) -> bool {
+        matches!(self, Self::Kafka)
+    }
+}
+
+/// ### feature.split_queues.{}.filter {#feature-split_queues-queue_id-filter}
+///
+/// A composable message filter, shaped like the HTTP `http_filter`: one `metadata` regex, or an
+/// `all_of` / `any_of` list of `metadata` regexes.
+///
+/// A `metadata` regex is matched against every message attribute (SQS message attributes, Kafka
+/// and RabbitMQ headers, Pub/Sub attributes, Service Bus application properties, Temporal task
+/// metadata, top-level JSON fields for Redis Pub/Sub and BullMQ) rendered as
+/// `<name>: <value>`, the same way the HTTP filter sees headers. The message matches when any
+/// attribute line matches, so one regex can target an attribute by name (`^tenant: blue$`) or
+/// a value wherever it appears (`.*mirrord-session={{ key }}.*`). Matching is case sensitive.
+///
+/// Use `filter` **or** the older `message_filter`, not both. `message_filter` is a map from an
+/// exact attribute name to a regex on its value, and is equivalent to an `all_of` of one
+/// `metadata` filter per entry.
+///
+/// ```json
+/// {
+///   "feature": {
+///     "split_queues": [
+///       {
+///         "queue_id": "*",
+///         "queue_type": "SQS",
+///         "filter": { "metadata": "^tenant: blue-.*$" }
+///       },
+///       {
+///         "queue_id": "*",
+///         "queue_type": "Temporal",
+///         "filter": {
+///           "any_of": [
+///             { "metadata": "^header.baggage: .*mirrord-session={{ key }}.*$" },
+///             { "metadata": "^header.test: .*mirrord-session={{ key }}.*$" }
+///           ]
+///         }
+///       }
+///     ]
+///   }
+/// }
+/// ```
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum MessageFilterConfig {
+    /// A regex matched against each message attribute rendered as `<name>: <value>`. Supports
+    /// the syntax of the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/)
+    /// crate.
+    Metadata { metadata: String },
+
+    /// The message must match every filter in the list. Cannot be empty.
+    AllOf {
+        #[schemars(length(min = 1))]
+        all_of: Vec<InnerMessageFilter>,
+    },
+
+    /// The message must match at least one filter in the list. Cannot be empty.
+    AnyOf {
+        #[schemars(length(min = 1))]
+        any_of: Vec<InnerMessageFilter>,
+    },
+}
+
+/// One filter inside `all_of` / `any_of`. Only `metadata` regexes for now; the list form leaves
+/// room for other leaf kinds without changing the shape.
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum InnerMessageFilter {
+    /// A regex matched against each message attribute rendered as `<name>: <value>`.
+    Metadata { metadata: String },
+}
+
+impl InnerMessageFilter {
+    fn verify(&self, queue_id: &str, path: &str) -> Result<(), QueueSplittingVerificationError> {
+        match self {
+            Self::Metadata { metadata } => verify_metadata_pattern(queue_id, path, metadata),
+        }
+    }
+}
+
+/// Rejects an empty pattern and one `fancy_regex` cannot compile. `path` is where the pattern
+/// sits in the config (for example `filter.any_of[1]`), so the error points at the entry to fix.
+fn verify_metadata_pattern(
+    queue_id: &str,
+    path: &str,
+    pattern: &str,
+) -> Result<(), QueueSplittingVerificationError> {
+    let path = format!("{path}.metadata");
+    if pattern.is_empty() {
+        return Err(QueueSplittingVerificationError::EmptyFilterPattern {
+            queue_name: queue_id.to_owned(),
+            path,
+        });
+    }
+    Regex::new(pattern).map(drop).map_err(|error| {
+        QueueSplittingVerificationError::InvalidRegex(queue_id.to_owned(), path, error.into())
+    })
+}
+
+impl MessageFilterConfig {
+    /// Checks every regex and rejects empty lists and patterns.
+    fn verify(&self, queue_id: &str, path: &str) -> Result<(), QueueSplittingVerificationError> {
+        match self {
+            Self::Metadata { metadata } => verify_metadata_pattern(queue_id, path, metadata),
+            Self::AllOf { all_of: filters } | Self::AnyOf { any_of: filters } => {
+                let list = match self {
+                    Self::AllOf { .. } => "all_of",
+                    _ => "any_of",
+                };
+                if filters.is_empty() {
+                    return Err(QueueSplittingVerificationError::EmptyCompositeFilter {
+                        queue_name: queue_id.to_owned(),
+                        path: format!("{path}.{list}"),
+                    });
+                }
+                filters.iter().enumerate().try_for_each(|(index, filter)| {
+                    filter.verify(queue_id, &format!("{path}.{list}[{index}]"))
+                })
+            }
+        }
+    }
+}
+
 /// The queue splitting configuration. Each entry pairs a queue id with a filter that decides which
 /// messages from the original queue are delivered to the local application, based on message
 /// attributes or headers, and possibly on jq filters (for SQS and other body-aware brokers).
 ///
-/// The queue ids have to match those defined in the `MirrordWorkloadQueueRegistry` for SQS and
-/// RabbitMQ or `MirrordKafkaTopicsConsumer` for Kafka.
+/// The queue ids have to match those defined in the target's `MirrordSplitConfig` (or the legacy
+/// `MirrordWorkloadQueueRegistry` / `MirrordKafkaTopicsConsumer`).
 ///
-/// Two shapes are accepted. The classic map form keys each filter by its queue id, which means a
+/// Two shapes are accepted. The classic map form keys each entry by its queue id, which means a
 /// given id can appear only once:
 ///
 /// ```json
@@ -68,7 +268,7 @@ impl QueueMode {
 ///     "split_queues": {
 ///       "first-queue": {
 ///         "queue_type": "SQS",
-///         "message_filter": { "wows": "so wows", "coolz": "^very" }
+///         "filter": { "metadata": "^wows: so wows$" }
 ///       },
 ///       "second-queue": {
 ///         "queue_type": "Kafka",
@@ -89,12 +289,12 @@ impl QueueMode {
 ///       {
 ///         "queue_id": "orders",
 ///         "queue_type": "SQS",
-///         "message_filter": { "region": "^eu" }
+///         "filter": { "metadata": "^region: eu" }
 ///       },
 ///       {
 ///         "queue_id": "orders",
 ///         "queue_type": "Kafka",
-///         "message_filter": { "region": "^us" }
+///         "filter": { "metadata": "^region: us" }
 ///       }
 ///     ]
 ///   }
@@ -103,30 +303,186 @@ impl QueueMode {
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub struct SplitQueuesConfig(Vec<QueueSplit>);
 
-/// A single queue splitting entry: the queue id together with its filter. Keeping the id next to
-/// the filter (instead of using it as a map key) is what lets the same id show up more than once,
-/// which a map cannot do.
+/// One queue to split: which broker it is on, which of its messages reach the local application,
+/// and what happens to those messages. The same struct backs both config shapes: in the list form
+/// it carries its `queue_id`, in the map form the id is the map key.
+///
+/// Adding a broker is one [`QueueKind`] variant; adding a filter option is one field here, read by
+/// every broker through the operator's shared filter code.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct QueueSplit {
-    /// The id of the queue to split. Does not have to be unique across entries.
+    /// ### feature.split_queues.{}.queue_id {#feature-split_queues-queue_id-queue_id}
+    ///
+    /// The id of the queue to split, as it appears in the target's split configuration. List form
+    /// only: in the map form the id is the key. Does not have to be unique across entries. Use
+    /// `*` to split every queue of the given `queue_type` with this filter.
+    ///
+    /// Empty only while a map-form entry is being read, before the key is copied in.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub queue_id: QueueId,
 
     /// Whether matched messages are stolen from the deployed application or mirrored to it.
     #[serde(default, skip_serializing_if = "QueueMode::is_steal")]
     pub queue_mode: QueueMode,
 
-    /// The filter for this queue, tagged by its `queue_type`.
-    #[serde(flatten)]
-    pub filter: QueueFilter,
+    /// The broker this queue lives on.
+    pub queue_type: QueueKind,
+
+    /// ### feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}
+    ///
+    /// The older filter shape: a mapping between message attribute (or header) names and regexes
+    /// their values should match. The local application only receives messages that have
+    /// **all** of the named attributes, each matching its pattern. Still supported; new configs
+    /// should prefer `filter`, which can also match attributes without naming them and compose
+    /// with `any_of` / `all_of`.
+    ///
+    /// For Temporal the names are `workflow_id`, `workflow_type`, `activity_type`,
+    /// `header.<name>`, or a search attribute key. For Redis Pub/Sub and BullMQ they are
+    /// top-level fields of the JSON payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_filter: Option<QueueMessageFilter>,
+
+    /// The composable filter. See `feature.split_queues.{}.filter`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<MessageFilterConfig>,
+
+    /// ### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
+    ///
+    /// When this field is specified, for each message, the jq filter runs on a JSON
+    /// representation of the message. If the jq program outputs `true`, that
+    /// message is considered as matching the filter. Combined with `filter` or
+    /// `message_filter`, a message must match both.
+    ///
+    /// For **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)
+    /// is used.
+    ///
+    /// For **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)
+    /// is used.
+    ///
+    /// For **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,
+    /// `payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8
+    /// strings, or base64-encoded when not valid UTF-8. With `payload_protobuf` set, the
+    /// object additionally has a `payload_decoded` field holding the payload decoded from
+    /// protobuf.
+    ///
+    /// For **RabbitMQ**, an object with `headers` (the AMQP basic-properties headers table),
+    /// `properties`, and `payload` fields is used. The `payload` and header values are UTF-8
+    /// strings, or base64-encoded when not valid UTF-8.
+    ///
+    /// For **Azure Service Bus**, an object with `body`, `application_properties`,
+    /// `message_id`, `content_type`, and `subject` fields is used.
+    ///
+    /// For **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose
+    /// payload is not valid JSON never match.
+    ///
+    /// For **Temporal**, an object the operator builds for each task is used. Every object has
+    /// a `task_type` field, set to either `"activity"` or `"workflow"`. Activity tasks also
+    /// carry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,
+    /// `activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).
+    /// Workflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,
+    /// `task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,
+    /// `search_attributes`, `memo`, and `input`.
+    ///
+    /// For **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not
+    /// valid JSON never match.
+    ///
+    /// For **NATS** and **NATSPubSub**, an object with `subject`, `headers`, and `payload`
+    /// fields is used. `payload` is the message body parsed as JSON when the body is JSON, and
+    /// a string otherwise (base64-encoded when not valid UTF-8). Unlike `NATS` (JetStream),
+    /// core NATS pub/sub stores nothing, so delivery to the local application is best-effort:
+    /// messages published while the split is being set up or torn down are not replayed.
+    ///
+    /// This can be used to filter messages based on their body content, for example.
+    ///
+    /// This filter, for example, will tell mirrord to only make available to this local
+    /// application messages with a json in the message body, with a `customer_email` field
+    /// that contains "metalbear.com": `".Body | fromjson | .customer_email |
+    /// test(\"metalbear\\\\.com\")"`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jq_filter: Option<String>,
+
+    /// Decodes the raw protobuf payload into a `payload_decoded` field for `jq_filter`, for
+    /// Kafka topics that carry plain protobuf instead of JSON. See
+    /// `feature.split_queues.{}.payload_protobuf`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_protobuf: Option<KafkaPayloadProtobuf>,
 }
 
-impl From<(QueueId, QueueFilter)> for QueueSplit {
-    fn from((queue_id, filter): (QueueId, QueueFilter)) -> Self {
+impl QueueSplit {
+    /// A split of `queue_id` on `queue_type` with no filter, which delivers nothing to the local
+    /// application until a filter is set.
+    pub fn new(queue_id: impl Into<QueueId>, queue_type: QueueKind) -> Self {
         Self {
-            queue_id,
+            queue_id: queue_id.into(),
             queue_mode: QueueMode::default(),
-            filter,
+            queue_type,
+            message_filter: None,
+            filter: None,
+            jq_filter: None,
+            payload_protobuf: None,
         }
+    }
+
+    /// Whether this entry uses the composable `filter` shape, which older operators cannot read.
+    pub fn has_composed_filter(&self) -> bool {
+        self.filter.is_some()
+    }
+
+    fn verify(&self) -> Result<(), QueueSplittingVerificationError> {
+        let queue_name = &self.queue_id;
+
+        if self.queue_type == QueueKind::Unknown {
+            return Err(QueueSplittingVerificationError::UnknownQueueType(
+                queue_name.clone(),
+            ));
+        }
+
+        if self.message_filter.is_some() && self.filter.is_some() {
+            return Err(QueueSplittingVerificationError::FilterShapeConflict(
+                queue_name.clone(),
+            ));
+        }
+
+        if let Some(message_filter) = &self.message_filter {
+            for (name, pattern) in message_filter {
+                Regex::new(pattern).map_err(|error| {
+                    QueueSplittingVerificationError::InvalidRegex(
+                        queue_name.clone(),
+                        format!("message_filter.{name}"),
+                        error.into(),
+                    )
+                })?;
+            }
+        }
+
+        if let Some(filter) = &self.filter {
+            filter.verify(queue_name, "filter")?;
+        }
+
+        if let Some(jq_filter) = &self.jq_filter {
+            SplitQueuesConfig::verify_jq_program(queue_name, jq_filter)?;
+        }
+
+        if self.payload_protobuf.is_some() {
+            if !self.queue_type.supports_payload_protobuf() {
+                return Err(
+                    QueueSplittingVerificationError::ProtobufOnUnsupportedQueueType {
+                        queue_name: queue_name.clone(),
+                        queue_type: self.queue_type,
+                    },
+                );
+            }
+            // The decoded payload is only ever consumed by the jq program, so a protobuf config
+            // with no jq filter would silently decode into nothing.
+            if self.jq_filter.is_none() {
+                return Err(QueueSplittingVerificationError::ProtobufWithoutJqFilter(
+                    queue_name.clone(),
+                ));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -153,93 +509,32 @@ impl SplitQueuesConfig {
     /// gets handled by the operator instead.
     ///
     /// Queue types the operator has disabled are dropped on its side instead of failing the
-    /// session, so listing all of them here is safe.
+    /// session, so listing all of them here is safe. Core NATS pub/sub is left out on purpose:
+    /// its delivery is best-effort, so it is only split when the user asks for it.
     pub fn all_wildcard_with_mode(key: &EnvKey, queue_mode: QueueMode) -> Self {
-        let sqs_jq_filter = Self::session_key_string_value_jq(".MessageAttributes", key);
-        let kafka_jq_filter = Self::session_key_string_value_jq(".headers", key);
-        let rmq_jq_filter = Self::session_key_string_value_jq(".headers", key);
-        let gcp_pubsub_jq_filter = Self::session_key_string_value_jq(".attributes", key);
-        let azure_service_bus_jq_filter =
-            Self::session_key_string_value_jq(".application_properties", key);
-        let temporal_jq_filter = Self::session_key_string_value_jq(".header", key);
-        let nats_jq_filter = Self::session_key_string_value_jq(".headers", key);
-        let payload_jq_filter = Self::session_key_string_value_jq(".", key);
+        // Each broker's jq selector points at the metadata object the session marker is
+        // propagated through.
+        const SESSION_MARKER_SELECTORS: [(QueueKind, &str); 9] = [
+            (QueueKind::Sqs, ".MessageAttributes"),
+            (QueueKind::Kafka, ".headers"),
+            (QueueKind::Rmq, ".headers"),
+            (QueueKind::GcpPubSub, ".attributes"),
+            (QueueKind::AzureServiceBus, ".application_properties"),
+            (QueueKind::RedisPubSub, "."),
+            (QueueKind::Temporal, ".header"),
+            (QueueKind::BullMq, "."),
+            (QueueKind::Nats, ".headers"),
+        ];
 
-        Self::from_splits([
-            QueueSplit {
-                queue_id: "*".to_owned(),
-                filter: QueueFilter::Sqs {
-                    message_filter: None,
-                    jq_filter: Some(sqs_jq_filter),
-                },
-                queue_mode,
-            },
-            QueueSplit {
-                queue_id: "*".to_owned(),
-                filter: QueueFilter::Kafka {
-                    message_filter: None,
-                    jq_filter: Some(kafka_jq_filter),
-                    payload_protobuf: None,
-                },
-                queue_mode,
-            },
-            QueueSplit {
-                queue_id: "*".to_owned(),
-                filter: QueueFilter::Rmq {
-                    message_filter: None,
-                    jq_filter: Some(rmq_jq_filter),
-                },
-                queue_mode,
-            },
-            QueueSplit {
-                queue_id: "*".to_owned(),
-                filter: QueueFilter::GcpPubSub {
-                    message_filter: None,
-                    jq_filter: Some(gcp_pubsub_jq_filter),
-                },
-                queue_mode,
-            },
-            QueueSplit {
-                queue_id: "*".to_owned(),
-                filter: QueueFilter::AzureServiceBus {
-                    message_filter: None,
-                    jq_filter: Some(azure_service_bus_jq_filter),
-                },
-                queue_mode,
-            },
-            QueueSplit {
-                queue_id: "*".to_owned(),
-                filter: QueueFilter::RedisPubSub {
-                    message_filter: None,
-                    jq_filter: Some(payload_jq_filter.clone()),
-                },
-                queue_mode,
-            },
-            QueueSplit {
-                queue_id: "*".to_owned(),
-                filter: QueueFilter::Temporal {
-                    message_filter: None,
-                    jq_filter: Some(temporal_jq_filter),
-                },
-                queue_mode,
-            },
-            QueueSplit {
-                queue_id: "*".to_owned(),
-                filter: QueueFilter::BullMq {
-                    message_filter: None,
-                    jq_filter: Some(payload_jq_filter),
-                },
-                queue_mode,
-            },
-            QueueSplit {
-                queue_id: "*".to_owned(),
-                filter: QueueFilter::Nats {
-                    message_filter: None,
-                    jq_filter: Some(nats_jq_filter),
-                },
-                queue_mode,
-            },
-        ])
+        Self::from_splits(
+            SESSION_MARKER_SELECTORS
+                .into_iter()
+                .map(|(queue_type, selector)| QueueSplit {
+                    queue_mode,
+                    jq_filter: Some(Self::session_key_string_value_jq(selector, key)),
+                    ..QueueSplit::new("*", queue_type)
+                }),
+        )
     }
 
     /// Builds the automatic queue-splitting jq filter used by `mirrord up`.
@@ -273,316 +568,27 @@ impl SplitQueuesConfig {
         &self.0
     }
 
+    /// The entries for one broker kind.
+    pub fn of_kind(&self, kind: QueueKind) -> impl Iterator<Item = &QueueSplit> {
+        self.0.iter().filter(move |split| split.queue_type == kind)
+    }
+
+    /// Every broker kind that has at least one entry.
+    pub fn kinds(&self) -> BTreeSet<QueueKind> {
+        self.0.iter().map(|split| split.queue_type).collect()
+    }
+
+    /// Whether any entry uses the composable `filter` shape, which older operators cannot read.
+    pub fn uses_composed_filters(&self) -> bool {
+        self.0.iter().any(QueueSplit::has_composed_filter)
+    }
+
     /// Queue ids whose mode is not the default `steal`, paired with their mode. Only these need to
     /// be sent to the operator; everything else is `steal`.
     pub fn queue_modes(&self) -> impl Iterator<Item = (&str, QueueMode)> {
         self.0.iter().filter_map(|split| {
             (!split.queue_mode.is_steal()).then_some((split.queue_id.as_str(), split.queue_mode))
         })
-    }
-
-    /// Get all the SQS queue ids from the config.
-    pub fn sqs_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Sqs { .. } => Some(split.queue_id.as_str()),
-            _ => None,
-        })
-    }
-
-    /// Out of the whole queue splitting config, get only the sqs message attribute filters.
-    pub fn sqs(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Sqs {
-                message_filter: Some(message_filter),
-                ..
-            } => Some((split.queue_id.as_str(), message_filter)),
-            _ => None,
-        })
-    }
-
-    /// Out of the whole queue splitting config, get only the sqs jq filters.
-    pub fn sqs_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Sqs {
-                jq_filter: Some(jq),
-                ..
-            } => Some((split.queue_id.as_str(), jq.as_str())),
-            _ => None,
-        })
-    }
-
-    /// Get all the Kafka queue ids from the config.
-    pub fn kafka_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Kafka { .. } => Some(split.queue_id.as_str()),
-            _ => None,
-        })
-    }
-
-    /// Out of the whole queue splitting config, get only the kafka message header filters.
-    pub fn kafka(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Kafka {
-                message_filter: Some(message_filter),
-                ..
-            } => Some((split.queue_id.as_str(), message_filter)),
-            _ => None,
-        })
-    }
-
-    /// Out of the whole queue splitting config, get only the kafka jq filters.
-    pub fn kafka_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Kafka {
-                jq_filter: Some(jq),
-                ..
-            } => Some((split.queue_id.as_str(), jq.as_str())),
-            _ => None,
-        })
-    }
-
-    /// Out of the whole queue splitting config, get only the kafka protobuf payload decoding
-    /// configs.
-    pub fn kafka_payload_protobuf(&self) -> impl Iterator<Item = (&str, &KafkaPayloadProtobuf)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Kafka {
-                payload_protobuf: Some(protobuf),
-                ..
-            } => Some((split.queue_id.as_str(), protobuf)),
-            _ => None,
-        })
-    }
-
-    pub fn rmq(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Rmq {
-                message_filter: Some(message_filter),
-                ..
-            } => Some((split.queue_id.as_str(), message_filter)),
-            _ => None,
-        })
-    }
-
-    pub fn rmq_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Rmq {
-                jq_filter: Some(jq),
-                ..
-            } => Some((split.queue_id.as_str(), jq.as_str())),
-            _ => None,
-        })
-    }
-
-    pub fn rmq_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Rmq { .. } => Some(split.queue_id.as_str()),
-            _ => None,
-        })
-    }
-
-    pub fn gcp_pubsub(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::GcpPubSub {
-                message_filter: Some(message_filter),
-                ..
-            } => Some((split.queue_id.as_str(), message_filter)),
-            _ => None,
-        })
-    }
-
-    pub fn gcp_pubsub_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::GcpPubSub {
-                jq_filter: Some(jq),
-                ..
-            } => Some((split.queue_id.as_str(), jq.as_str())),
-            _ => None,
-        })
-    }
-
-    pub fn gcp_pubsub_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::GcpPubSub { .. } => Some(split.queue_id.as_str()),
-            _ => None,
-        })
-    }
-
-    pub fn azure_service_bus(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::AzureServiceBus {
-                message_filter: Some(message_filter),
-                ..
-            } => Some((split.queue_id.as_str(), message_filter)),
-            _ => None,
-        })
-    }
-
-    pub fn azure_service_bus_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::AzureServiceBus {
-                jq_filter: Some(jq),
-                ..
-            } => Some((split.queue_id.as_str(), jq.as_str())),
-            _ => None,
-        })
-    }
-
-    pub fn azure_service_bus_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::AzureServiceBus { .. } => Some(split.queue_id.as_str()),
-            _ => None,
-        })
-    }
-
-    pub fn redis_pubsub(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::RedisPubSub {
-                message_filter: Some(message_filter),
-                ..
-            } => Some((split.queue_id.as_str(), message_filter)),
-            _ => None,
-        })
-    }
-
-    pub fn temporal(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Temporal {
-                message_filter: Some(message_filter),
-                ..
-            } => Some((split.queue_id.as_str(), message_filter)),
-            _ => None,
-        })
-    }
-
-    pub fn redis_pubsub_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::RedisPubSub {
-                jq_filter: Some(jq),
-                ..
-            } => Some((split.queue_id.as_str(), jq.as_str())),
-            _ => None,
-        })
-    }
-
-    pub fn temporal_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Temporal {
-                jq_filter: Some(jq),
-                ..
-            } => Some((split.queue_id.as_str(), jq.as_str())),
-            _ => None,
-        })
-    }
-
-    pub fn redis_pubsub_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::RedisPubSub { .. } => Some(split.queue_id.as_str()),
-            _ => None,
-        })
-    }
-
-    pub fn temporal_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Temporal { .. } => Some(split.queue_id.as_str()),
-            _ => None,
-        })
-    }
-
-    pub fn bullmq(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::BullMq {
-                message_filter: Some(message_filter),
-                ..
-            } => Some((split.queue_id.as_str(), message_filter)),
-            _ => None,
-        })
-    }
-
-    pub fn bullmq_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::BullMq {
-                jq_filter: Some(jq),
-                ..
-            } => Some((split.queue_id.as_str(), jq.as_str())),
-            _ => None,
-        })
-    }
-
-    pub fn bullmq_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::BullMq { .. } => Some(split.queue_id.as_str()),
-            _ => None,
-        })
-    }
-
-    pub fn nats(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Nats {
-                message_filter: Some(message_filter),
-                ..
-            } => Some((split.queue_id.as_str(), message_filter)),
-            _ => None,
-        })
-    }
-
-    pub fn nats_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Nats {
-                jq_filter: Some(jq),
-                ..
-            } => Some((split.queue_id.as_str(), jq.as_str())),
-            _ => None,
-        })
-    }
-
-    pub fn nats_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::Nats { .. } => Some(split.queue_id.as_str()),
-            _ => None,
-        })
-    }
-
-    pub fn nats_pubsub(&self) -> impl Iterator<Item = (&str, &QueueMessageFilter)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::NatsPubSub {
-                message_filter: Some(message_filter),
-                ..
-            } => Some((split.queue_id.as_str(), message_filter)),
-            _ => None,
-        })
-    }
-
-    pub fn nats_pubsub_jq_filters(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::NatsPubSub {
-                jq_filter: Some(jq),
-                ..
-            } => Some((split.queue_id.as_str(), jq.as_str())),
-            _ => None,
-        })
-    }
-
-    pub fn nats_pubsub_queues(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|split| match &split.filter {
-            QueueFilter::NatsPubSub { .. } => Some(split.queue_id.as_str()),
-            _ => None,
-        })
-    }
-
-    fn verify_message_attribute_filter(
-        queue_id: &QueueId,
-        filter: &QueueMessageFilter,
-    ) -> Result<(), QueueSplittingVerificationError> {
-        for (name, pattern) in filter {
-            Regex::new(pattern).map_err(|error| {
-                QueueSplittingVerificationError::InvalidRegex(
-                    queue_id.clone(),
-                    name.clone(),
-                    error.into(),
-                )
-            })?;
-        }
-        Ok(())
     }
 
     fn verify_jq_program(
@@ -601,80 +607,7 @@ impl SplitQueuesConfig {
         &self,
         _context: &mut ConfigContext,
     ) -> Result<(), QueueSplittingVerificationError> {
-        for split in &self.0 {
-            let queue_name = &split.queue_id;
-            match &split.filter {
-                QueueFilter::Sqs {
-                    message_filter,
-                    jq_filter,
-                }
-                | QueueFilter::GcpPubSub {
-                    message_filter,
-                    jq_filter,
-                }
-                | QueueFilter::AzureServiceBus {
-                    message_filter,
-                    jq_filter,
-                }
-                | QueueFilter::RedisPubSub {
-                    message_filter,
-                    jq_filter,
-                }
-                | QueueFilter::Temporal {
-                    message_filter,
-                    jq_filter,
-                }
-                | QueueFilter::BullMq {
-                    message_filter,
-                    jq_filter,
-                }
-                | QueueFilter::Nats {
-                    message_filter,
-                    jq_filter,
-                }
-                | QueueFilter::NatsPubSub {
-                    message_filter,
-                    jq_filter,
-                }
-                | QueueFilter::Rmq {
-                    message_filter,
-                    jq_filter,
-                } => {
-                    if let Some(filter) = message_filter {
-                        Self::verify_message_attribute_filter(queue_name, filter)?;
-                    }
-                    if let Some(jq_filter) = jq_filter {
-                        Self::verify_jq_program(queue_name, jq_filter)?;
-                    }
-                }
-                QueueFilter::Kafka {
-                    message_filter,
-                    jq_filter,
-                    payload_protobuf,
-                } => {
-                    if let Some(filter) = message_filter {
-                        Self::verify_message_attribute_filter(queue_name, filter)?;
-                    }
-                    if let Some(jq_filter) = jq_filter {
-                        Self::verify_jq_program(queue_name, jq_filter)?;
-                    }
-                    // The decoded payload is only ever consumed by the jq program, so a
-                    // protobuf config with no jq filter would silently decode into nothing.
-                    if payload_protobuf.is_some() && jq_filter.is_none() {
-                        return Err(QueueSplittingVerificationError::ProtobufWithoutJqFilter(
-                            queue_name.clone(),
-                        ));
-                    }
-                }
-                QueueFilter::Unknown => {
-                    return Err(QueueSplittingVerificationError::UnknownQueueType(
-                        queue_name.clone(),
-                    ));
-                }
-            }
-        }
-
-        Ok(())
+        self.0.iter().try_for_each(QueueSplit::verify)
     }
 }
 
@@ -695,37 +628,15 @@ impl Serialize for SplitQueuesConfig {
 
         let mut map = serializer.serialize_map(Some(self.0.len()))?;
         for split in &self.0 {
-            map.serialize_entry(
-                &split.queue_id,
-                &QueueSplitMapValue {
-                    queue_mode: split.queue_mode,
-                    filter: &split.filter,
-                },
-            )?;
+            // The id is the map key, so the value is the entry without it.
+            let value = QueueSplit {
+                queue_id: QueueId::new(),
+                ..split.clone()
+            };
+            map.serialize_entry(&split.queue_id, &value)?;
         }
         map.end()
     }
-}
-
-/// The value side of the map form: a filter tagged by `queue_type`, plus the optional
-/// `queue_mode`. Keeping `queue_mode` here (rather than next to the queue id key) means the map and
-/// list forms accept the same per-queue fields.
-#[derive(Serialize)]
-struct QueueSplitMapValue<'a> {
-    #[serde(skip_serializing_if = "QueueMode::is_steal")]
-    queue_mode: QueueMode,
-    #[serde(flatten)]
-    filter: &'a QueueFilter,
-}
-
-/// Owned counterpart of [`QueueSplitMapValue`] used when reading the map form. Also drives the
-/// JSON schema for the map value so `queue_mode` is documented alongside the filter.
-#[derive(Deserialize, JsonSchema)]
-struct QueueSplitMapValueOwned {
-    #[serde(default, skip_serializing_if = "QueueMode::is_steal")]
-    queue_mode: QueueMode,
-    #[serde(flatten)]
-    filter: QueueFilter,
 }
 
 impl<'de> Deserialize<'de> for SplitQueuesConfig {
@@ -749,14 +660,15 @@ impl<'de> Deserialize<'de> for SplitQueuesConfig {
                 A: MapAccess<'de>,
             {
                 let mut splits = Vec::with_capacity(map.size_hint().unwrap_or(0));
-                while let Some((queue_id, value)) =
-                    map.next_entry::<QueueId, QueueSplitMapValueOwned>()?
-                {
-                    splits.push(QueueSplit {
-                        queue_id,
-                        queue_mode: value.queue_mode,
-                        filter: value.filter,
-                    });
+                while let Some((queue_id, mut split)) = map.next_entry::<QueueId, QueueSplit>()? {
+                    if !split.queue_id.is_empty() {
+                        return Err(de::Error::custom(format!(
+                            "split_queues.{queue_id}: `queue_id` is the map key here, use the \
+                             list form to put it inside the entry"
+                        )));
+                    }
+                    split.queue_id = queue_id;
+                    splits.push(split);
                 }
                 Ok(SplitQueuesConfig(splits))
             }
@@ -767,6 +679,12 @@ impl<'de> Deserialize<'de> for SplitQueuesConfig {
             {
                 let mut splits = Vec::with_capacity(seq.size_hint().unwrap_or(0));
                 while let Some(split) = seq.next_element::<QueueSplit>()? {
+                    if split.queue_id.is_empty() {
+                        return Err(de::Error::custom(format!(
+                            "split_queues[{}]: missing `queue_id`",
+                            splits.len()
+                        )));
+                    }
                     splits.push(split);
                 }
                 Ok(SplitQueuesConfig(splits))
@@ -783,17 +701,30 @@ impl JsonSchema for SplitQueuesConfig {
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        let map_value = generator
-            .subschema_for::<QueueSplitMapValueOwned>()
-            .to_value();
-        let split = generator.subschema_for::<QueueSplit>().to_value();
+        // Both shapes are the same entry schema; the list form requires the id inside the entry,
+        // the map form has it as the key and must not repeat it inside.
+        let mut list_entry = QueueSplit::json_schema(generator);
+        if let Some(required) = list_entry
+            .get_mut("required")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            required.push("queue_id".into());
+        }
+
+        let mut map_value = QueueSplit::json_schema(generator);
+        if let Some(properties) = map_value
+            .get_mut("properties")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            properties.remove("queue_id");
+        }
 
         let mut schema = schemars::json_schema!({});
         schema.insert(
             "anyOf".to_owned(),
             serde_json::json!([
-                { "type": "object", "additionalProperties": map_value },
-                { "type": "array", "items": split },
+                { "type": "object", "additionalProperties": map_value.to_value() },
+                { "type": "array", "items": list_entry.to_value() },
             ]),
         );
         schema
@@ -811,11 +742,7 @@ impl MirrordConfig for SplitQueuesConfig {
         // `.proto` files can only be resolved against the local filesystem. Everything
         // downstream (connect params, the copy-target CRD) carries the compiled descriptor.
         for split in &mut self.0 {
-            if let QueueFilter::Kafka {
-                payload_protobuf: Some(protobuf),
-                ..
-            } = &mut split.filter
-            {
+            if let Some(protobuf) = &mut split.payload_protobuf {
                 protobuf.resolve_descriptor(&split.queue_id)?;
             }
         }
@@ -826,8 +753,6 @@ impl MirrordConfig for SplitQueuesConfig {
 impl FromMirrordConfig for SplitQueuesConfig {
     type Generator = Self;
 }
-
-pub type QueueMessageFilter = BTreeMap<String, String>;
 
 /// ### feature.split_queues.{}.payload_protobuf {#feature-split_queues-queue_id-payload_protobuf}
 ///
@@ -982,328 +907,37 @@ impl KafkaPayloadProtobuf {
     }
 }
 
-/// ### feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}
-///
-/// For each queue, `message_filter` is a mapping between message attribute names and regexes they
-/// should match. The local application will only receive messages that match **all** of the given
-/// patterns. This means, only messages that have **all** of the attributes in the
-/// filter, with values of those attributes matching the respective patterns.
-///
-/// ### feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}
-///
-/// The type of queue to be split, currently `SQS` and `Kafka` are supported. More queue types might
-/// be added in the future.
-#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema, EnumDiscriminants)]
-#[serde(tag = "queue_type", deny_unknown_fields)]
-#[strum_discriminants(name(QueueKind))]
-#[strum_discriminants(derive(Hash, PartialOrd, Ord, EnumIter))]
-pub enum QueueFilter {
-    /// ### feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}
-    /// When this field is specified, for each message, the jq filter runs on a JSON
-    /// representation of the message. If the jq program outputs `true`, that
-    /// message is considered as matching the filter.
-    ///
-    /// For **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)
-    /// is used.
-    ///
-    /// For **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)
-    /// is used.
-    ///
-    /// For **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,
-    /// `payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8
-    /// strings, or base64-encoded when not valid UTF-8. With `payload_protobuf` set, the
-    /// object additionally has a `payload_decoded` field holding the payload decoded from
-    /// protobuf.
-    ///
-    /// For **RabbitMQ**, an object with `headers` (the AMQP basic-properties headers table),
-    /// `properties`, and `payload` fields is used. The `payload` and header values are UTF-8
-    /// strings, or base64-encoded when not valid UTF-8.
-    ///
-    /// For **Azure Service Bus**, an object with `body`, `application_properties`,
-    /// `message_id`, `content_type`, and `subject` fields is used.
-    ///
-    /// For **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose
-    /// payload is not valid JSON never match.
-    ///
-    /// For **Temporal**, an object the operator builds for each task is used. Every object has
-    /// a `task_type` field, set to either `"activity"` or `"workflow"`. Activity tasks also
-    /// carry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,
-    /// `activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).
-    /// Workflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,
-    /// `task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,
-    /// `search_attributes`, `memo`, and `input`.
-    ///
-    /// For **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not
-    /// valid JSON never match.
-    ///
-    /// For **NATS**, an object with `subject`, `headers`, and `payload` fields is used.
-    /// `payload` is the message body parsed as JSON when the body is JSON, and a string
-    /// otherwise (base64-encoded when not valid UTF-8).
-    ///
-    /// This can be used to filter messages based on their body content, for example.
-    ///
-    ///
-    /// This filter, for example, will tell mirrord to only make available to this local application
-    /// messages with a json in the message body, with a `customer_email` field that contains
-    /// "metalbear.com": `".Body | fromjson | .customer_email | test(\"metalbear\\\\.com\")"`
-    #[serde(rename = "SQS")]
-    Sqs {
-        /// A filter is a mapping between message attribute names and regexes they should match.
-        /// The local application will only receive messages that match **all** of the given
-        /// patterns. This means, only messages that have **all** of the attributes in the
-        /// filter, with values of those attributes matching the respective patterns.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        message_filter: Option<QueueMessageFilter>,
-
-        /// A jq filter.
-        ///
-        /// When this is specified, for each SQS message, the jq filter runs on a JSON
-        /// representation of the SQS `Message` object.
-        ///
-        /// See [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).
-        ///
-        /// If the jq program outputs `true`, that message is considered as matching the filter.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        jq_filter: Option<String>,
-    },
-
-    #[serde(rename = "Kafka")]
-    Kafka {
-        /// A filter is a mapping between message header names and regexes they should match.
-        /// The local application will only receive messages that match **all** of the given
-        /// patterns. This means, only messages that have **all** of the headers in the
-        /// filter, with values of those headers matching the respective patterns.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        message_filter: Option<QueueMessageFilter>,
-
-        /// A jq filter.
-        ///
-        /// When this is specified, for each Kafka message, the jq filter runs on a JSON
-        /// representation of the message record: an object with `topic`, `partition`, `offset`,
-        /// `timestamp` (milliseconds, present when the record has one), `key`, `payload`, and
-        /// `headers` (an object mapping header names to their values) fields. `key`, `payload`,
-        /// and header values are UTF-8 strings, or base64-encoded when not valid UTF-8.
-        ///
-        /// If the jq program outputs `true`, that message is considered as matching the filter.
-        ///
-        /// For example, `".payload | fromjson | .customer_id == 2137"` matches messages whose
-        /// payload is a JSON object with a `customer_id` field equal to `2137`.
-        ///
-        /// When `payload_protobuf` is set, the object additionally has a `payload_decoded`
-        /// field holding the payload decoded from protobuf, so the program can target schema
-        /// fields directly, e.g. `".payload_decoded.merchant_id == 2137"`.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        jq_filter: Option<String>,
-
-        /// Decodes the raw protobuf payload into a `payload_decoded` field for `jq_filter`,
-        /// for topics that carry plain protobuf instead of JSON.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        payload_protobuf: Option<KafkaPayloadProtobuf>,
-    },
-
-    #[serde(rename = "RMQ")]
-    Rmq {
-        /// A filter is a mapping between message header names and regexes they should match.
-        /// The local application will only receive messages that match **all** of the given
-        /// patterns. This means, only messages that have **all** of the headers in the
-        /// filter, with values of those headers matching the respective patterns.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        message_filter: Option<QueueMessageFilter>,
-
-        /// A jq filter.
-        ///
-        /// When this is specified, for each RabbitMQ message, the jq filter runs on a JSON
-        /// representation of the message: an object with `headers` (the AMQP basic-properties
-        /// headers table), `properties` (the remaining basic properties), and `payload` fields.
-        /// The `payload` and header values are UTF-8 strings, or base64-encoded when not valid
-        /// UTF-8.
-        ///
-        /// If the jq program outputs `true`, that message is considered as matching the filter.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        jq_filter: Option<String>,
-    },
-
-    #[serde(rename = "GCPPubSub")]
-    GcpPubSub {
-        /// A filter is a mapping between Pub/Sub message attribute names and regexes they
-        /// should match. The local application will only receive messages whose attributes
-        /// match **all** of the given patterns.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        message_filter: Option<QueueMessageFilter>,
-
-        /// A jq filter.
-        ///
-        /// When this is specified, for each Pub/Sub message, the jq filter runs on a JSON
-        /// representation of the full
-        /// [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)
-        /// object.
-        ///
-        /// If the jq program outputs `true`, that message is considered as matching the filter.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        jq_filter: Option<String>,
-    },
-
-    #[serde(rename = "RedisPubSub")]
-    RedisPubSub {
-        /// A filter is a mapping between top-level JSON field names and regexes they
-        /// should match. The local application will only receive messages whose JSON
-        /// payload contains fields matching **all** of the given patterns.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        message_filter: Option<QueueMessageFilter>,
-
-        /// A jq filter that runs on the JSON representation of the message payload.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        jq_filter: Option<String>,
-    },
-
-    #[serde(rename = "AzureServiceBus")]
-    AzureServiceBus {
-        /// A filter is a mapping between Azure Service Bus application property names and
-        /// regexes they should match. The local application will only receive messages whose
-        /// application properties match **all** of the given patterns.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        message_filter: Option<QueueMessageFilter>,
-
-        /// A jq filter.
-        ///
-        /// When this is specified, for each Service Bus message, the jq filter runs on a JSON
-        /// object with `body`, `application_properties`, `message_id`, `content_type`, and
-        /// `subject` fields.
-        ///
-        /// If the jq program outputs `true`, that message is considered as matching the filter.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        jq_filter: Option<String>,
-    },
-
-    #[serde(rename = "Temporal")]
-    Temporal {
-        /// Regex filters on Temporal task metadata (`workflow_id`, `workflow_type`,
-        /// `activity_type`, or custom search attribute keys). All patterns must match.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        message_filter: Option<QueueMessageFilter>,
-
-        /// JQ filter on activity task input JSON. Workflow tasks ignore this filter.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        jq_filter: Option<String>,
-    },
-
-    #[serde(rename = "BullMQ")]
-    BullMq {
-        /// A filter on top-level JSON fields in the job's `data` payload and regexes
-        /// they should match. Only jobs whose data contains fields matching **all**
-        /// patterns are delivered to the local application.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        message_filter: Option<QueueMessageFilter>,
-
-        /// A jq filter that runs on the JSON representation of the job's `data` payload.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        jq_filter: Option<String>,
-    },
-
-    #[serde(rename = "NATS")]
-    Nats {
-        /// A filter is a mapping between NATS message header names and regexes they should
-        /// match. The local application will only receive messages whose headers match
-        /// **all** of the given patterns.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        message_filter: Option<QueueMessageFilter>,
-
-        /// A jq filter.
-        ///
-        /// When this is specified, for each NATS message, the jq filter runs on a JSON
-        /// object with `subject`, `headers`, and `payload` fields. `payload` is the message
-        /// body parsed as JSON when the body is JSON, and a string otherwise.
-        ///
-        /// If the jq program outputs `true`, that message is considered as matching the
-        /// filter.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        jq_filter: Option<String>,
-    },
-
-    #[serde(rename = "NATSPubSub")]
-    NatsPubSub {
-        /// A filter is a mapping between NATS message header names and regexes they should
-        /// match. The local application will only receive messages whose headers match
-        /// **all** of the given patterns.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        message_filter: Option<QueueMessageFilter>,
-
-        /// A jq filter.
-        ///
-        /// When this is specified, for each NATS message, the jq filter runs on a JSON
-        /// object with `subject`, `headers`, and `payload` fields. `payload` is the message
-        /// body parsed as JSON when the body is JSON, and a string otherwise.
-        ///
-        /// If the jq program outputs `true`, that message is considered as matching the
-        /// filter.
-        ///
-        /// Unlike `NATS` (JetStream), core NATS pub/sub stores nothing, so delivery to the
-        /// local application is best-effort: messages published while the split is being set
-        /// up or torn down are not replayed.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        jq_filter: Option<String>,
-    },
-
-    // When a newer client sends a new filter kind to an older operator, that does not yet know
-    // about that filter type, the filter will be deserialized to unknown.
-    #[schemars(skip)]
-    #[serde(other, skip_serializing)]
-    Unknown,
-}
-
 impl CollectAnalytics for &SplitQueuesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
-        analytics.add("sqs_queue_count", self.sqs_queues().count());
+        for kind in QueueKind::known() {
+            let splits: Vec<_> = self.of_kind(kind).collect();
+            analytics.add(format!("{kind}_queue_count"), splits.len());
+            analytics.add(
+                format!("{kind}_jq_filter_count"),
+                splits.iter().filter(|s| s.jq_filter.is_some()).count(),
+            );
+        }
         // The number of SQS queues filtered with message attribute filters.
-        analytics.add("sqs_message_attr_filter_queue_count", self.sqs().count());
-        // The number of SQS queues filtered with jq filters.
-        analytics.add("sqs_jq_filter_count", self.sqs_jq_filters().count());
-        analytics.add("kafka_queue_count", self.kafka_queues().count());
-        // The number of Kafka queues filtered with jq filters.
-        analytics.add("kafka_jq_filter_count", self.kafka_jq_filters().count());
-        analytics.add("rmq_queue_count", self.rmq_queues().count());
-        // The number of RabbitMQ queues filtered with jq filters.
-        analytics.add("rmq_jq_filter_count", self.rmq_jq_filters().count());
+        analytics.add(
+            "sqs_message_attr_filter_queue_count",
+            self.of_kind(QueueKind::Sqs)
+                .filter(|s| s.message_filter.is_some())
+                .count(),
+        );
         // The number of Kafka queues with protobuf payload decoding.
         analytics.add(
             "kafka_protobuf_decoding_count",
-            self.kafka_payload_protobuf().count(),
+            self.of_kind(QueueKind::Kafka)
+                .filter(|s| s.payload_protobuf.is_some())
+                .count(),
         );
-        analytics.add("gcp_pubsub_queue_count", self.gcp_pubsub_queues().count());
+        // The number of queues using the composable `filter` shape, across brokers.
         analytics.add(
-            "gcp_pubsub_jq_filter_count",
-            self.gcp_pubsub_jq_filters().count(),
-        );
-        analytics.add(
-            "azure_service_bus_queue_count",
-            self.azure_service_bus_queues().count(),
-        );
-        analytics.add(
-            "azure_service_bus_jq_filter_count",
-            self.azure_service_bus_jq_filters().count(),
-        );
-
-        analytics.add(
-            "redis_pubsub_queue_count",
-            self.redis_pubsub_queues().count(),
-        );
-        analytics.add(
-            "redis_pubsub_jq_filter_count",
-            self.redis_pubsub_jq_filters().count(),
-        );
-        analytics.add("temporal_queue_count", self.temporal_queues().count());
-        analytics.add(
-            "temporal_jq_filter_count",
-            self.temporal_jq_filters().count(),
-        );
-        analytics.add("bullmq_queue_count", self.bullmq_queues().count());
-        analytics.add("bullmq_jq_filter_count", self.bullmq_jq_filters().count());
-        analytics.add("nats_queue_count", self.nats_queues().count());
-        analytics.add("nats_jq_filter_count", self.nats_jq_filters().count());
-        analytics.add("nats_pubsub_queue_count", self.nats_pubsub_queues().count());
-        analytics.add(
-            "nats_pubsub_jq_filter_count",
-            self.nats_pubsub_jq_filters().count(),
+            "composed_filter_queue_count",
+            self.splits()
+                .iter()
+                .filter(|s| s.has_composed_filter())
+                .count(),
         );
     }
 }
@@ -1312,13 +946,23 @@ impl CollectAnalytics for &SplitQueuesConfig {
 pub enum QueueSplittingVerificationError {
     #[error("{0}: unknown queue type")]
     UnknownQueueType(String),
-    #[error("{0}.message_filter.{1}: failed to parse regular expression ({2})")]
+    #[error("{0}.{1}: failed to parse regular expression ({2})")]
     InvalidRegex(
         String,
         String,
         // without `Box`, clippy complains when `ConfigError` is used in `Err`
         Box<fancy_regex::Error>,
     ),
+    #[error(
+        "{0}: both `filter` and `message_filter` are set - keep one of them; a `message_filter` \
+         of `{{\"name\": \"pattern\"}}` is the same as `filter: {{\"metadata\": \"^name: \
+         pattern\"}}`"
+    )]
+    FilterShapeConflict(String),
+    #[error("{queue_name}.{path}: must list at least one filter")]
+    EmptyCompositeFilter { queue_name: String, path: String },
+    #[error("{queue_name}.{path}: the pattern is empty")]
+    EmptyFilterPattern { queue_name: String, path: String },
     #[error("Invalid jq program in filter for queue {queue_name}. Errors:\n{jq_compile_errors}")]
     InvalidJqProgram {
         queue_name: String,
@@ -1357,96 +1001,86 @@ pub enum QueueSplittingVerificationError {
          `jq_filter` that uses `.payload_decoded`, or remove `payload_protobuf`"
     )]
     ProtobufWithoutJqFilter(String),
+    #[error(
+        "{queue_name}: `payload_protobuf` is only supported for `queue_type: Kafka`, not \
+         `{queue_type}` - remove it from this entry"
+    )]
+    ProtobufOnUnsupportedQueueType {
+        queue_name: String,
+        queue_type: QueueKind,
+    },
 }
 
 #[cfg(test)]
 mod test {
-    use super::{QueueFilter, QueueMode, QueueSplit, SplitQueuesConfig};
+    use super::{
+        InnerMessageFilter, MessageFilterConfig, QueueKind, QueueMode, QueueSplit,
+        QueueSplittingVerificationError, SplitQueuesConfig,
+    };
     use crate::{
         config::{ConfigContext, MirrordConfig},
         env_key::EnvKey,
     };
 
+    fn message_filter(entries: &[(&str, &str)]) -> Option<super::QueueMessageFilter> {
+        Some(
+            entries
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        )
+    }
+
+    fn metadata(pattern: &str) -> MessageFilterConfig {
+        MessageFilterConfig::Metadata {
+            metadata: pattern.to_owned(),
+        }
+    }
+
+    fn inner(pattern: &str) -> InnerMessageFilter {
+        InnerMessageFilter::Metadata {
+            metadata: pattern.to_owned(),
+        }
+    }
+
+    fn verify(config: &SplitQueuesConfig) -> Result<(), QueueSplittingVerificationError> {
+        config.verify(&mut ConfigContext::default())
+    }
+
     #[test]
     fn deserialize_known_queue_types() {
-        let value = serde_json::json!({
-            "queue_type": "Kafka",
-            "message_filter": {
-                "key": "value",
-            },
-        });
+        for (queue_type, kind) in [
+            ("Kafka", QueueKind::Kafka),
+            ("RMQ", QueueKind::Rmq),
+            ("SQS", QueueKind::Sqs),
+            ("NATSPubSub", QueueKind::NatsPubSub),
+        ] {
+            let value = serde_json::json!({
+                "queue_type": queue_type,
+                "message_filter": { "key": "value" },
+            });
 
-        let filter = serde_json::from_value::<QueueFilter>(value).unwrap();
-        assert_eq!(
-            filter,
-            QueueFilter::Kafka {
-                message_filter: Some([("key".to_owned(), "value".to_owned())].into()),
-                jq_filter: None,
-                payload_protobuf: None,
-            }
-        );
-
-        let value = serde_json::json!({
-            "queue_type": "RMQ",
-            "message_filter": {
-                "key": "value",
-            },
-        });
-
-        let filter = serde_json::from_value::<QueueFilter>(value).unwrap();
-        assert_eq!(
-            filter,
-            QueueFilter::Rmq {
-                message_filter: Some([("key".to_owned(), "value".to_owned())].into()),
-                jq_filter: None,
-            }
-        );
-
-        let value = serde_json::json!({
-            "queue_type": "SQS",
-            "message_filter": {
-                "key": "value",
-            },
-        });
-
-        let filter = serde_json::from_value::<QueueFilter>(value).unwrap();
-        assert_eq!(
-            filter,
-            QueueFilter::Sqs {
-                message_filter: Some([("key".to_owned(), "value".to_owned())].into()),
-                jq_filter: None,
-            }
-        );
+            let split = serde_json::from_value::<QueueSplit>(value).unwrap();
+            assert_eq!(
+                split,
+                QueueSplit {
+                    message_filter: message_filter(&[("key", "value")]),
+                    ..QueueSplit::new("", kind)
+                }
+            );
+        }
     }
 
     #[test]
     fn deserialize_unknown_queue_type() {
         let value = serde_json::json!({
             "queue_type": "unknown",
-            "message_filter": {
-                "key": "value",
-            }
+            "message_filter": { "key": "value" }
         });
 
-        let filter = serde_json::from_value::<QueueFilter>(value).unwrap();
-        assert_eq!(filter, QueueFilter::Unknown);
-    }
-
-    #[test]
-    fn deserialize_sqs_jq_filter() {
-        let value = serde_json::json!({
-            "queue_type": "SQS",
-            "jq_filter": "whatever"
-        });
-
-        let filter = serde_json::from_value::<QueueFilter>(value).unwrap();
-        assert_eq!(
-            filter,
-            QueueFilter::Sqs {
-                jq_filter: Some("whatever".to_owned()),
-                message_filter: None
-            }
-        );
+        let split = serde_json::from_value::<QueueSplit>(value).unwrap();
+        assert_eq!(split.queue_type, QueueKind::Unknown);
+        verify(&SplitQueuesConfig::from_splits([split])).unwrap_err();
     }
 
     #[test]
@@ -1454,18 +1088,148 @@ mod test {
         let value = serde_json::json!({
             "queue_type": "SQS",
             "jq_filter": "whatever",
-            "message_filter": {
-                "who": "me",
-            }
+            "message_filter": { "who": "me" }
         });
 
-        let filter = serde_json::from_value::<QueueFilter>(value).unwrap();
+        let split = serde_json::from_value::<QueueSplit>(value).unwrap();
         assert_eq!(
-            filter,
-            QueueFilter::Sqs {
+            split,
+            QueueSplit {
                 jq_filter: Some("whatever".to_owned()),
-                message_filter: Some([("who".to_owned(), "me".to_owned())].into()),
+                message_filter: message_filter(&[("who", "me")]),
+                ..QueueSplit::new("", QueueKind::Sqs)
             }
+        );
+    }
+
+    /// The composable shape from the ticket: a single metadata regex, and an `any_of` of two.
+    #[test]
+    fn deserialize_composed_filters() {
+        let value = serde_json::json!([
+            {
+                "queue_id": "*",
+                "queue_type": "SQS",
+                "filter": { "metadata": "^tenant: blue-.*$" }
+            },
+            {
+                "queue_id": "*",
+                "queue_type": "Temporal",
+                "filter": {
+                    "any_of": [
+                        { "metadata": "^baggage: .*mirrord-session=abc.*$" },
+                        { "metadata": "^test: .*mirrord-session=abc.*$" }
+                    ]
+                }
+            }
+        ]);
+
+        let config = serde_json::from_value::<SplitQueuesConfig>(value).unwrap();
+        verify(&config).unwrap();
+        assert!(config.uses_composed_filters());
+        assert_eq!(
+            config.splits().first().and_then(|s| s.filter.clone()),
+            Some(metadata("^tenant: blue-.*$"))
+        );
+        assert_eq!(
+            config.splits().get(1).and_then(|s| s.filter.clone()),
+            Some(MessageFilterConfig::AnyOf {
+                any_of: vec![
+                    inner("^baggage: .*mirrord-session=abc.*$"),
+                    inner("^test: .*mirrord-session=abc.*$"),
+                ]
+            })
+        );
+    }
+
+    /// A filter node must be exactly one of `metadata`, `all_of`, `any_of`.
+    #[test]
+    fn composed_filter_rejects_unknown_and_mixed_nodes() {
+        for node in [
+            serde_json::json!({ "header": "^x: y$" }),
+            serde_json::json!({ "metadata": "^x: y$", "any_of": [] }),
+            serde_json::json!({}),
+            // Lists take `metadata` leaves only, like the HTTP filter's `all_of` / `any_of`.
+            serde_json::json!({ "any_of": [ { "all_of": [ { "metadata": "^x: y$" } ] } ] }),
+        ] {
+            let value = serde_json::json!({ "queue_type": "SQS", "filter": node });
+            serde_json::from_value::<QueueSplit>(value).unwrap_err();
+        }
+    }
+
+    #[test]
+    fn verify_rejects_both_filter_shapes_on_one_entry() {
+        let config = SplitQueuesConfig::from_splits([QueueSplit {
+            message_filter: message_filter(&[("tenant", "^blue$")]),
+            filter: Some(metadata("^tenant: blue$")),
+            ..QueueSplit::new("orders", QueueKind::Sqs)
+        }]);
+
+        let error = verify(&config).unwrap_err();
+        assert!(
+            matches!(error, QueueSplittingVerificationError::FilterShapeConflict(ref id) if id == "orders"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn verify_rejects_empty_composites_and_patterns_with_their_path() {
+        let empty_list = SplitQueuesConfig::from_splits([QueueSplit {
+            filter: Some(MessageFilterConfig::AnyOf { any_of: vec![] }),
+            ..QueueSplit::new("orders", QueueKind::Sqs)
+        }]);
+        let error = verify(&empty_list).unwrap_err().to_string();
+        assert!(error.contains("orders.filter.any_of"), "{error}");
+
+        let empty_pattern = SplitQueuesConfig::from_splits([QueueSplit {
+            filter: Some(MessageFilterConfig::AllOf {
+                all_of: vec![inner("^a: b$"), inner("")],
+            }),
+            ..QueueSplit::new("orders", QueueKind::Sqs)
+        }]);
+        let error = verify(&empty_pattern).unwrap_err().to_string();
+        assert!(
+            error.contains("orders.filter.all_of[1].metadata"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn verify_rejects_invalid_regex_in_either_shape() {
+        let composed = SplitQueuesConfig::from_splits([QueueSplit {
+            filter: Some(metadata("^tenant: (blue$")),
+            ..QueueSplit::new("orders", QueueKind::Sqs)
+        }]);
+        let error = verify(&composed).unwrap_err().to_string();
+        assert!(error.contains("orders.filter.metadata"), "{error}");
+
+        let legacy = SplitQueuesConfig::from_splits([QueueSplit {
+            message_filter: message_filter(&[("tenant", "(blue")]),
+            ..QueueSplit::new("orders", QueueKind::Sqs)
+        }]);
+        let error = verify(&legacy).unwrap_err().to_string();
+        assert!(error.contains("orders.message_filter.tenant"), "{error}");
+    }
+
+    #[test]
+    fn verify_rejects_payload_protobuf_outside_kafka() {
+        let config = SplitQueuesConfig::from_splits([QueueSplit {
+            jq_filter: Some(".payload_decoded.x == 1".to_owned()),
+            payload_protobuf: Some(super::KafkaPayloadProtobuf {
+                schema_file: None,
+                include_directories: Vec::new(),
+                message_type: "a.B".to_owned(),
+                descriptor_base64: Some("AA==".to_owned()),
+            }),
+            ..QueueSplit::new("orders", QueueKind::Sqs)
+        }]);
+
+        let error = verify(&config).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                QueueSplittingVerificationError::ProtobufOnUnsupportedQueueType { .. }
+            ),
+            "{error}"
         );
     }
 
@@ -1474,32 +1238,40 @@ mod test {
         let key = EnvKey::Provided("zamek.bobolice".to_owned());
         let config = SplitQueuesConfig::all_wildcard_default_mode(&key);
 
-        config.verify(&mut ConfigContext::default()).unwrap();
+        verify(&config).unwrap();
 
         assert!(config.splits().iter().all(|split| split.queue_id == "*"));
         assert!(config.is_all_wildcard_default_mode(&key));
+        assert!(!config.uses_composed_filters());
 
-        assert_eq!(config.rmq().count(), 0);
-        assert_eq!(config.sqs().count(), 0);
-        assert_eq!(config.kafka().count(), 0);
-        assert_eq!(config.gcp_pubsub().count(), 0);
-        assert_eq!(config.azure_service_bus().count(), 0);
-        assert_eq!(config.redis_pubsub().count(), 0);
-        assert_eq!(config.temporal().count(), 0);
-        assert_eq!(config.bullmq().count(), 0);
-        assert_eq!(config.nats().count(), 0);
-        for jq_filters in [
-            config.sqs_jq_filters().count(),
-            config.kafka_jq_filters().count(),
-            config.rmq_jq_filters().count(),
-            config.gcp_pubsub_jq_filters().count(),
-            config.azure_service_bus_jq_filters().count(),
-            config.redis_pubsub_jq_filters().count(),
-            config.temporal_jq_filters().count(),
-            config.bullmq_jq_filters().count(),
-            config.nats_jq_filters().count(),
-        ] {
-            assert_eq!(jq_filters, 1);
+        // Every jq-capable broker but core NATS pub/sub, each with only a jq filter. The order is
+        // part of the contract: `mirrord up` copy-target specs serialize this as a list and
+        // copy reuse compares specs, so reordering would stop new CLIs from reusing copies made
+        // by older ones.
+        assert_eq!(
+            config
+                .splits()
+                .iter()
+                .map(|s| s.queue_type)
+                .collect::<Vec<_>>(),
+            [
+                QueueKind::Sqs,
+                QueueKind::Kafka,
+                QueueKind::Rmq,
+                QueueKind::GcpPubSub,
+                QueueKind::AzureServiceBus,
+                QueueKind::RedisPubSub,
+                QueueKind::Temporal,
+                QueueKind::BullMq,
+                QueueKind::Nats,
+            ]
+        );
+        let mut every_known = QueueKind::known().collect::<Vec<_>>();
+        every_known.retain(|kind| *kind != QueueKind::NatsPubSub);
+        assert_eq!(config.kinds().len(), every_known.len());
+        for split in config.splits() {
+            assert!(split.message_filter.is_none() && split.filter.is_none());
+            assert!(split.jq_filter.is_some());
         }
     }
 
@@ -1508,58 +1280,31 @@ mod test {
         let key = EnvKey::Provided("zamek.bobolice".to_owned());
         let config = SplitQueuesConfig::all_wildcard_default_mode(&key);
 
-        let selectors = [
-            config.sqs_jq_filters().next().unwrap(),
-            config.kafka_jq_filters().next().unwrap(),
-            config.rmq_jq_filters().next().unwrap(),
-            config.gcp_pubsub_jq_filters().next().unwrap(),
-            config.azure_service_bus_jq_filters().next().unwrap(),
-            config.redis_pubsub_jq_filters().next().unwrap(),
-            config.temporal_jq_filters().next().unwrap(),
-            config.bullmq_jq_filters().next().unwrap(),
-            config.nats_jq_filters().next().unwrap(),
-        ];
+        let selectors = config
+            .splits()
+            .iter()
+            .map(|split| (split.queue_type, split.jq_filter.as_deref().unwrap()))
+            .collect::<Vec<_>>();
 
+        let marker = r#"[.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#;
+        let expected = [
+            (QueueKind::Sqs, ".MessageAttributes"),
+            (QueueKind::Kafka, ".headers"),
+            (QueueKind::Rmq, ".headers"),
+            (QueueKind::GcpPubSub, ".attributes"),
+            (QueueKind::AzureServiceBus, ".application_properties"),
+            (QueueKind::RedisPubSub, "."),
+            (QueueKind::Temporal, ".header"),
+            (QueueKind::BullMq, "."),
+            (QueueKind::Nats, ".headers"),
+        ]
+        .map(|(kind, selector)| (kind, format!("({selector} // {{}}) | {marker}")));
         assert_eq!(
             selectors,
-            [
-                (
-                    "*",
-                    r#"(.MessageAttributes // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
-                ),
-                (
-                    "*",
-                    r#"(.headers // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
-                ),
-                (
-                    "*",
-                    r#"(.headers // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
-                ),
-                (
-                    "*",
-                    r#"(.attributes // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
-                ),
-                (
-                    "*",
-                    r#"(.application_properties // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
-                ),
-                (
-                    "*",
-                    r#"(. // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
-                ),
-                (
-                    "*",
-                    r#"(.header // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
-                ),
-                (
-                    "*",
-                    r#"(. // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
-                ),
-                (
-                    "*",
-                    r#"(.headers // {}) | [.. | select(type == "string" and contains("mirrord-session=zamek.bobolice"))] | length > 0"#
-                ),
-            ]
+            expected
+                .iter()
+                .map(|(kind, jq)| (*kind, jq.as_str()))
+                .collect::<Vec<_>>()
         );
     }
 
@@ -1571,11 +1316,28 @@ mod test {
         });
 
         let config = serde_json::from_value::<SplitQueuesConfig>(value).unwrap();
-        assert_eq!(config.sqs_queues().collect::<Vec<_>>(), ["first"]);
-        assert_eq!(
-            config.kafka().map(|(id, _)| id).collect::<Vec<_>>(),
-            ["second"]
-        );
+        let ids = |kind| {
+            config
+                .of_kind(kind)
+                .map(|s| s.queue_id.as_str())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(QueueKind::Sqs), ["first"]);
+        assert_eq!(ids(QueueKind::Kafka), ["second"]);
+    }
+
+    /// In the map form the id is the key; repeating it inside the entry is a mistake we name
+    /// rather than silently overwrite.
+    #[test]
+    fn map_form_rejects_queue_id_inside_entry() {
+        let value = serde_json::json!({
+            "first": { "queue_id": "other", "queue_type": "SQS" },
+        });
+
+        let error = serde_json::from_value::<SplitQueuesConfig>(value)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("`queue_id` is the map key"), "{error}");
     }
 
     #[test]
@@ -1587,7 +1349,23 @@ mod test {
 
         let config = serde_json::from_value::<SplitQueuesConfig>(value).unwrap();
         assert_eq!(config.splits().len(), 2);
-        assert_eq!(config.sqs_queues().collect::<Vec<_>>(), ["first"]);
+        assert_eq!(
+            config.splits().first().map(|s| s.queue_id.as_str()),
+            Some("first")
+        );
+    }
+
+    #[test]
+    fn list_form_requires_queue_id() {
+        let value = serde_json::json!([{ "queue_type": "SQS" }]);
+
+        let error = serde_json::from_value::<SplitQueuesConfig>(value)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("split_queues[0]: missing `queue_id`"),
+            "{error}"
+        );
     }
 
     /// The whole point of the list form: the same queue id used for two different brokers.
@@ -1599,37 +1377,23 @@ mod test {
         ]);
 
         let config = serde_json::from_value::<SplitQueuesConfig>(value).unwrap();
-        assert_eq!(
-            config.sqs().map(|(id, _)| id).collect::<Vec<_>>(),
-            ["orders"]
-        );
-        assert_eq!(
-            config.kafka().map(|(id, _)| id).collect::<Vec<_>>(),
-            ["orders"]
-        );
+        assert_eq!(config.kinds().len(), 2);
+        assert!(config.splits().iter().all(|s| s.queue_id == "orders"));
     }
 
     /// Unique ids round-trip through the map form; duplicate ids round-trip through the list form.
     /// Both must deserialize back to the same config.
     #[test]
     fn serialize_round_trip() {
-        let unique = SplitQueuesConfig(vec![
+        let unique = SplitQueuesConfig::from_splits([
             QueueSplit {
-                queue_id: "first".to_owned(),
-                queue_mode: QueueMode::Steal,
-                filter: QueueFilter::Sqs {
-                    message_filter: Some([("k".to_owned(), "v".to_owned())].into()),
-                    jq_filter: None,
-                },
+                message_filter: message_filter(&[("k", "v")]),
+                ..QueueSplit::new("first", QueueKind::Sqs)
             },
             QueueSplit {
-                queue_id: "second".to_owned(),
                 queue_mode: QueueMode::Mirror,
-                filter: QueueFilter::Kafka {
-                    message_filter: Some([("who".to_owned(), "you$".to_owned())].into()),
-                    jq_filter: None,
-                    payload_protobuf: None,
-                },
+                filter: Some(metadata("^who: you$")),
+                ..QueueSplit::new("second", QueueKind::Kafka)
             },
         ]);
         let json = serde_json::to_value(&unique).unwrap();
@@ -1639,23 +1403,15 @@ mod test {
             unique
         );
 
-        let duplicate = SplitQueuesConfig(vec![
+        let duplicate = SplitQueuesConfig::from_splits([
             QueueSplit {
-                queue_id: "orders".to_owned(),
-                queue_mode: QueueMode::Steal,
-                filter: QueueFilter::Sqs {
-                    message_filter: Some([("region".to_owned(), "^eu".to_owned())].into()),
-                    jq_filter: None,
-                },
+                message_filter: message_filter(&[("region", "^eu")]),
+                ..QueueSplit::new("orders", QueueKind::Sqs)
             },
             QueueSplit {
-                queue_id: "orders".to_owned(),
                 queue_mode: QueueMode::Mirror,
-                filter: QueueFilter::Kafka {
-                    message_filter: Some([("region".to_owned(), "^us".to_owned())].into()),
-                    jq_filter: None,
-                    payload_protobuf: None,
-                },
+                message_filter: message_filter(&[("region", "^us")]),
+                ..QueueSplit::new("orders", QueueKind::Kafka)
             },
         ]);
         let json = serde_json::to_value(&duplicate).unwrap();
@@ -1664,6 +1420,29 @@ mod test {
             serde_json::from_value::<SplitQueuesConfig>(json).unwrap(),
             duplicate
         );
+    }
+
+    /// A legacy config must serialize to exactly the bytes older mirrord versions produced: the
+    /// copy-target CRD carries this config verbatim, older operators read it with
+    /// `deny_unknown_fields`, and copy-target reuse compares specs. A new field that leaks into
+    /// the legacy shape would break all three.
+    #[test]
+    fn legacy_config_serializes_byte_identically() {
+        let value = serde_json::json!({
+            "orders": {
+                "queue_type": "SQS",
+                "message_filter": { "tenant": "^blue$" },
+                "jq_filter": ".Body | fromjson | .x == 1"
+            },
+            "events": {
+                "queue_mode": "mirror",
+                "queue_type": "Kafka",
+                "message_filter": { "who": "you$" }
+            }
+        });
+
+        let config = serde_json::from_value::<SplitQueuesConfig>(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&config).unwrap(), value);
     }
 
     #[test]
@@ -1702,18 +1481,14 @@ mod test {
         .unwrap();
 
         QueueSplit {
-            queue_id: "cdc-topic".to_owned(),
-            queue_mode: QueueMode::default(),
-            filter: QueueFilter::Kafka {
-                message_filter: None,
-                jq_filter: jq_filter.map(ToOwned::to_owned),
-                payload_protobuf: Some(super::KafkaPayloadProtobuf {
-                    schema_file: Some(schema_dir.join("record.proto")),
-                    include_directories: Vec::new(),
-                    message_type: message_type.to_owned(),
-                    descriptor_base64: None,
-                }),
-            },
+            jq_filter: jq_filter.map(ToOwned::to_owned),
+            payload_protobuf: Some(super::KafkaPayloadProtobuf {
+                schema_file: Some(schema_dir.join("record.proto")),
+                include_directories: Vec::new(),
+                message_type: message_type.to_owned(),
+                descriptor_base64: None,
+            }),
+            ..QueueSplit::new("cdc-topic", QueueKind::Kafka)
         }
     }
 
@@ -1735,8 +1510,9 @@ mod test {
             .unwrap();
         generated.verify(&mut ConfigContext::default()).unwrap();
 
-        let (queue_id, protobuf) = generated.kafka_payload_protobuf().next().unwrap();
-        assert_eq!(queue_id, "cdc-topic");
+        let split = generated.splits().first().unwrap();
+        assert_eq!(split.queue_id, "cdc-topic");
+        let protobuf = split.payload_protobuf.as_ref().unwrap();
         // The embedded descriptor is stored gzipped (it rides in the connect URL, so size
         // matters); consumers sniff the magic and decompress.
         let compressed = BASE64_STANDARD
@@ -1787,13 +1563,10 @@ mod test {
             "test.cdc.Record",
             Some(".payload_decoded.merchant_id == 2137"),
         );
-        let QueueFilter::Kafka {
-            payload_protobuf: Some(protobuf),
-            ..
-        } = &mut split.filter
-        else {
-            unreachable!("protobuf_split always builds a Kafka filter with payload_protobuf");
-        };
+        let protobuf = split
+            .payload_protobuf
+            .as_mut()
+            .expect("protobuf_split always sets payload_protobuf");
         let plain = protox::compile([dir.path().join("record.proto")], [dir.path()]).unwrap();
         protobuf.descriptor_base64 =
             Some(BASE64_STANDARD.encode(prost::Message::encode_to_vec(&plain)));
@@ -1803,7 +1576,11 @@ mod test {
             .generate_config(&mut ConfigContext::default())
             .unwrap();
 
-        let (_, resolved) = generated.kafka_payload_protobuf().next().unwrap();
+        let resolved = generated
+            .splits()
+            .first()
+            .and_then(|s| s.payload_protobuf.as_ref())
+            .unwrap();
         let stored = BASE64_STANDARD
             .decode(resolved.descriptor_base64.as_deref().unwrap())
             .unwrap();

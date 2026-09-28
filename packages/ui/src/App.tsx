@@ -13,12 +13,14 @@ import {
 // mounted (hidden when inactive) so switching tabs preserves its state — the monitor keeps its
 // live session stream, and an in-progress wizard config isn't lost on a detour to the monitor.
 const Monitor = lazy(() => import('@mirrord/monitor'))
+const Events = lazy(() => import('@mirrord/monitor/events'))
 const Wizard = lazy(() => import('@mirrord/wizard'))
 
-type Tab = 'monitor' | 'wizard'
+type Tab = 'monitor' | 'events' | 'wizard'
 
 const TABS: { id: Tab; label: string; path: string }[] = [
   { id: 'monitor', label: 'Session Monitor', path: '/' },
+  { id: 'events', label: 'Events', path: '/events' },
   { id: 'wizard', label: 'Config Wizard', path: '/wizard' },
 ]
 
@@ -26,9 +28,9 @@ const BRAND_NAME = 'mirrord'
 
 /** The tab is chosen from the URL so `mirrord ui` (`/`) and `mirrord wizard` (`/wizard`) deep-link. */
 function tabForPath(path: string): Tab {
-  return path === '/wizard' || path.startsWith('/wizard/')
-    ? 'wizard'
-    : 'monitor'
+  if (path === '/wizard' || path.startsWith('/wizard/')) return 'wizard'
+  if (path === '/events' || path.startsWith('/events/')) return 'events'
+  return 'monitor'
 }
 
 function TabBar({
@@ -158,6 +160,13 @@ export default function App() {
                 isDarkMode={isDark}
                 onThemeChange={setTheme}
               />
+            </Suspense>
+          </div>
+        )}
+        {mounted.has('events') && (
+          <div className={active === 'events' ? 'h-full' : 'hidden'}>
+            <Suspense fallback={null}>
+              <Events active={active === 'events'} />
             </Suspense>
           </div>
         )}

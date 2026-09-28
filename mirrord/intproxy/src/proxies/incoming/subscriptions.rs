@@ -33,6 +33,8 @@ pub struct Subscription {
     active_source: Source,
     /// Whether this subscription is confirmed.
     confirmed: bool,
+    /// Deliveries accepted during this subscription lifetime.
+    hit_count: u64,
 }
 
 impl Subscription {
@@ -49,6 +51,7 @@ impl Subscription {
                 queued_sources: Default::default(),
                 active_source: source,
                 confirmed: false,
+                hit_count: 0,
             },
             message,
         )
@@ -156,6 +159,15 @@ impl Subscription {
             .subscription
             .agent_subscribe(protocol_version)
     }
+
+    pub fn add_new_hit(&mut self) -> u64 {
+        self.hit_count = self.hit_count.saturating_add(1);
+        self.hit_count
+    }
+
+    pub fn hit_count(&self) -> u64 {
+        self.hit_count
+    }
 }
 
 /// Manages port subscriptions across all connected layers.
@@ -178,6 +190,16 @@ impl SubscriptionsManager {
         self.subscriptions
             .get(&port)
             .map(|sub| &sub.active_source.request)
+    }
+
+    pub fn hit_count(&self, port: Port) -> Option<u64> {
+        self.subscriptions.get(&port).map(Subscription::hit_count)
+    }
+
+    pub fn count_hit(&mut self, port: Port) -> Option<u64> {
+        self.subscriptions
+            .get_mut(&port)
+            .map(Subscription::add_new_hit)
     }
 
     /// Registers a new port subscription in this struct.

@@ -4,9 +4,13 @@ use mirrord_config::feature::network::incoming::tls_delivery::{
     LocalTlsDelivery, TlsDeliveryProtocol,
 };
 use mirrord_tls_util::{
-    DangerousNoVerifierServer, FromPemError, HasSubjectAlternateNames, best_effort_root_store,
+    DangerousNoVerifierServer, FromPemError, HasSubjectAlternateNames, ParsePemError,
+    best_effort_root_store, parse_cert_chain, parse_key_der, read_cert_chain, read_key_der,
 };
-use rustls::{ClientConfig, RootCertStore, pki_types::ServerName};
+use rustls::{
+    ClientConfig, RootCertStore,
+    pki_types::{CertificateDer, PrivateKeyDer, ServerName},
+};
 use thiserror::Error;
 use tokio::{sync::OnceCell, task::JoinError};
 use tokio_rustls::TlsConnector;
@@ -20,11 +24,59 @@ pub enum LocalTlsSetupError {
     BackgroundTaskPanicked,
     #[error(transparent)]
     FromPemError(#[from] FromPemError),
+    #[error("failed to parse the client certificate or its key: {0}")]
+    ParsePemError(#[from] ParsePemError),
+    #[error("the client certificate and its key were rejected: {0}")]
+    ClientAuthRejected(#[from] rustls::Error),
 }
 
 impl From<JoinError> for LocalTlsSetupError {
     fn from(_: JoinError) -> Self {
         Self::BackgroundTaskPanicked
+    }
+}
+
+/// Client certificate presented to the user application's TLS server, for servers that require
+/// one (mutual TLS).
+pub enum LocalClientAuth {
+    /// PEM files on disk, read when the setup is first used.
+    Files { cert: PathBuf, key: PathBuf },
+    /// PEM data already in memory, e.g. read from a Kubernetes Secret by the mirrord operator.
+    Pem { cert: Vec<u8>, key: Vec<u8> },
+}
+
+impl LocalClientAuth {
+    async fn load(
+        &self,
+    ) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), LocalTlsSetupError> {
+        match self {
+            Self::Files { cert, key } => Ok((
+                read_cert_chain(cert.clone()).await?,
+                read_key_der(key.clone()).await?,
+            )),
+            Self::Pem { cert, key } => Ok((
+                parse_cert_chain(cert.as_slice())?,
+                parse_key_der(key.as_slice())?,
+            )),
+        }
+    }
+}
+
+impl fmt::Debug for LocalClientAuth {
+    /// Never prints the key material: this ends up in logs.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Files { cert, key } => f
+                .debug_struct("Files")
+                .field("cert", cert)
+                .field("key", key)
+                .finish(),
+            Self::Pem { cert, key } => f
+                .debug_struct("Pem")
+                .field("cert_bytes", &cert.len())
+                .field("key_bytes", &key.len())
+                .finish(),
+        }
     }
 }
 
@@ -35,6 +87,7 @@ pub struct LocalTlsSetup {
     trust_roots: Option<Vec<PathBuf>>,
     server_cert: Option<PathBuf>,
     server_name: Option<ServerName<'static>>,
+    client_auth: Option<LocalClientAuth>,
 
     resolved: OnceCell<(ClientConfig, Option<ServerName<'static>>)>,
 }
@@ -44,11 +97,13 @@ impl LocalTlsSetup {
         trust_roots: Option<Vec<PathBuf>>,
         server_cert: Option<PathBuf>,
         server_name: Option<ServerName<'static>>,
+        client_auth: Option<LocalClientAuth>,
     ) -> Self {
         Self {
             trust_roots,
             server_cert,
             server_name,
+            client_auth,
             resolved: OnceCell::new(),
         }
     }
@@ -68,10 +123,17 @@ impl LocalTlsSetup {
                         .ok()
                 });
 
+                // Config verification guarantees the cert and the key come together.
+                let client_auth = config
+                    .client_cert
+                    .zip(config.client_key)
+                    .map(|(cert, key)| LocalClientAuth::Files { cert, key });
+
                 Some(Arc::new(Self::new(
                     config.trust_roots,
                     config.server_cert,
                     server_name,
+                    client_auth,
                 )))
             }
         }
@@ -141,7 +203,15 @@ impl LocalTlsSetup {
                 .with_custom_certificate_verifier(Arc::new(DangerousNoVerifierServer))
         };
 
-        Ok((builder.with_no_client_auth(), server_name))
+        let config = match self.client_auth.as_ref() {
+            Some(client_auth) => {
+                let (cert_chain, key) = client_auth.load().await?;
+                builder.with_client_auth_cert(cert_chain, key)?
+            }
+            None => builder.with_no_client_auth(),
+        };
+
+        Ok((config, server_name))
     }
 }
 
@@ -151,6 +221,116 @@ impl fmt::Debug for LocalTlsSetup {
             .field("trust_roots", &self.trust_roots)
             .field("server_cert", &self.server_cert)
             .field("server_name", &self.server_name)
+            .field("client_auth", &self.client_auth)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use mirrord_tls_util::generate_cert;
+    use rustls::{RootCertStore, ServerConfig, server::WebPkiClientVerifier};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+    use tokio_rustls::TlsAcceptor;
+
+    use super::*;
+
+    /// Accepts one connection on a server that requires a client certificate signed by the
+    /// returned root, and reports whether the handshake succeeded.
+    async fn mtls_server() -> (
+        std::net::SocketAddr,
+        rcgen::CertifiedKey<rcgen::KeyPair>,
+        tokio::task::JoinHandle<Result<(), std::io::Error>>,
+    ) {
+        let root = generate_cert("test.root", None, true).unwrap();
+        let server = generate_cert("localhost", Some(&root), false).unwrap();
+
+        let mut roots = RootCertStore::empty();
+        roots.add(root.cert.der().clone()).unwrap();
+        let verifier = WebPkiClientVerifier::builder(Arc::new(roots))
+            .build()
+            .unwrap();
+        let config = ServerConfig::builder()
+            .with_client_cert_verifier(verifier)
+            .with_single_cert(
+                vec![server.cert.der().clone()],
+                PrivateKeyDer::Pkcs8(server.signing_key.serialize_der().into()),
+            )
+            .unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await?;
+            let mut stream = acceptor.accept(stream).await?;
+            let mut buf = [0u8; 1];
+            stream.read_exact(&mut buf).await?;
+            stream.write_all(&buf).await?;
+            Ok(())
+        });
+
+        (addr, root, task)
+    }
+
+    async fn connect(setup: LocalTlsSetup, addr: std::net::SocketAddr) {
+        let (connector, server_name) = setup.get(None).await.unwrap();
+        let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut stream = connector
+            .connect(server_name.unwrap(), stream)
+            .await
+            .unwrap();
+        // Any error from the server's verification of our certificate surfaces on the first
+        // read, not during our side of the handshake.
+        let _ = stream.write_all(b"x").await;
+        let _ = stream.read_exact(&mut [0u8; 1]).await;
+    }
+
+    /// A local server that requires a client certificate (mutual TLS) rejected every stolen
+    /// request with `BadCertificate`, because the intproxy always connected anonymously. With
+    /// `client_auth`, the intproxy presents the certificate and the server accepts it.
+    #[tokio::test]
+    async fn client_auth_is_presented_to_an_mtls_server() {
+        let (addr, root, server) = mtls_server().await;
+        let client = generate_cert("client", Some(&root), false).unwrap();
+
+        let setup = LocalTlsSetup::new(
+            None,
+            None,
+            Some(ServerName::try_from("localhost").unwrap()),
+            Some(LocalClientAuth::Pem {
+                cert: client.cert.pem().into_bytes(),
+                key: client.signing_key.serialize_pem().into_bytes(),
+            }),
+        );
+        connect(setup, addr).await;
+
+        server
+            .await
+            .unwrap()
+            .expect("the server should accept the presented client certificate");
+    }
+
+    #[tokio::test]
+    async fn anonymous_client_is_rejected_by_an_mtls_server() {
+        let (addr, _root, server) = mtls_server().await;
+
+        let setup = LocalTlsSetup::new(
+            None,
+            None,
+            Some(ServerName::try_from("localhost").unwrap()),
+            None,
+        );
+        connect(setup, addr).await;
+
+        server
+            .await
+            .unwrap()
+            .expect_err("the server should reject a client without a certificate");
     }
 }

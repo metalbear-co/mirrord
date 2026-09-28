@@ -69,6 +69,14 @@ use crate::{
 /// Environment variable we use to pass the internal proxy address to the layer.
 pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
 
+/// Environment variable we use to pass the layer the directory holding the files copied from the
+/// target, as requested by `feature.fs.prefetch`.
+///
+/// The directory mirrors the remote layout, so the copy of remote `/etc/ssl/cert.pem` lives at
+/// `$MIRRORD_FS_PREFETCH_DIR/etc/ssl/cert.pem`. Paths that have no copy there were not prefetched,
+/// and are to be read from the remote as usual.
+pub const MIRRORD_FS_PREFETCH_DIR: &str = "MIRRORD_FS_PREFETCH_DIR";
+
 /// Environment variable we use to pass an already-running internal proxy address to the layer
 /// during exec-based tests.
 pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
@@ -274,7 +282,8 @@ pub const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
 ///       "mode": "write",
 ///       "read_write": ".+\\.json" ,
 ///       "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ],
-///       "local": [ ".+\\.js", ".+\\.mjs" ]
+///       "local": [ ".+\\.js", ".+\\.mjs" ],
+///       "prefetch": [ "/etc/ssl" ]
 ///     },
 ///     "network": {
 ///       "incoming": {
@@ -1142,6 +1151,39 @@ impl LayerConfig {
             ));
         }
 
+        if let Some(path) = self
+            .feature
+            .fs
+            .prefetch
+            .iter()
+            .flatten()
+            .find(|path| Path::new(path).has_root().not())
+        {
+            return Err(ConfigError::InvalidValue {
+                name: "feature.fs.prefetch".into(),
+                provided: path.clone(),
+                error: "prefetched paths are resolved in the remote pod, \
+                    where the local working directory has no meaning, \
+                    so they must start with `/`."
+                    .into(),
+            });
+        }
+
+        if self.feature.fs.prefetch.is_some() && self.feature.fs.is_active().not() {
+            context.add_warning(
+                "`feature.fs.prefetch` is ignored when `feature.fs.mode` is `local`, \
+                 because no file operation is performed remotely."
+                    .to_owned(),
+            );
+        }
+
+        #[cfg(windows)]
+        if self.feature.fs.prefetch.is_some() {
+            context.add_warning(
+                "`feature.fs.prefetch` is not supported on Windows and will be ignored.".to_owned(),
+            );
+        }
+
         if let (Some(profile), true) = (&self.profile, context.has_warnings()) {
             // It might be that the user config is fine,
             // but the mirrord profile introduced changes that triggered the warnings.
@@ -1180,12 +1222,6 @@ impl LayerConfig {
     /// This is used to notify the user about settings that don't make sense in the context of
     /// preview environments, since it's already running in the cluster.
     pub fn verify_for_preview_env(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
-        if matches!(self.target.path, Some(Target::Label(_))) {
-            return Err(ConfigError::Conflict(
-                "Preview environments are not yet supported with label targets.".to_owned(),
-            ));
-        }
-
         let ignored = |field: &str| {
             format!("`{field}` is ignored in preview environments and will not be used.")
         };
@@ -2605,6 +2641,27 @@ mod tests {
             matches!(&error, ConfigError::TargetRequiresOperator),
             "unexpected error: {error}"
         );
+    }
+
+    /// A preview can target a label selector: one session takes traffic from every pod the
+    /// selector matches, so the preview checks must let the label target through.
+    #[test]
+    fn label_target_is_accepted_for_preview_env() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "target": { "path": { "labels": { "app": "checkout" } } },
+                "feature": { "preview": { "image": "checkout:pr-123" } }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+
+        resolved
+            .verify_for_preview_env(&mut context)
+            .expect("a label target should be accepted for preview environments");
     }
 
     /// Serializes the magic.aws tests that mutate the global `HOME` /

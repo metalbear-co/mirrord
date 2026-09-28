@@ -115,6 +115,17 @@ export const api = {
   eventStreamUrl: (sessionId: string): string =>
     withToken(`/api/v2/local/sessions/${encodeURIComponent(sessionId)}/events`),
 
+  operatorEventStreamUrl: (
+    context: string | null,
+    unmatched: boolean,
+  ): string => {
+    const params = new URLSearchParams()
+    if (context) params.set('context', context)
+    if (unmatched) params.set('unmatched', 'true')
+    const query = params.toString()
+    return withToken(`/api/v2/operator/events${query ? `?${query}` : ''}`)
+  },
+
   listChaosRules: async (sessionId: string): Promise<ChaosRule[]> => {
     const r = await fetch(withToken(chaosRulesPath(sessionId)), {
       credentials: 'include',
