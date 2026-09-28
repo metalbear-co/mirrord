@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeSet, HashMap},
     ops::Not,
     path::PathBuf,
@@ -14,12 +15,16 @@ use mirrord_config::{
     config::{ConfigContext, EnvKey, MirrordConfig},
     feature::{
         copy_target::CopyTargetConfig,
-        env::EnvConfig,
-        network::incoming::{IncomingMode, http_filter::HttpFilterConfig},
+        env::{EnvConfig, EnvFileConfig},
+        network::incoming::{
+            IncomingMode,
+            http_filter::{HttpFilterConfig, HttpFilterFileConfig},
+        },
         split_queues::{QueueMode, SplitQueuesConfig},
     },
     target::{Target, TargetType},
 };
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{
     Deserialize, Serialize,
     de::{MapAccess, Unexpected, Visitor, value::MapAccessDeserializer},
@@ -38,6 +43,7 @@ use crate::kube_context::UpKubeContext;
     Default,
     Serialize,
     Deserialize,
+    JsonSchema,
     PartialEq,
     VariantArray,
     IntoStaticStr,
@@ -111,7 +117,16 @@ impl Into<QueueMode> for ServiceMode {
 
 /// Whether the service runs with `mirrord exec` or `mirrord container`.
 #[derive(
-    Clone, Debug, Serialize, Deserialize, PartialEq, Default, IntoStaticStr, Display, VariantArray,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Default,
+    IntoStaticStr,
+    Display,
+    VariantArray,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -127,7 +142,7 @@ pub enum RunType {
 
 /// Includes all information necessary to build the `mirrord` command
 /// for this session.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub struct RunConfig {
     /// Whether to run `command` with `mirrord exec` or `mirrord container`.
@@ -150,7 +165,7 @@ pub struct RunConfig {
 }
 
 /// Settings applied to every service.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct CommonConfig {
     /// Accept invalid TLS certificates (e.g. self-signed) from the Kubernetes API server. When not
@@ -174,7 +189,7 @@ pub struct CommonConfig {
 /// The target workload of a service.
 // Separate from [`mirrord_config::target::TargetConfig`] because we use custom serde attributes
 // for this that we don't want on the other one.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct SpecifiedTarget {
     /// The workload to target, e.g. `deployment/my-app` or `pod/my-pod/container/my-container`.
@@ -187,6 +202,7 @@ pub struct SpecifiedTarget {
         serialize_with = "serialize_path",
         skip_serializing_if = "Option::is_none"
     )]
+    #[schemars(schema_with = "mirrord_config::target::make_simple_target_custom_schema")]
     pub(crate) path: Option<Target>,
 
     /// Namespace of the target workload. Defaults to the namespace of the kube context.
@@ -202,6 +218,35 @@ pub enum TargetConfig {
 
     /// Traditional `target: { path: "pod/path", namespace: "some_namespace" }` syntax
     Specified(SpecifiedTarget),
+}
+
+impl Default for TargetConfig {
+    fn default() -> Self {
+        Self::UNSPECIFIED
+    }
+}
+
+// Hand-written to match the hand-written `Deserialize` impl below.
+impl JsonSchema for TargetConfig {
+    fn schema_name() -> Cow<'static, str> {
+        "TargetConfig".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "anyOf": [
+                {
+                    "description": "Run targetless.",
+                    "const": "none"
+                },
+                generator.subschema_for::<SpecifiedTarget>(),
+                {
+                    "description": "An empty `target`, treated as if it were not set.",
+                    "type": "null"
+                }
+            ]
+        })
+    }
 }
 
 impl From<SpecifiedTarget> for TargetConfig {
@@ -336,8 +381,28 @@ where
     }
 }
 
+/// Inlines `T`'s schema without its `description` and its properties' `title`s.
+///
+/// Used for mirrord-config types whose docs are written for `mirrord.json` and don't apply to
+/// `mirrord-up.yaml`. The field's own doc comment becomes the description instead.
+fn inline_schema_without_docs<T: JsonSchema>(generator: &mut SchemaGenerator) -> Schema {
+    let mut schema = T::json_schema(generator);
+    schema.remove("description");
+
+    if let Some(serde_json::Value::Object(properties)) = schema.get_mut("properties") {
+        for property in properties
+            .values_mut()
+            .filter_map(serde_json::Value::as_object_mut)
+        {
+            property.remove("title");
+        }
+    }
+
+    schema
+}
+
 /// Per-service configuration.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceConfig {
     /// The remote workload this service runs against.
@@ -346,10 +411,21 @@ pub struct ServiceConfig {
     /// - A mapping with `path` and/or `namespace`: run against that workload.
     /// - Not set: `mirrord up` looks for a deployment, statefulset, rollout or pod (in that order)
     ///   named after the service.
+    #[serde(default)]
     pub(crate) target: TargetConfig,
 
     /// Environment variable settings for the local process.
+    ///
+    /// For example:
+    ///
+    /// ```yaml
+    /// env:
+    ///   include: "DATABASE_USER;PUBLIC_*"
+    ///   override:
+    ///     LOG_LEVEL: debug
+    /// ```
     #[serde(default)]
+    #[schemars(schema_with = "inline_schema_without_docs::<EnvFileConfig>")]
     pub(crate) env: EnvConfig,
 
     /// How incoming traffic and queue messages are shared between the local and the original
@@ -364,8 +440,14 @@ pub struct ServiceConfig {
     ///
     /// When not set, requests with a header matching the regex
     /// `baggage: .*mirrord-session={key}.*` are selected, where `{key}` is the session key.
-    /// Ignored in `replace` mode.
+    /// Ignored in `replace` mode. For example:
+    ///
+    /// ```yaml
+    /// http_filter:
+    ///   header_filter: "^x-debug: true$"
+    /// ```
     #[serde(default)]
+    #[schemars(schema_with = "inline_schema_without_docs::<HttpFilterFileConfig>")]
     pub(crate) http_filter: HttpFilterConfig,
 
     /// Ports whose incoming traffic is not stolen or mirrored.
@@ -398,7 +480,7 @@ pub struct ServiceConfig {
 ///
 /// The file is rendered as a template before parsing: `{{ key }}` inserts the session key, and
 /// `{{ git_branch }}` inserts the current git branch when there is one.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, JsonSchema, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct UpConfig {
     /// Settings applied to all services.
@@ -2053,6 +2135,7 @@ mod tests {
                 "modes": {
                     "split": 1,
                     "replace": 0,
+                    "mirror": 0,
                 },
             }),
         );
@@ -2127,5 +2210,45 @@ mod tests {
         assert_eq!(result["config_fields_used"]["config_patch"], 1);
         assert_eq!(result["run_types"]["exec"], 2);
         assert_eq!(result["run_types"]["container"], 1);
+    }
+}
+
+#[cfg(test)]
+mod schema {
+    use super::UpConfig;
+
+    /// The `mirrord-up.yaml` schema at the repo root, next to `mirrord-schema.json`.
+    const SCHEMA_FILE_PATH: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../mirrord-up-schema.json");
+
+    fn generate() -> String {
+        serde_json::to_string_pretty(&schemars::schema_for!(UpConfig))
+            .expect("Failed generating schema!")
+    }
+
+    /// Writes the `mirrord-up.yaml` schema to `mirrord-up-schema.json`.
+    ///
+    /// Run it after **ANY** change to the config types, including doc-only changes:
+    ///
+    /// ```sh
+    /// cargo test -p mirrord-up generate_up_schema -- --ignored
+    /// ```
+    #[test]
+    #[ignore]
+    fn generate_up_schema() {
+        std::fs::write(SCHEMA_FILE_PATH, generate()).expect("Failed writing schema file!");
+    }
+
+    #[test]
+    fn up_schema_file_is_up_to_date() {
+        let existing = std::fs::read_to_string(SCHEMA_FILE_PATH)
+            .expect("Schema file doesn't exist!")
+            .replace("\r\n", "\n");
+
+        assert!(
+            existing == generate(),
+            "mirrord-up-schema.json is outdated, regenerate it with \
+             `cargo test -p mirrord-up generate_up_schema -- --ignored`"
+        );
     }
 }

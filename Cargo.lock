@@ -5930,6 +5930,7 @@ dependencies = [
  "nix 0.31.3",
  "process-wrap",
  "rstest",
+ "schemars 1.2.2",
  "serde",
  "serde-saphyr",
  "serde_json",
