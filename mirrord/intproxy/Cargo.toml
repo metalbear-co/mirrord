@@ -29,6 +29,7 @@ mirrord-nightly-polyfill = { path = "../nightly-polyfill" }
 mirrord-tls-util = { path = "../tls-util" }
 mirrord-progress = { path = "../progress" }
 mirrord-protocol-io = { path = "../protocol-io" }
+mirrord-sessions-manager-client.workspace = true
 
 futures.workspace = true
 semver.workspace = true

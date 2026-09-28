@@ -886,6 +886,7 @@ impl CollectAnalytics for &UpConfig {
 mod tests {
     use std::{collections::HashSet, str::FromStr};
 
+    use mirrord_config::feature::split_queues::QueueKind;
     use rstest::rstest;
 
     use super::*;
@@ -1197,11 +1198,12 @@ mod tests {
                 .config
                 .feature
                 .split_queues
-                .sqs_jq_filters()
+                .of_kind(QueueKind::Sqs)
+                .map(|split| (split.queue_id.as_str(), split.jq_filter.as_deref()))
                 .collect::<Vec<_>>(),
             [(
                 "*",
-                r#".Body | fromjson | .headers["x-origin"] == "jadwiga""#
+                Some(r#".Body | fromjson | .headers["x-origin"] == "jadwiga""#)
             )]
         );
     }

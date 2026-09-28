@@ -1100,6 +1100,9 @@ fn queue_filter_count(config: &PreviewQueueSplittingConfig) -> usize {
         + config.redis_pubsub_queue_filters.len()
         + config.temporal_queue_filters.len()
         + config.bullmq_queue_filters.len()
+        + config.nats_queue_filters.len()
+        + config.nats_pubsub_queue_filters.len()
+        + config.queues.len()
 }
 
 fn db_branch_count(config: &PreviewDbBranchingConfig) -> usize {

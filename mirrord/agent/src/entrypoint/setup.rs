@@ -33,7 +33,7 @@ pub(super) async fn start_traffic_redirector(
     let pod_ips = envs::POD_IPS.from_env_or_default();
     let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
     let tls_handler_store =
-        StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
+        StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::from_pid(target_pid));
 
     let redirector_task_config = RedirectorTaskConfig::from_env();
 

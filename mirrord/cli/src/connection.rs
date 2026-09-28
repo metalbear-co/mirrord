@@ -23,15 +23,16 @@ use mirrord_operator::{
 };
 use mirrord_progress::{
     IdeAction, IdeMessage, NotificationLevel, Progress, ProgressTracker,
-    messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
+    messages::{AGENT_OPERATOR_HINT, HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     utm_medium,
 };
+use mirrord_sessions_manager_client::{ServiceScope, SessionsManagerConnectInfo};
 use tracing::Level;
 
 use crate::{
     CliError, CliResult, MirrordCi,
     ci::error::CiError,
-    connector::{AgentConnector, DirectConnector, OperatorConnector},
+    connector::{AgentConnector, DirectConnector, OperatorConnector, SessionsManagerConnector},
     data::GlobalConfig,
     up::MirrordUp,
 };
@@ -281,11 +282,13 @@ pub(crate) struct ConnectData {
     pub(crate) api_version: (u16, u16),
 }
 
-/// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
+/// 1. if [`LayerConfig`] targets Serverless, makes a connection to an existing agent through
+///    mirrord-sessions-manager-client.
+/// 2. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
 ///    with the target using the mirrord-operator.
-/// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], creates a
+/// 3. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], creates a
 ///    mirrord-agent and runs session without the mirrord-operator.
-/// 3. Otherwise, attempts to use the mirrord-operator and falls back to OSS flow in case
+/// 4. Otherwise, attempts to use the mirrord-operator and falls back to OSS flow in case
 ///    mirrord-operator is not found or its license is invalid.
 ///
 /// Here is where we start interactions with the kubernetes API.
@@ -298,6 +301,35 @@ pub(crate) async fn create_and_connect<R: Reporter>(
     mirrord_for_ci: Option<&MirrordCi>,
     mirrord_up: Option<&MirrordUp>,
 ) -> CliResult<ConnectData> {
+    if let Some(Target::Serverless(target)) = &config.target.path {
+        let service = target.sessions_manager_service()?;
+        let user_session_id = std::env::var("MIRRORD_SESSION_ID")
+            .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+        let agent_replica_filter = target.sessions_manager_target_replica_id();
+        let connect_info = SessionsManagerConnectInfo {
+            scope: ServiceScope {
+                service,
+                environment: config
+                    .target
+                    .namespace
+                    .clone()
+                    .unwrap_or_else(|| "default".to_owned()),
+            },
+            user_session_id,
+            replica_filter: agent_replica_filter.map(Into::into),
+        };
+        let connector = AgentConnector::SessionsManager(SessionsManagerConnector {
+            connect_info: connect_info.clone(),
+        });
+
+        return Ok(ConnectData {
+            connect_info: AgentConnectInfo::SessionsManager(connect_info),
+            connector,
+            // Implement - see MBE-1981
+            api_version: (0, 0),
+        });
+    }
+
     if let Some((connector, api_version)) = try_connect_using_operator(
         config,
         progress,
@@ -470,7 +502,6 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
 
     config.experimental.disable_reuseaddr = config.experimental.disable_reuseaddr.or(Some(true));
     config.experimental.go_asmcgocall = config.experimental.go_asmcgocall.or(Some(true));
-    config.experimental.guard_std_fds = config.experimental.guard_std_fds.or(Some(true));
 
     Ok(())
 }
@@ -513,6 +544,7 @@ where
     progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
     progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
     progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=multipodwarn&utm_medium=cli");
+    progress.print(AGENT_OPERATOR_HINT);
     Ok(())
 }
 
@@ -540,6 +572,7 @@ where
     progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
     progress.print("considering mirrord for Teams, which is better suited to shared environments.");
     progress.print("You can get started with mirrord for Teams at this link: https://app.metalbear.com/?utm_source=httpfilter&utm_medium=cli");
+    progress.print(AGENT_OPERATOR_HINT);
     Ok(())
 }
 

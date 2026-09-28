@@ -29,7 +29,9 @@ use tokio::net::TcpListener;
 use crate::{
     background_tasks::BackgroundTasks,
     main_tasks::{ProxyMessage, ToLayer},
-    proxies::incoming::{IncomingProxy, IncomingProxyError, IncomingProxyMessage},
+    proxies::incoming::{
+        IncomingProxy, IncomingProxyError, IncomingProxyMessage, tls::LocalTlsSetup,
+    },
     session_monitor::{MonitorEvent, MonitorTx},
 };
 
@@ -66,7 +68,7 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
     let (monitor_tx, mut monitor_rx) = tokio::sync::broadcast::channel(8);
     let proxy = IncomingProxy::new(
         Duration::from_secs(3),
-        Default::default(),
+        LocalTlsSetup::from_config(Default::default()),
         MonitorTx::from_sender(monitor_tx),
     );
     let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =

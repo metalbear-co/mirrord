@@ -69,6 +69,14 @@ use crate::{
 /// Environment variable we use to pass the internal proxy address to the layer.
 pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
 
+/// Environment variable we use to pass the layer the directory holding the files copied from the
+/// target, as requested by `feature.fs.prefetch`.
+///
+/// The directory mirrors the remote layout, so the copy of remote `/etc/ssl/cert.pem` lives at
+/// `$MIRRORD_FS_PREFETCH_DIR/etc/ssl/cert.pem`. Paths that have no copy there were not prefetched,
+/// and are to be read from the remote as usual.
+pub const MIRRORD_FS_PREFETCH_DIR: &str = "MIRRORD_FS_PREFETCH_DIR";
+
 /// Environment variable we use to pass an already-running internal proxy address to the layer
 /// during exec-based tests.
 pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
@@ -274,7 +282,8 @@ pub const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
 ///       "mode": "write",
 ///       "read_write": ".+\\.json" ,
 ///       "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ],
-///       "local": [ ".+\\.js", ".+\\.mjs" ]
+///       "local": [ ".+\\.js", ".+\\.mjs" ],
+///       "prefetch": [ "/etc/ssl" ]
 ///     },
 ///     "network": {
 ///       "incoming": {
@@ -1144,6 +1153,39 @@ impl LayerConfig {
                      Large values may increase the risk of timeouts.",
                 READONLY_FILE_BUFFER_WARN_LIMIT / 1024 / 1024,
             ));
+        }
+
+        if let Some(path) = self
+            .feature
+            .fs
+            .prefetch
+            .iter()
+            .flatten()
+            .find(|path| Path::new(path).has_root().not())
+        {
+            return Err(ConfigError::InvalidValue {
+                name: "feature.fs.prefetch".into(),
+                provided: path.clone(),
+                error: "prefetched paths are resolved in the remote pod, \
+                    where the local working directory has no meaning, \
+                    so they must start with `/`."
+                    .into(),
+            });
+        }
+
+        if self.feature.fs.prefetch.is_some() && self.feature.fs.is_active().not() {
+            context.add_warning(
+                "`feature.fs.prefetch` is ignored when `feature.fs.mode` is `local`, \
+                 because no file operation is performed remotely."
+                    .to_owned(),
+            );
+        }
+
+        #[cfg(windows)]
+        if self.feature.fs.prefetch.is_some() {
+            context.add_warning(
+                "`feature.fs.prefetch` is not supported on Windows and will be ignored.".to_owned(),
+            );
         }
 
         if let (Some(profile), true) = (&self.profile, context.has_warnings()) {
