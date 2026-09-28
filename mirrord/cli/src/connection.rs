@@ -5,7 +5,11 @@ use mirrord_analytics::{AnalyticsError, AnalyticsReporter, ExecutionKind, Operat
 use mirrord_config::{
     LayerConfig,
     agent::AgentFileConfig,
-    config::MirrordConfig,
+    config::{ConfigError, MirrordConfig},
+    feature::{
+        database_branches::{DatabaseBranchConfig, RedisBranchConfig},
+        network::incoming::ConcurrentSteal,
+    },
     target::{Target, TargetDisplay},
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
@@ -379,7 +383,14 @@ pub(crate) async fn create_and_connect<R: Reporter>(
     )
     .await
     .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
-    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
+    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))
+    .inspect_err(|error| {
+        if matches!(error, CliError::AgentPodDeleted) {
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::AgentPodDeleted);
+        }
+    })?;
 
     let api = Api::namespaced(k8s_api.client().clone(), &agent_connect_info.pod_namespace);
 
@@ -414,6 +425,19 @@ async fn apply_auto_mount_for_target<P: Progress>(
             progress.warning("auto_mount: failed to resolve target pod spec, skipping")
         }
     }
+}
+
+/// Records the wall behind a config verification error. These are rejected before a run
+/// reaches [`process_config_oss`], which only happens with `operator: false`.
+pub(crate) fn record_config_wall<R: Reporter>(error: &ConfigError, analytics: &mut R) {
+    let wall = match error {
+        ConfigError::TargetRequiresOperator => OperatorWall::TargetType,
+        ConfigError::CopyTargetRequiresOperator => OperatorWall::CopyTarget,
+        _ => return,
+    };
+
+    analytics.get_mut().add_operator_wall(wall);
+    analytics.set_error(AnalyticsError::Unknown);
 }
 
 /// Sends a report for a command that stopped because it needs the operator.
@@ -513,8 +537,23 @@ fn process_config_oss<P: Progress, R: Reporter>(
         record_wall(OperatorWall::SplitQueues);
     }
 
-    if config.feature.db_branches.is_empty().not() {
+    if config.feature.db_branches.iter().any(|branch| {
+        !matches!(branch, DatabaseBranchConfig::Redis(redis) if matches!(**redis, RedisBranchConfig::Local(_)))
+    }) {
         record_wall(OperatorWall::DbBranches);
+    }
+
+    let incoming = &config.feature.network.incoming;
+    if incoming.tls_delivery.is_some() || incoming.https_delivery.is_some() {
+        record_wall(OperatorWall::TlsDelivery);
+    }
+
+    if incoming.on_concurrent_steal != ConcurrentSteal::default() {
+        record_wall(OperatorWall::ConcurrentSteal);
+    }
+
+    if config.multi_cluster == Some(true) {
+        record_wall(OperatorWall::MultiCluster);
     }
 
     config.experimental.disable_reuseaddr = config.experimental.disable_reuseaddr.or(Some(true));

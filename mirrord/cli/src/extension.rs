@@ -5,6 +5,7 @@ use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 use crate::{
     CliResult,
     config::ExtensionExecArgs,
+    connection::record_config_wall,
     data::UserData,
     execution::{CrashReporting, MirrordExecution},
     print_config,
@@ -97,6 +98,9 @@ pub(crate) async fn extension_exec(
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
+    }
+    if let Err(error) = &result {
+        record_config_wall(error, &mut analytics);
     }
     result?;
 

@@ -163,7 +163,7 @@ pub fn read_operator_wall_from_env() -> Option<u32> {
 /// `operator_wall`. Only the first wall a run meets is kept.
 ///
 /// - Ends the run: `TargetType`, `CopyTarget`, `OperatorRequested`, `LicenseExpired` with
-///   `operator: true`, and every `*Command` variant.
+///   `operator: true`, `AgentPodDeleted`, and every `*Command` variant.
 /// - Only warns or is silently skipped: the rest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -188,6 +188,15 @@ pub enum OperatorWall {
     OperatorCommand = 12,
     /// `mirrord ls` with `operator: true`.
     ListTargetsCommand = 13,
+    /// The agent's pod was deleted while starting, and the error points to the operator.
+    AgentPodDeleted = 14,
+    /// `tls_delivery` or `https_delivery` is set, but is not applied without the operator.
+    TlsDelivery = 15,
+    /// `on_concurrent_steal` is set to a non-default value, but is not applied without the
+    /// operator.
+    ConcurrentSteal = 16,
+    /// `multi_cluster: true`, but is not applied without the operator.
+    MultiCluster = 17,
 }
 
 /// Struct to store analytics data.
@@ -244,6 +253,14 @@ impl Analytics {
         self.data
             .entry("operator_wall".to_owned())
             .or_insert(AnalyticValue::Number(wall as u32));
+    }
+
+    /// Removes `operator_wall` once a proxy has taken over reporting it.
+    pub fn take_operator_wall(&mut self) -> Option<u32> {
+        match self.data.remove("operator_wall") {
+            Some(AnalyticValue::Number(wall)) => Some(wall),
+            _ => None,
+        }
     }
 
     pub fn operator_wall(&self) -> Option<u32> {

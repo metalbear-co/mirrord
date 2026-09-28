@@ -1217,7 +1217,14 @@ async fn create_preview_api(
             CliError::OperatorNotInstalled
         })?;
 
-    operator_api.check_license_validity(progress)?;
+    operator_api
+        .check_license_validity(progress)
+        .inspect_err(|_| {
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::LicenseExpired);
+            analytics.set_error(AnalyticsError::Unknown);
+        })?;
 
     operator_api
         .operator()

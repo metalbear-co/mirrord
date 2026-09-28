@@ -107,13 +107,23 @@ async fn generate_ci_api_key(
                 &layer_config,
                 ExecutionKind::Other,
                 OperatorWall::CiCommand,
-                watch,
+                watch.clone(),
                 user_data,
             );
             CliError::OperatorNotInstalled
         })?;
 
-    operator_api.check_license_validity(&progress)?;
+    operator_api
+        .check_license_validity(&progress)
+        .inspect_err(|_| {
+            report_command_wall(
+                &layer_config,
+                ExecutionKind::Other,
+                OperatorWall::LicenseExpired,
+                watch,
+                user_data,
+            );
+        })?;
 
     let mut subtask = progress.subtask("creating API key");
     let api_key = operator_api

@@ -478,7 +478,10 @@ impl MirrordExecution {
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let mut client = connector.into_client().await?;
+        let mut client = connector
+            .into_client()
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         let env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
@@ -519,9 +522,15 @@ impl MirrordExecution {
             proxy_command.env(MIRRORD_EXTPROXY_TLS_SETUP_PEM, tls.server_pem());
         }
 
-        let mut proxy_process = proxy_command.spawn().map_err(|e| {
-            CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
-        })?;
+        let mut proxy_process = proxy_command
+            .spawn()
+            .map_err(|e| {
+                CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
+            })
+            .inspect_err(|_| analytics.set_error(AnalyticsError::Unknown))?;
+        // The proxy reports the wall from here on. Keeping a copy would count it twice whenever
+        // both the proxy and the CLI report a failed start.
+        analytics.get_mut().take_operator_wall();
 
         let stderr = proxy_process.stderr.take().expect("stderr was piped");
         let _stderr_guard = watch_stderr(stderr, progress).await;
@@ -622,7 +631,10 @@ impl MirrordExecution {
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let mut client = connector.into_client().await?;
+        let mut client = connector
+            .into_client()
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         config
             .feature
@@ -693,9 +705,15 @@ impl MirrordExecution {
             proxy_command.pre_exec(|| reparent_to_init().map_err(Into::into));
         }
 
-        let mut proxy_process = proxy_command.spawn().map_err(|e| {
-            CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
-        })?;
+        let mut proxy_process = proxy_command
+            .spawn()
+            .map_err(|e| {
+                CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
+            })
+            .inspect_err(|_| analytics.set_error(AnalyticsError::Unknown))?;
+        // The proxy reports the wall from here on. Keeping a copy would count it twice whenever
+        // both the proxy and the CLI report a failed start.
+        analytics.get_mut().take_operator_wall();
 
         let stderr = proxy_process.stderr.take().expect("stderr was piped");
         let _stderr_guard = watch_stderr(stderr, progress).await;

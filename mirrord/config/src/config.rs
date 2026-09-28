@@ -56,6 +56,11 @@ pub enum ConfigError {
     )]
     TargetRequiresOperator,
 
+    #[error(
+        "The copy target feature requires a mirrord operator, please either disable this option or use the operator."
+    )]
+    CopyTargetRequiresOperator,
+
     #[error("Queue splitting config is invalid: {0}")]
     QueueSplittingVerificationError(#[from] QueueSplittingVerificationError),
 
