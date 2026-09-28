@@ -217,7 +217,9 @@ mod file_ops_tests {
         assert!(res.success());
     }
 
-    /// Test our getdents64 Go syscall hook, for `os.ReadDir` on go, and mkdir and rmdir.
+    /// Test our getdents64 Go syscall hook, for `os.ReadDir` on go, mkdir and rmdir, and
+    /// `fstatat(dirfd, name, ...)` on each entry of an already-opened directory fd (the codepath
+    /// `ioutil.ReadDir`/`(*os.File).Readdir` use internally).
     /// This is an E2E test and not an integration test in order to test the agent side of the
     /// detours.
     #[cfg_attr(target_os = "windows", ignore)]
