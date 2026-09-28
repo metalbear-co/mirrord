@@ -187,6 +187,21 @@ pub(crate) enum ResourcesError {
     },
 
     #[error(
+        "{object} from {} is a `kubernetes.io/service-account-token` Secret, which a preview \
+         cannot copy: the cluster mints a token for the named ServiceAccount into every Secret \
+         of that type.\nNothing was created.",
+        source_path.display()
+    )]
+    #[diagnostic(help(
+        "Leave that Secret out of the files you pass, or reference the live one from the pod \
+         template."
+    ))]
+    ServiceAccountTokenSecret {
+        object: String,
+        source_path: PathBuf,
+    },
+
+    #[error(
         "{object} from {} has no pod template.\nNothing was created.",
         source_path.display()
     )]
@@ -342,6 +357,14 @@ impl ResourcePlan<'_> {
                     });
                 }
                 ObjectRole::Secret => {
+                    let secret_type = object.value.get("type").and_then(Value::as_str);
+                    if secret_type == Some(SERVICE_ACCOUNT_TOKEN_SECRET_TYPE) {
+                        return Err(ResourcesError::ServiceAccountTokenSecret {
+                            object: object.display(),
+                            source_path: object.source.clone(),
+                        });
+                    }
+
                     let secret_index = resources.secrets.len();
                     let bytes = compare::secret_bytes(&object.value)
                         .map_err(|error| invalid_secret(object, error))?;
@@ -356,11 +379,7 @@ impl ResourcePlan<'_> {
 
                     resources.secrets.push(PreviewSpecSecret {
                         name: object.name.clone(),
-                        r#type: object
-                            .value
-                            .get("type")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned),
+                        r#type: secret_type.map(str::to_owned),
                         keys,
                     });
                 }
@@ -370,6 +389,11 @@ impl ResourcePlan<'_> {
         Ok((resources != PreviewSpecResources::default()).then_some(resources))
     }
 }
+
+/// Secret type the API server fills in itself with a token for the ServiceAccount named in the
+/// Secret's annotations. A copy would be a new token for that ServiceAccount, so it is never
+/// copied.
+const SERVICE_ACCOUNT_TOKEN_SECRET_TYPE: &str = "kubernetes.io/service-account-token";
 
 /// The paths as the user wrote them, for messages.
 pub(crate) fn sources_label(paths: &[PathBuf]) -> String {
@@ -929,6 +953,42 @@ mod tests {
         );
         let pod = api_resource(&target("v1", "Pod"));
         assert_eq!((pod.group.as_str(), pod.plural.as_str()), ("", "pods"));
+    }
+
+    /// A service-account-token Secret is filled in by the API server for the ServiceAccount its
+    /// annotation names, so copying it would mint a token. It is refused before anything is
+    /// created rather than left for the cluster to reject the copy without that annotation.
+    #[test]
+    fn spec_resources_refuse_a_service_account_token_secret() {
+        let secret = object(json!({
+            "kind": "Secret",
+            "metadata": {
+                "name": "app-token",
+                "annotations": {"kubernetes.io/service-account.name": "app"},
+            },
+            "type": "kubernetes.io/service-account-token",
+        }));
+        let plan = ResourcePlan {
+            sources: "./k8s/".to_owned(),
+            target_display: "deployment/app".to_owned(),
+            planned: vec![PlannedObject {
+                object: &secret,
+                role: ObjectRole::Secret,
+                verdict: Verdict::New,
+                changes: vec![],
+            }],
+            out_of_scope: vec![],
+            notes: vec![],
+        };
+
+        let mut secret_values = BTreeMap::new();
+        let error = plan.spec_resources(&mut secret_values).unwrap_err();
+
+        assert!(
+            matches!(error, ResourcesError::ServiceAccountTokenSecret { ref object, .. } if object == "secret/app-token"),
+            "{error:?}"
+        );
+        assert!(secret_values.is_empty());
     }
 
     /// Only what differs travels on the CR, and Secret values go to the session Secret instead,
