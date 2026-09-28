@@ -5319,7 +5319,6 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-util",
- "k8s-openapi",
  "kube",
  "mirrord-nightly-polyfill",
  "mirrord-operator-websocket",
