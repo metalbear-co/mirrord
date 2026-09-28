@@ -57,7 +57,7 @@ pub enum ConfigError {
     TargetRequiresOperator,
 
     #[error(
-        "The copy target feature requires a mirrord operator, please either disable this option or use the operator."
+        "Conflicting configuration found `The copy target feature requires a mirrord operator, please either disable this option or use the operator.`"
     )]
     CopyTargetRequiresOperator,
 
