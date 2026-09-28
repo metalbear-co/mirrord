@@ -778,6 +778,28 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     PreviewDeleteFailed { name: String, reason: String },
 
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    PreviewResources(Box<crate::preview::resources::ResourcesError>),
+
+    #[error("No manifests to compare")]
+    #[diagnostic(help(
+        "Pass manifest files or directories with `--resource <path>`, or set \
+         `feature.preview.spec_resources` in your mirrord config."
+    ))]
+    PreviewResourcesRequired,
+
+    #[error(
+        "`--resource` is not supported when the operator runs in management-only multi-cluster \
+         mode"
+    )]
+    #[diagnostic(help(
+        "The manifests are compared with the target's live objects using your credentials, in \
+         the target's cluster. Start the preview without `--resource`, or against an operator in \
+         the target's cluster.{GENERAL_HELP}"
+    ))]
+    PreviewResourcesManagementOnly,
+
     #[error("No preview sessions found matching key `{0}`")]
     #[diagnostic(help("Use `mirrord preview status` to see available preview environments."))]
     PreviewNotFound(String),
@@ -858,6 +880,12 @@ impl CliError {
             },
             error => fallback(error),
         }
+    }
+}
+
+impl From<crate::preview::resources::ResourcesError> for CliError {
+    fn from(error: crate::preview::resources::ResourcesError) -> Self {
+        Self::PreviewResources(Box::new(error))
     }
 }
 

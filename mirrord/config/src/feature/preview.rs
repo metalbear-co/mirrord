@@ -218,6 +218,42 @@ pub struct PreviewConfig {
     /// the combined size of all contents in a single session.
     #[config(default)]
     pub secret_mounts: Vec<ConfigMount>,
+
+    /// #### feature.preview.spec_resources {#feature-preview-spec_resources}
+    ///
+    /// Kubernetes manifest files (or directories of them) to build the preview from, instead of
+    /// the target's live spec. Same as `mirrord preview start --resource <path>`, which
+    /// replaces this list when given.
+    ///
+    /// Point it at the manifests you already keep for the service (the desired state, for
+    /// example the files your pull request changes). From every `*.yaml` / `*.yml` document,
+    /// mirrord keeps only the target itself and the ConfigMaps and Secrets its pod uses
+    /// (through `env`, `envFrom`, or volumes). Everything else in the files, such as an Ingress
+    /// or another Deployment, is skipped. Of what is left, objects identical to what is live
+    /// are skipped too.
+    ///
+    /// - The target's pod template from the files becomes the preview pod's spec (with your
+    ///   `image`). When the files do not define the target, the live one is used.
+    /// - Changed or new ConfigMaps and Secrets are created as copies that belong to the preview,
+    ///   and the preview pod uses those copies. The live ones, which the real app uses, are never
+    ///   changed. The copies are deleted when the preview ends.
+    ///
+    /// Nothing is created when a file fails to parse or the cluster rejects a changed object.
+    /// Run `mirrord preview diff` to see what would change without creating anything.
+    ///
+    /// ```json
+    /// {
+    ///   "target": "deployment/app",
+    ///   "feature": {
+    ///     "preview": {
+    ///       "image": "my-registry/app:pr-318",
+    ///       "spec_resources": ["./k8s/app-deployment.yaml", "./k8s/configmap.yaml"]
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    #[config(default)]
+    pub spec_resources: Vec<PathBuf>,
 }
 
 /// A single file to project into the preview pod's container filesystem.
@@ -441,6 +477,7 @@ impl CollectAnalytics for &PreviewConfig {
         analytics.add("creation_timeout_secs", self.creation_timeout_secs);
         analytics.add("config_mounts", self.config_mounts.len() as u32);
         analytics.add("secret_mounts", self.secret_mounts.len() as u32);
+        analytics.add("spec_resources", !self.spec_resources.is_empty());
         analytics.add(
             "labels_include",
             self.labels
@@ -694,6 +731,7 @@ mod tests {
             cronjob: PreviewCronJobConfig::default(),
             config_mounts: vec![],
             secret_mounts: vec![],
+            spec_resources: vec![],
         }
     }
 
@@ -751,6 +789,7 @@ mod tests {
             cronjob: PreviewCronJobConfig::default(),
             config_mounts: vec![mount],
             secret_mounts: vec![],
+            spec_resources: vec![],
         }
     }
 
@@ -766,6 +805,7 @@ mod tests {
             cronjob: PreviewCronJobConfig::default(),
             config_mounts: vec![],
             secret_mounts: vec![mount],
+            spec_resources: vec![],
         }
     }
 

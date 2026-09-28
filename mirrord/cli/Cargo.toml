@@ -43,6 +43,7 @@ clap.workspace = true
 dotenvy.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
+serde-saphyr.workspace = true
 serde.workspace = true
 tracing-subscriber.workspace = true
 futures.workspace = true
@@ -120,7 +121,6 @@ http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
-serde-saphyr.workspace = true
 
 [features]
 windows_build = []

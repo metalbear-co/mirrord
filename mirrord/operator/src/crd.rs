@@ -805,6 +805,12 @@ pub enum NewOperatorFeature {
     /// targets at resolution time and would only report it as a failed session.
     PreviewCronJobTarget,
 
+    /// This operator builds the preview pod from the pod template and ConfigMaps/Secrets the CLI
+    /// sends in `spec.specResources` (`mirrord preview start --resource`). Gated so the CLI fails
+    /// fast: an older operator's CRD schema prunes the unknown field, so the preview would
+    /// silently run the target's live spec instead of the user's files.
+    PreviewSpecResources,
+
     /// The interception event stream serves every session at once when given no key, honors
     /// `include_session_key` and `include_unmatched`, and carries the ids pairing an HTTP request
     /// with its response.
@@ -894,6 +900,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchUrlParam => "DB branching url connection param",
             NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
             NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
+            NewOperatorFeature::PreviewSpecResources => "preview specs from manifest files",
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
             NewOperatorFeature::QueueSplittingWithComposedFilters => {
                 "queue splitting with composable message filters"
