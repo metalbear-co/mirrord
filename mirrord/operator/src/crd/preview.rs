@@ -450,6 +450,57 @@ pub struct PreviewIncomingConfig {
     /// and could break backwards compatibility if stored directly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_filter: Option<String>,
+
+    /// How the operator delivers stolen TLS traffic to the preview pod.
+    ///
+    /// `None` is the default: TLS, no verification of the pod's certificate, no client
+    /// certificate. Only ever `Some` for TLS-stolen ports; plain HTTP delivery ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_delivery: Option<PreviewTlsDelivery>,
+}
+
+/// The parts of the user's `feature.network.incoming.tls_delivery` that apply to a preview.
+///
+/// The operator, not the CLI, makes the TLS connection to the preview pod, so paths on the
+/// user's machine mean nothing here: the CLI reads the client certificate files and stores
+/// their contents in the session's secret mounts `Secret` (see [`secret_mounts_secret_name`]),
+/// and this only names the keys. `protocol`, `trust_roots` and `server_cert` have no preview
+/// counterpart: delivery is always TLS and the pod's certificate is never verified.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewTlsDelivery {
+    /// Server name (SNI) to send to the preview pod's TLS server.
+    ///
+    /// When unset, the original client's SNI is used, then the request URL's host, then
+    /// `localhost`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_name: Option<String>,
+
+    /// Client certificate the operator presents to the preview pod, for applications that
+    /// require one (mutual TLS). Without it the preview pod's TLS server rejects every stolen
+    /// request with a `BadCertificate` alert, which surfaces as a 502.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_auth: Option<PreviewTlsClientAuth>,
+}
+
+/// Keys in the session's secret mounts `Secret` holding the client certificate and its key.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewTlsClientAuth {
+    /// Key whose value is the PEM certificate chain.
+    pub cert_secret_key: String,
+
+    /// Key whose value is the PEM private key.
+    pub key_secret_key: String,
+}
+
+impl PreviewTlsClientAuth {
+    /// Secret key the CLI stores the certificate chain under. Secret mount files use `k<n>`
+    /// keys, so these never collide with them.
+    pub const CERT_SECRET_KEY: &str = "tls-client-cert";
+
+    /// Secret key the CLI stores the private key under.
+    pub const KEY_SECRET_KEY: &str = "tls-client-key";
 }
 
 impl PreviewIncomingConfig {
@@ -477,6 +528,9 @@ impl PreviewIncomingConfig {
                     .map(|http_filter| serde_json::to_string(&http_filter))
                     .transpose()
                     .expect("HttpFilterConfig serialization cannot fail"),
+                // Filled in by the CLI once the client certificate is stored in the
+                // session's Secret, see `PreviewTlsDelivery`.
+                tls_delivery: None,
             }),
         }
     }
@@ -953,6 +1007,9 @@ pub struct PreviewDbBranchingConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub s3_branch_names: Vec<String>,
 
+    /// turbopuffer branch namespace names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turbopuffer_branch_names: Vec<String>,
     /// This session's own connection mapping for the branches it reuses, keyed by branch
     /// resource name.
     ///
@@ -987,6 +1044,7 @@ impl PreviewDbBranchingConfig {
             clickhouse_branch_names,
             cockroachdb_branch_names,
             s3_branch_names,
+            turbopuffer_branch_names,
             connection_sources: _,
         } = self;
 
@@ -1002,6 +1060,7 @@ impl PreviewDbBranchingConfig {
             clickhouse_branch_names.iter(),
             cockroachdb_branch_names.iter(),
             s3_branch_names.iter(),
+            turbopuffer_branch_names.iter(),
         ]
         .into_iter()
         .flatten()
@@ -1026,6 +1085,7 @@ impl PreviewDbBranchingConfig {
                 clickhouse_branch_names: branch_db_names.clickhouse,
                 cockroachdb_branch_names: branch_db_names.cockroachdb,
                 s3_branch_names: branch_db_names.s3,
+                turbopuffer_branch_names: branch_db_names.turbopuffer,
                 connection_sources: branch_db_names.connection_sources,
             })
         }

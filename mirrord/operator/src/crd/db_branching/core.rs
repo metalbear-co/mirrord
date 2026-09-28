@@ -29,6 +29,8 @@ pub enum ConnectionSource {
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionParamsSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<SingleOrVec<ConnectionSourceKind>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<SingleOrVec<ConnectionSourceKind>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<SingleOrVec<ConnectionSourceKind>>,
@@ -339,6 +341,7 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
             })
             .collect();
         Self {
+            url: wrap(&config.params.url),
             host: wrap(&config.params.host),
             port: wrap(&config.params.port),
             user: wrap(&config.params.user),

@@ -121,6 +121,7 @@ pub mod pg;
 pub mod redis;
 pub mod s3;
 pub mod spanner;
+pub mod turbopuffer;
 
 pub use clickhouse::{
     ClickhouseBranchConfig, ClickhouseBranchCopyConfig, ClickhouseBranchTableCopyConfig,
@@ -145,6 +146,7 @@ pub use redis::{
 };
 pub use s3::{S3BranchConfig, S3BranchCopyConfig, S3Provider};
 pub use spanner::{SpannerBranchConfig, SpannerBranchCopyConfig, SpannerBranchTableCopyConfig};
+pub use turbopuffer::{TurbopufferBranchConfig, TurbopufferBranchCopyConfig};
 
 pub type PgIamAuthConfig = IamAuthConfig;
 
@@ -446,6 +448,8 @@ impl DatabaseBranchesConfig {
                 // S3 accepts only the `bucket` param, which the shared checks know nothing
                 // about.
                 DatabaseBranchConfig::S3(cfg) => cfg.verify()?,
+                // Same for turbopuffer's namespace/api_key/region params.
+                DatabaseBranchConfig::Turbopuffer(cfg) => cfg.verify()?,
                 other => other.verify_shared()?,
             }
         }
@@ -483,6 +487,7 @@ impl DatabaseBranchConfig {
             },
             DatabaseBranchConfig::S3(cfg) => Some(&cfg.base),
             DatabaseBranchConfig::Spanner(cfg) => Some(&cfg.base),
+            DatabaseBranchConfig::Turbopuffer(cfg) => Some(&cfg.base),
         }
     }
 
@@ -506,6 +511,8 @@ impl DatabaseBranchConfig {
             // An S3 branch is a bucket in the provider's cloud, not a server mirrord runs.
             DatabaseBranchConfig::S3(_) => None,
             DatabaseBranchConfig::Spanner(cfg) => Some(&cfg.pod),
+            // A turbopuffer branch is a namespace in turbopuffer's cloud.
+            DatabaseBranchConfig::Turbopuffer(_) => None,
         }
     }
 
@@ -530,6 +537,9 @@ impl DatabaseBranchConfig {
             // bucket, located by the `bucket` param of `S3BranchConfig::source`.
             DatabaseBranchConfig::S3(_) => None,
             DatabaseBranchConfig::Spanner(cfg) => Some(&cfg.database),
+            // Same for a turbopuffer branch: one namespace, located by the `namespace`
+            // param of `TurbopufferBranchConfig::source`.
+            DatabaseBranchConfig::Turbopuffer(_) => None,
         }
     }
 
@@ -552,6 +562,7 @@ impl DatabaseBranchConfig {
             },
             DatabaseBranchConfig::S3(_) => None,
             DatabaseBranchConfig::Spanner(cfg) => Some(&mut cfg.database),
+            DatabaseBranchConfig::Turbopuffer(_) => None,
         }
     }
 
@@ -570,7 +581,8 @@ impl DatabaseBranchConfig {
             | DatabaseBranchConfig::Mongodb(_)
             | DatabaseBranchConfig::Redis(_)
             | DatabaseBranchConfig::S3(_)
-            | DatabaseBranchConfig::Spanner(_) => None,
+            | DatabaseBranchConfig::Spanner(_)
+            | DatabaseBranchConfig::Turbopuffer(_) => None,
         }
     }
 
@@ -651,6 +663,10 @@ impl DatabaseBranchConfig {
                 SpannerBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
                 SpannerBranchCopyConfig::All => BranchCopyMode::All,
             },
+            DatabaseBranchConfig::Turbopuffer(cfg) => match cfg.copy {
+                TurbopufferBranchCopyConfig::Empty => BranchCopyMode::Empty,
+                TurbopufferBranchCopyConfig::All => BranchCopyMode::All,
+            },
         };
 
         Some(mode)
@@ -660,8 +676,10 @@ impl DatabaseBranchConfig {
     /// declared as params rather than a URL.
     fn connection_params(&self) -> Option<&ConnectionParamsVars> {
         match self {
-            // An S3 branch is always params-shaped; a bucket has no connection URL.
+            // S3 and turbopuffer branches are always params-shaped; a bucket or a namespace
+            // has no connection URL.
             DatabaseBranchConfig::S3(cfg) => Some(&cfg.source.params),
+            DatabaseBranchConfig::Turbopuffer(cfg) => Some(&cfg.source.params),
             other => match &other.database()?.connection {
                 ConnectionSource::Params(config) => Some(&config.params),
                 ConnectionSource::Url { .. } | ConnectionSource::FlatUrl { .. } => None,
@@ -676,6 +694,13 @@ impl DatabaseBranchConfig {
             self.migrations(),
             Some(SqlBranchMigrationsConfig::Liquibase { .. })
         )
+    }
+
+    /// True when this branch's connection params declare a `url` base. The CLI uses it to
+    /// refuse the config on an operator that predates the param.
+    pub fn uses_url_param(&self) -> bool {
+        self.connection_params()
+            .is_some_and(|params| params.url.is_some())
     }
 
     /// True when any of this branch's connection params is a `configmap` source. The CLI uses
@@ -693,6 +718,7 @@ impl DatabaseBranchConfig {
     fn uses_secret(&self) -> bool {
         match self {
             DatabaseBranchConfig::S3(cfg) => cfg.source.params.uses_secret(),
+            DatabaseBranchConfig::Turbopuffer(cfg) => cfg.source.params.uses_secret(),
             other => other
                 .database()
                 .is_some_and(|database| database.connection.uses_secret()),
@@ -718,6 +744,13 @@ impl DatabaseBranchConfig {
             // the branch bucket. It lives in `extra`, which the shared collector skips.
             DatabaseBranchConfig::S3(cfg) => {
                 for source in cfg.source.params.extra.values().flatten() {
+                    source.collect_env_keys(&mut keys);
+                }
+            }
+            // Only the namespace var is repointed; the API key and region are read, not
+            // rewritten, so overriding them locally does not fight the operator.
+            DatabaseBranchConfig::Turbopuffer(cfg) => {
+                for source in cfg.namespace_sources() {
                     source.collect_env_keys(&mut keys);
                 }
             }
@@ -801,6 +834,7 @@ impl TargetEnvironmentVariableSource {
 impl ConnectionParamsVars {
     fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
         [
+            &self.url,
             &self.host,
             &self.port,
             &self.user,
@@ -818,6 +852,7 @@ impl ConnectionParamsVars {
     /// analytics even though most of them are not redirected locally.
     fn all_sources(&self) -> impl Iterator<Item = &ParamSource> {
         [
+            &self.url,
             &self.host,
             &self.port,
             &self.user,
@@ -1085,6 +1120,7 @@ pub enum DatabaseBranchConfig {
     Redis(Box<RedisBranchConfig>),
     S3(Box<S3BranchConfig>),
     Spanner(Box<SpannerBranchConfig>),
+    Turbopuffer(Box<TurbopufferBranchConfig>),
 }
 
 /// <!--${internal}-->
@@ -1317,6 +1353,16 @@ pub struct ConnectionParamsConfig {
     pub params: ConnectionParamsVars,
 }
 
+/// The URL with a leading `jdbc:` removed, case-insensitively, or the URL unchanged.
+///
+/// A JDBC URL is not a base URL: without stripping the prefix the whole authority lands in the
+/// path and the URL resolves to no host at all.
+pub fn strip_jdbc_prefix(url: &str) -> &str {
+    url.get(..5)
+        .filter(|prefix| prefix.eq_ignore_ascii_case("jdbc:"))
+        .map_or(url, |prefix| &url[prefix.len()..])
+}
+
 /// <!--${internal}-->
 /// A connection parameter source: a plain env var name (string), an env var with a literal
 /// value override (object with `variable` and optional `value`), or a Kubernetes Secret
@@ -1524,6 +1570,17 @@ impl ParamSource {
         }
     }
 
+    /// Whether the source names an env var the operator can rewrite to the branch's value.
+    ///
+    /// A branch that redirects through an env var is unusable without one: the value would be
+    /// resolved and then have nowhere to go.
+    pub fn names_env_var(&self) -> bool {
+        let mut keys = Vec::new();
+        self.collect_env_keys(&mut keys);
+
+        !keys.is_empty()
+    }
+
     pub fn is_secret(&self) -> bool {
         match self {
             Self::Variable(_)
@@ -1573,6 +1630,8 @@ pub fn extract_pattern_param<'v>(
 /// Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct ConnectionParamsVars {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<SingleOrVec<ParamSource>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<SingleOrVec<ParamSource>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1839,9 +1898,10 @@ mod tests {
 
     /// Verifies that database configs properly deserialize.
     ///
-    /// Tests all flavors except [`DatabaseBranchEngine::Redis`] and
-    /// [`DatabaseBranchEngine::S3`], which are verified in [`redis_deserialize_compat`] and
-    /// [`s3_deserialize_compat`].
+    /// Tests all flavors except [`DatabaseBranchEngine::Redis`], [`DatabaseBranchEngine::S3`]
+    /// and [`DatabaseBranchEngine::Turbopuffer`], which are verified in
+    /// [`redis_deserialize_compat`], [`s3_deserialize_compat`] and
+    /// [`turbopuffer_deserialize_compat`].
     #[rstest]
     fn deserialize_compat(
         #[values(
@@ -1886,6 +1946,9 @@ mod tests {
             // An S3 branch has neither a pod nor a source database, and names its source
             // `source` rather than `connection`, so none of the shared assertions below fit.
             DatabaseBranchEngine::S3 => unreachable!("checked in `s3_deserialize_compat`"),
+            DatabaseBranchEngine::Turbopuffer => {
+                unreachable!("checked in `turbopuffer_deserialize_compat`")
+            }
         };
 
         let (Value::Object(mut fields), Value::Object(flavor_fields)) = (
@@ -2064,6 +2127,7 @@ mod tests {
     #[case::no_bucket(json!({}))]
     #[case::unknown_param(json!({ "bucket": "BUCKET", "table": "TABLE" }))]
     #[case::fixed_slot(json!({ "bucket": "BUCKET", "host": "HOST" }))]
+    #[case::url_slot(json!({ "bucket": "BUCKET", "url": "DB_URL" }))]
     fn s3_verify_rejects_params_other_than_bucket(#[case] params: Value) {
         let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
             "type": "s3",
@@ -2101,6 +2165,133 @@ mod tests {
         DatabaseBranchesConfig(vec![branch])
             .verify(&mut config::ConfigContext::default())
             .expect("config should verify");
+    }
+
+    /// Checks that [`TurbopufferBranchConfig`] properly deserializes.
+    ///
+    /// Like S3, a turbopuffer branch has no pod and no source database, so it is checked here
+    /// rather than in [`deserialize_compat`]. Only the namespace var is a redirected key: the
+    /// API key and region are read by the operator, never rewritten on the local app.
+    #[test]
+    fn turbopuffer_deserialize_compat() {
+        let config = json!({
+            "type": "turbopuffer",
+            "id": "my-branch",
+            "ttl_mins": 5,
+            "creation_timeout_secs": 90,
+            "source": {
+                "params": {
+                    "namespace": "TPUF_NAMESPACE",
+                    "api_key": { "secret": "turbopuffer", "key": "api-key" },
+                    "region": { "env_var_name": "TURBOPUFFER_REGION", "value": "gcp-us-central1" },
+                },
+            },
+            "copy": { "mode": "all" },
+        });
+
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(config).unwrap();
+        assert_eq!(
+            DatabaseBranchEngine::from(&branch),
+            DatabaseBranchEngine::Turbopuffer
+        );
+        assert_eq!(branch.pod(), None);
+        assert_eq!(branch.database(), None);
+        assert_eq!(branch.copy_mode(), Some(BranchCopyMode::All));
+        assert_eq!(branch.connection_env_keys(), vec!["TPUF_NAMESPACE"]);
+
+        let base = branch
+            .base()
+            .expect("turbopuffer branches carry the base group");
+        assert_eq!(base.id.as_deref(), Some("my-branch"));
+        assert_eq!(base.resolved_ttl_secs(), 300);
+        assert_eq!(base.creation_timeout_secs, 90);
+
+        let DatabaseBranchConfig::Turbopuffer(turbopuffer) = &branch else {
+            panic!("expected a turbopuffer branch");
+        };
+        assert!(turbopuffer.source.params.uses_secret());
+        assert_eq!(
+            turbopuffer
+                .source
+                .params
+                .extra
+                .get("namespace")
+                .and_then(|values| values.first()),
+            Some(&ParamSource::Variable("TPUF_NAMESPACE".to_owned()))
+        );
+        assert_eq!(turbopuffer.copy, TurbopufferBranchCopyConfig::All);
+
+        DatabaseBranchesConfig(vec![branch.clone()])
+            .verify(&mut config::ConfigContext::default())
+            .expect("config should verify");
+
+        let reparsed =
+            serde_json::from_value::<DatabaseBranchConfig>(serde_json::to_value(&branch).unwrap())
+                .expect("a serialized branch should parse back");
+        assert_eq!(reparsed, branch);
+    }
+
+    /// The minimal turbopuffer config: no copy mode (empty is the default), the source under
+    /// either of its two accepted names, and the endpoint given as either a region or a base
+    /// URL.
+    #[rstest]
+    #[case::source_region("source", "region")]
+    #[case::connection_base_url("connection", "base_url")]
+    fn turbopuffer_minimal_config(#[case] source_field: &str, #[case] endpoint_param: &str) {
+        let config = json!({
+            "type": "turbopuffer",
+            source_field: {
+                "params": {
+                    "namespace": "TPUF_NAMESPACE",
+                    "api_key": "TURBOPUFFER_API_KEY",
+                    endpoint_param: "TURBOPUFFER_ENDPOINT",
+                },
+            },
+        });
+
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(config).unwrap();
+        let DatabaseBranchConfig::Turbopuffer(turbopuffer) = &branch else {
+            panic!("expected a turbopuffer branch");
+        };
+        assert_eq!(turbopuffer.copy, TurbopufferBranchCopyConfig::Empty);
+        assert_eq!(
+            turbopuffer.base.resolved_ttl_secs(),
+            BranchBaseConfig::DEFAULT_TTL_SECS
+        );
+        assert_eq!(branch.copy_mode(), Some(BranchCopyMode::Empty));
+
+        DatabaseBranchesConfig(vec![branch])
+            .verify(&mut config::ConfigContext::default())
+            .expect("config should verify");
+    }
+
+    /// A turbopuffer branch needs its namespace var, its API key and exactly one endpoint
+    /// param, and nothing else; anything off that is a config error rather than a branch the
+    /// operator would reject later.
+    #[rstest]
+    #[case::no_namespace(json!({ "api_key": "KEY", "region": "REGION" }))]
+    #[case::no_api_key(json!({ "namespace": "NS", "region": "REGION" }))]
+    #[case::no_endpoint(json!({ "namespace": "NS", "api_key": "KEY" }))]
+    #[case::both_endpoints(json!({ "namespace": "NS", "api_key": "KEY", "region": "REGION", "base_url": "URL" }))]
+    #[case::unknown_param(json!({ "namespace": "NS", "api_key": "KEY", "region": "REGION", "table": "TABLE" }))]
+    #[case::fixed_slot(json!({ "namespace": "NS", "api_key": "KEY", "region": "REGION", "host": "HOST" }))]
+    #[case::url_slot(json!({ "namespace": "NS", "api_key": "KEY", "region": "REGION", "url": "DB_URL" }))]
+    #[case::unrewritable_namespace(json!({ "namespace": { "secret": "s", "key": "k" }, "api_key": "KEY", "region": "REGION" }))]
+    #[case::several_namespaces(json!({ "namespace": ["NS_ONE", "NS_TWO"], "api_key": "KEY", "region": "REGION" }))]
+    #[case::blank_namespace(json!({ "namespace": "", "api_key": "KEY", "region": "REGION" }))]
+    #[case::blank_api_key(json!({ "namespace": "NS", "api_key": "   ", "region": "REGION" }))]
+    #[case::blank_region(json!({ "namespace": "NS", "api_key": "KEY", "region": "" }))]
+    #[case::literal_base_url(json!({ "namespace": "NS", "api_key": "KEY", "base_url": { "env_var_name": "TPUF_URL", "value": "https://evil.example" } }))]
+    fn turbopuffer_verify_rejects_bad_params(#[case] params: Value) {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
+            "type": "turbopuffer",
+            "source": { "params": params },
+        }))
+        .expect("params are only checked by `verify`");
+
+        DatabaseBranchesConfig(vec![branch])
+            .verify(&mut config::ConfigContext::default())
+            .expect_err("the params must be rejected");
     }
 
     #[test]
@@ -2328,6 +2519,7 @@ mod tests {
             ConnectionSource::Params(Box::new(ConnectionParamsConfig {
                 source_type: Some(ConnectionSourceType::Env),
                 params: ConnectionParamsVars {
+                    url: None,
                     host: None,
                     port: None,
                     user: None,
@@ -2433,6 +2625,7 @@ mod tests {
         let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: None,
             params: ConnectionParamsVars {
+                url: None,
                 host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
                 port: None,
                 user: None,
@@ -2616,6 +2809,7 @@ mod tests {
         let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: None,
             params: ConnectionParamsVars {
+                url: None,
                 host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
                 port: None,
                 user: Some(ParamSource::Variable("DB_USER".to_owned()).into()),
@@ -2763,6 +2957,7 @@ mod tests {
         let source = ConnectionSource::Params(Box::new(ConnectionParamsConfig {
             source_type: None,
             params: ConnectionParamsVars {
+                url: None,
                 host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
                 port: None,
                 user: None,
@@ -2903,6 +3098,16 @@ mod tests {
                     "type": "s3",
                     "copy": { "mode": "all" },
                     "source": { "params": { "bucket": "MY_BUCKET_ENV_VAR" } }
+                },
+                {
+                    "type": "turbopuffer",
+                    "source": {
+                        "params": {
+                            "namespace": "TPUF_NAMESPACE",
+                            "api_key": { "secret": "turbopuffer", "key": "api-key" },
+                            "region": "TURBOPUFFER_REGION"
+                        }
+                    }
                 }
             ]"#,
         )
@@ -2927,18 +3132,19 @@ mod tests {
                 "redis_branch_count": 1,
                 "s3_branch_count": 1,
                 "spanner_branch_count": 0,
-                "copy_empty_count": 2,
+                "turbopuffer_branch_count": 1,
+                "copy_empty_count": 3,
                 "copy_schema_count": 0,
                 "copy_all_count": 2,
                 "connection_url_count": 2,
-                "connection_params_count": 3,
-                "connection_secret_count": 1,
+                "connection_params_count": 4,
+                "connection_secret_count": 2,
                 "params_host_count": 2,
                 "params_port_count": 1,
                 "params_user_count": 0,
                 "params_password_count": 1,
                 "params_database_count": 1,
-                "params_extra_count": 1,
+                "params_extra_count": 2,
                 "user_image_count": 1,
                 "profile_count": 1,
             })
@@ -3032,6 +3238,7 @@ mod tests {
             pg_branch_with_connection(ConnectionSource::Params(Box::new(ConnectionParamsConfig {
                 source_type: None,
                 params: ConnectionParamsVars {
+                    url: None,
                     host: Some(ParamSource::Variable("DB_HOST".to_owned()).into()),
                     port: None,
                     user: Some(ParamSource::Variable("DB_USER".to_owned()).into()),
