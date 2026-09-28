@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-09-25T00:00:00.000Z
+lastmod: 2026-09-28T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -846,7 +846,8 @@ have support for a shortened version, that you can see [here](#root-shortened).
       "mode": "write",
       "read_write": ".+\\.json" ,
       "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ],
-      "local": [ ".+\\.js", ".+\\.mjs" ]
+      "local": [ ".+\\.js", ".+\\.mjs" ],
+      "prefetch": [ "/etc/ssl" ]
     },
     "network": {
       "incoming": {
@@ -2207,6 +2208,129 @@ differently-named variable (for example it reads `MY_EMULATOR` and passes that e
 the client explicitly); then set this to that variable's name so mirrord writes the address
 where your app actually looks.
 
+When configuring a branch for a turbopuffer namespace, set `type` to `turbopuffer`.
+
+The branch namespace is a copy-on-write clone made by turbopuffer itself, so - like an S3
+branch - it has no pod in the cluster and takes no `image` nor `version`. It is otherwise
+a normal branch: the standard `id`, `ttl_secs`/`ttl_mins` and `creation_timeout_secs`
+options all apply.
+
+turbopuffer clients pick the namespace per request, so the app has to read the namespace
+name from an env var for mirrord to redirect it. The `namespace` param names that var;
+once the branch exists, the operator points it at the branch namespace. The `api_key`
+param names where the operator reads the API key it branches with, and `region` (or
+`base_url`) where the namespace lives. Those two are only read, never rewritten.
+
+Example:
+```json
+{
+  "type": "turbopuffer",
+  "source": {
+    "params": {
+      "namespace": "TPUF_NAMESPACE",
+      "api_key": "TURBOPUFFER_API_KEY",
+      "region": { "env_var_name": "TURBOPUFFER_REGION", "value": "gcp-us-central1" }
+    }
+  },
+  "copy": { "mode": "all" }
+}
+```
+
+#### feature.db_branches[].copy (type: turbopuffer) {#feature-db_branches-turbopuffer-copy}
+
+How the branch namespace is seeded from the source namespace.
+
+Users can choose from the following copy modes to bootstrap their turbopuffer branch:
+
+- Empty (default)
+
+  Reserves a fresh namespace name with nothing in it; turbopuffer creates the namespace on
+  the app's first write.
+
+- All
+
+  Branches the source namespace: an instant copy-on-write clone with every document and
+  the schema. Writes to either side never reach the other.
+
+```json
+{ "copy": { "mode": "all" } }
+```
+
+#### feature.db_branches[].source (type: turbopuffer) {#feature-db_branches-turbopuffer-source}
+
+Where to read the source namespace, the API key and the region from, in the same
+params shape the other engines use for their connection details - `type` picks how
+the variables are resolved on the target (`env` for the pod spec's own `env`,
+`env_from` for its `envFrom` sources), and is auto-detected when omitted.
+
+The params a turbopuffer branch takes:
+
+- `namespace` (required): the env var holding the source namespace name. The operator
+  rewrites it to the branch namespace, so it must name an env var.
+- `api_key` (required): the API key used to branch and later delete the namespace.
+- `region`: the turbopuffer region, e.g. `gcp-us-central1`.
+- `base_url`: the full API endpoint, for dedicated clusters. Exactly one of `region` and
+  `base_url` must be set.
+
+```json
+{
+  "source": {
+    "params": {
+      "namespace": "TPUF_NAMESPACE",
+      "api_key": { "secret": "turbopuffer", "key": "api-key" },
+      "base_url": "TURBOPUFFER_BASE_URL"
+    }
+  }
+}
+```
+
+Each value is as flexible as any other engine's params: a Kubernetes Secret
+(`{ "secret": "my-secret", "key": "namespace" }`), a literal
+(`{ "env_var_name": "TURBOPUFFER_REGION", "value": "gcp-us-central1" }`), or a regex
+extracting the name out of a larger variable
+(`{ "env_var_name": "TPUF_URI", "value_pattern": "..." }`).
+
+Connection parameters specified as individual environment variable names.
+The `type` field is optional - when omitted, the operator auto-detects
+whether the variable comes from `env` or `envFrom` on the target pod.
+
+Individual database connection parameter sources.
+At least one parameter must be specified.
+Each parameter is either a plain string (env var name) or an object with `secret` and `key`.
+
+Engine-specific connection parameters that have no universal slot above, keyed by a name
+the engine recognizes. They are written flat alongside the fixed slots, so a Spanner
+`params` block reads `{ "project": ..., "instance": ..., "database_id": ... }` with no
+nesting. The operator resolves each from the target pod and hands it to the branch init
+sidecar. A param with a branch-side equivalent (PostgreSQL's and CockroachDB's `sslmode`,
+an S3 branch's `bucket`) also gets its env var rewritten on the local app to the branch's
+own value; the rest are read-only source locators the local app keeps untouched.
+
+PostgreSQL and CockroachDB accept `sslmode`: the TLS mode of the source connection,
+which params mode has no URL to carry.
+
+An S3 branch accepts `bucket`: the name of the source bucket, which the operator repoints
+at the branch bucket once that exists.
+
+Google Cloud Spanner keys name the env vars on the target pod that hold its three
+separate source identifiers:
+- `project`: the GCP project id the source Spanner instance lives in.
+- `instance`: the source Spanner instance id within that project.
+- `database_id`: the source database id to recreate in the emulator (and, for the `schema`
+  / `all` copy modes, copy schema and data from).
+
+Spanner uses `database_id` rather than the fixed `database` slot above because the two mean
+different things. The fixed slot is an override target: the operator rewrites the app's
+database var to point at the branch's database. Spanner never rewrites it - the app keeps
+its own database id and is redirected wholesale by `SPANNER_EMULATOR_HOST` - so its
+database is a read-only locator the init sidecar uses to pick which source database to
+recreate, exactly like `project` and `instance`. The distinct name also keeps it from
+colliding with the flattened fixed `database` slot.
+
+Unknown keys are rejected by the operator for the resolved engine.
+
+The type of environment variable source for connection params.
+
 ### feature.env {#feature-env}
 
 Allows the user to set or override the local process' environment variables with the ones
@@ -2386,7 +2510,8 @@ For more information, check the file operations
       "read_write": ".+\\.json" ,
       "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ],
       "local": [ ".+\\.js", ".+\\.mjs" ],
-      "not_found": [ "\\.config/gcloud" ]
+      "not_found": [ "\\.config/gcloud" ],
+      "prefetch": [ "/etc/ssl" ]
     }
   }
 }
@@ -2507,6 +2632,68 @@ converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
 Patterns must therefore be written with forward slashes. Backslashes in the regex
 (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
 regex sees contains no backslashes at all — they were stripped during translation.
+
+#### feature.fs.prefetch {#feature-fs-prefetch}
+
+Remote paths to download from the target before the local process starts.
+
+Each path is copied from the remote filesystem into a temporary local directory, along
+with its permissions. Operations on these paths are then served from that local copy,
+without involving the agent at all. Directories are copied recursively.
+
+Writes go to the copy as well, and are never sent to the target. The application reads
+back whatever it wrote for the rest of the run, and the copy is abandoned when the run
+ends, leaving the target untouched. A write reaches the copy only when the
+[`mode`](#feature-fs-mode) would otherwise have sent it to the target, that is under
+`write`; under the other modes writes stay on the local filesystem under their original
+path, as they do for every other file.
+
+The copy keeps the permissions it had in the target, so a file that is read-only there is
+read-only here, and writing to it fails locally much as it would remotely.
+
+**Do not prefetch secrets.** The copy is written to a temporary directory on the machine
+running mirrord, guarded by nothing more than that machine's own permissions, rather than
+by the cluster. It is deleted when the session ends, but a session that is killed outright
+leaves it behind, since nothing gets to run.
+
+Creating, deleting and renaming still act on the target: a file created under a prefetched
+directory is not part of the copy, and deleting or renaming a prefetched path takes effect
+remotely rather than in the copy.
+
+This trades startup time for read throughput, and is meant for applications that
+repeatedly read a small and stable set of remote files, e.g. an HTTP server that reads
+`/etc/ssl` on every request.
+
+Because the copy is taken once, before the application starts, changes made to these
+paths in the pod afterwards are invisible to the application.
+
+Paths must start with `/`, as they are resolved in the remote pod, where the local
+process's working directory is meaningless.
+
+Not supported on Windows, where the option is ignored.
+
+```json
+{
+  "feature": {
+    "fs": {
+      "mode": "read",
+      "prefetch": [ "/etc/ssl", "/app/config.yaml" ]
+    }
+  }
+}
+```
+
+#### feature.fs.prefetch_timeout {#feature-fs-prefetch_timeout}
+
+How long to wait, in seconds, for each request to the agent made while copying
+[`prefetch`](#feature-fs-prefetch) paths. By default, the value is 30 seconds.
+
+The limit is per request rather than for the whole copy, which makes many requests: one
+per directory listing, and one per chunk of every file. Raise it when copying from a slow
+or distant cluster, where a single request can outlast the default.
+
+A path that runs out of time is skipped with a warning, and is read from the remote as
+usual.
 
 #### feature.fs.read_only {#feature-fs-read_only}
 
