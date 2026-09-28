@@ -25,7 +25,7 @@ use std::{
 
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
-    read_kube_version_from_env,
+    read_kube_version_from_env, read_operator_wall_from_env,
 };
 use mirrord_config::{
     LayerConfig, LayerFileConfig,
@@ -273,6 +273,9 @@ pub(crate) async fn proxy(
     (&config).collect_analytics(analytics.get_mut());
     if let Some(correlation_id) = read_correlation_id_from_env() {
         analytics.get_mut().add("correlation_id", correlation_id);
+    }
+    if let Some(wall) = read_operator_wall_from_env() {
+        analytics.get_mut().add("operator_wall", wall);
     }
     if let Some((major, minor)) = read_kube_version_from_env() {
         analytics.get_mut().add("kube_version_major", major);

@@ -150,8 +150,21 @@ impl AiAgent {
     }
 }
 
-/// The point at which an open-source run learned it needed the operator, reported as
-/// `operator_wall`. The first three end the run; the last two only warn.
+/// Environment variable carrying the [`OperatorWall`] a run met from the CLI down to the proxy
+/// that reports session analytics, since the CLI's own report is only sent on failure.
+pub const MIRRORD_OPERATOR_WALL_ENV: &str = "MIRRORD_OPERATOR_WALL";
+
+/// Reads the [`MIRRORD_OPERATOR_WALL_ENV`] wall set by the parent CLI, if present.
+pub fn read_operator_wall_from_env() -> Option<u32> {
+    std::env::var(MIRRORD_OPERATOR_WALL_ENV).ok()?.parse().ok()
+}
+
+/// The point at which a run without the operator learned it needed it, reported as
+/// `operator_wall`. Only the first wall a run meets is kept.
+///
+/// - Ends the run: `TargetType`, `CopyTarget`, `OperatorRequested`, `LicenseExpired` with
+///   `operator: true`, and every `*Command` variant.
+/// - Only warns or is silently skipped: the rest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum OperatorWall {
@@ -161,6 +174,20 @@ pub enum OperatorWall {
     OperatorRequested = 3,
     MultiPod = 4,
     HttpFilter = 5,
+    /// The operator's license expired. Without `operator: true` the run goes on without it.
+    LicenseExpired = 6,
+    /// `feature.split_queues` is set, but is not applied without the operator.
+    SplitQueues = 7,
+    /// `feature.db_branches` is set, but is not applied without the operator.
+    DbBranches = 8,
+    /// The target's environment names a queue the operator could split.
+    QueueSplittingHint = 9,
+    PreviewCommand = 10,
+    CiCommand = 11,
+    /// `mirrord operator status` or `mirrord operator session`.
+    OperatorCommand = 12,
+    /// `mirrord ls` with `operator: true`.
+    ListTargetsCommand = 13,
 }
 
 /// Struct to store analytics data.
@@ -210,6 +237,20 @@ pub struct Analytics {
 impl Analytics {
     pub fn add<Key: ToString, Value: Into<AnalyticValue>>(&mut self, key: Key, value: Value) {
         self.data.insert(key.to_string(), value.into());
+    }
+
+    /// Records `wall` as `operator_wall`, unless the run already met an earlier one.
+    pub fn add_operator_wall(&mut self, wall: OperatorWall) {
+        self.data
+            .entry("operator_wall".to_owned())
+            .or_insert(AnalyticValue::Number(wall as u32));
+    }
+
+    pub fn operator_wall(&self) -> Option<u32> {
+        match self.data.get("operator_wall") {
+            Some(AnalyticValue::Number(wall)) => Some(*wall),
+            _ => None,
+        }
     }
 }
 
@@ -643,6 +684,18 @@ mod tests {
             json!({
                 "preview_key_identifier": "a2V5"
             })
+        );
+    }
+
+    #[test]
+    fn first_operator_wall_is_kept() {
+        let mut analytics = Analytics::default();
+        analytics.add_operator_wall(OperatorWall::MultiPod);
+        analytics.add_operator_wall(OperatorWall::QueueSplittingHint);
+
+        assert_eq!(
+            analytics.operator_wall(),
+            Some(OperatorWall::MultiPod as u32)
         );
     }
 

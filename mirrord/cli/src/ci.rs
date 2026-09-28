@@ -10,7 +10,7 @@ use std::{fs::File, os::unix::process::ExitStatusExt, process::Stdio, time::Syst
 use ci_info::types::CiInfo;
 use drain::Watch;
 use fs4::tokio::AsyncFileExt;
-use mirrord_analytics::NullReporter;
+use mirrord_analytics::{ExecutionKind, NullReporter, OperatorWall};
 use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{
     LayerConfig, ci::CiConfig, config::ConfigContext, container::ContainerRuntime,
@@ -25,7 +25,10 @@ use tokio::fs::create_dir_all;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Level;
 
-use crate::{CliError, CliResult, ci::error::CiError, config::ci::*, data::UserData};
+use crate::{
+    CliError, CliResult, ci::error::CiError, config::ci::*, connection::report_command_wall,
+    data::UserData,
+};
 
 pub(crate) mod container;
 pub(crate) mod error;
@@ -57,7 +60,9 @@ pub(crate) async fn ci_command(
     user_data: &mut UserData,
 ) -> CliResult<()> {
     match args.command {
-        CiCommand::ApiKey { config_file } => generate_ci_api_key(config_file).await,
+        CiCommand::ApiKey { config_file } => {
+            generate_ci_api_key(config_file, watch, user_data).await
+        }
         CiCommand::Start(exec_args) => Ok(start::CiStartCommandHandler::new(
             exec_args, watch, user_data,
         )
@@ -79,7 +84,11 @@ pub(crate) async fn ci_command(
 /// Generate a new API key for CI usage by calling the operator API:
 /// `POST /mirrordclusteroperatorusercredentials`
 #[tracing::instrument(level = Level::TRACE, ret)]
-async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
+async fn generate_ci_api_key(
+    config_file: Option<PathBuf>,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord ci api-key");
 
     let mut cfg_context =
@@ -94,6 +103,13 @@ async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
         .await?
         .ok_or_else(|| {
             progress.failure(Some("operator not found"));
+            report_command_wall(
+                &layer_config,
+                ExecutionKind::Other,
+                OperatorWall::CiCommand,
+                watch,
+                user_data,
+            );
             CliError::OperatorNotInstalled
         })?;
 

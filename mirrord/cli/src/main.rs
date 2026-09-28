@@ -1102,10 +1102,10 @@ fn main() -> miette::Result<()> {
                     .and_then(|value| value.parse::<bool>().ok())
                     .unwrap_or_default();
 
-                list::print_targets(*args, rich_output).await?
+                list::print_targets(*args, rich_output, watch, &user_data).await?
             }
             Commands::Operator(args) => {
-                operator_command(*args).await?;
+                operator_command(*args, watch, &user_data).await?;
             }
             Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch, &user_data).await?;

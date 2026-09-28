@@ -1,7 +1,7 @@
 use std::{collections::HashSet, ops::Not, time::Duration};
 
 use kube::Api;
-use mirrord_analytics::{OperatorWall, Reporter};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, ExecutionKind, OperatorWall, Reporter};
 use mirrord_config::{
     LayerConfig,
     agent::AgentFileConfig,
@@ -32,7 +32,7 @@ use crate::{
     CliError, CliResult, MirrordCi,
     ci::error::CiError,
     connector::{AgentConnector, DirectConnector, OperatorConnector},
-    data::GlobalConfig,
+    data::{GlobalConfig, UserData},
     up::MirrordUp,
 };
 
@@ -94,7 +94,7 @@ where
         None if layer_config.operator == Some(true) => {
             analytics
                 .get_mut()
-                .add("operator_wall", OperatorWall::OperatorRequested as u32);
+                .add_operator_wall(OperatorWall::OperatorRequested);
             send_upgrade_ide_message(
                 progress,
                 "mirrord operator was not found in the cluster.",
@@ -113,6 +113,9 @@ where
         Ok(()) => license_subtask.success(Some("operator license valid")),
         Err(error) => {
             license_subtask.failure(Some("operator license expired"));
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::LicenseExpired);
 
             if layer_config.operator == Some(true) {
                 send_upgrade_ide_message(
@@ -413,6 +416,25 @@ async fn apply_auto_mount_for_target<P: Progress>(
     }
 }
 
+/// Sends a report for a command that stopped because it needs the operator.
+pub(crate) fn report_command_wall(
+    config: &LayerConfig,
+    execution_kind: ExecutionKind,
+    wall: OperatorWall,
+    watch: drain::Watch,
+    user_data: &UserData,
+) {
+    let mut analytics = AnalyticsReporter::only_error(
+        config.telemetry,
+        execution_kind,
+        watch,
+        user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
+    );
+    analytics.get_mut().add_operator_wall(wall);
+    analytics.set_error(AnalyticsError::Unknown);
+}
+
 /// Verifies and adjusts the [`LayerConfig`] after we've determined that this run does not use the
 /// operator.
 fn process_config_oss<P: Progress, R: Reporter>(
@@ -420,9 +442,7 @@ fn process_config_oss<P: Progress, R: Reporter>(
     progress: &mut P,
     analytics: &mut R,
 ) -> CliResult<()> {
-    let mut record_wall = |wall: OperatorWall| {
-        analytics.get_mut().add("operator_wall", wall as u32);
-    };
+    let mut record_wall = |wall: OperatorWall| analytics.get_mut().add_operator_wall(wall);
 
     // operator is disabled, but target requires it.
     if let Some(target) = config.target.path.as_ref()
@@ -488,6 +508,14 @@ fn process_config_oss<P: Progress, R: Reporter>(
         }
         _ => (),
     };
+
+    if config.feature.split_queues.is_set() {
+        record_wall(OperatorWall::SplitQueues);
+    }
+
+    if config.feature.db_branches.is_empty().not() {
+        record_wall(OperatorWall::DbBranches);
+    }
 
     config.experimental.disable_reuseaddr = config.experimental.disable_reuseaddr.or(Some(true));
     config.experimental.go_asmcgocall = config.experimental.go_asmcgocall.or(Some(true));

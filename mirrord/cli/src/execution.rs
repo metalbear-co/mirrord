@@ -8,7 +8,7 @@ use std::{
 
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, MIRRORD_KUBE_VERSION_MAJOR_ENV,
-    MIRRORD_KUBE_VERSION_MINOR_ENV, Reporter,
+    MIRRORD_KUBE_VERSION_MINOR_ENV, MIRRORD_OPERATOR_WALL_ENV, OperatorWall, Reporter,
 };
 #[cfg(any(windows, test))]
 use mirrord_config::MIRRORD_LAYER_CRASH_REPORTING;
@@ -511,6 +511,10 @@ impl MirrordExecution {
             .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string())
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
+        if let Some(wall) = analytics.get_mut().operator_wall() {
+            proxy_command.env(MIRRORD_OPERATOR_WALL_ENV, wall.to_string());
+        }
+
         if let Some(tls) = tls {
             proxy_command.env(MIRRORD_EXTPROXY_TLS_SETUP_PEM, tls.server_pem());
         }
@@ -663,6 +667,17 @@ impl MirrordExecution {
             )
             .env(MIRRORD_KUBE_VERSION_MAJOR_ENV, api_version.0.to_string())
             .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string());
+
+        if !matches!(connect_info, AgentConnectInfo::Operator(_))
+            && crate::queue_splitting::detects_splittable_queues(config, &env_vars)
+        {
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::QueueSplittingHint);
+        }
+        if let Some(wall) = analytics.get_mut().operator_wall() {
+            proxy_command.env(MIRRORD_OPERATOR_WALL_ENV, wall.to_string());
+        }
 
         // Use the operator session ID when available, otherwise generate a local UUID.
         // This ensures a single consistent session ID for both the operator and the local API.
