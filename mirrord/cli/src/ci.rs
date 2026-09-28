@@ -10,7 +10,7 @@ use std::{fs::File, os::unix::process::ExitStatusExt, process::Stdio, time::Syst
 use ci_info::types::CiInfo;
 use drain::Watch;
 use fs4::tokio::AsyncFileExt;
-use mirrord_analytics::{ExecutionKind, NullReporter, OperatorWall};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, ExecutionKind, OperatorWall, Reporter};
 use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{
     LayerConfig, ci::CiConfig, config::ConfigContext, container::ContainerRuntime,
@@ -25,10 +25,7 @@ use tokio::fs::create_dir_all;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::Level;
 
-use crate::{
-    CliError, CliResult, ci::error::CiError, config::ci::*, connection::report_command_wall,
-    data::UserData,
-};
+use crate::{CliError, CliResult, ci::error::CiError, config::ci::*, data::UserData};
 
 pub(crate) mod container;
 pub(crate) mod error;
@@ -99,30 +96,32 @@ async fn generate_ci_api_key(
             progress.failure(Some(&format!("failed to read config from env: {error}")));
         })?;
 
-    let operator_api = OperatorApi::try_new(&layer_config, &mut NullReporter::default(), &progress)
+    let mut analytics = AnalyticsReporter::only_error(
+        layer_config.telemetry,
+        ExecutionKind::Other,
+        watch,
+        user_data.machine_id(),
+        Some(layer_config.key.as_str().to_owned()),
+    );
+
+    let operator_api = OperatorApi::try_new(&layer_config, &mut analytics, &progress)
         .await?
         .ok_or_else(|| {
             progress.failure(Some("operator not found"));
-            report_command_wall(
-                &layer_config,
-                ExecutionKind::Other,
-                OperatorWall::CiCommand,
-                watch.clone(),
-                user_data,
-            );
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::CiCommand);
+            analytics.set_error(AnalyticsError::Unknown);
             CliError::OperatorNotInstalled
         })?;
 
     operator_api
         .check_license_validity(&progress)
         .inspect_err(|_| {
-            report_command_wall(
-                &layer_config,
-                ExecutionKind::Other,
-                OperatorWall::LicenseExpired,
-                watch,
-                user_data,
-            );
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::LicenseExpired);
+            analytics.set_error(AnalyticsError::Unknown);
         })?;
 
     let mut subtask = progress.subtask("creating API key");

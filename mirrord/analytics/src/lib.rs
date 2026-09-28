@@ -1,6 +1,10 @@
 #![deny(unused_crate_dependencies)]
 
-use std::{collections::HashMap, str::FromStr, time::Instant};
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
@@ -629,6 +633,10 @@ struct AnalyticsReport {
 
 const ANALYTICS_ENDPOINT: &str = "https://analytics.metalbear.com/api/v1/event";
 
+/// Bounds how long a report can hold up the CLI's exit, which waits for pending reports, when the
+/// analytics endpoint is unreachable or slow.
+const ANALYTICS_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.com
 #[tracing::instrument(level = Level::TRACE)]
 async fn send_analytics(report: AnalyticsReport, target: ReportTarget) {
@@ -636,6 +644,7 @@ async fn send_analytics(report: AnalyticsReport, target: ReportTarget) {
     let res = client
         .post(ANALYTICS_ENDPOINT)
         .header(EVENT_KIND_HEADER, target.event_kind())
+        .timeout(ANALYTICS_TIMEOUT)
         .json(&report)
         .send()
         .await;

@@ -100,6 +100,7 @@ where
             analytics
                 .get_mut()
                 .add_operator_wall(OperatorWall::OperatorRequested);
+            analytics.set_error(AnalyticsError::Unknown);
             send_upgrade_ide_message(
                 progress,
                 "mirrord operator was not found in the cluster.",
@@ -123,6 +124,7 @@ where
                 .add_operator_wall(OperatorWall::LicenseExpired);
 
             if layer_config.operator == Some(true) {
+                analytics.set_error(AnalyticsError::Unknown);
                 send_upgrade_ide_message(
                     progress,
                     "mirrord operator license expired.",
@@ -421,6 +423,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
             analytics
                 .get_mut()
                 .add_operator_wall(OperatorWall::AgentPodDeleted);
+            analytics.set_error(AnalyticsError::AgentConnection);
         }
     })?;
 
@@ -498,13 +501,13 @@ fn process_config_oss<P: Progress, R: Reporter>(
     progress: &mut P,
     analytics: &mut R,
 ) -> CliResult<()> {
-    let mut record_wall = |wall: OperatorWall| analytics.get_mut().add_operator_wall(wall);
-
     // operator is disabled, but target requires it.
     if let Some(target) = config.target.path.as_ref()
         && Target::requires_operator(target)
     {
-        record_wall(OperatorWall::TargetType);
+        analytics
+            .get_mut()
+            .add_operator_wall(OperatorWall::TargetType);
         send_upgrade_ide_message(
             progress,
             &format!(
@@ -513,6 +516,7 @@ fn process_config_oss<P: Progress, R: Reporter>(
             ),
             "requiresoperator",
         )?;
+        analytics.set_error(AnalyticsError::Unknown);
         return Err(CliError::FeatureRequiresOperatorError(format!(
             "target type {}",
             target.type_()
@@ -520,12 +524,15 @@ fn process_config_oss<P: Progress, R: Reporter>(
     }
 
     if config.feature.copy_target.enabled {
-        record_wall(OperatorWall::CopyTarget);
+        analytics
+            .get_mut()
+            .add_operator_wall(OperatorWall::CopyTarget);
         send_upgrade_ide_message(
             progress,
             "copy_target requires the mirrord operator, which is part of mirrord for Teams.",
             "requiresoperator",
         )?;
+        analytics.set_error(AnalyticsError::Unknown);
         return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
     }
 
@@ -547,45 +554,61 @@ fn process_config_oss<P: Progress, R: Reporter>(
         (true, true) => {
             // only show user one of the two msgs - each user should always be shown same msg
             if user_persistent_random_message_select() {
-                record_wall(OperatorWall::MultiPod);
+                analytics
+                    .get_mut()
+                    .add_operator_wall(OperatorWall::MultiPod);
                 show_multipod_warning(progress)?
             } else {
-                record_wall(OperatorWall::HttpFilter);
+                analytics
+                    .get_mut()
+                    .add_operator_wall(OperatorWall::HttpFilter);
                 show_http_filter_warning(progress)?
             }
         }
         (true, false) => {
-            record_wall(OperatorWall::MultiPod);
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::MultiPod);
             show_multipod_warning(progress)?
         }
         (false, true) => {
-            record_wall(OperatorWall::HttpFilter);
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::HttpFilter);
             show_http_filter_warning(progress)?
         }
         _ => (),
     };
 
     if config.feature.split_queues.is_set() {
-        record_wall(OperatorWall::SplitQueues);
+        analytics
+            .get_mut()
+            .add_operator_wall(OperatorWall::SplitQueues);
     }
 
     if config.feature.db_branches.iter().any(|branch| {
         !matches!(branch, DatabaseBranchConfig::Redis(redis) if matches!(**redis, RedisBranchConfig::Local(_)))
     }) {
-        record_wall(OperatorWall::DbBranches);
+        analytics.get_mut().add_operator_wall(OperatorWall::DbBranches);
     }
 
     let incoming = &config.feature.network.incoming;
     if incoming.tls_delivery.is_some() || incoming.https_delivery.is_some() {
-        record_wall(OperatorWall::TlsDelivery);
+        analytics
+            .get_mut()
+            .add_operator_wall(OperatorWall::TlsDelivery);
     }
 
     if incoming.on_concurrent_steal != ConcurrentSteal::default() {
-        record_wall(OperatorWall::ConcurrentSteal);
+        analytics
+            .get_mut()
+            .add_operator_wall(OperatorWall::ConcurrentSteal);
     }
 
     if config.multi_cluster == Some(true) {
-        record_wall(OperatorWall::MultiCluster);
+        analytics
+            .get_mut()
+            .add_operator_wall(OperatorWall::MultiCluster);
     }
 
     config.experimental.disable_reuseaddr = config.experimental.disable_reuseaddr.or(Some(true));
