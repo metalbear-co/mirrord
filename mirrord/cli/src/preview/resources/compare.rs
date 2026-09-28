@@ -47,9 +47,10 @@ impl FieldChange {
 /// Every difference between `live` and `supplied`, under `prefix`.
 ///
 /// Lists whose items all carry a `name` (containers, env vars, volumes, ports, ...) are matched
-/// by name, the way Kubernetes merges them, so reordering is not a change and the path says
-/// which item changed (`containers[app].env[LOG_LEVEL].value`). Other lists are compared as a
-/// whole.
+/// by name, so the path says which item changed (`containers[app].env[LOG_LEVEL].value`).
+/// Their order still counts: init containers run in list order and an env var can only expand
+/// the ones above it, so a list holding the same items in another order is one change on the
+/// list itself. Other lists are compared as a whole.
 pub(crate) fn diff(prefix: &str, live: &Value, supplied: &Value) -> Vec<FieldChange> {
     let mut changes = Vec::new();
     diff_into(prefix, live, supplied, &mut changes);
@@ -81,6 +82,21 @@ fn diff_into(path: &str, live: &Value, supplied: &Value, changes: &mut Vec<Field
         (Value::Array(live_items), Value::Array(supplied_items)) => {
             match (by_name(live_items), by_name(supplied_items)) {
                 (Some(live_named), Some(supplied_named)) => {
+                    let names = |items: &[Value]| -> Vec<Value> {
+                        items
+                            .iter()
+                            .filter_map(|item| item.get("name").cloned())
+                            .collect()
+                    };
+                    let reordered = live_named.keys().eq(supplied_named.keys())
+                        && names(live_items) != names(supplied_items);
+                    if reordered {
+                        changes.push(FieldChange::Changed {
+                            path: format!("{path} (order)"),
+                            old: Value::Array(names(live_items)),
+                            new: Value::Array(names(supplied_items)),
+                        });
+                    }
                     let as_object = |named: BTreeMap<&str, &Value>| {
                         Value::Object(
                             named
@@ -314,7 +330,7 @@ mod tests {
         })
     }
 
-    /// The same template, with server-written `null`s and reordered lists, is unchanged.
+    /// The same template, with server-written `null`s, is unchanged.
     #[test]
     fn identical_after_normalization_has_no_changes() {
         let live = comparable_template(&template("info"));
@@ -323,15 +339,29 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("creationTimestamp");
-        supplied["spec"]["containers"]
-            .as_array_mut()
-            .unwrap()
-            .reverse();
         supplied["spec"]["dnsPolicy"] = Value::Null;
 
         assert_eq!(
             diff("spec.template", &live, &comparable_template(&supplied)),
             []
+        );
+    }
+
+    /// Init containers run in list order and env vars expand only earlier ones, so the same
+    /// items in another order are a change, reported once on the list.
+    #[test]
+    fn reordered_named_list_is_a_change() {
+        let live = json!({"env": [{"name": "A", "value": "1"}, {"name": "B", "value": "$(A)"}]});
+        let supplied =
+            json!({"env": [{"name": "B", "value": "$(A)"}, {"name": "A", "value": "1"}]});
+
+        assert_eq!(
+            diff("", &live, &supplied),
+            [FieldChange::Changed {
+                path: "env (order)".to_owned(),
+                old: json!(["A", "B"]),
+                new: json!(["B", "A"]),
+            }]
         );
     }
 

@@ -117,7 +117,8 @@ fn render_object(output: &mut String, planned: &PlannedObject<'_>) {
 
     let hide_values = planned.role == ObjectRole::Secret;
     for change in &planned.changes {
-        let hidden = hide_values && change.path().starts_with("data.");
+        // `data` itself changes as a whole when one side has no values at all.
+        let hidden = hide_values && (change.path() == "data" || change.path().starts_with("data."));
         match change {
             FieldChange::Added { path, value } => {
                 let _ = writeln!(
@@ -315,6 +316,11 @@ mod tests {
                             path: "data.token".to_owned(),
                             value: json!("c2VjcmV0"),
                         },
+                        // One side with no values at all changes `data` as a whole.
+                        FieldChange::Removed {
+                            path: "data".to_owned(),
+                            value: json!({"old": "b2xkLXNlY3JldA=="}),
+                        },
                     ],
                 ),
             ],
@@ -334,8 +340,10 @@ deployment/app from ./k8s/app.yaml: changed
 secret/creds from ./k8s/secret.yaml: changed
   ~ data.password: (value hidden, changed)
   + data.token: (value hidden)
+  - data: (value hidden)
 "
         );
+        assert!(!rendered.contains("b2xkLXNlY3JldA"));
         assert!(!rendered.contains("aHVudGVy"));
         assert!(!rendered.contains("c2VjcmV0"));
     }

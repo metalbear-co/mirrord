@@ -32,6 +32,12 @@ pub(crate) fn load(paths: &[PathBuf]) -> Result<Vec<SuppliedObject>, ResourcesEr
         }
     }
 
+    // Files holding only empty documents would otherwise start a preview from the live spec,
+    // replacing an existing one, as if the files had been read.
+    if objects.is_empty() {
+        return Err(ResourcesError::NoObjects(super::sources_label(paths)));
+    }
+
     Ok(objects)
 }
 
@@ -278,6 +284,19 @@ data:
                 dir.path().display()
             )
         );
+    }
+
+    #[test]
+    fn files_without_objects_are_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("empty.yaml"),
+            "---\n---\nkind: List\nitems: []\n",
+        )
+        .unwrap();
+
+        let error = load(&[dir.path().to_path_buf()]).unwrap_err();
+        assert!(matches!(error, ResourcesError::NoObjects(_)), "{error}");
     }
 
     #[test]

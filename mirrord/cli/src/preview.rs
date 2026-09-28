@@ -117,7 +117,7 @@ async fn preview_start(
 
     // Read before contacting the cluster, so a broken manifest fails without side effects.
     let resource_paths = resource_paths(args.resources, &mut layer_config);
-    let supplied_objects = if resource_paths.is_empty() {
+    let mut supplied_objects = if resource_paths.is_empty() {
         None
     } else {
         Some(load_manifests(&resource_paths, &progress)?)
@@ -223,6 +223,16 @@ async fn preview_start(
 
     // Planned before an existing session is replaced: a rejected manifest leaves the running
     // preview alone.
+    if let Some(objects) = supplied_objects.as_mut() {
+        resources::resolve_workload_refs(
+            operator_api.client(),
+            objects,
+            &session_target,
+            target_namespace(&operator_api, &layer_config),
+        )
+        .await
+        .inspect_err(|_| subtask.failure(None))?;
+    }
     let resource_plan = match &supplied_objects {
         Some(objects) => {
             let plan = resources::plan(
@@ -1105,7 +1115,7 @@ async fn preview_diff(
     if resource_paths.is_empty() {
         return Err(CliError::PreviewResourcesRequired);
     }
-    let objects = load_manifests(&resource_paths, &progress)?;
+    let mut objects = load_manifests(&resource_paths, &progress)?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -1117,7 +1127,9 @@ async fn preview_diff(
 
     let (operator_api, _) =
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
-    require_spec_resources_support(&operator_api.operator().spec)?;
+    // Nothing is sent to the operator, so an operator without `PreviewSpecResources` can still
+    // show what would change.
+    reject_management_only(&operator_api.operator().spec)?;
 
     let mut subtask = progress.subtask("comparing manifests with the cluster");
 
@@ -1130,6 +1142,15 @@ async fn preview_diff(
         config_target,
         operator_api.client(),
         layer_config.target.namespace.as_deref(),
+    )
+    .await
+    .inspect_err(|_| subtask.failure(None))?;
+
+    resources::resolve_workload_refs(
+        operator_api.client(),
+        &mut objects,
+        &session_target,
+        target_namespace(&operator_api, &layer_config),
     )
     .await
     .inspect_err(|_| subtask.failure(None))?;
@@ -1157,8 +1178,9 @@ async fn preview_diff(
     Ok(())
 }
 
-/// The manifest paths for `--resource`: the ones given on the command line, or else
-/// `feature.preview.spec_resources` from the config.
+/// The manifest paths for `--resource`. Paths on the command line replace the config's list
+/// instead of adding to it, so a CI job can point one shared config at the manifests of the
+/// change it is previewing.
 fn resource_paths(from_args: Vec<PathBuf>, config: &mut LayerConfig) -> Vec<PathBuf> {
     let from_config = std::mem::take(&mut config.feature.preview.spec_resources);
     if from_args.is_empty() {
@@ -1189,6 +1211,10 @@ fn load_manifests(
 /// the files travel in and silently run the live spec: both are refused up front.
 fn require_spec_resources_support(spec: &MirrordOperatorSpec) -> CliResult<()> {
     spec.require_feature(NewOperatorFeature::PreviewSpecResources)?;
+    reject_management_only(spec)
+}
+
+fn reject_management_only(spec: &MirrordOperatorSpec) -> CliResult<()> {
     if spec.operator_namespace.is_some() {
         return Err(CliError::PreviewResourcesManagementOnly);
     }

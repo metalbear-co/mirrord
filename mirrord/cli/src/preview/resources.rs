@@ -114,6 +114,27 @@ pub(crate) enum ResourcesError {
     ))]
     NoManifests(PathBuf),
 
+    #[error("No Kubernetes objects found in {0}.\nNothing was created.")]
+    #[diagnostic(help(
+        "The files hold only empty documents. Add the manifests to preview, or leave out \
+         `--resource` to preview the live spec."
+    ))]
+    NoObjects(String),
+
+    #[error(
+        "{object} from {} is a `{secret_type}` Secret, which a preview cannot copy.\nNothing \
+         was created.",
+        source_path.display()
+    )]
+    #[diagnostic(help(
+        "Leave this Secret out of the manifests: the preview then uses the live one."
+    ))]
+    UnsupportedSecretType {
+        object: String,
+        source_path: PathBuf,
+        secret_type: String,
+    },
+
     #[error("{} is not a YAML file.", .0.display())]
     #[diagnostic(help("Only `*.yaml` and `*.yml` files are read as Kubernetes manifests."))]
     NotYaml(PathBuf),
@@ -389,11 +410,13 @@ pub(crate) async fn plan<'a>(
             source: Box::new(source),
         })
         .and_then(|object| to_value(&object, &target_display))?;
-    let live_template = scope::pod_template(&target.kind, &live_target).ok_or_else(|| {
-        ResourcesError::NoPodTemplate {
-            object: target_display.clone(),
-            source_path: PathBuf::from("the cluster"),
-        }
+    let live_template = match scope::workload_ref(&live_target) {
+        Some(reference) => live_workload_template(client, namespace, &reference).await?,
+        None => scope::pod_template(&target.kind, &live_target),
+    }
+    .ok_or_else(|| ResourcesError::NoPodTemplate {
+        object: target_display.clone(),
+        source_path: PathBuf::from("the cluster"),
     })?;
 
     let scope = scope::select(objects, target_ref, Some(&live_template))?;
@@ -449,6 +472,18 @@ pub(crate) async fn plan<'a>(
         &ApiResource::erase::<Secret>(&()),
     );
     for object in scope.secrets {
+        if let Some(secret_type) = object
+            .value
+            .get("type")
+            .and_then(Value::as_str)
+            .filter(|secret_type| UNCOPYABLE_SECRET_TYPES.contains(secret_type))
+        {
+            return Err(ResourcesError::UnsupportedSecretType {
+                object: object.display(),
+                source_path: object.source.clone(),
+                secret_type: secret_type.to_owned(),
+            });
+        }
         let supplied = compare::comparable_secret(&object.value)
             .map_err(|error| invalid_secret(object, error))?;
         let live = read_live(&secret_api, object, &mut plan.notes)
@@ -471,6 +506,105 @@ pub(crate) async fn plan<'a>(
     }
 
     Ok(plan)
+}
+
+/// Secret types whose copy the API server would refuse or that would not work under another
+/// name: a service account token Secret must carry its service account's annotation and is
+/// filled in by the token controller.
+const UNCOPYABLE_SECRET_TYPES: &[&str] = &["kubernetes.io/service-account-token"];
+
+/// The pod template of a workload a Rollout references, as it is live.
+async fn live_workload_template(
+    client: &Client,
+    namespace: &str,
+    reference: &scope::WorkloadRef,
+) -> Result<Option<Value>, ResourcesError> {
+    let display = format!("{}/{}", reference.kind.to_lowercase(), reference.name);
+    let api: Api<DynamicObject> = Api::namespaced_with(
+        client.clone(),
+        namespace,
+        &api_resource_for(&reference.api_version, &reference.kind),
+    );
+    let workload = api
+        .get(&reference.name)
+        .await
+        .map_err(|source| ResourcesError::LiveRead {
+            object: display.clone(),
+            source: Box::new(source),
+        })?;
+    Ok(scope::pod_template(
+        &reference.kind,
+        &to_value(&workload, &display)?,
+    ))
+}
+
+/// Gives an Argo Rollout target defined in the files a pod template of its own when it takes
+/// one from another workload (`spec.workloadRef`): the referenced workload's, from the files
+/// when they define it (it is then consumed, not reported as out of scope), else the live
+/// one. Everything after this step reads the target's template from `spec.template`.
+pub(crate) async fn resolve_workload_refs(
+    client: &Client,
+    objects: &mut Vec<SuppliedObject>,
+    target: &KubeResourceTarget,
+    namespace: &str,
+) -> Result<(), ResourcesError> {
+    let in_namespace = |object: &SuppliedObject| {
+        object
+            .namespace
+            .as_deref()
+            .is_none_or(|object_namespace| object_namespace == namespace)
+    };
+    let Some(target_index) = objects.iter().position(|object| {
+        object.kind.eq_ignore_ascii_case(&target.kind)
+            && object.name == target.name
+            && in_namespace(object)
+    }) else {
+        return Ok(());
+    };
+    let Some(reference) = objects
+        .get(target_index)
+        .and_then(|definition| scope::workload_ref(&definition.value))
+    else {
+        return Ok(());
+    };
+
+    let supplied = objects.iter().position(|object| {
+        object.kind.eq_ignore_ascii_case(&reference.kind)
+            && object.name == reference.name
+            && in_namespace(object)
+    });
+    let template = match supplied {
+        Some(index) => {
+            let workload = objects.remove(index);
+            scope::pod_template(&workload.kind, &workload.value)
+        }
+        None => live_workload_template(client, namespace, &reference).await?,
+    };
+
+    // Removing the referenced workload may have shifted the target's position.
+    let Some(definition) = objects.iter_mut().find(|object| {
+        object.kind.eq_ignore_ascii_case(&target.kind)
+            && object.name == target.name
+            && in_namespace(object)
+    }) else {
+        return Ok(());
+    };
+    let Some(template) = template else {
+        return Err(ResourcesError::NoPodTemplate {
+            object: definition.display(),
+            source_path: definition.source.clone(),
+        });
+    };
+    if let Some(spec) = definition
+        .value
+        .get_mut("spec")
+        .and_then(Value::as_object_mut)
+    {
+        spec.remove("workloadRef");
+        spec.insert("template".to_owned(), template);
+    }
+
+    Ok(())
 }
 
 /// Compares the target's template from the files with the live one.
@@ -693,11 +827,12 @@ fn for_dry_run(object: &Value, namespace: &str, generate_name: bool) -> Value {
 }
 
 fn api_resource(target: &KubeResourceTarget) -> ApiResource {
-    let (group, version) = target
-        .api_version
-        .rsplit_once('/')
-        .unwrap_or(("", target.api_version.as_str()));
-    ApiResource::from_gvk(&GroupVersionKind::gvk(group, version, &target.kind))
+    api_resource_for(&target.api_version, &target.kind)
+}
+
+fn api_resource_for(api_version: &str, kind: &str) -> ApiResource {
+    let (group, version) = api_version.rsplit_once('/').unwrap_or(("", api_version));
+    ApiResource::from_gvk(&GroupVersionKind::gvk(group, version, kind))
 }
 
 fn to_value<T: serde::Serialize>(object: &T, display: &str) -> Result<Value, ResourcesError> {

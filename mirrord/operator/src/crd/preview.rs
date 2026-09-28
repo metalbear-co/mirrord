@@ -298,10 +298,13 @@ impl PreviewSessionSpec {
             .and_then(|incoming| incoming.tls_delivery.as_ref())
             .and_then(|delivery| delivery.client_auth.as_ref())
             .is_some();
-        let spec_secrets = self
-            .spec_resources
-            .as_ref()
-            .is_some_and(|resources| !resources.secrets.is_empty());
+        // A spec Secret with no values stores nothing, so the CLI uploads no Secret for it.
+        let spec_secrets = self.spec_resources.as_ref().is_some_and(|resources| {
+            resources
+                .secrets
+                .iter()
+                .any(|secret| !secret.keys.is_empty())
+        });
 
         !self.secret_mounts.is_empty() || tls_client_auth || spec_secrets
     }
@@ -916,6 +919,18 @@ mod tests {
 
         spec.spec_resources = Some(PreviewSpecResources {
             secrets: vec![PreviewSpecSecret::default()],
+            ..Default::default()
+        });
+        assert!(
+            !spec.uses_session_secret(),
+            "a Secret without values stores nothing in the session Secret"
+        );
+
+        spec.spec_resources = Some(PreviewSpecResources {
+            secrets: vec![PreviewSpecSecret {
+                keys: BTreeMap::from([("password".to_owned(), "s0-0".to_owned())]),
+                ..Default::default()
+            }],
             ..Default::default()
         });
         assert!(spec.uses_session_secret());

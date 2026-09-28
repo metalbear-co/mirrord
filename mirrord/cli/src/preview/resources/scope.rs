@@ -55,6 +55,29 @@ pub(crate) fn pod_template(kind: &str, object: &Value) -> Option<Value> {
     object.pointer(pointer).cloned()
 }
 
+/// The workload an Argo Rollout takes its pod template from (`spec.workloadRef`), when it has
+/// no template of its own.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct WorkloadRef {
+    pub api_version: String,
+    pub kind: String,
+    pub name: String,
+}
+
+pub(crate) fn workload_ref(object: &Value) -> Option<WorkloadRef> {
+    if object.pointer("/spec/template").is_some() {
+        return None;
+    }
+    let reference = object.pointer("/spec/workloadRef")?;
+    let field = |name: &str| reference.get(name).and_then(Value::as_str);
+
+    Some(WorkloadRef {
+        api_version: field("apiVersion").unwrap_or("apps/v1").to_owned(),
+        kind: field("kind")?.to_owned(),
+        name: field("name")?.to_owned(),
+    })
+}
+
 /// Whether the pod template runs a container named `container`.
 pub(crate) fn has_container(template: &Value, container: &str) -> bool {
     template
@@ -72,10 +95,10 @@ pub(crate) struct References {
     pub secrets: BTreeSet<String>,
 }
 
-/// Collects every ConfigMap and Secret the pod reads through `env` (`configMapKeyRef`,
-/// `secretKeyRef`), `envFrom`, and volumes (including projected ones), in regular and init
-/// containers. `imagePullSecrets` are left out: they belong to the node's image pull, not to
-/// what the app reads.
+/// Collects every ConfigMap and Secret the pod uses: through `env` (`configMapKeyRef`,
+/// `secretKeyRef`), `envFrom`, and volumes (including projected ones) in regular and init
+/// containers, and `imagePullSecrets`, since a changed registry credential decides whether
+/// the preview can pull its image at all.
 pub(crate) fn references(template: &Value) -> References {
     let mut references = References::default();
     let Some(spec) = template.get("spec") else {
@@ -105,6 +128,12 @@ pub(crate) fn references(template: &Value) -> References {
             if let Some(name) = name_at(Some(env_from), "secretRef", "name") {
                 references.secrets.insert(name);
             }
+        }
+    }
+
+    for pull_secret in array(spec, "imagePullSecrets") {
+        if let Some(name) = pull_secret.get("name").and_then(Value::as_str) {
+            references.secrets.insert(name.to_owned());
         }
     }
 
@@ -304,10 +333,35 @@ mod tests {
         );
         assert_eq!(
             references.secrets,
-            ["env-secret", "from-secret", "proj-secret", "vol-secret"]
-                .map(str::to_owned)
-                .into()
+            [
+                "env-secret",
+                "from-secret",
+                "proj-secret",
+                "registry",
+                "vol-secret"
+            ]
+            .map(str::to_owned)
+            .into()
         );
+    }
+
+    #[test]
+    fn workload_ref_is_read_only_when_the_rollout_has_no_template() {
+        let referencing = json!({"spec": {"workloadRef": {"kind": "Deployment", "name": "app"}}});
+        assert_eq!(
+            workload_ref(&referencing),
+            Some(WorkloadRef {
+                api_version: "apps/v1".to_owned(),
+                kind: "Deployment".to_owned(),
+                name: "app".to_owned(),
+            })
+        );
+
+        let with_template = json!({"spec": {
+            "template": {"spec": {}},
+            "workloadRef": {"kind": "Deployment", "name": "app"},
+        }});
+        assert_eq!(workload_ref(&with_template), None);
     }
 
     #[test]
