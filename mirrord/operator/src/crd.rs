@@ -132,6 +132,7 @@ impl TargetCrd {
             Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
             Target::Label(_) => return LABEL_TARGET_NAME.to_owned(),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_owned(),
+            Target::Serverless(target) => ("serverless", &target.serverless, &target.container),
         };
 
         if let Some(container) = container {
@@ -660,6 +661,9 @@ pub enum NewOperatorFeature {
 
     PreviewEnv,
 
+    /// Prevents older operators from silently ignoring preview TLS client identity and SNI.
+    PreviewTlsDelivery,
+
     /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
     /// (`postgresOptions`, `mysqlOptions`, `mongodbOptions`) instead of the old separate
     /// `PgBranchDatabase`, `MysqlBranchDatabase`, `MongodbBranchDatabase` CRDs.
@@ -712,6 +716,13 @@ pub enum NewOperatorFeature {
     /// so the CLI can fail fast instead of creating a CRD an unsupporting operator would
     /// silently delete.
     S3Branching,
+
+    /// This operator supports branching turbopuffer namespaces via the `turbopufferOptions`
+    /// field on the unified `BranchDatabase` CRD. The branch namespace is a copy-on-write clone
+    /// made through turbopuffer's API, with no pod in the cluster. Advertised only when the
+    /// operator's `turbopufferBranching` flag is enabled, so the CLI can fail fast instead of
+    /// creating a CRD an unsupporting operator would silently delete.
+    TurbopufferBranching,
 
     /// This operator honors the `image` field on the unified `BranchDatabase` CRD, letting the
     /// user supply a full image reference for a built-in engine's branch pod. Gated so the CLI
@@ -777,6 +788,12 @@ pub enum NewOperatorFeature {
     /// never reconciles it, which the CLI would only see as a creation timeout.
     DbBranchConfigMapSource,
 
+    /// This operator layers a branch's connection params over a `url` param. Gated so the CLI
+    /// fails fast on older operators: the branch CRD schema lets the param through, and an
+    /// older operator ignores it and provisions from the remaining params, which points the
+    /// branch at the wrong source rather than failing.
+    DbBranchUrlParam,
+
     /// This operator understands `flavor: liquibase` in a branch's `migrations`. Gated so the
     /// CLI fails fast: an older operator's CRD schema constrains the flavor to the values it
     /// knows, so the API server rejects the branch with a schema error instead of anything the
@@ -828,8 +845,10 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::PgBranching => "PostgreSQL branching",
             NewOperatorFeature::CockroachdbBranching => "CockroachDB branching",
             NewOperatorFeature::S3Branching => "S3 branching",
+            NewOperatorFeature::TurbopufferBranching => "turbopuffer branching",
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
             NewOperatorFeature::PreviewEnv => "preview environments",
+            NewOperatorFeature::PreviewTlsDelivery => "TLS delivery configuration for previews",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
             NewOperatorFeature::BypassCiCertificateVerification => {
                 "BypassCiCertificateVerification"
@@ -872,6 +891,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
+            NewOperatorFeature::DbBranchUrlParam => "DB branching url connection param",
             NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
             NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",

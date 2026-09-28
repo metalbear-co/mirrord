@@ -218,7 +218,7 @@ impl SessionTarget {
                 t.labels.into_iter().collect(),
                 t.container?,
             ))),
-            Target::Targetless => None,
+            Target::Targetless | Target::Serverless(_) => None,
         }
     }
 

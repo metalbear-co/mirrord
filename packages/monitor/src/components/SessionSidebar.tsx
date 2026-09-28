@@ -187,12 +187,20 @@ export default function SessionSidebar({
 
   const teamUnavailable = watchStatus?.status === 'unavailable'
   const errorMessage =
-    watchStatus?.status === 'error' ? watchStatus.message : ''
+    watchStatus?.status === 'error' ||
+    watchStatus?.status === 'kubernetes_unavailable'
+      ? watchStatus.message
+      : ''
   // A transient 503 from the operator's status APIService (typically the pod
   // restarting) shouldn't read as a hard failure: keep the last-known sessions
   // on screen and show a soft "reconnecting" hint instead of the error box.
-  const teamReconnecting = /503|service unavailable/i.test(errorMessage)
-  const teamError = watchStatus?.status === 'error' && !teamReconnecting
+  const teamReconnecting =
+    watchStatus?.status === 'error' &&
+    /503|service unavailable/i.test(errorMessage)
+  const teamError =
+    (watchStatus?.status === 'error' ||
+      watchStatus?.status === 'kubernetes_unavailable') &&
+    !teamReconnecting
   const teamConnecting = watchStatus?.status === 'not_started'
 
   return (
@@ -336,7 +344,9 @@ export default function SessionSidebar({
         ) : teamError ? (
           <div className="bg-destructive/10 border-destructive/40 rounded-lg border px-3 py-2">
             <div className="text-destructive text-xs font-semibold">
-              {strings.sidebar.operatorError}
+              {watchStatus.status === 'kubernetes_unavailable'
+                ? strings.sidebar.kubernetesError
+                : strings.sidebar.operatorError}
             </div>
             <div className="text-meta text-destructive/80 mt-0.5 break-words">
               {errorMessage || 'Could not reach the operator.'}

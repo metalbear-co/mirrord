@@ -1,8 +1,9 @@
 use std::arch::naked_asm;
 
+use mirrord_layer_core::{hook_symbol, hooks::HookManager};
 use tracing::trace;
 
-use crate::{HookManager, go::c_abi_syscall6_handler, macros::hook_symbol};
+use crate::c_abi_syscall6_handler;
 
 type VoidFn = unsafe extern "C" fn() -> ();
 static mut FN_ASMCGOCALL: Option<VoidFn> = None;
@@ -164,7 +165,7 @@ fn post_go1_23(hook_manager: &mut HookManager, go_version: f32, module_name: Opt
 /// Refer:
 ///   - File zsyscall_linux_amd64.go generated using mksyscall.pl.
 ///   - <https://cs.opensource.google/go/go/+/refs/tags/go1.18.5:src/syscall/syscall_unix.go>
-pub(crate) fn enable_hooks(hook_manager: &mut HookManager, _use_asmcgocall: bool) {
+pub fn enable_hooks(hook_manager: &mut HookManager, _use_asmcgocall: bool) {
     let Some(version) = super::get_go_runtime_version(hook_manager) else {
         return;
     };
@@ -181,7 +182,7 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager, _use_asmcgocall: bool
 }
 
 /// Same as [`enable_hooks`], but hook symbols found in the given `module_name`.
-pub(crate) fn enable_hooks_in_loaded_module(
+pub fn enable_hooks_in_loaded_module(
     hook_manager: &mut HookManager,
     module_name: String,
     _use_asmcgocall: bool,
