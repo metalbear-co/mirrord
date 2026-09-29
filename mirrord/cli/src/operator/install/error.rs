@@ -119,4 +119,17 @@ pub(crate) enum OperatorInstallError {
         source: Box<kube::Error>,
     },
 
+    #[error("failed to start a trial")]
+    SignupRequest(#[source] reqwest::Error),
+
+    #[error("too many trials were started from this network recently")]
+    #[diagnostic(help("Try again later, or pass an existing API key with `--api-key`."))]
+    SignupRateLimited,
+
+    #[error("starting a trial is currently unavailable")]
+    #[diagnostic(help("Try again later, or pass an existing API key with `--api-key`."))]
+    SignupUnavailable,
+
+    #[error("failed to start a trial, the server responded with {status}: {body}")]
+    SignupFailed { status: StatusCode, body: String },
 }

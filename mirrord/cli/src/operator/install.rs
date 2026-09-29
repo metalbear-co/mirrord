@@ -13,6 +13,7 @@ use crate::config::OperatorInstallArgs;
 mod cluster;
 mod error;
 mod manifest;
+mod signup;
 
 pub(crate) use error::OperatorInstallError;
 
@@ -67,6 +68,25 @@ pub(super) async fn operator_install(
     let apis = cluster::resolve_apis(&client, &manifest, &release_namespace).await?;
     cluster::dry_run(&manifest, &apis).await?;
     subtask.success(None);
+
+    let trial = match api_key {
+        Some(api_key) => {
+            manifest.set_api_key(&api_key);
+            None
+        }
+        None => {
+            let mut subtask = progress.subtask("starting a trial");
+            let cluster_hint = no_hint
+                .not()
+                .then(|| cluster_hint.or(context.clone()))
+                .flatten();
+            let trial =
+                signup::start_trial(&http, &app_url, USER_AGENT, cluster_hint.as_deref()).await?;
+            manifest.set_api_key(&trial.api_key);
+            subtask.success(None);
+            Some(trial)
+        }
+    };
 
     Ok(())
 }

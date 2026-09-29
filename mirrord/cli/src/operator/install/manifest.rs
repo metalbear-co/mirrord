@@ -193,6 +193,12 @@ impl Manifest {
             );
         }
     }
+
+    pub(super) fn set_api_key(&mut self, api_key: &str) {
+        for object in &mut self.objects {
+            for_each_placeholder(&mut object.data, &mut |value| api_key.clone_into(value));
+        }
+    }
 }
 
 fn for_each_placeholder(value: &mut Value, f: &mut impl FnMut(&mut String)) {
@@ -273,6 +279,23 @@ metadata:
             Manifest::parse(&duplicated),
             Err(OperatorInstallError::ApiKeyPlaceholder(2))
         ));
+    }
+
+    #[test]
+    fn set_api_key_replaces_placeholder() {
+        let mut manifest = Manifest::parse(MANIFEST).unwrap();
+        manifest.set_api_key("secret");
+
+        let api_key = manifest
+            .objects()
+            .get(1)
+            .and_then(|deployment| {
+                deployment
+                    .data
+                    .pointer("/spec/template/spec/containers/0/env/0/value")
+            })
+            .and_then(Value::as_str);
+        assert_eq!(api_key, Some("secret"));
     }
 
     #[test]
