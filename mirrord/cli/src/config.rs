@@ -1752,8 +1752,14 @@ pub(super) struct UpArgs {
     pub key: Option<String>,
 
     /// Start `mirrord ui` in the background.
-    #[arg(short = 'u', long)]
+    ///
+    /// *DEPRECATED*: `mirrord ui` is started by default in the background.
+    #[arg(short = 'u', long, hide = true)]
     pub ui: bool,
+
+    /// Don't start `mirrord ui` in the background.
+    #[arg(long, conflicts_with = "ui")]
+    pub no_ui: bool,
 
     /// Names of the services to launch. When omitted, every service in the
     /// config is launched, except those marked `skip: true`. Naming a

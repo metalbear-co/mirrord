@@ -5,12 +5,18 @@ use std::{
 
 use mirrord_config::{
     LayerConfig,
-    feature::{network::incoming::ConcurrentSteal, split_queues::QueueMode},
+    feature::{
+        network::incoming::ConcurrentSteal,
+        split_queues::{QueueKind, QueueMode, SplitQueuesConfig},
+    },
     target::{Target, label::LabelTarget},
 };
 use serde::Serialize;
 
-use crate::crd::session::{SessionCiInfo, UpSessionInfo};
+use crate::crd::{
+    queue_filter::{MessageFilter, QueueType},
+    session::{SessionCiInfo, UpSessionInfo},
+};
 
 /// Query params for the operator connect request.
 ///
@@ -144,6 +150,24 @@ pub struct ConnectParams<'a> {
     )]
     pub nats_pubsub_jq_filters: HashMap<&'a str, &'a str>,
 
+    /// Queues requested with the composable `filter` shape, for every broker.
+    ///
+    /// Wire invariant: an operator that predates this param reads only the per-broker
+    /// `<broker>_splits` / `<broker>_jq_filters` params, which can carry nothing but the
+    /// `message_filter` map. So a legacy entry goes there and nowhere else, a composed entry goes
+    /// here and nowhere else, and a composed entry's jq program travels with it, never in the
+    /// legacy jq params where an old operator would run it without the attribute filter. The
+    /// CLI refuses to send this param to an operator that does not advertise
+    /// [`NewOperatorFeature::QueueSplittingWithComposedFilters`].
+    ///
+    /// [`NewOperatorFeature::QueueSplittingWithComposedFilters`]: crate::crd::NewOperatorFeature::QueueSplittingWithComposedFilters
+    #[serde(
+        default,
+        with = "force_json_ser",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub queue_filters: Vec<ComposedQueueFilter<'a>>,
+
     /// Per-queue split mode, keyed by queue id. Broker-agnostic: only queues whose mode is not the
     /// default `steal` appear here, so an omitted queue means steal.
     #[serde(
@@ -229,6 +253,40 @@ pub struct KafkaProtobufDecoding<'a> {
     pub message_type: &'a str,
 }
 
+/// One queue requested with the composable `filter` shape, as sent in
+/// [`ConnectParams::queue_filters`].
+#[derive(Serialize, Debug)]
+pub struct ComposedQueueFilter<'a> {
+    pub queue_id: &'a str,
+    pub queue_type: QueueType,
+    pub filter: MessageFilter,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jq_filter: Option<&'a str>,
+}
+
+/// The legacy `message_filter` maps of one broker, keyed by queue id. Entries using the
+/// composable shape are left out: they travel in [`ConnectParams::queue_filters`].
+fn legacy_filters(
+    split_queues: &SplitQueuesConfig,
+    kind: QueueKind,
+) -> HashMap<&str, &BTreeMap<String, String>> {
+    split_queues
+        .of_kind(kind)
+        .filter_map(|split| Some((split.queue_id.as_str(), split.message_filter.as_ref()?)))
+        .collect()
+}
+
+/// The jq filters of one broker's legacy entries, keyed by queue id. Composed entries carry
+/// their jq filter inside [`ConnectParams::queue_filters`], so an older operator never sees
+/// half of such an entry.
+fn legacy_jq_filters(split_queues: &SplitQueuesConfig, kind: QueueKind) -> HashMap<&str, &str> {
+    split_queues
+        .of_kind(kind)
+        .filter(|split| !split.has_composed_filter())
+        .filter_map(|split| Some((split.queue_id.as_str(), split.jq_filter.as_deref()?)))
+        .collect()
+}
+
 /// Same as TmpResourceEntry for serialization
 /// in connect params. The envoy converts from the CRD type into this when
 /// building the connect URL for remote clusters.
@@ -262,9 +320,30 @@ pub struct BranchDbNames {
     pub cockroachdb: Vec<String>,
     pub generic: Vec<String>,
     pub s3: Vec<String>,
+    pub turbopuffer: Vec<String>,
 }
 
 impl BranchDbNames {
+    /// The dialects that travel in the unified `branch_db_names` param, in one place so a new
+    /// dialect cannot reach one call site and miss another.
+    pub fn unified(&mut self) -> Vec<String> {
+        [
+            &mut self.mssql,
+            &mut self.mariadb,
+            &mut self.redis,
+            &mut self.dynamodb,
+            &mut self.spanner,
+            &mut self.clickhouse,
+            &mut self.cockroachdb,
+            &mut self.generic,
+            &mut self.s3,
+            &mut self.turbopuffer,
+        ]
+        .into_iter()
+        .flat_map(std::mem::take)
+        .collect()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.pg.is_empty()
             && self.mysql.is_empty()
@@ -279,6 +358,7 @@ impl BranchDbNames {
             && self.cockroachdb.is_empty()
             && self.generic.is_empty()
             && self.s3.is_empty()
+            && self.turbopuffer.is_empty()
     }
 }
 
@@ -286,11 +366,14 @@ impl<'a> ConnectParams<'a> {
     pub fn new(
         config: &'a LayerConfig,
         branch_name: Option<String>,
-        branch_db_names: BranchDbNames,
+        mut branch_db_names: BranchDbNames,
         session_ci_info: Option<SessionCiInfo>,
         up_session_info: Option<UpSessionInfo>,
         key: &'a str,
     ) -> Self {
+        let split_queues = &config.feature.split_queues;
+        let unified_branch_db_names = branch_db_names.unified();
+
         Self {
             connect: true,
             on_concurrent_steal: config.feature.network.incoming.on_concurrent_steal.into(),
@@ -299,17 +382,16 @@ impl<'a> ConnectParams<'a> {
                 Target::Label(target) => Some(target),
                 _ => None,
             }),
-            kafka_splits: config.feature.split_queues.kafka().collect(),
-            kafka_jq_filters: config.feature.split_queues.kafka_jq_filters().collect(),
+            kafka_splits: legacy_filters(split_queues, QueueKind::Kafka),
+            kafka_jq_filters: legacy_jq_filters(split_queues, QueueKind::Kafka),
             // The descriptor is embedded during config resolution; an entry without one cannot
             // reach this point through a resolved config, so it is simply skipped.
-            kafka_protobuf_decoding: config
-                .feature
-                .split_queues
-                .kafka_payload_protobuf()
-                .filter_map(|(queue_id, protobuf)| {
+            kafka_protobuf_decoding: split_queues
+                .of_kind(QueueKind::Kafka)
+                .filter_map(|split| {
+                    let protobuf = split.payload_protobuf.as_ref()?;
                     Some((
-                        queue_id,
+                        split.queue_id.as_str(),
                         KafkaProtobufDecoding {
                             descriptor_base64: protobuf.descriptor_base64.as_deref()?,
                             message_type: protobuf.message_type.as_str(),
@@ -317,57 +399,45 @@ impl<'a> ConnectParams<'a> {
                     ))
                 })
                 .collect(),
-            rmq_splits: config.feature.split_queues.rmq().collect(),
-            rmq_jq_filters: config.feature.split_queues.rmq_jq_filters().collect(),
-            gcp_pubsub_splits: config.feature.split_queues.gcp_pubsub().collect(),
-            sqs_splits: config.feature.split_queues.sqs().collect(),
-            sqs_jq_filters: config.feature.split_queues.sqs_jq_filters().collect(),
-            gcp_pubsub_jq_filters: config
-                .feature
-                .split_queues
-                .gcp_pubsub_jq_filters()
-                .collect(),
-            azure_service_bus_splits: config.feature.split_queues.azure_service_bus().collect(),
-            azure_service_bus_jq_filters: config
-                .feature
-                .split_queues
-                .azure_service_bus_jq_filters()
-                .collect(),
-            redis_pubsub_splits: config.feature.split_queues.redis_pubsub().collect(),
-            redis_pubsub_jq_filters: config
-                .feature
-                .split_queues
-                .redis_pubsub_jq_filters()
-                .collect(),
-            temporal_splits: config.feature.split_queues.temporal().collect(),
-            temporal_jq_filters: config.feature.split_queues.temporal_jq_filters().collect(),
-            bullmq_splits: config.feature.split_queues.bullmq().collect(),
-            bullmq_jq_filters: config.feature.split_queues.bullmq_jq_filters().collect(),
-            nats_splits: config.feature.split_queues.nats().collect(),
-            nats_jq_filters: config.feature.split_queues.nats_jq_filters().collect(),
-            nats_pubsub_splits: config.feature.split_queues.nats_pubsub().collect(),
-            nats_pubsub_jq_filters: config
-                .feature
-                .split_queues
-                .nats_pubsub_jq_filters()
+            rmq_splits: legacy_filters(split_queues, QueueKind::Rmq),
+            rmq_jq_filters: legacy_jq_filters(split_queues, QueueKind::Rmq),
+            gcp_pubsub_splits: legacy_filters(split_queues, QueueKind::GcpPubSub),
+            sqs_splits: legacy_filters(split_queues, QueueKind::Sqs),
+            sqs_jq_filters: legacy_jq_filters(split_queues, QueueKind::Sqs),
+            gcp_pubsub_jq_filters: legacy_jq_filters(split_queues, QueueKind::GcpPubSub),
+            azure_service_bus_splits: legacy_filters(split_queues, QueueKind::AzureServiceBus),
+            azure_service_bus_jq_filters: legacy_jq_filters(
+                split_queues,
+                QueueKind::AzureServiceBus,
+            ),
+            redis_pubsub_splits: legacy_filters(split_queues, QueueKind::RedisPubSub),
+            redis_pubsub_jq_filters: legacy_jq_filters(split_queues, QueueKind::RedisPubSub),
+            temporal_splits: legacy_filters(split_queues, QueueKind::Temporal),
+            temporal_jq_filters: legacy_jq_filters(split_queues, QueueKind::Temporal),
+            bullmq_splits: legacy_filters(split_queues, QueueKind::BullMq),
+            bullmq_jq_filters: legacy_jq_filters(split_queues, QueueKind::BullMq),
+            nats_splits: legacy_filters(split_queues, QueueKind::Nats),
+            nats_jq_filters: legacy_jq_filters(split_queues, QueueKind::Nats),
+            nats_pubsub_splits: legacy_filters(split_queues, QueueKind::NatsPubSub),
+            nats_pubsub_jq_filters: legacy_jq_filters(split_queues, QueueKind::NatsPubSub),
+            queue_filters: split_queues
+                .splits()
+                .iter()
+                .filter_map(|split| {
+                    Some(ComposedQueueFilter {
+                        queue_id: split.queue_id.as_str(),
+                        queue_type: split.queue_type.into(),
+                        filter: split.filter.as_ref()?.into(),
+                        jq_filter: split.jq_filter.as_deref(),
+                    })
+                })
                 .collect(),
             queue_modes: config.feature.split_queues.queue_modes().collect(),
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
-            branch_db_names: branch_db_names
-                .mssql
-                .into_iter()
-                .chain(branch_db_names.mariadb)
-                .chain(branch_db_names.redis)
-                .chain(branch_db_names.dynamodb)
-                .chain(branch_db_names.spanner)
-                .chain(branch_db_names.clickhouse)
-                .chain(branch_db_names.cockroachdb)
-                .chain(branch_db_names.generic)
-                .chain(branch_db_names.s3)
-                .collect(),
+            branch_db_names: unified_branch_db_names,
             session_ci_info,
             up_session_info,
             is_default_cluster: None,
@@ -444,5 +514,73 @@ impl fmt::Display for ConnectParams<'_> {
             serde_urlencoded::to_string(self).expect("serialization to memory should not fail");
 
         f.write_str(&as_string)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mirrord_config::feature::split_queues::{
+        InnerMessageFilter, MessageFilterConfig, QueueKind, QueueSplit, SplitQueuesConfig,
+    };
+
+    use super::*;
+
+    /// Composed entries travel only in `queue_filters`; legacy ones only in the per-broker params.
+    /// An older operator ignores the param it does not know, so a composed entry must never leak
+    /// half of itself (its jq program) into the legacy params.
+    #[test]
+    fn composed_entries_ride_only_in_queue_filters() {
+        let split_queues = SplitQueuesConfig::from_splits([
+            QueueSplit {
+                message_filter: Some([("client".to_owned(), "^a$".to_owned())].into()),
+                jq_filter: Some(".x".to_owned()),
+                ..QueueSplit::new("legacy", QueueKind::Sqs)
+            },
+            QueueSplit {
+                filter: Some(MessageFilterConfig::AnyOf {
+                    any_of: vec![InnerMessageFilter::Metadata {
+                        metadata: "^client: b$".to_owned(),
+                    }],
+                }),
+                jq_filter: Some(".y".to_owned()),
+                ..QueueSplit::new("composed", QueueKind::Sqs)
+            },
+        ]);
+
+        assert_eq!(
+            legacy_filters(&split_queues, QueueKind::Sqs)
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            ["legacy"]
+        );
+        assert_eq!(
+            legacy_jq_filters(&split_queues, QueueKind::Sqs),
+            [("legacy", ".x")].into()
+        );
+
+        let composed = split_queues
+            .splits()
+            .iter()
+            .filter_map(|split| {
+                Some(ComposedQueueFilter {
+                    queue_id: split.queue_id.as_str(),
+                    queue_type: split.queue_type.into(),
+                    filter: split.filter.as_ref()?.into(),
+                    jq_filter: split.jq_filter.as_deref(),
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            serde_json::to_value(&composed).unwrap(),
+            serde_json::json!([{
+                "queue_id": "composed",
+                "queue_type": "SQS",
+                "filter": { "type": "anyOf", "filters": [
+                    { "type": "metadata", "pattern": "^client: b$" }
+                ] },
+                "jq_filter": ".y",
+            }])
+        );
     }
 }

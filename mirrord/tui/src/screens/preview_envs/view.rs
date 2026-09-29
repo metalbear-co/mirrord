@@ -1012,10 +1012,10 @@ fn card_content(session: &PreviewSession, expanded: bool) -> Vec<Line<'static>> 
     if expanded {
         lines.push(field_line("IMAGE", session.spec.image.clone()));
         lines.push(field_line("REPLICAS", session.spec.replicas.to_string()));
-        if !session.spec.target.container.is_empty() {
+        if !session.spec.target.container().is_empty() {
             lines.push(field_line(
                 "CONTAINER",
-                session.spec.target.container.clone(),
+                session.spec.target.container().to_owned(),
             ));
         }
         if let Some(share_host) = session
@@ -1100,6 +1100,9 @@ fn queue_filter_count(config: &PreviewQueueSplittingConfig) -> usize {
         + config.redis_pubsub_queue_filters.len()
         + config.temporal_queue_filters.len()
         + config.bullmq_queue_filters.len()
+        + config.nats_queue_filters.len()
+        + config.nats_pubsub_queue_filters.len()
+        + config.queues.len()
 }
 
 fn db_branch_count(config: &PreviewDbBranchingConfig) -> usize {
