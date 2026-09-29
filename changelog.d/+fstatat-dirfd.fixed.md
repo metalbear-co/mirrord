@@ -1,1 +1,0 @@
-Fixed remote `stat`-family calls in the agent: `fstatat` relative to a directory fd looked up a path with the target root prefixed twice, and in targetless mode paths were resolved relative to the agent's working directory instead of `/`.
