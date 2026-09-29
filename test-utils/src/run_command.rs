@@ -4,7 +4,7 @@ use std::{collections::HashMap, process::Stdio};
 use tempfile::tempdir;
 use tokio::process::Command;
 
-use crate::TestProcess;
+use crate::{TestProcess, output_label};
 
 /// See [`run_exec`].
 pub async fn run_exec_with_target(
@@ -176,5 +176,6 @@ pub async fn run_mirrord(
         server.id().unwrap()
     );
     // We need to hold temp dir until the process is finished
-    TestProcess::from_child(server, Some(temp_dir))
+    let label = output_label(&path, &args);
+    TestProcess::from_child_labeled(server, Some(temp_dir), &label)
 }

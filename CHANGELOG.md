@@ -8,6 +8,46 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.265.0](https://github.com/metalbear-co/mirrord/tree/3.265.0) - 2026-09-27
+
+
+### Added
+
+- Add turbopuffer namespace branching.
+- Added `feature.fs.prefetch`, a list of remote paths that mirrord copies into
+  a local temporary directory before the process starts, so that operations on
+  those paths are served locally instead of going through the agent. Use cases
+  speeding up include HTTP servers that re-read `/etc/ssl` from the filesystem
+  on every request.
+
+
+### Fixed
+
+- Fixed the internal proxy terminating every process in the session when a
+  single layer connection closed before completing its handshake.
+- The agent now correctly resolves chained symlinks and symlinks in paths.
+
+## [3.264.0](https://github.com/metalbear-co/mirrord/tree/3.264.0) - 2026-09-25
+
+
+### Added
+
+- Added `tls_delivery.client_cert` and `client_key` so stolen TLS traffic
+  reaches local and preview apps that require a client certificate.
+- Database branch connection parameters now accept a `url` base that the other
+  parameters override.
+- Queue splitting filters can now be composed with `any_of` / `all_of` and
+  match any message attribute via `metadata` regexes, aligned with the HTTP
+  filter shape.
+
+
+### Fixed
+
+- Fixed debugging Node apps from VS Code hanging when the app uses a fixed
+  inspector port.
+- Reject unsupported preview TLS delivery and incomplete client credentials
+  before replacing an existing preview.
+
 ## [3.263.0](https://github.com/metalbear-co/mirrord/tree/3.263.0) - 2026-09-24
 
 

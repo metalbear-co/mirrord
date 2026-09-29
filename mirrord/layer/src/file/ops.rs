@@ -115,6 +115,36 @@ fn common_path_check(path: PathBuf, write: bool) -> Detour<PathBuf> {
     Detour::Success(path)
 }
 
+/// Bypasses the operation onto the local copy of `path`, when one was made for
+/// `feature.fs.prefetch`.
+///
+/// Runs only once [`common_path_check`] has decided that the operation would have gone to the
+/// agent, so that a path the config already serves from the local filesystem is never diverted
+/// into the copy instead. For a write that means the fs mode has to be
+/// [`FsModeConfig::Write`]: under the other modes [`ensure_remote`] has already sent the write to
+/// the local filesystem, under its original path, before we get here.
+fn ensure_not_prefetched(path: &Path) -> Detour<()> {
+    match crate::setup().prefetched_files().local_copy(path) {
+        Some(copy) => Detour::Bypass(Bypass::prefetched_file(copy.to_str().unwrap_or_default())),
+        None => Detour::Success(()),
+    }
+}
+
+/// [`common_path_check`] for operations on the contents of a file, which can be served from a copy
+/// made for `feature.fs.prefetch`.
+///
+/// Operations that resolve or describe the file itself keep to [`common_path_check`]: serving
+/// those from the copy would report the copy's own location back to the application (`realpath`),
+/// or answer for the local filesystem rather than the target's (`statfs`). So do the ones that
+/// change the remote namespace (`unlink`, `rename`, `mkdir`), which still take effect in the
+/// target.
+fn prefetchable_path_check(path: PathBuf, write: bool) -> Detour<PathBuf> {
+    let path = common_path_check(path, write)?;
+    ensure_not_prefetched(&path)?;
+
+    Detour::Success(path)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RemoteFile {
     pub fd: u64,
@@ -254,7 +284,7 @@ fn close_remote_file_on_failure(fd: u64) -> Result<()> {
 /// [`OPEN_FILES`].
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
-    let path = common_path_check(path?, open_options.is_write())?;
+    let path = prefetchable_path_check(path?, open_options.is_write())?;
 
     let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)
         .or_else(|fail| match fail {
@@ -558,7 +588,7 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: c_int) -> Detour<c_int> {
     // into account when deciding whether to ignore, because when a caller is asking whether they
     // have write access to a file and then write to it, we want the test and the actual write to
     // happen with the same file.
-    let path = common_path_check(path?, (mode & libc::W_OK) != 0)?;
+    let path = prefetchable_path_check(path?, (mode & libc::W_OK) != 0)?;
 
     let access = AccessFileRequest {
         pathname: path,
@@ -599,7 +629,7 @@ pub(crate) fn xstat(
 
             let fd = {
                 if fd == AT_FDCWD {
-                    path = common_path_check(path, false)?;
+                    path = prefetchable_path_check(path, false)?;
                     None
                 } else if path.is_absolute() {
                     path = crate::setup().file_remapper().change_path(path);
@@ -615,7 +645,7 @@ pub(crate) fn xstat(
 
         // lstat/stat
         (Some(path), None) => {
-            let path = common_path_check(path?, false)?;
+            let path = prefetchable_path_check(path?, false)?;
             (Some(path), None)
         }
 
@@ -697,7 +727,7 @@ pub(crate) fn statx_logic(
             (Some(fd), Some(path))
         }
         (_, Some(path)) => {
-            let path = common_path_check(path, false)?;
+            let path = prefetchable_path_check(path, false)?;
             (None, Some(path))
         }
     };
@@ -1157,7 +1187,7 @@ mod test {
         #[case] write: bool,
         #[case] expected: DetourKind,
     ) {
-        use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
+        use mirrord_config::feature::fs::{PREFETCH_TIMEOUT_DEFAULT, READONLY_FILE_BUFFER_DEFAULT};
 
         let read_write = Some(VecOrSingle::Multiple(vec![
             r"/pain/read_write.*\.a".to_owned(),
@@ -1175,6 +1205,8 @@ mod test {
             mode,
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
+            prefetch: None,
+            prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
         };
 
         let file_filter = FileFilter::new(fs_config);

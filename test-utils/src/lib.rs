@@ -6,9 +6,11 @@ use core::ops::Not;
 use std::os::unix::process::ExitStatusExt;
 use std::{
     collections::HashMap,
+    fs::File,
     io::Write,
+    path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -23,6 +25,86 @@ use tokio::{
 };
 
 pub mod run_command;
+
+/// Directory this harness keeps a copy of every process's output in, one file per process
+/// named `<label>-<pid>.log`, when set. The operator's `cargo xtask e2e-staging --logs` sets
+/// it, so what an app run under mirrord writes can be read while the test runs, next to the
+/// logs of the pods in the cluster, instead of only in nextest's report of a failure. Nothing
+/// is written when it is unset.
+pub const LOG_DIR_ENV: &str = "MIRRORD_TESTS_LOG_DIR";
+
+/// The file a process's output is copied to under [`LOG_DIR_ENV`], or `None` when the
+/// directory is unset or cannot be written; a copy that fails must not fail the test.
+fn output_copy(label: &str, pid: u32) -> Option<Arc<Mutex<File>>> {
+    let dir = PathBuf::from(std::env::var_os(LOG_DIR_ENV)?);
+    std::fs::create_dir_all(&dir).ok()?;
+    let file = File::create(dir.join(format!("{label}-{pid}.log"))).ok()?;
+    Some(Arc::new(Mutex::new(file)))
+}
+
+/// Appends one chunk of a process's output to its copy, prefixed like the terminal line.
+fn copy_output(copy: &Option<Arc<Mutex<File>>>, stream: &str, chunk: &str) {
+    if let Some(copy) = copy
+        && let Ok(mut file) = copy.lock()
+    {
+        let _ = write!(file, "{stream} {} {chunk}", format_time());
+    }
+}
+
+/// The name a process's output copy is filed under: what runs, so a `mirrord exec ... --
+/// /path/to/app` is filed as `app`, not `mirrord`. A Go test app is built as
+/// `<app dir>/<n>.go_test_app`, where only the directory says which app it is.
+pub fn output_label<S: AsRef<str>>(program: &str, args: &[S]) -> String {
+    let executable = args
+        .iter()
+        .position(|arg| arg.as_ref() == "--")
+        .and_then(|separator| args.get(separator + 1))
+        .map(AsRef::as_ref)
+        .unwrap_or(program);
+    let path = Path::new(executable);
+    let name = if path
+        .extension()
+        .is_some_and(|extension| extension == "go_test_app")
+    {
+        path.parent().and_then(Path::file_name)
+    } else {
+        path.file_stem()
+    };
+    name.map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "process".to_owned())
+}
+
+#[cfg(test)]
+mod output_label_tests {
+    use super::*;
+
+    #[test]
+    fn output_is_filed_under_the_app_not_the_launcher() {
+        assert_eq!(
+            output_label("/tools/mirrord", &["exec", "--", "/apps/rust-sqs-printer"]),
+            "rust-sqs-printer"
+        );
+        assert_eq!(
+            output_label("/apps/kafka-consumer", &[""; 0]),
+            "kafka-consumer"
+        );
+    }
+
+    #[test]
+    fn a_go_test_app_is_filed_under_its_directory() {
+        assert_eq!(
+            output_label(
+                "mirrord",
+                &[
+                    "exec",
+                    "--",
+                    "/src/tests/go-e2e-pg-branching/27.go_test_app"
+                ]
+            ),
+            "go-e2e-pg-branching"
+        );
+    }
+}
 
 /// WARN messages exempted from `assert_no_warn_in_stderr` check
 const ALLOWED_WARNINGS: [&str; 1] = [
@@ -420,7 +502,17 @@ impl TestProcess {
         exit_status
     }
 
-    pub fn from_child(mut child: Child, tempdir: Option<TempDir>) -> TestProcess {
+    pub fn from_child(child: Child, tempdir: Option<TempDir>) -> TestProcess {
+        Self::from_child_labeled(child, tempdir, "process")
+    }
+
+    /// [`Self::from_child`] with the name the process's output is filed under, see
+    /// [`LOG_DIR_ENV`].
+    pub fn from_child_labeled(
+        mut child: Child,
+        tempdir: Option<TempDir>,
+        label: &str,
+    ) -> TestProcess {
         let stderr_data = Arc::new(RwLock::new(String::new()));
         let stdout_data = Arc::new(RwLock::new(String::new()));
         let child_stderr = child.stderr.take().unwrap();
@@ -428,6 +520,8 @@ impl TestProcess {
         let stderr_data_reader = stderr_data.clone();
         let stdout_data_reader = stdout_data.clone();
         let pid = child.id().unwrap();
+        let stderr_copy = output_copy(label, pid);
+        let stdout_copy = stderr_copy.clone();
 
         let stderr_task = Some(tokio::spawn(async move {
             let mut reader = BufReader::new(child_stderr);
@@ -440,6 +534,7 @@ impl TestProcess {
 
                 let string = String::from_utf8_lossy(&buf[..n]);
                 eprint!("stderr {} {pid}: {}", format_time(), string);
+                copy_output(&stderr_copy, "stderr", &string);
                 let _ = Write::flush(&mut std::io::stderr());
                 {
                     stderr_data_reader.write().await.push_str(&string);
@@ -456,6 +551,7 @@ impl TestProcess {
                 }
                 let string = String::from_utf8_lossy(&buf[..n]);
                 print!("stdout {} {pid}: {}", format_time(), string);
+                copy_output(&stdout_copy, "stdout", &string);
                 let _ = Write::flush(&mut std::io::stdout());
                 {
                     stdout_data_reader.write().await.push_str(&string);
@@ -484,6 +580,7 @@ impl TestProcess {
         env: HashMap<String, String>,
     ) -> TestProcess {
         println!("EXECUTING: {executable}");
+        let label = output_label(&executable, &args);
         let child = Command::new(executable)
             .args(args)
             .envs(env)
@@ -493,7 +590,7 @@ impl TestProcess {
             .spawn()
             .unwrap();
         println!("Started application.");
-        TestProcess::from_child(child, None)
+        TestProcess::from_child_labeled(child, None, &label)
     }
 }
 
