@@ -5,6 +5,7 @@ use thiserror::Error;
 use crate::{
     MainTaskId,
     agent_conn::{AgentConnectionError, AgentConnectionTaskError},
+    background_tasks::TaskError,
     layer_initializer::LayerInitializerError,
     ping_pong::PingPongError,
     proxies::{
@@ -74,6 +75,10 @@ impl ProxyRuntimeError {
 pub enum ProxyStartupError {
     #[error("waiting for the first layer connection timed out")]
     ConnectionAcceptTimeout,
+    #[error("layer initializer failed while quiescing: {0}")]
+    LayerInitializerQuiescing(#[source] Box<TaskError<ProxyRuntimeError>>),
+    #[error("layer initializer stopped without acknowledging quiescence")]
+    LayerInitializerQuiescenceClosed,
 }
 
 pub fn agent_lost_io_error() -> ResponseError {
