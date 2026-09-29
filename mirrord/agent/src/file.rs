@@ -760,9 +760,13 @@ impl FileManager {
         let path = match (path, fd) {
             // lstat/stat or fstatat with fdcwd
             (Some(path), None) => path,
-            // fstatat
+            // fstatat: `parent_path` is the value `open` stored for this fd, which is already
+            // resolved against the target's root. Joining `path` onto it therefore gives the
+            // final path directly, unlike the other branches below: it must not be sent through
+            // `strip_prefix_root`/`resolve*` again, or the root ends up prepended twice and the
+            // path is never found.
             (Some(path), Some(fd)) => {
-                match self
+                let full_path = match self
                     .open_files
                     .get(&fd)
                     .ok_or(ResponseError::NotFound(fd))?
@@ -771,7 +775,19 @@ impl FileManager {
                     _ => {
                         return Err(ResponseError::NotDirectory(fd));
                     }
-                }
+                };
+
+                let metadata = if follow_symlink {
+                    full_path.metadata()
+                } else {
+                    full_path.symlink_metadata()
+                };
+
+                return metadata
+                    .map(|metadata| XstatResponse {
+                        metadata: metadata.into(),
+                    })
+                    .map_err(ResponseError::from);
             }
             // fstat
             (None, Some(fd)) => {
@@ -1020,5 +1036,43 @@ impl FileManager {
                 result_size,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    /// Regression test for the `fstatat(dirfd, name)` branch of [`FileManager::xstat`]:
+    /// `open` stores an already-resolved path for a directory fd, so looking up an entry inside
+    /// it must not be resolved against the target's root a second time.
+    #[test]
+    fn xstat_with_fd_and_path_does_not_resolve_dir_path_twice() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("conf")).unwrap();
+        fs::write(root.path().join("conf/entry.yaml"), "hello").unwrap();
+
+        let mut manager = FileManager {
+            path_resolver: Some(InTargetPathResolver::with_root_path(
+                root.path().to_path_buf(),
+            )),
+            open_files: Default::default(),
+            dir_streams: Default::default(),
+            getdents_streams: Default::default(),
+            fds_iter: (0..=u64::MAX),
+        };
+
+        let fd = 0;
+        manager
+            .open_files
+            .insert(fd, RemoteFile::Directory(root.path().join("conf")));
+
+        let response = manager
+            .xstat(Some(PathBuf::from("entry.yaml")), Some(fd), false)
+            .expect("fstatat on an entry of an already-resolved directory fd should succeed");
+
+        assert_eq!(response.metadata.size, 5);
     }
 }
