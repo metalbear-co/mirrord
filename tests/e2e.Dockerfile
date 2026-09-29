@@ -100,19 +100,6 @@ RUN set -eux; \
     corepack enable && corepack prepare "pnpm@${PNPM_MAJOR}" --activate; \
     node --version && pnpm --version
 
-ARG CARGO_ZIGBUILD_VERSION=0.23.0
-ARG ZIGLANG_VERSION=0.15.2
-
-ENV UV_TOOL_BIN_DIR=/usr/local/bin
-
-RUN set -eux; \
-    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh; \
-    uv tool install --no-cache "cargo-zigbuild==${CARGO_ZIGBUILD_VERSION}"; \
-    uv tool install --no-cache "ziglang==${ZIGLANG_VERSION}" --with-executables-from ziglang; \
-    ln -sf "$(command -v python-zig)" /usr/local/bin/zig; \
-    cargo-zigbuild --version; \
-    zig version
-
 # `mysqldump`/`mysqladmin` must be MySQL's own binaries and `mariadb-dump`/`mariadb-admin` MariaDB's.
 ARG MONGO_TOOLS_RELEASE=8.0
 ARG COCKROACH_RELEASE=v26.2.5
