@@ -218,6 +218,12 @@ impl fmt::Debug for OperatorSession {
 pub struct OperatorSessionConnection {
     pub session: Box<OperatorSession>,
     pub conn: OperatorConnection,
+    /// Ports declared by the target container, see
+    /// [`RuntimeData::container_ports`](mirrord_kube::api::runtime::RuntimeData::container_ports).
+    ///
+    /// Empty when we do not know them: the session is targetless, uses a copy target or spans
+    /// multiple clusters, or this is a connection to an existing session.
+    pub target_container_ports: Vec<u16>,
 }
 
 impl fmt::Debug for OperatorSessionConnection {
@@ -240,6 +246,8 @@ pub struct PreparedSession {
     /// Database branches prepared for this session, kept for rebuilding the connect URL in case
     /// the reused copy target has to be recreated.
     branch_db_names: BranchDbNames,
+    /// See [`OperatorSessionConnection::target_container_ports`].
+    target_container_ports: Vec<u16>,
 }
 
 /// Wrapper over mirrord operator API.
@@ -1558,7 +1566,7 @@ impl OperatorApi<PreparedClientCert> {
             BranchDbNames::default()
         };
 
-        let (session, reused_copy) = if do_copy_target {
+        let (session, reused_copy, target_container_ports) = if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
             if let Some(reason) = reason {
                 copy_subtask.info(&format!(
@@ -1609,12 +1617,12 @@ impl OperatorApi<PreparedClientCert> {
                 layer_config.baggage.clone(),
             )?;
 
-            (session, reused)
+            (session, reused, Vec::new())
         } else {
             let target = target.assert_valid_mirrord_target(self.client()).await?;
 
             // `targetless` has no `RuntimeData`!
-            if matches!(target, ResolvedTarget::Targetless(_)).not() {
+            let target_container_ports = if matches!(target, ResolvedTarget::Targetless(_)).not() {
                 let runtime_data = target
                     .runtime_data(self.client(), target.namespace())
                     .await?;
@@ -1651,7 +1659,11 @@ impl OperatorApi<PreparedClientCert> {
                         stolen_probes.join(", "),
                     ));
                 }
-            }
+
+                runtime_data.container_ports
+            } else {
+                Vec::new()
+            };
 
             let params = ConnectParams::new(
                 layer_config,
@@ -1670,13 +1682,14 @@ impl OperatorApi<PreparedClientCert> {
                 layer_config.baggage.clone(),
             )?;
 
-            (session, false)
+            (session, false, target_container_ports)
         };
 
         Ok(PreparedSession {
             session,
             reused_copy,
             branch_db_names,
+            target_container_ports,
         })
     }
 
@@ -1716,6 +1729,7 @@ impl OperatorApi<PreparedClientCert> {
             session,
             reused_copy,
             branch_db_names,
+            target_container_ports,
         } = self
             .prepare_session(
                 target,
@@ -1754,6 +1768,7 @@ impl OperatorApi<PreparedClientCert> {
         Ok(OperatorSessionConnection {
             session: Box::new(session),
             conn,
+            target_container_ports,
         })
     }
 
@@ -1987,6 +2002,7 @@ impl OperatorApi<PreparedClientCert> {
         Ok(OperatorSessionConnection {
             session: Box::new(session),
             conn,
+            target_container_ports: Vec::new(),
         })
     }
 
@@ -2648,7 +2664,11 @@ impl OperatorApi<PreparedClientCert> {
 
         let conn = Self::connect_target(&client, &session).await?;
 
-        Ok(OperatorSessionConnection { conn, session })
+        Ok(OperatorSessionConnection {
+            conn,
+            session,
+            target_container_ports: Vec::new(),
+        })
     }
 
     /// Makes a websocket connection to the target of the given [`OperatorSession`], reusing this

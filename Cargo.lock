@@ -5485,6 +5485,7 @@ dependencies = [
  "exec",
  "frida-gum",
  "http 1.5.0",
+ "itertools 0.14.0",
  "libc",
  "mirrord-config",
  "mirrord-console",
