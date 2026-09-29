@@ -16,12 +16,13 @@ use mirrord_session_monitor_client::{
 };
 use mirrord_session_monitor_protocol::{ProcessInfo, SessionInfo};
 use prettytable::{Table, row};
+use serde::Serialize;
 use tracing::Level;
 
 use crate::{
     config::{
         KillArgs, LocalSessionCommand, SessionArgs, SessionCommonArgs, SessionDeleteArgs,
-        SessionListArgs,
+        SessionListArgs, SessionListFormat,
     },
     error::CliError,
     util::remove_proxy_env,
@@ -33,6 +34,45 @@ struct MergedSessionRow {
     session_id: String,
     local: Option<SessionInfo>,
     remote: Option<OperatorStatusSession>,
+}
+
+#[derive(Serialize)]
+struct JsonSessionRow<'a> {
+    session_id: &'a str,
+    process_id: Option<u32>,
+    key: Option<&'a str>,
+    target: Option<&'a str>,
+    namespace: Option<&'a str>,
+    user: Option<String>,
+    process_name: Option<&'a str>,
+    command_line: Option<String>,
+    time_up: Option<String>,
+}
+
+impl<'a> From<&'a MergedSessionRow> for JsonSessionRow<'a> {
+    fn from(row: &'a MergedSessionRow) -> Self {
+        let process = row.local.as_ref().and_then(primary_process);
+
+        Self {
+            session_id: &row.session_id,
+            process_id: process.map(|process| process.pid),
+            key: row
+                .local
+                .as_ref()
+                .and_then(|session| session.key.as_deref())
+                .or_else(|| {
+                    row.remote
+                        .as_ref()
+                        .and_then(|session| session.key.as_deref())
+                }),
+            target: row.target_value(),
+            namespace: row.namespace_value(),
+            user: row.user_value(),
+            process_name: process.map(|process| process.process_name.as_str()),
+            command_line: process.map(|process| format_cmdline(Some(process))),
+            time_up: row.time_up_value(),
+        }
+    }
 }
 
 enum RemoteKillResult {
@@ -59,6 +99,12 @@ pub async fn kill_command(args: KillArgs) -> Result<(), CliError> {
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 async fn list_command(common: &SessionCommonArgs, args: SessionListArgs) -> Result<(), CliError> {
     let (rows, operator_not_found) = merged_sessions(common, &args).await?;
+
+    if args.format == SessionListFormat::Json {
+        let rows: Vec<_> = rows.iter().map(JsonSessionRow::from).collect();
+        println!("{}", serde_json::to_string(&rows)?);
+        return Ok(());
+    }
 
     if operator_not_found {
         println!(
@@ -96,14 +142,14 @@ async fn list_command(common: &SessionCommonArgs, args: SessionListArgs) -> Resu
                 .as_ref()
                 .and_then(|session| session.key.as_deref())
                 .unwrap_or(NOT_AVAILABLE),
-            row.target(),
-            row.namespace(),
-            row.user(),
+            row.target_value().unwrap_or(NOT_AVAILABLE),
+            row.namespace_value().unwrap_or(NOT_AVAILABLE),
+            row.user_value().unwrap_or_else(|| NOT_AVAILABLE.to_owned()),
             process
                 .map(|process| process.process_name.as_str())
                 .unwrap_or(NOT_AVAILABLE),
             format_cmdline(process),
-            row.time_up()
+            row.time_up_value().unwrap_or_else(|| "unknown".to_owned())
         ]);
     }
 
@@ -537,14 +583,13 @@ fn format_cmdline(process: Option<&ProcessInfo>) -> String {
     }
 }
 
-fn format_uptime(started_at: &str) -> String {
+fn format_uptime(started_at: &str) -> Option<String> {
     humantime::parse_rfc3339_weak(started_at)
         .ok()
         .and_then(|started_at| SystemTime::now().duration_since(started_at).ok())
         .map(|duration| {
             humantime::format_duration(Duration::from_secs(duration.as_secs())).to_string()
         })
-        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 impl MergedSessionRow {
@@ -555,15 +600,14 @@ impl MergedSessionRow {
             .unwrap_or_else(|| self.session_id.clone())
     }
 
-    fn target(&self) -> &str {
+    fn target_value(&self) -> Option<&str> {
         self.local
             .as_ref()
             .map(|session| session.target.as_str())
             .or_else(|| self.remote.as_ref().map(|session| session.target.as_str()))
-            .unwrap_or(NOT_AVAILABLE)
     }
 
-    fn namespace(&self) -> &str {
+    fn namespace_value(&self) -> Option<&str> {
         self.local
             .as_ref()
             .and_then(|session| session.namespace.as_deref())
@@ -572,27 +616,149 @@ impl MergedSessionRow {
                     .as_ref()
                     .and_then(|session| session.namespace.as_deref())
             })
-            .unwrap_or(NOT_AVAILABLE)
     }
 
-    fn user(&self) -> String {
+    fn user_value(&self) -> Option<String> {
         match (&self.local, &self.remote) {
-            (Some(_), Some(session)) => format!("You ({})", session.user),
-            (None, Some(session)) => session.user.clone(),
-            _ => NOT_AVAILABLE.to_owned(),
+            (Some(_), Some(session)) => Some(format!("You ({})", session.user)),
+            (None, Some(session)) => Some(session.user.clone()),
+            _ => None,
         }
     }
 
-    fn time_up(&self) -> String {
-        self.local
-            .as_ref()
-            .map(|session| format_uptime(&session.started_at))
-            .or_else(|| {
-                self.remote.as_ref().map(|session| {
-                    humantime::format_duration(Duration::from_secs(session.duration_secs))
-                        .to_string()
-                })
+    fn time_up_value(&self) -> Option<String> {
+        if let Some(local) = &self.local {
+            return format_uptime(&local.started_at);
+        }
+
+        self.remote.as_ref().map(|session| {
+            humantime::format_duration(Duration::from_secs(session.duration_secs)).to_string()
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    fn local_session() -> SessionInfo {
+        SessionInfo {
+            session_id: "abc123".to_owned(),
+            key: Some("dev".to_owned()),
+            target: "deployment/api".to_owned(),
+            namespace: None,
+            context: None,
+            started_at: "invalid".to_owned(),
+            mirrord_version: "1.0".to_owned(),
+            is_operator: true,
+            processes: vec![ProcessInfo {
+                pid: 42,
+                parent_pid: None,
+                process_name: "node".to_owned(),
+                cmdline: vec!["node".to_owned(), "app.js".to_owned()],
+            }],
+            port_subscriptions: Vec::new(),
+            config: json!({}),
+        }
+    }
+
+    fn remote_session() -> OperatorStatusSession {
+        serde_json::from_value(json!({
+            "id": "abc123",
+            "duration_secs": 5,
+            "user": "alice",
+            "target": "deployment/remote",
+            "namespace": "default",
+            "locked_ports": null,
+            "user_id": null,
+            "sqs": null,
+            "rmq": null,
+            "kafka": null,
+            "key": "dev"
+        }))
+        .unwrap()
+    }
+
+    fn json_value(row: &MergedSessionRow) -> Value {
+        serde_json::to_value(JsonSessionRow::from(row)).unwrap()
+    }
+
+    #[test]
+    fn local_json_row_uses_typed_values_and_nulls() {
+        let row = MergedSessionRow {
+            session_id: "abc123".to_owned(),
+            local: Some(local_session()),
+            remote: None,
+        };
+
+        assert_eq!(
+            json_value(&row),
+            json!({
+                "session_id": "abc123",
+                "process_id": 42,
+                "key": "dev",
+                "target": "deployment/api",
+                "namespace": null,
+                "user": null,
+                "process_name": "node",
+                "command_line": "node app.js",
+                "time_up": null
             })
-            .unwrap_or_else(|| "unknown".to_owned())
+        );
+    }
+
+    #[test]
+    fn remote_json_row_has_no_local_process() {
+        let row = MergedSessionRow {
+            session_id: "abc123".to_owned(),
+            local: None,
+            remote: Some(remote_session()),
+        };
+
+        assert_eq!(
+            json_value(&row),
+            json!({
+                "session_id": "abc123",
+                "process_id": null,
+                "key": "dev",
+                "target": "deployment/remote",
+                "namespace": "default",
+                "user": "alice",
+                "process_name": null,
+                "command_line": null,
+                "time_up": "5s"
+            })
+        );
+    }
+
+    #[test]
+    fn merged_json_row_prefers_local_details() {
+        let row = MergedSessionRow {
+            session_id: "abc123".to_owned(),
+            local: Some(local_session()),
+            remote: Some(remote_session()),
+        };
+        assert_eq!(
+            json_value(&row),
+            json!({
+                "session_id": "abc123",
+                "process_id": 42,
+                "key": "dev",
+                "target": "deployment/api",
+                "namespace": "default",
+                "user": "You (alice)",
+                "process_name": "node",
+                "command_line": "node app.js",
+                "time_up": null
+            })
+        );
+    }
+
+    #[test]
+    fn empty_json_list_is_an_array() {
+        let rows: Vec<JsonSessionRow<'_>> = Vec::new();
+        assert_eq!(serde_json::to_string(&rows).unwrap(), "[]");
     }
 }

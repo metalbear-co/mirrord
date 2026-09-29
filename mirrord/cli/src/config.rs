@@ -2040,6 +2040,10 @@ impl Default for LocalSessionCommand {
 /// Arguments for listing local and in-cluster mirrord sessions.
 #[derive(Args, Debug, Default)]
 pub struct SessionListArgs {
+    /// Format output for terminal display or scripting.
+    #[arg(long, default_value_t)]
+    pub format: SessionListFormat,
+
     /// Only list sessions started with this `key`.
     ///
     /// `key` is the session identifier set via `mirrord exec --key`, `MIRRORD_KEY`, or the
@@ -2048,6 +2052,14 @@ pub struct SessionListArgs {
     /// `spec.session.key` field selector. When omitted, all sessions are listed.
     #[arg(long)]
     pub key: Option<String>,
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum, Display)]
+#[strum(serialize_all = "lowercase")]
+pub enum SessionListFormat {
+    #[default]
+    Pretty,
+    Json,
 }
 
 /// Arguments for deleting local mirrord sessions.
@@ -2234,6 +2246,29 @@ mod tests {
     #[case(&["mirrord", "operator", "session", "stop", "--all", "-f", "config.json"])]
     fn global_management_flags_parse_before_and_after_subcommands(#[case] args: &[&str]) {
         Cli::try_parse_from(args).unwrap();
+    }
+
+    #[rstest]
+    #[case(&["mirrord", "session", "list"], SessionListFormat::Pretty)]
+    #[case(&["mirrord", "session", "ls", "--format", "json"], SessionListFormat::Json)]
+    #[case(&["mirrord", "session", "list", "--key", "dev", "--format", "json"], SessionListFormat::Json)]
+    fn session_list_parses_format(#[case] args: &[&str], #[case] expected: SessionListFormat) {
+        let cli = Cli::try_parse_from(args).unwrap();
+        let Commands::Session(args) = cli.commands else {
+            panic!("expected `session` command");
+        };
+        let Some(LocalSessionCommand::List(args)) = args.command else {
+            panic!("expected `session list` command");
+        };
+
+        assert_eq!(args.format, expected);
+    }
+
+    #[test]
+    fn session_list_rejects_unknown_format() {
+        let error =
+            Cli::try_parse_from(["mirrord", "session", "list", "--format", "xml"]).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidValue);
     }
 
     #[rstest]
