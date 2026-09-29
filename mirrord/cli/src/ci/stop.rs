@@ -81,7 +81,7 @@ impl CiStopCommandHandler {
         use futures::{StreamExt, stream};
         use nix::{
             errno::Errno,
-            sys::signal::{Signal, kill},
+            sys::signal::{Signal, kill, killpg},
             unistd::Pid,
         };
 
@@ -116,6 +116,18 @@ impl CiStopCommandHandler {
                 .map_err(CiError::from)
         }
 
+        fn try_kill_group(process_group: u32) -> CiResult<()> {
+            killpg(Pid::from_raw(process_group as i32), Signal::SIGKILL)
+                .or_else(|error| {
+                    if error == Errno::ESRCH {
+                        Ok(())
+                    } else {
+                        Err(error)
+                    }
+                })
+                .map_err(CiError::from)
+        }
+
         // We don't want to short-circuit on error, go to the next pid and try to `kill` it.
         let intproxies_killed = store
             .intproxy_pids
@@ -141,9 +153,9 @@ impl CiStopCommandHandler {
             .collect::<Vec<_>>();
 
         let users_killed = store
-            .user_pids
+            .user_process_groups
             .into_iter()
-            .filter_map(|user_pid| Some(try_kill(user_pid?)))
+            .map(try_kill_group)
             .collect::<Vec<_>>();
 
         intproxies_killed

@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 #[cfg(not(target_os = "windows"))]
-use std::{fs::File, os::unix::process::ExitStatusExt, process::Stdio, time::SystemTime};
+use std::{fs::File, io, os::unix::process::ExitStatusExt, process::Stdio, time::SystemTime};
 
 use ci_info::types::CiInfo;
 use drain::Watch;
@@ -20,9 +20,12 @@ use mirrord_progress::{Progress, ProgressTracker};
 #[cfg(not(target_os = "windows"))]
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
-#[cfg(not(target_os = "windows"))]
-use tokio::fs::create_dir_all;
 use tokio::{fs, io::AsyncWriteExt};
+#[cfg(not(target_os = "windows"))]
+use tokio::{
+    fs::create_dir_all,
+    process::{Child, Command},
+};
 use tracing::Level;
 
 use crate::{CliError, CliResult, ci::error::CiError, config::ci::*, data::UserData};
@@ -149,8 +152,8 @@ struct MirrordCiStore {
     /// container runtime.
     sidecar_containers: HashSet<MirrordCiManagedContainer>,
 
-    /// pid of the user process, stored when we spawn the user binary with mirrord.
-    user_pids: HashSet<Option<u32>>,
+    /// Leader PID of each background command's dedicated process group.
+    user_process_groups: HashSet<u32>,
 }
 
 impl MirrordCiStore {
@@ -211,14 +214,27 @@ impl MirrordCiStore {
             && self.extproxy_pids.is_empty()
             && self.sidecar_pids.is_empty()
             && self.sidecar_containers.is_empty()
-            && self.user_pids.is_empty()
+            && self.user_process_groups.is_empty()
     }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn spawn_background_user_command(
+    command: &mut Command,
+    store: &mut MirrordCiStore,
+) -> io::Result<Child> {
+    command.process_group(0);
+    let child = command.spawn()?;
+    if let Some(process_group) = child.id() {
+        store.user_process_groups.insert(process_group);
+    }
+    Ok(child)
 }
 
 /// mirrord-for-ci operations require a [`CiApiKey`] to run.
 ///
-/// `mirrord ci start` stores the pids of the user process and our intproxy so that we can
-/// stop these processes on `mirrord ci stop`.
+/// `mirrord ci start` stores background user command groups and the intproxy PID so that
+/// `mirrord ci stop` can terminate their processes.
 #[derive(Debug)]
 pub(super) struct MirrordCi {
     /// Used as the `Credentials` (certificate) for the `mirrord ci` operations.
@@ -281,8 +297,8 @@ impl MirrordCi {
     /// Prepares and runs the user binary with mirrord.
     ///
     /// Very similar to to how `mirrord exec` behaves, except that here we `spawn` a child process
-    /// that'll keep running, and we store the pid of this process in [`MirrordCiStore`] so we can
-    /// kill it later.
+    /// that'll keep running. Background commands are put in a separate process group so stop
+    /// can also terminate children that outlive their wrapper.
     #[cfg(not(target_os = "windows"))]
     #[tracing::instrument(level = Level::TRACE, skip(progress), err)]
     pub(super) async fn prepare_command<P: Progress>(
@@ -312,17 +328,21 @@ impl MirrordCi {
         )
         .await?;
 
-        let mut child = match tokio::process::Command::new(binary_path)
+        let mut command = Command::new(binary_path);
+        command
             .args(binary_args.iter().skip(1))
             .envs(env_vars)
             .stdin(Stdio::null())
             .stdout(File::create(ci_run_output_dir.join("stdout"))?)
             .stderr(File::create(ci_run_output_dir.join("stderr"))?)
-            .kill_on_drop(false)
-            .spawn()
-        {
+            .kill_on_drop(false);
+        let spawn_result = if self.ci_common_args.foreground {
+            command.spawn()
+        } else {
+            spawn_background_user_command(&mut command, &mut mirrord_ci_store)
+        };
+        let mut child = match spawn_result {
             Ok(child) => {
-                mirrord_ci_store.user_pids.insert(child.id());
                 mirrord_ci_store.write_to_file().await?;
                 child
             }
@@ -411,7 +431,7 @@ impl MirrordCi {
         // to delete them with `mirrord ci stop` even if the following code fails.
         mirrord_ci_store.write_to_file().await?;
 
-        let mut command = tokio::process::Command::new(binary_path);
+        let mut command = Command::new(binary_path);
         command.args(binary_args).kill_on_drop(false);
 
         // If `--foreground` don't write stdio to file.
@@ -430,9 +450,13 @@ impl MirrordCi {
                 .stderr(File::create(ci_output_dir.join("stderr"))?);
         }
 
-        let mut child = match command.spawn() {
+        let spawn_result = if self.ci_common_args.foreground {
+            command.spawn()
+        } else {
+            spawn_background_user_command(&mut command, &mut mirrord_ci_store)
+        };
+        let mut child = match spawn_result {
             Ok(child) => {
-                mirrord_ci_store.user_pids.insert(child.id());
                 mirrord_ci_store.write_to_file().await?;
                 child
             }
@@ -536,5 +560,59 @@ impl MirrordCi {
 
     pub(super) fn is_foreground(&self) -> bool {
         self.ci_common_args.foreground
+    }
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests {
+    use std::{
+        collections::HashSet, os::unix::process::ExitStatusExt, process::Stdio, time::Duration,
+    };
+
+    use nix::{
+        sys::signal::{Signal, killpg},
+        unistd::{Pid, getpgid},
+    };
+    use tokio::{
+        io::{AsyncBufReadExt, BufReader},
+        process::Command,
+        time::timeout,
+    };
+
+    use super::{MirrordCiStore, spawn_background_user_command};
+
+    #[tokio::test]
+    async fn background_command_records_a_group_containing_its_child() {
+        let mut store = MirrordCiStore::default();
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "sh -c 'sleep 30 & echo $!; wait' & wait"])
+            .stdout(Stdio::piped())
+            .kill_on_drop(true);
+
+        let mut child = spawn_background_user_command(&mut command, &mut store).unwrap();
+        let child_pid = child.id().unwrap();
+        let group = Pid::from_raw(child_pid as i32);
+        let stdout = child.stdout.take().unwrap();
+        let mut descendant_pid = String::new();
+        timeout(
+            Duration::from_secs(5),
+            BufReader::new(stdout).read_line(&mut descendant_pid),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let descendant_pid = Pid::from_raw(descendant_pid.trim().parse().unwrap());
+
+        assert_eq!(store.user_process_groups, HashSet::from([child_pid]));
+        assert_eq!(getpgid(Some(group)).unwrap(), group);
+        assert_eq!(getpgid(Some(descendant_pid)).unwrap(), group);
+
+        killpg(group, Signal::SIGKILL).unwrap();
+        let status = timeout(Duration::from_secs(5), child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status.signal(), Some(Signal::SIGKILL as i32));
     }
 }
