@@ -189,7 +189,7 @@ jobs:
       - name: Build mirrord CLI
         env:
           RUSTFLAGS: ${{ env.RUSTFLAGS }} -A dead_code
-        run: cargo xtask build-cli --platform linux-aarch64 --release
+        run: cargo xtask build-cli --platform linux-aarch64 --zigbuild --release
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: aarch64-unknown-linux-gnu
@@ -222,7 +222,7 @@ jobs:
       - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
         run: corepack enable pnpm
       - name: Build mirrord CLI
-        run: cargo xtask build-cli --platform linux-x86_64 --release
+        run: cargo xtask build-cli --platform linux-x86_64 --zigbuild --release
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: x86_64-unknown-linux-gnu

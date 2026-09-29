@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use which::which;
 
 use super::signing;
 use crate::relative_to_root;
@@ -92,17 +91,23 @@ pub struct CargoOptions {
     pub release: bool,
     /// The platform was given explicitly, see [`Target::cargo_target`].
     pub cross: bool,
+    /// Build Linux targets with `cargo zigbuild`, which links against glibc 2.17 so the binaries
+    /// also run on old distros. Without it, the binaries link against the host glibc, which is
+    /// fine for local development.
+    pub zigbuild: bool,
 }
 
 /// Creates the cargo command that builds `target`. Callers add the package and extra arguments.
-///
-/// Linux targets use `cargo zigbuild`, which links against glibc 2.17 so the binaries also run on
-/// old distros.
-pub fn cargo_build(target: Target, options: CargoOptions) -> Result<Command> {
-    let zigbuild = matches!(target, Target::LinuxX86_64 | Target::LinuxAarch64);
-    if zigbuild && which("cargo-zigbuild").is_err() {
-        anyhow::bail!("cargo-zigbuild is required for Linux builds.");
+pub fn cargo_build(target: Target, options: CargoOptions) -> Command {
+    // glibc is only a concern on Linux.
+    let is_linux = matches!(target, Target::LinuxX86_64 | Target::LinuxAarch64);
+    if options.zigbuild && !is_linux {
+        println!(
+            "Ignoring --zigbuild for {}, it only applies to Linux targets.",
+            target.triple()
+        );
     }
+    let zigbuild = options.zigbuild && is_linux;
 
     let mut cmd = Command::new("cargo");
     cmd.arg(if zigbuild { "zigbuild" } else { "build" });
@@ -118,7 +123,7 @@ pub fn cargo_build(target: Target, options: CargoOptions) -> Result<Command> {
         None => &mut cmd,
     };
 
-    Ok(cmd)
+    cmd
 }
 
 /// Builds the mirrord layer for the specified target
@@ -134,7 +139,7 @@ pub fn build_layer(
 
     println!("Building mirrord-layer for {}...", target.triple());
 
-    let mut cmd = cargo_build(target, options)?;
+    let mut cmd = cargo_build(target, options);
     cmd.arg("-p");
 
     match target {

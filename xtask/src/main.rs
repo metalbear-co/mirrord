@@ -36,6 +36,11 @@ enum Commands {
         #[arg(short, long)]
         release: bool,
 
+        /// Build Linux targets with `cargo zigbuild`, which links against glibc 2.17 so the
+        /// binaries also run on old distros. Ignored for other targets
+        #[arg(long, requires = "platform")]
+        zigbuild: bool,
+
         /// Do not (re)build the UI frontend; embed whatever is already in `packages/ui/dist`
         #[arg(long)]
         no_ui: bool,
@@ -71,6 +76,11 @@ enum Commands {
         /// Build in release mode
         #[arg(short, long)]
         release: bool,
+
+        /// Build Linux targets with `cargo zigbuild`, which links against glibc 2.17 so the
+        /// binaries also run on old distros. Ignored for other targets
+        #[arg(long, requires = "platform")]
+        zigbuild: bool,
 
         /// Additional arguments passed to cargo
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -170,12 +180,14 @@ fn main() -> Result<()> {
         Commands::BuildCli {
             platform,
             release,
+            zigbuild,
             no_ui,
             cargo_args,
         } => {
             let cargo = CargoOptions {
                 release,
                 cross: platform.is_some(),
+                zigbuild,
             };
             let platform = platform.unwrap_or_else(|| {
                 Platform::detect().unwrap_or_else(|e| {
@@ -203,11 +215,13 @@ fn main() -> Result<()> {
         Commands::BuildLayer {
             platform,
             release,
+            zigbuild,
             cargo_args,
         } => {
             let options = CargoOptions {
                 release,
                 cross: platform.is_some(),
+                zigbuild,
             };
             let platform = platform.unwrap_or_else(|| {
                 Platform::detect().unwrap_or_else(|e| {

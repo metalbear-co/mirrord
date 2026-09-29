@@ -58,6 +58,15 @@ On macOS, only the architecture that is not the host gets `--target`, even with 
 Apple Silicon, x86_64 artifacts go to `target/x86_64-apple-darwin/` and aarch64 artifacts go to
 `target/debug` or `target/release`. On Intel Macs, it is the opposite.
 
+**Old glibc versions:**
+
+With `--zigbuild`, Linux builds use `cargo zigbuild` to link against glibc 2.17, so the binaries also
+run on old Linux distributions. It requires `--platform` and `cargo-zigbuild`. Release builds in CI use it.
+
+```bash
+cargo xtask build-cli --release --platform linux-x86_64 --zigbuild
+```
+
 ### `build-ui`
 
 Builds the merged UI frontend (`packages/ui`, which composes the session monitor and the config
@@ -96,10 +105,10 @@ cargo xtask build-cli --release
 
 ```bash
 # Linux x86_64
-cargo xtask build-cli --release --platform linux-x86_64
+cargo xtask build-cli --release --platform linux-x86_64 --zigbuild
 
 # Linux ARM64 (requires cross-compilation setup)
-cargo xtask build-cli --release --platform linux-aarch64
+cargo xtask build-cli --release --platform linux-aarch64 --zigbuild
 ```
 
 ### Building Components Separately

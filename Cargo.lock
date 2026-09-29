@@ -11208,7 +11208,6 @@ dependencies = [
  "dunce",
  "reqwest 0.13.4",
  "serde_json",
- "which",
 ]
 
 [[package]]
