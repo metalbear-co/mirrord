@@ -110,6 +110,24 @@ pub(super) async fn operator_install(
     })?;
     progress.success(None);
 
+    println!(
+        "{}",
+        summary(
+            &operator.spec.operator_version,
+            &manifest,
+            context.as_deref(),
+            trial.as_ref(),
+        )
+    );
+
+    if let Some(trial) = &trial
+        && no_browser.not()
+        && std::io::stdout().is_terminal()
+        && let Err(error) = opener::open(&trial.claim_url)
+    {
+        tracing::debug!(?error, "failed to open the claim URL in the browser");
+    }
+
     Ok(())
 }
 
@@ -117,3 +135,40 @@ fn claim_instructions(claim_url: &str) -> String {
     format!("Claim the trial to take ownership of it: {claim_url}")
 }
 
+/// What the user needs to know after a successful installation, printed once.
+fn summary(
+    version: &semver::Version,
+    manifest: &Manifest,
+    context: Option<&str>,
+    trial: Option<&Trial>,
+) -> String {
+    let namespace = manifest.operator_namespace();
+    let location = match context {
+        Some(context) => format!("namespace `{namespace}` of kubecontext `{context}`"),
+        None => format!("namespace `{namespace}`"),
+    };
+    let mut summary = format!("mirrord operator {version} is installed in {location}.\n\n");
+
+    if let Some(trial) = trial {
+        summary.push_str(&format!(
+            "Your mirrord Enterprise trial ends on {}, after which the license drops to the Free \
+            tier.\n{}\n\n",
+            trial.trial_ends_at.format("%B %-d, %Y"),
+            claim_instructions(&trial.claim_url),
+        ));
+    }
+
+    summary.push_str(&format!(
+        "This is a default installation. For anything custom (namespace, tolerations, pull \
+        secrets, OIDC, ...), manage it with the helm chart, which takes over this installation \
+        and keeps its API key:\n\n  helm repo add metalbear {repo}\n  helm install {release} \
+        metalbear/{chart} --version {version} \\\n    --set \
+        cloud.apiKey.key=\"{api_key}\"",
+        api_key = manifest.api_key_lookup(),
+        repo = manifest::CHARTS_REPO_URL,
+        release = manifest::RELEASE_NAME,
+        chart = manifest::CHART_NAME,
+    ));
+
+    summary
+}
