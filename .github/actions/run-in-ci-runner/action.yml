@@ -24,7 +24,9 @@ runs:
           "$HOME/go/pkg/mod"
 
         status=0
+        # `--init` makes PID 1 an init process. We have tests that rely on having an init process.
         docker run --rm \
+          --init \
           --network host \
           --cap-drop NET_BIND_SERVICE \
           -v "$GITHUB_WORKSPACE:/workspace/mirrord" \

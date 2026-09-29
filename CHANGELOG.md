@@ -8,6 +8,25 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.265.0](https://github.com/metalbear-co/mirrord/tree/3.265.0) - 2026-09-27
+
+
+### Added
+
+- Add turbopuffer namespace branching.
+- Added `feature.fs.prefetch`, a list of remote paths that mirrord copies into
+  a local temporary directory before the process starts, so that operations on
+  those paths are served locally instead of going through the agent. Use cases
+  speeding up include HTTP servers that re-read `/etc/ssl` from the filesystem
+  on every request.
+
+
+### Fixed
+
+- Fixed the internal proxy terminating every process in the session when a
+  single layer connection closed before completing its handshake.
+- The agent now correctly resolves chained symlinks and symlinks in paths.
+
 ## [3.264.0](https://github.com/metalbear-co/mirrord/tree/3.264.0) - 2026-09-25
 
 
