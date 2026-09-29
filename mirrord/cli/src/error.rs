@@ -202,6 +202,11 @@ pub(crate) enum InternalProxyError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     ListenerSetup(std::io::Error),
 
+    #[cfg(unix)]
+    #[error("Failed to register CI intproxy SIGTERM handler: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    SignalHandler(std::io::Error),
+
     #[cfg(not(target_os = "windows"))]
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
