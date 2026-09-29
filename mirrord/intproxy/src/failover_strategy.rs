@@ -59,6 +59,10 @@ async fn terminate_after_agent_failure(pids: HashSet<i32>) {
 
 #[cfg(unix)]
 fn send_agent_failure_signal(pid: i32, signal: Signal) {
+    if pid <= 0 {
+        tracing::warn!(pid, ?signal, "Refusing to signal a process group");
+        return;
+    }
     match kill(Pid::from_raw(pid), signal) {
         Ok(()) | Err(Errno::ESRCH) => {}
         Err(error) => {
@@ -69,7 +73,9 @@ fn send_agent_failure_signal(pid: i32, signal: Signal) {
 
 #[cfg(windows)]
 async fn terminate_after_agent_failure(pids: HashSet<i32>) {
-    process_termination::terminate_processes(pids).await;
+    if let Err(error) = process_termination::terminate_processes(pids).await {
+        tracing::warn!(%error, "Failed to terminate processes after agent failure");
+    }
 }
 
 /// This struct is a strategy that handle failover logic for [`IntProxy`].
@@ -159,7 +165,10 @@ impl FailoverStrategy {
             shutdown,
             |pids, policy| async move {
                 match policy {
-                    TerminationPolicy::AgentFailure => terminate_after_agent_failure(pids).await,
+                    TerminationPolicy::AgentFailure => {
+                        terminate_after_agent_failure(pids).await;
+                        Ok(())
+                    }
                     TerminationPolicy::CiShutdown => {
                         process_termination::terminate_processes(pids).await
                     }
@@ -178,7 +187,7 @@ impl FailoverStrategy {
     ) -> Result<(), ProxyStartupError>
     where
         Terminate: FnMut(HashSet<i32>, TerminationPolicy) -> Termination,
-        Termination: Future<Output = ()>,
+        Termination: Future<Output = Result<(), process_termination::ProcessTerminationError>>,
     {
         let mut failover = self;
 
@@ -186,14 +195,18 @@ impl FailoverStrategy {
             failover.send_error_to_layer(layer_id, message_id).await;
         }
 
-        // Shutdown must not signal an inherited PID again: the numeric ID could have been reused
-        // since failover entry terminated that process.
-        let mut terminated_pids = HashSet::new();
+        // The inherited registrations are already handled on entry. A later registration can
+        // reuse their PID, but has a different layer ID and must still be terminated on shutdown.
+        let mut terminated_layers = HashSet::new();
+        let mut termination_error = None;
         if !shutdown.is_cancelled() {
             let inherited_pids = failover.connected_processes();
             if !inherited_pids.is_empty() {
-                terminate_processes(inherited_pids.clone(), TerminationPolicy::AgentFailure).await;
-                terminated_pids.extend(inherited_pids);
+                terminated_layers.extend(failover.connected_layers.keys().copied());
+                termination_error =
+                    terminate_processes(inherited_pids, TerminationPolicy::AgentFailure)
+                        .await
+                        .err();
             }
         }
 
@@ -228,15 +241,18 @@ impl FailoverStrategy {
         )
         .await;
         shutdown_layers
-            .pids
-            .retain(|pid| !terminated_pids.contains(pid));
-        if !shutdown_layers.pids.is_empty() {
+            .layer_pids
+            .retain(|layer_id, _| !terminated_layers.contains(layer_id));
+        let pids = shutdown_layers.pids();
+        if !pids.is_empty() {
             let policy = if shutdown.is_cancelled() {
                 TerminationPolicy::CiShutdown
             } else {
                 TerminationPolicy::AgentFailure
             };
-            terminate_processes(shutdown_layers.pids.clone(), policy).await;
+            if let Err(error) = terminate_processes(pids, policy).await {
+                termination_error.get_or_insert(error);
+            }
         }
         let shutdown_error = shutdown_layers.error.take();
         std::mem::drop(shutdown_layers);
@@ -259,7 +275,9 @@ impl FailoverStrategy {
             Some(Err(error)) => Err(error),
             _ => match shutdown_error {
                 Some(error) => Err(error),
-                None => Ok(()),
+                None => termination_error.map_or(Ok(()), |error| {
+                    Err(ProxyStartupError::ProcessTermination(error.0))
+                }),
             },
         }
     }
@@ -435,7 +453,7 @@ mod tests {
 
         for (index, pid) in inherited_pids.into_iter().enumerate() {
             proxy.connected_layers.insert(
-                LayerId(index as u64),
+                LayerId(1_000 + index as u64),
                 ProcessInfo {
                     pid,
                     parent_pid: 1,
@@ -527,6 +545,7 @@ mod tests {
                             assert_eq!(policy, TerminationPolicy::CiShutdown);
                             invocations.lock().unwrap().push(pids.clone());
                             record_signals(&pids, Signal::SIGKILL, &signals);
+                            Ok(())
                         }
                     }
                 },
@@ -542,6 +561,31 @@ mod tests {
         let signals = signals.lock().unwrap();
         assert_one_kill(&signals, INHERITED_PID);
         assert_eq!(signals.len(), 1);
+    }
+
+    /// A failed CI shutdown signal must surface even though the proxy still drains its tasks.
+    #[tokio::test]
+    async fn ci_shutdown_reports_process_termination_failure() {
+        let (failover, _proxy_addr) = make_failover([INHERITED_PID]).await;
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+
+        let result = failover
+            .run_with_termination(
+                Duration::from_secs(60),
+                Duration::from_secs(60),
+                &shutdown,
+                |pids, policy| async move {
+                    assert_eq!(policy, TerminationPolicy::CiShutdown);
+                    assert_eq!(pids, HashSet::from([INHERITED_PID]));
+                    Err(crate::process_termination::ProcessTerminationError(1))
+                },
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(ProxyStartupError::ProcessTermination(1))
+        ));
     }
 
     /// Natural timeout exits must collect a registration that the layer has already seen, even
@@ -608,6 +652,7 @@ mod tests {
                             async move {
                                 assert_eq!(policy, TerminationPolicy::AgentFailure);
                                 invocations.lock().unwrap().push(pids);
+                                Ok(())
                             }
                         }
                     },
@@ -681,6 +726,7 @@ mod tests {
                             async move {
                                 assert_eq!(policy, TerminationPolicy::CiShutdown);
                                 invocations.lock().unwrap().push(pids);
+                                Ok(())
                             }
                         },
                     )
@@ -700,112 +746,124 @@ mod tests {
         std::mem::drop((encoder, decoder));
     }
 
-    /// A registration queued during inherited-PID termination is drained after cancellation,
-    /// and each of the two disjoint sets is signalled exactly once.
+    /// A registration queued after failover-entry termination needs its own signal even if it
+    /// reuses the inherited layer's PID; distinct registrations must also each be signalled.
     #[tokio::test]
     async fn shutdown_terminates_registered_layer_outside_process_group_failover_queued_registration_once()
      {
-        let (failover, proxy_addr) = make_failover([INHERITED_PID]).await;
-        let shutdown = CancellationToken::new();
-        let invocations = Arc::new(Mutex::new(Vec::new()));
-        let signals = Arc::new(Mutex::new(Vec::new()));
-        let inherited_signal_sent = Arc::new(Notify::new());
-        let finish_inherited_termination = Arc::new(Notify::new());
+        for queued_pid in [QUEUED_PID, INHERITED_PID] {
+            let (failover, proxy_addr) = make_failover([INHERITED_PID]).await;
+            let shutdown = CancellationToken::new();
+            let invocations = Arc::new(Mutex::new(Vec::new()));
+            let signals = Arc::new(Mutex::new(Vec::new()));
+            let inherited_signal_sent = Arc::new(Notify::new());
+            let finish_inherited_termination = Arc::new(Notify::new());
 
-        let failover_handle = tokio::spawn({
-            let shutdown = shutdown.clone();
-            let invocations = invocations.clone();
-            let signals = signals.clone();
-            let inherited_signal_sent = inherited_signal_sent.clone();
-            let finish_inherited_termination = finish_inherited_termination.clone();
-            async move {
-                failover
-                    .run_with_termination(
-                        Duration::from_secs(60),
-                        Duration::from_secs(60),
-                        &shutdown,
-                        move |pids, policy| {
-                            let invocations = invocations.clone();
-                            let signals = signals.clone();
-                            let inherited_signal_sent = inherited_signal_sent.clone();
-                            let finish_inherited_termination = finish_inherited_termination.clone();
-                            async move {
-                                invocations.lock().unwrap().push(pids.clone());
-                                match policy {
-                                    TerminationPolicy::AgentFailure => {
-                                        assert!(pids.contains(&INHERITED_PID));
-                                        record_signals(&pids, Signal::SIGTERM, &signals);
-                                        inherited_signal_sent.notify_one();
-                                        finish_inherited_termination.notified().await;
-                                        record_signals(&pids, Signal::SIGKILL, &signals);
+            let failover_handle = tokio::spawn({
+                let shutdown = shutdown.clone();
+                let invocations = invocations.clone();
+                let signals = signals.clone();
+                let inherited_signal_sent = inherited_signal_sent.clone();
+                let finish_inherited_termination = finish_inherited_termination.clone();
+                async move {
+                    failover
+                        .run_with_termination(
+                            Duration::from_secs(60),
+                            Duration::from_secs(60),
+                            &shutdown,
+                            move |pids, policy| {
+                                let invocations = invocations.clone();
+                                let signals = signals.clone();
+                                let inherited_signal_sent = inherited_signal_sent.clone();
+                                let finish_inherited_termination =
+                                    finish_inherited_termination.clone();
+                                async move {
+                                    invocations.lock().unwrap().push(pids.clone());
+                                    match policy {
+                                        TerminationPolicy::AgentFailure => {
+                                            assert!(pids.contains(&INHERITED_PID));
+                                            record_signals(&pids, Signal::SIGTERM, &signals);
+                                            inherited_signal_sent.notify_one();
+                                            finish_inherited_termination.notified().await;
+                                            record_signals(&pids, Signal::SIGKILL, &signals);
+                                        }
+                                        TerminationPolicy::CiShutdown => {
+                                            record_signals(&pids, Signal::SIGKILL, &signals);
+                                        }
                                     }
-                                    TerminationPolicy::CiShutdown => {
-                                        record_signals(&pids, Signal::SIGKILL, &signals);
-                                    }
+                                    Ok(())
                                 }
-                            }
+                            },
+                        )
+                        .await
+                }
+            });
+
+            inherited_signal_sent.notified().await;
+            let conn = TcpStream::connect(proxy_addr).await.unwrap();
+            let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+                LocalMessage<LayerToProxyMessage>,
+                LocalMessage<ProxyToLayerMessage>,
+            >(conn);
+            encoder
+                .send(LocalMessage {
+                    message_id: 0,
+                    inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                        process_info: ProcessInfo {
+                            pid: queued_pid,
+                            parent_pid: 1,
+                            name: "queued-layer".to_owned(),
+                            cmdline: Vec::new(),
+                            loaded: true,
                         },
-                    )
-                    .await
+                        parent_layer: None,
+                    }),
+                })
+                .await
+                .unwrap();
+            assert!(matches!(
+                decoder.next().await.unwrap().unwrap(),
+                LocalMessage {
+                    message_id: 0,
+                    inner: ProxyToLayerMessage::NewSession(_),
+                }
+            ));
+            shutdown.cancel();
+            finish_inherited_termination.notify_one();
+
+            tokio::time::timeout(Duration::from_secs(5), failover_handle)
+                .await
+                .expect("failover did not finish after draining the queued registration")
+                .unwrap()
+                .unwrap();
+
+            let invocations = invocations.lock().unwrap();
+            assert_eq!(
+                invocations.as_slice(),
+                &[HashSet::from([INHERITED_PID]), HashSet::from([queued_pid]),]
+            );
+            assert!(invocations.iter().all(|pids| !pids.is_empty()));
+            let signals = signals.lock().unwrap();
+            assert_eq!(
+                signals
+                    .iter()
+                    .filter(|event| **event == (INHERITED_PID, Signal::SIGKILL))
+                    .count(),
+                if queued_pid == INHERITED_PID { 2 } else { 1 },
+            );
+            if queued_pid != INHERITED_PID {
+                assert_one_kill(&signals, queued_pid);
             }
-        });
+            assert_eq!(
+                signals
+                    .iter()
+                    .filter(|event| **event == (INHERITED_PID, Signal::SIGTERM))
+                    .count(),
+                1
+            );
+            assert_eq!(signals.len(), 3);
 
-        inherited_signal_sent.notified().await;
-        let conn = TcpStream::connect(proxy_addr).await.unwrap();
-        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
-            LocalMessage<LayerToProxyMessage>,
-            LocalMessage<ProxyToLayerMessage>,
-        >(conn);
-        encoder
-            .send(LocalMessage {
-                message_id: 0,
-                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
-                    process_info: ProcessInfo {
-                        pid: QUEUED_PID,
-                        parent_pid: 1,
-                        name: "queued-layer".to_owned(),
-                        cmdline: Vec::new(),
-                        loaded: true,
-                    },
-                    parent_layer: None,
-                }),
-            })
-            .await
-            .unwrap();
-        assert!(matches!(
-            decoder.next().await.unwrap().unwrap(),
-            LocalMessage {
-                message_id: 0,
-                inner: ProxyToLayerMessage::NewSession(_),
-            }
-        ));
-        shutdown.cancel();
-        finish_inherited_termination.notify_one();
-
-        tokio::time::timeout(Duration::from_secs(5), failover_handle)
-            .await
-            .expect("failover did not finish after draining the queued registration")
-            .unwrap()
-            .unwrap();
-
-        let invocations = invocations.lock().unwrap();
-        assert_eq!(
-            invocations.as_slice(),
-            &[HashSet::from([INHERITED_PID]), HashSet::from([QUEUED_PID]),]
-        );
-        assert!(invocations.iter().all(|pids| !pids.is_empty()));
-        let signals = signals.lock().unwrap();
-        assert_one_kill(&signals, INHERITED_PID);
-        assert_one_kill(&signals, QUEUED_PID);
-        assert_eq!(
-            signals
-                .iter()
-                .filter(|event| **event == (INHERITED_PID, Signal::SIGTERM))
-                .count(),
-            1
-        );
-        assert_eq!(signals.len(), 3);
-
-        std::mem::drop((encoder, decoder));
+            std::mem::drop((encoder, decoder));
+        }
     }
 }

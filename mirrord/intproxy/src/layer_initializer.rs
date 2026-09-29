@@ -27,6 +27,8 @@ pub enum LayerInitializerError {
     Codec(#[from] CodecError),
     #[error("layer did not send any message")]
     NoMessage,
+    #[error("layer registered an invalid process ID: {0}")]
+    InvalidProcessId(i32),
     #[error("layer sent unexpected message: {0:?}")]
     UnexpectedMessage(LayerToProxyMessage),
 }
@@ -103,6 +105,9 @@ impl LayerInitializer {
             LayerToProxyMessage::NewSession(request) => request,
             other => return Err(LayerInitializerError::UnexpectedMessage(other)),
         };
+        if process_info.pid <= 0 {
+            return Err(LayerInitializerError::InvalidProcessId(process_info.pid));
+        }
         tracing::info!(?parent_layer, ?process_info, "New layer connected");
 
         let mut encoder: AsyncEncoder<LocalMessage<ProxyToLayerMessage>, _> =
@@ -235,6 +240,47 @@ mod test {
                 .is_none()
         );
         drop(client);
+    }
+
+    /// A malformed PID must not be acknowledged or reach the shutdown signalling set.
+    #[tokio::test]
+    async fn rejects_non_positive_process_ids() {
+        for pid in [0, -42] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let client = TcpStream::connect(listener.local_addr().unwrap())
+                .await
+                .unwrap();
+            let (stream, address) = listener.accept().await.unwrap();
+            let shutdown = CancellationToken::new();
+            let handler = tokio::spawn(async move {
+                LayerInitializer::handle_new_stream(stream, address, super::LayerId(0), &shutdown)
+                    .await
+            });
+            let (mut tx, mut rx) = codec::make_async_framed::<
+                LocalMessage<LayerToProxyMessage>,
+                LocalMessage<ProxyToLayerMessage>,
+            >(client);
+            tx.send(LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                    process_info: ProcessInfo {
+                        pid,
+                        parent_pid: 1,
+                        name: "invalid-layer".to_owned(),
+                        cmdline: Vec::new(),
+                        loaded: true,
+                    },
+                    parent_layer: None,
+                }),
+            })
+            .await
+            .unwrap();
+            assert!(matches!(
+                handler.await.unwrap(),
+                Err(super::LayerInitializerError::InvalidProcessId(value)) if value == pid
+            ));
+            assert!(rx.next().await.is_none());
+        }
     }
 
     /// A connection that closes without sending `NewSession` must not stop the initializer from

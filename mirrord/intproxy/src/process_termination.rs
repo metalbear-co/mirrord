@@ -11,6 +11,10 @@
 
 use std::collections::HashSet;
 
+#[derive(Debug, thiserror::Error)]
+#[error("failed to terminate {0} registered process(es); see intproxy logs for details")]
+pub(crate) struct ProcessTerminationError(pub(crate) usize);
+
 #[cfg(unix)]
 use nix::{
     errno::Errno,
@@ -19,7 +23,7 @@ use nix::{
 };
 #[cfg(windows)]
 use winapi::{
-    shared::minwindef::FALSE,
+    shared::{minwindef::FALSE, winerror::ERROR_INVALID_PARAMETER},
     um::{
         errhandlingapi::GetLastError,
         handleapi::CloseHandle,
@@ -33,69 +37,79 @@ use winapi::{
 /// Intproxy quiesces registrations before calling this function. A second signal after a grace
 /// period could hit a different process if the registered PID was reused in between. A process
 /// that already exited is the outcome we want, so `ESRCH` is success. Other signalling errors
-/// are logged without leaving the remaining processes unsignalled.
+/// are reported after attempting every process.
 #[cfg(unix)]
-pub(crate) async fn terminate_processes(pids: HashSet<i32>) {
-    terminate_processes_with(pids, send_signal).await;
+pub(crate) async fn terminate_processes(pids: HashSet<i32>) -> Result<(), ProcessTerminationError> {
+    terminate_processes_with(pids, send_signal).await
 }
 
 #[cfg(unix)]
-async fn terminate_processes_with(pids: HashSet<i32>, mut signal_process: impl FnMut(i32, Signal)) {
-    if pids.is_empty() {
-        return;
-    }
-
+async fn terminate_processes_with(
+    pids: HashSet<i32>,
+    mut signal_process: impl FnMut(i32, Signal) -> nix::Result<()>,
+) -> Result<(), ProcessTerminationError> {
+    let mut failures = 0;
     for pid in pids {
-        signal_process(pid, Signal::SIGKILL);
+        match signal_process(pid, Signal::SIGKILL) {
+            Ok(()) | Err(Errno::ESRCH) => {}
+            Err(error) => {
+                failures += 1;
+                tracing::warn!(pid, %error, "Failed to terminate an injected process");
+            }
+        }
+    }
+    if failures == 0 {
+        Ok(())
+    } else {
+        Err(ProcessTerminationError(failures))
     }
 }
 
 #[cfg(unix)]
-fn send_signal(pid: i32, signal: Signal) {
-    match kill(Pid::from_raw(pid), signal) {
-        // `ESRCH` just means the process already exited, which is the outcome we want.
-        Ok(()) | Err(Errno::ESRCH) => {}
-        Err(error) => tracing::warn!(
-            pid,
-            ?signal,
-            %error,
-            "Failed to signal an injected process while tearing down a session",
-        ),
+fn send_signal(pid: i32, signal: Signal) -> nix::Result<()> {
+    // `kill(0, ...)` targets the caller's entire process group, and negative PIDs target other
+    // groups. A malformed layer registration must never widen the scope of cleanup.
+    if pid <= 0 {
+        return Err(Errno::EINVAL);
     }
+    kill(Pid::from_raw(pid), signal)
 }
 
 /// On Windows, calls `TerminateProcess` on each pid. No reliable graceful signal exists for an
 /// arbitrary process here, so this matches the unix `SIGKILL` with no grace phase.
 #[cfg(windows)]
-pub(crate) async fn terminate_processes(pids: HashSet<i32>) {
-    if pids.is_empty() {
-        return;
-    }
-
+pub(crate) async fn terminate_processes(pids: HashSet<i32>) -> Result<(), ProcessTerminationError> {
+    let mut failures = 0;
     for pid in pids {
+        if pid <= 0 {
+            failures += 1;
+            tracing::warn!(pid, "Invalid registered process ID");
+            continue;
+        }
         // SAFETY: FFI. Every opened handle is closed. `GetLastError` is read immediately after
         // the failing call, before anything else can clobber the thread-local error.
         unsafe {
             let handle = OpenProcess(PROCESS_TERMINATE, FALSE, pid as u32);
             if handle.is_null() {
-                // Most likely the process already exited (the `ESRCH` equivalent), but log the
-                // error code so that case can be told apart from a real failure.
-                tracing::warn!(
-                    pid,
-                    error = GetLastError(),
-                    "Failed to open an injected process while tearing down a session",
-                );
+                let error = GetLastError();
+                if error != ERROR_INVALID_PARAMETER {
+                    failures += 1;
+                    tracing::warn!(pid, error, "Failed to open an injected process");
+                }
                 continue;
             }
             if TerminateProcess(handle, 1) == 0 {
-                tracing::warn!(
-                    pid,
-                    error = GetLastError(),
-                    "Failed to terminate an injected process while tearing down a session",
-                );
+                let error = GetLastError();
+                failures += 1;
+                tracing::warn!(pid, error, "Failed to terminate an injected process");
             }
             CloseHandle(handle);
         }
+    }
+    if failures == 0 {
+        Ok(())
+    } else {
+        Err(ProcessTerminationError(failures))
     }
 }
 
@@ -115,7 +129,12 @@ mod tests {
         pids: HashSet<i32>,
         recorder: &mut Vec<(i32, nix::sys::signal::Signal)>,
     ) {
-        terminate_processes_with(pids, |pid, signal| recorder.push((pid, signal))).await;
+        terminate_processes_with(pids, |pid, signal| {
+            recorder.push((pid, signal));
+            Ok(())
+        })
+        .await
+        .unwrap();
     }
 
     /// Spawns a shell script that announces readiness on stdout, and returns only once that
@@ -147,7 +166,6 @@ mod tests {
         child
     }
 
-    /// Spawns a real, long-lived child process for the current platform.
     fn spawn_blocking_child() -> std::process::Child {
         #[cfg(unix)]
         {
@@ -162,7 +180,6 @@ mod tests {
         }
     }
 
-    /// Reaps the child, failing the test if it does not exit in time.
     fn wait_for_exit(child: &mut std::process::Child) -> std::process::ExitStatus {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
@@ -214,14 +231,49 @@ mod tests {
         );
     }
 
-    /// [`terminate_processes`] must actually terminate the given processes on the platforms we
-    /// support, not silently do nothing. Exercises the real (per-platform) kill path.
+    /// A failed signal must not prevent trying other registered processes or report success.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn signal_failure_is_reported_after_attempting_every_pid() {
+        let mut attempted = Vec::new();
+        let error = super::terminate_processes_with(HashSet::from([101, 202]), |pid, _| {
+            attempted.push(pid);
+            if pid == 101 {
+                Err(nix::errno::Errno::EPERM)
+            } else {
+                Ok(())
+            }
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(error.0, 1);
+        assert_eq!(
+            attempted.into_iter().collect::<HashSet<_>>(),
+            HashSet::from([101, 202])
+        );
+    }
+
+    /// Process-group sentinel IDs must never reach `kill` even if a caller bypasses validation.
+    #[cfg(unix)]
+    #[test]
+    fn signal_rejects_non_positive_pids() {
+        for pid in [0, -42] {
+            assert_eq!(
+                super::send_signal(pid, nix::sys::signal::Signal::SIGKILL),
+                Err(nix::errno::Errno::EINVAL)
+            );
+        }
+    }
+
+    /// Exercise the real OS signal path: recorder tests alone cannot catch a no-op implementation.
     #[tokio::test]
     async fn terminate_processes_terminates_the_given_pids() {
         let mut child = spawn_blocking_child();
         let pid = child.id() as i32;
 
-        terminate_processes(std::iter::once(pid).collect()).await;
+        terminate_processes(std::iter::once(pid).collect())
+            .await
+            .unwrap();
 
         let terminated = wait_for_exit(&mut child);
 
@@ -240,7 +292,9 @@ mod tests {
 
         let mut child = spawn_ready_script("trap 'exit 7' TERM; echo ready; while :; do :; done");
 
-        terminate_processes(std::iter::once(child.id() as i32).collect()).await;
+        terminate_processes(std::iter::once(child.id() as i32).collect())
+            .await
+            .unwrap();
 
         let terminated = wait_for_exit(&mut child);
         assert_eq!(

@@ -77,6 +77,8 @@ pub enum ProxyStartupError {
     ConnectionAcceptTimeout,
     #[error("layer initializer failed while quiescing: {0}")]
     LayerInitializerQuiescing(#[source] Box<TaskError<ProxyRuntimeError>>),
+    #[error("failed to terminate {0} registered process(es); see intproxy logs for details")]
+    ProcessTermination(usize),
     #[error("layer initializer stopped without acknowledging quiescence")]
     LayerInitializerQuiescenceClosed,
 }

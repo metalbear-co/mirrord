@@ -166,9 +166,16 @@ pub struct IntProxyIntervals {
 }
 
 pub(crate) struct ShutdownLayers {
-    pub(crate) pids: HashSet<i32>,
+    /// Layer IDs distinguish a new registration from an older layer whose PID was reused.
+    pub(crate) layer_pids: HashMap<LayerId, i32>,
     pub(crate) error: Option<ProxyStartupError>,
     _accepted_layers: Vec<NewLayer>,
+}
+
+impl ShutdownLayers {
+    pub(crate) fn pids(&self) -> HashSet<i32> {
+        self.layer_pids.values().copied().collect()
+    }
 }
 
 fn collect_shutdown_update(
@@ -177,8 +184,14 @@ fn collect_shutdown_update(
 ) -> bool {
     match update {
         (_, TaskUpdate::Message(ProxyMessage::NewLayer(layer))) => {
-            shutdown_layers.pids.insert(layer.process_info.pid);
+            shutdown_layers
+                .layer_pids
+                .insert(layer.id, layer.process_info.pid);
             shutdown_layers._accepted_layers.push(layer);
+            false
+        }
+        (MainTaskId::LayerConnection(layer_id), TaskUpdate::Finished(_)) => {
+            shutdown_layers.layer_pids.remove(&layer_id);
             false
         }
         (MainTaskId::LayerInitializer, TaskUpdate::Finished(result)) => {
@@ -202,7 +215,7 @@ fn collect_shutdown_update(
 }
 
 /// Stops layer acceptance and returns only after every accepted registration has crossed into the
-/// owner's monotonic PID set.
+/// owner's layer set. Completed connections are removed before their PIDs can be signalled.
 ///
 /// The initializer acknowledgement is independent of its bounded output channel, while this
 /// routine keeps draining that channel. Once acknowledged, one final nonblocking drain captures
@@ -213,7 +226,10 @@ pub(crate) async fn quiesce_and_collect_layers(
     connected_layers: &HashMap<LayerId, ProcessInfo>,
 ) -> ShutdownLayers {
     let mut shutdown_layers = ShutdownLayers {
-        pids: connected_layers.values().map(|info| info.pid).collect(),
+        layer_pids: connected_layers
+            .iter()
+            .map(|(id, info)| (*id, info.pid))
+            .collect(),
         error: None,
         _accepted_layers: Vec::new(),
     };
@@ -504,10 +520,12 @@ impl IntProxy {
         )
         .await;
         tracing::info!(
-            pids = ?shutdown_layers.pids,
+            pids = ?shutdown_layers.pids(),
             "Proxy exiting. Terminating registered processes before closing their layer connections.",
         );
-        process_termination::terminate_processes(shutdown_layers.pids.clone()).await;
+        let termination_error = process_termination::terminate_processes(shutdown_layers.pids())
+            .await
+            .err();
         let shutdown_error = shutdown_layers.error.take();
         std::mem::drop(shutdown_layers);
 
@@ -528,7 +546,9 @@ impl IntProxy {
             Some(Err(error)) => Err(error),
             _ => match shutdown_error {
                 Some(error) => Err(error),
-                None => Ok(()),
+                None => termination_error.map_or(Ok(()), |error| {
+                    Err(ProxyStartupError::ProcessTermination(error.0))
+                }),
             },
         })
     }
@@ -974,6 +994,8 @@ impl IntProxy {
 #[cfg(test)]
 mod test {
     #[cfg(unix)]
+    use std::collections::HashMap;
+    #[cfg(unix)]
     use std::{
         io::{BufRead, BufReader},
         os::unix::process::CommandExt,
@@ -987,6 +1009,8 @@ mod test {
     use mirrord_config::{
         LayerFileConfig, config::MirrordConfig, experimental::ExperimentalFileConfig,
     };
+    #[cfg(unix)]
+    use mirrord_intproxy_protocol::LayerId;
     use mirrord_intproxy_protocol::{
         IncomingRequest, LayerToProxyMessage, LocalMessage, NetProtocol, NewSessionRequest,
         OutgoingConnectRequest, OutgoingConnectRequestMetadata, OutgoingConnectResponse,
@@ -1032,6 +1056,34 @@ mod test {
     };
     #[cfg(unix)]
     use crate::{main_tasks::MainTaskId, session_monitor::MonitorEvent};
+
+    /// A finished connection must not leave a stale PID in the shutdown set, while another
+    /// registration sharing that PID must remain eligible for termination.
+    #[cfg(unix)]
+    #[test]
+    fn quiescence_discards_finished_layer_registration() {
+        let mut layers = super::ShutdownLayers {
+            layer_pids: HashMap::from([(LayerId(1), 1337), (LayerId(2), 1337)]),
+            error: None,
+            _accepted_layers: Vec::new(),
+        };
+        super::collect_shutdown_update(
+            (
+                MainTaskId::LayerConnection(LayerId(1)),
+                crate::background_tasks::TaskUpdate::Finished(Ok(())),
+            ),
+            &mut layers,
+        );
+        assert_eq!(layers.pids(), std::collections::HashSet::from([1337]));
+        super::collect_shutdown_update(
+            (
+                MainTaskId::LayerConnection(LayerId(2)),
+                crate::background_tasks::TaskUpdate::Finished(Ok(())),
+            ),
+            &mut layers,
+        );
+        assert!(layers.pids().is_empty());
+    }
 
     /// Verifies that [`IntProxy`] waits with processing layers' requests
     /// until [`mirrord_protocol`] version is negotiated.
