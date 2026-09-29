@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-09-28T00:00:00.000Z
+lastmod: 2026-09-29T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -3786,7 +3786,9 @@ Each entry sources its content one of two ways:
 Each session creates one `ConfigMap` owned by the `PreviewSession`,
 holding all mount payloads. The ConfigMap is mounted into the preview pod
 with one per-file `subPath` bind per entry, so each mount overlays a
-single path without shadowing the surrounding directory. The ConfigMap is
+single path without shadowing the surrounding directory. An entry inside
+a ConfigMap, Secret, downward API, or projected volume the container
+already mounts is projected into that volume instead. The ConfigMap is
 garbage-collected automatically when the session ends.
 
 Because both the `PreviewSession` resource and the generated `ConfigMap`
@@ -3975,7 +3977,8 @@ need permission to create `Secret`s. The `Secret` carries the session's
 owner reference and is garbage-collected when the session ends. It is
 mounted into the preview pod with one per-file `subPath` bind per entry, so
 each mount overlays a single path without shadowing the surrounding
-directory.
+directory. An entry inside a ConfigMap, Secret, downward API, or projected
+volume the container already mounts is projected into that volume instead.
 
 The same ~1 MiB per-object Kubernetes limit as `config_mounts` applies to
 the combined size of all contents in a single session.
