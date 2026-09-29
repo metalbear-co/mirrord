@@ -172,6 +172,12 @@ struct MirrordCiStore {
     user_process_groups: HashSet<u32>,
 }
 
+/// Keeping the same lock across a stop's read, signals, and ledger update prevents lock
+/// contention from leaving already-signalled numeric IDs available for a later retry.
+struct CiStoreLock {
+    _file: fs::File,
+}
+
 impl MirrordCiStore {
     /// File where we store the intproxy pid, user process pid, and whatever else we need for
     /// [`MirrordCi`].
@@ -189,7 +195,7 @@ impl MirrordCiStore {
 
     /// The lock has its own stable path because atomic replacement changes the state file's
     /// inode. Locking the state file itself would let another writer lock the replacement.
-    async fn lock_file(file_path: &Path) -> CiResult<fs::File> {
+    async fn lock_file(file_path: &Path) -> CiResult<CiStoreLock> {
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await?;
         }
@@ -206,13 +212,17 @@ impl MirrordCiStore {
             )
             .into());
         }
-        Ok(lock_file)
+        Ok(CiStoreLock { _file: lock_file })
     }
 
     /// Replace the state only after its contents are complete. A partial write must not erase
     /// the cleanup targets from the previous successful invocation.
     async fn write_to_path(&self, file_path: &Path) -> CiResult<()> {
-        let lock_file = Self::lock_file(file_path).await?;
+        let lock = Self::lock_file(file_path).await?;
+        self.write_locked(file_path, &lock).await
+    }
+
+    async fn write_locked(&self, file_path: &Path, _lock: &CiStoreLock) -> CiResult<()> {
         let contents = serde_json::to_vec(self)?;
         let parent = file_path.parent().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "CI state path has no parent")
@@ -226,7 +236,6 @@ impl MirrordCiStore {
         temporary.persist(file_path).map_err(|error| error.error)?;
         #[cfg(target_os = "linux")]
         fs::File::open(parent).await?.sync_all().await?;
-        lock_file.unlock()?;
         Ok(())
     }
 
@@ -242,15 +251,12 @@ impl MirrordCiStore {
     }
 
     /// Removes the persisted CI state at `path`, treating an absent file as already removed.
-    async fn remove_file(path: &Path) -> CiResult<()> {
-        let lock_file = Self::lock_file(path).await?;
-        let result = match fs::remove_file(path).await {
+    async fn remove_file(path: &Path, _lock: &CiStoreLock) -> CiResult<()> {
+        match fs::remove_file(path).await {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error.into()),
-        };
-        lock_file.unlock()?;
-        result
+        }
     }
 
     /// Check if the store is empty. Return `true` if no process is found.
@@ -705,7 +711,7 @@ mod tests {
                 .intproxy_pids,
             HashSet::from([1234])
         );
-        fs4::tokio::AsyncFileExt::unlock(&lock).unwrap();
+        drop(lock);
     }
 
     #[tokio::test]
