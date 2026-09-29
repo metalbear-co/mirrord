@@ -1052,6 +1052,10 @@ fn main() -> miette::Result<()> {
 
     let (signal, watch) = drain::channel();
 
+    // The IDE plugins parse the JSON error from stderr, so they must not get the environment.
+    let print_kube_environment = !logging::reports_json_errors(&cli.commands);
+    let all_namespaces = cli.commands.all_namespaces();
+
     let res: CliResult<(), CliError> = rt.block_on(async move {
         logging::init_tracing_registry(&cli.commands, watch.clone()).await?;
 
@@ -1248,6 +1252,10 @@ fn main() -> miette::Result<()> {
                 warn!("Failed to drain in a timely manner, ongoing tasks dropped.");
             });
     });
+
+    if res.is_err() && print_kube_environment {
+        error::print_run_kube_environment(all_namespaces);
+    }
 
     res.map_err(Into::into)
 }
