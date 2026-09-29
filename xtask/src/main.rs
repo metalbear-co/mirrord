@@ -7,7 +7,10 @@ use std::{
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use tasks::release::{BuildOptions, Platform};
+use tasks::{
+    layer::CargoOptions,
+    release::{BuildOptions, Platform},
+};
 
 #[derive(Parser)]
 #[command(name = "xtask")]
@@ -23,6 +26,9 @@ enum Commands {
     BuildCli {
         /// Target platform (linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64,
         /// macos-universal, windows)
+        ///
+        /// When given, xtask passes `--target` to cargo, except for the host architecture on
+        /// macOS.
         #[arg(short, long, value_parser = parse_platform)]
         platform: Option<Platform>,
 
@@ -56,6 +62,9 @@ enum Commands {
     /// Build layer only
     BuildLayer {
         /// Target platform
+        ///
+        /// When given, xtask passes `--target` to cargo, except for the host architecture on
+        /// macOS.
         #[arg(short, long, value_parser = parse_platform)]
         platform: Option<Platform>,
 
@@ -164,6 +173,10 @@ fn main() -> Result<()> {
             no_ui,
             cargo_args,
         } => {
+            let cargo = CargoOptions {
+                release,
+                cross: platform.is_some(),
+            };
             let platform = platform.unwrap_or_else(|| {
                 Platform::detect().unwrap_or_else(|e| {
                     eprintln!("Failed to detect platform: {}", e);
@@ -174,7 +187,7 @@ fn main() -> Result<()> {
 
             let options = BuildOptions {
                 platform,
-                release,
+                cargo,
                 build_ui: !no_ui,
                 cargo_args,
                 quiet: false,
@@ -192,6 +205,10 @@ fn main() -> Result<()> {
             release,
             cargo_args,
         } => {
+            let options = CargoOptions {
+                release,
+                cross: platform.is_some(),
+            };
             let platform = platform.unwrap_or_else(|| {
                 Platform::detect().unwrap_or_else(|e| {
                     eprintln!("Failed to detect platform: {}", e);
@@ -204,37 +221,37 @@ fn main() -> Result<()> {
                 Platform::MacosX86_64 => {
                     tasks::layer::build_layer(
                         tasks::layer::Target::MacosX86_64,
-                        release,
+                        options,
                         &cargo_args,
                     )?;
                 }
                 Platform::MacosAarch64 => {
                     tasks::layer::build_layer(
                         tasks::layer::Target::MacosAarch64,
-                        release,
+                        options,
                         &cargo_args,
                     )?;
-                    tasks::layer::build_shim(release)?;
+                    tasks::layer::build_shim(options)?;
                 }
                 Platform::MacosUniversal => {
-                    tasks::layer::build_macos_universal_layer(release, &cargo_args)?;
+                    tasks::layer::build_macos_universal_layer(options, &cargo_args)?;
                 }
                 Platform::LinuxX86_64 => {
                     tasks::layer::build_layer(
                         tasks::layer::Target::LinuxX86_64,
-                        release,
+                        options,
                         &cargo_args,
                     )?;
                 }
                 Platform::LinuxAarch64 => {
                     tasks::layer::build_layer(
                         tasks::layer::Target::LinuxAarch64,
-                        release,
+                        options,
                         &cargo_args,
                     )?;
                 }
                 Platform::Windows => {
-                    tasks::layer::build_layer(tasks::layer::Target::Windows, release, &cargo_args)?;
+                    tasks::layer::build_layer(tasks::layer::Target::Windows, options, &cargo_args)?;
                 }
             }
         }
@@ -287,7 +304,7 @@ fn main() -> Result<()> {
 
             let options = BuildOptions {
                 platform,
-                release: false,
+                cargo: CargoOptions::default(),
                 build_ui,
                 cargo_args: vec![], // welp
                 quiet: true,

@@ -461,7 +461,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: layer-x86_64-apple-darwin
-          path: target/x86_64-apple-darwin/release/libmirrord_layer.dylib
+          path: target/release/libmirrord_layer.dylib
           if-no-files-found: error
           retention-days: 2
 
@@ -499,8 +499,8 @@ jobs:
         with:
           name: layer-aarch64-apple-darwin
           path: |
-            target/aarch64-apple-darwin/release/libmirrord_layer.dylib
-            target/aarch64-apple-darwin/release/shim.dylib
+            target/release/libmirrord_layer.dylib
+            target/release/shim.dylib
           if-no-files-found: error
           retention-days: 2
 
@@ -524,10 +524,10 @@ jobs:
       - name: Recreate cargo target structure
         run: |
           mkdir -p target/x86_64-apple-darwin/release
-          mkdir -p target/aarch64-apple-darwin/release
+          mkdir -p target/release
           cp artifacts/layer-x86_64/libmirrord_layer.dylib target/x86_64-apple-darwin/release/
-          cp artifacts/layer-aarch64/libmirrord_layer.dylib target/aarch64-apple-darwin/release/
-          cp artifacts/layer-aarch64/shim.dylib target/aarch64-apple-darwin/release/
+          cp artifacts/layer-aarch64/libmirrord_layer.dylib target/release/
+          cp artifacts/layer-aarch64/shim.dylib target/release/
       - name: Import Code-Signing Certificates
         uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
         with:
@@ -547,7 +547,7 @@ jobs:
           name: layer-universal-apple-darwin
           path: |
             target/universal-apple-darwin/release/libmirrord_layer.dylib
-            target/aarch64-apple-darwin/release/libmirrord_layer.dylib
+            target/release/libmirrord_layer.dylib
           if-no-files-found: error
           retention-days: 2
 
@@ -581,7 +581,7 @@ jobs:
           mkdir -p target/universal-apple-darwin/release
           mkdir -p target/aarch64-apple-darwin/release
           cp artifacts/layer-universal/universal-apple-darwin/release/libmirrord_layer.dylib target/universal-apple-darwin/release/
-          cp artifacts/layer-universal/aarch64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/
+          cp artifacts/layer-universal/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/
       - name: Import Code-Signing Certificates
         uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
         with:
@@ -601,7 +601,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: cli-x86_64-apple-darwin
-          path: target/x86_64-apple-darwin/release/mirrord
+          path: target/release/mirrord
           if-no-files-found: error
           retention-days: 2
 
@@ -633,9 +633,9 @@ jobs:
       - name: Recreate layer structure
         run: |
           mkdir -p target/universal-apple-darwin/release
-          mkdir -p target/aarch64-apple-darwin/release
+          mkdir -p target/release
           cp artifacts/layer-universal/universal-apple-darwin/release/libmirrord_layer.dylib target/universal-apple-darwin/release/
-          cp artifacts/layer-universal/aarch64-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/
+          cp artifacts/layer-universal/release/libmirrord_layer.dylib target/release/
       - name: Import Code-Signing Certificates
         uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
         with:
@@ -648,14 +648,14 @@ jobs:
       - name: Build aarch64 CLI
         env:
           MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/universal-apple-darwin/release/libmirrord_layer.dylib
-          MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/aarch64-apple-darwin/release/libmirrord_layer.dylib
+          MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/release/libmirrord_layer.dylib
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-cli --platform macos-aarch64 --release
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: cli-aarch64-apple-darwin
-          path: target/aarch64-apple-darwin/release/mirrord
+          path: target/release/mirrord
           if-no-files-found: error
           retention-days: 2
 
@@ -689,10 +689,10 @@ jobs:
       - name: Recreate cargo target structure
         run: |
           mkdir -p target/x86_64-apple-darwin/release
-          mkdir -p target/aarch64-apple-darwin/release
+          mkdir -p target/release
           mkdir -p target/universal-apple-darwin/release
           cp artifacts/cli-x86_64/mirrord target/x86_64-apple-darwin/release/
-          cp artifacts/cli-aarch64/mirrord target/aarch64-apple-darwin/release/
+          cp artifacts/cli-aarch64/mirrord target/release/
           cp artifacts/layer-universal/universal-apple-darwin/release/libmirrord_layer.dylib target/universal-apple-darwin/release/
       - name: Import Code-Signing Certificates
         uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
