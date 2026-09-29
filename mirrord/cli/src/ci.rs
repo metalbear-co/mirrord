@@ -2,11 +2,12 @@
 use std::{
     collections::{HashMap, HashSet},
     env::{self, temp_dir},
+    io,
     ops::Not,
     path::{Path, PathBuf},
 };
 #[cfg(not(target_os = "windows"))]
-use std::{fs::File, io, os::unix::process::ExitStatusExt, process::Stdio, time::SystemTime};
+use std::{fs::File, os::unix::process::ExitStatusExt, process::Stdio, time::SystemTime};
 
 use ci_info::types::CiInfo;
 use drain::Watch;
@@ -186,48 +187,55 @@ impl MirrordCiStore {
         self.write_to_path(&Self::default_path()).await
     }
 
-    /// The stop path needs to persist only failed targets at its own state path before returning
-    /// an error. Refusing a contested lock avoids silently retaining already-signalled IDs.
-    async fn write_to_path(&self, file_path: &Path) -> CiResult<()> {
+    /// The lock has its own stable path because atomic replacement changes the state file's
+    /// inode. Locking the state file itself would let another writer lock the replacement.
+    async fn lock_file(file_path: &Path) -> CiResult<fs::File> {
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await?;
         }
-        let mut store_file = fs::OpenOptions::new()
+        let lock_file = fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(false)
-            .open(file_path)
+            .open(file_path.with_extension("lock"))
             .await?;
-
-        if store_file.try_lock_exclusive()?.not() {
+        if lock_file.try_lock_exclusive()?.not() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::WouldBlock,
                 "CI state file is locked by another writer",
             )
             .into());
         }
+        Ok(lock_file)
+    }
+
+    /// Replace the state only after its contents are complete. A partial write must not erase
+    /// the cleanup targets from the previous successful invocation.
+    async fn write_to_path(&self, file_path: &Path) -> CiResult<()> {
+        let lock_file = Self::lock_file(file_path).await?;
         let contents = serde_json::to_vec(self)?;
-        store_file.set_len(0).await?;
-        store_file.write_all(&contents).await?;
-        // Tokio may still be writing on its blocking pool; wait before releasing the lock or
-        // exiting `ci stop` so the remaining cleanup targets are available to the next run.
-        store_file.flush().await?;
-        store_file.unlock()?;
+        let parent = file_path.parent().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "CI state path has no parent")
+        })?;
+        let temporary = tempfile::NamedTempFile::new_in(parent)?;
+        let mut temporary_file = fs::File::from_std(temporary.reopen()?);
+        temporary_file.write_all(&contents).await?;
+        temporary_file.flush().await?;
+        temporary_file.sync_all().await?;
+        drop(temporary_file);
+        temporary.persist(file_path).map_err(|error| error.error)?;
+        #[cfg(target_os = "linux")]
+        fs::File::open(parent).await?.sync_all().await?;
+        lock_file.unlock()?;
         Ok(())
     }
 
     /// Tries to read the [`MirrordCiStore`] from `path` (normally [`Self::default_path`]).
-    /// A missing or malformed file yields an empty store so a partial write cannot prevent
-    /// subsequent CI commands from running. Other read errors still propagate.
+    /// A missing file is an empty store; a damaged file is an error, so cleanup cannot silently
+    /// report success while its recorded targets remain running.
     async fn read_from_file_or_default(path: &Path) -> CiResult<Self> {
         match fs::read(path).await {
-            Ok(contents) => match serde_json::from_slice(&contents) {
-                Ok(store) => Ok(store),
-                Err(error) => {
-                    tracing::warn!(path = %path.display(), %error, "invalid mirrord CI state; starting with an empty store");
-                    Ok(Self::default())
-                }
-            },
+            Ok(contents) => Ok(serde_json::from_slice(&contents)?),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(error.into()),
         }
@@ -235,11 +243,14 @@ impl MirrordCiStore {
 
     /// Removes the persisted CI state at `path`, treating an absent file as already removed.
     async fn remove_file(path: &Path) -> CiResult<()> {
-        match fs::remove_file(path).await {
+        let lock_file = Self::lock_file(path).await?;
+        let result = match fs::remove_file(path).await {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error.into()),
-        }
+        };
+        lock_file.unlock()?;
+        result
     }
 
     /// Check if the store is empty. Return `true` if no process is found.
@@ -634,7 +645,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ci_store_recovers_from_missing_and_invalid_files() {
+    async fn ci_store_rejects_invalid_files_and_replaces_complete_state() {
         let temp_dir = tempfile::tempdir().unwrap();
         let path = temp_dir.path().join("ci-state.json");
 
@@ -650,9 +661,9 @@ mod tests {
             assert!(
                 MirrordCiStore::read_from_file_or_default(&path)
                     .await
-                    .unwrap()
-                    .is_empty()
+                    .is_err()
             );
+            assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), contents);
         }
 
         let mut store = MirrordCiStore::default();
@@ -665,6 +676,36 @@ mod tests {
                 .intproxy_pids,
             HashSet::from([1234])
         );
+
+        store.intproxy_pids.clear();
+        store.write_to_path(&path).await.unwrap();
+        assert!(
+            MirrordCiStore::read_from_file_or_default(&path)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn ci_store_contested_write_preserves_existing_state() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("ci-state.json");
+        let mut store = MirrordCiStore::default();
+        store.intproxy_pids.insert(1234);
+        store.write_to_path(&path).await.unwrap();
+
+        let lock = MirrordCiStore::lock_file(&path).await.unwrap();
+        let replacement = MirrordCiStore::default();
+        assert!(replacement.write_to_path(&path).await.is_err());
+        assert_eq!(
+            MirrordCiStore::read_from_file_or_default(&path)
+                .await
+                .unwrap()
+                .intproxy_pids,
+            HashSet::from([1234])
+        );
+        fs4::tokio::AsyncFileExt::unlock(&lock).unwrap();
     }
 
     #[tokio::test]

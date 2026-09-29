@@ -75,6 +75,7 @@ regex.workspace = true
 mid.workspace = true
 uuid.workspace = true
 fs4.workspace = true
+tempfile.workspace = true
 hex.workspace = true
 tower = { workspace = true, features = ["retry"] }
 ci_info.workspace = true
@@ -119,7 +120,6 @@ hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
-tempfile.workspace = true
 serde-saphyr.workspace = true
 
 [features]
