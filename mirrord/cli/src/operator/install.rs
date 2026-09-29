@@ -88,5 +88,32 @@ pub(super) async fn operator_install(
         }
     };
 
+    let installed = async {
+        let mut subtask = progress.subtask("installing the operator");
+        cluster::create(&manifest, &apis).await?;
+        subtask.success(None);
+
+        let mut subtask = progress.subtask("waiting for the operator to become ready");
+        let operator = cluster::wait_for_operator(&client, manifest.operator_namespace()).await?;
+        subtask.success(None);
+
+        Ok(operator)
+    }
+    .await;
+
+    let operator = installed.inspect_err(|_| {
+        // The trial exists even though the installation failed. Printed rather than put in the
+        // error, where the URL would be wrapped across lines.
+        if let Some(trial) = &trial {
+            println!("{}", claim_instructions(&trial.claim_url));
+        }
+    })?;
+    progress.success(None);
+
     Ok(())
 }
+
+fn claim_instructions(claim_url: &str) -> String {
+    format!("Claim the trial to take ownership of it: {claim_url}")
+}
+

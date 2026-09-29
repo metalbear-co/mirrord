@@ -23,6 +23,17 @@ use super::{error::OperatorInstallError, manifest::Manifest};
 /// installed.
 const OPERATOR_API_SERVICE: &str = "v1.operator.metalbear.co";
 
+/// The field manager helm 4 applies releases with.
+///
+/// Applying under the same manager lets the printed `helm install` take over the objects. Under a
+/// different one, fields the API server defaults inside atomic values (e.g. RBAC subjects) would
+/// conflict with helm's apply, even though the rendered manifest is identical.
+const FIELD_MANAGER: &str = "helm";
+
+const READY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+const READY_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
 /// Resolves the API of every manifest object, in manifest order.
 ///
 /// Namespaced objects without a namespace go to `release_namespace`, as with `helm install`.
@@ -150,6 +161,52 @@ pub(super) async fn dry_run(
         Ok(())
     } else {
         Err(OperatorInstallError::LeftoverObjects { objects: leftovers })
+    }
+}
+
+/// Creates the objects in manifest order, which is the order helm installs them in.
+///
+/// Uses server-side apply the way helm does, see [`FIELD_MANAGER`]. [`dry_run`] already made sure
+/// none of the objects exist.
+pub(super) async fn create(
+    manifest: &Manifest,
+    apis: &[Api<DynamicObject>],
+) -> Result<(), OperatorInstallError> {
+    let params = PatchParams::apply(FIELD_MANAGER);
+
+    for (object, api) in manifest.objects().iter().zip(apis) {
+        api.patch(&object.name_any(), &params, &Patch::Apply(object))
+            .await
+            .map_err(|source| OperatorInstallError::Rejected {
+                object: describe(object),
+                source: Box::new(source),
+            })?;
+    }
+
+    Ok(())
+}
+
+/// Waits until the operator serves its status, which requires its pod to be up and its API to be
+/// registered.
+pub(super) async fn wait_for_operator(
+    client: &Client,
+    namespace: &str,
+) -> Result<MirrordOperatorCrd, OperatorInstallError> {
+    let api = Api::<MirrordOperatorCrd>::all(client.clone());
+    let deadline = Instant::now() + READY_TIMEOUT;
+
+    loop {
+        match api.get(OPERATOR_STATUS_NAME).await {
+            Ok(operator) => return Ok(operator),
+            Err(error) if Instant::now() >= deadline => {
+                return Err(OperatorInstallError::NotReady {
+                    namespace: namespace.to_owned(),
+                    timeout: READY_TIMEOUT,
+                    source: Box::new(error),
+                });
+            }
+            Err(_) => tokio::time::sleep(READY_POLL_INTERVAL).await,
+        }
     }
 }
 
