@@ -18,7 +18,7 @@ use tracing::Level;
 use super::CiResult;
 #[cfg(not(target_os = "windows"))]
 use crate::ci::CiError;
-use crate::ci::{MirrordCiManagedContainer, MirrordCiStore};
+use crate::ci::{CiStoreLock, MirrordCiManagedContainer, MirrordCiStore};
 
 /// Something `mirrord ci stop` has to terminate.
 ///
@@ -221,18 +221,22 @@ pub(super) struct CiStopCommandHandler {
 
     progress: ProgressTracker,
     store_path: PathBuf,
+    lock: CiStoreLock,
 }
 
 impl CiStopCommandHandler {
-    /// Loads the CI state from `store_path` for cleanup.
+    /// Locks before loading state so a contested writer cannot leave already-signalled targets
+    /// in the persisted ledger after cleanup.
     #[tracing::instrument(level = Level::TRACE, err)]
     pub(super) async fn new(store_path: PathBuf, progress: ProgressTracker) -> CiResult<Self> {
+        let lock = MirrordCiStore::lock_file(&store_path).await?;
         let store = MirrordCiStore::read_from_file_or_default(&store_path).await?;
 
         Ok(Self {
             store,
             progress,
             store_path,
+            lock,
         })
     }
 
@@ -256,6 +260,7 @@ impl CiStopCommandHandler {
             mut store,
             mut progress,
             store_path,
+            lock,
         } = self;
 
         // If `ci stop` is issued multiple time, we should exit with success status.
@@ -271,9 +276,9 @@ impl CiStopCommandHandler {
 
         let cleanup_result = store.terminate_with(remove_container).await;
         if store.is_empty() {
-            MirrordCiStore::remove_file(&store_path).await?;
+            MirrordCiStore::remove_file(&store_path, &lock).await?;
         } else {
-            store.write_to_path(&store_path).await?;
+            store.write_locked(&store_path, &lock).await?;
         }
         cleanup_result?;
         progress.success(None);
@@ -515,6 +520,46 @@ mod tests {
 
         child.kill().await.unwrap();
         child.wait().await.unwrap();
+    }
+
+    /// Contention must fail before signalling; a failed state update after signalling would leave
+    /// stale numeric IDs on disk for a later stop to target again.
+    #[tokio::test]
+    async fn contested_state_lock_prevents_stop_from_signalling() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store_path = temp_dir.path().join("mirrord-for-ci.json");
+        let mut store = MirrordCiStore::default();
+        let (mut child, _stdout) =
+            spawn_ready_script("echo ready; while :; do :; done", &mut store).await;
+        store.write_to_path(&store_path).await.unwrap();
+
+        let lock = MirrordCiStore::lock_file(&store_path).await.unwrap();
+        let attempted_stop =
+            CiStopCommandHandler::new(store_path.clone(), ProgressTracker::null()).await;
+        assert!(matches!(
+            attempted_stop,
+            Err(CiError::IO(error)) if error.kind() == std::io::ErrorKind::WouldBlock
+        ));
+        assert!(child.try_wait().unwrap().is_none());
+        assert_eq!(
+            MirrordCiStore::read_from_file_or_default(&store_path)
+                .await
+                .unwrap()
+                .user_process_groups,
+            store.user_process_groups
+        );
+        drop(lock);
+
+        let stop = CiStopCommandHandler::new(store_path.clone(), ProgressTracker::null())
+            .await
+            .unwrap();
+        assert!(store.write_to_path(&store_path).await.is_err());
+        stop.handle().await.unwrap();
+        timeout(Duration::from_secs(5), child.wait())
+            .await
+            .expect("group exits after successful stop")
+            .unwrap();
+        assert!(!store_path.exists());
     }
 
     /// A failed container removal must not leave an already-signalled group in the retry ledger.
