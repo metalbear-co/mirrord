@@ -273,19 +273,19 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          cargo xtask build-cli --platform windows --release
+          cargo xtask build-cli --release
 
           $uiIndex = "packages\ui\dist\index.html"
           if (-not (Test-Path $uiIndex)) {
             throw "UI frontend assets not found at $uiIndex - the release binary would serve 404s from 'mirrord ui'"
           }
 
-          $dll = "target\x86_64-pc-windows-msvc\release\mirrord_layer_win.dll"
+          $dll = "target\release\mirrord_layer_win.dll"
           if (-not (Test-Path $dll)) {
             throw "DLL not found at $dll"
           }
 
-          $exe = "target\x86_64-pc-windows-msvc\release\mirrord.exe"
+          $exe = "target\release\mirrord.exe"
           if (-not (Test-Path $exe)) {
             throw "EXE not found at $exe"
           }
@@ -1085,11 +1085,11 @@ jobs:
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
           mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
 
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord.exe /tmp/release/mirrord.exe
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord_layer_win.dll /tmp/release/mirrord_layer_win.dll
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/release/mirrord.exe /tmp/release/mirrord.exe
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/release/mirrord_layer_win.dll /tmp/release/mirrord_layer_win.dll
           mv /tmp/artifacts/x86_64-pc-windows-msvc/_temp/wix/mirrord.msi /tmp/release/mirrord.msi
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord.exe.sha256 /tmp/release/mirrord.exe.sha256
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/x86_64-pc-windows-msvc/release/mirrord_layer_win.dll.sha256 /tmp/release/mirrord_layer_win.dll.sha256
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/release/mirrord.exe.sha256 /tmp/release/mirrord.exe.sha256
+          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/release/mirrord_layer_win.dll.sha256 /tmp/release/mirrord_layer_win.dll.sha256
           mv /tmp/artifacts/x86_64-pc-windows-msvc/_temp/wix/mirrord.msi.sha256 /tmp/release/mirrord.msi.sha256
 
       - name: Extract release notes from CHANGELOG.md
