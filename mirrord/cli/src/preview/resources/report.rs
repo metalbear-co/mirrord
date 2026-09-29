@@ -220,6 +220,7 @@ mod tests {
             ],
             out_of_scope: vec![&ingress],
             notes: vec![],
+            live_secrets: Default::default(),
         };
 
         assert_eq!(
@@ -244,6 +245,7 @@ mod tests {
             planned: vec![],
             out_of_scope: vec![],
             notes: vec![],
+            live_secrets: Default::default(),
         };
 
         assert_eq!(
@@ -269,6 +271,7 @@ mod tests {
             )],
             out_of_scope: vec![],
             notes: vec![],
+            live_secrets: Default::default(),
         };
 
         assert_eq!(
@@ -326,6 +329,7 @@ mod tests {
             ],
             out_of_scope: vec![],
             notes: vec![],
+            live_secrets: Default::default(),
         };
 
         let rendered = render_diff(&plan);

@@ -28,7 +28,7 @@ mod report;
 mod scope;
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io,
     path::{Path, PathBuf},
 };
@@ -302,6 +302,10 @@ pub(crate) struct ResourcePlan<'a> {
     /// Things the user should know that do not stop the command, such as a dry run the user's
     /// credentials do not allow.
     pub notes: Vec<String>,
+    /// Secrets the live target's pod template uses. The operator lets a preview read only these
+    /// and its copies of Secrets from the files, so a Secret from the files that the live target
+    /// does not use travels as a copy even when it matches the live one.
+    pub live_secrets: BTreeSet<String>,
 }
 
 impl ResourcePlan<'_> {
@@ -312,20 +316,21 @@ impl ResourcePlan<'_> {
     }
 
     /// The session's `spec.specResources`: the user's pod template when the target changed,
-    /// and every changed or new ConfigMap and Secret. Secret values go into `secret_values`,
-    /// the contents of the session's secret mounts Secret, never onto the CR. `None` when
-    /// nothing differs from the live cluster, which leaves the CR as older CLIs create it.
+    /// every changed or new ConfigMap and Secret, and every Secret the live target does not use.
+    /// Secret values go into `secret_values`, the contents of the session's secret mounts
+    /// Secret, never onto the CR. `None` when nothing differs from the live cluster, which
+    /// leaves the CR as older CLIs create it.
     pub fn spec_resources(
         &self,
         secret_values: &mut BTreeMap<String, ByteString>,
     ) -> Result<Option<PreviewSpecResources>, ResourcesError> {
         let mut resources = PreviewSpecResources::default();
 
-        for planned in self
-            .planned
-            .iter()
-            .filter(|planned| planned.verdict != Verdict::Unchanged)
-        {
+        for planned in self.planned.iter().filter(|planned| {
+            planned.verdict != Verdict::Unchanged
+                || (planned.role == ObjectRole::Secret
+                    && !self.live_secrets.contains(&planned.object.name))
+        }) {
             let object = planned.object;
             match planned.role {
                 ObjectRole::Target => {
@@ -451,6 +456,7 @@ pub(crate) async fn plan<'a>(
         planned: Vec::new(),
         out_of_scope: scope.out_of_scope,
         notes: Vec::new(),
+        live_secrets: scope::references(&live_template).secrets,
     };
 
     if let Some(definition) = scope.target {
@@ -979,6 +985,7 @@ mod tests {
             }],
             out_of_scope: vec![],
             notes: vec![],
+            live_secrets: BTreeSet::new(),
         };
 
         let mut secret_values = BTreeMap::new();
@@ -1035,6 +1042,7 @@ mod tests {
             ],
             out_of_scope: vec![],
             notes: vec![],
+            live_secrets: BTreeSet::new(),
         };
 
         let mut secret_values = BTreeMap::new();
@@ -1093,11 +1101,59 @@ mod tests {
             }],
             out_of_scope: vec![],
             notes: vec![],
+            live_secrets: BTreeSet::new(),
         };
 
         let mut secret_values = BTreeMap::new();
         assert_eq!(plan.spec_resources(&mut secret_values).unwrap(), None);
         assert!(secret_values.is_empty());
+    }
+
+    /// The operator lets a preview read only the Secrets the live target uses and copies of
+    /// Secrets from the files. A Secret the files add a reference to must travel as a copy even
+    /// when it matches the live one, or the operator refuses the pod template.
+    #[test]
+    fn unchanged_secret_the_live_target_does_not_use_travels_as_a_copy() {
+        let used = object(json!({
+            "kind": "Secret",
+            "metadata": {"name": "used"},
+            "data": {"a": BASE64_STANDARD.encode("1")},
+        }));
+        let newly_used = object(json!({
+            "kind": "Secret",
+            "metadata": {"name": "newly-used"},
+            "data": {"b": BASE64_STANDARD.encode("2")},
+        }));
+        let unchanged = |object| PlannedObject {
+            object,
+            role: ObjectRole::Secret,
+            verdict: Verdict::Unchanged,
+            changes: vec![],
+        };
+        let plan = ResourcePlan {
+            sources: "./k8s/".to_owned(),
+            target_display: "deployment/app".to_owned(),
+            planned: vec![unchanged(&used), unchanged(&newly_used)],
+            out_of_scope: vec![],
+            notes: vec![],
+            live_secrets: BTreeSet::from(["used".to_owned()]),
+        };
+
+        let mut secret_values = BTreeMap::new();
+        let resources = plan.spec_resources(&mut secret_values).unwrap().unwrap();
+
+        assert_eq!(
+            resources.secrets,
+            vec![PreviewSpecSecret {
+                name: "newly-used".to_owned(),
+                r#type: None,
+                keys: BTreeMap::from([("b".to_owned(), "s0-0".to_owned())]),
+            }]
+        );
+        assert_eq!(
+            secret_values,
+            BTreeMap::from([("s0-0".to_owned(), ByteString(b"2".to_vec()))])
+        );
     }
 
     #[test]
