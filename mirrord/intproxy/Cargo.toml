@@ -64,6 +64,7 @@ socket2.workspace = true
 nix = { workspace = true, features = ["signal"] }
 
 [target.'cfg(windows)'.dependencies]
+utils-win = { path = "../utils-win" }
 winapi = { workspace = true }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]

@@ -5096,7 +5096,6 @@ dependencies = [
  "uuid",
  "which",
  "whoami",
- "winapi",
  "xmas-elf",
  "yamlpatch",
  "yamlpath",
@@ -5358,6 +5357,7 @@ dependencies = [
  "tokio-util",
  "tower-http",
  "tracing",
+ "utils-win",
  "uuid",
  "winapi",
 ]

@@ -19,8 +19,6 @@ use tracing::trace;
 mod auth_store;
 mod global_config;
 mod user_data;
-#[cfg(windows)]
-mod windows_acl;
 
 pub(crate) use auth_store::{AuthStore, StoredLoginToken};
 pub(crate) use global_config::{GlobalConfig, GlobalConfigError, global_config_command};
@@ -149,7 +147,7 @@ fn create_owner_only_parent(path: &Path) -> io::Result<()> {
     };
 
     fs::create_dir_all(parent)?;
-    windows_acl::restrict_to_current_user(parent)
+    utils_win::security::restrict_path_to_current_user(parent)
 }
 
 fn create_parent_for_missing_target(path: &Path) -> io::Result<()> {
