@@ -11,6 +11,7 @@ use self::{manifest::Manifest, signup::Trial};
 use crate::config::OperatorInstallArgs;
 
 mod error;
+mod manifest;
 
 pub(crate) use error::OperatorInstallError;
 
@@ -44,6 +45,18 @@ pub(super) async fn operator_install(
         .user_agent(USER_AGENT)
         .build()
         .map_err(OperatorInstallError::HttpClient)?;
+
+    let mut subtask = progress.subtask("fetching the operator manifest");
+    let manifest = match &manifest_path {
+        Some(path) => manifest::read_manifest(path)?,
+        None => {
+            let version = manifest::latest_chart_version(&http).await?;
+            manifest::fetch_manifest(&http, version).await?
+        }
+    };
+    let mut manifest = Manifest::parse(&manifest)?;
+    manifest.attribute_to_release(&release_namespace);
+    subtask.success(None);
 
     Ok(())
 }
