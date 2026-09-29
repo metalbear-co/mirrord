@@ -279,7 +279,9 @@ impl LayerSetup {
         let Some(example_port) = self.target_container_ports.first() else {
             return;
         };
-        if self.target_container_ports.contains(&remote_port) {
+        // The Windows layer subscribes also sockets bound to port 0. For these, the OS picks the
+        // local port, so we cannot suggest a correct `port_mapping`.
+        if local_port == 0 || self.target_container_ports.contains(&remote_port) {
             return;
         }
 
