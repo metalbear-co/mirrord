@@ -11,7 +11,9 @@ use mirrord_config::feature::network::incoming::IncomingConfig;
 use mirrord_intproxy::{
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     main_tasks::{ProxyMessage, ToLayer},
-    proxies::incoming::{IncomingProxy, IncomingProxyError, IncomingProxyMessage},
+    proxies::incoming::{
+        IncomingProxy, IncomingProxyError, IncomingProxyMessage, tls::LocalTlsSetup,
+    },
     session_monitor::MonitorTx,
 };
 use mirrord_intproxy_protocol::{
@@ -593,11 +595,13 @@ impl ReversePortForwarder {
         let incoming = background_tasks.register(
             IncomingProxy::new(
                 idle_local_http_connection_timeout,
-                network_config
-                    .tls_delivery
-                    .clone()
-                    .or_else(|| network_config.https_delivery.clone())
-                    .unwrap_or_default(),
+                LocalTlsSetup::from_config(
+                    network_config
+                        .tls_delivery
+                        .clone()
+                        .or_else(|| network_config.https_delivery.clone())
+                        .unwrap_or_default(),
+                ),
                 MonitorTx::disabled(),
             ),
             (),

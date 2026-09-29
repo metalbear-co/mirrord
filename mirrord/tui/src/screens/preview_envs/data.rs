@@ -32,10 +32,11 @@ impl PreviewEnvsTree {
         for session in sessions {
             let namespace = session.namespace().unwrap_or_default();
             // Grouped by (kind, name) — the workload — not by container, which is a
-            // card-level detail rather than a distinct group.
+            // card-level detail rather than a distinct group. A label target groups under its
+            // selector, since it has no single workload.
             let target = (
-                session.spec.target.kind.clone(),
-                session.spec.target.name.clone(),
+                session.spec.target.target_type().to_owned(),
+                session.spec.target.display_name().into_owned(),
             );
             namespaces
                 .entry(namespace)

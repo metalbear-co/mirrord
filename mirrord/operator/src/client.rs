@@ -865,6 +865,20 @@ where
                 .require_feature(NewOperatorFeature::DbBranchConfigMapSource)?;
         }
 
+        // A `url` connection param needs an operator that layers the other params over it: an
+        // older operator ignores the param and builds the source connection from whatever else
+        // is declared, silently branching the wrong database.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_url_param)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchUrlParam)?;
+        }
+
         // The `liquibase` flavor is new to the branch CRD's migration schema; an older
         // operator's schema rejects the value outright, which surfaces as a bare API validation
         // error rather than a missing capability.
@@ -1083,6 +1097,8 @@ where
                     names.generic.push(name);
                 } else if branch.spec.s3_options.is_some() {
                     names.s3.push(name);
+                } else if branch.spec.turbopuffer_options.is_some() {
+                    names.turbopuffer.push(name);
                 }
             }
             Ok(names)
@@ -1183,6 +1199,7 @@ where
                 cockroachdb: Vec::new(),
                 generic: Vec::new(),
                 s3: Vec::new(),
+                turbopuffer: Vec::new(),
             })
         }
     }
@@ -1426,6 +1443,7 @@ fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperat
         DatabaseBranchConfig::Mariadb(_) => Some(NewOperatorFeature::MariaDbBranching),
         DatabaseBranchConfig::Cockroachdb(_) => Some(NewOperatorFeature::CockroachdbBranching),
         DatabaseBranchConfig::S3(_) => Some(NewOperatorFeature::S3Branching),
+        DatabaseBranchConfig::Turbopuffer(_) => Some(NewOperatorFeature::TurbopufferBranching),
         DatabaseBranchConfig::Mssql(_)
         | DatabaseBranchConfig::Dynamodb(_)
         | DatabaseBranchConfig::Spanner(_)
@@ -2316,10 +2334,11 @@ impl OperatorApi<PreparedClientCert> {
         use_proxy: bool,
         profile: Option<&str>,
         branch_name: Option<String>,
-        branch_db_names: BranchDbNames,
+        mut branch_db_names: BranchDbNames,
         session_ci_info: Option<SessionCiInfo>,
         key: &str,
     ) -> String {
+        let unified_branch_db_names = branch_db_names.unified();
         let name = crd
             .meta()
             .name
@@ -2366,7 +2385,7 @@ impl OperatorApi<PreparedClientCert> {
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
-            branch_db_names: branch_db_names.mssql,
+            branch_db_names: unified_branch_db_names,
             session_ci_info,
             up_session_info: None,
             is_default_cluster: None,
@@ -2971,6 +2990,7 @@ mod test {
                 cockroachdb: vec![],
                 generic: vec![],
                 s3: vec![],
+                turbopuffer: vec![],
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\

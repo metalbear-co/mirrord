@@ -35,7 +35,7 @@ use crate::crd::queue_filter::{MessageFilter, QueueType, message_filter_crd_sche
 pub mod view;
 use uuid::Uuid;
 
-use super::session::KubeResourceTarget;
+use super::session::SessionTarget;
 #[cfg(feature = "client")]
 use crate::client::connect_params::BranchDbNames;
 
@@ -68,7 +68,11 @@ pub struct PreviewSessionSpec {
 
     /// Target to copy pod configuration from (deployment, pod, statefulset, etc.).
     /// The preview pod will be a copy of the target's pod spec with the user's image.
-    pub target: KubeResourceTarget,
+    ///
+    /// A pod-set target (label selector) takes traffic from every matching pod, whichever
+    /// workloads own them. The pod spec is copied from one of the matching pods, and an empty
+    /// `container` lets the operator pick the container in each pod on its own.
+    pub target: SessionTarget,
 
     /// How long (in seconds) this session is allowed to live.
     /// Values >= `u32::MAX` are treated as infinite.
@@ -183,7 +187,12 @@ impl PreviewSessionSpec {
         1
     }
 
-    /// Convert the [`KubeResourceTarget`] into a [`mirrord_config::target::Target`].
+    /// Convert the [`SessionTarget`] into a [`mirrord_config::target::Target`].
+    ///
+    /// `None` when the stored target has no config form: a resource kind this build does not
+    /// know, or a pod-set selector that uses `matchExpressions` or has no `matchLabels`. Such a
+    /// session was written by a different client or by hand; callers fail it with a message
+    /// naming the supported shape instead of guessing a target.
     pub fn config_target(&self) -> Option<Target> {
         self.target.clone().into_config()
     }
@@ -450,6 +459,57 @@ pub struct PreviewIncomingConfig {
     /// and could break backwards compatibility if stored directly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_filter: Option<String>,
+
+    /// How the operator delivers stolen TLS traffic to the preview pod.
+    ///
+    /// `None` is the default: TLS, no verification of the pod's certificate, no client
+    /// certificate. Only ever `Some` for TLS-stolen ports; plain HTTP delivery ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_delivery: Option<PreviewTlsDelivery>,
+}
+
+/// The parts of the user's `feature.network.incoming.tls_delivery` that apply to a preview.
+///
+/// The operator, not the CLI, makes the TLS connection to the preview pod, so paths on the
+/// user's machine mean nothing here: the CLI reads the client certificate files and stores
+/// their contents in the session's secret mounts `Secret` (see [`secret_mounts_secret_name`]),
+/// and this only names the keys. `protocol`, `trust_roots` and `server_cert` have no preview
+/// counterpart: delivery is always TLS and the pod's certificate is never verified.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewTlsDelivery {
+    /// Server name (SNI) to send to the preview pod's TLS server.
+    ///
+    /// When unset, the original client's SNI is used, then the request URL's host, then
+    /// `localhost`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_name: Option<String>,
+
+    /// Client certificate the operator presents to the preview pod, for applications that
+    /// require one (mutual TLS). Without it the preview pod's TLS server rejects every stolen
+    /// request with a `BadCertificate` alert, which surfaces as a 502.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_auth: Option<PreviewTlsClientAuth>,
+}
+
+/// Keys in the session's secret mounts `Secret` holding the client certificate and its key.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewTlsClientAuth {
+    /// Key whose value is the PEM certificate chain.
+    pub cert_secret_key: String,
+
+    /// Key whose value is the PEM private key.
+    pub key_secret_key: String,
+}
+
+impl PreviewTlsClientAuth {
+    /// Secret key the CLI stores the certificate chain under. Secret mount files use `k<n>`
+    /// keys, so these never collide with them.
+    pub const CERT_SECRET_KEY: &str = "tls-client-cert";
+
+    /// Secret key the CLI stores the private key under.
+    pub const KEY_SECRET_KEY: &str = "tls-client-key";
 }
 
 impl PreviewIncomingConfig {
@@ -477,6 +537,9 @@ impl PreviewIncomingConfig {
                     .map(|http_filter| serde_json::to_string(&http_filter))
                     .transpose()
                     .expect("HttpFilterConfig serialization cannot fail"),
+                // Filled in by the CLI once the client certificate is stored in the
+                // session's Secret, see `PreviewTlsDelivery`.
+                tls_delivery: None,
             }),
         }
     }
@@ -509,11 +572,13 @@ impl PreviewIncomingConfig {
 
 #[cfg(test)]
 mod tests {
-    use mirrord_config::feature::split_queues::{
-        MessageFilterConfig, QueueKind, QueueSplit, SplitQueuesConfig,
+    use mirrord_config::{
+        feature::split_queues::{MessageFilterConfig, QueueKind, QueueSplit, SplitQueuesConfig},
+        target::label::LabelTarget,
     };
 
     use super::*;
+    use crate::crd::session::KubeResourceTarget;
 
     /// Legacy entries keep riding the per-broker maps older operators read; composed entries go
     /// to the `queues` list only, so no entry is sent twice and an older operator never sees half
@@ -676,6 +741,67 @@ mod tests {
         .expect("spec created by an older CLI should deserialize");
 
         assert_eq!(spec.idle, None);
+    }
+
+    /// Sessions created before label targets existed store a single Kubernetes resource under
+    /// `target`. They stay in the cluster across operator upgrades, so they must keep reading as
+    /// that same resource and must serialize back to the same JSON.
+    #[test]
+    fn single_resource_target_keeps_its_wire_shape() {
+        let target = json!({
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "name": "app",
+            "container": "app",
+        });
+        let spec: PreviewSessionSpec = serde_json::from_value(json!({
+            "image": "nginx",
+            "key": "pr-123",
+            "target": target,
+            "ttlSecs": 3600,
+        }))
+        .expect("spec with a single resource target should deserialize");
+
+        assert_eq!(
+            spec.target,
+            SessionTarget::KubeResource(KubeResourceTarget {
+                api_version: "apps/v1".to_owned(),
+                kind: "Deployment".to_owned(),
+                name: "app".to_owned(),
+                container: "app".to_owned(),
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&spec.target).expect("target should serialize"),
+            target
+        );
+    }
+
+    /// A label target with no container round-trips back into the same config target, so the
+    /// operator resolves exactly the selector the user wrote and picks containers per pod.
+    #[test]
+    fn label_target_round_trips_to_config() {
+        let spec: PreviewSessionSpec = serde_json::from_value(json!({
+            "image": "nginx",
+            "key": "pr-123",
+            "target": {
+                "labelSelector": { "matchLabels": { "app": "checkout", "tier": "web" } },
+                "container": "",
+            },
+            "ttlSecs": 3600,
+        }))
+        .expect("spec with a label target should deserialize");
+
+        assert_eq!(
+            spec.config_target(),
+            Some(Target::Label(LabelTarget {
+                labels: BTreeMap::from([
+                    ("app".to_owned(), "checkout".to_owned()),
+                    ("tier".to_owned(), "web".to_owned()),
+                ]),
+                container: None,
+            }))
+        );
     }
 
     #[test]
@@ -952,6 +1078,10 @@ pub struct PreviewDbBranchingConfig {
     /// S3 branch bucket names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub s3_branch_names: Vec<String>,
+
+    /// turbopuffer branch namespace names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turbopuffer_branch_names: Vec<String>,
 }
 
 impl PreviewDbBranchingConfig {
@@ -976,6 +1106,7 @@ impl PreviewDbBranchingConfig {
             clickhouse_branch_names,
             cockroachdb_branch_names,
             s3_branch_names,
+            turbopuffer_branch_names,
         } = self;
 
         [
@@ -990,6 +1121,7 @@ impl PreviewDbBranchingConfig {
             clickhouse_branch_names.iter(),
             cockroachdb_branch_names.iter(),
             s3_branch_names.iter(),
+            turbopuffer_branch_names.iter(),
         ]
         .into_iter()
         .flatten()
@@ -1014,6 +1146,7 @@ impl PreviewDbBranchingConfig {
                 clickhouse_branch_names: branch_db_names.clickhouse,
                 cockroachdb_branch_names: branch_db_names.cockroachdb,
                 s3_branch_names: branch_db_names.s3,
+                turbopuffer_branch_names: branch_db_names.turbopuffer,
             })
         }
     }
