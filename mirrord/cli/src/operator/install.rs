@@ -10,6 +10,7 @@ use mirrord_progress::{Progress, ProgressTracker};
 use self::{manifest::Manifest, signup::Trial};
 use crate::config::OperatorInstallArgs;
 
+mod cluster;
 mod error;
 mod manifest;
 
@@ -46,6 +47,10 @@ pub(super) async fn operator_install(
         .build()
         .map_err(OperatorInstallError::HttpClient)?;
 
+    let mut subtask = progress.subtask("checking for an existing operator");
+    cluster::ensure_no_operator(&client).await?;
+    subtask.success(Some("no operator installed"));
+
     let mut subtask = progress.subtask("fetching the operator manifest");
     let manifest = match &manifest_path {
         Some(path) => manifest::read_manifest(path)?,
@@ -56,6 +61,11 @@ pub(super) async fn operator_install(
     };
     let mut manifest = Manifest::parse(&manifest)?;
     manifest.attribute_to_release(&release_namespace);
+    subtask.success(None);
+
+    let mut subtask = progress.subtask("checking permissions");
+    let apis = cluster::resolve_apis(&client, &manifest, &release_namespace).await?;
+    cluster::dry_run(&manifest, &apis).await?;
     subtask.success(None);
 
     Ok(())

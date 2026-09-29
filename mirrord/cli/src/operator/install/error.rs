@@ -56,4 +56,67 @@ pub(crate) enum OperatorInstallError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     NoDeployment,
 
+    #[error("the operator manifest has an object with an invalid `apiVersion` or `kind`")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    InvalidObjectType(#[source] kube::core::gvk::ParseGroupVersionError),
+
+    #[error("object `{name}` in the operator manifest has no `apiVersion` or `kind`")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    UntypedObject { name: String },
+
+    #[error("the cluster does not serve {object}")]
+    Discovery {
+        object: String,
+        #[source]
+        source: Box<kube::Error>,
+    },
+
+    #[error("failed to check the cluster for an existing mirrord operator")]
+    #[diagnostic(help(
+        "Installing the operator requires permissions to read and create cluster-scoped \
+        resources, such as APIServices, CustomResourceDefinitions and ClusterRoles."
+    ))]
+    Preflight(#[source] Box<kube::Error>),
+
+    #[error("mirrord operator {version} is already installed in namespace `{namespace}`")]
+    #[diagnostic(help(
+        "Run `mirrord operator status` to see its details. To install it again, uninstall the \
+        existing operator first."
+    ))]
+    AlreadyInstalled {
+        namespace: String,
+        version: semver::Version,
+    },
+
+    #[error(
+        "a mirrord operator is registered in namespace `{namespace}`, but it is not responding"
+    )]
+    #[diagnostic(help(
+        "Inspect it with `kubectl get pods -n {namespace}`. Fix or uninstall the existing \
+        operator before installing it again."
+    ))]
+    Unhealthy {
+        namespace: String,
+        #[source]
+        source: Box<kube::Error>,
+    },
+
+    #[error(
+        "found objects left over from an earlier mirrord operator installation:\n{}",
+        objects.iter().map(|object| format!("- {object}")).join("\n")
+    )]
+    #[diagnostic(help("Remove them before installing the operator again."))]
+    LeftoverObjects { objects: Vec<String> },
+
+    #[error("the cluster rejected {object}")]
+    #[diagnostic(help(
+        "Installing the operator requires permissions to create cluster-scoped resources, such \
+        as CustomResourceDefinitions and ClusterRoles."
+    ))]
+    Rejected {
+        object: String,
+        #[source]
+        source: Box<kube::Error>,
+    },
+
 }
