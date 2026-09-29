@@ -5014,6 +5014,7 @@ dependencies = [
  "axum-extra",
  "base64 0.22.1",
  "bytes",
+ "chrono",
  "ci_info",
  "clap",
  "clap_complete",

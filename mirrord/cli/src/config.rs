@@ -941,6 +941,12 @@ pub(super) enum OperatorCommand {
     // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
     #[clap(hide(true))]
     Setup,
+    /// Install the mirrord operator into the cluster of the current kubecontext.
+    ///
+    /// Without `--api-key`, starts an Enterprise trial and opens a link to claim it. Installs the
+    /// latest version of the helm chart with default values; use the helm chart directly for a
+    /// customized installation.
+    Install(Box<OperatorInstallArgs>),
     /// Print operator status
     Status {
         /// Specify config file to use
@@ -958,6 +964,42 @@ pub(super) enum OperatorCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1, global = true)]
         config_file: Option<PathBuf>,
     },
+}
+
+#[derive(Args, Debug)]
+pub(super) struct OperatorInstallArgs {
+    /// Operator API key, the same key the helm chart takes as `cloud.apiKey.key`.
+    ///
+    /// Registers the operator under the key's organization instead of starting a trial.
+    #[arg(long, env = "MIRRORD_OPERATOR_API_KEY", hide_env_values = true)]
+    pub api_key: Option<String>,
+
+    /// Print the trial claim URL instead of opening it in the browser.
+    #[arg(long)]
+    pub no_browser: bool,
+
+    /// Name shown on the trial claim page to identify this cluster.
+    ///
+    /// Defaults to the name of the current kubecontext.
+    #[arg(long, conflicts_with_all = ["api_key", "no_hint"])]
+    pub cluster_hint: Option<String>,
+
+    /// Do not send the kubecontext name to the trial claim page.
+    #[arg(long, conflicts_with = "api_key")]
+    pub no_hint: bool,
+
+    /// Install from a local rendered chart manifest instead of the latest published one.
+    #[arg(long, env = "MIRRORD_OPERATOR_INSTALL_MANIFEST", hide = true)]
+    pub manifest: Option<PathBuf>,
+
+    /// Base URL of the MetalBear app, used for the trial signup.
+    #[arg(
+        long,
+        env = "MIRRORD_OPERATOR_INSTALL_APP_URL",
+        hide = true,
+        default_value = "https://app.metalbear.com"
+    )]
+    pub app_url: String,
 }
 
 /// `mirrord operator session` family of commands.

@@ -1,0 +1,49 @@
+//! `mirrord operator install`: gets a license, installs the operator into the cluster of the
+//! current kubecontext, and hands ownership of the license to the user.
+
+use std::{io::IsTerminal, ops::Not};
+
+use kube::Client;
+use mirrord_kube::api::kubernetes::create_kube_config_with_context;
+use mirrord_progress::{Progress, ProgressTracker};
+
+use self::{manifest::Manifest, signup::Trial};
+use crate::config::OperatorInstallArgs;
+
+mod error;
+
+pub(crate) use error::OperatorInstallError;
+
+const USER_AGENT: &str = concat!("mirrord-cli/", env!("CARGO_PKG_VERSION"));
+
+pub(super) async fn operator_install(
+    args: OperatorInstallArgs,
+) -> Result<(), OperatorInstallError> {
+    let OperatorInstallArgs {
+        api_key,
+        no_browser,
+        cluster_hint,
+        no_hint,
+        manifest: manifest_path,
+        app_url,
+    } = args;
+
+    let mut progress = ProgressTracker::from_env("mirrord operator install");
+
+    let (mut kube_config, context) = create_kube_config_with_context(None, None::<&str>, None)
+        .await
+        .map_err(|error| OperatorInstallError::KubeConfig(Box::new(error)))?;
+    // The default policy retries 503s for minutes, which is exactly how a registered but
+    // unavailable operator API answers, both when checking for an existing operator and while
+    // waiting for the new one to come up.
+    kube_config.default_retry = false;
+    let release_namespace = kube_config.default_namespace.clone();
+    let client = Client::try_from(kube_config)
+        .map_err(|error| OperatorInstallError::KubeClient(Box::new(error)))?;
+    let http = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(OperatorInstallError::HttpClient)?;
+
+    Ok(())
+}

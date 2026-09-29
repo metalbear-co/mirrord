@@ -50,6 +50,8 @@ glob.workspace = true
 which.workspace = true
 schemars.workspace = true
 semver.workspace = true
+serde-saphyr.workspace = true
+chrono = { workspace = true, features = ["serde"] }
 reqwest = { workspace = true, features = ["stream"] }
 const-random.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "macros", "process", "sync"] }
@@ -120,7 +122,6 @@ http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
-serde-saphyr.workspace = true
 
 [features]
 windows_build = []
