@@ -615,19 +615,19 @@ where
     }
 
     /// Ask the operator to create a K8s Secret with the given credential values
-    /// in the target namespace. The Secret name is derived from `branch_id` so
-    /// branches sharing the same ID reuse the same Secret.
+    /// in the target namespace. The Secret name is derived from `branch_name`, so each
+    /// branch gets its own Secret.
     async fn create_credential_secret(
         &self,
         namespace: &str,
-        branch_id: &str,
+        branch_name: &str,
         values: std::collections::HashMap<String, String>,
     ) -> OperatorApiResult<String> {
         use crate::crd::{CreateCredentialSecretRequest, CreateCredentialSecretResponse};
 
         let request_body = CreateCredentialSecretRequest {
             namespace: namespace.to_owned(),
-            branch_id: branch_id.to_owned(),
+            branch_id: branch_name.to_owned(),
             values,
         };
 
@@ -850,6 +850,20 @@ where
                 .require_feature(NewOperatorFeature::PgBranchQueryParams)?;
         }
 
+        // Same fail-fast for pg `additional_databases`: an older operator's CRD schema prunes the
+        // field, so the branch would come up with only its own database while the app's other
+        // connections keep pointing at the source.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| !branch_config.pg_additional_databases().is_empty())
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::PgBranchAdditionalDatabases)?;
+        }
+
         // A `configmap` connection param source needs an operator that resolves it: the branch
         // CRD schema lets the source kind through, and an older operator then fails to
         // deserialize the branch and never reconciles it, which would surface only as a
@@ -915,19 +929,19 @@ where
             // create a K8s Secret and replace the CRD connection entries with
             // Secret references. Values were already extracted from the config
             // inside `new()` before CRD conversion.
-            for (branch_id, params) in create_params.iter_mut() {
+            for (branch_name, params) in create_params.iter_mut() {
                 if params.literal_values.is_empty() {
                     continue;
                 }
                 let secret_name = self
                     .create_credential_secret(
                         target_namespace,
-                        branch_id.as_ref(),
+                        branch_name,
                         params.literal_values.clone(),
                     )
                     .await?;
-                database_branches::replace_values_with_secret_refs(
-                    &mut params.spec.connection_source,
+                database_branches::replace_spec_values_with_secret_refs(
+                    &mut params.spec,
                     &secret_name,
                     &params.literal_values,
                 );
@@ -959,8 +973,9 @@ where
 
             // A failed branch still holds the resource name a fresh one would take, so creating
             // over it only collides and inherits the failure. Report it with the way out.
-            if let Some((id, branch)) = existing.failed.iter().next() {
+            if let Some(branch) = existing.failed.values().next() {
                 let name = branch.meta().name.clone().unwrap_or_default();
+                let id = &branch.spec.id;
                 let reason = branch
                     .status
                     .as_ref()
@@ -981,28 +996,29 @@ where
             // whose archive is already on the spec).
             let desired_migrations: std::collections::HashMap<_, _> = create_params
                 .iter()
-                .filter_map(|(id, params)| {
+                .filter_map(|(name, params)| {
                     params
                         .spec
                         .migrations
                         .clone()
-                        .map(|spec| (id.clone(), spec))
+                        .map(|spec| (name.clone(), spec))
                 })
                 .collect();
 
             // A reused branch that already has migrations, joined by a session that specified none,
             // silently inherits whatever schema the previous session applied. Flag it so the
             // mismatch is visible.
-            for (id, branch) in &existing.ready {
-                if !desired_migrations.contains_key(id) && branch.spec.migrations.is_some() {
+            for (name, branch) in &existing.ready {
+                if !desired_migrations.contains_key(name) && branch.spec.migrations.is_some() {
                     subtask.warning(&format!(
-                        "Reusing database branch {id}, which has migrations applied, but this session didn't specify any."
+                        "Reusing database branch {name} for id {}, which has migrations applied, but this session didn't specify any.",
+                        branch.spec.id
                     ));
                 }
             }
 
-            create_params.retain(|id, _| {
-                !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
+            create_params.retain(|name, _| {
+                !existing.ready.contains_key(name) && !existing.pending.contains_key(name)
             });
 
             let waited_branches =
@@ -1017,14 +1033,14 @@ where
             // Bring each branch's migrations up to what this session asked for. Reused branches
             // re-run the tool (which no-ops, applies the delta, or fails on a conflict); an
             // unchanged archive is a no-op patch and returns at once.
-            for (id, branch) in existing
+            for (name, branch) in existing
                 .ready
                 .iter()
                 .chain(waited_branches.iter())
                 .chain(created_branches.iter())
                 .chain(conflict_reused_branches.iter())
             {
-                if let Some(migrations) = desired_migrations.get(id) {
+                if let Some(migrations) = desired_migrations.get(name) {
                     ensure_branch_migrations(&branch_api, branch, migrations, timeout, &subtask)
                         .await?;
                 }
@@ -1034,25 +1050,28 @@ where
             // which branch databases it runs against and whether they are shared.
             let origins = existing
                 .ready
-                .iter()
-                .map(|(id, branch)| (id, branch, "reused"))
+                .values()
+                .map(|branch| (branch, "reused"))
                 .chain(
                     waited_branches
-                        .iter()
-                        .map(|(id, branch)| (id, branch, "reused once it finished initializing")),
+                        .values()
+                        .map(|branch| (branch, "reused once it finished initializing")),
                 )
                 .chain(
                     created_branches
-                        .iter()
-                        .map(|(id, branch)| (id, branch, "created by this session")),
+                        .values()
+                        .map(|branch| (branch, "created by this session")),
                 )
-                .chain(conflict_reused_branches.iter().map(|(id, branch)| {
-                    (id, branch, "created by another session meanwhile, reused")
-                }));
-            for (id, branch, origin) in origins {
+                .chain(
+                    conflict_reused_branches
+                        .values()
+                        .map(|branch| (branch, "created by another session meanwhile, reused")),
+                );
+            for (branch, origin) in origins {
                 subtask.info(&format!(
-                    "using branch database {} for id {id}: {origin}",
-                    branch.name_any()
+                    "using branch database {} for id {}: {origin}",
+                    branch.name_any(),
+                    branch.spec.id
                 ));
                 relay_source_compatibility_warnings(branch, &subtask);
             }
