@@ -1430,6 +1430,8 @@ pub fn resolve_branch_id<P: Progress>(
 }
 
 pub struct UnifiedDatabaseBranchParams {
+    /// Keyed by each branch's resource name, so entries of different types, or with different
+    /// additional databases, stay apart even under one id.
     pub branches: HashMap<BranchDatabaseId, UnifiedBranchParams>,
 }
 
@@ -1619,7 +1621,17 @@ impl UnifiedDatabaseBranchParams {
                     literal_values,
                 ),
             };
-            branches.insert(id, params);
+            let key = BranchDatabaseId::specified(params.deterministic_name.clone());
+            if branches.contains_key(&key) {
+                return Err(OperatorApiError::BranchCreationFailed {
+                    operation: OperatorOperation::DbBranching,
+                    message: format!(
+                        "two `feature.db_branches` entries are the same branch `{key}` (id \
+                         `{id}`); give each its own `id`"
+                    ),
+                });
+            }
+            branches.insert(key, params);
         }
 
         if let Ok(marker) = std::env::var(OPERATOR_ISOLATION_MARKER_ENV) {
@@ -1846,9 +1858,6 @@ pub struct UnifiedBranchParams {
     /// Target-independent resource name used for a branch with a user-specified id, so two
     /// workloads sharing the same id map to the same resource and reuse one branch.
     pub deterministic_name: String,
-    /// Key the branch is found and reused by, hashed into `deterministic_name`. Its credential
-    /// Secret is keyed by it too.
-    pub reuse_key: String,
     pub labels: BTreeMap<String, String>,
     pub annotations: BTreeMap<String, String>,
     pub spec: BranchDatabaseSpec,
@@ -1911,7 +1920,6 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
-            reuse_key,
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -1963,7 +1971,6 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
-            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2015,7 +2022,6 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
-            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2065,7 +2071,6 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
-            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2117,7 +2122,6 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
-            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2167,7 +2171,6 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
-            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2217,7 +2220,6 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
-            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2266,7 +2268,6 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
-            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2316,7 +2317,6 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
-            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2374,7 +2374,6 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
-            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2462,7 +2461,6 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
-            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2518,7 +2516,6 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
-            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2574,7 +2571,6 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
-            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2588,6 +2584,7 @@ mod test {
     use std::collections::{BTreeMap, HashMap};
 
     use k8s_openapi::{apimachinery::pkg::apis::meta::v1::MicroTime, jiff::Timestamp};
+    use kube::ResourceExt;
     use mirrord_config::{
         feature::database_branches::{
             S3BranchConfig, SqlBranchMigrationsConfig, TurbopufferBranchConfig,
@@ -2598,7 +2595,7 @@ mod test {
 
     use super::{
         BranchDatabase, BranchDatabaseId, ConfigConnectionSource, CrdConnectionSource,
-        DatabaseBranchesConfig, MigrationsSpec, ObjectMeta, UnifiedBranchParams,
+        DatabaseBranchesConfig, MigrationsSpec, ObjectMeta, OperatorApiError, UnifiedBranchParams,
         UnifiedDatabaseBranchParams, build_migration_archive, classify_existing_branches,
         convert_connection_source, extract_literal_values, read_migrations,
         replace_spec_values_with_secret_refs, replace_values_with_secret_refs, resolve_branch_id,
@@ -2676,7 +2673,7 @@ mod test {
             spec: params.spec,
             status,
         };
-        (BranchDatabaseId::specified(id.to_owned()), branch)
+        (BranchDatabaseId::specified(branch.name_any()), branch)
     }
 
     /// The lookup runs before the create, so what it reports has to be what the create
@@ -2697,7 +2694,10 @@ mod test {
         ]);
 
         let ids = |bucket: &HashMap<BranchDatabaseId, BranchDatabase>| {
-            let mut ids = bucket.keys().map(ToString::to_string).collect::<Vec<_>>();
+            let mut ids = bucket
+                .values()
+                .map(|branch| branch.spec.id.clone())
+                .collect::<Vec<_>>();
             ids.sort();
             ids
         };
@@ -2709,13 +2709,13 @@ mod test {
         assert_eq!(ids(&existing.failed), ["failed"]);
     }
 
-    /// The lookup is keyed on the requested id, not on what the branch's spec says, so the
-    /// caller can subtract the result from its create list by the same key it built it with.
+    /// The lookup keeps the key the caller asked with, so the caller can subtract the result
+    /// from its create list by the same key it built it with.
     #[test]
-    fn found_branches_are_keyed_on_the_requested_id() {
-        let (id, branch) = found_branch("shared-id", Some(BranchDatabasePhase::Ready));
-        let existing = classify_existing_branches([(id.clone(), branch)]);
-        assert!(existing.ready.contains_key(&id));
+    fn found_branches_keep_the_requested_key() {
+        let (key, branch) = found_branch("shared-id", Some(BranchDatabasePhase::Ready));
+        let existing = classify_existing_branches([(key.clone(), branch)]);
+        assert!(existing.ready.contains_key(&key));
     }
 
     /// An S3 branch is cloned in the provider's cloud, so its spec carries none of the pod
@@ -3194,18 +3194,58 @@ mod test {
         );
     }
 
-    /// The credential Secret is keyed by the key the branch name is hashed from: the plain id
-    /// without additional databases, so existing Secrets keep their names.
-    #[test]
-    fn pg_credential_secret_is_keyed_like_the_branch() {
-        let plain = pg_params_with(serde_json::json!([]));
-        assert_eq!(plain.reuse_key, "shared");
+    /// Builds the unified params of a config holding the given branches, with no `id`s
+    /// falling back to the session key.
+    fn branches_params(
+        branches: serde_json::Value,
+    ) -> Result<UnifiedDatabaseBranchParams, OperatorApiError> {
+        let mut config: DatabaseBranchesConfig = serde_json::from_value(branches).unwrap();
+        let target = "deployment/my-app".parse::<Target>().unwrap();
+        UnifiedDatabaseBranchParams::new(
+            &mut config,
+            &target,
+            "default",
+            "session-key",
+            &NullProgress,
+        )
+    }
 
-        let extra = pg_params_with(serde_json::json!([{ "name": "a" }]));
-        assert_ne!(extra.reuse_key, plain.reuse_key);
-        assert_eq!(
-            super::deterministic_branch_name("pg", "default", &extra.reuse_key),
-            extra.deterministic_name
+    /// Entries without an `id` share the session key, yet each is its own branch as long as
+    /// the type or the additional databases differ. Each is keyed by its resource name, which
+    /// its credential Secret is named from.
+    #[test]
+    fn branches_without_an_id_stay_apart() {
+        let params = branches_params(serde_json::json!([
+            { "type": "pg", "connection": { "url": "DATABASE_URL" } },
+            { "type": "mysql", "connection": { "url": "MYSQL_URL" } },
+            {
+                "type": "pg",
+                "connection": { "url": "OTHER_DATABASE_URL" },
+                "additional_databases": [{ "name": "analytics" }]
+            }
+        ]))
+        .unwrap();
+
+        assert_eq!(params.branches.len(), 3);
+        for (key, branch) in &params.branches {
+            assert_eq!(key.as_ref(), branch.deterministic_name);
+            assert_eq!(branch.spec.id, "session-key");
+        }
+    }
+
+    /// Two entries that would be the very same branch cannot both be served by it, so the
+    /// config is refused instead of one of them being dropped.
+    #[test]
+    fn two_entries_of_one_branch_are_refused() {
+        let result = branches_params(serde_json::json!([
+            { "type": "pg", "connection": { "url": "DATABASE_URL" } },
+            { "type": "pg", "connection": { "url": "OTHER_DATABASE_URL" } }
+        ]));
+
+        assert!(
+            matches!(result, Err(OperatorApiError::BranchCreationFailed { ref message, .. }) if message.contains("give each its own `id`")),
+            "{:?}",
+            result.err()
         );
     }
 }

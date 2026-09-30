@@ -615,19 +615,19 @@ where
     }
 
     /// Ask the operator to create a K8s Secret with the given credential values
-    /// in the target namespace. The Secret name is derived from `reuse_key`, so a
-    /// branch always gets the same Secret.
+    /// in the target namespace. The Secret name is derived from `branch_name`, so each
+    /// branch gets its own Secret.
     async fn create_credential_secret(
         &self,
         namespace: &str,
-        reuse_key: &str,
+        branch_name: &str,
         values: std::collections::HashMap<String, String>,
     ) -> OperatorApiResult<String> {
         use crate::crd::{CreateCredentialSecretRequest, CreateCredentialSecretResponse};
 
         let request_body = CreateCredentialSecretRequest {
             namespace: namespace.to_owned(),
-            branch_id: reuse_key.to_owned(),
+            branch_id: branch_name.to_owned(),
             values,
         };
 
@@ -929,14 +929,14 @@ where
             // create a K8s Secret and replace the CRD connection entries with
             // Secret references. Values were already extracted from the config
             // inside `new()` before CRD conversion.
-            for params in create_params.values_mut() {
+            for (branch_name, params) in create_params.iter_mut() {
                 if params.literal_values.is_empty() {
                     continue;
                 }
                 let secret_name = self
                     .create_credential_secret(
                         target_namespace,
-                        &params.reuse_key,
+                        branch_name.as_ref(),
                         params.literal_values.clone(),
                     )
                     .await?;
@@ -973,8 +973,9 @@ where
 
             // A failed branch still holds the resource name a fresh one would take, so creating
             // over it only collides and inherits the failure. Report it with the way out.
-            if let Some((id, branch)) = existing.failed.iter().next() {
+            if let Some(branch) = existing.failed.values().next() {
                 let name = branch.meta().name.clone().unwrap_or_default();
+                let id = &branch.spec.id;
                 let reason = branch
                     .status
                     .as_ref()
@@ -1007,10 +1008,11 @@ where
             // A reused branch that already has migrations, joined by a session that specified none,
             // silently inherits whatever schema the previous session applied. Flag it so the
             // mismatch is visible.
-            for (id, branch) in &existing.ready {
-                if !desired_migrations.contains_key(id) && branch.spec.migrations.is_some() {
+            for (key, branch) in &existing.ready {
+                if !desired_migrations.contains_key(key) && branch.spec.migrations.is_some() {
                     subtask.warning(&format!(
-                        "Reusing database branch {id}, which has migrations applied, but this session didn't specify any."
+                        "Reusing database branch {}, which has migrations applied, but this session didn't specify any.",
+                        branch.spec.id
                     ));
                 }
             }
@@ -1063,10 +1065,11 @@ where
                 .chain(conflict_reused_branches.iter().map(|(id, branch)| {
                     (id, branch, "created by another session meanwhile, reused")
                 }));
-            for (id, branch, origin) in origins {
+            for (_, branch, origin) in origins {
                 subtask.info(&format!(
-                    "using branch database {} for id {id}: {origin}",
-                    branch.name_any()
+                    "using branch database {} for id {}: {origin}",
+                    branch.name_any(),
+                    branch.spec.id
                 ));
                 relay_source_compatibility_warnings(branch, &subtask);
             }
