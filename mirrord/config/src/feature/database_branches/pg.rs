@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     BranchBaseConfig, BranchPodConfig, ConnectionSource, DatabaseSourceConfig, IamAuthConfig,
-    SqlBranchMigrationsConfig,
+    ParamSource, SingleOrVec, SqlBranchMigrationsConfig,
 };
 use crate::config::ConfigError;
 
@@ -150,6 +150,11 @@ pub struct PgAdditionalDatabaseConfig {
 /// would end up as the same database on the branch.
 pub const POSTGRES_MAX_IDENTIFIER_BYTES: usize = 63;
 
+/// The template databases every PostgreSQL server has. They exist on the branch pod before
+/// the copy runs, so a copy named after one would restore into the template itself, and every
+/// database created after it would start as a clone of that data.
+pub const POSTGRES_TEMPLATE_DATABASES: [&str; 2] = ["template0", "template1"];
+
 impl PgBranchConfig {
     /// Checks `additional_databases` against each other and against the branch's own
     /// database and connection:
@@ -180,6 +185,14 @@ impl PgBranchConfig {
                      at most {POSTGRES_MAX_IDENTIFIER_BYTES} bytes, and longer names get cut \
                      short. Use the database's real name on the source server.",
                     name.len()
+                )));
+            }
+
+            if POSTGRES_TEMPLATE_DATABASES.contains(&name) {
+                return Err(ConfigError::Conflict(format!(
+                    "`{FIELD}[{index}].name` is `{name}`, a PostgreSQL template database. A \
+                     copy would restore into the template every later database is cloned \
+                     from. Use a regular database.",
                 )));
             }
 
@@ -229,6 +242,41 @@ impl PgBranchConfig {
                         "{owner} names its database through the env var `{key}`, which \
                          {other_owner} also reads. Give each database its own URL or \
                          database var; host, port, user and password vars may be shared."
+                    )));
+                }
+            }
+        }
+
+        // On a branch that keeps the app's own credentials (pg full roles mode), only the
+        // branch's own connection user gets a login. A connection reading that user var
+        // but another password var (or the reverse) would log in as a user whose password
+        // the branch never installed; the operator cannot fix half a pair, so the pair is
+        // shared whole or not at all.
+        let credential_vars = |connection: &ConnectionSource| {
+            let params = connection.params()?;
+            let first_var = |sources: &Option<SingleOrVec<ParamSource>>| {
+                sources.as_ref()?.first()?.as_variable().map(str::to_owned)
+            };
+            Some((first_var(&params.user), first_var(&params.password)))
+        };
+        if let Some((primary_user, primary_password)) = credential_vars(&self.database.connection) {
+            for (owner, connection) in connections.iter().skip(1) {
+                let Some((user, password)) = credential_vars(connection) else {
+                    continue;
+                };
+                let shares_user = user.is_some() && user == primary_user;
+                let shares_password = password.is_some() && password == primary_password;
+                if user.is_some() && password.is_some() && shares_user != shares_password {
+                    let (shared, own) = if shares_user {
+                        ("user", "password")
+                    } else {
+                        ("password", "user")
+                    };
+                    return Err(ConfigError::Conflict(format!(
+                        "{owner} reads the same {shared} var as the branch's own `connection` \
+                         but its own {own} var. On a branch that keeps the app's credentials \
+                         only the branch's own user can log in, so share both the user and \
+                         the password vars, or neither."
                     )));
                 }
             }
@@ -550,5 +598,57 @@ mod tests {
             message.contains("`PGSSLMODE`") && message.contains("different literal value"),
             "{message}"
         );
+    }
+
+    /// A template database pre-exists on the branch pod, so a copy named after it would
+    /// restore into the template and leak into every database created after it.
+    #[test]
+    fn additional_database_named_after_a_template_is_rejected() {
+        for template in POSTGRES_TEMPLATE_DATABASES {
+            let message = conflict_message(verify(json!([{
+                "type": "pg",
+                "connection": { "url": "DATABASE_URL" },
+                "additional_databases": [{ "name": template }]
+            }])));
+            assert!(
+                message.contains(&format!("`{template}`")) && message.contains("template"),
+                "{message}"
+            );
+        }
+    }
+
+    /// Sharing only one of the user and password vars with the branch's own connection
+    /// would leave the other pointing at credentials the branch never installed.
+    #[test]
+    fn additional_connection_sharing_half_the_credentials_is_rejected() {
+        let config = |user: &str, password: &str| {
+            json!([{
+                "type": "pg",
+                "connection": { "type": "env", "params": {
+                    "host": "DB_HOST", "user": "DB_USER", "password": "DB_PASSWORD",
+                    "database": "DB_NAME"
+                } },
+                "additional_databases": [{
+                    "name": "analytics",
+                    "connection": { "type": "env", "params": {
+                        "host": "DB_HOST", "user": user, "password": password,
+                        "database": "ANALYTICS_DB"
+                    } }
+                }]
+            }])
+        };
+
+        verify(config("DB_USER", "DB_PASSWORD")).expect("the whole pair may be shared");
+        verify(config("ANALYTICS_USER", "ANALYTICS_PASSWORD")).expect("a pair of its own is fine");
+        for (user, password) in [
+            ("DB_USER", "ANALYTICS_PASSWORD"),
+            ("ANALYTICS_USER", "DB_PASSWORD"),
+        ] {
+            let message = conflict_message(verify(config(user, password)));
+            assert!(
+                message.contains("share both the user and the password vars"),
+                "{user}/{password}: {message}"
+            );
+        }
     }
 }

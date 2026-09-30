@@ -813,7 +813,7 @@ impl DatabaseBranchConfig {
 
 impl ConnectionSource {
     /// The individual params, when this source is params-shaped rather than a URL.
-    fn params(&self) -> Option<&ConnectionParamsVars> {
+    pub(crate) fn params(&self) -> Option<&ConnectionParamsVars> {
         match self {
             Self::Params(config) => Some(&config.params),
             Self::Url { .. } | Self::FlatUrl { .. } => None,
