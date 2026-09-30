@@ -3,7 +3,10 @@
 /// Provides Windows-specific process synchronization between parent and child processes
 /// using named events. Both sides derive the event name from the child's PID
 /// (`mirrord_layer_init_{child_pid}`), so no environment variable handoff is needed.
-use std::ffi::CString;
+use std::{
+    ffi::CString,
+    os::windows::io::{AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle},
+};
 
 use utils_win::process::process_status;
 use winapi::{
@@ -12,10 +15,14 @@ use winapi::{
         winerror::WAIT_TIMEOUT,
     },
     um::{
-        handleapi::CloseHandle,
+        handleapi::{CloseHandle, DuplicateHandle},
+        processthreadsapi::{GetCurrentProcess, GetProcessId, OpenProcess},
         synchapi::{CreateEventA, OpenEventA, SetEvent, WaitForSingleObject},
         winbase::{INFINITE, WAIT_OBJECT_0},
-        winnt::{EVENT_ALL_ACCESS, HANDLE},
+        winnt::{
+            DUPLICATE_CLOSE_SOURCE, DUPLICATE_SAME_ACCESS, EVENT_ALL_ACCESS, HANDLE,
+            PROCESS_DUP_HANDLE,
+        },
     },
 };
 
@@ -45,6 +52,43 @@ pub struct LayerInitEvent {
     handle: HANDLE,
     name: String,
     role: EventRole,
+}
+
+/// Keeps an APC readiness event alive after attach returns to the debugger.
+/// The target owns the retained reference until it exits.
+pub struct RemoteLayerInitEvent {
+    process: OwnedHandle,
+    handle: HANDLE,
+    release_on_drop: bool,
+}
+
+impl RemoteLayerInitEvent {
+    /// Transfer event lifetime to the target after loading has been queued.
+    pub fn retain(mut self) {
+        self.release_on_drop = false;
+    }
+}
+
+impl Drop for RemoteLayerInitEvent {
+    fn drop(&mut self) {
+        if self.release_on_drop {
+            let mut local = std::ptr::null_mut();
+            unsafe {
+                if DuplicateHandle(
+                    self.process.as_raw_handle().cast(),
+                    self.handle,
+                    GetCurrentProcess(),
+                    &mut local,
+                    0,
+                    FALSE,
+                    DUPLICATE_CLOSE_SOURCE | DUPLICATE_SAME_ACCESS,
+                ) != 0
+                {
+                    CloseHandle(local);
+                }
+            }
+        }
+    }
 }
 
 impl LayerInitEvent {
@@ -80,6 +124,52 @@ impl LayerInitEvent {
                 role: EventRole::Parent,
             })
         }
+    }
+
+    /// Duplicate the readiness event so an IDE can resume after attach exits.
+    pub fn keep_alive_in_process(
+        &self,
+        process: BorrowedHandle<'_>,
+    ) -> LayerResult<RemoteLayerInitEvent> {
+        let pid = unsafe { GetProcessId(process.as_raw_handle().cast()) };
+        if pid == 0 {
+            return Err(LayerError::ProcessSynchronization(format!(
+                "query event target pid: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        // Injection handles need not carry the independent duplicate-handle right.
+        let raw = unsafe { OpenProcess(PROCESS_DUP_HANDLE, FALSE, pid) };
+        if raw.is_null() {
+            return Err(LayerError::ProcessSynchronization(format!(
+                "open event target: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        let process = unsafe { OwnedHandle::from_raw_handle(raw.cast()) };
+        let mut handle = std::ptr::null_mut();
+        if unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                self.handle,
+                process.as_raw_handle().cast(),
+                &mut handle,
+                0,
+                FALSE,
+                DUPLICATE_SAME_ACCESS,
+            )
+        } == 0
+        {
+            return Err(LayerError::ProcessSynchronization(format!(
+                "duplicate readiness event into target: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        Ok(RemoteLayerInitEvent {
+            process,
+            handle,
+            release_on_drop: true,
+        })
     }
 
     /// Open the existing event for the child (injected layer) process.

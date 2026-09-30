@@ -127,7 +127,6 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 ctor = "0.2"
 derive_more = "2.0.1"
 dirs = "6"
-dll-syringe = "0.17.1"
 dns-lookup = "3"
 dotenvy = "0.15"
 drain = "0.1"
@@ -265,6 +264,7 @@ secrecy = "0.10"
 sha2 = "0.10"
 shellexpand = "3"
 socket2 = { version = "0.5", features = ["all"] }
+stork = { git = "https://github.com/metalbear-co/stork.git", rev = "a88686e764145be5d1d8f81d4be5bfb4ed217d89" }
 strsim = "0.11"
 strum = "0.27.1"
 strum_macros = "0.27.1"
