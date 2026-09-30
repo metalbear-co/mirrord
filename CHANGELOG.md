@@ -8,6 +8,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.266.1](https://github.com/metalbear-co/mirrord/tree/3.266.1) - 2026-09-30
+
+
+### Fixed
+
+- `mirrord ci` persists its cleanup state atomically and rejects malformed
+  state instead of silently discarding recorded cleanup targets.
+
 ## [3.266.0](https://github.com/metalbear-co/mirrord/tree/3.266.0) - 2026-09-29
 
 
