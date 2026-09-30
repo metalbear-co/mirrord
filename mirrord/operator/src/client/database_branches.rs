@@ -1846,8 +1846,8 @@ pub struct UnifiedBranchParams {
     /// Target-independent resource name used for a branch with a user-specified id, so two
     /// workloads sharing the same id map to the same resource and reuse one branch.
     pub deterministic_name: String,
-    /// Key the branch is found and reused by, hashed into `deterministic_name`. The branch's
-    /// credential Secret is keyed by it too, so two branches never share one.
+    /// Key the branch is found and reused by, hashed into `deterministic_name`. Its credential
+    /// Secret is keyed by it too.
     pub reuse_key: String,
     pub labels: BTreeMap<String, String>,
     pub annotations: BTreeMap<String, String>,
@@ -3194,13 +3194,18 @@ mod test {
         );
     }
 
-    /// The credential Secret is keyed like the branch: by the plain id without additional
-    /// databases, so existing Secrets keep their names, and apart from it with them.
+    /// The credential Secret is keyed by the key the branch name is hashed from: the plain id
+    /// without additional databases, so existing Secrets keep their names.
     #[test]
     fn pg_credential_secret_is_keyed_like_the_branch() {
-        let key = |additional| pg_params_with(additional).reuse_key;
+        let plain = pg_params_with(serde_json::json!([]));
+        assert_eq!(plain.reuse_key, "shared");
 
-        assert_eq!(key(serde_json::json!([])), "shared");
-        assert_ne!(key(serde_json::json!([{ "name": "a" }])), "shared");
+        let extra = pg_params_with(serde_json::json!([{ "name": "a" }]));
+        assert_ne!(extra.reuse_key, plain.reuse_key);
+        assert_eq!(
+            super::deterministic_branch_name("pg", "default", &extra.reuse_key),
+            extra.deterministic_name
+        );
     }
 }

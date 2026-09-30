@@ -46,7 +46,8 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
 /// Request body for `POST /branchcredentials` - asks the operator to create a K8s
 /// Secret with the given values in the target namespace. The Secret name is derived
-/// from `branch_id` so the same branch always reuses the same Secret.
+/// from `branch_id`, the key the branch is reused by, so the same branch always reuses the
+/// same Secret.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateCredentialSecretRequest {
     pub namespace: String,

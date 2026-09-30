@@ -616,7 +616,7 @@ where
 
     /// Ask the operator to create a K8s Secret with the given credential values
     /// in the target namespace. The Secret name is derived from `reuse_key`, so a
-    /// branch always gets the same Secret and two branches never share one.
+    /// branch always gets the same Secret.
     async fn create_credential_secret(
         &self,
         namespace: &str,
