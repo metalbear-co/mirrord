@@ -640,14 +640,18 @@ mod tests {
 
         verify(config("DB_USER", "DB_PASSWORD")).expect("the whole pair may be shared");
         verify(config("ANALYTICS_USER", "ANALYTICS_PASSWORD")).expect("a pair of its own is fine");
-        for (user_var, password_var) in [
-            ("DB_USER", "ANALYTICS_PASSWORD"),
-            ("ANALYTICS_USER", "DB_PASSWORD"),
+        for (shape, user_var, password_var) in [
+            ("only the user var shared", "DB_USER", "ANALYTICS_PASSWORD"),
+            (
+                "only the password var shared",
+                "ANALYTICS_USER",
+                "DB_PASSWORD",
+            ),
         ] {
             let message = conflict_message(verify(config(user_var, password_var)));
             assert!(
                 message.contains("share both the user and the password vars"),
-                "{user_var}/{password_var}: {message}"
+                "{shape}: {message}"
             );
         }
     }
