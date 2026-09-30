@@ -77,6 +77,17 @@ pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
 /// and are to be read from the remote as usual.
 pub const MIRRORD_FS_PREFETCH_DIR: &str = "MIRRORD_FS_PREFETCH_DIR";
 
+/// Environment variable we use to pass the ports declared by the target container to the layer,
+/// as a comma-separated list.
+///
+/// The layer uses this list to warn the user when their application subscribes to a port that the
+/// target container does not declare. This is often a sign of a missing
+/// `feature.network.incoming.port_mapping`.
+///
+/// An empty list means that we do not know the ports. The CLI sets this variable also in this
+/// case, so that a value inherited from an outer mirrord session does not stay in place.
+pub const MIRRORD_LAYER_TARGET_CONTAINER_PORTS: &str = "MIRRORD_LAYER_TARGET_CONTAINER_PORTS";
+
 /// Environment variable we use to pass an already-running internal proxy address to the layer
 /// during exec-based tests.
 pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";

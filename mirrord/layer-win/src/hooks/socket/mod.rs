@@ -615,6 +615,8 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
                 bound_state.requested_address.port()
             );
 
+            setup().warn_if_port_not_in_target(bound_state.requested_address.port(), mapped_port);
+
             Arc::get_mut(&mut socket).unwrap().state = SocketState::Listening(bound_state);
             SOCKETS
                 .lock()
