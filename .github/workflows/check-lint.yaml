@@ -141,6 +141,8 @@ jobs:
         include:
           - os: blacksmith-6vcpu-macos-latest
             target: x86_64-apple-darwin
+            # The macOS runners are Apple Silicon, so this is the only entry that cross-compiles.
+            cross: true
           - os: blacksmith-6vcpu-macos-latest
             target: aarch64-apple-darwin
           - os: windows-latest
@@ -177,7 +179,7 @@ jobs:
         continue-on-error: true
         env:
           CARGO_BUILD_WARNINGS: deny
-        run: cargo clippy ${{ contains(matrix.target, 'linux') && '--workspace' || '' }} --all-targets --all-features --target ${{ matrix.target }} --keep-going --quiet -- "-Wclippy::indexing_slicing"
+        run: cargo clippy ${{ contains(matrix.target, 'linux') && '--workspace' || '' }} --all-targets --all-features ${{ matrix.cross && format('--target {0}', matrix.target) || '' }} --keep-going --quiet -- "-Wclippy::indexing_slicing"
       - name: cargo fmt (run only on one platform)
         id: cargo_fmt
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
@@ -187,7 +189,7 @@ jobs:
         id: operator_crd_check
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         continue-on-error: true
-        run: cargo check -p mirrord-operator --features crd --target ${{ matrix.target }} --keep-going --quiet
+        run: cargo check -p mirrord-operator --features crd --keep-going --quiet
       - name: check all lint steps passed
         if: ${{ !cancelled() && (steps.cargo_clippy.outcome == 'failure' || steps.cargo_fmt.outcome == 'failure' || steps.operator_crd_check.outcome == 'failure') }}
         run: |
