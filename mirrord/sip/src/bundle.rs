@@ -2,6 +2,12 @@ use std::path::{Path, PathBuf};
 
 use crate::logger::SipLoggerGuard;
 
+pub(crate) enum BundleLookup {
+    Found(PathBuf),
+    Missing,
+    NotBundled,
+}
+
 /// Paths to system directories that are bundled in our SIP util bundle.
 ///
 /// If an executed binary is located in one of these, we try to find it in the bundle.
@@ -25,10 +31,13 @@ pub fn find_in_bundle(
     binary: &Path,
     bundle: &Path,
     logger: &mut SipLoggerGuard<'_>,
-) -> Option<PathBuf> {
-    let mut binary_suffix = BUNDLED_DIRS
+) -> BundleLookup {
+    let Some(mut binary_suffix) = BUNDLED_DIRS
         .into_iter()
-        .find_map(|dir| binary.strip_prefix(dir).ok())?;
+        .find_map(|dir| binary.strip_prefix(dir).ok())
+    else {
+        return BundleLookup::NotBundled;
+    };
     if binary_suffix == "sh" {
         binary_suffix = Path::new("bash");
     }
@@ -40,13 +49,13 @@ pub fn find_in_bundle(
             logger.log(format_args!(
                 "Found pre-built SIP util for {binary:?} at {candidate:?}",
             ));
-            return Some(candidate);
+            return BundleLookup::Found(candidate);
         }
     }
     logger.log(format_args!(
         "Pre-built SIP util for {binary:?} was not found at {bundle:?}",
     ));
-    None
+    BundleLookup::Missing
 }
 
 #[cfg(test)]
@@ -95,13 +104,15 @@ mod test {
         let bundle = make_bundle();
         let found = super::find_in_bundle(binary, bundle.path(), &mut SipLogger::noop().lock());
         match (found, expect_found) {
-            (Some(found), true) => {
+            (super::BundleLookup::Found(found), true) => {
                 assert!(found.strip_prefix(bundle.path()).is_ok());
                 assert!(found.exists());
             }
-            (Some(found), false) => panic!("false positive at {found:?}"),
-            (None, true) => panic!("false negative"),
-            (None, false) => {}
+            (super::BundleLookup::Found(found), false) => panic!("false positive at {found:?}"),
+            (super::BundleLookup::Missing | super::BundleLookup::NotBundled, true) => {
+                panic!("false negative")
+            }
+            (super::BundleLookup::Missing | super::BundleLookup::NotBundled, false) => {}
         }
     }
 }

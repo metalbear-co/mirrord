@@ -338,7 +338,7 @@ impl MirrordExecution {
                     extract_sip_binaries(&MIRRORD_BINARIES_DIR_PATH_BUF, COMPRESSED_SIP_BINARIES)?;
                 }
 
-                executable
+                let result = executable
                     .and_then(|exe| {
                         sip_patch(
                             exe,
@@ -365,7 +365,9 @@ impl MirrordExecution {
                         if let SipError::TooManyFilesOpen(..) = sip_error {
                             panic!("mirrord failed to patch SIP with: {}", sip_error);
                         }
-                    })?
+                    })?;
+
+                result.map(|result| result.path_string())
             }
         };
 
