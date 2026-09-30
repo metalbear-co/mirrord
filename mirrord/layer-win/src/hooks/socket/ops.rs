@@ -211,7 +211,7 @@ where
 {
     let socket_address = addr.as_socket();
     if result == 0 {
-        tracing::info!(
+        tracing::debug!(
             "{} -> successfully connected to address: {:?}",
             function_name,
             socket_address

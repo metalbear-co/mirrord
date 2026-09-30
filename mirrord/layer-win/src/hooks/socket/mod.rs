@@ -21,7 +21,7 @@ use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, OutgoingConnMetadataRequest, PortSubscribe,
 };
 use mirrord_layer_lib::{
-    detour::{Detour, WinGetAddrInfoInt, WinSocket},
+    detour::{Detour, LastErrorGuard, WinGetAddrInfoInt, WinSocket},
     error::{ConnectError, HookError, HookResult, LayerResult, SendToError, windows::WindowsError},
     proxy_connection::make_proxy_request_with_response,
     setup::{LayerSetup, NetworkHookConfig, setup},
@@ -59,8 +59,8 @@ use winapi::{
         winsock2::{
             HOSTENT, INVALID_SOCKET, IPPORT_RESERVED, LPWSAOVERLAPPED_COMPLETION_ROUTINE, SOCKET,
             SOCKET_ERROR, WSA_IO_PENDING, WSAEACCES, WSAEADDRINUSE, WSAECONNABORTED,
-            WSAECONNREFUSED, WSAEFAULT, WSAGetLastError, WSAHOST_NOT_FOUND, WSAOVERLAPPED, WSASend,
-            WSASetLastError, timeval,
+            WSAECONNREFUSED, WSAEFAULT, WSAEWOULDBLOCK, WSAGetLastError, WSAHOST_NOT_FOUND,
+            WSAOVERLAPPED, WSASend, WSASetLastError, timeval,
         },
         ws2tcpip::LPLOOKUPSERVICE_COMPLETION_ROUTINE,
     },
@@ -79,7 +79,8 @@ use self::{
     },
 };
 use crate::{
-    apply_hook, hooks::log_without_disturbing_caller, process::elevation::require_elevation,
+    apply_hook,
+    process::{elevation::require_elevation, get_export},
 };
 
 // Anchors `ws2_32` as a static import of this DLL, via `#[link]`.
@@ -151,9 +152,10 @@ type GetAddrInfoWType = unsafe extern "system" fn(
 ) -> INT;
 static GET_ADDR_INFO_W_ORIGINAL: OnceLock<&GetAddrInfoWType> = OnceLock::new();
 
-// See comment about FreeAddrInfoW in apply_hook! below
-// type FreeAddrInfoType = unsafe extern "system" fn(addrinfo: *mut ADDRINFOA);
-// static FREE_ADDR_INFO_ORIGINAL: OnceLock<&FreeAddrInfoType> = OnceLock::new();
+// `freeaddrinfo` gets its own hook only where `ws2_32` exports it at a different address from
+// `FreeAddrInfoW`. See `initialize_hooks`.
+type FreeAddrInfoType = unsafe extern "system" fn(addrinfo: *mut ADDRINFOA);
+static FREE_ADDR_INFO_ORIGINAL: OnceLock<&FreeAddrInfoType> = OnceLock::new();
 type FreeAddrInfoWType = unsafe extern "system" fn(addrinfo: *mut ADDRINFOW);
 static FREE_ADDR_INFO_W_ORIGINAL: OnceLock<&FreeAddrInfoWType> = OnceLock::new();
 
@@ -338,56 +340,40 @@ unsafe extern "system" fn wsa_socket_w_detour(
 }
 
 /// Windows socket hook for bind
-///
-/// The instrumented implementation may call Windows APIs while its tracing span is being closed.
-/// Restore the original bind error only after it returns so the caller receives the correct
-/// WinSock error.
 #[mirrord_layer_macro::internal_bypass(BIND_ORIGINAL)]
-unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
-    let (result, last_error) = unsafe { bind_detour_impl(s, name, namelen) };
-    if let Some(last_error) = last_error {
-        unsafe { WSASetLastError(last_error) };
-    }
-
-    result
-}
-
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe fn bind_detour_impl(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> (INT, Option<i32>) {
+unsafe extern "system" fn bind_detour(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> INT {
     tracing::trace!("bind_detour -> socket: {}, namelen: {}", s, namelen);
 
     let original = BIND_ORIGINAL.get().unwrap();
 
     // Define bind function before early returns so it can be reused
-    let bind_fn = |addr: *const SOCKADDR,
-                   addr_len: INT,
-                   reason: &str,
-                   failure_is_final: bool|
-     -> (INT, Option<i32>) {
-        let res = unsafe { original(s, addr, addr_len) };
-        let last_error = (res != ERROR_SUCCESS_I32).then(|| unsafe { WSAGetLastError() });
+    let bind_fn =
+        |addr: *const SOCKADDR, addr_len: INT, reason: &str, failure_is_final: bool| -> INT {
+            let res = unsafe { original(s, addr, addr_len) };
 
-        if let Some(last_error) = last_error {
-            if failure_is_final {
-                tracing::error!(
-                    "bind_detour -> {} failed (wsa_last_error={})",
-                    reason,
-                    last_error
-                );
-            } else {
-                tracing::debug!(
-                    "bind_detour -> {} failed, retrying on a random port \
+            if res != ERROR_SUCCESS_I32 {
+                let last_error = get_last_error();
+                if failure_is_final {
+                    tracing::error!(
+                        "bind_detour -> {} failed (wsa_last_error={})",
+                        reason,
+                        last_error
+                    );
+                } else {
+                    tracing::debug!(
+                        "bind_detour -> {} failed, retrying on a random port \
                         (wsa_last_error={})",
-                    reason,
-                    last_error
-                );
+                        reason,
+                        last_error
+                    );
+                }
+            } else {
+                tracing::debug!("bind_detour -> {} succeeded", reason);
             }
-        } else {
-            tracing::debug!("bind_detour -> {} succeeded", reason);
-        }
 
-        (res, last_error)
-    };
+            res
+        };
     let requested_addr = match unsafe { SocketAddr::try_from_raw(name, namelen) } {
         Some(addr) => addr,
         None => {
@@ -396,7 +382,7 @@ unsafe fn bind_detour_impl(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> (I
         }
     };
 
-    tracing::info!(
+    tracing::debug!(
         "bind_detour -> mirrord binding socket to {}",
         requested_addr
     );
@@ -421,18 +407,19 @@ unsafe fn bind_detour_impl(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> (I
                 }
             })
         {
-            tracing::warn!(
+            tracing::debug!(
                 "bind_detour -> address {} is already bound by another socket",
                 requested_addr
             );
             sockets.insert(s, entry);
-            return (SOCKET_ERROR, Some(WSAEADDRINUSE));
+            unsafe { WSASetLastError(WSAEADDRINUSE) };
+            return SOCKET_ERROR;
         }
 
         entry
     };
     if !matches!(socket.state, SocketState::Initialized) {
-        tracing::warn!(
+        tracing::debug!(
             "bind_detour -> socket {} is not in Initialized state, using original bind",
             s
         );
@@ -469,7 +456,7 @@ unsafe fn bind_detour_impl(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> (I
     };
 
     // Attempt primary bind
-    let (bind_result, last_error) = bind_fn(
+    let bind_result = bind_fn(
         &local_addr_storage as *const _ as *const SOCKADDR,
         local_addr_len,
         "primary bind",
@@ -481,7 +468,9 @@ unsafe fn bind_detour_impl(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> (I
         // Fall back to a random local port when the requested one is busy, mirroring the Unix
         // layer's `bind_similar_address`. The real port is recovered below via `getsockname`.
         if can_use_random_port.not() {
-            if last_error == Some(WSAEACCES) && local_addr.port() < IPPORT_RESERVED as u16 {
+            if get_last_error() == WSAEACCES && local_addr.port() < IPPORT_RESERVED as u16 {
+                // The prompt calls Win32, and the caller must still read the bind's error.
+                let _bind_error = LastErrorGuard::save();
                 require_elevation(&format!(
                     "mirrord failed to bind to privileged port {} - insufficient UAC privileges. On Windows, binding to privileged ports (< {}) requires running as Administrator or with elevated UAC privileges. Please restart your application with elevated privileges.",
                     local_addr.port(),
@@ -489,7 +478,7 @@ unsafe fn bind_detour_impl(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> (I
                 ));
             }
 
-            return (bind_result, last_error);
+            return bind_result;
         }
 
         let fallback_addr = SocketAddr::new(local_addr.ip(), 0);
@@ -497,18 +486,18 @@ unsafe fn bind_detour_impl(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> (I
             Ok((storage, len)) => (storage, len),
             Err(e) => {
                 tracing::error!("bind_detour -> failed to convert fallback address: {}", e);
-                return (bind_result, last_error);
+                return bind_result;
             }
         };
 
-        let (fallback_result, fallback_error) = bind_fn(
+        let fallback_result = bind_fn(
             &fallback_storage as *const _ as *const SOCKADDR,
             fallback_len,
             "random port fallback",
             true,
         );
         if fallback_result != ERROR_SUCCESS_I32 {
-            return (fallback_result, fallback_error);
+            return fallback_result;
         }
     }
 
@@ -534,7 +523,24 @@ unsafe fn bind_detour_impl(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> (I
         requested_addr
     );
 
-    (ERROR_SUCCESS_I32, None)
+    ERROR_SUCCESS_I32
+}
+
+/// Logs that an original call failed.
+///
+/// `WSAEWOULDBLOCK` is how a non-blocking socket answers "not yet", so it is logged at debug.
+///
+/// # Arguments
+///
+/// * `detour` - the detour that made the call, for the log line.
+/// * `call` - which call failed.
+fn log_original_failure(detour: &str, call: &str) {
+    let last_error = get_last_error();
+    if last_error == WSAEWOULDBLOCK {
+        tracing::debug!("{detour} -> {call} would block");
+    } else {
+        tracing::error!("{detour} -> {call} failed (wsa_last_error={last_error})");
+    }
 }
 
 /// Windows socket hook for listen
@@ -549,7 +555,7 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
         let res = unsafe { original(s, backlog) };
 
         if res != ERROR_SUCCESS_I32 {
-            tracing::error!("listen_detour -> {} failed", reason);
+            log_original_failure("listen_detour", reason);
         } else {
             tracing::debug!("listen_detour -> {} succeeded", reason);
         }
@@ -586,7 +592,6 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 
     let listen_result = listen_fn("expected listen");
     if listen_result != ERROR_SUCCESS_I32 {
-        tracing::error!("listen_detour -> listen() failed");
         return listen_result;
     }
 
@@ -622,7 +627,7 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
     }
 
     if setup().targetless() {
-        tracing::warn!("listen_detour -> running targetless, binding locally instead");
+        tracing::debug!("listen_detour -> running targetless, binding locally instead");
         return listen_result;
     }
 
@@ -730,13 +735,10 @@ unsafe extern "system" fn accept_detour(
     let original = ACCEPT_ORIGINAL.get().unwrap();
     let accepted_socket = unsafe { original(s, addr, addrlen) };
     if accepted_socket == INVALID_SOCKET {
-        tracing::error!("accept_detour -> original accept failed");
+        log_original_failure("accept_detour", "original accept");
         return accepted_socket;
     }
-    tracing::info!(
-        "accept_detour -> accepted socket {} from mirrord-managed listener",
-        accepted_socket
-    );
+    tracing::debug!("accept_detour -> accepted socket {}", accepted_socket);
 
     // Wrap the accepted socket in RAII wrapper for automatic cleanup on error
     let auto_close_socket = AutoCloseSocket::new(accepted_socket);
@@ -746,7 +748,7 @@ unsafe extern "system" fn accept_detour(
             .expect("accept_detour -> failed to lock sockets for socket retrieval");
 
         let Some(socket) = sockets.get(&s) else {
-            tracing::warn!(
+            tracing::debug!(
                 "accept_detour -> socket {} is not tracked, using original accept",
                 s
             );
@@ -806,7 +808,7 @@ unsafe extern "system" fn accept_detour(
         peer_address,
     }) {
         Ok(res) => {
-            tracing::info!(
+            tracing::debug!(
                 "accept_detour -> got metadata: remote_source={}, local_address={}",
                 res.remote_source,
                 res.local_address
@@ -880,7 +882,7 @@ unsafe extern "system" fn getsockname_detour(
     {
         Some(sock) => sock.clone(),
         None => {
-            tracing::warn!("getsockname_detour -> socket not managed: {}", s);
+            tracing::debug!("getsockname_detour -> socket not managed: {}", s);
             return getsockname_fn();
         }
     };
@@ -1180,7 +1182,7 @@ unsafe extern "system" fn connectex_detour(
                 if result_code == ERROR_SUCCESS_I32 {
                     return TRUE;
                 } else if error_opt == Some(WSA_IO_PENDING) {
-                    tracing::info!(
+                    tracing::debug!(
                         "connectex_detour -> socket {} ConnectEx to proxy returned WSA_IO_PENDING, attempting immediate completion check",
                         s
                     );
@@ -1717,7 +1719,7 @@ unsafe extern "system" fn getaddrinfo_detour(
         }
         _ => None,
     };
-    tracing::warn!("getaddrinfo_detour called for hostname: {:?}", node_opt);
+    tracing::debug!("getaddrinfo_detour called for hostname: {:?}", node_opt);
 
     let service_opt = match Option::from(raw_service) {
         Some(ptr) if !ptr.is_null() => {
@@ -1765,15 +1767,13 @@ unsafe extern "system" fn getaddrinfow_detour(
     hints: *const ADDRINFOW,
     result: *mut *mut ADDRINFOW,
 ) -> INT {
-    tracing::warn!("GetAddrInfoW_detour called");
-
     let node_opt = match Option::from(node_name) {
         Some(ptr) if !ptr.is_null() => unsafe {
             Some(str_win::u16_buffer_to_string(PCWSTR(ptr).as_wide()))
         },
         _ => None,
     };
-    tracing::warn!("GetAddrInfoW_detour called for hostname: {:?}", node_opt);
+    tracing::debug!("GetAddrInfoW_detour called for hostname: {:?}", node_opt);
 
     let service_opt = match Option::from(service_name) {
         Some(ptr) if !ptr.is_null() => unsafe {
@@ -1807,22 +1807,36 @@ unsafe extern "system" fn getaddrinfow_detour(
         })
 }
 
-/// Deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.
+/// Frees the chains that `getaddrinfo_detour` and `getaddrinfow_detour` answered with. Ours
+/// (tracked in `MANAGED_ADDRINFO`) are dropped by us; anything else goes to `FreeAddrInfoW`.
 ///
-/// This follows the same pattern as the Unix layer - it checks if the structure
-/// was allocated by us and frees it properly, or calls the original freeaddrinfo if it wasn't ours.
+/// Where `ws2_32` exports `freeaddrinfo` and `FreeAddrInfoW` as two names for one address, this
+/// is the only hook for both, because the hook engine refuses a second hook on a target it
+/// already holds. It then serves `ADDRINFOA` callers too, which works because the body never
+/// reads through the pointer: it looks the address up in `MANAGED_ADDRINFO` and drops the owner,
+/// which knows its own type. A foreign chain goes to the one original both names share.
 // Not `internal_bypass`-annotated: it dispatches on what it was given, not on who called it.
 // Any thread can hold a chain this layer allocated, and a bypass would hand that chain to
 // `ws2_32`, which frees Rust-allocated memory and leaves a stale `MANAGED_ADDRINFO` entry. The
 // next chain at that address then makes it a double free (`0xC0000374`).
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
-unsafe extern "system" fn freeaddrinfo_t_detour(addrinfo: *mut ADDRINFOW) {
+unsafe extern "system" fn freeaddrinfow_detour(addrinfo: *mut ADDRINFOW) {
     unsafe {
-        // note: supports both ADDRINFOA and ADDRINFOW,
-        //  the proper dealloc will be called
         if !free_managed_addrinfo(addrinfo) {
-            // Not one of ours - call original freeaddrinfo
             FREE_ADDR_INFO_W_ORIGINAL.get().unwrap()(addrinfo);
+        }
+    }
+}
+
+/// Frees `ADDRINFOA` chains where `freeaddrinfo` is its own export. Ours are dropped by us, like
+/// in [`freeaddrinfow_detour`], and a foreign chain goes to the ANSI original, which is the only
+/// function that knows how it was allocated.
+// Not `internal_bypass`-annotated, for the reason given on `freeaddrinfow_detour`.
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+unsafe extern "system" fn freeaddrinfo_detour(addrinfo: *mut ADDRINFOA) {
+    unsafe {
+        if !free_managed_addrinfo(addrinfo) {
+            FREE_ADDR_INFO_ORIGINAL.get().unwrap()(addrinfo);
         }
     }
 }
@@ -1959,7 +1973,7 @@ unsafe extern "system" fn getaddrinfoexw_detour(
 
 /// Frees `ADDRINFOEXW` chains. Ours (tracked in `MANAGED_ADDRINFO`) are dropped
 /// by us; anything else goes to the original `FreeAddrInfoExW`.
-// Not `internal_bypass`-annotated, for the reason given on `freeaddrinfo_t_detour`. This is the
+// Not `internal_bypass`-annotated, for the reason given on `freeaddrinfow_detour`. This is the
 // hook .NET reaches from the completion routine that `addrinfo_ex::deliver` calls.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn freeaddrinfoexw_detour(addrinfo: PADDRINFOEXW) {
@@ -2053,14 +2067,10 @@ unsafe extern "system" fn sendto_detour(
         sendto_fn,
     ) {
         Ok(result) => {
-            // `result` is what the original returned and can be `SOCKET_ERROR`, so the caller
-            // reads the thread's error next. The log line must not be what it finds.
-            log_without_disturbing_caller(|| {
-                tracing::debug!(
-                    "sendto_detour -> layer-lib sendto success: {} bytes",
-                    result
-                )
-            });
+            tracing::debug!(
+                "sendto_detour -> layer-lib sendto success: {} bytes",
+                result
+            );
             result as INT
         }
         Err(e) => fallback_to_original(&format!("layer-lib error: {:?}", e)),
@@ -2077,6 +2087,10 @@ unsafe extern "system" fn sendto_detour(
 unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
+
+    // `closesocket` reports why it failed through the thread's error, and the caller reads that
+    // after this returns. Unsubscribing below talks to the proxy, which sets the error itself.
+    let _last_error = LastErrorGuard::save();
 
     if let Some(socket) = SOCKETS.lock().expect("SOCKETS lock failed").remove(&s)
         && matches!(socket.state, SocketState::Listening(_))
@@ -2141,15 +2155,33 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
             GET_ADDR_INFO_W_ORIGINAL
         )?;
 
-        // Note: FreeAddrInfoW is used for both ADDRINFOA and ADDRINFOW deallocation
+        // Both frees must reach the layer, or `ws2_32` frees a chain Rust allocated. Where the
+        // two names share one address a single hook catches both, and a second hook on the same
+        // target would fail. Where they differ, each gets its own hook and its own original.
+        let free_ansi = get_export("ws2_32", "freeaddrinfo");
+        let free_wide = get_export("ws2_32", "FreeAddrInfoW");
+
         apply_hook!(
             guard,
             "ws2_32",
             "FreeAddrInfoW",
-            freeaddrinfo_t_detour,
+            freeaddrinfow_detour,
             FreeAddrInfoWType,
             FREE_ADDR_INFO_W_ORIGINAL
         )?;
+
+        if free_ansi != free_wide {
+            apply_hook!(
+                guard,
+                "ws2_32",
+                "freeaddrinfo",
+                freeaddrinfo_detour,
+                FreeAddrInfoType,
+                FREE_ADDR_INFO_ORIGINAL
+            )?;
+        } else {
+            tracing::debug!("freeaddrinfo and FreeAddrInfoW share one address, hooked once");
+        }
 
         // Async-capable resolver (.NET's *Async DNS path) + its dedicated free
         // and cancel functions. ADDRINFOEXW has its own free (different OS
@@ -2382,4 +2414,180 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>, setup: &LayerSetup) ->
 
     tracing::info!("Socket hooks initialization completed");
     Ok(())
+}
+
+/// The `freeaddrinfo` family decides by the chain it is given, never by who frees it.
+///
+/// `freeaddrinfow_detour` reclaims an `ADDRINFOA` chain as well as an `ADDRINFOW` one, because
+/// it is the only hook where both names share one address. `freeaddrinfo_detour` is installed
+/// where they do not, and hands a foreign chain to the ANSI original.
+#[cfg(test)]
+mod free_addrinfo {
+    use std::{
+        net::{IpAddr, Ipv4Addr},
+        sync::Mutex,
+    };
+
+    use mirrord_layer_lib::{
+        detour::DetourGuard,
+        socket::dns::windows::utils::{ManagedAddrInfo, WindowsAddrInfo},
+    };
+    use utils_win::internal_thread::InternalGuard;
+
+    use super::*;
+
+    /// Every chain `ws2_32`'s `FreeAddrInfoW` was asked to free.
+    ///
+    /// A list, not a counter. The test harness runs these in parallel and they share one
+    /// `OnceLock` for the original, so a counter would measure the other tests. Each test asks
+    /// only about the address it published, which nobody else can hold.
+    static FREED_BY_WIDE_ORIGINAL: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+    /// Every chain `ws2_32`'s `freeaddrinfo` was asked to free.
+    static FREED_BY_ANSI_ORIGINAL: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+    unsafe extern "system" fn wide_original(addrinfo: *mut ADDRINFOW) {
+        FREED_BY_WIDE_ORIGINAL
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(addrinfo as usize);
+    }
+
+    unsafe extern "system" fn ansi_original(addrinfo: *mut ADDRINFOA) {
+        FREED_BY_ANSI_ORIGINAL
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(addrinfo as usize);
+    }
+
+    static WIDE_ORIGINAL_IMPL: FreeAddrInfoWType = wide_original;
+    static ANSI_ORIGINAL_IMPL: FreeAddrInfoType = ansi_original;
+
+    fn freed_by(list: &Mutex<Vec<usize>>, head: usize) -> bool {
+        list.lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(&head)
+    }
+
+    /// Whether `ws2_32` was asked to free this chain. It never may be, for a chain of ours.
+    fn reached_ws2_32(head: usize) -> bool {
+        freed_by(&FREED_BY_WIDE_ORIGINAL, head) || freed_by(&FREED_BY_ANSI_ORIGINAL, head)
+    }
+
+    /// Publishes a managed chain of the given type and returns the address of its head.
+    fn publish<T: WindowsAddrInfo>(
+        wrap: impl FnOnce(ManagedAddrInfo<T>) -> ManagedAddrInfoAny,
+    ) -> usize {
+        let _ = FREE_ADDR_INFO_W_ORIGINAL.set(&WIDE_ORIGINAL_IMPL);
+        let _ = FREE_ADDR_INFO_ORIGINAL.set(&ANSI_ORIGINAL_IMPL);
+
+        let managed = ManagedAddrInfo::<T>::try_from(vec![(
+            "127.0.0.1".to_owned(),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+        )])
+        .expect("build a managed chain");
+        let head = managed.as_ptr() as usize;
+        MANAGED_ADDRINFO
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(head, wrap(managed));
+        head
+    }
+
+    /// Whether `MANAGED_ADDRINFO` still tracks this head.
+    fn is_tracked(head: usize) -> bool {
+        MANAGED_ADDRINFO
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains_key(&head)
+    }
+
+    /// With one shared address, the wide hook reclaims both chain types, and nobody else's chain.
+    #[test]
+    fn the_shared_hook_reclaims_both_chain_types_and_defers_for_others() {
+        // The wide chain, which the parameter type names.
+        let wide = publish::<ADDRINFOW>(ManagedAddrInfoAny::W);
+        assert!(is_tracked(wide), "published");
+        unsafe { freeaddrinfow_detour(wide as *mut ADDRINFOW) };
+        assert!(!is_tracked(wide), "the wide chain is reclaimed");
+        assert!(!reached_ws2_32(wide), "and never reached ws2_32");
+
+        // The ANSI chain, which reaches this same detour through the `freeaddrinfo` name.
+        let ansi = publish::<ADDRINFOA>(ManagedAddrInfoAny::A);
+        assert!(is_tracked(ansi), "published");
+        unsafe { freeaddrinfow_detour(ansi as *mut ADDRINFOW) };
+        assert!(!is_tracked(ansi), "the ANSI chain is reclaimed");
+        assert!(!reached_ws2_32(ansi), "and never reached ws2_32");
+
+        // An address no chain of ours was ever published at.
+        let foreign = 0x1234_usize;
+        unsafe { freeaddrinfow_detour(foreign as *mut ADDRINFOW) };
+        assert!(
+            freed_by(&FREED_BY_WIDE_ORIGINAL, foreign),
+            "a foreign chain belongs to the original"
+        );
+    }
+
+    /// With two addresses, the ANSI hook reclaims our chains and hands a foreign chain to the
+    /// ANSI original, never the wide one.
+    #[test]
+    fn the_ansi_hook_reclaims_ours_and_defers_to_the_ansi_original() {
+        let ansi = publish::<ADDRINFOA>(ManagedAddrInfoAny::A);
+        unsafe { freeaddrinfo_detour(ansi as *mut ADDRINFOA) };
+        assert!(!is_tracked(ansi), "the ANSI chain is reclaimed");
+        assert!(!reached_ws2_32(ansi), "and never reached ws2_32");
+
+        // A wide chain freed through the ANSI name is still ours to reclaim.
+        let wide = publish::<ADDRINFOW>(ManagedAddrInfoAny::W);
+        unsafe { freeaddrinfo_detour(wide as *mut ADDRINFOA) };
+        assert!(!is_tracked(wide), "the wide chain is reclaimed");
+        assert!(!reached_ws2_32(wide), "and never reached ws2_32");
+
+        let foreign = 0x5678_usize;
+        unsafe { freeaddrinfo_detour(foreign as *mut ADDRINFOA) };
+        assert!(
+            freed_by(&FREED_BY_ANSI_ORIGINAL, foreign),
+            "a foreign ANSI chain belongs to the ANSI original"
+        );
+        assert!(
+            !freed_by(&FREED_BY_WIDE_ORIGINAL, foreign),
+            "and never to the wide one"
+        );
+    }
+
+    /// A thread mirrord marked as its own still reclaims a chain of ours. The hook decides by the
+    /// chain, so who frees it must not matter.
+    #[test]
+    fn a_marked_thread_still_reclaims_our_chain() {
+        let head = publish::<ADDRINFOW>(ManagedAddrInfoAny::W);
+
+        let marked = InternalGuard::enter();
+        unsafe { freeaddrinfow_detour(head as *mut ADDRINFOW) };
+        drop(marked);
+
+        assert!(!is_tracked(head), "an internal thread reclaims it too");
+        assert!(
+            !reached_ws2_32(head),
+            "ws2_32 must never free a chain this layer allocated"
+        );
+    }
+
+    /// A free made while another detour holds the mark still reclaims a chain of ours.
+    ///
+    /// Application code runs with the mark set when a user APC, such as a completion routine,
+    /// fires during the alertable wait of a blocking call that a detour passed to its original.
+    #[test]
+    fn a_held_guard_still_reclaims_our_chain() {
+        let head = publish::<ADDRINFOW>(ManagedAddrInfoAny::W);
+
+        let guard = DetourGuard::new().expect("the outermost call owns the guard");
+        unsafe { freeaddrinfow_detour(head as *mut ADDRINFOW) };
+        drop(guard);
+
+        assert!(!is_tracked(head), "a detour reclaims it too");
+        assert!(
+            !reached_ws2_32(head),
+            "ws2_32 must never free a chain this layer allocated"
+        );
+    }
 }

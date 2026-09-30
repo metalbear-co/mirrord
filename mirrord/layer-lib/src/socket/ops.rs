@@ -65,7 +65,7 @@ impl ConnectResult {
             && let Some(addr) = addr.as_socket()
             && (addr.ip().is_loopback() || addr.ip().is_unspecified())
         {
-            tracing::warn!(
+            tracing::debug!(
                 ?res,
                 "ConnectResult to local target is not a failure, reporting success"
             );
@@ -384,7 +384,7 @@ where
         return Detour::Bypass(Bypass::Domain(remote_address.domain().into()));
     }
 
-    tracing::info!("intercepting connection to {:?}", remote_address);
+    tracing::debug!("intercepting connection to {:?}", remote_address);
 
     let enabled_tcp_outgoing = setup().outgoing_config().tcp;
     let enabled_udp_outgoing = setup().outgoing_config().udp;
