@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-09-29T00:00:00.000Z
+lastmod: 2026-09-30T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -1729,6 +1729,46 @@ Parameters:
 - `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.
 
 When configuring a branch for PostgreSQL, set `type` to `pg`.
+
+#### feature.db_branches[].additional_databases (type: pg) {#feature-db_branches-pg-additional_databases}
+
+More databases from the same source server, copied into the same branch server. Use
+it when your application talks to several databases on one PostgreSQL server: every
+database lands on one branch pod, so the application keeps using a single host.
+
+Each entry is dumped with the source connection of this branch (same host, port,
+user, password, TLS, `iam_auth` and `connection_settings`); only the database name
+differs. The database gets the same name on the branch.
+
+- `name`: the database name on the source server. Must differ from the branch's own
+  database and from every other entry.
+- `connection` (optional): how the application reaches this database, in the same shape as
+  [`connection`](#feature-db_branches-sql-connection). mirrord points it at the branch with
+  this database's name. Without it, the database is only created and copied, and the
+  application switches to it on the branch host by itself.
+- `copy` (optional): copy mode and table filters for this database, in the same shape as
+  the branch's own `copy`. Defaults to `empty`.
+
+```json
+{
+  "feature": {
+    "db_branches": [
+      {
+        "type": "pg",
+        "connection": { "url": { "type": "env", "variable": "DATABASE_URL" } },
+        "copy": { "mode": "all" },
+        "additional_databases": [
+          {
+            "name": "analytics",
+            "connection": { "url": { "type": "env", "variable": "ANALYTICS_DATABASE_URL" } },
+            "copy": { "mode": "schema" }
+          }
+        ]
+      }
+    ]
+  }
+}
+```
 
 #### feature.db_branches[].connection_settings (type: pg) {#feature-db_branches-pg-connection_settings}
 
