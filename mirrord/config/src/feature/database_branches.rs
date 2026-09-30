@@ -832,6 +832,64 @@ impl ConnectionSource {
         matches!(self, Self::Url { .. } | Self::FlatUrl { .. })
     }
 
+    /// Env vars whose branch-side value names this connection's database: the URL, which
+    /// carries the database in its path, and the `database` param. Connections to different
+    /// databases on one branch cannot share such a var, since it can only name one of them.
+    /// Host, port, user and password vars get the same branch-side value for every database
+    /// on the branch pod, so they are not in this list.
+    pub(crate) fn database_specific_env_keys(&self) -> Vec<&str> {
+        let mut keys = Vec::new();
+        match self {
+            Self::Url { .. } | Self::FlatUrl { .. } => self.collect_env_keys(&mut keys),
+            Self::Params(config) => [&config.params.url, &config.params.database]
+                .into_iter()
+                .flatten()
+                .flatten()
+                .for_each(|source| source.collect_env_keys(&mut keys)),
+        }
+        keys
+    }
+
+    /// Every env var this connection reads, engine-specific extras included.
+    pub(crate) fn all_env_keys(&self) -> Vec<&str> {
+        let mut keys = Vec::new();
+        match self {
+            Self::Url { .. } | Self::FlatUrl { .. } => self.collect_env_keys(&mut keys),
+            Self::Params(config) => config
+                .params
+                .all_sources()
+                .for_each(|source| source.collect_env_keys(&mut keys)),
+        }
+        keys
+    }
+
+    /// Literal `value`s this connection sets, as `(env var, value)`, extras included. The
+    /// CLI moves them into one credential Secret keyed by env var name.
+    pub(crate) fn literal_values(&self) -> Vec<(&str, &str)> {
+        match self {
+            Self::Url {
+                url:
+                    TargetEnvironmentVariableSource::Env {
+                        variable,
+                        value: Some(value),
+                        ..
+                    },
+            } => vec![(variable.as_str(), value.as_str())],
+            Self::Url { .. } | Self::FlatUrl { .. } => Vec::new(),
+            Self::Params(config) => config
+                .params
+                .all_sources()
+                .filter_map(|source| match source {
+                    ParamSource::Env {
+                        env_var_name,
+                        value: Some(value),
+                    } => Some((env_var_name.as_str(), value.as_str())),
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+
     /// True when any connection value is read from a Kubernetes Secret or an
     /// external secret manager (GCP/AWS) rather than the target pod's environment.
     fn uses_secret(&self) -> bool {

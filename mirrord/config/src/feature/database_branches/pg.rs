@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashSet},
+    iter,
+};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -142,27 +145,41 @@ pub struct PgAdditionalDatabaseConfig {
     pub copy: PgBranchCopyConfig,
 }
 
+/// Longest database name PostgreSQL keeps, in bytes (`NAMEDATALEN - 1`). The server cuts
+/// longer identifiers down to this length, so two long names sharing their first 63 bytes
+/// would end up as the same database on the branch.
+pub const POSTGRES_MAX_IDENTIFIER_BYTES: usize = 63;
+
 impl PgBranchConfig {
     /// Checks `additional_databases` against each other and against the branch's own
-    /// database: every name must be set and unique, and no two connections may read the
-    /// same env var, or one redirect would overwrite the other.
+    /// database and connection:
+    /// - every name is set, fits a PostgreSQL identifier and is unique;
+    /// - no var that names a database (a URL or `database` param) is read by another connection,
+    ///   since it can only point at one database on the branch;
+    /// - no two connections set the same var to different literal values, since the CLI keeps one
+    ///   value per var.
+    ///
+    /// Host, port, user and password vars may be shared: every database lives on the same
+    /// branch pod, so they get the same branch-side value whichever connection they belong to.
     pub fn verify_additional_databases(&self) -> Result<(), ConfigError> {
         const FIELD: &str = "feature.db_branches[].additional_databases";
 
         let mut names = HashSet::new();
-        let mut primary_keys = Vec::new();
-        self.database.connection.collect_env_keys(&mut primary_keys);
-        let mut env_owners: BTreeMap<&str, String> = primary_keys
-            .into_iter()
-            .map(|key| (key, "the branch's own `connection`".to_owned()))
-            .collect();
-
         for (index, database) in self.additional_databases.iter().enumerate() {
             let name = database.name.trim();
             if name.is_empty() {
                 return Err(ConfigError::Conflict(format!(
                     "`{FIELD}[{index}].name` is empty. Set it to the name of a database on \
                      the source server."
+                )));
+            }
+
+            if name.len() > POSTGRES_MAX_IDENTIFIER_BYTES {
+                return Err(ConfigError::Conflict(format!(
+                    "`{FIELD}[{index}].name` is {} bytes long; PostgreSQL database names are \
+                     at most {POSTGRES_MAX_IDENTIFIER_BYTES} bytes, and longer names get cut \
+                     short. Use the database's real name on the source server.",
+                    name.len()
                 )));
             }
 
@@ -179,20 +196,56 @@ impl PgBranchConfig {
                     "`{FIELD}` lists `{name}` more than once. Keep one entry per database."
                 )));
             }
+        }
 
-            let Some(connection) = &database.connection else {
-                continue;
-            };
-            let mut keys = Vec::new();
-            connection.collect_env_keys(&mut keys);
-            for key in keys {
-                let owner = format!("`{FIELD}[{index}].connection`");
-                if let Some(previous) = env_owners.insert(key, owner.clone()) {
+        let connections = iter::once((
+            "the branch's own `connection`".to_owned(),
+            &self.database.connection,
+        ))
+        .chain(
+            self.additional_databases
+                .iter()
+                .enumerate()
+                .filter_map(|(index, database)| {
+                    Some((
+                        format!("`{FIELD}[{index}].connection`"),
+                        database.connection.as_ref()?,
+                    ))
+                }),
+        )
+        .collect::<Vec<_>>();
+
+        for (index, (owner, connection)) in connections.iter().enumerate() {
+            for key in connection.database_specific_env_keys() {
+                let shared_with =
+                    connections
+                        .iter()
+                        .enumerate()
+                        .find(|&(other, (_, other_connection))| {
+                            other != index && other_connection.all_env_keys().contains(&key)
+                        });
+                if let Some((_, (other_owner, _))) = shared_with {
                     return Err(ConfigError::Conflict(format!(
-                        "{owner} reads the env var `{key}`, which {previous} already reads. \
-                         Each database needs its own env vars, or mirrord cannot point them \
-                         at different databases."
+                        "{owner} names its database through the env var `{key}`, which \
+                         {other_owner} also reads. Give each database its own URL or \
+                         database var; host, port, user and password vars may be shared."
                     )));
+                }
+            }
+        }
+
+        let mut literals: BTreeMap<&str, (&str, &str)> = BTreeMap::new();
+        for (owner, connection) in &connections {
+            for (key, value) in connection.literal_values() {
+                match literals.insert(key, (value, owner.as_str())) {
+                    Some((previous, previous_owner)) if previous != value => {
+                        return Err(ConfigError::Conflict(format!(
+                            "{owner} sets the env var `{key}` to a different literal value \
+                             than {previous_owner}. A var has one value in the session; use \
+                             the same value or a different var."
+                        )));
+                    }
+                    _ => {}
                 }
             }
         }
@@ -412,5 +465,90 @@ mod tests {
             "additional_databases": [{ "name": "analytics" }]
         }]));
         assert!(result.is_err(), "mysql must reject additional_databases");
+    }
+
+    /// Every database lives on the same branch pod, so a host, port, user or password var
+    /// gets the same branch-side value for each of them and may be shared.
+    #[test]
+    fn additional_connection_may_share_host_port_and_credentials() {
+        verify(json!([{
+            "type": "pg",
+            "connection": { "type": "env", "params": {
+                "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER",
+                "password": "DB_PASSWORD", "database": "DB_NAME"
+            } },
+            "additional_databases": [{
+                "name": "analytics",
+                "connection": { "type": "env", "params": {
+                    "host": "DB_HOST", "port": "DB_PORT", "user": "DB_USER",
+                    "password": "DB_PASSWORD", "database": "ANALYTICS_DB"
+                } }
+            }]
+        }]))
+        .expect("shared host/port/credential vars point at the same branch pod");
+    }
+
+    /// A database var can only name one database on the branch.
+    #[test]
+    fn additional_connection_sharing_the_database_var_is_rejected() {
+        let message = conflict_message(verify(json!([{
+            "type": "pg",
+            "connection": { "type": "env", "params": { "host": "DB_HOST", "database": "DB_NAME" } },
+            "additional_databases": [{
+                "name": "analytics",
+                "connection": { "type": "env", "params": { "host": "DB_HOST", "database": "DB_NAME" } }
+            }]
+        }])));
+        assert!(message.contains("`DB_NAME`"), "{message}");
+    }
+
+    /// PostgreSQL cuts longer identifiers to 63 bytes, where two long names could collide.
+    #[test]
+    fn additional_database_name_longer_than_an_identifier_is_rejected() {
+        let config = |name: String| {
+            json!([{
+                "type": "pg",
+                "connection": { "url": "DATABASE_URL" },
+                "additional_databases": [{ "name": name }]
+            }])
+        };
+
+        verify(config("a".repeat(POSTGRES_MAX_IDENTIFIER_BYTES)))
+            .expect("a name of exactly 63 bytes fits");
+        let message = conflict_message(verify(config(
+            "a".repeat(POSTGRES_MAX_IDENTIFIER_BYTES + 1),
+        )));
+        assert!(message.contains("64 bytes long"), "{message}");
+    }
+
+    /// The CLI keeps one literal value per env var, so two connections setting one var to
+    /// different values would silently lose one; the same value is fine.
+    #[test]
+    fn conflicting_literal_values_across_connections_are_rejected() {
+        let config = |additional_sslmode: &str| {
+            json!([{
+                "type": "pg",
+                "connection": { "type": "env", "params": {
+                    "host": "DB_HOST",
+                    "database": "DB_NAME",
+                    "sslmode": { "env_var_name": "PGSSLMODE", "value": "require" }
+                } },
+                "additional_databases": [{
+                    "name": "analytics",
+                    "connection": { "type": "env", "params": {
+                        "host": "DB_HOST",
+                        "database": "ANALYTICS_DB",
+                        "sslmode": { "env_var_name": "PGSSLMODE", "value": additional_sslmode }
+                    } }
+                }]
+            }])
+        };
+
+        verify(config("require")).expect("the same literal value may be repeated");
+        let message = conflict_message(verify(config("disable")));
+        assert!(
+            message.contains("`PGSSLMODE`") && message.contains("different literal value"),
+            "{message}"
+        );
     }
 }
