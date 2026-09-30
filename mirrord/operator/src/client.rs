@@ -615,19 +615,19 @@ where
     }
 
     /// Ask the operator to create a K8s Secret with the given credential values
-    /// in the target namespace. The Secret name is derived from `branch_id` so
-    /// branches sharing the same ID reuse the same Secret.
+    /// in the target namespace. The Secret name is derived from `reuse_key`, so a
+    /// branch always gets the same Secret and two branches never share one.
     async fn create_credential_secret(
         &self,
         namespace: &str,
-        branch_id: &str,
+        reuse_key: &str,
         values: std::collections::HashMap<String, String>,
     ) -> OperatorApiResult<String> {
         use crate::crd::{CreateCredentialSecretRequest, CreateCredentialSecretResponse};
 
         let request_body = CreateCredentialSecretRequest {
             namespace: namespace.to_owned(),
-            branch_id: branch_id.to_owned(),
+            branch_id: reuse_key.to_owned(),
             values,
         };
 
@@ -929,14 +929,14 @@ where
             // create a K8s Secret and replace the CRD connection entries with
             // Secret references. Values were already extracted from the config
             // inside `new()` before CRD conversion.
-            for (branch_id, params) in create_params.iter_mut() {
+            for params in create_params.values_mut() {
                 if params.literal_values.is_empty() {
                     continue;
                 }
                 let secret_name = self
                     .create_credential_secret(
                         target_namespace,
-                        branch_id.as_ref(),
+                        &params.reuse_key,
                         params.literal_values.clone(),
                     )
                     .await?;

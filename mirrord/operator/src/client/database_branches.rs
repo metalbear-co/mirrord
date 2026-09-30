@@ -1846,6 +1846,9 @@ pub struct UnifiedBranchParams {
     /// Target-independent resource name used for a branch with a user-specified id, so two
     /// workloads sharing the same id map to the same resource and reuse one branch.
     pub deterministic_name: String,
+    /// Key the branch is found and reused by, hashed into `deterministic_name`. The branch's
+    /// credential Secret is keyed by it too, so two branches never share one.
+    pub reuse_key: String,
     pub labels: BTreeMap<String, String>,
     pub annotations: BTreeMap<String, String>,
     pub spec: BranchDatabaseSpec,
@@ -1863,11 +1866,8 @@ impl UnifiedBranchParams {
         migrations: Option<MigrationsSpec>,
     ) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
-        let deterministic_name = deterministic_branch_name(
-            "pg",
-            target_namespace,
-            &pg_reuse_key(id, &config.additional_databases),
-        );
+        let reuse_key = pg_reuse_key(id, &config.additional_databases);
+        let deterministic_name = deterministic_branch_name("pg", target_namespace, &reuse_key);
         let connection_source = convert_connection_source(&config.database.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
@@ -1910,6 +1910,7 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
+            reuse_key,
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -1961,6 +1962,7 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
+            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2012,6 +2014,7 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
+            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2061,6 +2064,7 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
+            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2112,6 +2116,7 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
+            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2161,6 +2166,7 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
+            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2210,6 +2216,7 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
+            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2258,6 +2265,7 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
+            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2307,6 +2315,7 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
+            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2364,6 +2373,7 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
+            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2451,6 +2461,7 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
+            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2506,6 +2517,7 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
+            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -2561,6 +2573,7 @@ impl UnifiedBranchParams {
         Self {
             name_prefix,
             deterministic_name,
+            reuse_key: id.to_owned(),
             labels,
             annotations: BTreeMap::new(),
             spec,
@@ -3167,5 +3180,15 @@ mod test {
                 { "name": "b" }
             ]))
         );
+    }
+
+    /// The credential Secret is keyed like the branch: by the plain id without additional
+    /// databases, so existing Secrets keep their names, and apart from it with them.
+    #[test]
+    fn pg_credential_secret_is_keyed_like_the_branch() {
+        let key = |additional| pg_params_with(additional).reuse_key;
+
+        assert_eq!(key(serde_json::json!([])), "shared");
+        assert_ne!(key(serde_json::json!([{ "name": "a" }])), "shared");
     }
 }
