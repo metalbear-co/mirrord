@@ -82,8 +82,19 @@ pub(super) async fn operator_install(
                 .flatten();
             let trial =
                 signup::start_trial(&http, &app_url, USER_AGENT, cluster_hint.as_deref()).await?;
-            manifest.set_api_key(&trial.api_key);
             subtask.success(None);
+
+            // Printed right away, so the claim URL and the API key are not lost if the
+            // installation fails or is interrupted, and a retry can reuse the trial.
+            println!("{}", trial_details(&trial));
+            if no_browser.not()
+                && std::io::stdout().is_terminal()
+                && let Err(error) = opener::open(&trial.claim_url)
+            {
+                tracing::debug!(?error, "failed to open the claim URL in the browser");
+            }
+
+            manifest.set_api_key(&trial.api_key);
             Some(trial)
         }
     };
@@ -102,10 +113,13 @@ pub(super) async fn operator_install(
     .await;
 
     let operator = installed.inspect_err(|_| {
-        // The trial exists even though the installation failed. Printed rather than put in the
-        // error, where the URL would be wrapped across lines.
+        // Printed rather than put in the error, where the command would be wrapped across lines.
         if let Some(trial) = &trial {
-            println!("{}", claim_instructions(&trial.claim_url));
+            println!(
+                "To retry without starting another trial, reuse its API key: mirrord operator \
+                install --api-key {}",
+                trial.api_key
+            );
         }
     })?;
     progress.success(None);
@@ -115,48 +129,32 @@ pub(super) async fn operator_install(
         summary(
             &operator.spec.operator_version,
             &manifest,
-            context.as_deref(),
-            trial.as_ref(),
+            context.as_deref()
         )
     );
-
-    if let Some(trial) = &trial
-        && no_browser.not()
-        && std::io::stdout().is_terminal()
-        && let Err(error) = opener::open(&trial.claim_url)
-    {
-        tracing::debug!(?error, "failed to open the claim URL in the browser");
-    }
 
     Ok(())
 }
 
-fn claim_instructions(claim_url: &str) -> String {
-    format!("Claim the trial to take ownership of it: {claim_url}")
+/// What the user needs to know about a trial, printed once as soon as it starts.
+fn trial_details(trial: &Trial) -> String {
+    format!(
+        "Started a mirrord Enterprise trial. It ends on {}, after which the license drops to the \
+        Free tier.\nClaim the trial to take ownership of it: {}\nAPI key of the trial: {}\n",
+        trial.trial_ends_at.format("%B %-d, %Y"),
+        trial.claim_url,
+        trial.api_key,
+    )
 }
 
 /// What the user needs to know after a successful installation, printed once.
-fn summary(
-    version: &semver::Version,
-    manifest: &Manifest,
-    context: Option<&str>,
-    trial: Option<&Trial>,
-) -> String {
+fn summary(version: &semver::Version, manifest: &Manifest, context: Option<&str>) -> String {
     let namespace = manifest.operator_namespace();
     let location = match context {
         Some(context) => format!("namespace `{namespace}` of kubecontext `{context}`"),
         None => format!("namespace `{namespace}`"),
     };
     let mut summary = format!("mirrord operator {version} is installed in {location}.\n\n");
-
-    if let Some(trial) = trial {
-        summary.push_str(&format!(
-            "Your mirrord Enterprise trial ends on {}, after which the license drops to the Free \
-            tier.\n{}\n\n",
-            trial.trial_ends_at.format("%B %-d, %Y"),
-            claim_instructions(&trial.claim_url),
-        ));
-    }
 
     summary.push_str(&format!(
         "This is a default installation. For anything custom (namespace, tolerations, pull \
