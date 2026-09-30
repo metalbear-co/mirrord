@@ -281,13 +281,6 @@ async fn start_session_monitor(
     (proxy_monitor_tx, ChaosWatcherRx::new(chaos_rx))
 }
 
-fn daemon_operator_session_id(
-    needs_db_portforwards: bool,
-    operator_session_id: Option<u64>,
-) -> Option<u64> {
-    operator_session_id.filter(|_| needs_db_portforwards)
-}
-
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
 #[tracing::instrument(level = Level::INFO, skip_all, err)]
@@ -392,7 +385,8 @@ pub(crate) async fn proxy(
         needs_db_portforwards,
     )
     .await;
-    if let Some(session_id) = daemon_operator_session_id(needs_db_portforwards, operator_session_id)
+    if needs_db_portforwards
+        && let Some(session_id) = operator_session_id
         && let Ok(daemon) = crate::ui::ensure_daemon().await.inspect_err(|error| {
             tracing::warn!(%error, "failed to start the local mirrord daemon");
         })
@@ -547,17 +541,7 @@ mod tests {
         process::Command,
     };
 
-    use super::{
-        arm_ci_shutdown_watchdog, daemon_operator_session_id, install_ci_shutdown_handler,
-    };
-
-    #[test]
-    fn daemon_starts_only_for_operator_backed_db_branches() {
-        assert_eq!(daemon_operator_session_id(false, None), None);
-        assert_eq!(daemon_operator_session_id(false, Some(1)), None);
-        assert_eq!(daemon_operator_session_id(true, None), None);
-        assert_eq!(daemon_operator_session_id(true, Some(1)), Some(1));
-    }
+    use super::{arm_ci_shutdown_watchdog, install_ci_shutdown_handler};
 
     /// The test runner must be a separate process because the watchdog's signal kills its owner.
     #[test]

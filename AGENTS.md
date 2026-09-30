@@ -68,6 +68,11 @@ mirrord is actively maintained by dozens of people, it is not a greenfield proje
 maximize simplicity. Reuse existing abstractions and codepaths instead of introducing new ones. Every new path is
 something someone has to understand, maintain, and keep compatible.
 
+Avoid extracting trivial, self-contained logic into a function used only once. Keep it at the callsite when the helper
+would merely add indirection or exist to make a tiny test possible. Extract a function when it is reused or hides
+non-obvious details that would distract from the surrounding flow. Test meaningful behavior rather than trivial
+wrappers around a library API.
+
 ## Comments and Documentation
 
 Don't write comments explaining what code does, the code should speak for itself. Instead, focus on _why_ something
