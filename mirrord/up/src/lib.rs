@@ -207,18 +207,7 @@ impl MessageFormatter for SuggestingFormatter {
             return message;
         };
 
-        // The allowed names are lowercase. Without this, a value in uppercase like `MIRROR` is
-        // too many edits away from `mirror` to get a hint.
-        let unknown = unknown.to_lowercase();
-        // The same limit as rustc: one edit for each three characters, and at least one.
-        let max_distance = unknown.chars().count().max(3) / 3;
-
-        let Some((closest, _)) = expected
-            .iter()
-            .map(|&candidate| (candidate, strsim::osa_distance(&unknown, candidate)))
-            .min_by_key(|&(_, distance)| distance)
-            .filter(|&(_, distance)| distance <= max_distance)
-        else {
+        let Some(closest) = closest_name(unknown, expected) else {
             return message;
         };
 
@@ -226,6 +215,24 @@ impl MessageFormatter for SuggestingFormatter {
         let _ = write!(message, "; did you mean `{closest}`?");
         message.into()
     }
+}
+
+/// The name in `candidates` that `unknown` is most likely a typo of, if one is close enough.
+///
+/// Used for the "did you mean" hints in `mirrord-up.yaml` parse errors.
+fn closest_name<'a>(unknown: &str, candidates: &[&'a str]) -> Option<&'a str> {
+    // The allowed names are lowercase. Without this, a value in uppercase like `MIRROR` is too
+    // many edits away from `mirror` to get a hint.
+    let unknown = unknown.to_lowercase();
+    // The same limit as rustc: one edit for each three characters, and at least one.
+    let max_distance = unknown.chars().count().max(3) / 3;
+
+    candidates
+        .iter()
+        .map(|&candidate| (candidate, strsim::osa_distance(&unknown, candidate)))
+        .min_by_key(|&(_, distance)| distance)
+        .filter(|&(_, distance)| distance <= max_distance)
+        .map(|(candidate, _)| candidate)
 }
 
 fn render_template(content: &str, key: &EnvKey) -> Result<String, tera::Error> {
