@@ -385,14 +385,11 @@ pub(crate) async fn proxy(
         needs_db_portforwards,
     )
     .await;
-    let daemon = crate::ui::ensure_daemon().await;
-    if let Err(error) = &daemon {
-        tracing::warn!(%error, "failed to start the local mirrord daemon");
-    }
-
     if needs_db_portforwards
         && let Some(session_id) = operator_session_id
-        && let Ok(daemon) = daemon
+        && let Ok(daemon) = crate::ui::ensure_daemon().await.inspect_err(|error| {
+            tracing::warn!(%error, "failed to start the local mirrord daemon");
+        })
         && let Err(err) = db_portforwards::setup(
             &config,
             &mut agent_conn,
