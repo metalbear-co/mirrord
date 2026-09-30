@@ -178,7 +178,9 @@ impl UpError {
     }
 }
 
-fn render_template(content: &str, key: &EnvKey) -> Result<String, tera::Error> {
+/// Renders the Tera templates (`{{ key }}`, `{{ git_branch }}`) in the raw content of a
+/// `mirrord-up.yaml`, producing the YAML that gets deserialized into an [`UpConfig`].
+pub fn render_template(content: &str, key: &EnvKey) -> Result<String, tera::Error> {
     let mut tera = Tera::default();
     tera.add_raw_template("main", content)?;
 
