@@ -1,5 +1,7 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap},
+    iter,
     time::Duration,
 };
 
@@ -15,10 +17,10 @@ use mirrord_config::{
         ClickhouseBranchConfig, CockroachdbBranchConfig, ConnectionParamsConfig,
         ConnectionSource as ConfigConnectionSource, ConnectionSourceType, DatabaseBranchConfig,
         DatabaseBranchesConfig, DynamodbBranchConfig, GenericBranchConfig, GenericReadinessConfig,
-        MariadbBranchConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource, PgBranchConfig,
-        RedisBranchConfig, S3BranchConfig, SingleOrVec, SpannerBranchConfig,
-        SqlBranchMigrationsConfig, TargetEnvironmentVariableSource, TurbopufferBranchConfig,
-        redis::RemoteRedisBranchConfig,
+        MariadbBranchConfig, MongodbBranchConfig, MysqlBranchConfig, ParamSource,
+        PgAdditionalDatabaseConfig, PgBranchConfig, RedisBranchConfig, S3BranchConfig, SingleOrVec,
+        SpannerBranchConfig, SqlBranchMigrationsConfig, TargetEnvironmentVariableSource,
+        TurbopufferBranchConfig, redis::RemoteRedisBranchConfig,
     },
     target::{Target, TargetDisplay},
 };
@@ -36,8 +38,8 @@ use crate::{
             BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, CockroachdbOptions,
             DynamodbOptions, GenericCopySpec, GenericExecProbeSpec, GenericHttpGetProbeSpec,
             GenericOptions, GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions,
-            MssqlOptions, MysqlOptions, PostgresOptions, RedisOptions, S3Options, SpannerOptions,
-            SqlBranchCopyConfig, TurbopufferOptions,
+            MssqlOptions, MysqlOptions, PgAdditionalDatabase, PostgresOptions, RedisOptions,
+            S3Options, SpannerOptions, SqlBranchCopyConfig, TurbopufferOptions,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -802,6 +804,25 @@ pub fn replace_values_with_secret_refs(
     }
 }
 
+/// [`replace_values_with_secret_refs`] over every connection a branch spec carries: its own and
+/// those of a PostgreSQL branch's additional databases. The CLI extracted literal values from
+/// all of them into the same Secret.
+#[cfg(feature = "client")]
+pub fn replace_spec_values_with_secret_refs(
+    spec: &mut BranchDatabaseSpec,
+    secret_name: &str,
+    literal_values: &std::collections::HashMap<String, String>,
+) {
+    let additional_sources = spec
+        .postgres_options
+        .iter_mut()
+        .flat_map(|options| options.additional_databases.iter_mut())
+        .filter_map(|database| database.connection_source.as_mut());
+    for source in iter::once(&mut spec.connection_source).chain(additional_sources) {
+        replace_values_with_secret_refs(source, secret_name, literal_values);
+    }
+}
+
 fn convert_connection_source(source: &ConfigConnectionSource) -> CrdConnectionSource {
     match source {
         ConfigConnectionSource::Url { url } => {
@@ -833,6 +854,34 @@ fn convert_connection_source(source: &ConfigConnectionSource) -> CrdConnectionSo
             CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(config.as_ref())))
         }
     }
+}
+
+fn convert_additional_database(config: &PgAdditionalDatabaseConfig) -> PgAdditionalDatabase {
+    PgAdditionalDatabase {
+        name: config.name.trim().to_owned(),
+        connection_source: config.connection.as_ref().map(convert_connection_source),
+        copy: SqlBranchCopyConfig::from(config.copy.clone()),
+    }
+}
+
+/// The key a PostgreSQL branch is found and reused by, hashed into its resource name.
+///
+/// A branch holding more databases is a different branch from one holding fewer, even under
+/// the same id: reusing it would point the app's extra connections at databases the branch
+/// does not have. So the sorted names of the additional databases join the id. A branch
+/// without additional databases keeps the plain id and so the name it always had.
+fn pg_reuse_key<'a>(id: &'a str, additional: &[PgAdditionalDatabaseConfig]) -> Cow<'a, str> {
+    if additional.is_empty() {
+        return Cow::Borrowed(id);
+    }
+
+    let mut names = additional
+        .iter()
+        .map(|database| database.name.trim())
+        .collect::<Vec<_>>();
+    names.sort_unstable();
+    // NUL cannot appear in a PostgreSQL database name, so the joined key is unambiguous.
+    Cow::Owned(format!("{id}\0{}", names.join("\0")))
 }
 
 #[derive(Debug, Clone)]
@@ -1442,6 +1491,17 @@ impl UnifiedDatabaseBranchParams {
                     }
                 }
             }
+            // The additional databases' app connections are rewritten like the branch's own,
+            // so their literal values go to the same Secret instead of into the CRD.
+            if let DatabaseBranchConfig::Pg(config) = &mut *branch_db_config {
+                for connection in config
+                    .additional_databases
+                    .iter_mut()
+                    .filter_map(|database| database.connection.as_mut())
+                {
+                    extract_literal_values(connection, &mut literal_values);
+                }
+            }
 
             let params = match branch_db_config {
                 DatabaseBranchConfig::Clickhouse(c) => UnifiedBranchParams::from_clickhouse(
@@ -1805,7 +1865,11 @@ impl UnifiedBranchParams {
         migrations: Option<MigrationsSpec>,
     ) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
-        let deterministic_name = deterministic_branch_name("pg", target_namespace, id);
+        let deterministic_name = deterministic_branch_name(
+            "pg",
+            target_namespace,
+            &pg_reuse_key(id, &config.additional_databases),
+        );
         let connection_source = convert_connection_source(&config.database.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
         tracing::debug!(?iam_auth, "Converted IAM auth for CRD");
@@ -1824,6 +1888,11 @@ impl UnifiedBranchParams {
                 iam_auth,
                 connection_settings: config.connection_settings.clone(),
                 query_params: config.query_params.clone(),
+                additional_databases: config
+                    .additional_databases
+                    .iter()
+                    .map(convert_additional_database)
+                    .collect(),
             }),
             mysql_options: None,
             mariadb_options: None,
@@ -2517,9 +2586,10 @@ mod test {
 
     use super::{
         BranchDatabase, BranchDatabaseId, ConfigConnectionSource, CrdConnectionSource,
-        MigrationsSpec, ObjectMeta, UnifiedBranchParams, build_migration_archive,
-        classify_existing_branches, convert_connection_source, extract_literal_values,
-        read_migrations, replace_values_with_secret_refs, resolve_branch_id,
+        DatabaseBranchesConfig, MigrationsSpec, ObjectMeta, UnifiedBranchParams,
+        UnifiedDatabaseBranchParams, build_migration_archive, classify_existing_branches,
+        convert_connection_source, extract_literal_values, read_migrations,
+        replace_spec_values_with_secret_refs, replace_values_with_secret_refs, resolve_branch_id,
     };
     use crate::crd::{
         db_branching::{
@@ -2530,6 +2600,27 @@ mod test {
         },
         session::KubeResourceTarget,
     };
+
+    /// Builds the unified params of a config holding one pg branch with a fixed id.
+    fn pg_branch_params(branch: serde_json::Value) -> UnifiedBranchParams {
+        let mut config: DatabaseBranchesConfig =
+            serde_json::from_value(serde_json::json!([branch])).unwrap();
+        let target = "deployment/my-app".parse::<Target>().unwrap();
+        let mut params = UnifiedDatabaseBranchParams::new(
+            &mut config,
+            &target,
+            "default",
+            "session-key",
+            &NullProgress,
+        )
+        .unwrap();
+        let (_, params) = params
+            .branches
+            .drain()
+            .next()
+            .expect("one branch configured");
+        params
+    }
 
     /// A branch found under the deterministic name for `id`, in the given phase (`None` is a
     /// branch the operator has not picked up yet).
@@ -2958,5 +3049,103 @@ mod test {
                 "expected Specified variant for config_id={config_id:?}, key={key}"
             );
         }
+    }
+
+    /// The additional databases reach the CRD with their own name, copy mode and connection,
+    /// and a literal value in an additional connection lands in the credential Secret like
+    /// one in the branch's own connection.
+    #[test]
+    fn pg_spec_carries_additional_databases_and_moves_their_literals_to_the_secret() {
+        let mut params = pg_branch_params(serde_json::json!({
+            "id": "shared",
+            "type": "pg",
+            "connection": { "url": { "type": "env", "variable": "DATABASE_URL" } },
+            "copy": { "mode": "all" },
+            "additional_databases": [
+                {
+                    "name": "analytics",
+                    "connection": { "params": {
+                        "host": "ANALYTICS_HOST",
+                        "password": { "env_var_name": "ANALYTICS_PASSWORD", "value": "hunter2" },
+                        "database": "ANALYTICS_DB"
+                    } },
+                    "copy": { "mode": "schema", "tables": { "events": { "filter": "id < 10" } } }
+                },
+                { "name": "audit" }
+            ]
+        }));
+
+        let options = params.spec.postgres_options.as_ref().expect("a pg branch");
+        let [analytics, audit] = options.additional_databases.as_slice() else {
+            panic!("expected two additional databases, got {options:?}");
+        };
+        assert_eq!(analytics.name, "analytics");
+        assert_eq!(analytics.copy.mode.as_ref(), "schema");
+        assert!(
+            analytics
+                .copy
+                .items
+                .as_ref()
+                .is_some_and(|items| items.contains_key("events"))
+        );
+        assert!(analytics.connection_source.is_some());
+        assert_eq!(audit.name, "audit");
+        assert_eq!(audit.copy.mode.as_ref(), "empty");
+        assert!(audit.connection_source.is_none());
+        assert!(matches!(
+            params.spec.dialect(),
+            Ok(DialectConfig::Postgres(_))
+        ));
+
+        assert_eq!(
+            params.literal_values,
+            HashMap::from([("ANALYTICS_PASSWORD".to_owned(), "hunter2".to_owned())])
+        );
+        let literal_values = params.literal_values.clone();
+        replace_spec_values_with_secret_refs(&mut params.spec, "creds-secret", &literal_values);
+        let options = params.spec.postgres_options.as_ref().expect("a pg branch");
+        let Some(CrdConnectionSource::Params(analytics_source)) = options
+            .additional_databases
+            .first()
+            .and_then(|database| database.connection_source.as_ref())
+        else {
+            panic!("the analytics connection is params-shaped");
+        };
+        assert!(matches!(
+            analytics_source.password.as_ref().and_then(|kinds| kinds.first()),
+            Some(ConnectionSourceKind::Secret { name, key, .. })
+                if name == "creds-secret" && key == "ANALYTICS_PASSWORD"
+        ));
+    }
+
+    /// Reuse goes by resource name, so the set of additional databases is part of it: a
+    /// branch holding another set is never picked up. A branch without additional databases
+    /// keeps the name it had before the field existed, and the order of the list does not
+    /// matter.
+    #[test]
+    fn pg_branch_name_depends_on_the_set_of_additional_databases() {
+        let name = |additional: serde_json::Value| {
+            pg_branch_params(serde_json::json!({
+                "id": "shared",
+                "type": "pg",
+                "connection": { "url": "DATABASE_URL" },
+                "additional_databases": additional
+            }))
+            .deterministic_name
+        };
+
+        let plain = name(serde_json::json!([]));
+        assert_eq!(
+            plain,
+            super::deterministic_branch_name("pg", "default", "shared")
+        );
+
+        let two = name(serde_json::json!([{ "name": "a" }, { "name": "b" }]));
+        assert_ne!(two, plain);
+        assert_eq!(
+            two,
+            name(serde_json::json!([{ "name": "b" }, { "name": "a" }]))
+        );
+        assert_ne!(two, name(serde_json::json!([{ "name": "a" }])));
     }
 }

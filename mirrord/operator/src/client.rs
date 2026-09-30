@@ -850,6 +850,20 @@ where
                 .require_feature(NewOperatorFeature::PgBranchQueryParams)?;
         }
 
+        // Same fail-fast for pg `additional_databases`: an older operator's CRD schema prunes the
+        // field, so the branch would come up with only its own database while the app's other
+        // connections keep pointing at the source.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| !branch_config.pg_additional_databases().is_empty())
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::PgBranchAdditionalDatabases)?;
+        }
+
         // A `configmap` connection param source needs an operator that resolves it: the branch
         // CRD schema lets the source kind through, and an older operator then fails to
         // deserialize the branch and never reconciles it, which would surface only as a
@@ -926,8 +940,8 @@ where
                         params.literal_values.clone(),
                     )
                     .await?;
-                database_branches::replace_values_with_secret_refs(
-                    &mut params.spec.connection_source,
+                database_branches::replace_spec_values_with_secret_refs(
+                    &mut params.spec,
                     &secret_name,
                     &params.literal_values,
                 );

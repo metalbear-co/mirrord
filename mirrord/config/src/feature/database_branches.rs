@@ -139,7 +139,9 @@ pub use mongodb::{
 };
 pub use mssql::{MssqlBranchConfig, MssqlBranchCopyConfig, MssqlBranchTableCopyConfig};
 pub use mysql::{MysqlBranchConfig, MysqlBranchCopyConfig, MysqlBranchTableCopyConfig};
-pub use pg::{PgBranchConfig, PgBranchCopyConfig, PgBranchTableCopyConfig};
+pub use pg::{
+    PgAdditionalDatabaseConfig, PgBranchConfig, PgBranchCopyConfig, PgBranchTableCopyConfig,
+};
 pub use redis::{
     RedisBranchConfig, RedisBranchCopyConfig, RedisConnectionConfig, RedisLocalConfig,
     RedisOptions, RedisRuntime, RedisValueSource,
@@ -417,7 +419,11 @@ impl DatabaseBranchesConfig {
         for branch in &self.0 {
             // Param sources are shared by every engine, so they are checked here rather than
             // in each engine's own verify.
-            if let Some(params) = branch.connection_params() {
+            for params in branch.connection_params().into_iter().chain(
+                branch
+                    .additional_connections()
+                    .filter_map(ConnectionSource::params),
+            ) {
                 for source in params.all_sources() {
                     source.verify()?;
                 }
@@ -448,6 +454,12 @@ impl DatabaseBranchesConfig {
                 // S3 accepts only the `bucket` param, which the shared checks know nothing
                 // about.
                 DatabaseBranchConfig::S3(cfg) => cfg.verify()?,
+                // PostgreSQL can copy more databases into the same branch, which have to be
+                // told apart from each other.
+                DatabaseBranchConfig::Pg(cfg) => {
+                    branch.verify_shared()?;
+                    cfg.verify_additional_databases()?;
+                }
                 // Same for turbopuffer's namespace/api_key/region params.
                 DatabaseBranchConfig::Turbopuffer(cfg) => cfg.verify()?,
                 other => other.verify_shared()?,
@@ -680,10 +692,7 @@ impl DatabaseBranchConfig {
             // has no connection URL.
             DatabaseBranchConfig::S3(cfg) => Some(&cfg.source.params),
             DatabaseBranchConfig::Turbopuffer(cfg) => Some(&cfg.source.params),
-            other => match &other.database()?.connection {
-                ConnectionSource::Params(config) => Some(&config.params),
-                ConnectionSource::Url { .. } | ConnectionSource::FlatUrl { .. } => None,
-            },
+            other => other.database()?.connection.params(),
         }
     }
 
@@ -699,18 +708,44 @@ impl DatabaseBranchConfig {
     /// True when this branch's connection params declare a `url` base. The CLI uses it to
     /// refuse the config on an operator that predates the param.
     pub fn uses_url_param(&self) -> bool {
-        self.connection_params()
-            .is_some_and(|params| params.url.is_some())
+        self.all_connection_params()
+            .any(|params| params.url.is_some())
     }
 
     /// True when any of this branch's connection params is a `configmap` source. The CLI uses
     /// it to refuse the config on an operator that predates the source kind.
     pub fn uses_config_map_source(&self) -> bool {
-        self.connection_params().is_some_and(|params| {
+        self.all_connection_params().any(|params| {
             params
                 .all_sources()
                 .any(|source| matches!(source, ParamSource::ConfigMap { .. }))
         })
+    }
+
+    /// The more databases a PostgreSQL branch copies next to its own. Empty for every other
+    /// engine.
+    pub fn pg_additional_databases(&self) -> &[PgAdditionalDatabaseConfig] {
+        match self {
+            DatabaseBranchConfig::Pg(cfg) => &cfg.additional_databases,
+            _ => &[],
+        }
+    }
+
+    /// App connections of [`Self::pg_additional_databases`], which the operator redirects
+    /// like the branch's own `connection`.
+    fn additional_connections(&self) -> impl Iterator<Item = &ConnectionSource> {
+        self.pg_additional_databases()
+            .iter()
+            .filter_map(|database| database.connection.as_ref())
+    }
+
+    /// Params of the branch's own connection plus those of its additional databases' app
+    /// connections. Capability gates look at all of them, since the operator resolves each.
+    fn all_connection_params(&self) -> impl Iterator<Item = &ConnectionParamsVars> {
+        self.connection_params().into_iter().chain(
+            self.additional_connections()
+                .filter_map(ConnectionSource::params),
+        )
     }
 
     /// True when any of this branch's source values is read from a Kubernetes Secret or from
@@ -766,6 +801,9 @@ impl DatabaseBranchConfig {
                 if let Some(database) = other.database() {
                     database.connection.collect_env_keys(&mut keys);
                 }
+                for connection in other.additional_connections() {
+                    connection.collect_env_keys(&mut keys);
+                }
             }
         };
 
@@ -774,7 +812,15 @@ impl DatabaseBranchConfig {
 }
 
 impl ConnectionSource {
-    fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
+    /// The individual params, when this source is params-shaped rather than a URL.
+    fn params(&self) -> Option<&ConnectionParamsVars> {
+        match self {
+            Self::Params(config) => Some(&config.params),
+            Self::Url { .. } | Self::FlatUrl { .. } => None,
+        }
+    }
+
+    pub(crate) fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
         match self {
             Self::Url { url } => url.collect_env_keys(out),
             Self::FlatUrl { url, .. } => out.extend(url.iter().map(String::as_str)),
@@ -1844,6 +1890,10 @@ impl CollectAnalytics for &DatabaseBranchesConfig {
         analytics.add(
             "profile_count",
             self.count_branches(|db| db.base().is_some_and(|base| base.profile.is_some())),
+        );
+        analytics.add(
+            "pg_additional_databases_count",
+            self.count_branches(|db| !db.pg_additional_databases().is_empty()),
         );
     }
 }
@@ -3076,7 +3126,8 @@ mod tests {
                             "password": { "secret": "rds-credentials", "key": "password" },
                             "database": "DB_NAME"
                         }
-                    }
+                    },
+                    "additional_databases": [{ "name": "analytics" }]
                 },
                 {
                     "type": "mysql",
@@ -3147,6 +3198,7 @@ mod tests {
                 "params_extra_count": 2,
                 "user_image_count": 1,
                 "profile_count": 1,
+                "pg_additional_databases_count": 1,
             })
         );
     }
@@ -3208,6 +3260,7 @@ mod tests {
             query_params: Default::default(),
             iam_auth: None,
             migrations: None,
+            additional_databases: Vec::new(),
         }))
     }
 

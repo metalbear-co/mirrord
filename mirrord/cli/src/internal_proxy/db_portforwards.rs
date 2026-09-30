@@ -1294,6 +1294,7 @@ mod tests {
             query_params: BTreeMap::from([("sslmode".to_owned(), "disable".to_owned())]),
             iam_auth: None,
             migrations: None,
+            additional_databases: Vec::new(),
         }))
     }
 
