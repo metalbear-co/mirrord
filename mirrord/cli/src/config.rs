@@ -28,7 +28,9 @@ use mirrord_config::{
     target::TargetType,
 };
 #[cfg(windows)]
-use mirrord_layer_lib::process::windows::injection::InjectionMethod;
+use mirrord_layer_lib::process::windows::injection::{
+    InjectionMethod, MIRRORD_INJECTION_METHOD_ENV,
+};
 use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
@@ -641,8 +643,17 @@ impl ExecParams {
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
     /// Windows DLL injection method.
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`. The env fallback lets setups that cannot change
+    /// the CLI invocation (launchers, IDEs) still select the method.
     #[cfg(windows)]
-    #[arg(long, hide = true, default_value = "load-library")]
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library"
+    )]
     pub injection_method: InjectionMethod,
 
     #[clap(flatten)]
@@ -1886,7 +1897,17 @@ pub(super) enum UpSubcommand {
 #[derive(Args, Debug)]
 pub(super) struct AttachArgs {
     /// APC selection attests a debugger stop before application execution.
-    #[arg(long, hide = true, default_value = "load-library", value_parser = InjectionMethod::parse_attach)]
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`. `attach` is invoked by the IDE extension, which is
+    /// exactly the case the env fallback exists for.
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library",
+        value_parser = InjectionMethod::parse_attach
+    )]
     pub injection_method: InjectionMethod,
 
     /// PID of the target process to attach to.
@@ -1898,9 +1919,14 @@ pub(super) struct AttachArgs {
 #[derive(Args, Debug)]
 pub(super) struct PitmArgs {
     /// Windows DLL injection method.
+    ///
+    /// When the flag is absent, `pitm` takes `MIRRORD_INJECTION_METHOD` from the child's
+    /// environment, then falls back to `load-library` (see `pitm::resolve_injection_method`).
+    /// The flag carries no clap `env` fallback so that an explicit choice can be told apart
+    /// from the plugin's per-run value.
     #[cfg(windows)]
-    #[arg(long, hide = true, default_value = "load-library")]
-    pub injection_method: InjectionMethod,
+    #[arg(long, hide = true)]
+    pub injection_method: Option<InjectionMethod>,
 
     /// Target executable followed by its arguments. Everything after `--`
     /// is forwarded verbatim to the child process.
@@ -2192,11 +2218,18 @@ pub struct KillArgs {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    use std::process::Command;
+
     use clap::{CommandFactory, Parser, error::ErrorKind};
     use clap_complete::{Shell, generate};
     use rstest::rstest;
 
     use super::*;
+
+    /// Marks the re-executed test binary in [`exec_injection_method_falls_back_to_environment`].
+    #[cfg(windows)]
+    const INJECTION_METHOD_TEST_CHILD_ENV: &str = "MIRRORD_CLI_TEST_INJECTION_METHOD_CHILD";
 
     #[cfg(windows)]
     #[test]
@@ -2213,12 +2246,17 @@ mod tests {
                 .unwrap();
                 let selected = match cli.commands {
                     Commands::Exec(args) => args.injection_method,
-                    Commands::Pitm(args) => args.injection_method,
+                    Commands::Pitm(args) => args.injection_method.unwrap(),
                     _ => panic!("unexpected command"),
                 };
                 assert_eq!(selected.to_string(), method);
             }
         }
+        let cli = Cli::try_parse_from(["mirrord", "pitm", "cmd.exe"]).unwrap();
+        let Commands::Pitm(args) = cli.commands else {
+            panic!("expected pitm")
+        };
+        assert_eq!(args.injection_method, None);
         for method in ["load-library", "apc"] {
             let cli =
                 Cli::try_parse_from(["mirrord", "attach", "--injection-method", method, "123"])
@@ -2244,6 +2282,66 @@ mod tests {
                     .to_string()
                     .contains("injection-method")
             );
+        }
+    }
+
+    /// `exec` falls back to `MIRRORD_INJECTION_METHOD` when the flag is absent, and an
+    /// explicit flag always wins over the environment.
+    ///
+    /// clap reads the variable on every `exec` parse, so setting it in this process would leak
+    /// into the other parse tests running in parallel. The checks run in a copy of the test
+    /// binary that is started with the variable already set, once per value.
+    #[cfg(windows)]
+    #[test]
+    fn exec_injection_method_falls_back_to_environment() {
+        if std::env::var_os(INJECTION_METHOD_TEST_CHILD_ENV).is_none() {
+            // Test names do not include the crate name that `module_path!` starts with.
+            let (_, module) = module_path!().split_once("::").unwrap();
+            let test_name = format!("{module}::exec_injection_method_falls_back_to_environment");
+            for value in ["apc", "bogus"] {
+                let output = Command::new(std::env::current_exe().unwrap())
+                    .args([test_name.as_str(), "--exact", "--test-threads=1"])
+                    .env(INJECTION_METHOD_TEST_CHILD_ENV, "1")
+                    .env(MIRRORD_INJECTION_METHOD_ENV, value)
+                    .output()
+                    .unwrap();
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                assert!(
+                    output.status.success() && stdout.contains("1 passed"),
+                    "child run with {MIRRORD_INJECTION_METHOD_ENV}={value} failed:\n{stdout}\n{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            return;
+        }
+
+        let value = std::env::var(MIRRORD_INJECTION_METHOD_ENV).unwrap();
+        match value.as_str() {
+            "apc" => {
+                let cli = Cli::try_parse_from(["mirrord", "exec", "cmd.exe"]).unwrap();
+                let Commands::Exec(args) = cli.commands else {
+                    panic!("expected exec")
+                };
+                assert_eq!(args.injection_method.to_string(), "apc");
+
+                let cli = Cli::try_parse_from([
+                    "mirrord",
+                    "exec",
+                    "--injection-method",
+                    "iat",
+                    "cmd.exe",
+                ])
+                .unwrap();
+                let Commands::Exec(args) = cli.commands else {
+                    panic!("expected exec")
+                };
+                assert_eq!(args.injection_method.to_string(), "iat");
+            }
+            "bogus" => assert!(
+                Cli::try_parse_from(["mirrord", "exec", "cmd.exe"]).is_err(),
+                "invalid MIRRORD_INJECTION_METHOD must fail parse"
+            ),
+            other => panic!("unexpected {MIRRORD_INJECTION_METHOD_ENV} value {other:?}"),
         }
     }
 

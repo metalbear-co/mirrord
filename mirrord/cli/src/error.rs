@@ -689,6 +689,14 @@ pub(crate) enum CliError {
     PitmInvalidChildEnv(String),
 
     #[cfg(windows)]
+    #[error("Invalid `MIRRORD_INJECTION_METHOD` for the `mirrord pitm` child: {0}")]
+    #[diagnostic(help(
+        "Set `MIRRORD_INJECTION_METHOD` to `load-library`, `apc` or `iat`, or unset it to use \
+         `load-library`."
+    ))]
+    PitmInvalidInjectionMethod(String),
+
+    #[cfg(windows)]
     #[error("`mirrord pitm` was invoked without a target executable")]
     PitmMissingExe,
 

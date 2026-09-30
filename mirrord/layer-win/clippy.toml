@@ -1,0 +1,30 @@
+# Windows layer: calls that end the target process.
+#
+# The layer is a library inside somebody else's process. Its hooks and its `DllMain` run on
+# that process's threads at every stage of a thread's life, including before Rust has started
+# the thread and after it has torn it down.
+#
+# A thread's Rust handle slot is first-come, first-served. `std::thread::current` claims it
+# lazily, and `ThreadInit::init` aborts the whole process when it finds the slot already taken:
+# "current thread handle already set during thread spawn". That abort is `rtabort!` — no
+# unwind, no catch, no dump.
+#
+# `std::io::stderr` and `std::io::stdout` reach the same place through the reentrant lock they
+# take, which needs a thread identity. `println!` and `eprintln!` go through those.
+#
+# Proven, not theorised: the `current` and `eprintln` modes of the `poison.dll` probe both
+# abort their host with that exact message, while `format`, `file` and a raw `WriteFile` to the
+# standard error handle are safe.
+#
+# Use `mirrord_layer_lib::logging::report_to_stderr` for stderr, and the `OsThreadId` event
+# format for thread ids. See the warning block at the top of `layer-lib`'s `logging`.
+#
+# A call site that is genuinely safe — one that can only run on a Rust-owned thread after
+# `ThreadInit::init` — should carry `#[allow(clippy::disallowed_methods)]` with a comment
+# saying why.
+disallowed-methods = [
+    { path = "std::thread::current", reason = "claims the thread handle slot; aborts the process on the next Rust thread spawn. See layer-lib::logging." },
+    { path = "std::thread::park", reason = "reaches std::thread::current. See layer-lib::logging." },
+    { path = "std::io::stderr", reason = "takes a reentrant lock that claims the thread handle slot. Use mirrord_layer_lib::logging::report_to_stderr." },
+    { path = "std::io::stdout", reason = "takes a reentrant lock that claims the thread handle slot. Use mirrord_layer_lib::logging::report_to_stderr." },
+]

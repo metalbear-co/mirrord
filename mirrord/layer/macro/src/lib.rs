@@ -108,6 +108,69 @@ pub fn hook_fn(
     proc_macro::TokenStream::from(output)
 }
 
+/// `#[internal_bypass(ORIGINAL)]` marks a layer-win detour so mirrord's own worker
+/// threads skip straight to the original function.
+///
+/// The layer enables every hook before its internal worker connects to the proxy;
+/// without this, that worker's own socket/file calls would be intercepted and routed
+/// back through the not-yet-established connection. See
+/// `layer-win/src/hooks/internal_thread.rs`.
+///
+/// `ORIGINAL` names the `OnceLock<&Fn>` static that `apply_hook!` fills at hook
+/// creation (e.g. `SOCKET_ORIGINAL`). The annotated body is preserved verbatim and
+/// only runs on non-internal threads.
+///
+/// Place this attribute as the outermost attribute on the function; it re-emits any
+/// attributes below it (e.g. `#[instrument]`) so they still expand.
+///
+/// Only layer-win hooks have the `crate::hooks::internal_thread` module; applying
+/// this in the unix layer will not compile.
+#[proc_macro_attribute]
+pub fn internal_bypass(
+    args: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let item = syn::parse_macro_input!(input as syn::ItemFn);
+    let original = syn::parse_macro_input!(args as syn::Ident);
+
+    let attrs = &item.attrs;
+    let vis = &item.vis;
+    let sig = &item.sig;
+    let block = &item.block;
+
+    let arg_names = sig
+        .inputs
+        .iter()
+        .map(|input| match input {
+            syn::FnArg::Receiver(_) => {
+                panic!("internal_bypass cannot wrap a function taking `self`")
+            }
+            syn::FnArg::Typed(pat_type) => match pat_type.pat.as_ref() {
+                syn::Pat::Ident(pat_ident) => pat_ident.ident.clone(),
+                other => panic!(
+                    "internal_bypass requires plain identifier parameters, found `{}`",
+                    quote::quote!(#other)
+                ),
+            },
+        })
+        .collect::<Vec<_>>();
+
+    let expanded = quote::quote! {
+        #(#attrs)*
+        #vis #sig {
+            if crate::hooks::internal_thread::is_internal() {
+                let original = #original
+                    .get()
+                    .expect("internal_bypass: original function not set; hooks must be created before they can fire");
+                return unsafe { original(#(#arg_names),*) };
+            }
+            #block
+        }
+    };
+
+    proc_macro::TokenStream::from(expanded)
+}
+
 /// Same as above but calls the original function if detour guard is active.
 #[proc_macro_attribute]
 pub fn hook_guard_fn(

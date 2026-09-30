@@ -41,7 +41,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use mirrord_layer_lib::process::windows::{
     command_line::build_command_line,
     execution::{LayerManagedProcess, MIRRORD_LAYER_FILE_ENV},
-    injection::{InjectionMethod, MIRRORD_INJECTION_METHOD},
+    injection::{InjectionMethod, MIRRORD_INJECTION_METHOD_ENV},
 };
 use mirrord_progress::NullProgress;
 use serde::Deserialize;
@@ -87,6 +87,9 @@ struct ChildEnv {
 /// call [`pitm_command`]. Clap never runs, so the JVM args (which look nothing
 /// like mirrord subcommands) are never misparsed.
 ///
+/// There is no `--injection-method` flag on this path, so the method comes from
+/// `MIRRORD_INJECTION_METHOD` as described in [`resolve_injection_method`].
+///
 /// Returns `None` when not in java-launcher mode so the caller falls through
 /// to normal clap parsing.
 pub(crate) fn run_as_java_launcher() -> Option<miette::Result<()>> {
@@ -115,7 +118,7 @@ pub(crate) fn run_as_java_launcher() -> Option<miette::Result<()>> {
 
     let args = PitmArgs {
         command,
-        injection_method: InjectionMethod::default(),
+        injection_method: None,
     };
     Some(pitm_command(args).map_err(Into::into))
 }
@@ -149,9 +152,12 @@ pub(crate) fn pitm_command(args: PitmArgs) -> CliResult<()> {
         lib_path.to_string_lossy().into_owned(),
     );
 
+    // The child's layer forwards this value to every descendant it creates, so it carries the
+    // resolved method rather than whatever spelling selected it.
+    let injection_method = resolve_injection_method(args.injection_method, &env_vars)?;
     env_vars.insert(
-        MIRRORD_INJECTION_METHOD.to_owned(),
-        args.injection_method.to_string(),
+        MIRRORD_INJECTION_METHOD_ENV.to_owned(),
+        injection_method.to_string(),
     );
 
     let command_line = build_command_line(exe, extra_args);
@@ -176,6 +182,35 @@ pub(crate) fn pitm_command(args: PitmArgs) -> CliResult<()> {
     std::process::exit(exit_code as i32);
 }
 
+/// Selects the injection method for the child process.
+///
+/// Precedence, highest first:
+///
+/// 1. `--injection-method` on the `pitm` command line;
+/// 2. `MIRRORD_INJECTION_METHOD` in the composed child environment, which holds the plugin's
+///    [`MIRRORD_CHILD_ENV`] value when it sets one and the value `pitm` inherited otherwise (see
+///    [`build_child_environment`]);
+/// 3. [`InjectionMethod::default`].
+///
+/// An explicit flag is the most deliberate choice, so it wins. Without one, the value the child
+/// would see anyway is honoured, which is how the plugin or the user's environment picks the
+/// method for launches whose command line they do not control, such as the Java launcher shim.
+/// An unparsable value is an error rather than a silent fallback to the default.
+fn resolve_injection_method(
+    flag: Option<InjectionMethod>,
+    child_env: &HashMap<String, String>,
+) -> CliResult<InjectionMethod> {
+    if let Some(method) = flag {
+        return Ok(method);
+    }
+
+    child_env
+        .get(MIRRORD_INJECTION_METHOD_ENV)
+        .map(|value| value.parse().map_err(CliError::PitmInvalidInjectionMethod))
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
 /// Compose the final environment block for the child process.
 ///
 /// Starts from the current process environment, strips
@@ -195,4 +230,54 @@ fn build_child_environment(child_env: ChildEnv) -> HashMap<String, String> {
         env.remove(&k);
     }
     env
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env_with_method(value: &str) -> HashMap<String, String> {
+        HashMap::from([(MIRRORD_INJECTION_METHOD_ENV.to_owned(), value.to_owned())])
+    }
+
+    #[test]
+    fn injection_method_flag_wins_over_child_environment() {
+        let method =
+            resolve_injection_method(Some(InjectionMethod::Iat), &env_with_method("apc")).unwrap();
+        assert_eq!(method, InjectionMethod::Iat);
+    }
+
+    #[test]
+    fn injection_method_falls_back_to_child_environment() {
+        let method = resolve_injection_method(None, &env_with_method("apc")).unwrap();
+        assert_eq!(method, InjectionMethod::Apc);
+    }
+
+    #[test]
+    fn injection_method_defaults_without_flag_or_environment() {
+        let method = resolve_injection_method(None, &HashMap::new()).unwrap();
+        assert_eq!(method, InjectionMethod::default());
+    }
+
+    #[test]
+    fn invalid_injection_method_in_child_environment_is_an_error() {
+        assert!(matches!(
+            resolve_injection_method(None, &env_with_method("bogus")),
+            Err(CliError::PitmInvalidInjectionMethod(_))
+        ));
+    }
+
+    /// The plugin's `set` entry is what reaches the child, so it is what selects the method
+    /// when there is no flag.
+    #[test]
+    fn plugin_set_value_selects_injection_method() {
+        let env = build_child_environment(ChildEnv {
+            set: env_with_method("iat"),
+            unset: Vec::new(),
+        });
+        assert_eq!(
+            resolve_injection_method(None, &env).unwrap(),
+            InjectionMethod::Iat
+        );
+    }
 }

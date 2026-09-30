@@ -65,6 +65,8 @@ type Job = Box<dyn FnOnce() + Send + 'static>;
 static POOL: Lazy<Sender<Job>> = Lazy::new(|| {
     let (tx, rx) = mpsc::channel::<Job>();
     let rx = Arc::new(Mutex::new(rx));
+    // Each worker claims its Rust thread handle slot on entry and aborts the process when a hook
+    // claimed it first - see the warning in `layer-lib::logging`.
     for id in 0..WORKER_COUNT {
         let rx = Arc::clone(&rx);
         thread::Builder::new()
@@ -84,7 +86,21 @@ pub(crate) fn initialize() {
 }
 
 fn worker_loop(rx: Arc<Mutex<Receiver<Job>>>) {
+    // Deliberately NOT marked internal. A job here can call back into application code -
+    // `addrinfo_ex`'s `deliver` runs the caller's completion routine on this thread, and .NET
+    // calls `FreeAddrInfoExW` from it. A marked thread bypasses that hook, so `ws2_32` frees a
+    // chain this layer allocated and leaves a stale `MANAGED_ADDRINFO` entry, which the next
+    // chain on that reused address turns into a double free (`0xC0000374`).
+    //
+    // Marking buys nothing anyway: the agent round-trip uses `send`/`recv`, which this layer
+    // does not hook, on a socket created before any job runs.
+
     // are you a named thread or just another thread Andy?
+    //
+    // Safe here, unlike in a hook: this is a Rust-spawned thread, so `ThreadInit::init` has
+    // already claimed the thread handle slot before this line runs, and reading it back cannot
+    // be the call that claims it.
+    #[allow(clippy::disallowed_methods)]
     let tid = std::thread::current()
         .name()
         .map(str::to_owned)
