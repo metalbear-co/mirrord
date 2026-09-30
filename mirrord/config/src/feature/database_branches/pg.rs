@@ -621,7 +621,7 @@ mod tests {
     /// would leave the other pointing at credentials the branch never installed.
     #[test]
     fn additional_connection_sharing_half_the_credentials_is_rejected() {
-        let config = |user: &str, password: &str| {
+        let config = |user_var: &str, password_var: &str| {
             json!([{
                 "type": "pg",
                 "connection": { "type": "env", "params": {
@@ -631,7 +631,7 @@ mod tests {
                 "additional_databases": [{
                     "name": "analytics",
                     "connection": { "type": "env", "params": {
-                        "host": "DB_HOST", "user": user, "password": password,
+                        "host": "DB_HOST", "user": user_var, "password": password_var,
                         "database": "ANALYTICS_DB"
                     } }
                 }]
@@ -640,14 +640,14 @@ mod tests {
 
         verify(config("DB_USER", "DB_PASSWORD")).expect("the whole pair may be shared");
         verify(config("ANALYTICS_USER", "ANALYTICS_PASSWORD")).expect("a pair of its own is fine");
-        for (user, password) in [
+        for (user_var, password_var) in [
             ("DB_USER", "ANALYTICS_PASSWORD"),
             ("ANALYTICS_USER", "DB_PASSWORD"),
         ] {
-            let message = conflict_message(verify(config(user, password)));
+            let message = conflict_message(verify(config(user_var, password_var)));
             assert!(
                 message.contains("share both the user and the password vars"),
-                "{user}/{password}: {message}"
+                "{user_var}/{password_var}: {message}"
             );
         }
     }
