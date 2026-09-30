@@ -468,6 +468,10 @@ fn is_crash_code(code: u32) -> bool {
 /// it. It steps around SEH and vectored handlers by design, so the layer cannot write a dump for
 /// it. A reader needs to know that the missing dump is the rule here, what usually causes one, and
 /// what does work instead.
+/// Why a fast-fail leaves nothing behind.
+///
+/// `STATUS_STACK_BUFFER_OVERRUN` is what `__fastfail` raises, and Rust's abort on MSVC goes through
+/// it. It steps around SEH and vectored handlers by design.
 const FAST_FAIL_NOTE: &str = r#"About this one: a fast-fail runs no exception handler. Windows ends
 the process at once, so no dump can be written from inside it. That is by design, not a gap in
 this report.
@@ -476,14 +480,54 @@ A panic that leaves a hook gets here too. A hook is an extern "system" function 
 calls, and Rust ends the process rather than let a panic cross that boundary. The usual cause is
 a hook that logs while the thread-local storage of that thread is being destroyed, which panics
 with AccessError. The panic text goes to the terminal, not to the layer log, so look for
-"panicked at" in the console output of the run.
+"panicked at" in the console output of the run."#;
 
-To capture a dump of the next one, turn on Windows Error Reporting local dumps. This needs an
-administrator, and the keys stay until you remove them:
+/// Why a heap corruption leaves nothing behind, and what finds the culprit.
+///
+/// `STATUS_HEAP_CORRUPTION` is raised through `RtlReportFatalFailure`, which ends the process
+/// without running a handler, exactly like a fast-fail. The report must say so, or a reader
+/// spends the evening looking for a dump that was never possible.
+const HEAP_CORRUPTION_NOTE: &str = r#"About this one: the heap detected damage and ended the
+process through RtlReportFatalFailure, which runs no exception handler. So no dump can be written
+from inside it. That is by design, not a gap in this report.
+
+The report also names the process that died, not the code that damaged the heap. The two are
+usually far apart in time: the write that corrupts a block is often long finished before the
+allocator notices. Suspect anything that writes into a buffer the process owns -- a hook that
+fills a caller's output buffer, or memory freed by an allocator that did not allocate it.
+
+The tool that closes that gap is page heap, which makes the process fault on the bad write
+itself rather than later. It needs an administrator:
+
+  gflags /p /enable <image>.exe /full        (turn off again with /p /disable)"#;
+
+/// The recipe for capturing a dump of the next uncatchable crash.
+///
+/// Shared by every code that no in-process handler can see, because in each of those cases the
+/// only way to get a dump is to have Windows take it from outside.
+const WER_DUMP_NOTE: &str = r#"To capture a dump of the next one, turn on Windows Error Reporting
+local dumps. This needs an administrator, and the keys stay until you remove them:
 
   set K=HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\<image>.exe
   reg add "%K%" /v DumpFolder /t REG_EXPAND_SZ /d C:\dumps
   reg add "%K%" /v DumpType   /t REG_DWORD     /d 2"#;
+
+/// Explains a crash code that no in-process handler can see, when there is something to say.
+///
+/// # Arguments
+///
+/// * `code` - the NTSTATUS the process died with.
+///
+/// # Returns
+///
+/// The explanation, or `None` for a code an ordinary handler would have caught.
+fn uncatchable_note(code: u32) -> Option<&'static str> {
+    match code {
+        STATUS_STACK_BUFFER_OVERRUN => Some(FAST_FAIL_NOTE),
+        STATUS_HEAP_CORRUPTION => Some(HEAP_CORRUPTION_NOTE),
+        _ => None,
+    }
+}
 
 /// Returns a short name for a known NTSTATUS crash code.
 fn exception_name(code: u32) -> Option<&'static str> {
@@ -595,10 +639,16 @@ fn report_text(report: &CrashReport) -> String {
                 report.focus_name, report.focus_pid,
             );
 
-            if *exit_code == STATUS_STACK_BUFFER_OVERRUN {
+            // Every code that reaches here was invisible to the in-process handler, so every
+            // one of them needs the recipe for getting a dump next time. Only the explanation
+            // above it differs.
+            if let Some(note) = uncatchable_note(*exit_code) {
                 let _ = writeln!(out);
-                let _ = writeln!(out, "{FAST_FAIL_NOTE}");
+                let _ = writeln!(out, "{note}");
             }
+
+            let _ = writeln!(out);
+            let _ = writeln!(out, "{WER_DUMP_NOTE}");
         }
         Outcome::Terminated { exit_code } => {
             let _ = writeln!(

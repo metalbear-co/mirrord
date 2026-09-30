@@ -25,9 +25,9 @@
 //! ## Layout
 //!
 //! This file is the shared protocol both sides agree on: the per-pid object names, the
-//! [`CrashInfo`] shared-section layout, the [`Registration`] wire format, and its codec. The two
-//! sides live in submodules: [`channel`] is what a registered layer holds and signals through,
-//! [`server`] is the monitor's accept-and-watch loop.
+//! `CrashInfo` shared-section layout, the [`Registration`] wire format, and its codec. The two
+//! sides live in submodules: `channel` is what a registered layer holds and signals through,
+//! `server` is the monitor's accept-and-watch loop.
 
 use std::{
     io::{self, Read, Write},

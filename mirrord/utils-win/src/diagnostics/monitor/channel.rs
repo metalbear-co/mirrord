@@ -32,13 +32,13 @@ use crate::diagnostics::handle::OwnedHandle;
 /// The client side of the crash channel, held by a registered layer.
 ///
 /// All handles are opened once at registration, in a healthy state, so the crash path never opens
-/// anything by name and never allocates. Each is an [`OwnedHandle`], so dropping the channel frees
+/// anything by name and never allocates. Each is an `OwnedHandle`, so dropping the channel frees
 /// every handle and unmaps the view — no hand-written cleanup.
 ///
 /// `view` is the heart of the channel. At registration the monitor created a named shared section
-/// (`mirrord_crash_info_<pid>`) sized to exactly one [`CrashInfo`]; `MapViewOfFile` maps that
+/// (`mirrord_crash_info_<pid>`) sized to exactly one `CrashInfo`; `MapViewOfFile` maps that
 /// section into this process and returns a pointer to its bytes. Because both sides open the *same*
-/// named section and agree on the `#[repr(C)]` [`CrashInfo`] layout, `view.as_ptr() as *mut
+/// named section and agree on the `#[repr(C)]` `CrashInfo` layout, `view.as_ptr() as *mut
 /// CrashInfo` is a valid pointer to a shared `CrashInfo`: what the layer writes here, the monitor
 /// reads from outside.
 pub struct MonitorChannel {
