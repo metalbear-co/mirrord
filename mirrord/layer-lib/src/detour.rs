@@ -17,7 +17,10 @@ use libc::c_char;
 #[cfg(windows)]
 use winapi::{
     shared::minwindef::INT,
-    um::winsock2::{INVALID_SOCKET, SOCKET, WSASetLastError},
+    um::{
+        errhandlingapi::{GetLastError, SetLastError},
+        winsock2::{INVALID_SOCKET, SOCKET, WSASetLastError},
+    },
 };
 
 #[cfg(windows)]
@@ -98,6 +101,30 @@ impl DetourGuard {
 impl Drop for DetourGuard {
     fn drop(&mut self) {
         detour_bypass_off();
+    }
+}
+
+/// Keeps the thread's last error across work a detour does after its original call.
+///
+/// A caller reads the last error after the hooked API returns, so the layer's own work after the
+/// original (proxy traffic, closing a helper socket) must not be what it finds. Winsock keeps its
+/// error in the same slot, so this covers `WSAGetLastError` too. Logging needs no guard: the
+/// subscriber keeps the error itself (see `crate::logging`).
+#[cfg(windows)]
+pub struct LastErrorGuard(u32);
+
+#[cfg(windows)]
+impl LastErrorGuard {
+    /// Records the thread's last error, to be put back when the guard is dropped.
+    pub fn save() -> Self {
+        Self(unsafe { GetLastError() })
+    }
+}
+
+#[cfg(windows)]
+impl Drop for LastErrorGuard {
+    fn drop(&mut self) {
+        unsafe { SetLastError(self.0) };
     }
 }
 

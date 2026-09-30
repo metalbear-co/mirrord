@@ -278,14 +278,15 @@ impl LayerSetup {
 
         let declared_ports = self.target_container_ports.iter().join(", ");
 
-        eprintln!(
+        // Reached from the `listen` hook, so this must not touch Rust's thread state on Windows.
+        crate::logging::report_to_stderr(format_args!(
             "mirrord: your application listens on port {local_port}, so mirrord subscribed to \
             port {remote_port} of the target. The target container does not declare port \
             {remote_port}, it declares only these ports: {declared_ports}. Traffic may not reach \
             your application. If the target container uses a different port than your \
             application, set `feature.network.incoming.port_mapping` in the mirrord config, for \
             example: `[[{local_port}, {example_port}]]`."
-        );
+        ));
     }
 
     pub fn local_hostname(&self) -> bool {

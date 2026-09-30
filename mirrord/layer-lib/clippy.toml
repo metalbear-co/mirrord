@@ -1,0 +1,22 @@
+# Calls that can end the target process when they run inside the Windows layer. See the warning
+# in `layer-lib::logging`.
+#
+# Use `crate::logging::report_to_stderr` for stderr. A unix-only site, where none of this applies,
+# carries an `#[allow]` with the reason.
+disallowed-macros = [
+    { path = "std::println", reason = "locks stdout, which claims the thread handle slot. See layer-lib::logging." },
+    { path = "std::print", reason = "locks stdout, which claims the thread handle slot. See layer-lib::logging." },
+    { path = "std::eprintln", reason = "locks stderr, which claims the thread handle slot. Use crate::logging::report_to_stderr." },
+    { path = "std::eprint", reason = "locks stderr, which claims the thread handle slot. Use crate::logging::report_to_stderr." },
+    { path = "std::dbg", reason = "locks stderr, which claims the thread handle slot. Use crate::logging::report_to_stderr." },
+]
+disallowed-methods = [
+    { path = "std::thread::current", reason = "claims the thread handle slot. See layer-lib::logging." },
+    { path = "std::thread::park", reason = "reaches std::thread::current. See layer-lib::logging." },
+    { path = "std::io::stderr", reason = "takes a reentrant lock that claims the thread handle slot. Use crate::logging::report_to_stderr." },
+    { path = "std::io::stdout", reason = "takes a reentrant lock that claims the thread handle slot. See layer-lib::logging." },
+    { path = "tracing_subscriber::fmt::Layer::with_thread_ids", reason = "reaches std::thread::current. Use the OsThreadId event format." },
+    { path = "tracing_subscriber::fmt::Layer::with_thread_names", reason = "reaches std::thread::current. Use the OsThreadId event format." },
+    { path = "tracing_subscriber::fmt::format::Format::with_thread_ids", reason = "reaches std::thread::current. Use the OsThreadId event format." },
+    { path = "tracing_subscriber::fmt::format::Format::with_thread_names", reason = "reaches std::thread::current. Use the OsThreadId event format." },
+]
