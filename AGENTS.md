@@ -25,11 +25,11 @@ the user's local process with the mirrord layer loaded.
 ```bash
 # check the entire workspace at once
 # always use when a change spans multiple crates instead of checking each crate individually
-cargo clippy --all-targets --all-features --keep-going -- --deny warnings
+CARGO_BUILD_WARNINGS=deny cargo clippy --all-targets --all-features --keep-going
 
 # check a specific crate
 # the agent is linux only
-cargo clippy -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going -- --deny warnings
+CARGO_BUILD_WARNINGS=deny cargo clippy -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going
 
 # layer and cli bundled with the new layer
 # use only when a fresh mirrord + layer binary is needed for testing
