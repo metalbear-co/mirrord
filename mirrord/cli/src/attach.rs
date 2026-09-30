@@ -1,6 +1,9 @@
 use std::os::windows::io::BorrowedHandle;
 
-use mirrord_layer_lib::process::windows::{injection::InjectionMethod, sync::LayerInitEvent};
+use mirrord_layer_lib::process::windows::{
+    injection::InjectionMethod,
+    sync::{InitWaitOutcome, LayerInitEvent},
+};
 use mirrord_progress::Progress;
 use stork::{LoaderState, OwnedTarget};
 
@@ -18,7 +21,7 @@ const ATTACH_SIGNAL_TIMEOUT_MS: u32 = 30_000;
 ///    ID, resolved config, etc.).
 /// 3. Injected those environment variables into the target process (through editing the debug
 ///    launch configuration).
-/// 4. Invoked `mirrord attach --pid <pid>` (this function).
+/// 4. Invoked `mirrord attach <pid>` (this function). The pid is positional.
 ///
 /// Because of this, `attach_command` does **not** spawn an intproxy, resolve a k8s
 /// target, or set up any environment variables itself — all of that state already
@@ -98,17 +101,32 @@ where
 
     sub_progress.info("waiting for layer to signal injection complete");
 
+    // Watching the failure event and the target itself, not only readiness. A layer that gives up
+    // inside `DllMain` can say so, and a target that dies is not worth waiting out: either one
+    // used to spend the whole timeout and then report it as a timeout, which names the symptom
+    // instead of the cause.
     match init_event
-        .wait_for_signal(Some(ATTACH_SIGNAL_TIMEOUT_MS))
+        .wait_for_signal_or_process_exit(
+            process.target().process.cast(),
+            Some(ATTACH_SIGNAL_TIMEOUT_MS),
+        )
         .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?
     {
-        true => {
+        Some(InitWaitOutcome::Signaled) => {
             sub_progress.success(Some(&format!(
                 "layer successfully initialized in process {}",
                 args.pid
             )));
             Ok(())
         }
-        false => Err(CliError::AttachLayerTimeout(args.pid)),
+        Some(InitWaitOutcome::Failed) => Err(CliError::AttachInjectionFailed(
+            args.pid,
+            "the layer failed to initialize; its own log names the cause".to_owned(),
+        )),
+        Some(InitWaitOutcome::ProcessExited) => Err(CliError::AttachInjectionFailed(
+            args.pid,
+            "the target exited before the layer reported ready".to_owned(),
+        )),
+        None => Err(CliError::AttachLayerTimeout(args.pid)),
     }
 }
