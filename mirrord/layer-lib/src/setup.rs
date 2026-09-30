@@ -265,16 +265,7 @@ impl LayerSetup {
         &self.incoming_mode
     }
 
-    /// Tells the user when their application subscribed to a remote port that the target
-    /// container does not declare.
-    ///
-    /// Often, this means that the application listens on a different port locally than the
-    /// target container does in the cluster, so no traffic reaches the application. Without this
-    /// message, users see no feedback at all in this case.
-    ///
-    /// Containers do not have to declare their ports, so this is only a hint. We print it to stderr
-    /// directly instead of logging it, because the layer does not log anything unless the user
-    /// sets `MIRRORD_LOG`.
+    /// Prints to stderr, not `tracing`: the layer logs nothing unless `MIRRORD_LOG` is set.
     pub fn warn_if_port_not_in_target(&self, local_port: Port, remote_port: Port) {
         let Some(example_port) = self.target_container_ports.first() else {
             return;
