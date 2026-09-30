@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     collections::{BTreeMap, HashMap},
     iter,
     time::Duration,
@@ -866,22 +865,21 @@ fn convert_additional_database(config: &PgAdditionalDatabaseConfig) -> PgAdditio
 
 /// The key a PostgreSQL branch is found and reused by, hashed into its resource name.
 ///
-/// A branch holding more databases is a different branch from one holding fewer, even under
-/// the same id: reusing it would point the app's extra connections at databases the branch
-/// does not have. So the sorted names of the additional databases join the id. A branch
-/// without additional databases keeps the plain id and so the name it always had.
-fn pg_reuse_key<'a>(id: &'a str, additional: &[PgAdditionalDatabaseConfig]) -> Cow<'a, str> {
+/// A branch is only reused by a session asking for the same additional databases, connected
+/// the same way. A branch without additional databases keeps the plain id and so the name it
+/// always had.
+fn pg_reuse_key(id: &str, additional: &[PgAdditionalDatabaseConfig]) -> String {
     if additional.is_empty() {
-        return Cow::Borrowed(id);
+        return id.to_owned();
     }
 
-    let mut names = additional
+    let mut databases = additional
         .iter()
-        .map(|database| database.name.trim())
+        .map(|database| (database.name.trim(), database.connection.as_ref()))
         .collect::<Vec<_>>();
-    names.sort_unstable();
-    // NUL cannot appear in a PostgreSQL database name, so the joined key is unambiguous.
-    Cow::Owned(format!("{id}\0{}", names.join("\0")))
+    databases.sort_unstable_by_key(|(name, _)| *name);
+
+    serde_json::to_string(&(id, databases)).expect("a connection config always serializes to JSON")
 }
 
 #[derive(Debug, Clone)]
@@ -3118,21 +3116,23 @@ mod test {
         ));
     }
 
-    /// Reuse goes by resource name, so the set of additional databases is part of it: a
-    /// branch holding another set is never picked up. A branch without additional databases
-    /// keeps the name it had before the field existed, and the order of the list does not
-    /// matter.
+    /// Builds the params of a pg branch with id `shared` and the given additional databases.
+    fn pg_params_with(additional: serde_json::Value) -> UnifiedBranchParams {
+        pg_branch_params(serde_json::json!({
+            "id": "shared",
+            "type": "pg",
+            "connection": { "url": "DATABASE_URL" },
+            "additional_databases": additional
+        }))
+    }
+
+    /// Reuse goes by resource name, so the additional databases and their connections are
+    /// part of it: a branch holding another set, or connecting one of them differently, is
+    /// never picked up. A branch without additional databases keeps the name it had before the
+    /// field existed, and the order of the list does not matter.
     #[test]
-    fn pg_branch_name_depends_on_the_set_of_additional_databases() {
-        let name = |additional: serde_json::Value| {
-            pg_branch_params(serde_json::json!({
-                "id": "shared",
-                "type": "pg",
-                "connection": { "url": "DATABASE_URL" },
-                "additional_databases": additional
-            }))
-            .deterministic_name
-        };
+    fn pg_branch_name_depends_on_the_additional_databases() {
+        let name = |additional| pg_params_with(additional).deterministic_name;
 
         let plain = name(serde_json::json!([]));
         assert_eq!(
@@ -3147,5 +3147,25 @@ mod test {
             name(serde_json::json!([{ "name": "b" }, { "name": "a" }]))
         );
         assert_ne!(two, name(serde_json::json!([{ "name": "a" }])));
+
+        let connected = name(serde_json::json!([
+            { "name": "a", "connection": { "url": "A_URL" } },
+            { "name": "b" }
+        ]));
+        assert_ne!(connected, two);
+        assert_eq!(
+            connected,
+            name(serde_json::json!([
+                { "name": "b" },
+                { "name": "a", "connection": { "url": "A_URL" } }
+            ]))
+        );
+        assert_ne!(
+            connected,
+            name(serde_json::json!([
+                { "name": "a", "connection": { "url": "OTHER_URL" } },
+                { "name": "b" }
+            ]))
+        );
     }
 }
