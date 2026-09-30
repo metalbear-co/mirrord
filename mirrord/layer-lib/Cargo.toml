@@ -58,7 +58,10 @@ str-win = { path = "../str-win" }
 utils-win = { path = "../utils-win" }
 winapi.workspace = true
 stork.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
 windows-strings.workspace = true
+phnt.workspace = true
 
 [dev-dependencies]
 mirrord-intproxy-protocol = { path = "../intproxy/protocol" }

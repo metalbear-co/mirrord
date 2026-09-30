@@ -1,15 +1,18 @@
 //! Preview each crash-dialog scenario without a real crash.
 //!
-//! Drives the real `report::surface` path (same title/subtitle/body and artifacts the monitor
-//! produces), so each scenario shows exactly the dialog a user would see.
+//! Calls `report::write_artifacts` and then `report::show_dialog`, as the monitor does, so each
+//! scenario writes the same artifacts and shows exactly the dialog a user would see.
 //!
 //! Run: `cargo run -p utils-win --example preview_scenarios -- <scenario>`
 //! where `<scenario>` is one of: `crash`, `kill`, `fastfail`, `initfail`.
 
 #[cfg(windows)]
-fn main() {
-    use utils_win::diagnostics::report::{CrashReport, Incident, Outcome, ProcessNode, surface};
+use utils_win::diagnostics::report::{
+    CrashReport, Incident, Outcome, ProcessNode, show_dialog, write_artifacts,
+};
 
+#[cfg(windows)]
+fn main() {
     let scenario = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "crash".to_owned());
@@ -23,7 +26,7 @@ fn main() {
             parent_pid: 33828,
             name: "node.exe".to_owned(),
             role: "parent".to_owned(),
-            log_path: None,
+            log: None,
             // Already dead — shows up in the tree marked, e.g. the init-failure dead-parent case.
             exit_code: Some(0xC000_0409),
         },
@@ -32,7 +35,7 @@ fn main() {
             parent_pid: 19580,
             name: "crasher.exe".to_owned(),
             role: "child".to_owned(),
-            log_path: None,
+            log: None,
             exit_code: None,
         },
     ];
@@ -84,8 +87,8 @@ fn main() {
         stem: "mirrord-crash_preview_crasher_pid32908".to_owned(),
     }];
 
-    // `true` claims the dialog slot; `surface` still only shows it on an interactive desktop.
-    surface(&report, &directory, true, &incidents, "preview");
+    let written = write_artifacts(&report, &directory, &incidents, "preview");
+    show_dialog(&report, &written, &directory);
 }
 
 #[cfg(not(windows))]

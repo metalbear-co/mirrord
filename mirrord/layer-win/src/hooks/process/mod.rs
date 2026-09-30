@@ -9,15 +9,19 @@ use std::sync::OnceLock;
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult, windows::WindowsError},
-    process::windows::execution::{CreateProcessInternalWType, LayerManagedProcess},
+    process::windows::execution::{
+        CreateProcessInternalWType, LaunchError, LayerFailurePolicy, LayerManagedProcess,
+    },
 };
 use winapi::{
     ctypes::c_void,
     shared::{
-        minwindef::{BOOL, DWORD, HMODULE, LPVOID, TRUE},
+        minwindef::{BOOL, DWORD, FALSE, HMODULE, LPVOID, TRUE},
         ntdef::{HANDLE, LPCWSTR, LPWSTR},
+        winerror::ERROR_DLL_INIT_FAILED,
     },
     um::{
+        errhandlingapi::SetLastError,
         minwinbase::LPSECURITY_ATTRIBUTES,
         processthreadsapi::{
             LPPROCESS_INFORMATION, LPSTARTUPINFOW, PROCESS_INFORMATION, STARTUPINFOW,
@@ -29,7 +33,7 @@ use windows_strings::PCWSTR;
 
 use crate::{
     apply_hook,
-    hooks::log_without_disturbing_caller,
+    hooks::{internal_thread::InternalGuard, log_without_disturbing_caller},
     process::{environment::parse_environment_block, get_module_name},
 };
 
@@ -44,11 +48,6 @@ type GetProcAddressType =
     unsafe extern "system" fn(hModule: HMODULE, lpProcName: *const i8) -> *mut c_void;
 static GET_PROC_ADDRESS_ORIGINAL: OnceLock<&GetProcAddressType> = OnceLock::new();
 
-/// Windows API hook for CreateProcessInternalW function.
-///
-/// This function intercepts calls to the internal Windows process creation API
-/// and redirects them through our unified mirrord process creation system.
-/// Falls back to the original implementation if unified creation fails.
 /// Reads one of the caller's null-terminated wide arguments, for the log only.
 ///
 /// # Safety
@@ -73,6 +72,17 @@ unsafe fn wide_argument(argument: *const u16) -> Option<String> {
     Some(str_win::u16_buffer_to_string(unsafe { wide.as_wide() }))
 }
 
+/// Windows API hook for CreateProcessInternalW function.
+///
+/// This function intercepts calls to the internal Windows process creation API and redirects
+/// them through our unified mirrord process creation system.
+///
+/// Only a failure before the process exists falls back to the original implementation. Once
+/// the process was created, it is never created again, whatever happened to mirrord's layer in
+/// it: the program may already have run, and a second creation would run its side effects
+/// twice. A process mirrord could not set up runs without mirrord and is reported to the crash
+/// monitor (see [`LayerFailurePolicy::RunWithoutMirrord`]). One that could not be allowed to run
+/// at all was ended, and the caller gets `ERROR_DLL_INIT_FAILED`.
 unsafe extern "system" fn create_process_internal_w_hook(
     user_token: HANDLE,
     application_name: LPCWSTR,
@@ -94,8 +104,8 @@ unsafe extern "system" fn create_process_internal_w_hook(
     let env_vars = unsafe { parse_environment_block(environment as *mut _, creation_flags) };
 
     // Every argument that names the child, because a bundle has to say which program failed to
-    // start. A customer bundle holds a `CreateProcess` that failed with "The system cannot find
-    // the file specified" and nothing recorded what it was trying to run (COR-1878).
+    // start: "The system cannot find the file specified" means little without what it was
+    // trying to run.
     //
     // Three string conversions in a hook this hot are affordable because `tracing` builds a
     // field only when something is listening, and nothing listens at debug in a default run.
@@ -144,18 +154,25 @@ unsafe extern "system" fn create_process_internal_w_hook(
         }
     };
 
-    match LayerManagedProcess::execute_with_closure(
-        env_vars,
-        creation_flags,
-        unsafe { &mut *startup_info },
-        create_process_fn,
-        // Hooked child processes are released to run independently; the root
-        // pitm/exec job already owns the whole descendant tree via inheritance.
-        false,
-        None::<mirrord_progress::NullProgress>, // No progress in hook context
-    )
-    .map(|managed_process| managed_process.release())
-    {
+    // The injection work reads the layer DLL, resolves exports and may report to the crash
+    // monitor, all on this application thread. That is mirrord's own traffic and must reach the
+    // local disk and network directly, not come back through this layer's hooks.
+    let launched = {
+        let _internal = InternalGuard::enter();
+        LayerManagedProcess::execute_with_closure(
+            env_vars,
+            creation_flags,
+            unsafe { &mut *startup_info },
+            create_process_fn,
+            // Hooked child processes are released to run independently; the root
+            // pitm/exec job already owns the whole descendant tree via inheritance.
+            false,
+            LayerFailurePolicy::RunWithoutMirrord,
+            None::<mirrord_progress::NullProgress>, // No progress in hook context
+        )
+    };
+
+    match launched.map(|managed_process| managed_process.release()) {
         Ok(proc_info) => {
             // Success: populate output parameter and return TRUE
             unsafe {
@@ -166,9 +183,24 @@ unsafe extern "system" fn create_process_internal_w_hook(
             });
             TRUE
         }
-        Err(e) => {
+        Err(LaunchError {
+            error,
+            created: true,
+        }) => {
+            // The process existed and has been ended, because it could not be allowed to run.
+            // Creating it again is exactly what must not happen, so the caller gets a failure.
+            log_without_disturbing_caller(
+                || tracing::error!(%error, "the child could not run safely after injection, so it was ended"),
+            );
+            unsafe { SetLastError(ERROR_DLL_INIT_FAILED) };
+            FALSE
+        }
+        Err(LaunchError {
+            error,
+            created: false,
+        }) => {
             // Failure: log error and fall back to original implementation
-            tracing::error!("Unified process creation failed: {}", e);
+            tracing::error!("Unified process creation failed: {}", error);
             // Fallback to original Windows API implementation
             tracing::warn!("Falling back to original CreateProcessInternalW");
 

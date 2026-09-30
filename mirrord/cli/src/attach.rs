@@ -2,7 +2,7 @@ use std::os::windows::io::BorrowedHandle;
 
 use mirrord_layer_lib::process::windows::{
     injection::InjectionMethod,
-    sync::{InitWaitOutcome, LayerInitEvent},
+    sync::{InitWaitOutcome, ParentInitEvents},
 };
 use mirrord_progress::Progress;
 use stork::{LoaderState, OwnedTarget};
@@ -45,51 +45,45 @@ where
 
     unsafe { std::env::set_var("MIRRORD_LAYER_FILE", &lib_path) };
 
-    let process = match args.injection_method {
-        InjectionMethod::Apc => OwnedTarget::open_with_main_thread(args.pid),
-        InjectionMethod::LoadLibrary => OwnedTarget::open_process(args.pid),
-        InjectionMethod::Iat => {
-            return Err(CliError::AttachInjectionFailed(
-                args.pid,
-                "attach does not support iat".to_owned(),
-            ));
-        }
-    }
-    .map_err(|e| CliError::AttachProcessOpenFailed(args.pid, e))?;
+    // The value parser rejects iat, so only the two attach methods reach here.
+    let (process, loader_state, keep_events_alive) = match args.injection_method {
+        // Selecting APC attests the IDE's pre-application primary-thread stop. The attach then
+        // returns to the debugger so it can release that stop, so a reference in the target
+        // keeps the named events alive for the layer.
+        InjectionMethod::Apc => (
+            OwnedTarget::open_with_main_thread(args.pid),
+            LoaderState::EarlyApc,
+            true,
+        ),
+        InjectionMethod::LoadLibrary => (
+            OwnedTarget::open_process(args.pid),
+            LoaderState::Unknown,
+            false,
+        ),
+        InjectionMethod::Iat => unreachable!("parse_attach rejects iat"),
+    };
+    let process = process.map_err(|e| CliError::AttachProcessOpenFailed(args.pid, e))?;
     sub_progress.info(&format!("obtained handle to process {}", args.pid));
 
-    // Create the event before injection. The layer opens it by deriving the same
-    // name from its own PID and signals it when initialization is complete.
-    let init_event = LayerInitEvent::for_parent(args.pid)
+    // Create the events before injection. The layer opens them by deriving the same
+    // names from its own PID, and signals one when initialization is complete.
+    let init_events = ParentInitEvents::create(args.pid)
         .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?;
 
-    // APC attach returns to the debugger so it can release its early stop.
-    // A reference in the target keeps the named event alive for the layer worker.
-    let remote_event = if args.injection_method == InjectionMethod::Apc {
-        Some(
-            init_event
-                .keep_alive_in_process(unsafe {
-                    BorrowedHandle::borrow_raw(process.target().process)
-                })
-                .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?,
-        )
-    } else {
-        None
-    };
-    let target =
-        process
-            .borrowed()
-            .with_loader_state(if args.injection_method == InjectionMethod::Apc {
-                LoaderState::EarlyApc
-            } else {
-                LoaderState::Unknown
-            });
-    // Selecting APC attests the IDE's pre-application primary-thread stop.
+    let remote_events = keep_events_alive
+        .then(|| {
+            init_events.keep_alive_in_process(unsafe {
+                BorrowedHandle::borrow_raw(process.target().process)
+            })
+        })
+        .transpose()
+        .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?;
+    let target = process.borrowed().with_loader_state(loader_state);
     let result = unsafe { args.injection_method.injector().inject(&target, &lib_path) };
-    if let Some(event) = remote_event
+    if let Some(events) = remote_events
         && (result.is_ok() || result.as_ref().is_err_and(|e| e.is_pending()))
     {
-        event.retain();
+        events.retain();
     }
     let injected = result.map_err(|e| CliError::AttachStorkFailed(args.pid, e))?;
     if injected.timing == stork::LoadTiming::OnResume {
@@ -105,28 +99,28 @@ where
     // inside `DllMain` can say so, and a target that dies is not worth waiting out: either one
     // used to spend the whole timeout and then report it as a timeout, which names the symptom
     // instead of the cause.
-    match init_event
-        .wait_for_signal_or_process_exit(
-            process.target().process.cast(),
+    match init_events
+        .wait(
+            unsafe { BorrowedHandle::borrow_raw(process.target().process) },
             Some(ATTACH_SIGNAL_TIMEOUT_MS),
         )
         .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?
     {
-        Some(InitWaitOutcome::Signaled) => {
+        InitWaitOutcome::Signaled => {
             sub_progress.success(Some(&format!(
                 "layer successfully initialized in process {}",
                 args.pid
             )));
             Ok(())
         }
-        Some(InitWaitOutcome::Failed) => Err(CliError::AttachInjectionFailed(
+        InitWaitOutcome::Failed => Err(CliError::AttachInjectionFailed(
             args.pid,
             "the layer failed to initialize; its own log names the cause".to_owned(),
         )),
-        Some(InitWaitOutcome::ProcessExited) => Err(CliError::AttachInjectionFailed(
+        InitWaitOutcome::ProcessExited => Err(CliError::AttachInjectionFailed(
             args.pid,
             "the target exited before the layer reported ready".to_owned(),
         )),
-        None => Err(CliError::AttachLayerTimeout(args.pid)),
+        InitWaitOutcome::TimedOut => Err(CliError::AttachLayerTimeout(args.pid)),
     }
 }

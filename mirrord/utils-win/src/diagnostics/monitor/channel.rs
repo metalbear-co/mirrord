@@ -5,11 +5,7 @@
 //! then on the crash path never opens anything by name and never allocates: it writes the shared
 //! section and flips an event.
 
-use std::{
-    io::{self, Read},
-    net::{SocketAddr, TcpStream},
-    time::Duration,
-};
+use std::{io, net::SocketAddr, time::Duration};
 
 use str_win::string_to_u16_buffer;
 use winapi::{
@@ -25,7 +21,7 @@ use winapi::{
 use super::{
     ACK_READY, CLEAN_EVENT_PREFIX, CRASH_EVENT_PREFIX, CrashInfo, DONE_EVENT_PREFIX,
     DUMP_ACK_TIMEOUT_MS, INFO_SECTION_PREFIX, KIND_CRASH, KIND_INIT_FAILURE, REASON_CAPACITY,
-    Registration, write_registration,
+    Registration, exchange,
 };
 use crate::diagnostics::handle::OwnedHandle;
 
@@ -81,12 +77,16 @@ impl MonitorChannel {
         }
     }
 
-    /// Signals an early layer-initialization failure and waits for the monitor to surface it.
+    /// Signals a layer-initialization failure of this process and waits for the monitor to surface
+    /// it.
     ///
     /// Reuses the crash channel: it writes the reason into the shared section with the init-failure
     /// kind, sets the crash event, and waits on the done event. The monitor reports it without a
     /// dump. Without this, an init failure exits via `process::exit` → `DLL_PROCESS_DETACH`, which
     /// signals a clean shutdown and the monitor would never know it failed.
+    ///
+    /// Only a registered, still-running layer can use this. A failure observed from outside goes
+    /// through [`super::report_init_failure_for`] instead, which does not need the process alive.
     ///
     /// # Arguments
     ///
@@ -121,10 +121,15 @@ impl MonitorChannel {
     }
 }
 
+/// How long [`register`] may spend connecting.
+const REGISTER_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long the whole [`register`] exchange may take, connect included.
+const REGISTER_BUDGET: Duration = Duration::from_secs(7);
+
 /// Registers this process with the monitor and opens the crash channel.
 ///
-/// This runs at layer startup, in a healthy state. It is best-effort. A missing monitor or any
-/// failure yields `None`, and the caller falls back to the in-process dump.
+/// This runs at layer startup, in a healthy state. It is best-effort: on an error the caller falls
+/// back to the in-process dump.
 ///
 /// # Arguments
 ///
@@ -136,17 +141,15 @@ impl MonitorChannel {
 /// An opened [`MonitorChannel`], or the error that stopped it.
 ///
 /// The error is worth keeping. "The monitor is not reachable" and "the monitor refused this
-/// process" are different faults with different causes, and a caller that only sees `None` cannot
-/// tell a reader which one happened.
+/// process" are different faults with different causes, and the caller logs which one happened.
 pub fn register(address: SocketAddr, registration: &Registration) -> io::Result<MonitorChannel> {
-    let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-
-    write_registration(&mut stream, registration)?;
-
-    let mut ack = [0u8; 1];
-    stream.read_exact(&mut ack)?;
-    if ack[0] != ACK_READY {
+    let ack = exchange(
+        address,
+        registration,
+        REGISTER_CONNECT_TIMEOUT,
+        REGISTER_BUDGET,
+    )?;
+    if ack != ACK_READY {
         return Err(io::Error::other(
             "the crash monitor refused the registration",
         ));
@@ -158,7 +161,7 @@ pub fn register(address: SocketAddr, registration: &Registration) -> io::Result<
 }
 
 /// Opens the per-pid crash objects the monitor created.
-fn open_channel(pid: u32) -> Option<MonitorChannel> {
+pub(super) fn open_channel(pid: u32) -> Option<MonitorChannel> {
     let crash_name = string_to_u16_buffer(format!("{CRASH_EVENT_PREFIX}{pid}"));
     let done_name = string_to_u16_buffer(format!("{DONE_EVENT_PREFIX}{pid}"));
     let clean_name = string_to_u16_buffer(format!("{CLEAN_EVENT_PREFIX}{pid}"));

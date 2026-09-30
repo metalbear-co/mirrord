@@ -27,10 +27,10 @@
 use std::{
     fmt::Write as _,
     fs::File,
-    io::{self, Write as _},
+    io::{self, Read as _, Seek as _, SeekFrom, Write as _},
     path::{Path, PathBuf},
     sync::{
-        Mutex,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
@@ -40,21 +40,6 @@ use winapi::shared::{
     ntstatus,
 };
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
-
-/// Set while the crash dialog is on screen, blocking on the user.
-///
-/// The monitor's lifetime watchdog reads it so the monitor outlives the CLI session until the
-/// dialog is dismissed, instead of being torn down the instant the crashed process exits.
-static DIALOG_SHOWING: AtomicBool = AtomicBool::new(false);
-
-/// Whether the crash dialog is currently on screen.
-///
-/// # Returns
-///
-/// `true` while a dialog is open and waiting on the user.
-pub(crate) fn dialog_showing() -> bool {
-    DIALOG_SHOWING.load(Ordering::SeqCst)
-}
 
 /// Where to file a bug report.
 const GITHUB_NEW_ISSUE_URL: &str = "https://github.com/metalbear-co/mirrord/issues/new/choose";
@@ -141,11 +126,37 @@ pub struct ProcessNode {
     pub role: String,
     /// Its exact layer log file, when file logging is active. Registered so the bundle never
     /// globs.
-    pub log_path: Option<PathBuf>,
+    pub log: Option<SessionLog>,
     /// The exit code observed when this process died, or `None` if it was still alive — or its
     /// death had not yet been observed — when the report was built. A `Some` marks the node
     /// dead in the tree.
     pub exit_code: Option<u32>,
+}
+
+/// A registered layer log, held open from the moment the monitor accepted it.
+///
+/// The monitor opens the file by its name inside the session directory, refusing links, and the
+/// session archive reads this same open file. Reopening it by name would read whatever the name
+/// leads to by then: a process that can write inside the session directory could have replaced
+/// the file with a link to somewhere else.
+#[derive(Debug, Clone)]
+pub struct SessionLog {
+    /// The file's name, which names its entry in the archive.
+    pub name: String,
+    /// The file itself. Opened for reading, sharing read, write and delete, so the process that
+    /// writes it and the session's cleanup are not held up by it.
+    pub file: Arc<File>,
+}
+
+impl SessionLog {
+    /// Everything the file holds, read from its start.
+    pub fn contents(&self) -> io::Result<Vec<u8>> {
+        let mut file = &*self.file;
+        file.seek(SeekFrom::Start(0))?;
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents)?;
+        Ok(contents)
+    }
 }
 
 /// How the focused process ended.
@@ -165,6 +176,12 @@ pub enum Outcome {
     /// is not lost as a silent clean exit.
     InitFailed {
         /// A human-readable reason, including the session role and parent liveness.
+        reason: String,
+    },
+    /// The layer did not report ready in time, but nothing says it failed: its hooks are live and
+    /// it may still come up. A note for the session's files, never a dialog.
+    SlowStart {
+        /// What the launcher saw.
         reason: String,
     },
 }
@@ -197,7 +214,7 @@ pub struct CrashReport<'a> {
     /// The text crash record path, when one exists.
     pub record: Option<&'a Path>,
     /// The exact session log files to bundle, gathered from the registrations.
-    pub logs: &'a [PathBuf],
+    pub logs: &'a [SessionLog],
     /// A module inventory of the crashing process, when it could be enumerated.
     pub modules: Option<&'a str>,
     /// The mirrord version string.
@@ -235,35 +252,42 @@ static ARCHIVE_HWM: AtomicUsize = AtomicUsize::new(0);
 /// dumps.
 static ARCHIVE_FINALIZED: AtomicBool = AtomicBool::new(false);
 
-/// Composes the report, writes its flat artifacts, (re)builds the session archive, and shows the
-/// dialog.
+/// What [`write_artifacts`] produced for one report, for the dialog that may follow it.
+pub struct Written {
+    /// The report text, which is also the dialog's body.
+    pub report_text: String,
+    /// Whether the report file reached the disk.
+    pub report_written: bool,
+    /// Whether building the session archive failed. A session with nothing but reports has no
+    /// archive to build, and that is not a failure.
+    pub archive_failed: bool,
+}
+
+/// Composes the report, writes its flat artifacts, and (re)builds the session archive.
 ///
 /// This incident's report text — and its module inventory, when there is one — are written as loose
 /// files, then the single per-session archive is rebuilt to include every incident so far. The
-/// rebuild happens before the dialog so a current, complete bundle already exists when the dialog
+/// rebuild happens before any dialog so a current, complete bundle already exists when the dialog
 /// points the user at it.
 ///
 /// # Arguments
 ///
 /// * `report` - the crash facts.
 /// * `directory` - where to write the artifacts.
-/// * `show_dialog` - whether this caller claimed the single per-session dialog slot. The caller
-///   does the claiming so this function never has to hold a shared lock across the blocking dialog.
 /// * `incidents` - every incident reported this session, including this one, for the session
 ///   archive.
 /// * `session_id` - the session stamp the archive file name is built from.
-pub fn surface(
+pub fn write_artifacts(
     report: &CrashReport,
     directory: &Path,
-    show_dialog: bool,
     incidents: &[Incident],
     session_id: &str,
-) {
+) -> Written {
     let report_text = report_text(report);
 
     // This incident's loose files are the source of truth: the report text always, and the module
     // inventory when we have one. The record is written by the layer, the dump by the monitor.
-    write_report(directory, report, &report_text);
+    let report_written = write_report(directory, report, &report_text);
     if let Some(modules) = report.modules {
         write_modules(directory, report.stem, modules);
     }
@@ -279,27 +303,53 @@ pub fn surface(
         logs: report.logs,
         session_id,
     };
-    let archive = build_session_archive(&session_archive)
-        .inspect_err(|error| tracing::warn!(%error, "crash report: failed to build the archive"))
-        .ok()
-        .flatten();
-    if let Some(archive) = &archive {
-        tracing::info!(path = %archive.display(), "crash report: wrote the attachable archive");
+    let archive_failed = match build_session_archive(&session_archive) {
+        Ok(Some(archive)) => {
+            tracing::info!(path = %archive.display(), "crash report: wrote the attachable archive");
+            false
+        }
+        Ok(None) => false,
+        Err(error) => {
+            tracing::warn!(%error, "crash report: failed to build the archive");
+            true
+        }
+    };
+
+    Written {
+        report_text,
+        report_written,
+        archive_failed,
+    }
+}
+
+/// Shows the crash dialog for a report [`write_artifacts`] already wrote, unless this is CI.
+///
+/// In CI nobody could dismiss it and the monitor would block. It blocks until the user dismisses
+/// it, and the monitor's watchdog keeps the monitor alive until then. The files and the console
+/// output are always written first, so a suppressed or dismissed dialog loses nothing.
+///
+/// The caller decides whether this report claims the session's single dialog, and must hold no
+/// lock that other reports need while this runs.
+pub fn show_dialog(report: &CrashReport, written: &Written, directory: &Path) {
+    if ci_info::is_ci() {
+        return;
     }
 
-    // Show the dialog whenever this caller claimed the session's single slot — unless we're in CI,
-    // where nobody could dismiss it and the monitor would block. It blocks until the user dismisses
-    // it, and the monitor's watchdog keeps the monitor alive until then. The files and the console
-    // output are always written, so a suppressed or dismissed dialog loses nothing.
-    if show_dialog && !ci_info::is_ci() {
-        let title = dialog_title(report);
-        let subtitle = dialog_subtitle(report);
-        let body = dialog_body(report, &report_text);
-
-        DIALOG_SHOWING.store(true, Ordering::SeqCst);
-        super::dialog::show(&title, &subtitle, &body, directory, GITHUB_NEW_ISSUE_URL);
-        DIALOG_SHOWING.store(false, Ordering::SeqCst);
+    let title = dialog_title(report);
+    let subtitle = dialog_subtitle(report);
+    let mut body = dialog_body(report, &written.report_text);
+    // The report text tells the reader where its files are. When they could not be written, the
+    // dialog is the only copy, and it has to say so rather than send them looking.
+    if !written.report_written || written.archive_failed {
+        let _ = write!(
+            body,
+            "\nThe crash files could not all be written to {}, so this window may be the only \
+             copy of this report. Copy it before closing it.\n",
+            directory.display(),
+        );
     }
+
+    super::dialog::show(&title, &subtitle, &body, directory, GITHUB_NEW_ISSUE_URL);
 }
 
 /// Whether the focused process should be presented as a crash (vs. an external kill).
@@ -312,6 +362,8 @@ fn presented_as_crash(report: &CrashReport) -> bool {
 fn dialog_title(report: &CrashReport) -> String {
     if matches!(report.outcome, Outcome::InitFailed { .. }) {
         "mirrord layer failed to start".to_owned()
+    } else if matches!(report.outcome, Outcome::SlowStart { .. }) {
+        "mirrord layer was slow to start".to_owned()
     } else if presented_as_crash(report) {
         "mirrord caught a crash".to_owned()
     } else {
@@ -433,6 +485,7 @@ fn focus_mark(report: &CrashReport) -> &'static str {
     match &report.outcome {
         Outcome::Crashed => " ✗ crashed",
         Outcome::InitFailed { .. } => " ✗ failed to start",
+        Outcome::SlowStart { .. } => " (slow to start)",
         Outcome::Terminated { exit_code } if is_crash_code(*exit_code) => " ✗ crashed",
         Outcome::Terminated { .. } => " ✗ terminated",
     }
@@ -462,31 +515,15 @@ fn is_crash_code(code: u32) -> bool {
     is_native_fault(code) && code != STATUS_CONTROL_C_EXIT
 }
 
-/// Explains a fast-fail, which no in-process handler can catch.
-///
-/// `STATUS_STACK_BUFFER_OVERRUN` is what `__fastfail` raises, and Rust's abort on MSVC goes through
-/// it. It steps around SEH and vectored handlers by design, so the layer cannot write a dump for
-/// it. A reader needs to know that the missing dump is the rule here, what usually causes one, and
-/// what does work instead.
-/// Why a fast-fail leaves nothing behind.
-///
-/// `STATUS_STACK_BUFFER_OVERRUN` is what `__fastfail` raises, and Rust's abort on MSVC goes through
-/// it. It steps around SEH and vectored handlers by design.
 const FAST_FAIL_NOTE: &str = r#"About this one: a fast-fail runs no exception handler. Windows ends
 the process at once, so no dump can be written from inside it. That is by design, not a gap in
 this report.
 
-A panic that leaves a hook gets here too. A hook is an extern "system" function that Windows
-calls, and Rust ends the process rather than let a panic cross that boundary. The usual cause is
-a hook that logs while the thread-local storage of that thread is being destroyed, which panics
-with AccessError. The panic text goes to the terminal, not to the layer log, so look for
-"panicked at" in the console output of the run."#;
+Many things end a process this way: a stack buffer check, abort(), std::terminate, or a Rust
+panic that tries to leave a function Windows called. That last one includes mirrord's own hooks.
+A panic prints its text to the terminal, not to the layer log, so look for "panicked at" in the
+console output of the run before suspecting the application."#;
 
-/// Why a heap corruption leaves nothing behind, and what finds the culprit.
-///
-/// `STATUS_HEAP_CORRUPTION` is raised through `RtlReportFatalFailure`, which ends the process
-/// without running a handler, exactly like a fast-fail. The report must say so, or a reader
-/// spends the evening looking for a dump that was never possible.
 const HEAP_CORRUPTION_NOTE: &str = r#"About this one: the heap detected damage and ended the
 process through RtlReportFatalFailure, which runs no exception handler. So no dump can be written
 from inside it. That is by design, not a gap in this report.
@@ -501,33 +538,13 @@ itself rather than later. It needs an administrator:
 
   gflags /p /enable <image>.exe /full        (turn off again with /p /disable)"#;
 
-/// The recipe for capturing a dump of the next uncatchable crash.
-///
-/// Shared by every code that no in-process handler can see, because in each of those cases the
-/// only way to get a dump is to have Windows take it from outside.
+/// The keys are spelled out in full, not through a shell variable, so the commands work as written
+/// in both `cmd` and PowerShell.
 const WER_DUMP_NOTE: &str = r#"To capture a dump of the next one, turn on Windows Error Reporting
 local dumps. This needs an administrator, and the keys stay until you remove them:
 
-  set K=HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\<image>.exe
-  reg add "%K%" /v DumpFolder /t REG_EXPAND_SZ /d C:\dumps
-  reg add "%K%" /v DumpType   /t REG_DWORD     /d 2"#;
-
-/// Explains a crash code that no in-process handler can see, when there is something to say.
-///
-/// # Arguments
-///
-/// * `code` - the NTSTATUS the process died with.
-///
-/// # Returns
-///
-/// The explanation, or `None` for a code an ordinary handler would have caught.
-fn uncatchable_note(code: u32) -> Option<&'static str> {
-    match code {
-        STATUS_STACK_BUFFER_OVERRUN => Some(FAST_FAIL_NOTE),
-        STATUS_HEAP_CORRUPTION => Some(HEAP_CORRUPTION_NOTE),
-        _ => None,
-    }
-}
+  reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\<image>.exe" /v DumpFolder /t REG_EXPAND_SZ /d C:\dumps
+  reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\<image>.exe" /v DumpType /t REG_DWORD /d 2"#;
 
 /// Returns a short name for a known NTSTATUS crash code.
 fn exception_name(code: u32) -> Option<&'static str> {
@@ -565,7 +582,7 @@ pub fn attribution(report: &CrashReport) -> String {
                 .find(|node| node.pid == parent)
                 .map(|node| node.name.as_str())
                 .unwrap_or("unknown");
-            format!("its parent is an intermediate spawner {name}(pid {parent})")
+            format!("its parent is an intermediate spawner {name} (pid {parent})")
         }
     }
 }
@@ -614,18 +631,25 @@ fn report_text(report: &CrashReport) -> String {
         Outcome::Crashed => {
             let _ = writeln!(
                 out,
-                "A process running under mirrord crashed: {}(pid {}).",
+                "A process running under mirrord crashed: {} (pid {}).",
                 report.focus_name, report.focus_pid,
             );
         }
         Outcome::InitFailed { reason } => {
             let _ = writeln!(
                 out,
-                "mirrord's layer failed to initialize in {}(pid {}), so the process did not start \
-                 under mirrord.",
+                "mirrord's layer failed to initialize in {} (pid {}).",
                 report.focus_name, report.focus_pid,
             );
             let _ = writeln!(out, "Reason: {reason}");
+        }
+        Outcome::SlowStart { reason } => {
+            let _ = writeln!(
+                out,
+                "mirrord's layer in {} (pid {}) was slow to start. This is a note, not a crash.",
+                report.focus_name, report.focus_pid,
+            );
+            let _ = writeln!(out, "What was seen: {reason}");
         }
         Outcome::Terminated { exit_code } if is_crash_code(*exit_code) => {
             // The exit code is an NTSTATUS fault, so this was a crash the in-process handler did
@@ -633,7 +657,7 @@ fn report_text(report: &CrashReport) -> String {
             let named = exception_name(*exit_code).unwrap_or("a fatal exception");
             let _ = writeln!(
                 out,
-                "A process running under mirrord crashed: {}(pid {}) — {named} ({exit_code:#010x}). \
+                "A process running under mirrord crashed: {} (pid {}) — {named} ({exit_code:#010x}). \
                  The in-process handler did not capture it, so no memory dump is available for this \
                  one.",
                 report.focus_name, report.focus_pid,
@@ -642,7 +666,12 @@ fn report_text(report: &CrashReport) -> String {
             // Every code that reaches here was invisible to the in-process handler, so every
             // one of them needs the recipe for getting a dump next time. Only the explanation
             // above it differs.
-            if let Some(note) = uncatchable_note(*exit_code) {
+            let note = match *exit_code {
+                STATUS_STACK_BUFFER_OVERRUN => Some(FAST_FAIL_NOTE),
+                STATUS_HEAP_CORRUPTION => Some(HEAP_CORRUPTION_NOTE),
+                _ => None,
+            };
+            if let Some(note) = note {
                 let _ = writeln!(out);
                 let _ = writeln!(out, "{note}");
             }
@@ -653,7 +682,7 @@ fn report_text(report: &CrashReport) -> String {
         Outcome::Terminated { exit_code } => {
             let _ = writeln!(
                 out,
-                "A process running under mirrord was terminated unexpectedly: {}(pid {}), \
+                "A process running under mirrord was terminated unexpectedly: {} (pid {}), \
                  exit code {exit_code:#010x}. No crash handler fired, which usually means it was \
                  killed from the outside.",
                 report.focus_name, report.focus_pid,
@@ -684,10 +713,18 @@ fn report_text(report: &CrashReport) -> String {
 }
 
 /// Writes the report text to its flat file.
-fn write_report(directory: &Path, report: &CrashReport, text: &str) {
+///
+/// # Returns
+///
+/// `true` when the file was written.
+fn write_report(directory: &Path, report: &CrashReport, text: &str) -> bool {
     let path = directory.join(format!("{}.report.txt", report.stem));
-    if let Err(error) = File::create(&path).and_then(|mut file| file.write_all(text.as_bytes())) {
-        tracing::warn!(%error, "crash report: failed to write the report text");
+    match File::create(&path).and_then(|mut file| file.write_all(text.as_bytes())) {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(%error, "crash report: failed to write the report text");
+            false
+        }
     }
 }
 
@@ -709,7 +746,7 @@ pub struct SessionArchive<'a> {
     /// Every incident reported this session.
     pub incidents: &'a [Incident],
     /// The registered session log files to bundle, deduplicated by file name.
-    pub logs: &'a [PathBuf],
+    pub logs: &'a [SessionLog],
     /// The session stamp the archive file name is built from.
     pub session_id: &'a str,
 }
@@ -765,12 +802,9 @@ fn build_session_archive(archive: &SessionArchive) -> io::Result<Option<PathBuf>
     // The caller passes the whole session's log set as one flat list; two registrations can name
     // the same file, so keep the first sighting of each file name.
     let mut seen = std::collections::HashSet::new();
-    let logs: Vec<(String, PathBuf)> = logs
+    let logs: Vec<&SessionLog> = logs
         .iter()
-        .filter_map(|log| {
-            let name = log.file_name()?.to_str()?.to_owned();
-            seen.insert(name.clone()).then_some((name, log.clone()))
-        })
+        .filter(|log| seen.insert(log.name.as_str()))
         .collect();
 
     // A report-only session (no records, dumps, or logs) adds nothing over the loose
@@ -834,9 +868,9 @@ fn build_session_archive(archive: &SessionArchive) -> io::Result<Option<PathBuf>
     }
 
     // The session logs, once each.
-    for (name, log) in logs {
-        if let Ok(data) = std::fs::read(&log) {
-            zip.start_file(format!("layer-logs/{name}"), options)
+    for log in logs {
+        if let Ok(data) = log.contents() {
+            zip.start_file(format!("layer-logs/{}", log.name), options)
                 .map_err(to_io)?;
             zip.write_all(&data)?;
         }
@@ -944,6 +978,10 @@ mod tests {
         write("mirrord-crash_b_node_pid200.report.txt", "child report");
         let log = dir.join("mirrord-layer_shared.log");
         std::fs::write(&log, "shared log").unwrap();
+        let log = SessionLog {
+            name: "mirrord-layer_shared.log".to_owned(),
+            file: Arc::new(File::open(&log).unwrap()),
+        };
 
         let incidents = [
             Incident {
@@ -1045,7 +1083,7 @@ mod tests {
             parent_pid,
             name: name.to_owned(),
             role: "child".to_owned(),
-            log_path: None,
+            log: None,
             exit_code: None,
         }
     }
@@ -1239,5 +1277,49 @@ mod tests {
         ));
         assert!(text.contains("crashed"));
         assert!(text.contains("did not capture"));
+    }
+
+    /// A session with nothing but a report has no archive to build. That is not a write failure,
+    /// so the dialog must not claim the files are missing.
+    #[test]
+    fn a_report_only_session_is_not_a_write_failure() {
+        let dir = std::env::temp_dir().join(format!("mirrord-report-only-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let nodes = [node(50, 10, "child.exe")];
+        let mut init = report(
+            Outcome::InitFailed {
+                reason: "x".to_owned(),
+            },
+            &nodes,
+            50,
+            "child.exe",
+            10,
+        );
+        init.stem = "mirrord-crash_only_child_pid50";
+        let incidents = [Incident {
+            name: "child.exe".to_owned(),
+            pid: 50,
+            stem: init.stem.to_owned(),
+        }];
+
+        let written = write_artifacts(&init, &dir, &incidents, "report-only");
+        let report_exists = dir
+            .join("mirrord-crash_only_child_pid50.report.txt")
+            .exists();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(written.report_written);
+        assert!(report_exists);
+        assert!(
+            !written.archive_failed,
+            "no archive to build is not a failure"
+        );
+
+        // The failure the dialog does warn about.
+        let unwritable = dir.join("missing").join("deeper");
+        let written = write_artifacts(&init, &unwritable, &incidents, "report-only");
+        assert!(!written.report_written);
     }
 }

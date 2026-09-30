@@ -18,7 +18,7 @@ mirrord has hit an unexpected problem!
 >> Or file a [bug report on GitHub](https://github.com/metalbear-co/mirrord/issues/new/choose)
 >> Or email us at [hi@metalbear.com](mailto:hi@metalbear.com)
 
-A process running under mirrord crashed: crasher(pid 32908).
+A process running under mirrord crashed: crasher (pid 32908).
 mirrord version: 3.216.0
 
 Process tree:

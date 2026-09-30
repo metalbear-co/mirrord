@@ -206,7 +206,11 @@ fn resolve_injection_method(
 
     child_env
         .get(MIRRORD_INJECTION_METHOD_ENV)
-        .map(|value| value.parse().map_err(CliError::PitmInvalidInjectionMethod))
+        .map(|value| {
+            value.parse().map_err(|error: strum::ParseError| {
+                CliError::PitmInvalidInjectionMethod(error.to_string())
+            })
+        })
         .transpose()
         .map(Option::unwrap_or_default)
 }

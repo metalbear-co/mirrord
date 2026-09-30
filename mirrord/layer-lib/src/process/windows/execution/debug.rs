@@ -79,32 +79,39 @@ use mirrord_config::MIRRORD_LAYER_WAIT_FOR_DEBUGGER;
 /// let should_wait = should_wait_for_debugger(); // Returns false
 /// ```
 pub fn should_wait_for_debugger() -> bool {
-    let wait_debugger = match env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER) {
-        Ok(value) => value,
-        Err(_) => return false,
+    let Ok(setting) = env::var(MIRRORD_LAYER_WAIT_FOR_DEBUGGER) else {
+        return false;
     };
+    let current_exe = get_current_process_name();
+    let should_wait = debugger_wait_targets(Some(&setting), &current_exe);
 
-    if wait_debugger == "1" {
-        // Wait for debugger on all processes
-        true
-    } else if !wait_debugger.is_empty() {
-        // Process name filter - get current executable name
-        let current_exe = get_current_process_name().to_lowercase();
-        let filter_name = wait_debugger.to_lowercase();
-        let should_wait = current_exe == filter_name;
+    if should_wait && setting != "1" {
+        // This runs on the `DllMain` path, where `eprintln!` ends the process. See the
+        // warning at the top of `crate::logging`.
+        crate::logging::report_to_stderr(format_args!(
+            "mirrord: Process '{}' matches debugger filter '{setting}', waiting for debugger",
+            current_exe.to_lowercase()
+        ));
+    }
 
-        if should_wait {
-            // This runs on the `DllMain` path, where `eprintln!` ends the process. See the
-            // warning at the top of `crate::logging`.
-            crate::logging::report_to_stderr(format_args!(
-                "mirrord: Process '{current_exe}' matches debugger filter '{wait_debugger}',                  waiting for debugger"
-            ));
-        }
+    should_wait
+}
 
-        should_wait
-    } else {
-        // Empty value means no debugger wait
-        false
+/// Whether a `MIRRORD_LAYER_WAIT_FOR_DEBUGGER` value makes the layer in a process wait for a
+/// debugger.
+///
+/// The one rule both sides apply: the layer, to decide whether to wait, and its launcher, to
+/// decide whether the wait may outlast its usual bounds.
+///
+/// # Arguments
+///
+/// * `setting` - the variable's value in that process's environment, if it has one.
+/// * `image_stem` - that process's executable name without its extension.
+pub fn debugger_wait_targets(setting: Option<&str>, image_stem: &str) -> bool {
+    match setting {
+        None | Some("") => false,
+        Some("1") => true,
+        Some(filter) => filter.to_lowercase() == image_stem.to_lowercase(),
     }
 }
 
@@ -169,5 +176,21 @@ pub fn format_debugger_config() -> String {
         Ok(value) if value == "1" => "all processes".to_owned(),
         Ok(value) if !value.is_empty() => format!("processes matching '{}'", value),
         _ => "disabled".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_setting_names_the_processes_that_wait() {
+        assert!(!debugger_wait_targets(None, "node"));
+        assert!(!debugger_wait_targets(Some(""), "node"));
+        assert!(debugger_wait_targets(Some("1"), "node"));
+        assert!(debugger_wait_targets(Some("Node"), "node"));
+        assert!(debugger_wait_targets(Some("node"), "NODE"));
+        assert!(!debugger_wait_targets(Some("node"), "python"));
+        assert!(!debugger_wait_targets(Some("node.exe"), "node"));
     }
 }

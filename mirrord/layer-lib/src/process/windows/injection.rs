@@ -1,20 +1,33 @@
 //! Injection selection shared by CLI launches and intercepted child creation.
 
-use std::{fmt, str::FromStr};
+use strum_macros::{Display, EnumString};
 
 /// Forward the selected method to descendants created through layer hooks.
 pub const MIRRORD_INJECTION_METHOD_ENV: &str = "MIRRORD_INJECTION_METHOD";
 
 /// Explicit Windows injection methods; selection never falls back automatically.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+///
+/// Parsing ignores ASCII case, because the value often comes from an environment variable a person
+/// typed; [`Display`](std::fmt::Display) always writes the canonical lowercase name.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, EnumString, Display)]
+#[strum(serialize_all = "kebab-case", ascii_case_insensitive)]
 pub enum InjectionMethod {
     /// Load immediately through a remote thread.
     #[default]
     LoadLibrary,
-    /// Queue loading on the primary thread before application execution.
+    /// Queue loading on the primary thread, which runs it before the executable's entry point.
     Apc,
     /// Rewrite imports in a newly created, never-resumed process.
     Iat,
+}
+
+/// A method name that cannot be used.
+#[derive(Debug, thiserror::Error)]
+pub enum InjectionMethodError {
+    #[error("unknown injection method {0:?}; expected load-library, apc or iat")]
+    Unknown(String),
+    #[error("attach supports load-library or apc; iat requires a newly created process")]
+    IatOnAttach,
 }
 
 impl InjectionMethod {
@@ -27,40 +40,19 @@ impl InjectionMethod {
         }
     }
 
+    /// Parses a method name, with an error that lists the names it accepts.
+    pub fn parse(value: &str) -> Result<Self, InjectionMethodError> {
+        value
+            .parse()
+            .map_err(|_| InjectionMethodError::Unknown(value.to_owned()))
+    }
+
     /// Attach cannot establish the never-run-loader requirement for IAT.
-    pub fn parse_attach(value: &str) -> Result<Self, String> {
-        match value.parse()? {
-            Self::Iat => Err(
-                "attach supports load-library or apc; iat requires a newly created process"
-                    .to_owned(),
-            ),
+    pub fn parse_attach(value: &str) -> Result<Self, InjectionMethodError> {
+        match Self::parse(value)? {
+            Self::Iat => Err(InjectionMethodError::IatOnAttach),
             method => Ok(method),
         }
-    }
-}
-
-impl FromStr for InjectionMethod {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "load-library" => Ok(Self::LoadLibrary),
-            "apc" => Ok(Self::Apc),
-            "iat" => Ok(Self::Iat),
-            _ => Err(format!(
-                "unknown injection method {value:?}; expected load-library, apc, or iat"
-            )),
-        }
-    }
-}
-
-impl fmt::Display for InjectionMethod {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::LoadLibrary => "load-library",
-            Self::Apc => "apc",
-            Self::Iat => "iat",
-        })
     }
 }
 
@@ -69,19 +61,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn method_strings_are_explicit_and_attach_rejects_iat() {
-        for method in [
-            InjectionMethod::LoadLibrary,
-            InjectionMethod::Apc,
-            InjectionMethod::Iat,
-        ] {
-            assert_eq!(
-                method.to_string().parse::<InjectionMethod>().unwrap(),
-                method
-            );
-        }
-        assert!(InjectionMethod::parse_attach("iat").is_err());
-        assert!(InjectionMethod::parse_attach("apc").is_ok());
-        assert!("auto".parse::<InjectionMethod>().is_err());
+    fn an_unknown_method_names_the_choices() {
+        let error = InjectionMethod::parse("auto").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            r#"unknown injection method "auto"; expected load-library, apc or iat"#
+        );
+        assert!(matches!(
+            InjectionMethod::parse_attach("IAT"),
+            Err(InjectionMethodError::IatOnAttach)
+        ));
     }
 }

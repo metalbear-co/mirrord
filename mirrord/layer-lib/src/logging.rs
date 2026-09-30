@@ -70,6 +70,12 @@ use {
 /// Environment variable for specifying layer log directory path
 pub const MIRRORD_LAYER_LOG_PATH: &str = "MIRRORD_LAYER_LOG_PATH";
 
+/// The prefix of every layer log file name.
+///
+/// On Windows the crash monitor opens a registered log only under a name of this shape, see
+/// `utils_win::diagnostics::monitor::is_log_name`.
+const LOG_FILE_PREFIX: &str = "mirrord-layer_";
+
 /// Address of a running mirrord-console. When set, the console owns the layer's logs.
 const MIRRORD_CONSOLE_ADDR: &str = "MIRRORD_CONSOLE_ADDR";
 
@@ -777,7 +783,7 @@ fn build_log_file_path(log_dir: &str) -> io::Result<String> {
     }
     std::fs::create_dir_all(dir_path)?;
 
-    let file_name = format!("mirrord-layer_{}_{}_pid{}", timestamp, process_name, pid);
+    let file_name = format!("{LOG_FILE_PREFIX}{timestamp}_{process_name}_pid{pid}");
     let full_path = dir_path.join(file_name);
 
     report_to_stderr(format_args!(
@@ -826,6 +832,26 @@ mod tests {
     };
 
     use super::*;
+
+    /// The Windows crash monitor opens a registered log only under a name that passes its rule,
+    /// and it repeats the prefix, because it cannot depend on this crate. A name this logger builds
+    /// that failed the rule would drop the log from every crash bundle without a word.
+    #[cfg(windows)]
+    #[test]
+    fn the_crash_monitor_accepts_the_log_file_name() {
+        assert_eq!(LOG_FILE_PREFIX, utils_win::diagnostics::monitor::LOG_PREFIX);
+
+        let directory = tempdir().expect("temp dir");
+        let path = build_log_file_path(&directory.path().to_string_lossy()).expect("log path");
+        let name = Path::new(&path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("a file name");
+        assert!(
+            utils_win::diagnostics::monitor::is_log_name(name),
+            "{name} is refused by the crash monitor"
+        );
+    }
 
     /// The subscriber reads process-wide environment variables, so the tests that change them must
     /// run one at a time.
