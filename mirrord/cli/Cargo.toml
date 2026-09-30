@@ -27,6 +27,7 @@ mirrord-kube = { path = "../kube", features = ["portforward"] }
 mirrord-config = { path = "../config" }
 mirrord-up = { path = "../up" }
 mirrord-tui = { path = "../tui" }
+mirrord-mcp = { path = "../mcp" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
