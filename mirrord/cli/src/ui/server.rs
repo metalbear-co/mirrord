@@ -59,7 +59,7 @@ use crate::{
     data::UserData,
     ui::{
         MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, daemon, db_portforwards,
-        error::ApiError, wizard::wizard_router,
+        error::ApiError, lifecycle::DaemonLifecycle, wizard::wizard_router,
     },
 };
 
@@ -351,8 +351,12 @@ pub struct AppState {
     pub(crate) clients: Arc<RwLock<HashMap<Option<String>, Client>>>,
     /// DB branch forwards owned by the local daemon and shared by active mirrord sessions.
     pub(crate) db_portforwards: db_portforwards::DbPortForwards,
-    /// Cancels the daemon server after an authenticated, safe shutdown request.
+    /// Cancels the daemon server after an authenticated, safe shutdown request or once a
+    /// session-owned daemon goes idle. See [`crate::ui::lifecycle`] for how cancellation and
+    /// admission of new work are serialized.
     pub(crate) shutdown: CancellationToken,
+    /// Whether the daemon may stop itself when idle, and when it was last used.
+    pub(crate) lifecycle: Arc<DaemonLifecycle>,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -438,6 +442,7 @@ pub(super) async fn token_auth(
     if let Some(cookie) = jar.get("mirrord_token")
         && cookie.value() == state.token
     {
+        state.lifecycle.touch();
         return next.run(request).await;
     }
 
@@ -448,6 +453,7 @@ pub(super) async fn token_auth(
         .unwrap_or_default()
         == Some(&state.token)
     {
+        state.lifecycle.touch();
         let mut response = next.run(request).await;
         if let Ok(value) = HeaderValue::from_str(&auth_cookie(&state.token).to_string()) {
             response.headers_mut().append(header::SET_COOKIE, value);
@@ -582,19 +588,35 @@ async fn add_session(session_id: String, endpoint: SessionEndpoint, state: AppSt
         session: Box::new(tracked.info.clone()),
     };
 
-    {
-        let mut sessions = state.sessions.write().await;
-        if let Entry::Vacant(entry) = sessions.entry(session_id.clone()) {
-            entry.insert(tracked);
-        } else {
-            return;
-        }
+    if !register_session(&state, session_id.clone(), tracked).await {
+        return;
     }
 
     let _ = state.notify_tx.send(notification);
     info!(%session_id, "Session added");
 
     tokio::spawn(stream_session_events(session_id, session_client, state));
+}
+
+/// Starts tracking a session unless it is already tracked or the daemon is shutting down.
+///
+/// Checking cancellation under the sessions write lock is the registration half of the daemon's
+/// admission rule, see [`crate::ui::lifecycle`]. A session rejected here is not lost: the next
+/// daemon finds it through [`scan_existing_sessions`].
+async fn register_session(state: &AppState, session_id: String, tracked: TrackedSession) -> bool {
+    let mut sessions = state.sessions.write().await;
+    if state.shutdown.is_cancelled() {
+        debug!(%session_id, "not tracking session: the local daemon is shutting down");
+        return false;
+    }
+
+    match sessions.entry(session_id) {
+        Entry::Vacant(entry) => {
+            entry.insert(tracked);
+            true
+        }
+        Entry::Occupied(_) => false,
+    }
 }
 
 /// Removes a locally tracked session and releases all of its DB-forward claims.
@@ -1007,35 +1029,56 @@ async fn ws_handler(
     ws.on_upgrade(|socket| ws_connection(socket, state))
 }
 
+/// Streams session notifications to one WebSocket client until it disconnects or the daemon shuts
+/// down.
+///
+/// The notification receiver counts as a connected UI client for idle shutdown (see
+/// [`crate::ui::lifecycle`]), so the task also watches the socket and drops the receiver as soon
+/// as the client goes away, instead of noticing only on the next failed send.
 async fn ws_connection(mut socket: WebSocket, state: AppState) {
-    {
+    // Subscribing while holding the sessions lock means every session change lands either in the
+    // snapshot or in `rx`: registration and removal update the map under the write lock and
+    // broadcast after releasing it. A change made just before the snapshot can also arrive through
+    // `rx`, which the client sees as a repeated addition or the removal of a session it never saw.
+    let (snapshot, mut rx) = {
         let sessions = state.sessions.read().await;
-        for session in sessions.values() {
-            let notification = SessionNotification::SessionAdded {
+        let rx = state.notify_tx.subscribe();
+        let snapshot: Vec<SessionNotification> = sessions
+            .values()
+            .map(|session| SessionNotification::SessionAdded {
                 session: Box::new(session.info.clone()),
-            };
-            let msg = serde_json::to_string(&notification)
-                .expect("notification serialization cannot fail");
-            if socket.send(Message::Text(msg.into())).await.is_err() {
-                return;
-            }
+            })
+            .collect();
+        (snapshot, rx)
+    };
+    for notification in snapshot {
+        let msg =
+            serde_json::to_string(&notification).expect("notification serialization cannot fail");
+        if socket.send(Message::Text(msg.into())).await.is_err() {
+            return;
         }
     }
 
-    let mut rx = state.notify_tx.subscribe();
     loop {
-        match rx.recv().await {
-            Ok(notification) => {
-                let msg = serde_json::to_string(&notification)
-                    .expect("notification serialization cannot fail");
-                if socket.send(Message::Text(msg.into())).await.is_err() {
-                    break;
+        tokio::select! {
+            notification = rx.recv() => match notification {
+                Ok(notification) => {
+                    let msg = serde_json::to_string(&notification)
+                        .expect("notification serialization cannot fail");
+                    if socket.send(Message::Text(msg.into())).await.is_err() {
+                        break;
+                    }
                 }
-            }
-            Err(broadcast::error::RecvError::Lagged(n)) => {
-                warn!(n, "WebSocket client lagged, dropped messages");
-            }
-            Err(broadcast::error::RecvError::Closed) => break,
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    warn!(n, "WebSocket client lagged, dropped messages");
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            message = socket.recv() => match message {
+                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+                Some(Ok(_)) => {}
+            },
+            _ = state.shutdown.cancelled() => break,
         }
     }
 }
@@ -1388,9 +1431,11 @@ mod tests {
         body::Body,
         http::{Request, StatusCode, header},
     };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tower::ServiceExt;
 
     use super::*;
+    use crate::ui::lifecycle::{self, DaemonMode};
 
     const TEST_TOKEN: &str = "test-token-1234567890abcdef";
 
@@ -1408,6 +1453,7 @@ mod tests {
             clients: Default::default(),
             db_portforwards: Default::default(),
             shutdown: CancellationToken::new(),
+            lifecycle: Arc::new(DaemonLifecycle::new(DaemonMode::SessionOwned)),
         }
     }
 
@@ -1842,6 +1888,224 @@ mod tests {
         );
     }
 
+    fn tracked_session(session_id: &str) -> TrackedSession {
+        let endpoint = SessionEndpoint::for_session(session_id, std::path::Path::new("/tmp"));
+        TrackedSession {
+            info: SessionInfo {
+                session_id: session_id.to_owned(),
+                key: None,
+                target: "deployment/test".to_owned(),
+                namespace: None,
+                context: None,
+                started_at: "2026-09-22T12:00:00Z".to_owned(),
+                mirrord_version: "0.0.0".to_owned(),
+                is_operator: false,
+                processes: Vec::new(),
+                port_subscriptions: Vec::new(),
+                config: serde_json::Value::Null,
+            },
+            endpoint: endpoint.clone(),
+            events: Vec::new(),
+            client: SessionClient::new(endpoint),
+        }
+    }
+
+    async fn internal_status(
+        state: &AppState,
+        request: axum::http::request::Builder,
+    ) -> StatusCode {
+        let request = request
+            .header(TOKEN_HEADER_NAME, TEST_TOKEN)
+            .body(Body::empty())
+            .unwrap();
+        build_router(state.clone())
+            .oneshot(request)
+            .await
+            .unwrap()
+            .status()
+    }
+
+    /// A daemon the user started never stops itself, however long it has been idle.
+    #[tokio::test]
+    async fn persistent_daemon_is_not_stopped_when_idle() {
+        let state = AppState {
+            lifecycle: Arc::new(DaemonLifecycle::new(DaemonMode::Persistent)),
+            ..test_state()
+        };
+
+        assert!(!lifecycle::stop_if_idle(&state, Duration::ZERO).await);
+        assert!(!state.shutdown.is_cancelled());
+    }
+
+    /// Opening the UI against a session-owned daemon makes it persistent.
+    #[tokio::test]
+    async fn promoted_daemon_is_not_stopped_when_idle() {
+        let state = test_state();
+
+        assert_eq!(
+            internal_status(&state, Request::post("/api/internal/persist")).await,
+            StatusCode::NO_CONTENT
+        );
+        assert!(!lifecycle::stop_if_idle(&state, Duration::ZERO).await);
+        assert!(!state.shutdown.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn session_owned_daemon_stops_once_idle() {
+        let state = test_state();
+
+        assert!(!lifecycle::stop_if_idle(&state, Duration::from_secs(3600)).await);
+        assert!(!state.shutdown.is_cancelled());
+
+        assert!(lifecycle::stop_if_idle(&state, Duration::ZERO).await);
+        assert!(state.shutdown.is_cancelled());
+    }
+
+    /// Tracked sessions and connected WebSocket clients keep a session-owned daemon up.
+    #[tokio::test]
+    async fn session_owned_daemon_stays_up_while_used() {
+        let state = test_state();
+
+        let ws_client = state.notify_tx.subscribe();
+        assert!(!lifecycle::stop_if_idle(&state, Duration::ZERO).await);
+        drop(ws_client);
+
+        assert!(register_session(&state, "session".to_owned(), tracked_session("session")).await);
+        assert!(!lifecycle::stop_if_idle(&state, Duration::ZERO).await);
+
+        remove_session("session", &state).await;
+        assert!(lifecycle::stop_if_idle(&state, Duration::ZERO).await);
+        assert!(state.shutdown.is_cancelled());
+    }
+
+    /// Registration and idle shutdown never interleave: either the session is tracked by a daemon
+    /// that stays up, or the daemon stops and rejects it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn registration_and_idle_shutdown_are_serialized() {
+        for _ in 0..200 {
+            let state = test_state();
+            let register = tokio::spawn({
+                let state = state.clone();
+                async move {
+                    register_session(&state, "session".to_owned(), tracked_session("session")).await
+                }
+            });
+            let stop = tokio::spawn({
+                let state = state.clone();
+                async move { lifecycle::stop_if_idle(&state, Duration::ZERO).await }
+            });
+
+            let registered = register.await.unwrap();
+            let stopped = stop.await.unwrap();
+            assert_ne!(registered, stopped);
+            assert_eq!(
+                state.sessions.read().await.contains_key("session"),
+                registered
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn registration_is_rejected_after_shutdown() {
+        let state = test_state();
+
+        assert!(lifecycle::request_shutdown(&state).await.is_ok());
+        assert!(!register_session(&state, "session".to_owned(), tracked_session("session")).await);
+        assert!(state.sessions.read().await.is_empty());
+    }
+
+    /// Promotion must not wait behind a DB forward attachment, which holds the registry lock while
+    /// it connects to the agent.
+    #[tokio::test]
+    async fn promotion_does_not_wait_for_the_forward_registry() {
+        let state = test_state();
+        let _attaching = state.db_portforwards.lock().await;
+
+        let status = tokio::time::timeout(
+            Duration::from_secs(5),
+            internal_status(&state, Request::post("/api/internal/persist")),
+        )
+        .await
+        .expect("promotion waited for the forward registry");
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert!(state.lifecycle.is_persistent());
+    }
+
+    async fn wait_for(condition: impl Fn() -> bool) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !condition() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("condition not reached within 5 seconds");
+    }
+
+    /// Opens a WebSocket connection to `/ws` over plain TCP and returns the socket once the
+    /// upgrade succeeded.
+    async fn open_websocket(addr: std::net::SocketAddr) -> tokio::net::TcpStream {
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let request = format!(
+            "GET /ws HTTP/1.1\r\nHost: {addr}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\
+             Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+             {TOKEN_HEADER_NAME}: {TEST_TOKEN}\r\n\r\n"
+        );
+        stream.write_all(request.as_bytes()).await.unwrap();
+
+        let mut status_line = [0; 12];
+        stream.read_exact(&mut status_line).await.unwrap();
+        assert_eq!(&status_line, b"HTTP/1.1 101");
+        stream
+    }
+
+    /// Connected WebSocket clients keep a session-owned daemon up, so a client that goes away, or
+    /// a daemon that shuts down, must release its notification receiver even when no notification
+    /// arrives to reveal the closed connection.
+    #[tokio::test]
+    async fn websocket_client_is_released_on_disconnect_and_shutdown() {
+        let state = test_state();
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = build_router(state.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await });
+
+        let client = open_websocket(addr).await;
+        wait_for(|| state.notify_tx.receiver_count() == 1).await;
+        drop(client);
+        wait_for(|| state.notify_tx.receiver_count() == 0).await;
+
+        let _client = open_websocket(addr).await;
+        wait_for(|| state.notify_tx.receiver_count() == 1).await;
+        state.shutdown.cancel();
+        wait_for(|| state.notify_tx.receiver_count() == 0).await;
+    }
+
+    /// Discovery pings the daemon before reusing it, so a draining daemon must fail the ping, and
+    /// must refuse promotion.
+    #[tokio::test]
+    async fn ping_and_promotion_fail_once_shutdown_starts() {
+        let state = test_state();
+        assert_eq!(
+            internal_status(&state, Request::get("/api/internal/ping")).await,
+            StatusCode::OK
+        );
+
+        assert_eq!(
+            internal_status(&state, Request::post("/api/internal/shutdown")).await,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            internal_status(&state, Request::get("/api/internal/ping")).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            internal_status(&state, Request::post("/api/internal/persist")).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
     mod operator_sessions {
         use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
         use mirrord_operator::crd::Session;
@@ -2102,6 +2366,7 @@ mod tests {
                 clients: Default::default(),
                 db_portforwards: Default::default(),
                 shutdown: CancellationToken::new(),
+                lifecycle: Arc::new(DaemonLifecycle::new(DaemonMode::Persistent)),
             };
 
             let resp = list_operator_sessions(axum::extract::State(state)).await.0;

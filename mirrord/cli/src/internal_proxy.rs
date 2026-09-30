@@ -385,26 +385,34 @@ pub(crate) async fn proxy(
         needs_db_portforwards,
     )
     .await;
-    let daemon = crate::ui::ensure_daemon().await;
-    if let Err(error) = &daemon {
-        tracing::warn!(%error, "failed to start the local mirrord daemon");
-    }
 
-    if needs_db_portforwards
-        && let Some(session_id) = operator_session_id
-        && let Ok(daemon) = daemon
-        && let Err(err) = db_portforwards::setup(
-            &config,
-            &mut agent_conn,
-            session_id,
-            &local_session_id,
-            config.key.as_str(),
-            agent_connect_info,
-            &daemon,
-        )
-        .await
-    {
-        tracing::warn!(%err, "failed to set up DB branch port forwards, continuing without them");
+    // The daemon's only consumer here is the DB port-forward setup, so other sessions do not start
+    // one. A daemon started later still finds this session through `scan_existing_sessions` and its
+    // filesystem watcher.
+    if needs_db_portforwards && let Some(session_id) = operator_session_id {
+        match crate::ui::ensure_daemon().await {
+            Ok(mut daemon) => {
+                if let Err(err) = db_portforwards::setup(
+                    &config,
+                    &mut agent_conn,
+                    session_id,
+                    &local_session_id,
+                    config.key.as_str(),
+                    agent_connect_info,
+                    &mut daemon,
+                )
+                .await
+                {
+                    tracing::warn!(
+                        %err,
+                        "failed to set up DB branch port forwards, continuing without them"
+                    );
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to start the local mirrord daemon");
+            }
+        }
     }
 
     // Let it assign address for us then print it for the user.

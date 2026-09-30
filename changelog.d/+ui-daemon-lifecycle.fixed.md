@@ -1,0 +1,1 @@
+The local mirrord daemon no longer stays behind after every `mirrord exec`: sessions start it only when they need DB branch port forwards, and a daemon started that way stops itself after a minute with no sessions, port forwards or UI clients. A daemon started with `mirrord ui`, `mirrord wizard` or `mirrord up --ui` keeps running until `mirrord ui stop`.

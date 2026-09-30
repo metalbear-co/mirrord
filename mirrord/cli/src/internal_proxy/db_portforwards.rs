@@ -620,7 +620,7 @@ pub(super) async fn setup(
     local_session_id: &str,
     key: &str,
     connect_info: mirrord_intproxy::agent_conn::AgentConnectInfo,
-    daemon: &crate::ui::DaemonClient,
+    daemon: &mut crate::ui::DaemonClient,
 ) -> Result<(), SetupError> {
     let portforwards = extract_portforward_configs(&config.feature.db_branches, key);
 

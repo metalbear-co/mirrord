@@ -22,7 +22,6 @@ use mirrord_config::LayerConfig;
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::Mutex, task::JoinHandle};
-use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 use super::server::AppState;
@@ -180,28 +179,20 @@ pub(crate) async fn attach(
     Ok(Json(DbPortForwardAttachResponse { local }))
 }
 
-/// Atomically cancels the daemon if no sessions still claim DB branch forwards.
+/// Lists the sessions that claim any forward in `forwards`, sorted and deduplicated.
 ///
-/// This uses the same registry lock as [`attach`], so a new claim cannot appear between the safety
-/// check and cancellation. Once cancelled, later attachment attempts are rejected.
-pub(crate) async fn request_daemon_shutdown(
-    registry: &DbPortForwards,
-    shutdown: &CancellationToken,
-) -> Result<(), Vec<String>> {
-    let forwards = registry.lock().await;
+/// The daemon may not shut down while this is non-empty. Callers hold the registry lock across
+/// this check and the shutdown decision, see `ui::lifecycle`.
+pub(crate) fn claimed_sessions(
+    forwards: &HashMap<DbPortForwardIdentity, ManagedForward>,
+) -> Vec<String> {
     let mut sessions: Vec<_> = forwards
         .values()
         .flat_map(|forward| forward.sessions.iter().cloned())
         .collect();
     sessions.sort_unstable();
     sessions.dedup();
-
-    if sessions.is_empty() {
-        shutdown.cancel();
-        Ok(())
-    } else {
-        Err(sessions)
-    }
+    sessions
 }
 
 pub(crate) async fn release_session(session_id: &str, state: &AppState) {
@@ -266,7 +257,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn daemon_shutdown_is_blocked_until_all_forward_claims_are_released() {
+    async fn claims_are_listed_until_all_forward_claims_are_released() {
         let identity = DbPortForwardIdentity {
             kube_context: Some("test".to_owned()),
             namespace: Some("default".to_owned()),
@@ -283,17 +274,14 @@ mod tests {
                 task: tokio::spawn(pending()),
             },
         );
-        let shutdown = CancellationToken::new();
 
         assert_eq!(
-            request_daemon_shutdown(&registry, &shutdown).await,
-            Err(vec!["one".to_owned(), "two".to_owned()])
+            claimed_sessions(&*registry.lock().await),
+            vec!["one".to_owned(), "two".to_owned()]
         );
-        assert!(!shutdown.is_cancelled());
 
         release_session_from("one", &registry).await;
         release_session_from("two", &registry).await;
-        assert_eq!(request_daemon_shutdown(&registry, &shutdown).await, Ok(()));
-        assert!(shutdown.is_cancelled());
+        assert!(claimed_sessions(&*registry.lock().await).is_empty());
     }
 }
