@@ -306,7 +306,14 @@ pub(crate) enum CliError {
     BinaryExecuteFailed(String, Vec<String>),
 
     #[cfg(windows)]
-    #[error("Failed to execute binary `{0}`: {1}")]
+    #[error("Failed to execute binary `{0}`")]
+    #[diagnostic(help(
+        "Please open an issue on our GitHub repository with binary information:
+    1. How it was compiled/built.
+    2. Operating system and version.
+    3. Any extra information you might have.
+    4. If you can provide way to build the binary, that would be great.{GENERAL_HELP}"
+    ))]
     WindowsBinaryExecuteFailed(String, #[source] Box<mirrord_layer_lib::error::LayerError>),
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -659,11 +666,11 @@ pub(crate) enum CliError {
     UnsupportedOnWindows(String),
 
     #[cfg(windows)]
-    #[error("Failed to open process {0} for attachment: {1}")]
+    #[error("Failed to open process {0} for attachment")]
     AttachProcessOpenFailed(u32, #[source] stork::Error),
 
     #[cfg(windows)]
-    #[error("Failed to inject layer into process {0}: {1}")]
+    #[error("Failed to inject layer into process {0}")]
     AttachStorkFailed(u32, #[source] stork::Error),
 
     #[cfg(windows)]
@@ -694,7 +701,9 @@ pub(crate) enum CliError {
         "Set `MIRRORD_INJECTION_METHOD` to `load-library`, `apc` or `iat`, or unset it to use \
          `load-library`."
     ))]
-    PitmInvalidInjectionMethod(String),
+    PitmInvalidInjectionMethod(
+        mirrord_layer_lib::process::windows::injection::InjectionMethodError,
+    ),
 
     #[cfg(windows)]
     #[error("`mirrord pitm` was invoked without a target executable")]

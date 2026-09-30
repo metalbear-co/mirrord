@@ -225,7 +225,7 @@ fn child_environment(
             .get(MIRRORD_INJECTION_METHOD_ENV)
             .map(InjectionMethod::parse)
             .transpose()
-            .map_err(|error| CliError::PitmInvalidInjectionMethod(error.to_string()))?
+            .map_err(CliError::PitmInvalidInjectionMethod)?
             .unwrap_or_default(),
     };
 

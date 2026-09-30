@@ -95,10 +95,10 @@ where
 
     sub_progress.info("waiting for layer to signal injection complete");
 
-    // Watching the failure event and the target itself, not only readiness. A layer that gives up
-    // inside `DllMain` can say so, and a target that dies is not worth waiting out: either one
-    // used to spend the whole timeout and then report it as a timeout, which names the symptom
-    // instead of the cause.
+    // Watch the failure event and the target itself, not only readiness. A layer that gives up
+    // inside `DllMain` signals failure, and a target that dies will never signal anything; waiting
+    // out the timeout in either case would report a timeout, which names the symptom instead of
+    // the cause.
     match init_events
         .wait(
             unsafe { BorrowedHandle::borrow_raw(process.target().process) },
