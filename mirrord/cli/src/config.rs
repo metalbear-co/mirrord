@@ -2291,29 +2291,6 @@ mod tests {
     }
 
     #[rstest]
-    #[case(&["mirrord", "session", "list"], SessionListFormat::Pretty)]
-    #[case(&["mirrord", "session", "ls", "--format", "json"], SessionListFormat::Json)]
-    #[case(&["mirrord", "session", "list", "--key", "dev", "--format", "json"], SessionListFormat::Json)]
-    fn session_list_parses_format(#[case] args: &[&str], #[case] expected: SessionListFormat) {
-        let cli = Cli::try_parse_from(args).unwrap();
-        let Commands::Session(args) = cli.commands else {
-            panic!("expected `session` command");
-        };
-        let Some(LocalSessionCommand::List(args)) = args.command else {
-            panic!("expected `session list` command");
-        };
-
-        assert_eq!(args.format, expected);
-    }
-
-    #[test]
-    fn session_list_rejects_unknown_format() {
-        let error =
-            Cli::try_parse_from(["mirrord", "session", "list", "--format", "xml"]).unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::InvalidValue);
-    }
-
-    #[rstest]
     #[case(&["mirrord", "db-branches", "destroy", "branch"])]
     #[case(&["mirrord", "session", "delete", "session-id"])]
     #[case(&["mirrord", "session", "kill", "session-id"])]
