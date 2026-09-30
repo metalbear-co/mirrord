@@ -350,7 +350,6 @@ unsafe extern "system" fn getprocaddress_detour(
     let original_result = unsafe { original(hModule, lpProcName) };
 
     // NOTE(gabriela): lpProcName may be either an ordinal, or pointer to string.
-    // NOTE(gabriela): check win-57
     if !lpProcName.is_null() {
         // NOTE(gabriela): convoluted explication below...
         //

@@ -11,6 +11,8 @@ use utils_win::diagnostics::report::{
     CrashReport, Incident, Outcome, ProcessNode, show_dialog, write_artifacts,
 };
 
+// A developer tool run from a terminal, never loaded into a target process, so printing is safe.
+#[allow(clippy::disallowed_macros)]
 #[cfg(windows)]
 fn main() {
     let scenario = std::env::args()
