@@ -118,16 +118,21 @@ pub(super) async fn ensure_no_operator(client: &Client) -> Result<(), OperatorIn
 /// Dry-runs creating every object, so missing permissions and leftovers of an earlier
 /// installation surface before anything is created or a trial is started.
 ///
+/// A plain create finds the leftovers, which a server-side apply would silently merge into. Since
+/// [`create`] applies server-side, which also needs the `patch` permission, each object is then
+/// dry-run applied as well.
+///
 /// Objects in a namespace that the manifest itself creates can't be dry-run before the namespace
 /// exists, so those are skipped.
 pub(super) async fn dry_run(
     manifest: &Manifest,
     apis: &[Api<DynamicObject>],
 ) -> Result<(), OperatorInstallError> {
-    let params = PostParams {
+    let create_params = PostParams {
         dry_run: true,
         field_manager: Some(FIELD_MANAGER.to_owned()),
     };
+    let apply_params = PatchParams::apply(FIELD_MANAGER).dry_run();
 
     let created_namespaces = manifest
         .objects()
@@ -138,8 +143,15 @@ pub(super) async fn dry_run(
 
     let mut leftovers = Vec::new();
     for (object, api) in manifest.objects().iter().zip(apis) {
-        match api.create(&params, object).await {
-            Ok(_) => {}
+        match api.create(&create_params, object).await {
+            Ok(_) => {
+                api.patch(&object.name_any(), &apply_params, &Patch::Apply(object))
+                    .await
+                    .map_err(|source| OperatorInstallError::Rejected {
+                        object: describe(object),
+                        source: Box::new(source),
+                    })?;
+            }
             Err(kube::Error::Api(status)) if status.code == StatusCode::CONFLICT => {
                 leftovers.push(describe(object))
             }
