@@ -5902,6 +5902,8 @@ dependencies = [
  "once_cell",
  "rand 0.10.2",
  "rstest",
+ "serde",
+ "serde_json",
  "tar",
  "tempfile",
  "thiserror 2.0.20",

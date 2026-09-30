@@ -29,7 +29,10 @@ use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use mirrord_protocol_api::client::{MirrordClient, MirrordClientRetry};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{
-    MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, extract_sip_binaries, sip_patch,
+    MIRRORD_BINARIES_DIR_PATH_BUF, MIRRORD_SIP_X64_FALLBACK_ENV, SipError, SipPatchOptions,
+    extract_sip_binaries,
+    rosetta::{MIRRORD_ROSETTA_FALLBACKS_PATH_ENV, rosetta_fallbacks_path},
+    sip_patch,
 };
 use mirrord_tls_util::SecureChannelSetup;
 use serde::Serialize;
@@ -56,7 +59,7 @@ use crate::{
 };
 
 #[cfg(target_os = "macos")]
-const COMPRESSED_SIP_BINARIES: &[u8] =
+pub(crate) const COMPRESSED_SIP_BINARIES: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/apple-utils.tar.gz"));
 
 /// Environment variable for saving the execution kind for analytics.
@@ -326,6 +329,11 @@ impl MirrordExecution {
             }
             #[cfg(target_os = "macos")]
             {
+                env_vars.insert(
+                    MIRRORD_ROSETTA_FALLBACKS_PATH_ENV.to_owned(),
+                    rosetta_fallbacks_path()?.to_string_lossy().into_owned(),
+                );
+
                 let log_info =
                     config
                         .experimental
@@ -368,6 +376,20 @@ impl MirrordExecution {
                             panic!("mirrord failed to patch SIP with: {}", sip_error);
                         }
                     })?;
+
+                if let Some(fallback) = result
+                    .as_ref()
+                    .and_then(|result| result.x64_fallback.as_ref())
+                {
+                    progress.warning(&format!(
+                        "The protected system binary `{}` is missing from mirrord's native macOS bundle. This run requires Rosetta.",
+                        fallback.display(),
+                    ));
+                    env_vars.insert(
+                        MIRRORD_SIP_X64_FALLBACK_ENV.to_owned(),
+                        fallback.to_string_lossy().into_owned(),
+                    );
+                }
 
                 result.map(|result| result.path_string())
             }

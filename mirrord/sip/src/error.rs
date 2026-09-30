@@ -31,6 +31,9 @@ pub enum SipError {
     #[error("which failed with `{0}`")]
     WhichFailed(#[from] which::Error),
 
+    #[error("Failed to process the Rosetta fallback report: `{0}`")]
+    RosettaReportJson(#[from] serde_json::Error),
+
     #[error("Unlikely error happened `{0}`")]
     UnlikelyError(String),
 

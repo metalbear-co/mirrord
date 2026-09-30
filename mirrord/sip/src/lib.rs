@@ -7,6 +7,7 @@ mod bundle;
 mod codesign;
 mod error;
 mod logger;
+pub mod rosetta;
 mod rpath;
 
 /// Concerns MacOS' SIP (System Integrity Protection) mechanism and how to sidestep it.
