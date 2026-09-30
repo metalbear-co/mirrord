@@ -2082,6 +2082,10 @@ impl Default for LocalSessionCommand {
 /// Arguments for listing local and in-cluster mirrord sessions.
 #[derive(Args, Debug, Default)]
 pub struct SessionListArgs {
+    /// Format output for terminal display or scripting.
+    #[arg(long, default_value_t)]
+    pub format: SessionListFormat,
+
     /// Only list sessions started with this `key`.
     ///
     /// `key` is the session identifier set via `mirrord exec --key`, `MIRRORD_KEY`, or the
@@ -2090,6 +2094,14 @@ pub struct SessionListArgs {
     /// `spec.session.key` field selector. When omitted, all sessions are listed.
     #[arg(long)]
     pub key: Option<String>,
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum, Display)]
+#[strum(serialize_all = "lowercase")]
+pub enum SessionListFormat {
+    #[default]
+    Pretty,
+    Json,
 }
 
 /// Arguments for deleting local mirrord sessions.
