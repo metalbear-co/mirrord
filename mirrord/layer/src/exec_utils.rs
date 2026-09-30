@@ -103,7 +103,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
         log_info,
     ) {
         Ok(None) => Bypass(NoSipDetected(path.to_owned())),
-        Ok(Some(new_path)) => Success(new_path),
+        Ok(Some(result)) => Success(result.path_string()),
         Err(SipError::FileNotFound(non_existing_bin)) => {
             trace!(
                 "The application wants to execute {}, SIP check got FileNotFound for {}. \

@@ -19,6 +19,7 @@ workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-codesign.workspace = true
 hex.workspace = true
+libc.workspace = true
 object.workspace = true
 rand.workspace = true
 tempfile.workspace = true

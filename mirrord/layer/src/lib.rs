@@ -239,7 +239,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
                 load_type: Some(load_type),
             });
 
-        if let Ok(Some(binary)) = mirrord_sip::sip_patch(
+        if let Ok(Some(result)) = mirrord_sip::sip_patch(
             path,
             mirrord_sip::SipPatchOptions {
                 patch: &patch_binaries,
@@ -251,7 +251,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
             },
             log_info,
         ) {
-            let err = exec::execvp(binary, args);
+            let err = exec::execvp(result.path, args);
             tracing::error!("Couldn't execute {:?}", err);
             return Err(LayerError::ExecFailed(err));
         }
