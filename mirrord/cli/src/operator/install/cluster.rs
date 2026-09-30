@@ -7,7 +7,9 @@ use std::{
 };
 
 use http::StatusCode;
-use k8s_openapi::kube_aggregator::pkg::apis::apiregistration::v1::APIService;
+use k8s_openapi::{
+    api::core::v1::Namespace, kube_aggregator::pkg::apis::apiregistration::v1::APIService,
+};
 use kube::{
     Api, Client, ResourceExt,
     api::{DynamicObject, Patch, PatchParams, PostParams},
@@ -33,6 +35,21 @@ const FIELD_MANAGER: &str = "helm";
 const READY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 const READY_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Identifies the cluster by the UID of its `default` namespace, which is stable for the lifetime
+/// of the cluster and is the same ID the operator reports for it.
+///
+/// Used as the trial's cluster hint in place of the kubecontext name, which can carry the user's
+/// account identity (e.g. EKS context names are ARNs with the AWS account ID, GKE ones name the
+/// project) and must not be sent without consent. `None` if the namespace can't be read.
+pub(super) async fn cluster_id(client: &Client) -> Option<String> {
+    Api::<Namespace>::all(client.clone())
+        .get("default")
+        .await
+        .inspect_err(|error| tracing::debug!(?error, "failed to fetch the cluster ID"))
+        .ok()
+        .and_then(|namespace| namespace.metadata.uid)
+}
 
 /// Resolves the API of every manifest object, in manifest order.
 ///

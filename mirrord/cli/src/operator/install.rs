@@ -76,10 +76,11 @@ pub(super) async fn operator_install(
         }
         None => {
             let mut subtask = progress.subtask("starting a trial");
-            let cluster_hint = no_hint
-                .not()
-                .then(|| cluster_hint.or(context.clone()))
-                .flatten();
+            let cluster_hint = match (no_hint, cluster_hint) {
+                (true, _) => None,
+                (false, Some(cluster_hint)) => Some(cluster_hint),
+                (false, None) => cluster::cluster_id(&client).await,
+            };
             let trial =
                 signup::start_trial(&http, &app_url, USER_AGENT, cluster_hint.as_deref()).await?;
             subtask.success(None);

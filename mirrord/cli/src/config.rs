@@ -980,11 +980,11 @@ pub(super) struct OperatorInstallArgs {
 
     /// Name shown on the trial claim page to identify this cluster.
     ///
-    /// Defaults to the name of the current kubecontext.
+    /// Defaults to the cluster's ID, the UID of its `default` namespace.
     #[arg(long, conflicts_with_all = ["api_key", "no_hint"])]
     pub cluster_hint: Option<String>,
 
-    /// Do not send the kubecontext name to the trial claim page.
+    /// Do not send a cluster hint to the trial claim page.
     #[arg(long, conflicts_with = "api_key")]
     pub no_hint: bool,
 
