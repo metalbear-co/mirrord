@@ -5935,6 +5935,7 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "serde_yaml",
+ "strsim",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "tempfile",

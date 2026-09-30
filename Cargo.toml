@@ -258,6 +258,7 @@ secrecy = "0.10"
 sha2 = "0.10"
 shellexpand = "3"
 socket2 = { version = "0.5", features = ["all"] }
+strsim = "0.11"
 strum = "0.27.1"
 strum_macros = "0.27.1"
 syn = { version = "2", features = ["full", "extra-traits"] }

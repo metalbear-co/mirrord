@@ -33,6 +33,7 @@ miette = { workspace = true, features = ["fancy"] }
 process-wrap.workspace = true
 thiserror.workspace = true
 strum_macros.workspace = true
+strsim.workspace = true
 strum.workspace = true
 tokio = { workspace = true, features = ["process", "rt", "signal", "sync", "time"] }
 clap.workspace = true
