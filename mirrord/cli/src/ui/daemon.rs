@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     fs::create_dir_all,
     io::{AsyncBufReadExt, BufReader},
+    process::{Child, Command},
     sync::{Mutex, broadcast},
 };
 use tokio_util::sync::CancellationToken;
@@ -282,6 +283,14 @@ pub(super) async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
     }
 }
 
+/// The daemon must survive both its parent's exit and terminal signals sent to the parent's group.
+fn spawn_daemon(command: &mut Command) -> std::io::Result<Child> {
+    #[cfg(unix)]
+    command.process_group(0);
+
+    command.kill_on_drop(false).spawn()
+}
+
 /// Starts or reuses the local daemon and optionally opens its browser-facing UI.
 ///
 /// The foreground process spawns another mirrord executable with
@@ -321,14 +330,14 @@ pub(super) async fn ui_start(
         env_vars.insert("MIRRORD_LOG".to_owned(), "mirrord=debug".to_owned());
     }
 
-    let mut child = tokio::process::Command::new(mirrord_binary)
-        .args(vec!["ui"])
-        .envs(env_vars)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(File::create(&std_err_file)?)
-        .kill_on_drop(false)
-        .spawn()?;
+    let mut child = spawn_daemon(
+        Command::new(mirrord_binary)
+            .args(["ui"])
+            .envs(env_vars)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(File::create(&std_err_file)?),
+    )?;
 
     let mut stdout = BufReader::new(child.stdout.take().expect("was piped")).lines();
 
@@ -734,7 +743,94 @@ pub(super) fn router(state: AppState) -> Router<AppState> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use nix::{
+        sys::signal::killpg,
+        unistd::{getpgid, getpgrp},
+    };
+
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn daemon_has_its_own_process_group() {
+        let mut child = spawn_daemon(
+            Command::new("sleep")
+                .arg("30")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+        .unwrap();
+        let pid = Pid::from_raw(child.id().unwrap() as i32);
+        let group = getpgid(Some(pid));
+        // Reap the child before asserting so a failed assertion cannot leave it running.
+        child.kill().await.unwrap();
+        assert_eq!(group.unwrap(), pid);
+        assert_ne!(pid, getpgrp());
+    }
+
+    /// Isolate terminal-style signals from the test runner's own process group.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn daemon_signal_worker() {
+        if env::var_os("MIRRORD_DAEMON_SIGNAL_TEST_WORKER").is_none() {
+            return;
+        }
+
+        let mut interrupt =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()).unwrap();
+        let mut child = spawn_daemon(
+            Command::new("sleep")
+                .arg("30")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+        .unwrap();
+        println!("ready");
+        let received = tokio::time::timeout(Duration::from_secs(5), interrupt.recv()).await;
+        // Allow a child that inherited the foreground group to process the same interrupt.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let status = child.try_wait().unwrap();
+        child.kill().await.unwrap();
+        assert!(received.unwrap().is_some());
+        assert!(status.is_none(), "daemon exited after foreground SIGINT");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn daemon_survives_foreground_group_interrupt() {
+        let mut worker = Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "ui::daemon::tests::daemon_signal_worker",
+                "--nocapture",
+            ])
+            .env("MIRRORD_DAEMON_SIGNAL_TEST_WORKER", "1")
+            .process_group(0)
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut stdout = BufReader::new(worker.stdout.take().unwrap()).lines();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let line = stdout.next_line().await.unwrap().expect("worker exited");
+                if line == "ready" {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("worker installs signal handler and starts daemon");
+        killpg(Pid::from_raw(worker.id().unwrap() as i32), Signal::SIGINT).unwrap();
+        let status = tokio::time::timeout(Duration::from_secs(10), worker.wait())
+            .await
+            .expect("worker cleans up daemon and exits")
+            .unwrap();
+        assert!(status.success());
+    }
 
     fn paths(dir: &tempfile::TempDir) -> (PathBuf, PathBuf, PathBuf) {
         (
