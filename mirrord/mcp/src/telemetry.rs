@@ -153,3 +153,54 @@ impl McpClient {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rmcp::model::CallToolResult;
+
+    use super::*;
+
+    #[test]
+    fn client_names() {
+        for (name, expected) in [
+            ("claude-code", McpClient::ClaudeCode),
+            ("claude-ai", McpClient::Claude),
+            ("cursor-vscode", McpClient::Cursor),
+            ("Visual Studio Code", McpClient::VsCode),
+            ("Visual Studio Code - Insiders", McpClient::VsCode),
+            ("windsurf-client", McpClient::Windsurf),
+            ("codex-mcp-client", McpClient::Codex),
+            ("gemini-cli-mcp-client", McpClient::GeminiCli),
+            ("some-agent", McpClient::Other),
+        ] {
+            assert_eq!(McpClient::from_name(name), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn tool_names() {
+        assert_eq!("validate_config".parse(), Ok(McpTool::ValidateConfig));
+        assert!("unknown".parse::<McpTool>().is_err());
+        assert!("no_such_tool".parse::<McpTool>().is_err());
+    }
+
+    #[test]
+    fn tool_outcomes() {
+        assert_eq!(
+            ToolOutcome::of(&Ok(CallToolResult::success(vec![]).into())),
+            ToolOutcome::Success
+        );
+        assert_eq!(
+            ToolOutcome::of(&Ok(CallToolResult::error(vec![]).into())),
+            ToolOutcome::ToolError
+        );
+        assert_eq!(
+            ToolOutcome::of(&Err(ErrorData::invalid_params("tool not found", None))),
+            ToolOutcome::InvalidParams
+        );
+        assert_eq!(
+            ToolOutcome::of(&Err(ErrorData::internal_error("boom", None))),
+            ToolOutcome::Internal
+        );
+    }
+}

@@ -453,6 +453,68 @@ mod tests {
         assert!(allowed.contains(&json!("mirror")), "{allowed:?}");
     }
 
+    /// `connection` is a serde alias of `source`, which the schema doesn't know about.
+    #[test]
+    fn serde_alias() {
+        let output = validate(
+            ConfigFormat::MirrordJson,
+            r#"{ "feature": { "db_branches": [ { "type": "turbopuffer", "connection": { "params": {
+                "namespace": "TPUF_NAMESPACE",
+                "api_key": "TURBOPUFFER_API_KEY",
+                "region": { "env_var_name": "TURBOPUFFER_REGION", "value": "gcp-us-central1" }
+            } } } ] } }"#,
+        );
+        assert!(output.valid, "{:?}", output.issues);
+    }
+
+    /// Passes the schema and deserializes, but `verify` rejects it.
+    #[test]
+    fn conflicting_http_filters() {
+        let issue = single_issue(
+            ConfigFormat::MirrordJson,
+            r#"{ "feature": { "network": { "incoming": { "mode": "steal",
+                "http_filter": { "header_filter": "a", "path_filter": "b" } } } } }"#,
+        );
+        assert!(
+            issue.message.contains("multiple types of HTTP filter"),
+            "{}",
+            issue.message
+        );
+    }
+
+    /// A missing target may still come from the command line, so it doesn't make the config
+    /// targetless (which would conflict with `steal`).
+    #[test]
+    fn missing_target_not_final() {
+        let output = validate(
+            ConfigFormat::MirrordJson,
+            r#"{ "feature": { "network": { "incoming": "steal" } } }"#,
+        );
+        assert!(output.valid, "{:?}", output.issues);
+    }
+
+    #[test]
+    fn up_yaml_key_dependent_template() {
+        let content = r#"
+services:
+  app:
+    run:
+      command: ["true"]
+{% if key == "prod" %}    bogus: 1
+{% endif %}"#;
+        assert!(validate(ConfigFormat::MirrordUpYaml, content).valid);
+
+        let mut output = validate_config(ValidateConfigArgs {
+            format: ConfigFormat::MirrordUpYaml,
+            content: content.to_owned(),
+            key: Some("prod".to_owned()),
+        })
+        .unwrap();
+        let issue = output.issues.pop().unwrap();
+        assert!(output.issues.is_empty(), "{:?}", output.issues);
+        assert_eq!(issue.path, "/services/app/bogus");
+    }
+
     #[test]
     fn json_syntax_error() {
         let issue = single_issue(ConfigFormat::MirrordJson, r#"{ "feature": "#);
