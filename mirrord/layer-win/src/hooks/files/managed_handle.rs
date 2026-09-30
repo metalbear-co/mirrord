@@ -180,6 +180,14 @@ impl HandleContext {
     }
 }
 
+/// Whether `handle` is a file handle this layer handed out.
+///
+/// The hooks that act on a handle ask this before `internal_bypass` decides by who called,
+/// because the kernel answers a managed handle with `STATUS_INVALID_HANDLE`.
+pub(in crate::hooks::files) fn is_managed_handle(handle: HANDLE) -> bool {
+    MANAGED_FILES.get(&handle).is_some()
+}
+
 /// The IOCP `(port, key)` binding for a file handle, by value.
 ///
 /// For hooks that don't already hold the file's context (e.g. `nt_cancel_io_file_hook`).

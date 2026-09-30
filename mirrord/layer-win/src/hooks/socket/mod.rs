@@ -69,7 +69,10 @@ use windows_strings::{PCSTR, PCWSTR};
 
 use self::{
     hostname::{NameTooLong, handle_hostname_ansi, handle_hostname_unicode, is_remote_hostname},
-    ops::{WSABufferData, get_connectex_original, hook_connectex_extension, log_connection_result},
+    ops::{
+        CONNECTEX_ORIGINAL, WSABufferData, get_connectex_original, hook_connectex_extension,
+        log_connection_result,
+    },
     utils::{
         AutoCloseSocket, ERROR_SUCCESS_I32, create_thread_local_hostent, determine_local_address,
         get_actual_bound_address,
@@ -86,8 +89,8 @@ use crate::{
 // import descriptor for `ws2_32` is what guarantees the lookups succeed from inside
 // `initialize_layer_sync`.
 //
-// Today that descriptor exists only because layer code happens to call winsock. This makes the
-// dependency explicit so it cannot be removed by accident. Without it, the first
+// Other winsock calls in the layer produce that descriptor as well, but nothing requires them to
+// stay, so this anchor holds the import on its own. Without the import, the first
 // `apply_hook!(.. "ws2_32" ..)` fails, which aborts layer startup and runs the target with no
 // mirrord at all.
 //
@@ -1065,6 +1068,10 @@ unsafe extern "system" fn wsa_ioctl_detour(
 
 /// Windows socket hook for ConnectEx (overlapped connect)
 /// This function properly handles libuv's expectations for overlapped I/O completion
+///
+/// It is installed by pointer substitution in `wsa_ioctl_detour` rather than by `apply_hook!`.
+/// `hook_connectex_extension` fills `CONNECTEX_ORIGINAL` before it hands out the pointer.
+#[mirrord_layer_macro::internal_bypass(CONNECTEX_ORIGINAL)]
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn connectex_detour(
     s: SOCKET,
@@ -1599,7 +1606,7 @@ unsafe extern "system" fn get_computer_name_ex_w_detour(
         "GetComputerNameExW: unsupported name_type {}, falling back to original",
         name_type
     );
-    return unsafe { original(name_type, lpBuffer, nSize) };
+    unsafe { original(name_type, lpBuffer, nSize) }
 }
 
 /// Hook for gethostbyname to handle DNS resolution of our modified hostname
@@ -1689,7 +1696,7 @@ unsafe extern "system" fn gethostbyname_detour(name: *const i8) -> *mut HOSTENT 
         "gethostbyname: calling original function for hostname: {}",
         hostname_cstr
     );
-    return fallback_to_original();
+    fallback_to_original()
 }
 
 /// Hook for getaddrinfo to handle DNS resolution with full mirrord functionality
@@ -1804,7 +1811,10 @@ unsafe extern "system" fn getaddrinfow_detour(
 ///
 /// This follows the same pattern as the Unix layer - it checks if the structure
 /// was allocated by us and frees it properly, or calls the original freeaddrinfo if it wasn't ours.
-#[mirrord_layer_macro::internal_bypass(FREE_ADDR_INFO_W_ORIGINAL)]
+// Not `internal_bypass`-annotated: it dispatches on what it was given, not on who called it.
+// Any thread can hold a chain this layer allocated, and a bypass would hand that chain to
+// `ws2_32`, which frees Rust-allocated memory and leaves a stale `MANAGED_ADDRINFO` entry. The
+// next chain at that address then makes it a double free (`0xC0000374`).
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn freeaddrinfo_t_detour(addrinfo: *mut ADDRINFOW) {
     unsafe {
@@ -1949,7 +1959,8 @@ unsafe extern "system" fn getaddrinfoexw_detour(
 
 /// Frees `ADDRINFOEXW` chains. Ours (tracked in `MANAGED_ADDRINFO`) are dropped
 /// by us; anything else goes to the original `FreeAddrInfoExW`.
-#[mirrord_layer_macro::internal_bypass(FREE_ADDR_INFO_EX_W_ORIGINAL)]
+// Not `internal_bypass`-annotated, for the reason given on `freeaddrinfo_t_detour`. This is the
+// hook .NET reaches from the completion routine that `addrinfo_ex::deliver` calls.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn freeaddrinfoexw_detour(addrinfo: PADDRINFOEXW) {
     unsafe {
@@ -1961,7 +1972,9 @@ unsafe extern "system" fn freeaddrinfoexw_detour(addrinfo: PADDRINFOEXW) {
 
 /// Cancels an in-flight async resolution. Recognizes our synthetic handles via
 /// [`addrinfo_ex::cancel`]; for any other handle, defers to the original.
-#[mirrord_layer_macro::internal_bypass(GET_ADDR_INFO_EX_CANCEL_ORIGINAL)]
+// Not `internal_bypass`-annotated: `lp_handle` holds a synthetic `0x6000_xxxx` handle this layer
+// minted, and a bypass would hand that value to `ws2_32`, which answers `WSA_INVALID_HANDLE` and
+// leaves the query running.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn getaddrinfoexcancel_detour(lp_handle: LPHANDLE) -> INT {
     if !lp_handle.is_null() {
@@ -2055,7 +2068,11 @@ unsafe extern "system" fn sendto_detour(
 }
 
 /// Socket management detour for closesocket() - closes a socket
-#[mirrord_layer_macro::internal_bypass(CLOSE_SOCKET_ORIGINAL)]
+///
+/// A socket in `SOCKETS` is closed through the body whoever closes it. A bypass would leave its
+/// entry behind, so the next socket that reuses the value would inherit its state, and a listener
+/// would never send its `PortUnsubscribe`.
+#[mirrord_layer_macro::internal_bypass(CLOSE_SOCKET_ORIGINAL, managed = is_socket_managed(s))]
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();

@@ -9,6 +9,9 @@ pub(crate) mod macros;
 pub(crate) mod process;
 pub(crate) mod socket;
 
+#[cfg(test)]
+mod bypass_contract;
+
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{
     error::{LayerError, LayerResult},

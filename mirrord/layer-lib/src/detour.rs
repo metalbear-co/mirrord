@@ -8,9 +8,9 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
+use std::{cell::Cell, net::SocketAddr, sync::OnceLock};
 #[cfg(unix)]
-use std::{cell::RefCell, ffi::CString, ops::Deref, path::PathBuf};
-use std::{net::SocketAddr, sync::OnceLock};
+use std::{ffi::CString, ops::Deref, path::PathBuf};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
@@ -27,7 +27,6 @@ use winapi::{
 use crate::error::get_platform_errno;
 use crate::{error::HookError, socket::sockets::SocketDescriptor};
 
-#[cfg(unix)]
 thread_local!(
     /// Holds the thread-local state for bypassing the layer's detour functions.
     ///
@@ -37,7 +36,8 @@ thread_local!(
     /// create a bypass inside a function (like we have in
     /// [`TcpHandler::create_local_stream`](crate::tcp::TcpHandler::create_local_stream)).
     ///
-    /// Or rely on the [`hook_guard_fn`](mirrord_layer_macro::hook_guard_fn) macro.
+    /// Or rely on the [`hook_guard_fn`](mirrord_layer_macro::hook_guard_fn) and
+    /// [`internal_bypass`](mirrord_layer_macro::internal_bypass) macros.
     ///
     /// ## Details
     ///
@@ -49,20 +49,11 @@ thread_local!(
     ///
     /// We set this to `true` whenever an operation may require calling other [`libc`] functions,
     /// and back to `false` after it's done.
-    static DETOUR_BYPASS: RefCell<bool> = const { RefCell::new(false) }
+    ///
+    /// `const`-initialized and without a destructor, so reading it never fails, even on a thread
+    /// whose other storage is already gone.
+    static DETOUR_BYPASS: Cell<bool> = const { Cell::new(false) }
 );
-
-/// Sets [`DETOUR_BYPASS`] to `false`.
-///
-/// Prefer relying on the [`Drop`] implementation of [`DetourGuard`] instead.
-#[cfg(unix)]
-pub(super) fn detour_bypass_off() {
-    DETOUR_BYPASS.with(|enabled| {
-        if let Ok(mut bypass) = enabled.try_borrow_mut() {
-            *bypass = false
-        }
-    });
-}
 
 /// Handler for the layer's [`DETOUR_BYPASS`].
 ///
@@ -72,35 +63,78 @@ pub(super) fn detour_bypass_off() {
 ///
 /// You should always use `DetourGuard::new`, if you construct this in any other way, it's
 /// not going to guard anything.
-#[cfg(unix)]
+///
+/// ## Calls into application code
+///
+/// Application code called with the guard held would bypass every hook: a `connect` would go to
+/// the local network and a remote file handle would reach the kernel. Hold the guard for the
+/// layer's own work, and hold an [`ApplicationCallback`] around any call from a detour body into
+/// the target's code.
+///
+/// ## Limitation on Windows: APCs during an alertable wait
+///
+/// A detour holds the guard across its call to the original, and a blocking Winsock call or a
+/// wait on a `FILE_SYNCHRONOUS_IO_ALERT` handle waits alertably. User APCs queued to the thread
+/// run inside that wait with the guard held, so hooks that dispatch on who called pass their
+/// calls straight to the originals. Hooks that dispatch on a value the layer handed out still
+/// serve it (see `internal_bypass`'s `managed`). Releasing the guard around the original is not a
+/// fix: the original's own nested calls would re-enter the layer, and an APC that makes a remote
+/// request while the thread waits on the proxy would contend for the connection the thread
+/// already holds.
 pub struct DetourGuard;
 
-#[cfg(unix)]
 impl DetourGuard {
     /// Create a new DetourGuard if it's not already enabled.
+    ///
+    /// # Returns
+    ///
+    /// `Some` when this is the outermost guard on the thread, `None` when one is already held.
+    /// The bypass stays with the outermost guard either way.
+    #[inline]
     pub fn new() -> Option<Self> {
-        DETOUR_BYPASS.with(|enabled| {
-            if let Ok(bypass) = enabled.try_borrow()
-                && *bypass
-            {
-                None
-            } else {
-                match enabled.try_borrow_mut() {
-                    Ok(mut bypass) => {
-                        *bypass = true;
-                        Some(Self)
-                    }
-                    _ => None,
-                }
-            }
-        })
+        if DETOUR_BYPASS.replace(true) {
+            None
+        } else {
+            Some(Self)
+        }
+    }
+
+    /// Whether a guard is held on this thread.
+    pub fn is_held() -> bool {
+        DETOUR_BYPASS.get()
     }
 }
 
-#[cfg(unix)]
 impl Drop for DetourGuard {
+    #[inline]
     fn drop(&mut self) {
-        detour_bypass_off();
+        // Only the outermost call holds a guard, so clearing is correct. A nested call got `None`
+        // and has nothing to drop.
+        DETOUR_BYPASS.set(false);
+    }
+}
+
+/// RAII guard that clears the [`DetourGuard`] bypass for a call into application code.
+///
+/// Hold this around any call from a detour body into the target's own code, which must see the
+/// hooks that the rest of the process sees. See [`DetourGuard`] for what happens when it does
+/// not. Outside a detour it changes nothing.
+pub struct ApplicationCallback {
+    previous: bool,
+}
+
+impl ApplicationCallback {
+    /// Clears the bypass until the guard is dropped, then restores what it was.
+    pub fn enter() -> Self {
+        ApplicationCallback {
+            previous: DETOUR_BYPASS.replace(false),
+        }
+    }
+}
+
+impl Drop for ApplicationCallback {
+    fn drop(&mut self) {
+        DETOUR_BYPASS.set(self.previous);
     }
 }
 
@@ -626,5 +660,76 @@ impl<S> Detour<S> {
             Detour::Bypass(reason) => op(reason),
             Detour::Error(error) => K::from_error(error),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The outermost call gets the guard and every nested call is told to bypass.
+    #[test]
+    fn nested_entry_is_refused() {
+        assert!(!DetourGuard::is_held());
+
+        let outer = DetourGuard::new().expect("the outermost call owns the guard");
+        assert!(DetourGuard::is_held());
+        assert!(
+            DetourGuard::new().is_none(),
+            "a nested call must be told to call the original"
+        );
+
+        drop(outer);
+        assert!(!DetourGuard::is_held(), "the outermost guard clears it");
+    }
+
+    /// A refused guard must not clear the bypass when it goes out of scope.
+    #[test]
+    fn a_refused_guard_leaves_the_bypass_alone() {
+        let _outer = DetourGuard::new().expect("guard");
+
+        {
+            let nested = DetourGuard::new();
+            assert!(nested.is_none());
+        }
+
+        assert!(
+            DetourGuard::is_held(),
+            "the bypass belongs to the outer guard"
+        );
+    }
+
+    /// Application code must run with the hooks the rest of the process sees.
+    #[test]
+    fn a_callback_leaves_and_restores_the_bypass() {
+        let _outer = DetourGuard::new().expect("guard");
+
+        {
+            let _callback = ApplicationCallback::enter();
+            assert!(!DetourGuard::is_held(), "application code sees no bypass");
+            assert!(
+                DetourGuard::new().is_some(),
+                "a hook reached from application code runs its own body"
+            );
+        }
+
+        assert!(
+            DetourGuard::is_held(),
+            "the layer's own work bypasses again"
+        );
+    }
+
+    /// The escape is harmless where there is nothing to leave, which is the case on a worker
+    /// thread that delivers an asynchronous completion.
+    #[test]
+    fn a_callback_outside_a_detour_changes_nothing() {
+        assert!(!DetourGuard::is_held());
+
+        {
+            let _callback = ApplicationCallback::enter();
+            assert!(!DetourGuard::is_held());
+        }
+
+        assert!(!DetourGuard::is_held());
     }
 }

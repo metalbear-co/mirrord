@@ -10,9 +10,14 @@
 //!   [`HandleContext`](managed_handle::HandleContext).
 //! - [`util`] -- shared helpers (`WindowsTime`, NT-path classifier, agent `try_seek` /
 //!   `try_xstat`).
-//! - [`ops`] -- one module per FS operation. Each contains the body that used to live inline in
-//!   this file; the `unsafe extern "system"` hooks below are thin delegates so all that lives here
-//!   is the dispatch table + initialization.
+//! - [`ops`] -- one module per FS operation, holding its hook's body. The `unsafe extern "system"`
+//!   hooks below are thin delegates, so all that lives here is the dispatch table + initialization.
+//!
+//! ## Managed handles bypass nothing
+//!
+//! The hooks that act on a handle serve a `0x5000_xxxx` handle this layer handed out whoever
+//! passes it back, through `internal_bypass`'s `managed`. Anything else keeps both bypasses. The
+//! hooks whose body is only a lookup plus the original take no bypass at all.
 //!
 //! ## NT level
 //!
@@ -93,7 +98,10 @@ unsafe extern "system" fn nt_create_file_hook(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[mirrord_layer_macro::internal_bypass(NT_READ_FILE_ORIGINAL)]
+#[mirrord_layer_macro::internal_bypass(
+    NT_READ_FILE_ORIGINAL,
+    managed = managed_handle::is_managed_handle(file)
+)]
 unsafe extern "system" fn nt_read_file_hook(
     file: HANDLE,
     event: HANDLE,
@@ -148,7 +156,10 @@ unsafe extern "system" fn nt_write_file_hook(
     }
 }
 
-#[mirrord_layer_macro::internal_bypass(NT_SET_INFORMATION_FILE_ORIGINAL)]
+#[mirrord_layer_macro::internal_bypass(
+    NT_SET_INFORMATION_FILE_ORIGINAL,
+    managed = managed_handle::is_managed_handle(file)
+)]
 unsafe extern "system" fn nt_set_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -196,7 +207,10 @@ unsafe extern "system" fn nt_set_quota_information_file_hook(
     unsafe { ops::stubs::set_quota_information(file, io_status_block, buffer, length) }
 }
 
-#[mirrord_layer_macro::internal_bypass(NT_QUERY_INFORMATION_FILE_ORIGINAL)]
+#[mirrord_layer_macro::internal_bypass(
+    NT_QUERY_INFORMATION_FILE_ORIGINAL,
+    managed = managed_handle::is_managed_handle(file)
+)]
 unsafe extern "system" fn nt_query_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -223,7 +237,10 @@ unsafe extern "system" fn nt_query_attributes_file_hook(
     unsafe { ops::stubs::query_attributes(object_attributes, file_basic_info) }
 }
 
-#[mirrord_layer_macro::internal_bypass(NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL)]
+#[mirrord_layer_macro::internal_bypass(
+    NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL,
+    managed = managed_handle::is_managed_handle(file)
+)]
 unsafe extern "system" fn nt_query_volume_information_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -336,7 +353,6 @@ unsafe extern "system" fn nt_lock_file_hook(
 }
 
 // Not `internal_bypass`-annotated: dispatches on the handle, not the caller.
-// See `utils_win::internal_thread`.
 unsafe extern "system" fn nt_unlock_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -348,13 +364,11 @@ unsafe extern "system" fn nt_unlock_file_hook(
 }
 
 // Not `internal_bypass`-annotated: dispatches on the handle, not the caller.
-// See `utils_win::internal_thread`.
 unsafe extern "system" fn nt_close_hook(handle: HANDLE) -> NTSTATUS {
     unsafe { ops::close::handle(handle) }
 }
 
 // Not `internal_bypass`-annotated: dispatches on the handle, not the caller.
-// See `utils_win::internal_thread`.
 unsafe extern "system" fn nt_cancel_io_file_hook(
     file: HANDLE,
     io_status_block: *mut _IO_STATUS_BLOCK,
@@ -363,7 +377,6 @@ unsafe extern "system" fn nt_cancel_io_file_hook(
 }
 
 // Not `internal_bypass`-annotated: dispatches on the handle, not the caller.
-// See `utils_win::internal_thread`.
 unsafe extern "system" fn nt_wait_for_single_object_hook(
     handle: HANDLE,
     alertable: BOOLEAN,

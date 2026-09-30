@@ -33,7 +33,9 @@ type ConnectExFn = unsafe extern "system" fn(
     *mut OVERLAPPED,
 ) -> BOOL;
 
-static CONNECTEX_ORIGINAL: OnceLock<ConnectExFn> = OnceLock::new();
+/// The real `ConnectEx`, captured by [`hook_connectex_extension`] before it hands out the detour.
+/// `connectex_detour`'s `internal_bypass` calls it for mirrord's own and nested calls.
+pub(super) static CONNECTEX_ORIGINAL: OnceLock<ConnectExFn> = OnceLock::new();
 
 pub fn get_connectex_original() -> Option<ConnectExFn> {
     CONNECTEX_ORIGINAL.get().copied()
