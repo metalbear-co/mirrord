@@ -1,16 +1,17 @@
 //! Local daemon discovery, authenticated control, and internal HTTP routes.
 //!
-//! The daemon and browser UI server are the same persistent process. Foreground mirrord
-//! invocations discover that process through `daemon.json` and authenticate with the token file.
-//! Shutdown is requested over the internal API because the daemon must atomically check its own DB
-//! port-forward claims before deciding whether it can exit.
+//! The daemon and browser UI server are the same long-lived process, shared by every local mirrord
+//! invocation. Foreground mirrord invocations discover that process through `daemon.json` and
+//! authenticate with the token file. Shutdown is requested over the internal API because the
+//! daemon must atomically check its own DB port-forward claims before deciding whether it can exit.
+//! When the daemon stops on its own is decided in [`super::lifecycle`].
 
 use std::{
     collections::HashMap,
     env::{self, temp_dir, vars},
     fs::File,
     net::{Ipv4Addr, SocketAddr},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
     time::{Duration, SystemTime},
@@ -27,12 +28,6 @@ use axum::{
 use fs4::fs_std::FileExt;
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use mirrord_session_monitor_client::sessions_dir;
-#[cfg(unix)]
-use nix::{
-    errno::Errno,
-    sys::signal::{Signal, kill},
-    unistd::Pid,
-};
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -47,6 +42,7 @@ use tracing::{debug, warn};
 use super::server::start_periodic_rescan;
 use super::{
     UiCliError, UiServerError, db_portforwards,
+    lifecycle::{self, DaemonLifecycle, DaemonMode, MIRRORD_SERVER_MODE_ENV_NAME},
     server::{
         AppState, SessionNotification, build_router, scan_existing_sessions,
         start_filesystem_watcher, start_operator_watcher, token_auth,
@@ -66,8 +62,8 @@ const UI_LOCK_FILE_NAME: &str = "ui.lock";
 
 /// The file containing the PID of the most recently started daemon.
 ///
-/// It allows failed startup to stop the background process. If [`UI_LOCK_FILE_NAME`] is not locked,
-/// no daemon is running and this file is stale.
+/// `mirrord ui` prints it for diagnostics and manual cleanup. If [`UI_LOCK_FILE_NAME`] is not
+/// locked, no daemon is running and this file is stale.
 ///
 /// Only ever written, read or deleted by the parent (foreground) process, not the child process
 /// that runs the daemon. It is not locked.
@@ -196,8 +192,10 @@ impl TokenClaim {
 /// foreground parent can detach. It holds [`UI_LOCK_FILE_NAME`] for its lifetime; if another daemon
 /// already holds the lock, this process exits early with `Ok(())`.
 ///
+/// A [`DaemonMode::SessionOwned`] daemon also stops itself once idle, see [`lifecycle`].
+///
 /// Returns an error if setup fails, or when the running daemon exits due to an error.
-pub(super) async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
+pub(super) async fn ui_run_server(port: u16, mode: DaemonMode) -> Result<(), UiServerError> {
     let (guard, token) = match TokenClaim::claim_token_file()? {
         TokenClaim::AlreadyRunning => {
             println!("SERVER: daemon already running");
@@ -232,6 +230,7 @@ pub(super) async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
         clients: Default::default(),
         db_portforwards: Default::default(),
         shutdown: shutdown.clone(),
+        lifecycle: Arc::new(DaemonLifecycle::new(mode)),
     };
 
     scan_existing_sessions(&sessions_dir, &state).await;
@@ -239,6 +238,9 @@ pub(super) async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
     start_periodic_rescan(sessions_dir.clone(), state.clone());
     start_filesystem_watcher(&sessions_dir, state.clone())?;
     start_operator_watcher(state.clone());
+    if mode == DaemonMode::SessionOwned {
+        lifecycle::start_idle_shutdown(state.clone());
+    }
 
     let app = build_router(state);
 
@@ -288,7 +290,10 @@ pub(super) async fn ui_run_server(port: u16) -> Result<(), UiServerError> {
 /// [`MIRRORD_SERVER_PORT_ENV_NAME`] set. That child runs [`ui_run_server`] and outlives the command
 /// or mirrord session that started it. The parent waits for startup confirmation before returning.
 ///
-/// The daemon remains running after the foreground command exits and is shared by later sessions.
+/// `mode` says who the daemon is for. A daemon started in [`DaemonMode::Persistent`] keeps running
+/// after the foreground command exits, until `mirrord ui stop`. One started in
+/// [`DaemonMode::SessionOwned`] also stops itself once idle. Reusing a running daemon in
+/// [`DaemonMode::Persistent`] promotes it, so a daemon the user opened never stops on its own.
 ///
 /// `open_path` is the path the browser is pointed at (e.g. `/` for the session monitor, `/wizard`
 /// for the config wizard), appended to the daemon URL before the `?token=` query.
@@ -296,92 +301,13 @@ pub(super) async fn ui_start(
     port: u16,
     no_browser: bool,
     open_path: &str,
+    mode: DaemonMode,
 ) -> Result<ServerDetails, UiCliError> {
-    let mirrord_binary = env::current_exe()?;
-
-    let std_err_dir = temp_dir()
-        .join("mirrord")
-        .join(format!("ui-{}", env!("CARGO_PKG_VERSION")));
-    create_dir_all(&std_err_dir).await?;
-    let timestamp = SystemTime::UNIX_EPOCH
-        .elapsed()
-        .expect("system time should not be earlier than UNIX EPOCH")
-        .as_secs();
-
-    // stderr is piped into `/tmp/mirrord/ui-{MIRRORD_VERSION}/stderr-{timestamp}`. If a daemon is
-    // already running, this short-lived child still writes its startup logs to the new file.
-    let std_err_file = std_err_dir.join(format!("stderr-{timestamp}"));
-
-    let mut env_vars: HashMap<String, String> = vars().collect();
-    env_vars.insert(MIRRORD_SERVER_PORT_ENV_NAME.to_owned(), port.to_string());
-    env_vars.insert(MIRRORD_PROGRESS_ENV.to_owned(), "off".to_owned());
-
-    // default to debug level for logs sent to `std_err_file`
-    if !env_vars.contains_key("MIRRORD_LOG") {
-        env_vars.insert("MIRRORD_LOG".to_owned(), "mirrord=debug".to_owned());
-    }
-
-    let mut child = tokio::process::Command::new(mirrord_binary)
-        .args(vec!["ui"])
-        .envs(env_vars)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(File::create(&std_err_file)?)
-        .kill_on_drop(false)
-        .spawn()?;
-
-    let mut stdout = BufReader::new(child.stdout.take().expect("was piped")).lines();
-
-    let first_line = tokio::time::timeout(Duration::from_secs(30), stdout.next_line()).await;
-    let already_running = match first_line {
-        Err(..) => {
-            return Err(UiCliError::SpawnBackgroundTask(
-                "timed out waiting for the daemon process to confirm setup complete".to_owned(),
-            ));
-        }
-        Ok(Err(error)) => {
-            return Err(UiCliError::SpawnBackgroundTask(format!(
-                "failed to read the daemon process' stdout with {error}",
-            )));
-        }
-        Ok(Ok(None)) => {
-            return Err(UiCliError::SpawnBackgroundTask(
-                "unexpected EOF when reading the daemon process' stdout".to_owned(),
-            ));
-        }
-        Ok(Ok(Some(line))) => {
-            if line == "SERVER: setup complete" {
-                false
-            } else if line == "SERVER: daemon already running" {
-                true
-            } else {
-                return Err(UiCliError::SpawnBackgroundTask(format!(
-                    "unexpected message when reading the daemon process' stdout: {line}",
-                )));
-            }
-        }
-    };
-
-    let pid_file = mirrord_dir::get_path_or_fallback().join(PID_FILE_NAME);
-    let server_pid = if already_running {
-        // read pid from file, and dont overwrite it
-        std::fs::read_to_string(&pid_file).unwrap_or("unknown".to_owned())
-    } else {
-        // Store the daemon process ID for startup cleanup and diagnostics.
-        let Some(child_pid) = child.id().map(|pid| pid.to_string()) else {
-            return Err(UiCliError::ChildExitedUnexpectedly);
-        };
-
-        if let Err(err) = std::fs::write(&pid_file, &child_pid) {
-            // it's extremely unlikely to fail to write this file after we have the ui.lock
-            // file, but notify the user anyway because manual daemon cleanup will be harder.
-            println!(
-                "Unable to save PID of the daemon process. This does not mean the daemon is not running, \
-                but you may have to kill the process manually to stop it. Error: `{err}`"
-            );
-        }
-        child_pid
-    };
+    let SpawnedDaemon {
+        already_running,
+        server_pid,
+        std_err_file,
+    } = start_or_join_daemon(port, mode).await?;
 
     let token_path = mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME);
     let fallback_token = std::fs::read_to_string(&token_path)?;
@@ -409,6 +335,222 @@ pub(super) async fn ui_start(
         already_running,
         url,
         token: fallback_token,
+        server_pid,
+        std_err_file,
+    })
+}
+
+/// How many times [`start_or_join_daemon`] spawns a daemon process before giving up.
+const DAEMON_START_ATTEMPTS: usize = 3;
+
+/// Spawns a daemon, or joins the one already running in `mode`.
+///
+/// A running daemon that refuses to serve a new client is shutting down. Its lock and discovery
+/// files stay in place until it finishes draining, so this waits for it to exit and spawns a fresh
+/// daemon instead of handing out one that is about to disappear.
+async fn start_or_join_daemon(port: u16, mode: DaemonMode) -> Result<SpawnedDaemon, UiCliError> {
+    for _ in 0..DAEMON_START_ATTEMPTS {
+        let spawned = spawn_daemon(port, mode).await?;
+        if !spawned.already_running {
+            return Ok(spawned);
+        }
+        match join_running_daemon(mode).await? {
+            JoinOutcome::Joined => return Ok(spawned),
+            JoinOutcome::Exited => continue,
+        }
+    }
+
+    Err(UiCliError::SpawnBackgroundTask(
+        "the running local mirrord daemon kept shutting down while a new one was being started"
+            .to_owned(),
+    ))
+}
+
+/// How [`join_running_daemon`] ended.
+enum JoinOutcome {
+    /// The running daemon serves clients in the requested mode.
+    Joined,
+    /// No daemon holds [`UI_LOCK_FILE_NAME`] any more, so a new one can be started.
+    Exited,
+}
+
+/// Makes sure the daemon holding [`UI_LOCK_FILE_NAME`] can serve a client in `mode`, promoting it
+/// when `mode` is [`DaemonMode::Persistent`].
+///
+/// While the lock is held, a daemon without discovery data, or one that does not answer, is either
+/// still starting or draining after a shutdown, so this keeps waiting until it answers or releases
+/// the lock. Discovery data with another protocol version belongs to a daemon this CLI cannot talk
+/// to. Gives up after [`DAEMON_JOIN_TIMEOUT`].
+async fn join_running_daemon(mode: DaemonMode) -> Result<JoinOutcome, UiCliError> {
+    let wait = async {
+        loop {
+            if let Some(daemon) = DaemonClient::discover()? {
+                if daemon.admit(mode).await {
+                    return Ok(JoinOutcome::Joined);
+                }
+            } else if !daemon_lock_held()? {
+                return Ok(JoinOutcome::Exited);
+            } else if published_protocol_version()
+                .is_some_and(|version| version != DAEMON_PROTOCOL_VERSION)
+            {
+                return Err(UiCliError::DaemonResponse(INCOMPATIBLE_DAEMON.to_owned()));
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    };
+
+    tokio::time::timeout(DAEMON_JOIN_TIMEOUT, wait)
+        .await
+        .unwrap_or_else(|_| {
+            Err(UiCliError::DaemonResponse(
+                "the running local mirrord daemon neither responded nor exited".to_owned(),
+            ))
+        })
+}
+
+/// Bound on [`join_running_daemon`]. A draining daemon exits within about two seconds.
+const DAEMON_JOIN_TIMEOUT: Duration = Duration::from_secs(10);
+
+const INCOMPATIBLE_DAEMON: &str =
+    "an incompatible local mirrord daemon is already running; stop that process before retrying";
+
+/// Whether a daemon holds [`UI_LOCK_FILE_NAME`], checked without claiming it the way
+/// [`TokenClaim`] does.
+fn daemon_lock_held() -> Result<bool, UiCliError> {
+    Ok(daemon_lock_held_at(
+        &mirrord_dir::get_path_or_fallback().join(UI_LOCK_FILE_NAME),
+    )?)
+}
+
+fn daemon_lock_held_at(lock_path: &Path) -> std::io::Result<bool> {
+    let lock_file = match File::open(lock_path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+
+    // Fully qualified, because `File` has an inherent `try_lock_shared` with another signature.
+    let acquired = FileExt::try_lock_shared(&lock_file)?;
+    if acquired {
+        let _ = FileExt::unlock(&lock_file);
+    }
+    Ok(!acquired)
+}
+
+/// The protocol version in `daemon.json`, whether or not this CLI understands it.
+fn published_protocol_version() -> Option<u32> {
+    let path = mirrord_dir::get_path_or_fallback().join(DAEMON_INFO_FILE_NAME);
+    let info: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    info.get("protocol_version")?.as_u64()?.try_into().ok()
+}
+
+/// Outcome of spawning one daemon process in [`spawn_daemon`].
+struct SpawnedDaemon {
+    /// The spawned process found another daemon holding [`UI_LOCK_FILE_NAME`] and exited.
+    already_running: bool,
+    server_pid: String,
+    std_err_file: PathBuf,
+}
+
+/// Spawns a mirrord process that runs [`ui_run_server`] in `mode` and waits for it to confirm
+/// setup, or to report that another daemon already runs.
+async fn spawn_daemon(port: u16, mode: DaemonMode) -> Result<SpawnedDaemon, UiCliError> {
+    let mirrord_binary = env::current_exe()?;
+
+    let std_err_dir = temp_dir()
+        .join("mirrord")
+        .join(format!("ui-{}", env!("CARGO_PKG_VERSION")));
+    create_dir_all(&std_err_dir).await?;
+    let timestamp = SystemTime::UNIX_EPOCH
+        .elapsed()
+        .expect("system time should not be earlier than UNIX EPOCH")
+        .as_secs();
+
+    // stderr is piped into `/tmp/mirrord/ui-{MIRRORD_VERSION}/stderr-{timestamp}`. If a daemon is
+    // already running, this short-lived child still writes its startup logs to the new file.
+    let std_err_file = std_err_dir.join(format!("stderr-{timestamp}"));
+
+    let mut env_vars: HashMap<String, String> = vars().collect();
+    env_vars.insert(MIRRORD_SERVER_PORT_ENV_NAME.to_owned(), port.to_string());
+    // Always set, so a value inherited from the environment cannot pick the mode.
+    env_vars.insert(
+        MIRRORD_SERVER_MODE_ENV_NAME.to_owned(),
+        mode.as_env_value().to_owned(),
+    );
+    env_vars.insert(MIRRORD_PROGRESS_ENV.to_owned(), "off".to_owned());
+
+    // default to debug level for logs sent to `std_err_file`
+    if !env_vars.contains_key("MIRRORD_LOG") {
+        env_vars.insert("MIRRORD_LOG".to_owned(), "mirrord=debug".to_owned());
+    }
+
+    let mut child = tokio::process::Command::new(mirrord_binary)
+        .args(vec!["ui"])
+        .envs(env_vars)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(File::create(&std_err_file)?)
+        .kill_on_drop(false)
+        .spawn()?;
+
+    let mut stdout = BufReader::new(child.stdout.take().expect("was piped")).lines();
+
+    let first_line = tokio::time::timeout(Duration::from_secs(30), stdout.next_line()).await;
+    let confirmation = match first_line {
+        Err(..) => Err(UiCliError::SpawnBackgroundTask(
+            "timed out waiting for the daemon process to confirm setup complete".to_owned(),
+        )),
+        Ok(Err(error)) => Err(UiCliError::SpawnBackgroundTask(format!(
+            "failed to read the daemon process' stdout with {error}",
+        ))),
+        Ok(Ok(None)) => Err(UiCliError::SpawnBackgroundTask(
+            "unexpected EOF when reading the daemon process' stdout".to_owned(),
+        )),
+        Ok(Ok(Some(line))) => {
+            if line == "SERVER: setup complete" {
+                Ok(false)
+            } else if line == "SERVER: daemon already running" {
+                Ok(true)
+            } else {
+                Err(UiCliError::SpawnBackgroundTask(format!(
+                    "unexpected message when reading the daemon process' stdout: {line}",
+                )))
+            }
+        }
+    };
+    let already_running = match confirmation {
+        Ok(already_running) => already_running,
+        Err(error) => {
+            // A child stuck in startup may hold the daemon lock. It is the only process this
+            // invocation may stop: a daemon that was already running serves other sessions.
+            let _ = child.start_kill();
+            return Err(error);
+        }
+    };
+
+    let pid_file = mirrord_dir::get_path_or_fallback().join(PID_FILE_NAME);
+    let server_pid = if already_running {
+        // read pid from file, and dont overwrite it
+        std::fs::read_to_string(&pid_file).unwrap_or("unknown".to_owned())
+    } else {
+        // Store the daemon process ID for startup cleanup and diagnostics.
+        let Some(child_pid) = child.id().map(|pid| pid.to_string()) else {
+            return Err(UiCliError::ChildExitedUnexpectedly);
+        };
+
+        if let Err(err) = std::fs::write(&pid_file, &child_pid) {
+            // it's extremely unlikely to fail to write this file after we have the ui.lock
+            // file, but notify the user anyway because manual daemon cleanup will be harder.
+            println!(
+                "Unable to save PID of the daemon process. This does not mean the daemon is not running, \
+                but you may have to kill the process manually to stop it. Error: `{err}`"
+            );
+        }
+        child_pid
+    };
+
+    Ok(SpawnedDaemon {
+        already_running,
         server_pid,
         std_err_file,
     })
@@ -471,6 +613,7 @@ impl DaemonClient {
         }))
     }
 
+    /// Whether the daemon answers and is not shutting down.
     async fn ping(&self) -> bool {
         self.client
             .get(format!("http://{}/api/internal/ping", self.info.addr))
@@ -481,14 +624,65 @@ impl DaemonClient {
             .is_ok_and(|response| response.status().is_success())
     }
 
+    /// Asks the daemon to stay up until `mirrord ui stop`. Fails when it is shutting down.
+    async fn promote(&self) -> bool {
+        self.client
+            .post(format!("http://{}/api/internal/persist", self.info.addr))
+            .header(TOKEN_HEADER_NAME, &self.token)
+            .timeout(Duration::from_secs(1))
+            .send()
+            .await
+            .is_ok_and(|response| response.status().is_success())
+    }
+
+    /// Whether the daemon can serve a client in `mode`, promoting it for
+    /// [`DaemonMode::Persistent`].
+    async fn admit(&self, mode: DaemonMode) -> bool {
+        match mode {
+            DaemonMode::Persistent => self.promote().await,
+            DaemonMode::SessionOwned => self.ping().await,
+        }
+    }
+
+    /// Whether the discovery files still describe this daemon. They are removed when it exits and
+    /// replaced when another daemon starts, and the token is unique to each daemon.
+    fn is_published(&self) -> bool {
+        read_daemon_info().is_some()
+            && std::fs::read_to_string(mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME))
+                .is_ok_and(|token| token.trim() == self.token)
+    }
+
+    /// Requests attachment to a daemon-owned DB forward.
+    ///
+    /// A session-owned daemon can go idle and shut down between [`ensure_daemon`] and the daemon
+    /// registering this session, and another daemon may replace it on the same port. When the
+    /// daemon this client knows refuses the attachment or is gone, this switches to the current
+    /// daemon from [`ensure_daemon`], which waits for a draining one to exit, and retries once.
+    /// A fresh daemon finds the session through `scan_existing_sessions` while starting.
+    pub(crate) async fn attach_db_portforward(
+        &mut self,
+        request: &db_portforwards::DbPortForwardAttachRequest,
+    ) -> Result<db_portforwards::DbPortForwardAttachResponse, UiCliError> {
+        match self.try_attach_db_portforward(request).await {
+            Err(UiCliError::DaemonGone) => {
+                debug!("local daemon shut down before DB port-forward attachment, restarting it");
+                *self = ensure_daemon().await?;
+                self.try_attach_db_portforward(request).await
+            }
+            result => result,
+        }
+    }
+
     /// Requests attachment to a daemon-owned DB forward, retrying the session-discovery race.
     ///
     /// The intproxy publishes its session-monitor sentinel before making this request, but the
     /// daemon's filesystem watcher may not have registered it yet. The attach endpoint reports that
     /// state as `409 Conflict`; retrying for up to ten seconds lets discovery catch up without
-    /// accepting claims from unknown sessions. Connection failures are retried for the same window
-    /// because the daemon may still be completing startup.
-    pub(crate) async fn attach_db_portforward(
+    /// accepting claims from unknown sessions. Transport failures are retried for the same window
+    /// while the daemon is still published, because it may still be completing startup. A daemon
+    /// that is shutting down, has exited, or was replaced (so the request carries a stale token)
+    /// fails with [`UiCliError::DaemonGone`].
+    async fn try_attach_db_portforward(
         &self,
         request: &db_portforwards::DbPortForwardAttachRequest,
     ) -> Result<db_portforwards::DbPortForwardAttachResponse, UiCliError> {
@@ -506,12 +700,18 @@ impl DaemonClient {
                 .await
             {
                 Ok(response) => response,
-                Err(error) if error.is_connect() => {
+                Err(_) if !self.is_published() => return Err(UiCliError::DaemonGone),
+                Err(error) if error.is_connect() || error.is_request() => {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     continue;
                 }
                 Err(error) => return Err(error.into()),
             };
+            if response.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE
+                || (response.status() == reqwest::StatusCode::UNAUTHORIZED && !self.is_published())
+            {
+                return Err(UiCliError::DaemonGone);
+            }
             if response.status() == reqwest::StatusCode::CONFLICT {
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 continue;
@@ -578,6 +778,10 @@ impl DaemonClient {
 /// file supplies authentication. Existing discovery data is trusted only after an authenticated
 /// ping succeeds. Otherwise this starts a daemon without opening a browser, then reads the newly
 /// published discovery information. Incompatible protocol versions are never reused.
+///
+/// A daemon started here is [`DaemonMode::SessionOwned`], so it stops once nothing uses it. A
+/// daemon that is shutting down fails the ping, and [`ui_start`] waits for it to exit before
+/// starting a new one.
 pub(crate) async fn ensure_daemon() -> Result<DaemonClient, UiCliError> {
     if let Some(daemon) = DaemonClient::discover()?
         && daemon.ping().await
@@ -585,100 +789,14 @@ pub(crate) async fn ensure_daemon() -> Result<DaemonClient, UiCliError> {
         return Ok(daemon);
     }
 
-    let details = ui_start(UI_DEFAULT_PORT, true, "").await?;
-    let info = read_daemon_info().ok_or_else(|| {
-        UiCliError::DaemonResponse(
-            "an incompatible local mirrord daemon is already running; stop that process before retrying"
-                .to_owned(),
-        )
-    })?;
+    let details = ui_start(UI_DEFAULT_PORT, true, "", DaemonMode::SessionOwned).await?;
+    let info = read_daemon_info()
+        .ok_or_else(|| UiCliError::DaemonResponse(INCOMPATIBLE_DAEMON.to_owned()))?;
     Ok(DaemonClient {
         client: reqwest::Client::builder().build()?,
         info,
         token: details.token,
     })
-}
-
-/// Stops the local daemon during failed startup or explicit internal cleanup.
-///
-/// If [`UI_LOCK_FILE_NAME`] is held, this kills the daemon using [`PID_FILE_NAME`]. Otherwise it
-/// temporarily claims the lock and removes stale discovery, token, and PID files. Normal
-/// `mirrord ui stop` uses the authenticated shutdown endpoint instead; this is only recovery for a
-/// failed startup path.
-///
-/// @with_printouts: if `true`, prints info messages to stdout. Does not affect logs.
-pub(super) async fn stop_daemon(with_printouts: bool) -> Result<(), UiCliError> {
-    let mirrord_dir = mirrord_dir::get_path_or_fallback();
-    let pid_file = mirrord_dir.join(PID_FILE_NAME);
-
-    let guard = match TokenClaim::claim_token_file()? {
-        TokenClaim::AlreadyRunning => {
-            let pid = match std::fs::read_to_string(&pid_file) {
-                Ok(pid) => pid,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    return Err(UiCliError::MissingPidFile);
-                }
-                Err(error) => return Err(error.into()),
-            };
-
-            debug!(
-                ?pid,
-                ?pid_file,
-                "local daemon process ID read from file successfully"
-            );
-
-            #[cfg(unix)]
-            {
-                let pid = pid.parse().map_err(UiCliError::PidParse)?;
-                kill(Pid::from_raw(pid), Some(Signal::SIGKILL)).or_else(|error| {
-                    if error == Errno::ESRCH {
-                        // ESRCH means that the process has already exited.
-                        Ok(())
-                    } else {
-                        Err(error)
-                    }
-                })?;
-            }
-
-            #[cfg(windows)]
-            std::process::Command::new("taskkill")
-                .args(["/pid", &pid, "/t"])
-                .output()?;
-
-            if with_printouts {
-                println!("* Sent stop command to local daemon (it may not exit immediately)");
-            }
-            None
-        }
-        TokenClaim::Claimed { guard, .. } => {
-            if with_printouts {
-                println!(
-                    "* No running instance of `mirrord ui` was found. If you think this is incorrect, \
-                try killing the process manually, for example by running `ps aux | grep mirrord` \
-                and then `kill $PID` in a terminal."
-                );
-            }
-            Some(guard)
-        }
-    };
-
-    // Remove stale files, ignoring errors since they won't cause problems being there. When we
-    // acquired the guard, it owns cleanup of the token file.
-    let _ = std::fs::remove_file(mirrord_dir::get_path_or_fallback().join(PID_FILE_NAME))
-        .inspect_err(|err| debug!(?err, "deleting PID file returned error"));
-    let _ = std::fs::remove_file(mirrord_dir::get_path_or_fallback().join(DAEMON_INFO_FILE_NAME))
-        .inspect_err(|err| debug!(?err, "deleting daemon info file returned error"));
-    if guard.is_none() {
-        let _ = std::fs::remove_file(mirrord_dir::get_path_or_fallback().join(TOKEN_FILE_NAME))
-            .inspect_err(|err| debug!(?err, "deleting token file returned error"));
-    }
-
-    if with_printouts {
-        println!("* Cleaned up stale files");
-    }
-
-    drop(guard);
-    Ok(())
 }
 
 /// Stops the daemon unless active sessions still claim daemon-owned DB port forwards.
@@ -703,8 +821,22 @@ pub async fn ui_stop(with_printouts: bool) -> Result<(), UiCliError> {
     Ok(())
 }
 
-async fn daemon_ping() -> StatusCode {
-    StatusCode::OK
+/// Answers discovery. Fails once shutdown has started, so a draining daemon is never reused.
+async fn daemon_ping(State(state): State<AppState>) -> StatusCode {
+    if state.shutdown.is_cancelled() {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::OK
+    }
+}
+
+/// Promotes the daemon to [`DaemonMode::Persistent`] when the user explicitly opens the UI.
+async fn daemon_persist(State(state): State<AppState>) -> StatusCode {
+    if state.lifecycle.promote(&state.shutdown) {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -713,7 +845,7 @@ struct DaemonShutdownBlocked {
 }
 
 async fn daemon_shutdown(State(state): State<AppState>) -> Response {
-    match db_portforwards::request_daemon_shutdown(&state.db_portforwards, &state.shutdown).await {
+    match lifecycle::request_shutdown(&state).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(sessions) => (
             StatusCode::CONFLICT,
@@ -727,6 +859,7 @@ async fn daemon_shutdown(State(state): State<AppState>) -> Response {
 pub(super) fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/ping", get(daemon_ping))
+        .route("/persist", post(daemon_persist))
         .route("/db-port-forwards/attach", post(db_portforwards::attach))
         .route("/shutdown", post(daemon_shutdown))
         .layer(middleware::from_fn_with_state(state, token_auth))
@@ -819,5 +952,25 @@ mod tests {
             panic!("reclaim after drop should succeed");
         };
         assert_ne!(first, second, "a reclaim should publish a fresh token");
+    }
+
+    /// Joining a running daemon tells a daemon that is starting or draining (lock held) from one
+    /// that has exited (lock free) without claiming the lock itself.
+    #[test]
+    fn lock_probe_sees_a_held_lock_without_claiming_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lock, token_path, daemon_info_path) = paths(&dir);
+
+        assert!(!daemon_lock_held_at(&lock).unwrap());
+
+        let TokenClaim::Claimed { guard, .. } =
+            TokenClaim::claim_token_file_at(lock.clone(), token_path, daemon_info_path).unwrap()
+        else {
+            panic!("first claim should succeed");
+        };
+        assert!(daemon_lock_held_at(&lock).unwrap());
+
+        drop(guard);
+        assert!(!daemon_lock_held_at(&lock).unwrap());
     }
 }

@@ -1,9 +1,12 @@
 //! # Local mirrord daemon and UI
 //!
-//! The daemon starts automatically with mirrord sessions and owns local services shared between
-//! them. The `mirrord ui` command opens its web-based session monitor. The daemon watches
-//! `~/.mirrord/sessions/` for session sentinel files (`.sock` on unix, `.pipe` on windows),
-//! connects to each session's HTTP API, and serves REST/SSE/WebSocket endpoints on localhost.
+//! The daemon owns local services shared between mirrord sessions. `mirrord ui`, `mirrord wizard`
+//! and `mirrord up --ui` start it and open its web-based session monitor, and it then runs until
+//! `mirrord ui stop`. A session that needs a shared service, such as DB branch port forwards,
+//! starts it on demand, and a daemon started that way stops itself once nothing uses it (see
+//! `ui::lifecycle`). The daemon watches `~/.mirrord/sessions/` for session sentinel files (`.sock`
+//! on unix, `.pipe` on windows), connects to each session's HTTP API, and serves
+//! REST/SSE/WebSocket endpoints on localhost.
 //!
 //! It also enables chaos testing by updating chaos rules enforced in the internal proxy.
 //!
@@ -16,8 +19,6 @@
 //! and `ui::wizard`). This command starts the daemon if needed and points the browser at the wizard
 //! page. The frontend itself lives in `packages/ui` (composing `packages/wizard`).
 
-#[cfg(unix)]
-use std::num::ParseIntError;
 use std::{env, io::Read, str::FromStr};
 
 use futures::future::join_all;
@@ -32,8 +33,6 @@ use mirrord_intproxy::session_monitor::chaos::rules::{ChaosRule, ChaosRuleReques
 use mirrord_session_monitor_client::{
     Response, SessionClient, SessionError, session_endpoints, sessions_dir,
 };
-#[cfg(unix)]
-use nix::errno::Errno;
 use serde_json::{Value, json};
 use thiserror::Error;
 use tracing::{error, info};
@@ -52,6 +51,7 @@ mod chaos;
 mod daemon;
 pub(crate) mod db_portforwards;
 mod error;
+mod lifecycle;
 pub mod server;
 mod wizard;
 
@@ -59,9 +59,9 @@ const MAX_EVENTS_PER_SESSION: usize = 500;
 
 pub(crate) use daemon::{DaemonClient, ensure_daemon, ui_stop};
 use daemon::{
-    MIRRORD_SERVER_PORT_ENV_NAME, ServerDetails, TOKEN_HEADER_NAME, stop_daemon, ui_run_server,
-    ui_start,
+    MIRRORD_SERVER_PORT_ENV_NAME, ServerDetails, TOKEN_HEADER_NAME, ui_run_server, ui_start,
 };
+use lifecycle::DaemonMode;
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum UiCliError {
@@ -71,16 +71,6 @@ pub enum UiCliError {
     /// IO error for the foreground process - for the daemon, use [`UiServerError::Io`].
     #[error(transparent)]
     Io(#[from] std::io::Error),
-
-    /// May occur while trying to kill the existing local daemon.
-    #[cfg(unix)]
-    #[error("failed to perform an operation on the local mirrord daemon process: {0}")]
-    #[diagnostic(help(
-        "To forcefully stop the daemon process, try killing it manually. On \
-        unix for example, find the process with `ps aux | grep mirrord ui` and \
-        then `kill $PID` to stop it running."
-    ))]
-    Process(#[from] Errno),
 
     /// Occurs when the foreground task is waiting to read an "OK" message from the stdout of the
     /// child, and it times out or gets a different response or error.
@@ -92,22 +82,15 @@ pub enum UiCliError {
     #[error("the new daemon process ended unexpectedly")]
     ChildExitedUnexpectedly,
 
-    #[cfg(unix)]
-    #[error("failed to parse a PID from file contents: {0}")]
-    PidParse(ParseIntError),
-
-    #[error("couldn't kill the local mirrord daemon because its PID file was not found")]
-    #[diagnostic(help(
-        "Try killing the process manually. On Unix, for example, run `ps aux | grep mirrord` and \
-        then `kill $PID` in a terminal."
-    ))]
-    MissingPidFile,
-
     #[error("failed to communicate with the local mirrord daemon: {0}")]
     DaemonRequest(#[from] reqwest::Error),
 
     #[error("local mirrord daemon returned an invalid response: {0}")]
     DaemonResponse(String),
+
+    /// The daemon a client knew is shutting down, has exited, or was replaced by another one.
+    #[error("the local mirrord daemon is shutting down or was replaced")]
+    DaemonGone,
 
     #[error(
         "cannot stop the local mirrord daemon because these sessions still use shared DB port forwards: {0}. Stop them and retry"
@@ -185,8 +168,8 @@ fn ui_start_printout(
 }
 
 /// Runs the `mirrord ui` command. Starting opens the daemon's UI; stopping terminates the daemon
-/// when no sessions still depend on its shared DB forwards. Failed startup performs private daemon
-/// cleanup.
+/// when no sessions still depend on its shared DB forwards. Failed startup stops only a daemon
+/// process this invocation spawned, never one that was already running.
 ///
 /// `open_path` selects which page the browser opens on when the daemon starts (`/` for the session
 /// monitor, `/wizard` for the config wizard). It has no effect on [`UiSubcommand::Stop`].
@@ -212,10 +195,14 @@ pub async fn ui_command(
     match command.unwrap_or(UiSubcommand::Start) {
         UiSubcommand::Start => {
             if let Ok(port) = env::var(MIRRORD_SERVER_PORT_ENV_NAME) {
-                ui_run_server(u16::from_str(&port).unwrap_or(UI_DEFAULT_PORT)).await?;
+                ui_run_server(
+                    u16::from_str(&port).unwrap_or(UI_DEFAULT_PORT),
+                    DaemonMode::from_env(),
+                )
+                .await?;
                 Ok(())
             } else {
-                match ui_start(port, no_browser, open_path).await {
+                match ui_start(port, no_browser, open_path, DaemonMode::Persistent).await {
                     Ok(details) => {
                         ui_start_printout(&details);
                         if details.already_running && config_file.is_some() {
@@ -228,8 +215,7 @@ pub async fn ui_command(
                         Ok(())
                     }
                     Err(error) => {
-                        error!("`mirrord ui` failed to start the daemon, cleaning up startup");
-                        let _ = stop_daemon(false).await;
+                        error!("`mirrord ui` failed to start the daemon");
                         Err(error)
                     }
                 }
@@ -265,8 +251,11 @@ pub async fn wizard_command(
 
 /// The entrypoint for the `chaos` command. Starts the local daemon if needed without opening a
 /// browser, then displays or edits active chaos rules.
+///
+/// Nothing here keeps using the daemon, so a daemon started here is session-owned and stops once
+/// idle, like one started by a session.
 pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
-    let details = ui_start(UI_DEFAULT_PORT, true, "").await?;
+    let details = ui_start(UI_DEFAULT_PORT, true, "", DaemonMode::SessionOwned).await?;
     info!(?details, "ran mirrord ui start");
 
     let sessions_dir = sessions_dir().ok_or_else(|| {
