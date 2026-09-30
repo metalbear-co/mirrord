@@ -56,6 +56,10 @@ pub(crate) enum OperatorInstallError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     NoDeployment,
 
+    #[error("the operator Deployment in the manifest has no valid `helm.sh/chart` label")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    NoChartVersionLabel,
+
     #[error("the operator manifest has an object with an invalid `apiVersion` or `kind`")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     InvalidObjectType(#[source] kube::core::gvk::ParseGroupVersionError),

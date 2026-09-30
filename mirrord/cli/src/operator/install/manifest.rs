@@ -35,6 +35,10 @@ const RELEASE_NAME_ANNOTATION: &str = "meta.helm.sh/release-name";
 
 const RELEASE_NAMESPACE_ANNOTATION: &str = "meta.helm.sh/release-namespace";
 
+/// Names the chart and version an object was rendered from, as `<chart>-<version>` with `+`
+/// replaced by `_`.
+const CHART_LABEL: &str = "helm.sh/chart";
+
 /// Required by helm to adopt an object. Most chart templates already set it, but not all of them
 /// (e.g. the CRDs).
 const MANAGED_BY_LABEL: &str = "app.kubernetes.io/managed-by";
@@ -125,6 +129,8 @@ async fn fetch(http: &reqwest::Client, url: &str) -> Result<Option<String>, Oper
 #[derive(Debug)]
 pub(super) struct Manifest {
     objects: Vec<DynamicObject>,
+    /// Version of the chart the manifest was rendered from, which may differ from the operator's.
+    chart_version: semver::Version,
     operator_deployment: String,
     /// Namespace of the operator Deployment.
     operator_namespace: String,
@@ -160,6 +166,12 @@ impl Manifest {
                     .is_some_and(|types| types.kind == "Deployment")
             })
             .ok_or(OperatorInstallError::NoDeployment)?;
+        let chart_version = deployment
+            .labels()
+            .get(CHART_LABEL)
+            .and_then(|chart| chart.strip_prefix(&format!("{CHART_NAME}-")))
+            .and_then(|version| semver::Version::parse(&version.replace('_', "+")).ok())
+            .ok_or(OperatorInstallError::NoChartVersionLabel)?;
         let operator_deployment = deployment.name_any();
         let operator_namespace = deployment
             .namespace()
@@ -167,6 +179,7 @@ impl Manifest {
 
         Ok(Self {
             objects,
+            chart_version,
             operator_deployment,
             operator_namespace,
         })
@@ -178,6 +191,10 @@ impl Manifest {
 
     pub(super) fn operator_namespace(&self) -> &str {
         &self.operator_namespace
+    }
+
+    pub(super) fn chart_version(&self) -> &semver::Version {
+        &self.chart_version
     }
 
     /// A shell command substitution that reads the installed operator's API key from the cluster.
@@ -246,6 +263,8 @@ kind: Deployment
 metadata:
   name: mirrord-operator
   namespace: mirrord
+  labels:
+    helm.sh/chart: mirrord-operator-1.35.0
 spec:
   template:
     spec:
@@ -276,6 +295,7 @@ metadata:
             .collect::<Vec<_>>();
         assert_eq!(names, ["mirrord", "mirrord-operator"]);
         assert_eq!(manifest.operator_namespace(), "mirrord");
+        assert_eq!(manifest.chart_version(), &semver::Version::new(1, 35, 0));
     }
 
     #[test]

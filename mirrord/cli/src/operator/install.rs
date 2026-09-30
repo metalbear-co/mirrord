@@ -162,8 +162,9 @@ fn summary(
         "This is a default installation. For anything custom (namespace, tolerations, pull \
         secrets, OIDC, ...), manage it with the helm chart, which takes over this installation \
         and keeps its API key:\n\n  helm repo add metalbear {repo}\n  helm install {release} \
-        metalbear/{chart} --version {version} \\\n    --set \
+        metalbear/{chart} --version {chart_version} \\\n    --set \
         cloud.apiKey.key=\"{api_key}\"",
+        chart_version = manifest.chart_version(),
         api_key = manifest.api_key_lookup(),
         repo = manifest::CHARTS_REPO_URL,
         release = manifest::RELEASE_NAME,
