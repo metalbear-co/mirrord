@@ -868,14 +868,14 @@ fn convert_additional_database(config: &PgAdditionalDatabaseConfig) -> PgAdditio
 /// A branch is only reused by a session asking for the same additional databases, connected
 /// the same way. A branch without additional databases keeps the plain id and so the name it
 /// always had.
-fn pg_reuse_key(id: &str, additional: &[PgAdditionalDatabaseConfig]) -> String {
+fn pg_reuse_key(id: &str, additional: &[PgAdditionalDatabase]) -> String {
     if additional.is_empty() {
         return id.to_owned();
     }
 
     let mut databases = additional
         .iter()
-        .map(|database| (database.name.trim(), database.connection.as_ref()))
+        .map(|database| (database.name.as_str(), database.connection_source.as_ref()))
         .collect::<Vec<_>>();
     databases.sort_unstable_by_key(|(name, _)| *name);
 
@@ -1866,7 +1866,12 @@ impl UnifiedBranchParams {
         migrations: Option<MigrationsSpec>,
     ) -> Self {
         let name_prefix = format!("{}-pg-branch-", target.name());
-        let reuse_key = pg_reuse_key(id, &config.additional_databases);
+        let additional_databases = config
+            .additional_databases
+            .iter()
+            .map(convert_additional_database)
+            .collect::<Vec<_>>();
+        let reuse_key = pg_reuse_key(id, &additional_databases);
         let deterministic_name = deterministic_branch_name("pg", target_namespace, &reuse_key);
         let connection_source = convert_connection_source(&config.database.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
@@ -1886,11 +1891,7 @@ impl UnifiedBranchParams {
                 iam_auth,
                 connection_settings: config.connection_settings.clone(),
                 query_params: config.query_params.clone(),
-                additional_databases: config
-                    .additional_databases
-                    .iter()
-                    .map(convert_additional_database)
-                    .collect(),
+                additional_databases,
             }),
             mysql_options: None,
             mariadb_options: None,
@@ -3179,6 +3180,17 @@ mod test {
                 { "name": "a", "connection": { "url": "OTHER_URL" } },
                 { "name": "b" }
             ]))
+        );
+        assert_eq!(
+            connected,
+            name(serde_json::json!([
+                {
+                    "name": "a",
+                    "connection": { "url": { "type": "env", "variable": "A_URL" } }
+                },
+                { "name": "b" }
+            ])),
+            "two spellings of one connection are the same branch"
         );
     }
 
