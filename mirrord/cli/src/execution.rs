@@ -27,7 +27,8 @@ use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use mirrord_protocol_api::client::{MirrordClient, MirrordClientRetry};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{
-    MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, extract_sip_binaries, sip_patch,
+    MIRRORD_BINARIES_DIR_PATH_BUF, MIRRORD_SIP_X64_FALLBACK_ENV, SipError, SipPatchOptions,
+    extract_sip_binaries, sip_patch,
 };
 use mirrord_tls_util::SecureChannelSetup;
 use serde::Serialize;
@@ -366,6 +367,13 @@ impl MirrordExecution {
                             panic!("mirrord failed to patch SIP with: {}", sip_error);
                         }
                     })?;
+
+                if result
+                    .as_ref()
+                    .is_some_and(|result| result.x64_fallback.is_some())
+                {
+                    env_vars.insert(MIRRORD_SIP_X64_FALLBACK_ENV.to_owned(), "1".to_owned());
+                }
 
                 result.map(|result| result.path_string())
             }

@@ -14,12 +14,14 @@ pub(crate) mod db_portforwards;
 
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::ffi::OsStrExt;
+#[cfg(target_os = "macos")]
+use std::sync::atomic::Ordering;
 use std::{
     env::{self, home_dir},
     io,
     net::{Ipv4Addr, SocketAddr},
     ops::Not,
-    sync::{Arc, Weak},
+    sync::{Arc, Weak, atomic::AtomicU32},
     time::Duration,
 };
 
@@ -421,6 +423,7 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
+    let sip_x64_fallback_count = Arc::new(AtomicU32::new(0));
     let res = IntProxy::new_with_connection(
         agent_conn,
         listener,
@@ -440,6 +443,7 @@ pub(crate) async fn proxy(
         monitor_tx,
         chaos_rx,
     )
+    .with_sip_x64_fallback_count(sip_x64_fallback_count.clone())
     .run_with_shutdown(
         first_connection_timeout,
         consecutive_connection_timeout,
@@ -447,6 +451,17 @@ pub(crate) async fn proxy(
     )
     .await
     .map_err(From::from);
+
+    #[cfg(target_os = "macos")]
+    {
+        let sip_x64_fallback_count = sip_x64_fallback_count.load(Ordering::Relaxed);
+        if sip_x64_fallback_count > 0 {
+            chaos_reporter
+                .write()
+                .await
+                .set_sip_x64_fallback_count(sip_x64_fallback_count);
+        }
+    }
 
     if res.is_err()
         && tokio::time::timeout(Duration::from_secs(1), async {

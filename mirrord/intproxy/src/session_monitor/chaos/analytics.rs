@@ -75,6 +75,11 @@ impl ChaosAnalyticsReporter {
     pub fn set_inner_error(&mut self, error: AnalyticsError) {
         self.inner.set_error(error);
     }
+
+    /// Records how many protected system binaries required an x86_64 fallback during the session.
+    pub fn set_sip_x64_fallback_count(&mut self, count: u32) {
+        self.inner.get_mut().add("sip_x64_fallback_count", count);
+    }
 }
 
 impl Drop for ChaosAnalyticsReporter {

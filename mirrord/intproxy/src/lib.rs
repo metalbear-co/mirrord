@@ -1,9 +1,12 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
+#[cfg(target_os = "macos")]
+use std::sync::atomic::Ordering;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     ops::ControlFlow,
+    sync::{Arc, atomic::AtomicU32},
     time::Duration,
 };
 
@@ -157,6 +160,9 @@ pub struct IntProxy {
 
     /// Session monitor event sender
     monitor_tx: MonitorTx,
+
+    /// A counter for the number of times Rosetta was used. Used for metrics before Rosetta EOL
+    sip_x64_fallback_count: Option<Arc<AtomicU32>>,
 }
 
 /// Timing configuration for [`IntProxy`] maintenance tasks.
@@ -396,7 +402,14 @@ impl IntProxy {
             process_logging_interval,
             agent_tx,
             monitor_tx,
+            sip_x64_fallback_count: None,
         }
+    }
+
+    /// Records SIP x86_64 fallbacks in the session analytics owned by the caller.
+    pub fn with_sip_x64_fallback_count(mut self, count: Arc<AtomicU32>) -> Self {
+        self.sip_x64_fallback_count = Some(count);
+        self
     }
 
     /// Check if any layer connections are still alive
@@ -615,6 +628,7 @@ impl IntProxy {
                     msg.message,
                     LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
                         | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_))
+                        | LayerToProxyMessage::SipX64Fallback(_)
                 ) {
                     self.pending_layers.insert((msg.layer_id, msg.message_id));
                 }
@@ -899,6 +913,12 @@ impl IntProxy {
                     .simple
                     .send(SimpleProxyMessage::GetEnvReq(message_id, layer_id, req))
                     .await
+            }
+            LayerToProxyMessage::SipX64Fallback(_) => {
+                #[cfg(target_os = "macos")]
+                if let Some(count) = &self.sip_x64_fallback_count {
+                    count.fetch_add(1, Ordering::Relaxed);
+                }
             }
             other => Err(ProxyRuntimeError::UnexpectedLayerMessage(other))?,
         }

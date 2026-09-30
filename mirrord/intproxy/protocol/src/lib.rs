@@ -52,7 +52,14 @@ pub enum LayerToProxyMessage {
     Incoming(IncomingRequest),
     /// Fetch environment variables from the target.
     GetEnv(GetEnvVarsRequest),
+    /// Reports that SIP patching used an x86_64 system binary that was missing from appleutils.
+    SipX64Fallback(SipX64Fallback),
 }
+
+/// Reports when a protected system binary still requires Rosetta because it is missing from
+/// appleutils.
+#[derive(Clone, Copy, Debug, Encode, Decode, PartialEq, Eq)]
+pub struct SipX64Fallback;
 
 /// Layer process information
 #[derive(Encode, Decode, Debug, PartialEq, Eq)]
@@ -630,6 +637,11 @@ impl_request!(
     res = RemoteResult<HashMap<String, String>>,
     req_path = LayerToProxyMessage::GetEnv,
     res_path = ProxyToLayerMessage::GetEnv,
+);
+
+impl_request!(
+    req = SipX64Fallback,
+    req_path = LayerToProxyMessage::SipX64Fallback,
 );
 
 impl_request!(

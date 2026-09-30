@@ -9,6 +9,7 @@ Types of data sent:
 1. Feature on/off
 2. Feature enum value (steal/mirror, read/write)
 3. Feature count (how many ports in `listen_ports`)
+4. On Apple silicon, the count of protected system binaries that are missing from the native macOS bundle and require Rosetta
 
 When there's an error, we send the name of the error (out of a hard-coded list, so there's no risk of any sensitive data being sent).
 

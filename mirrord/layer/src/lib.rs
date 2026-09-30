@@ -99,6 +99,8 @@ use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, feature::env::mapper::EnvVarsRemapper,
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
+#[cfg(target_os = "macos")]
+use mirrord_intproxy_protocol::SipX64Fallback;
 #[cfg(doc)]
 use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_lib::{
@@ -119,10 +121,25 @@ use nix::{
 };
 use socket::{SOCKETS, UserSocket};
 
+#[cfg(target_os = "macos")]
+use crate::common::make_proxy_request_no_response;
 pub(crate) use crate::macros::*;
 use crate::{
     common::make_proxy_request_with_response, load::LoadType, socket::hooks::MANAGED_ADDRINFO,
 };
+
+#[cfg(target_os = "macos")]
+fn report_sip_x64_fallback() {
+    if std::env::var_os(mirrord_sip::MIRRORD_SIP_X64_FALLBACK_ENV).is_none() {
+        return;
+    }
+
+    if let Err(error) = make_proxy_request_no_response(SipX64Fallback) {
+        tracing::warn!(%error, "Failed to report the SIP x86_64 fallback");
+    }
+    // The first process reports this fallback. Child processes must not report it again.
+    unsafe { std::env::remove_var(mirrord_sip::MIRRORD_SIP_X64_FALLBACK_ENV) };
+}
 
 /// Silences `deny(unused_crate_dependencies)`.
 ///
@@ -331,6 +348,9 @@ fn load_only_layer_start(config: &LayerConfig) {
             .set(new_connection)
             .expect("setting PROXY_CONNECTION singleton")
     }
+
+    #[cfg(target_os = "macos")]
+    report_sip_x64_fallback();
 }
 
 /// The one true start of mirrord-layer.
@@ -435,6 +455,9 @@ fn layer_start(config: LayerConfig) {
             .set(new_connection)
             .expect("setting PROXY_CONNECTION singleton")
     }
+
+    #[cfg(target_os = "macos")]
+    report_sip_x64_fallback();
 
     let fetch_env = setup().env_config().load_from_process.unwrap_or(false)
         && !std::env::var(REMOTE_ENV_FETCHED)

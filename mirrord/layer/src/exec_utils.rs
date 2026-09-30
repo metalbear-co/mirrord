@@ -6,6 +6,7 @@ use std::{
 };
 
 use libc::{c_char, c_int, pid_t};
+use mirrord_intproxy_protocol::SipX64Fallback;
 use mirrord_layer_lib::{
     detour::{
         Bypass::{
@@ -23,7 +24,7 @@ use tracing::{info, trace, warn};
 
 use crate::{
     EXECUTABLE_ARGS,
-    common::{CheckedInto, strip_mirrord_path},
+    common::{CheckedInto, make_proxy_request_no_response, strip_mirrord_path},
     exec_hooks::{hooks, *},
     hooks::HookManager,
     replace,
@@ -103,7 +104,14 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
         log_info,
     ) {
         Ok(None) => Bypass(NoSipDetected(path.to_owned())),
-        Ok(Some(result)) => Success(result.path),
+        Ok(Some(result)) => {
+            if result.x64_fallback.is_some()
+                && let Err(error) = make_proxy_request_no_response(SipX64Fallback)
+            {
+                warn!(%error, "Failed to report the SIP x86_64 fallback");
+            }
+            Success(result.path_string())
+        }
         Err(SipError::FileNotFound(non_existing_bin)) => {
             trace!(
                 "The application wants to execute {}, SIP check got FileNotFound for {}. \
