@@ -423,7 +423,10 @@ pub(crate) enum CliError {
     FeatureRequiresOperatorError(String),
 
     #[error("Feature `{feature}` is not supported in mirrord operator {operator_version}.")]
-    #[diagnostic(help("{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "Upgrade the mirrord operator to a version that supports it, or remove the setting \
+         that needs it from your mirrord config.{GENERAL_HELP}"
+    ))]
     FeatureNotSupportedInOperatorError {
         feature: String,
         operator_version: String,

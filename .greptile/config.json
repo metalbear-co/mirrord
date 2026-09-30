@@ -3,7 +3,7 @@
   "rules": [
     {
       "id": "review-logical-change",
-      "rule": "Review the logical change, not only the diff. Before commenting on lines, reconstruct what the pull request is supposed to accomplish from its title, description, and the issue it references, then check the implementation against that intent. Raise a top-level comment when a requirement or acceptance criterion stated in the issue or the description is not implemented.",
+      "rule": "Review the logical change, not only the diff. Before commenting on lines, reconstruct what the pull request is supposed to accomplish from its title, description, and the issue it references, then check the implementation against that intent. Raise a top-level comment when a requirement or acceptance criterion stated in the issue or the description is not implemented. End each such comment with a short direction to the PR author: either fix it in this PR or create a follow-up issue, and inform the product team about any scope changes.",
       "severity": "high"
     },
     {

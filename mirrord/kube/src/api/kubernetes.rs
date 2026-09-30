@@ -230,7 +230,7 @@ impl KubernetesAPI {
         target_config: &TargetConfig,
         network_config: Option<&mut NetworkConfig>,
         container_config: ContainerConfig,
-    ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
+    ) -> Result<CreatedAgent, KubeApiError>
     where
         P: Progress,
     {
@@ -283,7 +283,7 @@ impl KubernetesAPI {
 
         info!(?params, "Spawning new agent");
 
-        let agent_connect_info = match (runtime_data, self.agent.ephemeral) {
+        let agent_connect_info = match (runtime_data.as_ref(), self.agent.ephemeral) {
             (None, false) => {
                 let variant = JobVariant::new(&self.agent, &params);
 
@@ -292,16 +292,16 @@ impl KubernetesAPI {
                     .await?
             }
             (Some(runtime_data), false) => {
-                let variant = JobTargetedVariant::new(&self.agent, &params, &runtime_data);
+                let variant = JobTargetedVariant::new(&self.agent, &params, runtime_data);
 
-                Targeted::new(&self.client, &runtime_data, &variant)
+                Targeted::new(&self.client, runtime_data, &variant)
                     .create_agent(progress)
                     .await?
             }
             (Some(runtime_data), true) => {
-                let variant = EphemeralTargetedVariant::new(&self.agent, &params, &runtime_data);
+                let variant = EphemeralTargetedVariant::new(&self.agent, &params, runtime_data);
 
-                Targeted::new(&self.client, &runtime_data, &variant)
+                Targeted::new(&self.client, runtime_data, &variant)
                     .create_agent(progress)
                     .await?
             }
@@ -310,8 +310,23 @@ impl KubernetesAPI {
 
         info!(?agent_connect_info, "Created agent pod");
 
-        Ok(agent_connect_info)
+        Ok(CreatedAgent {
+            connect_info: agent_connect_info,
+            runtime_data,
+        })
     }
+}
+
+/// Agent created with [`KubernetesAPI::create_agent`].
+#[derive(Debug)]
+pub struct CreatedAgent {
+    /// Information needed to connect to the agent.
+    pub connect_info: AgentKubernetesConnectInfo,
+    /// Data of the target that the agent runs against, so that the caller can check the session
+    /// setup against the target.
+    ///
+    /// [`None`] when the agent is targetless.
+    pub runtime_data: Option<RuntimeData>,
 }
 
 /// Fetches the Kubernetes apiserver version as `(major, minor)`.
