@@ -1007,55 +1007,6 @@ pub mod labels {
 pub use crate::crd::TARGET_NAMESPACE_ANNOTATION;
 use crate::crd::session::{KubeResourceTarget, SessionTarget};
 
-/// Possible options to create the [`BranchDatabase`] name
-enum GeneratedName {
-    /// An explicit name for the resource expected to be the [`ObjectMeta::name`]
-    Explicit(String),
-    /// A prefix for the [`ObjectMeta::generate_name`] value where k8s will generate the actual
-    /// name.
-    Generate(String),
-}
-
-impl GeneratedName {
-    /// Split the name to either a `name` or `generate_name` variables to create [`ObjectMeta`]
-    fn into_parts(self) -> (Option<String>, Option<String>) {
-        match self {
-            GeneratedName::Explicit(name) => (Some(name), None),
-            GeneratedName::Generate(name) => (None, Some(name)),
-        }
-    }
-}
-
-/// Create the future [`BranchDatabase`]'s name,
-///
-/// A user-specified id gets the target-independent `deterministic_name` so that two
-/// workloads asking for the same branch id resolve to the same resource and reuse it via
-/// the 409 conflict path instead of each creating its own branch. A generated id has no
-/// sharing intent, so it uses `generateName` from `name_prefix`, which keeps the target
-/// workload name for readability.
-///
-/// Important: Make sure that the returning value will not exceed the 63 character limit of k8s.
-fn generate_branch_name(
-    name_prefix: String,
-    deterministic_name: String,
-    database_id: &BranchDatabaseId,
-) -> GeneratedName {
-    match database_id {
-        BranchDatabaseId::Generated(_) if name_prefix.len() <= 63 => {
-            GeneratedName::Generate(name_prefix)
-        }
-        BranchDatabaseId::Generated(_) => {
-            use std::hash::{Hash, Hasher};
-
-            let mut prefix_hasher = std::collections::hash_map::DefaultHasher::new();
-            name_prefix.hash(&mut prefix_hasher);
-
-            GeneratedName::Generate(format!("{:x}", prefix_hasher.finish()))
-        }
-        BranchDatabaseId::Specified(_) => GeneratedName::Explicit(deterministic_name),
-    }
-}
-
 /// Branch resource name for a user-specified id, independent of the target workload.
 ///
 /// Two workloads sharing the same id must produce the same name so they reuse one branch,
@@ -1082,17 +1033,17 @@ fn deterministic_branch_name(dialect: &str, target_namespace: &str, id: &str) ->
 #[derive(Debug, Default)]
 pub struct CreatedBranches {
     /// Branches this session minted.
-    pub created: HashMap<BranchDatabaseId, BranchDatabase>,
+    pub created: HashMap<String, BranchDatabase>,
     /// Branches another session minted between this session's lookup and its create, found
     /// through the create conflict and picked up instead.
-    pub reused: HashMap<BranchDatabaseId, BranchDatabase>,
+    pub reused: HashMap<String, BranchDatabase>,
 }
 
 /// Create unified branch databases and wait for their readiness.
 #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
 pub async fn create_branches<P: Progress>(
     api: &Api<BranchDatabase>,
-    params: HashMap<BranchDatabaseId, UnifiedBranchParams>,
+    params: HashMap<String, UnifiedBranchParams>,
     timeout: Duration,
     progress: &P,
 ) -> Result<CreatedBranches, OperatorApiError> {
@@ -1104,20 +1055,16 @@ pub async fn create_branches<P: Progress>(
     let mut created_branches = HashMap::new();
     let mut reused_branches = HashMap::new();
 
-    for (id, params) in params {
+    for (name, params) in params {
         let annotations = if params.annotations.is_empty() {
             None
         } else {
             Some(params.annotations)
         };
 
-        let (name, generate_name) =
-            generate_branch_name(params.name_prefix, params.deterministic_name, &id).into_parts();
-
         let branch = BranchDatabase {
             metadata: ObjectMeta {
-                name: name.clone(),
-                generate_name,
+                name: Some(name.clone()),
                 labels: Some(params.labels),
                 annotations,
                 ..Default::default()
@@ -1128,25 +1075,23 @@ pub async fn create_branches<P: Progress>(
 
         match api.create(&kube::api::PostParams::default(), &branch).await {
             Ok(branch) => {
-                created_branches.insert(id, branch);
+                created_branches.insert(name, branch);
             }
             Err(kube::Error::Api(ref err)) if err.code == 409 => {
-                if let Some(ref deterministic_name) = name {
-                    // The lookup before this create came back empty, so another session
-                    // minted the branch in between. Say so, or the user sees "1 to create"
-                    // followed by a reuse with no explanation.
-                    subtask.info(&format!(
-                        "branch database {deterministic_name} was created by another session \
-                         meanwhile, reusing it"
-                    ));
-                    let existing = api.get(deterministic_name).await.map_err(|e| {
-                        OperatorApiError::KubeError {
-                            error: e,
-                            operation: OperatorOperation::DbBranching,
-                        }
+                // The lookup before this create came back empty, so another session minted the
+                // branch in between. Say so, or the user sees "1 to create" followed by a reuse
+                // with no explanation.
+                subtask.info(&format!(
+                    "branch database {name} was created by another session meanwhile, reusing it"
+                ));
+                let existing = api
+                    .get(&name)
+                    .await
+                    .map_err(|e| OperatorApiError::KubeError {
+                        error: e,
+                        operation: OperatorOperation::DbBranching,
                     })?;
-                    reused_branches.insert(id, existing);
-                }
+                reused_branches.insert(name, existing);
             }
             Err(e) => {
                 return Err(OperatorApiError::KubeError {
@@ -1245,40 +1190,40 @@ pub fn relay_source_compatibility_warnings<P: Progress>(db: &BranchDatabase, pro
     }
 }
 
-/// Branches found under the user-specified ids, sorted by what the caller does with them.
+/// Branches found under the requested resource names, sorted by what the caller does with them.
 #[derive(Default)]
 pub struct ExistingBranches {
     /// Branches already in Ready phase, can be used immediately.
-    pub ready: HashMap<BranchDatabaseId, BranchDatabase>,
+    pub ready: HashMap<String, BranchDatabase>,
     /// Branches still being created (not Ready, not Failed). The caller should wait
     /// for these instead of creating duplicates.
-    pub pending: HashMap<BranchDatabaseId, BranchDatabase>,
+    pub pending: HashMap<String, BranchDatabase>,
     /// Branches that failed to come up. They occupy the resource name a fresh branch would
     /// take, so the caller must report them instead of trying to create over them.
-    pub failed: HashMap<BranchDatabaseId, BranchDatabase>,
+    pub failed: HashMap<String, BranchDatabase>,
 }
 
-/// Sort branches found under the requested ids by phase.
+/// Sort branches found under the requested resource names by phase.
 ///
-/// Every branch here already carries the caller's id, so the phase is the only thing
-/// left to decide: Ready is reusable now, Failed is dead, and anything else (Init,
+/// Every branch here is one the caller asked for, so the phase is the only thing left to
+/// decide: Ready is reusable now, Failed is dead, and anything else (Init,
 /// Pending, no status yet, or a phase this build does not know) is still coming up.
 fn classify_existing_branches(
-    found: impl IntoIterator<Item = (BranchDatabaseId, BranchDatabase)>,
+    found: impl IntoIterator<Item = (String, BranchDatabase)>,
 ) -> ExistingBranches {
     let mut existing = ExistingBranches::default();
-    for (id, db) in found {
+    for (name, db) in found {
         let bucket = match db.status.as_ref().map(|status| &status.phase) {
             Some(BranchDatabasePhase::Ready) => &mut existing.ready,
             Some(BranchDatabasePhase::Failed) => &mut existing.failed,
             _ => &mut existing.pending,
         };
-        bucket.insert(id, db);
+        bucket.insert(name, db);
     }
     existing
 }
 
-/// Look up the branch databases that already exist for the user-specified ids in `params`.
+/// Look up the branch databases that already exist under the resource names in `params`.
 ///
 /// The lookup goes by the same deterministic resource name that [`create_branches`] uses,
 /// so its answer is exactly what a create would run into: a branch it finds is the one a
@@ -1288,24 +1233,18 @@ fn classify_existing_branches(
 /// reuse on the create conflict.
 pub async fn list_existing_branches<P: Progress>(
     api: &Api<BranchDatabase>,
-    params: &HashMap<BranchDatabaseId, UnifiedBranchParams>,
+    params: &HashMap<String, UnifiedBranchParams>,
     progress: &P,
 ) -> Result<ExistingBranches, OperatorApiError> {
-    let specified = params
-        .iter()
-        .filter(|&(id, _)| matches!(id, BranchDatabaseId::Specified(_)))
-        .collect::<Vec<_>>();
-    if specified.is_empty() {
+    if params.is_empty() {
         return Ok(ExistingBranches::default());
     }
 
     let mut subtask = progress.subtask("looking up existing branch databases");
 
-    let lookups = specified.iter().map(|&(id, params)| async move {
-        api.get_opt(&params.deterministic_name)
-            .await
-            .map(|found| (id.clone(), found))
-    });
+    let lookups = params
+        .keys()
+        .map(|name| async move { api.get_opt(name).await.map(|found| (name.clone(), found)) });
     let found = futures::future::try_join_all(lookups)
         .await
         .map_err(|e| OperatorApiError::KubeError {
@@ -1313,12 +1252,12 @@ pub async fn list_existing_branches<P: Progress>(
             operation: OperatorOperation::DbBranching,
         })?
         .into_iter()
-        .filter_map(|(id, found)| found.map(|db| (id, db)));
+        .filter_map(|(name, found)| found.map(|db| (name, db)));
     let existing = classify_existing_branches(found);
 
     // A failed branch is not creatable either: it holds the name, and the caller reports it.
     let to_create =
-        specified.len() - existing.ready.len() - existing.pending.len() - existing.failed.len();
+        params.len() - existing.ready.len() - existing.pending.len() - existing.failed.len();
     let mut summary = format!(
         "{} ready to reuse, {} still initializing, {} to create",
         existing.ready.len(),
@@ -1337,24 +1276,19 @@ pub async fn list_existing_branches<P: Progress>(
 /// Returns the branches that reached Ready. Returns an error if any branch failed.
 pub async fn wait_for_pending_branches<P: Progress>(
     api: &Api<BranchDatabase>,
-    pending: &HashMap<BranchDatabaseId, BranchDatabase>,
+    pending: &HashMap<String, BranchDatabase>,
     timeout: Duration,
     progress: &P,
-) -> Result<HashMap<BranchDatabaseId, BranchDatabase>, OperatorApiError> {
+) -> Result<HashMap<String, BranchDatabase>, OperatorApiError> {
     if pending.is_empty() {
         return Ok(HashMap::new());
     }
 
     let mut subtask = progress.subtask("waiting for in-progress branch databases");
 
-    let branch_names: Vec<(BranchDatabaseId, String)> = pending
-        .iter()
-        .filter_map(|(id, db)| db.meta().name.clone().map(|name| (id.clone(), name)))
-        .collect();
-
-    let wait_futures = branch_names
-        .iter()
-        .map(|(_, name)| {
+    let wait_futures = pending
+        .keys()
+        .map(|name| {
             await_condition(api.clone(), name, |db: Option<&BranchDatabase>| {
                 db.and_then(|db| {
                     db.status.as_ref().map(|status| {
@@ -1375,7 +1309,7 @@ pub async fn wait_for_pending_branches<P: Progress>(
         })?;
 
     let mut ready_branches = HashMap::new();
-    for (result, (id, _name)) in results.into_iter().zip(branch_names.iter()) {
+    for (result, name) in results.into_iter().zip(pending.keys()) {
         let Ok(Some(db)) = result else {
             continue;
         };
@@ -1393,7 +1327,7 @@ pub async fn wait_for_pending_branches<P: Progress>(
             });
         }
 
-        ready_branches.insert(id.clone(), db);
+        ready_branches.insert(name.clone(), db);
     }
 
     subtask.success(Some(&format!(
@@ -1432,7 +1366,7 @@ pub fn resolve_branch_id<P: Progress>(
 pub struct UnifiedDatabaseBranchParams {
     /// Keyed by each branch's resource name, so entries of different types, or with different
     /// additional databases, stay apart even under one id.
-    pub branches: HashMap<BranchDatabaseId, UnifiedBranchParams>,
+    pub branches: HashMap<String, UnifiedBranchParams>,
 }
 
 impl UnifiedDatabaseBranchParams {
@@ -1464,15 +1398,16 @@ impl UnifiedDatabaseBranchParams {
         };
 
         let mut branches = HashMap::new();
-        for branch_db_config in config.0.iter_mut() {
+        // Where each branch was configured, and whether that entry set an `id`.
+        let mut entries = HashMap::new();
+        for (position, branch_db_config) in config.0.iter_mut().enumerate() {
             // Local Redis branches are run by the CLI itself and never reach the operator,
             // and they are the only branches without the shared base.
-            let Some(id) = branch_db_config
-                .base()
-                .map(|base| resolve_branch_id(&base.id, session_key, progress))
-            else {
+            let Some(base) = branch_db_config.base() else {
                 continue;
             };
+            let sets_id = base.id.is_some();
+            let id = resolve_branch_id(&base.id, session_key, progress);
 
             let migrations = read_migrations(branch_db_config.migrations())?;
 
@@ -1507,7 +1442,6 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Clickhouse(c) => UnifiedBranchParams::from_clickhouse(
                     id.as_ref(),
                     c,
-                    target,
                     target_namespace,
                     &session_target,
                     literal_values,
@@ -1515,7 +1449,6 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Cockroachdb(c) => UnifiedBranchParams::from_cockroachdb(
                     id.as_ref(),
                     c,
-                    target,
                     target_namespace,
                     &session_target,
                     literal_values,
@@ -1524,7 +1457,6 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Pg(c) => UnifiedBranchParams::from_pg(
                     id.as_ref(),
                     c,
-                    target,
                     target_namespace,
                     &session_target,
                     literal_values,
@@ -1533,7 +1465,6 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Mysql(c) => UnifiedBranchParams::from_mysql(
                     id.as_ref(),
                     c,
-                    target,
                     target_namespace,
                     &session_target,
                     literal_values,
@@ -1542,7 +1473,6 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Mariadb(c) => UnifiedBranchParams::from_mariadb(
                     id.as_ref(),
                     c,
-                    target,
                     target_namespace,
                     &session_target,
                     literal_values,
@@ -1551,7 +1481,6 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Dynamodb(c) => UnifiedBranchParams::from_dynamodb(
                     id.as_ref(),
                     c,
-                    target,
                     target_namespace,
                     &session_target,
                     literal_values,
@@ -1559,7 +1488,6 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Mongodb(c) => UnifiedBranchParams::from_mongodb(
                     id.as_ref(),
                     c,
-                    target,
                     target_namespace,
                     &session_target,
                     literal_values,
@@ -1568,7 +1496,6 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Mssql(c) => UnifiedBranchParams::from_mssql(
                     id.as_ref(),
                     c,
-                    target,
                     target_namespace,
                     &session_target,
                     literal_values,
@@ -1581,7 +1508,6 @@ impl UnifiedDatabaseBranchParams {
                     RedisBranchConfig::Remote(c) => UnifiedBranchParams::from_redis(
                         id.as_ref(),
                         c,
-                        target,
                         target_namespace,
                         &session_target,
                         literal_values,
@@ -1591,7 +1517,6 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Spanner(c) => UnifiedBranchParams::from_spanner(
                     id.as_ref(),
                     c,
-                    target,
                     target_namespace,
                     &session_target,
                     literal_values,
@@ -1599,7 +1524,6 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Generic(c) => UnifiedBranchParams::from_generic(
                     id.as_ref(),
                     c,
-                    target,
                     target_namespace,
                     &session_target,
                     literal_values,
@@ -1607,7 +1531,6 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::S3(c) => UnifiedBranchParams::from_s3(
                     id.as_ref(),
                     c,
-                    target,
                     target_namespace,
                     &session_target,
                     literal_values,
@@ -1615,23 +1538,29 @@ impl UnifiedDatabaseBranchParams {
                 DatabaseBranchConfig::Turbopuffer(c) => UnifiedBranchParams::from_turbopuffer(
                     id.as_ref(),
                     c,
-                    target,
                     target_namespace,
                     &session_target,
                     literal_values,
                 ),
             };
-            let key = BranchDatabaseId::specified(params.deterministic_name.clone());
-            if branches.contains_key(&key) {
+            let name = params.deterministic_name.clone();
+            if let Some((earlier, earlier_sets_id)) =
+                entries.insert(name.clone(), (position, sets_id))
+            {
+                let reason = if earlier_sets_id || sets_id {
+                    format!("both use the id `{id}`")
+                } else {
+                    "neither sets an `id`".to_owned()
+                };
                 return Err(OperatorApiError::BranchCreationFailed {
                     operation: OperatorOperation::DbBranching,
                     message: format!(
-                        "two `feature.db_branches` entries are the same branch `{key}` (id \
-                         `{id}`); give each its own `id`"
+                        "`feature.db_branches[{earlier}]` and `feature.db_branches[{position}]` \
+                         are the same branch because {reason}; give each its own `id`"
                     ),
                 });
             }
-            branches.insert(key, params);
+            branches.insert(name, params);
         }
 
         if let Ok(marker) = std::env::var(OPERATOR_ISOLATION_MARKER_ENV) {
@@ -1852,9 +1781,6 @@ pub async fn ensure_branch_migrations<P: Progress>(
 
 #[derive(Debug, Clone)]
 pub struct UnifiedBranchParams {
-    /// Prefix for `generateName`, used only for a branch with a generated id. It keeps the
-    /// target workload name so the random resource name stays readable.
-    pub name_prefix: String,
     /// Target-independent resource name used for a branch with a user-specified id, so two
     /// workloads sharing the same id map to the same resource and reuse one branch.
     pub deterministic_name: String,
@@ -1868,13 +1794,11 @@ impl UnifiedBranchParams {
     pub fn from_pg(
         id: &str,
         config: &PgBranchConfig,
-        target: &Target,
         target_namespace: &str,
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
-        let name_prefix = format!("{}-pg-branch-", target.name());
         let additional_databases = config
             .additional_databases
             .iter()
@@ -1918,7 +1842,6 @@ impl UnifiedBranchParams {
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
-            name_prefix,
             deterministic_name,
             labels,
             annotations: BTreeMap::new(),
@@ -1930,13 +1853,11 @@ impl UnifiedBranchParams {
     pub fn from_mysql(
         id: &str,
         config: &MysqlBranchConfig,
-        target: &Target,
         target_namespace: &str,
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
-        let name_prefix = format!("{}-mysql-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mysql", target_namespace, id);
         let connection_source = convert_connection_source(&config.database.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
@@ -1969,7 +1890,6 @@ impl UnifiedBranchParams {
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
-            name_prefix,
             deterministic_name,
             labels,
             annotations: BTreeMap::new(),
@@ -1981,13 +1901,11 @@ impl UnifiedBranchParams {
     pub fn from_mariadb(
         id: &str,
         config: &MariadbBranchConfig,
-        target: &Target,
         target_namespace: &str,
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
-        let name_prefix = format!("{}-mariadb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mariadb", target_namespace, id);
         let connection_source = convert_connection_source(&config.database.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
@@ -2020,7 +1938,6 @@ impl UnifiedBranchParams {
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
-            name_prefix,
             deterministic_name,
             labels,
             annotations: BTreeMap::new(),
@@ -2032,12 +1949,10 @@ impl UnifiedBranchParams {
     pub fn from_dynamodb(
         id: &str,
         config: &DynamodbBranchConfig,
-        target: &Target,
         target_namespace: &str,
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
-        let name_prefix = format!("{}-dynamodb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("dynamodb", target_namespace, id);
         let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
@@ -2069,7 +1984,6 @@ impl UnifiedBranchParams {
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
-            name_prefix,
             deterministic_name,
             labels,
             annotations: BTreeMap::new(),
@@ -2081,13 +1995,11 @@ impl UnifiedBranchParams {
     pub fn from_mongodb(
         id: &str,
         config: &MongodbBranchConfig,
-        target: &Target,
         target_namespace: &str,
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
-        let name_prefix = format!("{}-mongodb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mongodb", target_namespace, id);
         let connection_source = convert_connection_source(&config.database.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
@@ -2120,7 +2032,6 @@ impl UnifiedBranchParams {
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
-            name_prefix,
             deterministic_name,
             labels,
             annotations: BTreeMap::new(),
@@ -2132,13 +2043,11 @@ impl UnifiedBranchParams {
     pub fn from_mssql(
         id: &str,
         config: &mirrord_config::feature::database_branches::MssqlBranchConfig,
-        target: &Target,
         target_namespace: &str,
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
-        let name_prefix = format!("{}-mssql-branch-", target.name());
         let deterministic_name = deterministic_branch_name("mssql", target_namespace, id);
         let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
@@ -2169,7 +2078,6 @@ impl UnifiedBranchParams {
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
-            name_prefix,
             deterministic_name,
             labels,
             annotations: BTreeMap::new(),
@@ -2181,13 +2089,11 @@ impl UnifiedBranchParams {
     pub fn from_redis(
         id: &str,
         config: &RemoteRedisBranchConfig,
-        target: &Target,
         target_namespace: &str,
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
-        let name_prefix = format!("{}-redis-branch-", target.name());
         let deterministic_name = deterministic_branch_name("redis", target_namespace, id);
         let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
@@ -2218,7 +2124,6 @@ impl UnifiedBranchParams {
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
-            name_prefix,
             deterministic_name,
             labels,
             annotations: BTreeMap::new(),
@@ -2230,12 +2135,10 @@ impl UnifiedBranchParams {
     pub fn from_clickhouse(
         id: &str,
         config: &ClickhouseBranchConfig,
-        target: &Target,
         target_namespace: &str,
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
-        let name_prefix = format!("{}-clickhouse-branch-", target.name());
         let deterministic_name = deterministic_branch_name("clickhouse", target_namespace, id);
         let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
@@ -2266,7 +2169,6 @@ impl UnifiedBranchParams {
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
-            name_prefix,
             deterministic_name,
             labels,
             annotations: BTreeMap::new(),
@@ -2278,13 +2180,11 @@ impl UnifiedBranchParams {
     pub fn from_cockroachdb(
         id: &str,
         config: &CockroachdbBranchConfig,
-        target: &Target,
         target_namespace: &str,
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
     ) -> Self {
-        let name_prefix = format!("{}-cockroachdb-branch-", target.name());
         let deterministic_name = deterministic_branch_name("cockroachdb", target_namespace, id);
         let connection_source = convert_connection_source(&config.database.connection);
         let spec = BranchDatabaseSpec {
@@ -2315,7 +2215,6 @@ impl UnifiedBranchParams {
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
-            name_prefix,
             deterministic_name,
             labels,
             annotations: BTreeMap::new(),
@@ -2327,12 +2226,10 @@ impl UnifiedBranchParams {
     pub fn from_spanner(
         id: &str,
         config: &SpannerBranchConfig,
-        target: &Target,
         target_namespace: &str,
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
-        let name_prefix = format!("{}-spanner-branch-", target.name());
         let deterministic_name = deterministic_branch_name("spanner", target_namespace, id);
 
         // Spanner keeps the app's project/instance/database untouched (only SPANNER_EMULATOR_HOST
@@ -2372,7 +2269,6 @@ impl UnifiedBranchParams {
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
-            name_prefix,
             deterministic_name,
             labels,
             annotations: BTreeMap::new(),
@@ -2384,12 +2280,10 @@ impl UnifiedBranchParams {
     pub fn from_generic(
         id: &str,
         config: &GenericBranchConfig,
-        target: &Target,
         target_namespace: &str,
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
-        let name_prefix = format!("{}-generic-branch-", target.name());
         let deterministic_name = deterministic_branch_name("generic", target_namespace, id);
 
         // Custom `extra` params flow through the shared converter into the CRD's `extra`, just
@@ -2459,7 +2353,6 @@ impl UnifiedBranchParams {
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
-            name_prefix,
             deterministic_name,
             labels,
             annotations: BTreeMap::new(),
@@ -2475,12 +2368,10 @@ impl UnifiedBranchParams {
     pub fn from_s3(
         id: &str,
         config: &S3BranchConfig,
-        target: &Target,
         target_namespace: &str,
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
-        let name_prefix = format!("{}-s3-branch-", target.name());
         let deterministic_name = deterministic_branch_name("s3", target_namespace, id);
         let connection_source =
             CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(&config.source)));
@@ -2514,7 +2405,6 @@ impl UnifiedBranchParams {
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
-            name_prefix,
             deterministic_name,
             labels,
             annotations: BTreeMap::new(),
@@ -2531,12 +2421,10 @@ impl UnifiedBranchParams {
     pub fn from_turbopuffer(
         id: &str,
         config: &TurbopufferBranchConfig,
-        target: &Target,
         target_namespace: &str,
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
     ) -> Self {
-        let name_prefix = format!("{}-turbopuffer-branch-", target.name());
         let deterministic_name = deterministic_branch_name("turbopuffer", target_namespace, id);
         let connection_source =
             CrdConnectionSource::Params(Box::new(ConnectionParamsSpec::from(&config.source)));
@@ -2569,7 +2457,6 @@ impl UnifiedBranchParams {
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
-            name_prefix,
             deterministic_name,
             labels,
             annotations: BTreeMap::new(),
@@ -2610,20 +2497,26 @@ mod test {
         session::KubeResourceTarget,
     };
 
-    /// Builds the unified params of a config holding one pg branch with a fixed id.
-    fn pg_branch_params(branch: serde_json::Value) -> UnifiedBranchParams {
-        let mut config: DatabaseBranchesConfig =
-            serde_json::from_value(serde_json::json!([branch])).unwrap();
+    /// Builds the unified params of a config holding `branches`, with session key
+    /// `session-key`.
+    fn branches_params(
+        branches: serde_json::Value,
+    ) -> Result<UnifiedDatabaseBranchParams, OperatorApiError> {
+        let mut config: DatabaseBranchesConfig = serde_json::from_value(branches).unwrap();
         let target = "deployment/my-app".parse::<Target>().unwrap();
-        let mut params = UnifiedDatabaseBranchParams::new(
+        UnifiedDatabaseBranchParams::new(
             &mut config,
             &target,
             "default",
             "session-key",
             &NullProgress,
         )
-        .unwrap();
-        let (_, params) = params
+    }
+
+    /// Builds the unified params of a config holding one pg branch.
+    fn pg_branch_params(branch: serde_json::Value) -> UnifiedBranchParams {
+        let (_, params) = branches_params(serde_json::json!([branch]))
+            .unwrap()
             .branches
             .drain()
             .next()
@@ -2633,10 +2526,7 @@ mod test {
 
     /// A branch found under the deterministic name for `id`, in the given phase (`None` is a
     /// branch the operator has not picked up yet).
-    fn found_branch(
-        id: &str,
-        phase: Option<BranchDatabasePhase>,
-    ) -> (BranchDatabaseId, BranchDatabase) {
+    fn found_branch(id: &str, phase: Option<BranchDatabasePhase>) -> (String, BranchDatabase) {
         let config: S3BranchConfig = serde_json::from_value(serde_json::json!({
             "source": { "type": "env_from", "params": { "bucket": "MY_BUCKET_ENV_VAR" } },
         }))
@@ -2647,14 +2537,8 @@ mod test {
             name: "my-app".to_owned(),
             container: String::new(),
         };
-        let params = UnifiedBranchParams::from_s3(
-            id,
-            &config,
-            &"deployment/my-app".parse::<Target>().unwrap(),
-            "default",
-            &session_target,
-            HashMap::new(),
-        );
+        let params =
+            UnifiedBranchParams::from_s3(id, &config, "default", &session_target, HashMap::new());
         let status = phase.map(|phase| BranchDatabaseStatus {
             pod_name: None,
             phase,
@@ -2673,7 +2557,7 @@ mod test {
             spec: params.spec,
             status,
         };
-        (BranchDatabaseId::specified(branch.name_any()), branch)
+        (branch.name_any(), branch)
     }
 
     /// The lookup runs before the create, so what it reports has to be what the create
@@ -2693,7 +2577,7 @@ mod test {
             found_branch("failed", Some(BranchDatabasePhase::Failed)),
         ]);
 
-        let ids = |bucket: &HashMap<BranchDatabaseId, BranchDatabase>| {
+        let ids = |bucket: &HashMap<String, BranchDatabase>| {
             let mut ids = bucket
                 .values()
                 .map(|branch| branch.spec.id.clone())
@@ -2738,7 +2622,6 @@ mod test {
         let params = UnifiedBranchParams::from_s3(
             "my-branch",
             &config,
-            &"deployment/my-app".parse::<Target>().unwrap(),
             "default",
             &session_target,
             HashMap::new(),
@@ -2792,7 +2675,6 @@ mod test {
         let params = UnifiedBranchParams::from_turbopuffer(
             "my-branch",
             &config,
-            &"deployment/my-app".parse::<Target>().unwrap(),
             "default",
             &session_target,
             HashMap::new(),
@@ -3194,27 +3076,10 @@ mod test {
         );
     }
 
-    /// Builds the unified params of a config holding the given branches, with no `id`s
-    /// falling back to the session key.
-    fn branches_params(
-        branches: serde_json::Value,
-    ) -> Result<UnifiedDatabaseBranchParams, OperatorApiError> {
-        let mut config: DatabaseBranchesConfig = serde_json::from_value(branches).unwrap();
-        let target = "deployment/my-app".parse::<Target>().unwrap();
-        UnifiedDatabaseBranchParams::new(
-            &mut config,
-            &target,
-            "default",
-            "session-key",
-            &NullProgress,
-        )
-    }
-
-    /// Entries without an `id` share the session key, yet each is its own branch as long as
-    /// the type or the additional databases differ. Each is keyed by its resource name, which
-    /// its credential Secret is named from.
+    /// Entries without an `id` share the session key, yet each is its own branch, keyed by its
+    /// resource name, as long as the type or the additional databases differ.
     #[test]
-    fn branches_without_an_id_stay_apart() {
+    fn entries_without_an_id_are_separate_branches() {
         let params = branches_params(serde_json::json!([
             { "type": "pg", "connection": { "url": "DATABASE_URL" } },
             { "type": "mysql", "connection": { "url": "MYSQL_URL" } },
@@ -3227,14 +3092,14 @@ mod test {
         .unwrap();
 
         assert_eq!(params.branches.len(), 3);
-        for (key, branch) in &params.branches {
-            assert_eq!(key.as_ref(), branch.deterministic_name);
+        for (name, branch) in &params.branches {
+            assert_eq!(name, &branch.deterministic_name);
             assert_eq!(branch.spec.id, "session-key");
         }
     }
 
     /// Two entries that would be the very same branch cannot both be served by it, so the
-    /// config is refused instead of one of them being dropped.
+    /// session is refused instead of one of them being dropped.
     #[test]
     fn two_entries_of_one_branch_are_refused() {
         let result = branches_params(serde_json::json!([
@@ -3243,7 +3108,7 @@ mod test {
         ]));
 
         assert!(
-            matches!(result, Err(OperatorApiError::BranchCreationFailed { ref message, .. }) if message.contains("give each its own `id`")),
+            matches!(result, Err(OperatorApiError::BranchCreationFailed { ref message, .. }) if message.contains("`feature.db_branches[0]` and `feature.db_branches[1]`") && message.contains("neither sets an `id`")),
             "{:?}",
             result.err()
         );
