@@ -6,6 +6,7 @@
 pub mod command_line;
 pub mod console;
 pub mod diagnostics;
+pub mod environment;
 pub mod execution;
 pub mod injection;
 pub mod sync;

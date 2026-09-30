@@ -89,17 +89,6 @@ pub(crate) fn panic_message(panic: &(dyn Any + Send)) -> &str {
         .unwrap_or("<non-string panic>")
 }
 
-/// Logs which injection method brought this layer in (the launching CLI sets it on the child
-/// environment), first, so every layer log identifies its load path.
-fn record_injection_method() {
-    tracing::info!(
-        injection_method = std::env::var(MIRRORD_INJECTION_METHOD_ENV)
-            .as_deref()
-            .unwrap_or("unset"),
-        "layer loading"
-    );
-}
-
 /// Synchronous part of layer startup, run inside [`dll_attach`].
 ///
 /// Everything here is loader-lock-safe (env parsing, `GetProcAddress` on already imported
@@ -139,7 +128,20 @@ fn record_injection_method() {
 fn initialize_layer_sync() -> Result<Option<ChildInitEvent>, Box<dyn Error>> {
     init_tracing_sinks();
 
-    record_injection_method();
+    // Captured here whatever the log level, so the children get the method that loaded this
+    // layer even if the target changes the variable before it creates one. `tracing` evaluates an
+    // event's fields only when something listens.
+    let child_injection_method = hooks::process::init_layer_injection_method();
+
+    // First, so every layer log identifies its load path. The launching CLI sets the variable on
+    // the child environment; an attached process has none.
+    tracing::info!(
+        injection_method = std::env::var(MIRRORD_INJECTION_METHOD_ENV)
+            .as_deref()
+            .unwrap_or("unset"),
+        %child_injection_method,
+        "layer loading"
+    );
 
     diagnostics::log_loader_snapshot();
 
@@ -370,7 +372,7 @@ fn dll_attach(_module: HINSTANCE, _reserved: LPVOID) -> BOOL {
     TRUE
 }
 
-// Function that gets called upon DLL deinitialization ([`DLL_PROCESS_DETACH`]).
+/// Function that gets called upon DLL deinitialization ([`DLL_PROCESS_DETACH`]).
 ///
 /// # Return value
 ///

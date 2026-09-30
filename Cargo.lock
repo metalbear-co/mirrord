@@ -9087,6 +9087,9 @@ dependencies = [
 [[package]]
 name = "str-win"
 version = "0.1.0"
+dependencies = [
+ "winapi",
+]
 
 [[package]]
 name = "streaming-iterator"

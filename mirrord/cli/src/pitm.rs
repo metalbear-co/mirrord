@@ -35,11 +35,12 @@
 //! no config loading; it is the thinnest possible shim around
 //! [`LayerManagedProcess::execute`].
 
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use mirrord_layer_lib::process::windows::{
     command_line::build_command_line,
+    environment::WindowsEnv,
     execution::{LayerManagedProcess, MIRRORD_LAYER_FILE_ENV},
     injection::{InjectionMethod, MIRRORD_INJECTION_METHOD_ENV},
 };
@@ -88,7 +89,7 @@ struct ChildEnv {
 /// like mirrord subcommands) are never misparsed.
 ///
 /// There is no `--injection-method` flag on this path, so the method comes from
-/// `MIRRORD_INJECTION_METHOD` as described in [`resolve_injection_method`].
+/// `MIRRORD_INJECTION_METHOD` as described in [`child_environment`].
 ///
 /// Returns `None` when not in java-launcher mode so the caller falls through
 /// to normal clap parsing.
@@ -138,27 +139,15 @@ pub(crate) fn pitm_command(args: PitmArgs) -> CliResult<()> {
     let child_env: ChildEnv = serde_json::from_slice(&decoded_bytes)
         .map_err(|e| CliError::PitmInvalidChildEnv(format!("json parse: {e}")))?;
 
-    let mut env_vars = build_child_environment(child_env);
-
-    // Extract the layer DLL to the temp dir and point the child at it.
-    // `LayerManagedProcess::execute` reads `MIRRORD_LAYER_FILE` from the
-    // supplied env_vars map, so we embed it there rather than mutating
-    // the current process's environment.
     // A build-specific file name prevents a newer CLI from reusing a stale layer left by an
     // older `pitm` invocation.
     let lib_path = extract_library(None, &NullProgress, true)?;
-    env_vars.insert(
-        MIRRORD_LAYER_FILE_ENV.to_owned(),
-        lib_path.to_string_lossy().into_owned(),
-    );
-
-    // The child's layer forwards this value to every descendant it creates, so it carries the
-    // resolved method rather than whatever spelling selected it.
-    let injection_method = resolve_injection_method(args.injection_method, &env_vars)?;
-    env_vars.insert(
-        MIRRORD_INJECTION_METHOD_ENV.to_owned(),
-        injection_method.to_string(),
-    );
+    let child = child_environment(
+        WindowsEnv::inherited(),
+        child_env,
+        args.injection_method,
+        &lib_path,
+    )?;
 
     let command_line = build_command_line(exe, extra_args);
 
@@ -166,7 +155,8 @@ pub(crate) fn pitm_command(args: PitmArgs) -> CliResult<()> {
         Some(exe.to_owned()),
         command_line,
         None,
-        env_vars,
+        child.environment,
+        child.injection_method,
         // Bind the child JVM's lifetime to this pitm process via a kill-on-close job,
         // so IntelliJ/Gradle abruptly stopping the run can't orphan it (an orphaned,
         // still-connected layer keeps the agent alive → "dirty iptables" next session).
@@ -182,106 +172,157 @@ pub(crate) fn pitm_command(args: PitmArgs) -> CliResult<()> {
     std::process::exit(exit_code as i32);
 }
 
-/// Selects the injection method for the child process.
+/// What `pitm` launches its child with.
+#[derive(Debug)]
+struct ChildLaunch {
+    environment: WindowsEnv,
+    injection_method: InjectionMethod,
+}
+
+/// Composes the child's environment and selects how it is injected.
 ///
-/// Precedence, highest first:
+/// The environment starts from `inherited` (this process's environment) and strips
+/// [`MIRRORD_CHILD_ENV`] (the child has no reason to see the envelope it was delivered in). The
+/// plugin's `set` overrides are applied next, so they win over inherited values, and then the
+/// variables the plugin asked to `unset` are removed, so a variable in both lists is unset --
+/// matching the principle of least surprise for a "remove these" directive. Last,
+/// `MIRRORD_LAYER_FILE` points the child at the extracted layer. Names follow Windows rules, so an
+/// override of `PATH` replaces an inherited `Path` instead of sitting next to it.
 ///
-/// 1. `--injection-method` on the `pitm` command line;
-/// 2. `MIRRORD_INJECTION_METHOD` in the composed child environment, which holds the plugin's
-///    [`MIRRORD_CHILD_ENV`] value when it sets one and the value `pitm` inherited otherwise (see
-///    [`build_child_environment`]);
+/// The injection method, highest precedence first:
+///
+/// 1. `flag`, the `--injection-method` on the `pitm` command line;
+/// 2. `MIRRORD_INJECTION_METHOD` in the composed environment, which holds the plugin's `set` value
+///    when it has one and the value `pitm` inherited otherwise;
 /// 3. [`InjectionMethod::default`].
 ///
 /// An explicit flag is the most deliberate choice, so it wins. Without one, the value the child
 /// would see anyway is honoured, which is how the plugin or the user's environment picks the
 /// method for launches whose command line they do not control, such as the Java launcher shim.
-/// An unparsable value is an error rather than a silent fallback to the default.
-fn resolve_injection_method(
+/// An unparsable value is an error rather than a silent fallback to the default. The launch
+/// writes the chosen method's canonical name into the child's environment.
+fn child_environment(
+    mut inherited: WindowsEnv,
+    child_env: ChildEnv,
     flag: Option<InjectionMethod>,
-    child_env: &HashMap<String, String>,
-) -> CliResult<InjectionMethod> {
-    if let Some(method) = flag {
-        return Ok(method);
+    lib_path: &Path,
+) -> CliResult<ChildLaunch> {
+    inherited.remove(MIRRORD_CHILD_ENV);
+    for (name, value) in child_env.set {
+        inherited.set(&name, value);
     }
+    for name in child_env.unset {
+        inherited.remove(&name);
+    }
+    inherited.set(
+        MIRRORD_LAYER_FILE_ENV,
+        lib_path.to_string_lossy().into_owned(),
+    );
 
-    child_env
-        .get(MIRRORD_INJECTION_METHOD_ENV)
-        .map(|value| {
-            value.parse().map_err(|error: strum::ParseError| {
-                CliError::PitmInvalidInjectionMethod(error.to_string())
-            })
-        })
-        .transpose()
-        .map(Option::unwrap_or_default)
-}
+    let injection_method = match flag {
+        Some(method) => method,
+        None => inherited
+            .get(MIRRORD_INJECTION_METHOD_ENV)
+            .map(InjectionMethod::parse)
+            .transpose()
+            .map_err(|error| CliError::PitmInvalidInjectionMethod(error.to_string()))?
+            .unwrap_or_default(),
+    };
 
-/// Compose the final environment block for the child process.
-///
-/// Starts from the current process environment, strips
-/// [`MIRRORD_CHILD_ENV`] (the child has no reason to see the envelope
-/// it was delivered in), applies the plugin's requested `set` overrides
-/// last so they win over inherited values, and finally removes any
-/// variables the plugin asked to `unset`. The `unset` pass runs after
-/// `set` so a variable present in both lists is unset -- matching the
-/// principle of least surprise for a "remove these" directive.
-fn build_child_environment(child_env: ChildEnv) -> HashMap<String, String> {
-    let mut env: HashMap<String, String> = std::env::vars().collect();
-    env.remove(MIRRORD_CHILD_ENV);
-    for (k, v) in child_env.set {
-        env.insert(k, v);
-    }
-    for k in child_env.unset {
-        env.remove(&k);
-    }
-    env
+    Ok(ChildLaunch {
+        environment: inherited,
+        injection_method,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn env_with_method(value: &str) -> HashMap<String, String> {
-        HashMap::from([(MIRRORD_INJECTION_METHOD_ENV.to_owned(), value.to_owned())])
+    const LAYER: &str = r"C:\layers\mirrord_layer.dll";
+
+    fn launch(
+        inherited: &[(&str, &str)],
+        set: &[(&str, &str)],
+        unset: &[&str],
+        flag: Option<InjectionMethod>,
+    ) -> CliResult<ChildLaunch> {
+        let owned = |entries: &[(&str, &str)]| {
+            entries
+                .iter()
+                .map(|&(name, value)| (name.to_owned(), value.to_owned()))
+                .collect::<Vec<_>>()
+        };
+        child_environment(
+            WindowsEnv::from_ordered_entries(owned(inherited)),
+            ChildEnv {
+                set: owned(set).into_iter().collect(),
+                unset: unset.iter().map(|&name| name.to_owned()).collect(),
+            },
+            flag,
+            Path::new(LAYER),
+        )
+    }
+
+    /// The plugin's overrides replace inherited names in any casing, its unsets win over its own
+    /// overrides, the envelope is gone, and the child is pointed at the extracted layer.
+    #[test]
+    fn the_plugin_shapes_the_childs_environment() {
+        let child = launch(
+            &[
+                ("Path", r"C:\inherited"),
+                ("Temp", r"C:\scratch"),
+                (MIRRORD_CHILD_ENV, "envelope"),
+                ("mirrord_layer_file", "stale.dll"),
+            ],
+            &[("PATH", r"C:\override"), ("GONE", "x")],
+            &["temp", "GONE"],
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            child.environment.iter().collect::<Vec<_>>(),
+            [(MIRRORD_LAYER_FILE_ENV, LAYER), ("PATH", r"C:\override")]
+        );
     }
 
     #[test]
-    fn injection_method_flag_wins_over_child_environment() {
-        let method =
-            resolve_injection_method(Some(InjectionMethod::Iat), &env_with_method("apc")).unwrap();
-        assert_eq!(method, InjectionMethod::Iat);
+    fn the_flag_wins_over_the_childs_environment() {
+        let child = launch(
+            &[(MIRRORD_INJECTION_METHOD_ENV, "apc")],
+            &[],
+            &[],
+            Some(InjectionMethod::Iat),
+        )
+        .unwrap();
+        assert_eq!(child.injection_method, InjectionMethod::Iat);
+    }
+
+    /// Without a flag, the value the child would see selects the method: the plugin's over the
+    /// inherited one, under any casing of the name.
+    #[test]
+    fn without_a_flag_the_childs_environment_selects_the_method() {
+        let child = launch(
+            &[("mirrord_injection_method", "apc")],
+            &[(MIRRORD_INJECTION_METHOD_ENV, "IAT")],
+            &[],
+            None,
+        )
+        .unwrap();
+        assert_eq!(child.injection_method, InjectionMethod::Iat);
+
+        let child = launch(&[("mirrord_injection_method", "apc")], &[], &[], None).unwrap();
+        assert_eq!(child.injection_method, InjectionMethod::Apc);
+
+        let child = launch(&[], &[], &[], None).unwrap();
+        assert_eq!(child.injection_method, InjectionMethod::default());
     }
 
     #[test]
-    fn injection_method_falls_back_to_child_environment() {
-        let method = resolve_injection_method(None, &env_with_method("apc")).unwrap();
-        assert_eq!(method, InjectionMethod::Apc);
-    }
-
-    #[test]
-    fn injection_method_defaults_without_flag_or_environment() {
-        let method = resolve_injection_method(None, &HashMap::new()).unwrap();
-        assert_eq!(method, InjectionMethod::default());
-    }
-
-    #[test]
-    fn invalid_injection_method_in_child_environment_is_an_error() {
+    fn an_invalid_method_in_the_childs_environment_is_an_error() {
         assert!(matches!(
-            resolve_injection_method(None, &env_with_method("bogus")),
+            launch(&[(MIRRORD_INJECTION_METHOD_ENV, "bogus")], &[], &[], None),
             Err(CliError::PitmInvalidInjectionMethod(_))
         ));
-    }
-
-    /// The plugin's `set` entry is what reaches the child, so it is what selects the method
-    /// when there is no flag.
-    #[test]
-    fn plugin_set_value_selects_injection_method() {
-        let env = build_child_environment(ChildEnv {
-            set: env_with_method("iat"),
-            unset: Vec::new(),
-        });
-        assert_eq!(
-            resolve_injection_method(None, &env).unwrap(),
-            InjectionMethod::Iat
-        );
     }
 }

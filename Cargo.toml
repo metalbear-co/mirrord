@@ -321,6 +321,7 @@ winapi = { version = "0.3.9", features = [
     "processthreadsapi",
     "errhandlingapi",
     "sysinfoapi",
+    "stringapiset",
     "synchapi",
     "handleapi",
     "jobapi2",

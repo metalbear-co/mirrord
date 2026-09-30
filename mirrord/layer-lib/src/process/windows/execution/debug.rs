@@ -83,7 +83,7 @@ pub fn should_wait_for_debugger() -> bool {
         return false;
     };
     let current_exe = get_current_process_name();
-    let should_wait = debugger_wait_targets(Some(&setting), &current_exe);
+    let should_wait = debugger_wait_targets(&setting, &current_exe);
 
     if should_wait && setting != "1" {
         // This runs on the `DllMain` path, where `eprintln!` ends the process. See the
@@ -105,13 +105,13 @@ pub fn should_wait_for_debugger() -> bool {
 ///
 /// # Arguments
 ///
-/// * `setting` - the variable's value in that process's environment, if it has one.
+/// * `setting` - the variable's value in that process's environment.
 /// * `image_stem` - that process's executable name without its extension.
-pub fn debugger_wait_targets(setting: Option<&str>, image_stem: &str) -> bool {
+pub fn debugger_wait_targets(setting: &str, image_stem: &str) -> bool {
     match setting {
-        None | Some("") => false,
-        Some("1") => true,
-        Some(filter) => filter.to_lowercase() == image_stem.to_lowercase(),
+        "" => false,
+        "1" => true,
+        filter => filter.to_lowercase() == image_stem.to_lowercase(),
     }
 }
 
@@ -185,12 +185,11 @@ mod tests {
 
     #[test]
     fn the_setting_names_the_processes_that_wait() {
-        assert!(!debugger_wait_targets(None, "node"));
-        assert!(!debugger_wait_targets(Some(""), "node"));
-        assert!(debugger_wait_targets(Some("1"), "node"));
-        assert!(debugger_wait_targets(Some("Node"), "node"));
-        assert!(debugger_wait_targets(Some("node"), "NODE"));
-        assert!(!debugger_wait_targets(Some("node"), "python"));
-        assert!(!debugger_wait_targets(Some("node.exe"), "node"));
+        assert!(!debugger_wait_targets("", "node"));
+        assert!(debugger_wait_targets("1", "node"));
+        assert!(debugger_wait_targets("Node", "node"));
+        assert!(debugger_wait_targets("node", "NODE"));
+        assert!(!debugger_wait_targets("node", "python"));
+        assert!(!debugger_wait_targets("node.exe", "node"));
     }
 }

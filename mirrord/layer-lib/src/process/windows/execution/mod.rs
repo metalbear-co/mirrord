@@ -1,14 +1,12 @@
 //! Windows process execution with mirrord layer injection.
 
-use std::{
-    collections::HashMap, net::SocketAddr, ops::Deref, os::windows::io::BorrowedHandle, path::Path,
-    ptr,
-};
+use std::{net::SocketAddr, ops::Deref, os::windows::io::BorrowedHandle, path::Path, ptr};
 
 use base64::prelude::*;
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_CRASH_MONITOR_ADDR, MIRRORD_LAYER_CRASH_REPORTING,
-    MIRRORD_LAYER_FULL_MEMORY_DUMP, MIRRORD_LAYER_WAIT_FOR_DEBUGGER,
+    LayerConfig, MIRRORD_FS_PREFETCH_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR,
+    MIRRORD_LAYER_CRASH_REPORTING, MIRRORD_LAYER_FULL_MEMORY_DUMP, MIRRORD_LAYER_INTPROXY_ADDR,
+    MIRRORD_LAYER_TARGET_CONTAINER_PORTS, MIRRORD_LAYER_WAIT_FOR_DEBUGGER,
 };
 use stork::{BorrowedTarget, LoadTiming, LoaderState};
 use str_win::string_to_u16_buffer;
@@ -41,6 +39,7 @@ use winapi::{
 };
 
 use super::{
+    environment::WindowsEnv,
     injection::{InjectionMethod, MIRRORD_INJECTION_METHOD_ENV},
     sync::{InitWaitOutcome, ParentInitEvents},
 };
@@ -100,15 +99,6 @@ fn loader_status_name(exit_code: u32) -> Option<&'static str> {
         .map(|(_, name)| *name)
 }
 
-/// Whether a process that exited before its layer reported ready is worth reporting.
-///
-/// A program that runs and exits before the layer's asynchronous startup is done is ordinary. One
-/// whose primary thread never ran (the layer loaded before it, and nothing resumed it yet) did not
-/// get to run its program at all, and a loader exit code says the loader gave up.
-fn exit_is_suspicious(timing: LoadTiming, exit_code: Option<u32>) -> bool {
-    timing == LoadTiming::Immediate || exit_code.and_then(loader_status_name).is_some()
-}
-
 /// The injector for `method`.
 ///
 /// A layer that waits for a debugger does so inside `DllMain`, which holds a load-library
@@ -123,14 +113,6 @@ fn injector_for(method: InjectionMethod, debugger_wait: bool) -> stork::Injector
     }
 }
 
-/// The value of `name` in `environment`, under any casing, as Windows looks it up.
-fn get_env_var<'a>(environment: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {
-    environment
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.as_str())
-}
-
 /// Where a launcher reports a child's startup problems, read from the environment it gave the
 /// child rather than from its own: `mirrord exec` and `pitm` keep the monitor's address and the
 /// log directory only there.
@@ -143,11 +125,13 @@ struct StartupReporting {
 }
 
 impl StartupReporting {
-    fn from_environment(environment: &HashMap<String, String>) -> Self {
+    fn from_environment(environment: &WindowsEnv) -> Self {
         Self {
-            monitor: get_env_var(environment, MIRRORD_LAYER_CRASH_MONITOR_ADDR)
+            monitor: environment
+                .get(MIRRORD_LAYER_CRASH_MONITOR_ADDR)
                 .and_then(|address| address.parse().ok()),
-            log_dir: get_env_var(environment, MIRRORD_LAYER_LOG_PATH)
+            log_dir: environment
+                .get(MIRRORD_LAYER_LOG_PATH)
                 .filter(|directory| !directory.is_empty())
                 .map(str::to_owned),
         }
@@ -179,8 +163,19 @@ struct LaunchPlan<'a> {
     debugger_wait: bool,
 }
 
+/// Variables Windows itself needs in every process: without `SystemRoot`, Winsock cannot start,
+/// so the child's layer could not reach the internal proxy.
+const SYSTEM_VARIABLES: &[&str] = &["SystemRoot", "windir"];
+
 /// Environment variables that should be explicitly forwarded from parent to child process
+///
+/// A creator that passes its own environment block gets these added to it, so they include
+/// everything the layer's setup reads: without the internal proxy address, the child's layer
+/// fails to start.
 const FORWARDED_ENV_VARS: &[&str] = &[
+    MIRRORD_LAYER_INTPROXY_ADDR,
+    MIRRORD_LAYER_TARGET_CONTAINER_PORTS,
+    MIRRORD_FS_PREFETCH_DIR,
     MIRRORD_AGENT_ADDR_ENV,
     MIRRORD_LAYER_ID_ENV,
     MIRRORD_LAYER_FILE_ENV,
@@ -276,39 +271,20 @@ impl LayerManagedProcess {
         Ok(handle)
     }
 
-    /// Build Windows environment block from HashMap (UTF-16 format)
-    fn build_windows_env_block(environment: &HashMap<String, String>) -> Vec<u16> {
-        // Windows hands out a sorted block and the C runtime expects to get one back, so do not
-        // let the iteration order of a `HashMap` decide what the child sees.
-        let mut entries: Vec<(&String, &String)> = environment.iter().collect();
-        entries.sort_by_key(|(name, _)| name.to_uppercase());
-
-        let mut windows_environment: Vec<u16> = Vec::new();
-        for (key, value) in entries {
-            let entry = format!("{}={}", key, value);
-            let entry_wide = string_to_u16_buffer(&entry);
-            windows_environment.extend(entry_wide);
-        }
-        // add environment block null terminator
-        windows_environment.push(0);
-        windows_environment
-    }
-
     /// Add mirrord-specific environment variables to caller's environment.
-    fn add_mirrord_env_vars(env_vars: &mut HashMap<String, String>) {
+    ///
+    /// # Arguments
+    ///
+    /// * `parent` - the launching process's environment, where the forwarded variables come from.
+    /// * `env_vars` - the environment the child is created with.
+    fn add_mirrord_env_vars(parent: &WindowsEnv, env_vars: &mut WindowsEnv) {
         // Forward explicitly configured environment variables from parent to child
         for &env_var in FORWARDED_ENV_VARS {
-            if let Ok(value) = std::env::var(env_var) {
-                env_vars.insert(env_var.to_owned(), value.clone());
+            if let Some(value) = parent.get(env_var) {
+                env_vars.set(env_var, value.to_owned());
             } else {
-                tracing::debug!("No {} found in current process environment", env_var);
+                tracing::debug!("No {} found in the parent environment", env_var);
             }
-        }
-
-        if !env_vars.contains_key(MIRRORD_INJECTION_METHOD_ENV)
-            && let Ok(value) = std::env::var(MIRRORD_INJECTION_METHOD_ENV)
-        {
-            env_vars.insert(MIRRORD_INJECTION_METHOD_ENV.to_owned(), value);
         }
 
         // Encode and forward current socket state to child process (like Unix prepare_execve_envp)
@@ -338,34 +314,33 @@ impl LayerManagedProcess {
         };
 
         if let Some((encoded_sockets, socket_count)) = encoded_sockets {
-            env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_owned(), encoded_sockets.clone());
             tracing::debug!(
                 "Encoded and forwarding {} shared sockets to child process: {}",
                 socket_count,
                 encoded_sockets
             );
-        } else if let Ok(existing_sockets) = std::env::var(SHARED_SOCKETS_ENV_VAR) {
-            env_vars.insert(SHARED_SOCKETS_ENV_VAR.to_owned(), existing_sockets.clone());
+            env_vars.set(SHARED_SOCKETS_ENV_VAR, encoded_sockets);
+        } else if let Some(existing_sockets) = parent.get(SHARED_SOCKETS_ENV_VAR) {
             tracing::debug!(
                 "Fallback: forwarding existing shared sockets: {}",
                 existing_sockets
             );
+            env_vars.set(SHARED_SOCKETS_ENV_VAR, existing_sockets.to_owned());
         }
 
         // Add resolved config for child process inheritance
         // Only add if not already present in the environment we're building
-        if !env_vars.contains_key(LayerConfig::RESOLVED_CONFIG_ENV) {
+        if env_vars.get(LayerConfig::RESOLVED_CONFIG_ENV).is_none() {
             // First try to get from current environment variable, then fallback to encoding current
             // config
-            if let Ok(resolved_config) = std::env::var(LayerConfig::RESOLVED_CONFIG_ENV) {
-                env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.to_owned(), resolved_config);
+            if let Some(resolved_config) = parent.get(LayerConfig::RESOLVED_CONFIG_ENV) {
+                env_vars.set(LayerConfig::RESOLVED_CONFIG_ENV, resolved_config.to_owned());
             } else {
                 // Fallback: try to encode current config if layer setup is available
                 // Use a safe approach that doesn't panic if setup isn't initialized
                 match std::panic::catch_unwind(|| setup().layer_config().encode()) {
                     Ok(Ok(encoded_config)) => {
-                        env_vars
-                            .insert(LayerConfig::RESOLVED_CONFIG_ENV.to_owned(), encoded_config);
+                        env_vars.set(LayerConfig::RESOLVED_CONFIG_ENV, encoded_config);
                         tracing::debug!(
                             "Fallback: encoded current config for child process inheritance"
                         );
@@ -390,20 +365,20 @@ impl LayerManagedProcess {
         unsafe {
             if let Some(proxy_conn) = PROXY_CONNECTION.get() {
                 // Pass current process ID as parent PID for child
-                env_vars.insert(
-                    MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID.to_owned(),
+                env_vars.set(
+                    MIRRORD_LAYER_CHILD_PROCESS_PARENT_PID,
                     std::process::id().to_string(),
                 );
 
                 // Pass current layer ID for child inheritance
-                env_vars.insert(
-                    MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID.to_owned(),
+                env_vars.set(
+                    MIRRORD_LAYER_CHILD_PROCESS_LAYER_ID,
                     proxy_conn.layer_id().0.to_string(),
                 );
 
                 // Pass proxy address for child connection
-                env_vars.insert(
-                    MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR.to_owned(),
+                env_vars.set(
+                    MIRRORD_LAYER_CHILD_PROCESS_PROXY_ADDR,
                     proxy_conn.proxy_addr().to_string(),
                 );
             }
@@ -459,7 +434,8 @@ impl LayerManagedProcess {
         application_name: Option<String>,
         command_line: String,
         current_directory: Option<String>,
-        env_vars: HashMap<String, String>,
+        env_vars: WindowsEnv,
+        injection_method: InjectionMethod,
         kill_children_on_exit: bool,
         progress: Option<P>,
     ) -> LayerResult<Self>
@@ -529,7 +505,9 @@ impl LayerManagedProcess {
         };
 
         Self::execute_with_closure(
-            env_vars,
+            &WindowsEnv::inherited(),
+            Some(env_vars),
+            injection_method,
             default_creation_flags,
             &mut default_startup_info,
             create_process_fn,
@@ -551,8 +529,21 @@ impl LayerManagedProcess {
     ///
     /// A [`LaunchError`] says whether the process had been created. Once it had, it must not be
     /// created again: it may already have run, and its side effects would run twice.
+    ///
+    /// # Arguments
+    ///
+    /// * `parent` - the launching process's environment. The layer file and the variables Windows
+    ///   needs come from it when `caller_env_vars` lacks them, and mirrord's own settings always
+    ///   do.
+    /// * `caller_env_vars` - the environment the creator asked for. `None` inherits `parent`; an
+    ///   empty one asks for no variables at all, which is a different request.
+    /// * `injection_method` - how the layer is loaded. The child's environment carries it on, so
+    ///   its own descendants are loaded the same way.
+    #[allow(clippy::too_many_arguments)]
     pub fn execute_with_closure<F, P>(
-        caller_env_vars: HashMap<String, String>,
+        parent: &WindowsEnv,
+        caller_env_vars: Option<WindowsEnv>,
+        injection_method: InjectionMethod,
         caller_creation_flags: DWORD,
         caller_startup_info: &mut STARTUPINFOW,
         create_process_fn: F,
@@ -569,9 +560,10 @@ impl LayerManagedProcess {
             created: false,
         };
         let dll_path = caller_env_vars
-            .get(MIRRORD_LAYER_FILE_ENV)
-            .cloned()
-            .or_else(|| std::env::var(MIRRORD_LAYER_FILE_ENV).ok())
+            .as_ref()
+            .and_then(|environment| environment.get(MIRRORD_LAYER_FILE_ENV))
+            .or_else(|| parent.get(MIRRORD_LAYER_FILE_ENV))
+            .map(str::to_owned)
             .ok_or(LayerError::VarError(std::env::VarError::NotPresent))
             .map_err(not_created)?;
         if !std::path::Path::new(&dll_path).exists() {
@@ -581,48 +573,30 @@ impl LayerManagedProcess {
             ))));
         }
 
-        // Determine the final environment: either caller's custom environment or parent environment
-        // + mirrord vars Always create environment block since we need mirrord variables in
-        // both cases
-        let environment = {
-            let mut env = if caller_env_vars.is_empty() {
-                // Caller wants to inherit parent environment - get current environment
-                std::env::vars().collect()
-            } else {
-                // Caller provided custom environment variables
-                caller_env_vars
-            };
-            Self::add_mirrord_env_vars(&mut env);
-            env
+        // An explicit environment is the creator's choice, apart from the variables Windows cannot
+        // run without, which come from the parent when the creator left them out. Either way the
+        // child gets mirrord's variables on top.
+        let mut environment = match caller_env_vars {
+            Some(mut environment) => {
+                for &name in SYSTEM_VARIABLES {
+                    if environment.get(name).is_none()
+                        && let Some(value) = parent.get(name)
+                    {
+                        environment.set(name, value.to_owned());
+                    }
+                }
+                environment
+            }
+            None => parent.clone(),
         };
-        // An invalid inherited value must not leave this child without mirrord. The CLI rejects
-        // one it is given directly, so this can only come from an environment someone edited.
-        let injection_method = environment
-            .get(MIRRORD_INJECTION_METHOD_ENV)
-            .and_then(|value| {
-                value
-                    .parse::<InjectionMethod>()
-                    .inspect_err(|error| {
-                        tracing::error!(
-                            rejected = %value,
-                            %error,
-                            default = %InjectionMethod::default(),
-                            "{MIRRORD_INJECTION_METHOD_ENV} is invalid, so this child is injected with the default method"
-                        )
-                    })
-                    .ok()
-            })
-            .unwrap_or_default();
-        // Descendants inherit the canonical name, so an invalid value is reported once, here.
-        let mut environment = environment;
-        if let Some(value) = environment.get_mut(MIRRORD_INJECTION_METHOD_ENV) {
-            *value = injection_method.to_string();
-        }
-        let mut env_storage = Self::build_windows_env_block(&environment);
+        Self::add_mirrord_env_vars(parent, &mut environment);
+        environment.set(MIRRORD_INJECTION_METHOD_ENV, injection_method.to_string());
+        let mut env_storage = environment.to_block();
         let environment_ptr = env_storage.as_mut_ptr() as LPVOID;
         let reporting = StartupReporting::from_environment(&environment);
-        let debugger_setting =
-            get_env_var(&environment, MIRRORD_LAYER_WAIT_FOR_DEBUGGER).map(str::to_owned);
+        let debugger_setting = environment
+            .get(MIRRORD_LAYER_WAIT_FOR_DEBUGGER)
+            .map(str::to_owned);
 
         // Calculate final creation flags (original + environment + suspended)
         let creation_flags = caller_creation_flags | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED;
@@ -663,7 +637,7 @@ impl LayerManagedProcess {
                 .file_stem()
                 .map(|stem| stem.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            debugger_wait_targets(Some(setting), &image_stem)
+            debugger_wait_targets(setting, &image_stem)
         });
 
         let plan = LaunchPlan {
@@ -724,7 +698,7 @@ impl LayerManagedProcess {
                 BorrowedHandle::borrow_raw(self.process_info.hThread.cast())
             })
             .with_loader_state(LoaderState::NotStarted);
-        tracing::info!(
+        tracing::debug!(
             child_pid,
             %method,
             caller_suspended = plan.caller_suspended,
@@ -780,7 +754,7 @@ impl LayerManagedProcess {
                         "inject: the readiness events could not be kept alive in the child, so its layer reports to nobody"
                     ),
                 }
-                tracing::info!(
+                tracing::debug!(
                     child_pid,
                     "inject: layer loading queued until the creator resumes the process"
                 );
@@ -795,11 +769,11 @@ impl LayerManagedProcess {
 
         // A layer that waits for a debugger takes as long as attaching one does.
         let timeout_ms = (!plan.debugger_wait).then_some(LAYER_INIT_TIMEOUT_MS);
-        tracing::info!(child_pid, ?timeout_ms, "wait: begin");
+        tracing::debug!(child_pid, ?timeout_ms, "wait: begin");
 
         match parent_events.wait(self.process_handle(), timeout_ms) {
             Ok(InitWaitOutcome::Signaled) => {
-                tracing::info!(child_pid, "wait: signaled");
+                tracing::debug!(child_pid, "wait: signaled");
                 if let Some(progress) = progress.as_mut() {
                     progress.success(Some("Ready!"));
                 }
@@ -827,9 +801,13 @@ impl LayerManagedProcess {
                 // The process is gone either way, so there is nothing to resume and nothing to
                 // create again.
                 let exit_code = self.exit_code();
-                if !exit_is_suspicious(injected.timing, exit_code) {
-                    // A program shorter-lived than the layer's async startup never gets to send
-                    // the signal, and that is ordinary.
+                // A program shorter-lived than the layer's async startup never gets to send the
+                // signal, and that is ordinary. One whose primary thread never ran (the layer
+                // loaded before it, and nothing resumed it yet) did not get to run its program at
+                // all, and a loader exit code says the loader gave up.
+                if injected.timing != LoadTiming::Immediate
+                    && exit_code.and_then(loader_status_name).is_none()
+                {
                     tracing::debug!(
                         child_pid,
                         ?exit_code,
@@ -865,9 +843,9 @@ impl LayerManagedProcess {
                 };
             }
             Ok(InitWaitOutcome::TimedOut) => {
-                // The layer is loaded and its hooks are live; it is only late. Under the hook,
-                // the process runs on and its hooked calls wait for the layer. That is a note,
-                // not a crash.
+                // The layer is loaded and its hooks are live; it is only late. Nothing says it
+                // failed, so under either policy that is a note, not a crash: no dialog, and the
+                // session is not marked as crashed. Under `exec` the launch error says the rest.
                 tracing::warn!(
                     child_pid,
                     %method,
@@ -882,21 +860,21 @@ impl LayerManagedProcess {
                     LayerFailurePolicy::Terminate => {
                         self.report(
                             plan,
-                            InitReport::Failed(format!("In this process {what} mirrord ended it.")),
+                            InitReport::SlowStart(format!(
+                                "In this process {what} mirrord ended it."
+                            )),
                         );
                         return Err(LayerError::ProcessSynchronization(format!(
                             "in process {child_pid} {what}"
                         )));
                     }
-                    LayerFailurePolicy::RunWithoutMirrord => {
-                        self.report(
-                            plan,
-                            InitReport::SlowStart(format!(
-                                "In this process {what} The process keeps running, and its hooked \
-                                 calls wait for the layer."
-                            )),
-                        );
-                    }
+                    LayerFailurePolicy::RunWithoutMirrord => self.report(
+                        plan,
+                        InitReport::SlowStart(format!(
+                            "In this process {what} The process keeps running, and its hooked \
+                             calls wait for the layer."
+                        )),
+                    ),
                 }
             }
             Err(error) => {
@@ -1114,12 +1092,15 @@ impl Drop for LayerManagedProcess {
 mod tests {
     use std::{
         ffi::CString,
+        io::{ErrorKind, Write},
+        net::TcpListener,
         os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
         sync::{Arc, Mutex},
         thread::JoinHandle,
         time::{Duration, Instant},
     };
 
+    use utils_win::diagnostics::monitor::{ACK_READY, Registration, read_registration};
     use winapi::{
         shared::minwindef::FALSE,
         um::{
@@ -1131,11 +1112,6 @@ mod tests {
     };
 
     use super::*;
-
-    #[test]
-    fn crash_reporting_policy_is_forwarded_to_child_processes() {
-        assert!(FORWARDED_ENV_VARS.contains(&MIRRORD_LAYER_CRASH_REPORTING));
-    }
 
     /// The exit code the test program ends with, so an exit with it proves the program ran.
     const RAN: u32 = 7;
@@ -1171,6 +1147,10 @@ mod tests {
         command: &'static str,
         /// `MIRRORD_LAYER_WAIT_FOR_DEBUGGER` in the child's environment.
         wait_for_debugger: Option<&'static str>,
+        /// The environment the creator asks for, before the launcher adds to it.
+        environment: WindowsEnv,
+        /// The launching process's environment, which the launcher forwards from.
+        parent: WindowsEnv,
     }
 
     struct Launched {
@@ -1181,6 +1161,8 @@ mod tests {
         creations: u32,
         /// What the launcher reported as done, which tells readiness apart from a fallback.
         progress: Vec<String>,
+        /// The environment block the launcher created the child with.
+        child_environment: WindowsEnv,
     }
 
     impl Launched {
@@ -1236,26 +1218,22 @@ mod tests {
                 layer,
                 command: "exit 7",
                 wait_for_debugger: None,
+                environment: WindowsEnv::from_ordered_entries(
+                    ["SystemRoot", "PATH"]
+                        .into_iter()
+                        .filter_map(|name| Some((name.to_owned(), std::env::var(name).ok()?))),
+                ),
+                parent: WindowsEnv::inherited(),
             }
         }
 
         fn run(self) -> Launched {
-            let mut environment: HashMap<String, String> = ["SystemRoot", "PATH"]
-                .into_iter()
-                .filter_map(|name| Some((name.to_owned(), std::env::var(name).ok()?)))
-                .collect();
-            environment.insert(MIRRORD_LAYER_FILE_ENV.to_owned(), self.payload.clone());
-            environment.insert(
-                MIRRORD_INJECTION_METHOD_ENV.to_owned(),
-                self.method.to_string(),
-            );
+            let mut environment = self.environment;
+            environment.set(MIRRORD_LAYER_FILE_ENV, self.payload.clone());
             // Keeps `add_mirrord_env_vars` from reaching for a layer setup these tests do not have.
-            environment.insert(LayerConfig::RESOLVED_CONFIG_ENV.to_owned(), String::new());
+            environment.set(LayerConfig::RESOLVED_CONFIG_ENV, String::new());
             if let Some(setting) = self.wait_for_debugger {
-                environment.insert(
-                    MIRRORD_LAYER_WAIT_FOR_DEBUGGER.to_owned(),
-                    setting.to_owned(),
-                );
+                environment.set(MIRRORD_LAYER_WAIT_FOR_DEBUGGER, setting.to_owned());
             }
 
             let child_pid = Arc::new(Mutex::new(None::<u32>));
@@ -1263,12 +1241,15 @@ mod tests {
 
             let mut creations = 0;
             let mut duplicate = None;
+            let mut child_environment = None;
             let mut startup_info = STARTUPINFOW {
                 cb: std::mem::size_of::<STARTUPINFOW>() as u32,
                 ..unsafe { std::mem::zeroed() }
             };
             let create = |flags: DWORD, environment: LPVOID, startup_info: &mut STARTUPINFOW| {
                 creations += 1;
+                child_environment =
+                    Some(unsafe { WindowsEnv::from_block::<u16>(environment.cast()) });
                 let application = string_to_u16_buffer(system_dll("cmd.exe"));
                 let mut command_line = string_to_u16_buffer(format!("cmd.exe /c {}", self.command));
                 let mut process_info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
@@ -1316,7 +1297,9 @@ mod tests {
             };
             let recorder = Recorder::default();
             let result = LayerManagedProcess::execute_with_closure(
-                environment,
+                &self.parent,
+                Some(environment),
+                self.method,
                 creation_flags,
                 &mut startup_info,
                 create,
@@ -1332,6 +1315,7 @@ mod tests {
                 process: duplicate.expect("the child was created"),
                 creations,
                 progress,
+                child_environment: child_environment.expect("the child was created"),
             }
         }
     }
@@ -1391,6 +1375,71 @@ mod tests {
                 CloseHandle(event);
             }
         })
+    }
+
+    /// An explicit environment, even one without `SystemRoot`, gets what Windows needs to start
+    /// Winsock, and nothing else of this process's environment. The creator's own value, and its
+    /// casing, are kept. The child's environment also names the injection method, so its own
+    /// children are loaded the same way.
+    #[test]
+    fn an_explicit_environment_gets_only_the_system_variables() {
+        let system_root = std::env::var("SystemRoot").expect("this process has a SystemRoot");
+        let launched = Launch {
+            environment: WindowsEnv::new(),
+            ..Launch::new(InjectionMethod::LoadLibrary, Layer::Ready)
+        }
+        .run();
+        assert_eq!(launched.exit_code(), RAN);
+        let child = &launched.child_environment;
+        assert_eq!(child.get("SystemRoot"), Some(system_root.as_str()));
+        assert_eq!(child.get("PATH"), None, "this process's PATH stays out");
+        assert_eq!(
+            child.get(MIRRORD_INJECTION_METHOD_ENV),
+            Some(InjectionMethod::LoadLibrary.to_string().as_str())
+        );
+
+        let launched = Launch {
+            environment: WindowsEnv::from_ordered_entries([(
+                "SYSTEMROOT".to_owned(),
+                system_root.clone(),
+            )]),
+            ..Launch::new(InjectionMethod::LoadLibrary, Layer::Ready)
+        }
+        .run();
+        assert_eq!(launched.exit_code(), RAN);
+        assert!(
+            launched
+                .child_environment
+                .iter()
+                .any(|entry| entry == ("SYSTEMROOT", system_root.as_str())),
+            "the creator's casing is kept"
+        );
+    }
+
+    /// A child given an explicit environment still gets what its layer's setup reads from the
+    /// parent's environment.
+    #[test]
+    fn layer_settings_are_forwarded_to_child_processes() {
+        let settings = [
+            (MIRRORD_LAYER_INTPROXY_ADDR, "127.0.0.1:1"),
+            (MIRRORD_LAYER_TARGET_CONTAINER_PORTS, "8080"),
+            (MIRRORD_FS_PREFETCH_DIR, r"C:\mirrord-forwarding-test"),
+            (MIRRORD_LAYER_CRASH_REPORTING, "false"),
+        ];
+        let mut launch = Launch::new(InjectionMethod::LoadLibrary, Layer::Ready);
+        for (name, value) in settings {
+            launch.parent.set(name, value.to_owned());
+        }
+        let launched = launch.run();
+
+        assert_eq!(launched.exit_code(), RAN);
+        for (name, value) in settings {
+            assert_eq!(
+                launched.child_environment.get(name),
+                Some(value),
+                "{name} is forwarded"
+            );
+        }
     }
 
     /// Resumes a child left suspended for its creator.
@@ -1618,35 +1667,68 @@ mod tests {
         assert_eq!(launched.exit_code(), RAN);
     }
 
-    /// Only an exit that says the program never ran is reported.
-    #[test]
-    fn suspicious_exits_are_the_early_and_the_loader_ones() {
-        for (code, name) in [
-            (0xC000_0142, "STATUS_DLL_INIT_FAILED"),
-            (0xC000_0135, "STATUS_DLL_NOT_FOUND"),
-            (0xC000_0138, "STATUS_ORDINAL_NOT_FOUND"),
-            (0xC000_0139, "STATUS_ENTRYPOINT_NOT_FOUND"),
-            (0xC000_007B, "STATUS_INVALID_IMAGE_FORMAT"),
-            (0xC000_0428, "STATUS_INVALID_IMAGE_HASH"),
-        ] {
-            assert_eq!(loader_status_name(code), Some(name));
-            assert!(
-                exit_is_suspicious(LoadTiming::OnResume, Some(code)),
-                "{name}"
-            );
-        }
+    /// A crash monitor that takes one registration and acknowledges it.
+    ///
+    /// # Returns
+    ///
+    /// The monitor's address, and its thread, which hands over the registration it took, or
+    /// `None` when none arrived in time.
+    fn fake_monitor() -> (String, JoinHandle<Option<Registration>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let address = listener.local_addr().expect("address").to_string();
+        let monitor = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                        if Instant::now() > deadline {
+                            return None;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("accept: {error}"),
+                }
+            };
+            stream.set_nonblocking(false).expect("blocking");
+            let registration = read_registration(&mut stream).expect("registration");
+            stream.write_all(&[ACK_READY]).expect("ack");
+            Some(registration)
+        });
+        (address, monitor)
+    }
 
-        assert!(
-            exit_is_suspicious(LoadTiming::Immediate, Some(0)),
-            "the primary thread never ran"
-        );
-        assert!(exit_is_suspicious(LoadTiming::Immediate, None));
-        assert!(
-            !exit_is_suspicious(LoadTiming::OnResume, Some(0)),
-            "a short program"
-        );
-        assert!(!exit_is_suspicious(LoadTiming::OnResume, Some(1)));
-        assert!(!exit_is_suspicious(LoadTiming::OnResume, None));
-        assert_eq!(loader_status_name(0xC000_0005), None);
+    /// A layer that is only late is a slow start whatever the launcher does with the process, so
+    /// ending it under `exec` files no crash and shows no dialog. The launcher finds the monitor
+    /// in the environment it gave the child.
+    #[test]
+    fn a_readiness_timeout_is_reported_as_a_slow_start_under_either_policy() {
+        for (policy, says) in [
+            (LayerFailurePolicy::Terminate, "mirrord ended it"),
+            (LayerFailurePolicy::RunWithoutMirrord, "keeps running"),
+        ] {
+            let (address, monitor) = fake_monitor();
+            let mut launch = Launch {
+                policy,
+                ..Launch::new(InjectionMethod::LoadLibrary, Layer::Silent)
+            };
+            launch
+                .environment
+                .set(MIRRORD_LAYER_CRASH_MONITOR_ADDR, address);
+            let launched = launch.run();
+            assert_eq!(launched.creations, 1);
+
+            let registration = monitor
+                .join()
+                .expect("monitor")
+                .expect("the launcher reported to the monitor");
+            match registration.init_report {
+                Some(InitReport::SlowStart(reason)) => {
+                    assert!(reason.contains(says), "{policy:?}: {reason}")
+                }
+                report => panic!("{policy:?} filed {report:?}"),
+            }
+        }
     }
 }

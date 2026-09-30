@@ -1,24 +1,35 @@
-//! The layer's startup contract when its startup fails: the waiting parent learns of it at once,
-//! the crash monitor gets a report even before the layer registered, and the process ends.
+//! The layer's startup contract. When its startup fails, the waiting parent learns of it at once,
+//! the crash monitor gets a report even before the layer registered, and the process ends. When it
+//! registers, it names a log the monitor can open.
 //!
 //! Each case runs the layer's code in a fresh copy of this test binary, because the code under
 //! test ends its process and flips process-wide state (the proxy connection gate, the crash
-//! handler) that no other test may see. The parent half plays the launcher and the monitor.
+//! handler, the log file, the working directory) that no other test may see. The parent half plays
+//! the launcher and the monitor.
 
 use std::{
     ffi::c_void,
-    io::{Read, Write},
-    net::TcpListener,
     os::windows::io::{AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle},
+    path::Path,
     process::{Child, Command, Stdio},
-    thread::JoinHandle,
     time::{Duration, Instant},
 };
+#[cfg(debug_assertions)]
+use std::{io::Write, net::TcpListener, thread::JoinHandle};
 
 use mirrord_config::MIRRORD_LAYER_CRASH_MONITOR_ADDR;
-use mirrord_layer_lib::process::windows::sync::{
-    ChildInitEvent, InitWaitOutcome, ParentInitEvents,
+use mirrord_layer_lib::{
+    logging::{MIRRORD_LAYER_LOG_PATH, init_tracing_sinks},
+    process::windows::{
+        diagnostics::session_role,
+        injection::{InjectionMethod, MIRRORD_INJECTION_METHOD_ENV},
+        sync::{ChildInitEvent, InitWaitOutcome, ParentInitEvents},
+    },
 };
+use tracing::subscriber::{NoSubscriber, with_default};
+#[cfg(debug_assertions)]
+use utils_win::diagnostics::monitor::{ACK_READY, InitReport, Registration, read_registration};
+use utils_win::diagnostics::{crash_dir, monitor::is_log_name};
 use winapi::{
     shared::minwindef::FALSE,
     um::{processthreadsapi::OpenProcess, winnt::SYNCHRONIZE},
@@ -79,17 +90,15 @@ fn wait_like_a_launcher(child: &Child) -> InitWaitOutcome {
         .expect("wait for the child")
 }
 
-/// A crash monitor that takes one registration, acknowledges it, and hands back its bytes.
-fn fake_monitor() -> (String, JoinHandle<Vec<u8>>) {
+/// A crash monitor that takes one registration, acknowledges it, and hands it back.
+#[cfg(debug_assertions)]
+fn fake_monitor() -> (String, JoinHandle<Registration>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let address = listener.local_addr().expect("address").to_string();
     let monitor = std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("a registration");
-        let mut length = [0u8; 4];
-        stream.read_exact(&mut length).expect("length");
-        let mut registration = vec![0u8; u32::from_le_bytes(length) as usize];
-        stream.read_exact(&mut registration).expect("registration");
-        stream.write_all(&[1]).expect("ack");
+        let registration = read_registration(&mut stream).expect("registration");
+        stream.write_all(&[ACK_READY]).expect("ack");
         registration
     });
     (address, monitor)
@@ -122,12 +131,14 @@ fn a_panic_before_registration_is_reported_and_ends_the_process() {
         InitWaitOutcome::Failed,
         "the parent is told at once"
     );
-    let registration = String::from_utf8_lossy(&registration);
-    assert!(
-        registration.contains("panicked")
-            && registration.contains("MIRRORD_LAYER_DEBUG_PANIC_BEFORE_REGISTRATION"),
-        "the monitor got the panic: {registration}"
-    );
+    match registration.init_report {
+        Some(InitReport::Failed(reason)) => assert!(
+            reason.contains("panicked")
+                && reason.contains("MIRRORD_LAYER_DEBUG_PANIC_BEFORE_REGISTRATION"),
+            "the monitor got the panic: {reason}"
+        ),
+        report => panic!("the monitor got {report:?}"),
+    }
     assert_eq!(output.status.code(), Some(1), "the process ends");
 }
 
@@ -202,4 +213,136 @@ extern "system" fn hooked_detour() -> u32 {
 fn call_hooked_target() -> u32 {
     let target: HookedFn = std::hint::black_box(hooked_target);
     target()
+}
+
+/// The method a layer's children are injected with is the one that loaded it, captured at startup
+/// whatever the log level. A capture that depended on an event being logged would happen only at
+/// the first child launch, and would see a variable the target changed in the meantime.
+#[test]
+fn startup_captures_the_injection_method_with_logging_off() {
+    let child = spawn_isolated(
+        "tests::startup::isolated_injection_method_capture",
+        &[(MIRRORD_INJECTION_METHOD_ENV, "apc".to_owned())],
+    );
+
+    let output = child.wait_with_output().expect("child");
+
+    assert!(
+        output.status.success(),
+        "the layer's half passed: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+#[ignore = "the layer's half of startup_captures_the_injection_method_with_logging_off"]
+fn isolated_injection_method_capture() {
+    assert!(
+        std::env::var_os(ISOLATED).is_some(),
+        "runs only in the copy `spawn_isolated` starts"
+    );
+
+    // No resolved configuration, so startup stops after the capture, before any hook.
+    let started = with_default(NoSubscriber::default(), crate::initialize_layer_sync);
+    assert!(
+        started.is_err(),
+        "startup stops at the missing configuration"
+    );
+
+    // SAFETY: this copy of the test binary runs this one test on one thread.
+    unsafe { std::env::set_var(MIRRORD_INJECTION_METHOD_ENV, "load-library") };
+    assert_eq!(
+        crate::hooks::process::init_layer_injection_method(),
+        InjectionMethod::Apc
+    );
+}
+
+/// The working directory the layer's half of
+/// `the_monitor_finds_a_registered_log_from_another_working_directory` runs in.
+const WORKING_DIRECTORY: &str = "MIRRORD_LAYER_WIN_TEST_WORKING_DIRECTORY";
+
+/// The file, in [`WORKING_DIRECTORY`], the layer's half writes the log name it registered to.
+const REGISTERED_LOG_NAME: &str = "registered-log-name";
+
+/// The layer registers its log by name, and the monitor, which runs in a working directory of its
+/// own, finds it in the session directory. A relative session directory names a different place
+/// in each working directory, so a layer that sees one registers no log at all.
+#[test]
+fn the_monitor_finds_a_registered_log_from_another_working_directory() {
+    let scratch = std::env::temp_dir().join(format!(
+        "mirrord-layer-log-directory-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&scratch);
+    let working_directory = scratch.join("layer");
+    let session_directory = scratch.join("session");
+    std::fs::create_dir_all(&working_directory).expect("the layer's working directory");
+
+    let registered = |log_directory: &Path| {
+        let _ = std::fs::remove_file(working_directory.join(REGISTERED_LOG_NAME));
+        let child = spawn_isolated(
+            "tests::startup::isolated_log_registration",
+            &[
+                (
+                    MIRRORD_LAYER_LOG_PATH,
+                    log_directory.to_string_lossy().into_owned(),
+                ),
+                // Only configured: building the registration connects to nothing.
+                (MIRRORD_LAYER_CRASH_MONITOR_ADDR, "127.0.0.1:9".to_owned()),
+                (
+                    WORKING_DIRECTORY,
+                    working_directory.to_string_lossy().into_owned(),
+                ),
+            ],
+        );
+        let output = child.wait_with_output().expect("child");
+        assert!(
+            output.status.success(),
+            "the layer's half passed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        std::fs::read_to_string(working_directory.join(REGISTERED_LOG_NAME)).ok()
+    };
+
+    // What the CLI gives every process of the session.
+    let log_name = registered(&session_directory);
+    // The monitor's half: its own working directory is this process's, not the layer's.
+    let found = log_name.as_deref().is_some_and(|log_name| {
+        is_log_name(log_name) && session_directory.join(log_name).is_file()
+    });
+    // What a process launched outside the CLI could see.
+    let relative_log_name = registered(Path::new("logs"));
+    let relative_log_written = working_directory.join("logs").is_dir();
+    let _ = std::fs::remove_dir_all(&scratch);
+
+    assert!(found, "the monitor finds the registered log {log_name:?}");
+    assert_eq!(
+        relative_log_name, None,
+        "a log in a relative directory is not registered"
+    );
+    assert!(
+        relative_log_written,
+        "it is still written, in the layer's own working directory"
+    );
+}
+
+#[test]
+#[ignore = "the layer's half of the_monitor_finds_a_registered_log_from_another_working_directory"]
+fn isolated_log_registration() {
+    assert!(
+        std::env::var_os(ISOLATED).is_some(),
+        "runs only in the copy `spawn_isolated` starts"
+    );
+    std::env::set_current_dir(std::env::var_os(WORKING_DIRECTORY).expect("a working directory"))
+        .expect("enter the working directory");
+
+    init_tracing_sinks();
+    let (_, registration) =
+        crate::diagnostics::monitor_registration(&session_role(), "child.exe", &crash_dir())
+            .expect("a monitor is configured");
+
+    if let Some(log_name) = registration.log_name {
+        std::fs::write(REGISTERED_LOG_NAME, log_name).expect("hand over the log name");
+    }
 }
