@@ -193,21 +193,21 @@ impl MessageFormatter for SuggestingFormatter {
     fn format_message<'a>(&self, error: &'a serde_saphyr::Error) -> Cow<'a, str> {
         let message = DefaultMessageFormatter.format_message(error);
 
-        let (serde_saphyr::Error::SerdeUnknownField {
-            field: unknown,
-            expected,
-            ..
-        }
-        | serde_saphyr::Error::SerdeUnknownVariant {
-            variant: unknown,
-            expected,
-            ..
-        }) = error.without_snippet()
-        else {
-            return message;
+        let closest = match error.without_snippet() {
+            serde_saphyr::Error::SerdeUnknownField {
+                field: unknown,
+                expected,
+                ..
+            }
+            | serde_saphyr::Error::SerdeUnknownVariant {
+                variant: unknown,
+                expected,
+                ..
+            } => closest_name(unknown, expected),
+            _ => None,
         };
 
-        let Some(closest) = closest_name(unknown, expected) else {
+        let Some(closest) = closest else {
             return message;
         };
 
