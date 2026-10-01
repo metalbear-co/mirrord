@@ -4565,7 +4565,7 @@ dependencies = [
 [[package]]
 name = "kube"
 version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=e8c740eed67d11b643d03bd7062d681327f3c457#e8c740eed67d11b643d03bd7062d681327f3c457"
+source = "git+https://github.com/metalbear-co/kube.git?rev=3cbb98d5550d1b69e515d4dac51e815f4a4481e8#3cbb98d5550d1b69e515d4dac51e815f4a4481e8"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -4577,7 +4577,7 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=e8c740eed67d11b643d03bd7062d681327f3c457#e8c740eed67d11b643d03bd7062d681327f3c457"
+source = "git+https://github.com/metalbear-co/kube.git?rev=3cbb98d5550d1b69e515d4dac51e815f4a4481e8#3cbb98d5550d1b69e515d4dac51e815f4a4481e8"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -4614,7 +4614,7 @@ dependencies = [
 [[package]]
 name = "kube-core"
 version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=e8c740eed67d11b643d03bd7062d681327f3c457#e8c740eed67d11b643d03bd7062d681327f3c457"
+source = "git+https://github.com/metalbear-co/kube.git?rev=3cbb98d5550d1b69e515d4dac51e815f4a4481e8#3cbb98d5550d1b69e515d4dac51e815f4a4481e8"
 dependencies = [
  "derive_more",
  "form_urlencoded",
@@ -4632,7 +4632,7 @@ dependencies = [
 [[package]]
 name = "kube-derive"
 version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=e8c740eed67d11b643d03bd7062d681327f3c457#e8c740eed67d11b643d03bd7062d681327f3c457"
+source = "git+https://github.com/metalbear-co/kube.git?rev=3cbb98d5550d1b69e515d4dac51e815f4a4481e8#3cbb98d5550d1b69e515d4dac51e815f4a4481e8"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -4645,7 +4645,7 @@ dependencies = [
 [[package]]
 name = "kube-runtime"
 version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=e8c740eed67d11b643d03bd7062d681327f3c457#e8c740eed67d11b643d03bd7062d681327f3c457"
+source = "git+https://github.com/metalbear-co/kube.git?rev=3cbb98d5550d1b69e515d4dac51e815f4a4481e8#3cbb98d5550d1b69e515d4dac51e815f4a4481e8"
 dependencies = [
  "ahash",
  "async-broadcast",
@@ -5203,6 +5203,7 @@ dependencies = [
  "tokio-util",
  "tower",
  "tower-http",
+ "tower-test",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -5508,6 +5509,7 @@ version = "3.267.0"
 dependencies = [
  "async-stream",
  "futures",
+ "http 1.5.0",
  "itertools 0.14.0",
  "k8s-openapi",
  "kube",
@@ -5525,6 +5527,7 @@ dependencies = [
  "tokio",
  "tokio-retry",
  "tower",
+ "tower-test",
  "tracing",
 ]
 

@@ -529,7 +529,9 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     OperatorReturnedUnknownTargetType(String),
 
-    #[error("Failed to make secondary agent connection: {0}")]
+    #[error(
+        "Failed to make secondary agent connection: Agent port-forward WebSocket upgrade failed: {0}"
+    )]
     #[diagnostic(help(
         "Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"
     ))]
