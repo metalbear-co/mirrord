@@ -118,10 +118,7 @@ pub fn validate_config(
                 serde_json::from_str(&rendered).map_err(|error| error.to_string())
             });
             match parsed {
-                Ok(value) => match check::<LayerFileConfig>(&value, &LAYER_SCHEMA)? {
-                    Ok(config) => verify(config, &mut context).err().into_iter().collect(),
-                    Err(issues) => issues,
-                },
+                Ok(value) => check_layer_config(&value, context)?,
                 Err(message) => vec![file_issue(message)],
             }
         }
@@ -151,20 +148,32 @@ pub fn validate_config(
     })
 }
 
-/// Generates the final config and verifies it, like `mirrord exec` and `mirrord verify-config`.
+/// Validates a mirrord config: deserializes it, then generates the final config and verifies it,
+/// like `mirrord exec` and `mirrord verify-config`.
 ///
 /// An empty target is not treated as final: it may still be given on the command line (`-t`) or
 /// picked in an IDE.
-fn verify(config: LayerFileConfig, context: &mut ConfigContext) -> Result<(), ConfigIssue> {
-    let mut context = std::mem::take(context).empty_target_final(false);
-    config
+fn check_layer_config(
+    value: &Value,
+    context: ConfigContext,
+) -> Result<Vec<ConfigIssue>, ValidateConfigError> {
+    let config = match check::<LayerFileConfig>(value, &LAYER_SCHEMA)? {
+        Ok(config) => config,
+        Err(issues) => return Ok(issues),
+    };
+
+    let mut context = context.empty_target_final(false);
+    Ok(config
         .generate_config(&mut context)
         .and_then(|config| config.verify(&mut context))
-        .map_err(|error: ConfigError| ConfigIssue {
+        .err()
+        .map(|error: ConfigError| ConfigIssue {
             path: String::new(),
             message: error.to_string(),
             allowed_values: None,
         })
+        .into_iter()
+        .collect())
 }
 
 /// An issue with the file as a whole: a template or syntax error that prevented reading it.
@@ -182,8 +191,9 @@ fn file_issue(message: String) -> ConfigIssue {
 /// `mirrord up` merges it into the mirrord config it generates for the service and fails on a
 /// result that isn't a valid mirrord config. The generated config depends on resolving targets in
 /// the cluster, so the merge can't be reproduced here; instead the patch is checked on its own as
-/// a mirrord config. Nearly every mirrord config field is optional, so any valid patch is also a
-/// valid config fragment, and this catches invalid values and misspelled options.
+/// a mirrord config, including the semantic checks `mirrord up` runs on the merged result (such as
+/// the jq filters of split queues). Nearly every mirrord config field is optional, so any valid
+/// patch is also a valid config fragment.
 fn check_config_patches(up_config: &Value) -> Result<Vec<ConfigIssue>, ValidateConfigError> {
     let Some(services) = up_config.get("services").and_then(Value::as_object) else {
         return Ok(Vec::new());
@@ -195,11 +205,12 @@ fn check_config_patches(up_config: &Value) -> Result<Vec<ConfigIssue>, ValidateC
             continue;
         };
         let prefix = format!("/services/{}/config_patch", escape_pointer_token(service));
+        // Isolated from the environment like the merged config in `mirrord up`, whose
+        // environment-derived settings come from the generated config rather than the patch.
+        let context = ConfigContext::default().strict_env(true);
         issues.extend(
-            check::<LayerFileConfig>(patch, &LAYER_SCHEMA)?
-                .err()
+            check_layer_config(patch, context)?
                 .into_iter()
-                .flatten()
                 .map(|issue| ConfigIssue {
                     path: format!("{prefix}{}", issue.path),
                     ..issue
@@ -593,6 +604,28 @@ services:
             issue.path,
             "/services/worker/config_patch/feature/split_queues"
         );
+    }
+
+    /// Deserializes, but `verify` rejects the jq filter.
+    #[test]
+    fn up_yaml_config_patch_invalid_jq_filter() {
+        let issue = single_issue(
+            ConfigFormat::MirrordUpYaml,
+            r#"
+services:
+  worker:
+    config_patch:
+      feature:
+        split_queues:
+          "*":
+            queue_type: SQS
+            jq_filter: "["
+    run:
+      command: ["echo"]
+"#,
+        );
+        assert_eq!(issue.path, "/services/worker/config_patch");
+        assert!(issue.message.contains("jq"), "{}", issue.message);
     }
 
     #[test]
