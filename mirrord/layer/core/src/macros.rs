@@ -5,7 +5,7 @@
 //! - [`replace!`](`macro@crate::replace`)
 //!
 //! Replaces a [`libc`] function with a hook.
-
+//!
 //! - `hook_symbol!` (Linux x86_64/aarch64 only)
 //!
 //! Used to hook go symbols.

@@ -30,6 +30,13 @@ static EXECVE_PROBE_ENABLED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(not(target_os = "macos"))]
 thread_local! {
+    /// The environment that [`on_execve`] gave to the last `execve` on this thread. It is replaced
+    /// on the next call, so each thread keeps at most one copy.
+    ///
+    /// This is also correct in the `vfork` child of glibc’s `posix_spawn`: the child uses the
+    /// parent thread’s thread-local, and the parent waits until the child calls `execve`. When
+    /// `execve` succeeds, the kernel has copied the environment; when it fails, nothing uses the
+    /// buffer again.
     static PREPARED_ENVP: RefCell<Option<PreparedEnvp>> = const { RefCell::new(None) };
 }
 
@@ -103,15 +110,14 @@ fn on_execve(call: &ProbedCall<'_>) {
 
     let envp = call.arg(ENVP) as *const *const c_char;
     if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
-        PREPARED_ENVP.with(|prepared| {
-            *prepared.borrow_mut() = Some(PreparedEnvp::new(envp));
-            let envp = prepared
-                .borrow()
-                .as_ref()
-                .expect("prepared environment was just set")
-                .as_ptr();
-            call.set_arg(ENVP, envp as usize);
-        });
+        let envp = PreparedEnvp::new(envp);
+        let pointer = envp.as_ptr();
+        let mut envp = Some(envp);
+        let _ = PREPARED_ENVP.try_with(|prepared| *prepared.borrow_mut() = envp.take());
+        // The thread-local is gone while the thread exits, for example in an `atexit` handler.
+        // The thread is about to end, so leak the environment then.
+        std::mem::forget(envp);
+        call.set_arg(ENVP, pointer as usize);
     }
 }
 
