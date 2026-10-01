@@ -10,19 +10,21 @@
 //! that failed to deserialize, because it reports every problem at once, each with its location
 //! and, where the schema lists them, the allowed values, where serde stops at the first error.
 
-use std::{ops::Not, path::Path, sync::LazyLock};
+use std::{ops::Not, path::Path};
 
-use jsonschema::{ValidationError, Validator, error::ValidationErrorKind, paths::Location};
+use jsonschema::{ValidationError, error::ValidationErrorKind, paths::Location};
 use mirrord_config::{
     LayerFileConfig,
     config::{ConfigContext, ConfigError, MirrordConfig},
     env_key::{EnvKey, MIRRORD_ENV_KEY},
 };
 use mirrord_up::{UpConfig, UpError};
-use schemars::{JsonSchema, schema_for};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use thiserror::Error;
+
+use crate::schema::{LAYER_SCHEMA, Schema, UP_SCHEMA};
 
 /// Which config file the content belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -74,23 +76,6 @@ pub enum ValidateConfigError {
     #[error("the config schema compiled into mirrord is invalid: {0}")]
     InvalidSchema(#[source] &'static ValidationError<'static>),
 }
-
-/// A compiled schema, with the raw schema kept around to look up the allowed field names.
-struct Schema {
-    raw: Value,
-    validator: Result<Validator, ValidationError<'static>>,
-}
-
-impl Schema {
-    fn new<T: JsonSchema>() -> Self {
-        let raw = schema_for!(T).to_value();
-        let validator = jsonschema::validator_for(&raw);
-        Self { raw, validator }
-    }
-}
-
-static LAYER_SCHEMA: LazyLock<Schema> = LazyLock::new(Schema::new::<LayerFileConfig>);
-static UP_SCHEMA: LazyLock<Schema> = LazyLock::new(Schema::new::<UpConfig>);
 
 /// Placeholder for `{{ key }}` in a `mirrord-up.yaml` when no key is given. Any value works for
 /// templates that only interpolate the key.
