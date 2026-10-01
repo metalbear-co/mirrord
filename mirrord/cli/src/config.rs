@@ -1140,6 +1140,17 @@ pub(super) struct DiagnoseArgs {
     pub command: DiagnoseCommand,
 }
 
+#[cfg(target_os = "macos")]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum, Display)]
+#[strum(serialize_all = "lowercase")]
+pub(super) enum DiagnoseSipFormat {
+    /// Print output as a table.
+    #[default]
+    Table,
+    /// Print output as JSON.
+    Json,
+}
+
 #[derive(Subcommand, Debug)]
 /// Commands for diagnosing potential issues introduced by mirrord.
 pub(super) enum DiagnoseCommand {
@@ -1160,6 +1171,9 @@ pub(super) enum DiagnoseCommand {
         /// Binary to inspect.
         #[arg(value_hint = ValueHint::ExecutablePath)]
         binary: PathBuf,
+        /// Output format.
+        #[arg(long, default_value_t)]
+        format: DiagnoseSipFormat,
     },
 }
 
