@@ -505,6 +505,36 @@ pub enum WindowsSupportError {
     Ci,
 }
 
+/// Where `mirrord-up.yaml` settings end up in the mirrord config generated for each service, as
+/// pairs of dotted paths (`*` standing for any service name). The settings below them map the same
+/// way, e.g. `services.*.http_filter.header_filter` sets
+/// `feature.network.incoming.http_filter.header_filter`; a `config_patch` maps onto the root of the
+/// mirrord config. Settings missing here, like `run`, only steer `mirrord up` itself.
+///
+/// Mirrors [`ServiceConfig::assemble`], and must be changed along with it.
+pub const LAYER_CONFIG_PATHS: &[(&str, &str)] = &[
+    (
+        "common.accept_invalid_certificates",
+        "accept_invalid_certificates",
+    ),
+    ("common.operator", "operator"),
+    ("common.telemetry", "telemetry"),
+    ("common.context", "kube_context"),
+    ("services.*.context", "kube_context"),
+    ("services.*.target", "target"),
+    ("services.*.env", "feature.env"),
+    ("services.*.default_mode", "feature.network.incoming.mode"),
+    (
+        "services.*.http_filter",
+        "feature.network.incoming.http_filter",
+    ),
+    (
+        "services.*.ignore_ports",
+        "feature.network.incoming.ignore_ports",
+    ),
+    ("services.*.config_patch", ""),
+];
+
 impl ServiceConfig {
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service.
     fn assemble(
