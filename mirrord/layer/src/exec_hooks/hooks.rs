@@ -86,7 +86,6 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
 /// does not retain that state.
 #[cfg(not(target_os = "macos"))]
 fn on_execve(call: &ProbedCall<'_>) {
-    /// `execve(path, argv, envp)`.
     const ENVP: u32 = 2;
 
     let envp = call.arg(ENVP) as *const *const c_char;
