@@ -767,7 +767,12 @@ impl FileManager {
                     .get(&fd)
                     .ok_or(ResponseError::NotFound(fd))?
                 {
-                    RemoteFile::Directory(parent_path) => parent_path.join(path),
+                    // `parent_path` is already resolved, so it has to be turned back into a
+                    // target path before joining, as the result is resolved again below.
+                    RemoteFile::Directory(parent_path) => match self.path_resolver.as_ref() {
+                        Some(resolver) => resolver.unresolve(parent_path)?.join(path),
+                        None => parent_path.join(path),
+                    },
                     _ => {
                         return Err(ResponseError::NotDirectory(fd));
                     }
@@ -795,9 +800,6 @@ impl FileManager {
             // invalid
             _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).into()),
         };
-        let path = path.strip_prefix_root().map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "couldn't strip prefix")
-        })?;
         let res = if follow_symlink {
             self.resolve_path(&path)?.metadata()
         } else if let Some(resolver) = self.path_resolver.as_ref() {
@@ -1020,5 +1022,135 @@ impl FileManager {
                 result_size,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, os::unix::fs::symlink};
+
+    use rstest::rstest;
+
+    use super::*;
+
+    const S_IFMT: u32 = 0o170000;
+    const S_IFREG: u32 = 0o100000;
+    const S_IFLNK: u32 = 0o120000;
+
+    /// Targeted, targetless and workload companion agents resolve paths differently, so stat
+    /// requests are exercised with each.
+    #[derive(Debug, Clone, Copy)]
+    enum Mode {
+        Targeted,
+        Targetless,
+        WorkloadCompanion,
+    }
+
+    /// A temporary directory holding `a/b/c/` with:
+    ///
+    /// ```text
+    /// file                    regular file
+    /// link                 -> file
+    /// abs_link             -> <dir>/file
+    /// dangling             -> /nonexistent
+    /// ```
+    ///
+    /// For [`Mode::Targeted`] the temporary directory is the target root, so `<dir>` is
+    /// `/a/b/c` and `abs_link` only resolves correctly against the target root. For the other
+    /// modes `<dir>` is the real path on the host.
+    ///
+    /// Returns the [`FileManager`] and the path to `a/b/c` as sent by the layer.
+    fn setup(mode: Mode) -> (tempfile::TempDir, FileManager, PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let host_dir = root.path().join("a/b/c");
+        fs::create_dir_all(&host_dir).unwrap();
+
+        let (manager, dir) = match mode {
+            Mode::Targeted => (
+                FileManager::with_resolver(Some(InTargetPathResolver::with_root_path(
+                    root.path().to_path_buf(),
+                ))),
+                PathBuf::from("/a/b/c"),
+            ),
+            Mode::Targetless => (FileManager::new(None), host_dir.clone()),
+            Mode::WorkloadCompanion => (FileManager::new_workload_companion(), host_dir.clone()),
+        };
+
+        fs::write(host_dir.join("file"), "hello").unwrap();
+        symlink("file", host_dir.join("link")).unwrap();
+        symlink(dir.join("file"), host_dir.join("abs_link")).unwrap();
+        symlink("/nonexistent", host_dir.join("dangling")).unwrap();
+
+        (root, manager, dir)
+    }
+
+    fn file_type(
+        manager: &mut FileManager,
+        path: impl Into<PathBuf>,
+        fd: Option<u64>,
+        follow_symlink: bool,
+    ) -> RemoteResult<u32> {
+        manager
+            .xstat(Some(path.into()), fd, follow_symlink)
+            .map(|response| response.metadata.mode & S_IFMT)
+    }
+
+    #[rstest]
+    fn fstatat_relative_to_dir_fd(
+        #[values(Mode::Targeted, Mode::Targetless, Mode::WorkloadCompanion)] mode: Mode,
+    ) {
+        let (_root, mut manager, dir) = setup(mode);
+        let fd = manager
+            .open(
+                dir,
+                OpenOptionsInternal {
+                    read: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .fd;
+        let fd = Some(fd);
+
+        assert_eq!(file_type(&mut manager, "file", fd, true).unwrap(), S_IFREG);
+        assert_eq!(file_type(&mut manager, "link", fd, true).unwrap(), S_IFREG);
+        assert_eq!(file_type(&mut manager, "link", fd, false).unwrap(), S_IFLNK);
+        assert_eq!(
+            file_type(&mut manager, "abs_link", fd, true).unwrap(),
+            S_IFREG
+        );
+        assert_eq!(
+            file_type(&mut manager, "dangling", fd, false).unwrap(),
+            S_IFLNK
+        );
+        assert!(file_type(&mut manager, "dangling", fd, true).is_err());
+    }
+
+    #[rstest]
+    fn stat_absolute_path(
+        #[values(Mode::Targeted, Mode::Targetless, Mode::WorkloadCompanion)] mode: Mode,
+    ) {
+        let (_root, mut manager, dir) = setup(mode);
+
+        assert_eq!(
+            file_type(&mut manager, dir.join("file"), None, true).unwrap(),
+            S_IFREG
+        );
+        assert_eq!(
+            file_type(&mut manager, dir.join("link"), None, true).unwrap(),
+            S_IFREG
+        );
+        assert_eq!(
+            file_type(&mut manager, dir.join("link"), None, false).unwrap(),
+            S_IFLNK
+        );
+        assert_eq!(
+            file_type(&mut manager, dir.join("abs_link"), None, true).unwrap(),
+            S_IFREG
+        );
+        assert_eq!(
+            file_type(&mut manager, dir.join("dangling"), None, false).unwrap(),
+            S_IFLNK
+        );
     }
 }

@@ -546,9 +546,6 @@ impl ServiceConfig {
 
         cfg.feature.env = self.env;
 
-        cfg.feature.split_queues =
-            SplitQueuesConfig::all_wildcard_with_mode(&key, self.default_mode.into());
-
         cfg.feature.network.incoming.mode = self.default_mode.into();
 
         match self.default_mode {
@@ -564,6 +561,9 @@ impl ServiceConfig {
                         ..Default::default()
                     }
                 };
+
+                cfg.feature.split_queues =
+                    SplitQueuesConfig::all_wildcard_with_mode(&key, self.default_mode.into());
             }
 
             ServiceMode::Replace => {

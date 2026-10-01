@@ -43,7 +43,14 @@ use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use mirrord_session_monitor_protocol::SessionInfo;
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
-use tokio::{net::TcpListener, sync::RwLock};
+#[cfg(unix)]
+use nix::{
+    sys::signal::{Signal, kill},
+    unistd::getpid,
+};
+#[cfg(unix)]
+use tokio::signal::unix::{SignalKind, signal};
+use tokio::{net::TcpListener, sync::RwLock, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{Level, warn};
 
@@ -111,6 +118,69 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
     let addr = listener.local_addr()?;
     println!("{addr}\n");
     Ok(())
+}
+
+/// Owns the CI-only signal bridge for the lifetime of the internal proxy setup and run.
+pub(crate) struct IntProxyShutdown {
+    pub(super) token: CancellationToken,
+    signal_task: Option<JoinHandle<()>>,
+}
+
+impl Drop for IntProxyShutdown {
+    fn drop(&mut self) {
+        if let Some(signal_task) = self.signal_task.take() {
+            signal_task.abort();
+        }
+    }
+}
+
+#[cfg(unix)]
+const CI_SHUTDOWN_WATCHDOG_GRACE: Duration = Duration::from_secs(5);
+
+/// The watchdog stays in intproxy itself, so its self-signal cannot reach a process that has
+/// reused a PID after intproxy exited. An OS thread remains runnable if async shutdown stalls.
+#[cfg(unix)]
+fn arm_ci_shutdown_watchdog(grace: Duration) -> io::Result<()> {
+    std::thread::Builder::new()
+        .name("mirrord-ci-shutdown-watchdog".to_owned())
+        .spawn(move || {
+            std::thread::sleep(grace);
+            if let Err(error) = kill(getpid(), Signal::SIGKILL) {
+                tracing::error!(%error, "Failed to force intproxy shutdown");
+            }
+        })
+        .map(|_| ())
+}
+
+/// Installs the signal handler before the CI intproxy pid becomes discoverable by `mirrord ci
+/// stop`. The returned owner also removes the receiver task on every natural or setup-error exit.
+pub(crate) fn install_ci_shutdown_handler(
+    mirrord_for_ci: bool,
+) -> Result<IntProxyShutdown, InternalProxyError> {
+    let token = CancellationToken::new();
+    #[cfg(unix)]
+    let signal_task = if mirrord_for_ci {
+        let mut sigterm =
+            signal(SignalKind::terminate()).map_err(InternalProxyError::SignalHandler)?;
+        let shutdown = token.clone();
+        Some(tokio::spawn(async move {
+            if sigterm.recv().await.is_some() {
+                if let Err(error) = arm_ci_shutdown_watchdog(CI_SHUTDOWN_WATCHDOG_GRACE) {
+                    tracing::error!(%error, "Failed to arm intproxy shutdown watchdog");
+                }
+                shutdown.cancel();
+            }
+        }))
+    } else {
+        None
+    };
+    #[cfg(not(unix))]
+    let signal_task = {
+        let _ = mirrord_for_ci;
+        None
+    };
+
+    Ok(IntProxyShutdown { token, signal_task })
 }
 
 /// Starts the session monitor API server if enabled.
@@ -219,6 +289,7 @@ pub(crate) async fn proxy(
     listen_port: u16,
     watch: drain::Watch,
     user_data: &UserData,
+    shutdown_handler: IntProxyShutdown,
 ) -> Result<(), InternalProxyError> {
     tracing::info!(
         ?config,
@@ -314,14 +385,11 @@ pub(crate) async fn proxy(
         needs_db_portforwards,
     )
     .await;
-    let daemon = crate::ui::ensure_daemon().await;
-    if let Err(error) = &daemon {
-        tracing::warn!(%error, "failed to start the local mirrord daemon");
-    }
-
     if needs_db_portforwards
         && let Some(session_id) = operator_session_id
-        && let Ok(daemon) = daemon
+        && let Ok(daemon) = crate::ui::ensure_daemon().await.inspect_err(|error| {
+            tracing::warn!(%error, "failed to start the local mirrord daemon");
+        })
         && let Err(err) = db_portforwards::setup(
             &config,
             &mut agent_conn,
@@ -339,6 +407,7 @@ pub(crate) async fn proxy(
     // Let it assign address for us then print it for the user.
     let listener = create_listen_socket(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_port))
         .map_err(InternalProxyError::ListenerSetup)?;
+    let shutdown = shutdown_handler.token.clone();
     print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
     #[cfg(not(target_os = "windows"))]
@@ -371,7 +440,11 @@ pub(crate) async fn proxy(
         monitor_tx,
         chaos_rx,
     )
-    .run(first_connection_timeout, consecutive_connection_timeout)
+    .run_with_shutdown(
+        first_connection_timeout,
+        consecutive_connection_timeout,
+        shutdown,
+    )
     .await
     .map_err(From::from);
 
@@ -452,5 +525,105 @@ pub(crate) async fn connect_and_ping(
                 ));
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::{env, os::unix::process::ExitStatusExt, process::Stdio, time::Duration};
+
+    use nix::{
+        sys::signal::{Signal, kill},
+        unistd::Pid,
+    };
+    use tokio::{
+        io::{AsyncBufReadExt, BufReader},
+        process::Command,
+    };
+
+    use super::{arm_ci_shutdown_watchdog, install_ci_shutdown_handler};
+
+    /// The test runner must be a separate process because the watchdog's signal kills its owner.
+    #[test]
+    fn ci_shutdown_watchdog_worker() {
+        if env::var_os("MIRRORD_CI_WATCHDOG_TEST_WORKER").is_none() {
+            return;
+        }
+
+        arm_ci_shutdown_watchdog(Duration::from_millis(100)).unwrap();
+        loop {
+            std::thread::park();
+        }
+    }
+
+    #[tokio::test]
+    async fn ci_shutdown_signal_worker() {
+        if env::var_os("MIRRORD_CI_SHUTDOWN_SIGNAL_TEST_WORKER").is_none() {
+            return;
+        }
+
+        let shutdown = install_ci_shutdown_handler(true).unwrap();
+        println!("ready");
+        shutdown.token.cancelled().await;
+    }
+
+    /// A normal CI shutdown arms the watchdog before notifying the proxy and exits without
+    /// waiting for the watchdog's forced termination.
+    #[tokio::test]
+    async fn ci_shutdown_signal_cancels_intproxy() {
+        let mut child = Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "internal_proxy::tests::ci_shutdown_signal_worker",
+                "--nocapture",
+            ])
+            .env("MIRRORD_CI_SHUTDOWN_SIGNAL_TEST_WORKER", "1")
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let mut line = String::new();
+            loop {
+                line.clear();
+                assert_ne!(stdout.read_line(&mut line).await.unwrap(), 0);
+                if line.trim() == "ready" {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("intproxy installs its signal handler");
+
+        kill(Pid::from_raw(child.id().unwrap() as i32), Signal::SIGTERM).unwrap();
+        let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .expect("intproxy exits after cancellation")
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[tokio::test]
+    async fn ci_shutdown_watchdog_kills_stalled_intproxy() {
+        let mut child = Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "internal_proxy::tests::ci_shutdown_watchdog_worker",
+            ])
+            .env("MIRRORD_CI_WATCHDOG_TEST_WORKER", "1")
+            .stdout(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+
+        let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .expect("watchdog stops the stalled process")
+            .unwrap();
+        assert_eq!(
+            status.signal(),
+            Some(nix::sys::signal::Signal::SIGKILL as i32)
+        );
     }
 }
