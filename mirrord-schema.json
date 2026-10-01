@@ -4189,7 +4189,7 @@
         },
         "client_cert_source": {
           "title": "feature.network.incoming.tls_delivery.client_cert_source {#feature-network-incoming-tls_delivery-client_cert_source}",
-          "description": "Where `client_cert` and `client_key` are read from. Defaults to `local`.\n\n- `local`: files on the machine running mirrord.\n- `target`: files inside the target's container, at the paths the target's own process\n  uses. Only preview sessions (`mirrord preview start`) support this: the mirrord\n  operator reads the files from a running pod of the target. `mirrord exec` has no\n  access to the target's files and connects without a client certificate.",
+          "description": "Where `client_cert` and `client_key` are read from. Defaults to `local`.\n\n- `local`: files on the machine running mirrord.\n- `target`: files inside the target's container, at the paths the target's own process\n  uses. Only preview sessions (`mirrord preview start`) support this: the mirrord operator\n  reads the files from a running pod of the target. `mirrord exec` has no access to the\n  target's files and connects without a client certificate.",
           "$ref": "#/$defs/TlsClientCertSource",
           "default": "local"
         },
