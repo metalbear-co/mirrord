@@ -6,6 +6,7 @@ use crate::config::{self, ConfigError};
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(extend("x-mirrord-plan" = "team"))]
 pub struct StatefulSetTarget {
     pub stateful_set: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
