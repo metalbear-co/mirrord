@@ -3049,6 +3049,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60d15c21c07ff23c47c1348d074cd2f694787a192636e5160bb118c493041953"
 dependencies = [
  "bindgen",
+ "cc",
  "frida-build",
 ]
 
