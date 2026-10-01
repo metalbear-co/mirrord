@@ -180,6 +180,7 @@ fn apply_profile<P: Progress>(
         } else {
             subtask.info(&format!("setting target namespace to {profile_ns}"));
             config.target.namespace = Some(profile_ns.to_string());
+            crate::kube::update_run_target_namespace(config);
         }
     }
 

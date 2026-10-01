@@ -389,6 +389,31 @@ pub(super) enum Commands {
     PrintSchema,
 }
 
+impl Commands {
+    /// Whether the command spans every namespace (`-A`).
+    pub(super) fn all_namespaces(&self) -> bool {
+        match self {
+            Self::DbBranches(args) => args.all_namespaces,
+            Self::Queues(args) => matches!(
+                args.command,
+                QueuesCommand::Status {
+                    all_namespaces: true,
+                    ..
+                }
+            ),
+            Self::Preview(args) => match &args.command {
+                PreviewCommand::Status(args) => args.all_namespaces,
+                PreviewCommand::Stop(args) => args.all_namespaces,
+                PreviewCommand::Logs(args) => args.all_namespaces,
+                PreviewCommand::Start(_) => false,
+            },
+            Self::Session(args) => args.common.all_namespaces,
+            Self::Kill(args) => args.common.all_namespaces,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
 pub enum FsMode {
     /// Read & Write from remote, apart from overrides (hardcoded and configured in file)
