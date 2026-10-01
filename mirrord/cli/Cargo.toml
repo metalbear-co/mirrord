@@ -27,6 +27,7 @@ mirrord-kube = { path = "../kube", features = ["portforward"] }
 mirrord-config = { path = "../config" }
 mirrord-up = { path = "../up" }
 mirrord-tui = { path = "../tui" }
+mirrord-mcp = { path = "../mcp" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
@@ -50,6 +51,8 @@ glob.workspace = true
 which.workspace = true
 schemars.workspace = true
 semver.workspace = true
+serde-saphyr.workspace = true
+chrono = { workspace = true, features = ["serde"] }
 reqwest = { workspace = true, features = ["stream"] }
 const-random.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "macros", "process", "signal", "sync"] }
@@ -98,6 +101,7 @@ mirrord-sessions-manager-client.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
 hyper.workspace = true
 bytes.workspace = true
+sha2.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
@@ -120,7 +124,7 @@ hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
-serde-saphyr.workspace = true
+tempfile.workspace = true
 
 [features]
 windows_build = []

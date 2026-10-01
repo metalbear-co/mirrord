@@ -316,6 +316,10 @@ pub enum ReportTarget {
     /// One action inside the mirrord terminal interface. Several are reported per run, tied
     /// together by a `run_id` property.
     TuiEvent,
+    /// A client (an AI agent's harness) connected to `mirrord mcp`.
+    McpServerStarted,
+    /// One tool call handled by `mirrord mcp`.
+    McpToolCalled,
 }
 
 /// Header the client sets to tell the analytics-server which event a report is.
@@ -332,6 +336,8 @@ impl ReportTarget {
             ReportTarget::ClientSession => "client-session",
             ReportTarget::UpSession => "up-session",
             ReportTarget::TuiEvent => "tui-event",
+            ReportTarget::McpServerStarted => "mcp-server-started",
+            ReportTarget::McpToolCalled => "mcp-tool-called",
         }
     }
 }
@@ -424,6 +430,28 @@ impl AnalyticsReporter {
 
     /// Constructs a reporter that delivers to [`ReportTarget::UpSession`].
     pub fn for_up_event(enabled: bool, watch: drain::Watch, machine_id: Uuid) -> Self {
+        Self::for_event(ReportTarget::UpSession, enabled, watch, machine_id)
+    }
+
+    /// Constructs a reporter for one `mirrord mcp` event, either
+    /// [`ReportTarget::McpServerStarted`] or [`ReportTarget::McpToolCalled`].
+    pub fn for_mcp_event(
+        target: ReportTarget,
+        enabled: bool,
+        watch: drain::Watch,
+        machine_id: Uuid,
+    ) -> Self {
+        Self::for_event(target, enabled, watch, machine_id)
+    }
+
+    /// A reporter for `target` that carries the properties shared by every standalone event:
+    /// `machine_id`, `is_ci`, and the AI agent detection.
+    fn for_event(
+        target: ReportTarget,
+        enabled: bool,
+        watch: drain::Watch,
+        machine_id: Uuid,
+    ) -> Self {
         let mut analytics = Analytics::default();
         analytics.add("machine_id", machine_id);
         analytics.add("is_ci", ci_info::is_ci());
@@ -441,7 +469,7 @@ impl AnalyticsReporter {
             operator_properties: None,
             start_instant: Instant::now(),
             watch,
-            target: ReportTarget::UpSession,
+            target,
             session_key: None,
         }
     }
@@ -670,5 +698,15 @@ mod tests {
             AiAgent::detect_from(env(&[("CLAUDECODE", "1"), ("CURSOR_TRACE_ID", "abc")])),
             Some(AiAgent::ClaudeCode)
         );
+    }
+
+    /// These values are registered on the analytics server, which rejects unknown ones.
+    #[test]
+    fn mcp_event_kinds() {
+        assert_eq!(
+            ReportTarget::McpServerStarted.event_kind(),
+            "mcp-server-started"
+        );
+        assert_eq!(ReportTarget::McpToolCalled.event_kind(), "mcp-tool-called");
     }
 }

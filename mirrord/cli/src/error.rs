@@ -13,6 +13,7 @@ use mirrord_intproxy::{
     error::ProxyStartupError,
 };
 use mirrord_kube::error::KubeApiError;
+use mirrord_mcp::McpError;
 use mirrord_operator::{
     client::error::{HttpError, OperatorApiError, OperatorOperation},
     crd::preview::PreviewPodLogs,
@@ -30,6 +31,8 @@ use crate::{
     data::GlobalConfigError,
     dump::DumpSessionError,
     fix::FixKubeconfigError,
+    login::LoginError,
+    operator::OperatorInstallError,
     port_forward::PortForwardError,
     profile::ProfileError,
     tui::TuiCliError,
@@ -78,7 +81,7 @@ pub(crate) fn format_preview_logs(logs: &[PreviewPodLogs]) -> String {
     format!("\n\nlast output from the preview pods:\n\n{rendered}")
 }
 
-const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or GitHub repository.
+pub(crate) const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or GitHub repository.
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
@@ -245,7 +248,7 @@ pub(crate) enum InternalProxyError {
 pub(crate) enum OperatorSetupError {
     #[error("mirrord operator setup was deleted")]
     #[diagnostic(help(
-        "Please use the helm chart instead https://github.com/metalbear-co/charts/"
+        "Please use `mirrord operator install`, or the helm chart https://github.com/metalbear-co/charts/"
     ))]
     Deleted,
 }
@@ -350,6 +353,10 @@ pub(crate) enum CliError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     OperatorSetupError(#[from] OperatorSetupError),
+
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    OperatorInstall(#[from] OperatorInstallError),
 
     #[error("`mirrord operator status` command failed! Could not retrieve operator status API.")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -803,6 +810,15 @@ pub(crate) enum CliError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Tui(#[from] TuiCliError),
+
+    /// Errors produced by the `mirrord mcp` command.
+    #[error(transparent)]
+    Mcp(#[from] McpError),
+
+    /// Errors produced by the `mirrord login` command.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Login(#[from] LoginError),
 
     /// Errors produced by the `mirrord ui` and `mirrord chaos` commands.
     #[error(transparent)]

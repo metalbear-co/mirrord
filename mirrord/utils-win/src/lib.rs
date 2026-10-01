@@ -1,7 +1,7 @@
 //! Windows-only utilities shared across mirrord.
 //!
-//! This crate is the home for general Windows helpers. It is drawn on by the injected layer and
-//! by the CLI.
+//! This crate is the home for general Windows helpers. It is drawn on by the injected layer, the
+//! CLI and the intproxy.
 //!
 //! The Windows crash diagnostics also live here, under `diagnostics`. The crate is empty on
 //! non-Windows targets.
@@ -18,3 +18,5 @@ pub mod fixed_buf;
 pub mod modules;
 #[cfg(windows)]
 pub mod process;
+#[cfg(windows)]
+pub mod security;

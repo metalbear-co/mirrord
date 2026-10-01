@@ -235,7 +235,9 @@ fn closest_name<'a>(unknown: &str, candidates: &[&'a str]) -> Option<&'a str> {
         .map(|(candidate, _)| candidate)
 }
 
-fn render_template(content: &str, key: &EnvKey) -> Result<String, tera::Error> {
+/// Renders the Tera templates (`{{ key }}`, `{{ git_branch }}`) in the raw content of a
+/// `mirrord-up.yaml`, producing the YAML that gets deserialized into an [`UpConfig`].
+pub fn render_template(content: &str, key: &EnvKey) -> Result<String, tera::Error> {
     let mut tera = Tera::default();
     tera.add_raw_template("main", content)?;
 
@@ -253,10 +255,31 @@ fn template(content: &str, key: &EnvKey) -> Result<UpConfig, UpError> {
     Ok(serde_saphyr::from_str(&rendered)?)
 }
 
+impl UpConfig {
+    /// Rejects combinations of settings that deserialize fine but that `mirrord up` cannot run.
+    ///
+    /// Doesn't look at the filesystem, so it also serves to validate a config that isn't on disk
+    /// (e.g. in `mirrord mcp`); [`load_up_config`] runs it before resolving the services' paths.
+    pub fn verify(&self) -> Result<(), UpError> {
+        for (service, service_config) in &self.services {
+            if service_config.run.directory.is_some()
+                && matches!(service_config.run.r#type, config::RunType::Container)
+            {
+                return Err(UpError::ContainerRunDirectory {
+                    service: service.clone(),
+                });
+            }
+        }
+
+        Ok(())
+    }
+}
+
 /// Load, parse, and resolve local paths in a `mirrord-up.yaml` configuration file.
 pub fn load_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
     let content = std::fs::read_to_string(path)?;
     let mut config = template(&content, key)?;
+    config.verify()?;
     let config_directory = std::fs::canonicalize(
         path.parent()
             .filter(|parent| parent.as_os_str().is_empty().not())
@@ -267,12 +290,6 @@ pub fn load_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
         let Some(directory) = &mut service_config.run.directory else {
             continue;
         };
-
-        if matches!(service_config.run.r#type, config::RunType::Container) {
-            return Err(UpError::ContainerRunDirectory {
-                service: service.clone(),
-            });
-        }
 
         let was_relative = directory.is_relative();
         if was_relative {

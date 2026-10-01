@@ -343,6 +343,8 @@ mod kube;
 mod list;
 mod local_redis;
 mod logging;
+mod login;
+mod mcp;
 mod newsletter;
 mod operator;
 #[cfg(windows)]
@@ -1196,6 +1198,7 @@ fn main() -> miette::Result<()> {
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             Commands::Queues(args) => queues::queues_command(*args).await?,
             Commands::Fix(args) => fix::fix_command(args).await?,
+            Commands::Login(args) => login::login_command(*args).await?,
             #[cfg(windows)]
             Commands::Attach(args) => {
                 let progress = ProgressTracker::from_env("mirrord attach");
@@ -1206,6 +1209,7 @@ fn main() -> miette::Result<()> {
             Commands::Tui => windows_unsupported!((), "tui", {
                 tui::tui_command(watch.clone(), &user_data).await?
             }),
+            Commands::Mcp => mcp::mcp_command(watch.clone(), &user_data).await?,
             Commands::Ui { args, command } => ui::ui_command(*args, command, "/").await?,
             Commands::Wizard { args, no_telemetry } => {
                 ui::wizard_command(args, no_telemetry, watch, &user_data).await?

@@ -17,6 +17,9 @@ actual I/O work requested by the layers.
 target to use.
 - `mirrord`: the CLI that resolves configuration, creates or connects to the agent, starts the intproxy, and launches
 the user's local process with the mirrord layer loaded.
+- `mirrord-mcp`: the MCP server behind `mirrord mcp`, which exposes mirrord to AI agents over stdio. Tools are
+registered in its `tools` module and must be answered offline, from what is compiled into the binary. Usage is
+reported through `mirrord-analytics`, and every new tool needs a variant in its `McpTool` telemetry enum.
 
 ## Command Reference
 
@@ -67,6 +70,11 @@ cargo fmt
 mirrord is actively maintained by dozens of people, it is not a greenfield project. When adding or changing things,
 maximize simplicity. Reuse existing abstractions and codepaths instead of introducing new ones. Every new path is
 something someone has to understand, maintain, and keep compatible.
+
+Avoid extracting trivial, self-contained logic into a function used only once. Keep it near its point of use when the
+helper would merely add indirection or exist to make a tiny test possible. Extract a function when it is reused or hides
+non-obvious details that would distract from the surrounding flow. Test meaningful behavior rather than trivial
+wrappers around a library API.
 
 ## Comments and Documentation
 

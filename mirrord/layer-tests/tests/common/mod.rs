@@ -154,6 +154,7 @@ pub enum Application {
     StatfsFstatfs,
     MkdirRmdir,
     Cor1734FileMode,
+    SendfileEagain,
     OpenFile,
     CIssue2055,
     CIssue2178,
@@ -241,6 +242,9 @@ impl Application {
             Application::MkdirRmdir => String::from("tests/apps/mkdir_rmdir/out.c_test_app"),
             Application::Cor1734FileMode => {
                 String::from("tests/apps/cor_1734_file_mode/out.c_test_app")
+            }
+            Application::SendfileEagain => {
+                String::from("tests/apps/sendfile_eagain/out.c_test_app")
             }
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
             Application::NodeHTTP
@@ -508,6 +512,7 @@ impl Application {
             | Application::StatfsFstatfs
             | Application::MkdirRmdir
             | Application::Cor1734FileMode
+            | Application::SendfileEagain
             | Application::Realpath
             | Application::RustFileOps
             | Application::RustIssue1123
@@ -608,6 +613,7 @@ impl Application {
             | Application::StatfsFstatfs
             | Application::MkdirRmdir
             | Application::Cor1734FileMode
+            | Application::SendfileEagain
             | Application::Realpath
             | Application::GoIssue834(..)
             | Application::GoRead(..)
