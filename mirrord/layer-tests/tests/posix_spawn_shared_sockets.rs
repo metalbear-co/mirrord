@@ -10,8 +10,8 @@ pub use common::*;
 #[case("concurrent")]
 #[tokio::test]
 async fn posix_spawn_children_receive_shared_socket_metadata(#[case] mode: &str) {
-    let application = Application::PosixSpawnSharedSockets(mode);
-    let (test_process, _) = application
+    let application = Application::PosixSpawnSharedSockets(mode.to_owned());
+    let (mut test_process, _) = application
         .start_process_with_port(Default::default(), None)
         .await;
 
