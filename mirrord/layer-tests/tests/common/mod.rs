@@ -658,6 +658,7 @@ impl Application {
             | Application::GoIssue2988(..)
             | Application::NodeMakeConnections
             | Application::DoubleListen
+            | Application::PosixSpawnSharedSockets
             | Application::PythonSocketPair
             | Application::PythonCor1401Seqpacket
             | Application::UnixConnectAddrlen
