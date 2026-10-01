@@ -18,7 +18,7 @@ use mirrord_config::{
     config::{ConfigContext, ConfigError, MirrordConfig},
     env_key::{EnvKey, MIRRORD_ENV_KEY},
 };
-use mirrord_up::UpConfig;
+use mirrord_up::{UpConfig, UpError};
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -131,9 +131,10 @@ pub fn validate_config(
             });
             match parsed {
                 Ok(value) => {
-                    let mut issues = check::<UpConfig>(&value, &UP_SCHEMA)?
-                        .err()
-                        .unwrap_or_default();
+                    let mut issues = match check::<UpConfig>(&value, &UP_SCHEMA)? {
+                        Ok(config) => config.verify().err().map(up_issue).into_iter().collect(),
+                        Err(issues) => issues,
+                    };
                     issues.extend(check_config_patches(&value)?);
                     issues
                 }
@@ -174,6 +175,23 @@ fn check_layer_config(
         })
         .into_iter()
         .collect())
+}
+
+/// An issue found by [`UpConfig::verify`], pointing at the offending setting where the error names
+/// it.
+fn up_issue(error: UpError) -> ConfigIssue {
+    let path = match &error {
+        UpError::ContainerRunDirectory { service } => {
+            format!("/services/{}/run/directory", escape_pointer_token(service))
+        }
+        _ => String::new(),
+    };
+
+    ConfigIssue {
+        path,
+        message: error.to_string(),
+        allowed_values: None,
+    }
 }
 
 /// An issue with the file as a whole: a template or syntax error that prevented reading it.
@@ -644,6 +662,24 @@ services:
         );
         assert_eq!(issue.path, "/services/worker/config_patch/feature/netwrk");
         assert!(issue.allowed_values.unwrap().contains(&json!("network")));
+    }
+
+    /// Deserializes, but `mirrord up` only supports `run.directory` for `exec` services.
+    #[test]
+    fn up_yaml_container_run_directory() {
+        let issue = single_issue(
+            ConfigFormat::MirrordUpYaml,
+            r#"
+services:
+  app:
+    run:
+      type: container
+      directory: ./app
+      command: ["docker", "run", "app"]
+"#,
+        );
+        assert_eq!(issue.path, "/services/app/run/directory");
+        assert!(issue.message.contains("type: exec"), "{}", issue.message);
     }
 
     #[test]

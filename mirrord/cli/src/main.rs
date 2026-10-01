@@ -343,8 +343,8 @@ mod kube;
 mod list;
 mod local_redis;
 mod logging;
-mod mcp;
 mod login;
+mod mcp;
 mod newsletter;
 mod operator;
 #[cfg(windows)]
