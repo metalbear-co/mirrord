@@ -105,10 +105,17 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     ) {
         Ok(None) => Bypass(NoSipDetected(path.to_owned())),
         Ok(Some(result)) => {
-            if result.x64_fallback.is_some()
-                && let Err(error) = make_proxy_request_no_response(SipX64Fallback)
-            {
-                warn!(%error, "Failed to report the SIP x86_64 fallback");
+            if let Some(binary) = &result.x64_fallback {
+                let warning = format!(
+                    "The protected system binary {} is missing from mirrord's native macOS bundle and requires Rosetta. Run `mirrord diagnose sip {}` and share its output with the mirrord team.\n",
+                    binary.display(),
+                    binary.display(),
+                );
+                let warning = warning.as_bytes();
+                unsafe { libc::write(libc::STDERR_FILENO, warning.as_ptr().cast(), warning.len()) };
+                if let Err(error) = make_proxy_request_no_response(SipX64Fallback) {
+                    warn!(%error, "Failed to report the SIP x86_64 fallback");
+                }
             }
             Success(result.path_string())
         }

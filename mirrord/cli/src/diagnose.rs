@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+use std::process::Command;
 use std::{path::Path, time::Duration};
 
 use futures::{SinkExt, StreamExt};
@@ -8,6 +10,11 @@ use mirrord_operator::{client::OperatorApi, crd::NewOperatorFeature};
 use mirrord_progress::{NullProgress, Progress, ProgressTracker};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use mirrord_protocol_api::client::ProtocolConnector;
+#[cfg(target_os = "macos")]
+use mirrord_sip::{
+    APPLE_UTILS_VERSION, MIRRORD_BINARIES_DIR_PATH_BUF, SipPatchOptions, extract_sip_binaries,
+    sip_patch,
+};
 use tokio::time::Instant;
 use tracing::Level;
 
@@ -166,10 +173,56 @@ async fn diagnose_license() -> CliResult<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+fn command_output(command: &mut Command) -> String {
+    command
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
+#[cfg(target_os = "macos")]
+fn diagnose_sip(binary: &Path) -> CliResult<()> {
+    extract_sip_binaries(
+        &MIRRORD_BINARIES_DIR_PATH_BUF,
+        crate::execution::COMPRESSED_SIP_BINARIES,
+    )?;
+
+    let binary = binary.to_string_lossy();
+    let result = sip_patch(
+        &binary,
+        SipPatchOptions {
+            sip_binaries_dir: Some(MIRRORD_BINARIES_DIR_PATH_BUF.as_path()),
+            ..Default::default()
+        },
+        None,
+    )?;
+    let Some(fallback) = result.and_then(|result| result.x64_fallback) else {
+        println!("This binary does not use the Rosetta fallback.");
+        return Ok(());
+    };
+
+    let macos_version = command_output(Command::new("sw_vers").arg("-productVersion"));
+    let file = command_output(Command::new("/usr/bin/file").arg(&fallback));
+    println!("mirrord Rosetta readiness report");
+    println!("mirrord version: {}", env!("CARGO_PKG_VERSION"));
+    println!("macOS version: {macos_version}");
+    println!("CLI architecture: {}", std::env::consts::ARCH);
+    println!("appleutils version: {APPLE_UTILS_VERSION}");
+    println!("protected binary: {}", fallback.display());
+    println!("file: {file}");
+    println!("result: missing from appleutils; x86_64 fallback required");
+    Ok(())
+}
+
 /// Handle commands related to the operator `mirrord diagnose ...`
 pub(crate) async fn diagnose_command(args: DiagnoseArgs) -> CliResult<()> {
     match args.command {
         DiagnoseCommand::Latency { config_file } => diagnose_latency(config_file.as_deref()).await,
         DiagnoseCommand::License => diagnose_license().await,
+        #[cfg(target_os = "macos")]
+        DiagnoseCommand::Sip { binary } => diagnose_sip(&binary),
     }
 }

@@ -55,7 +55,7 @@ use crate::{
 };
 
 #[cfg(target_os = "macos")]
-const COMPRESSED_SIP_BINARIES: &[u8] =
+pub(crate) const COMPRESSED_SIP_BINARIES: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/apple-utils.tar.gz"));
 
 /// Environment variable for saving the execution kind for analytics.
@@ -368,10 +368,15 @@ impl MirrordExecution {
                         }
                     })?;
 
-                if result
+                if let Some(fallback) = result
                     .as_ref()
-                    .is_some_and(|result| result.x64_fallback.is_some())
+                    .and_then(|result| result.x64_fallback.as_ref())
                 {
+                    progress.warning(&format!(
+                        "The protected system binary `{}` is missing from mirrord's native macOS bundle. This run requires Rosetta. Run `mirrord diagnose sip {}` and share its output with the mirrord team.",
+                        fallback.display(),
+                        fallback.display(),
+                    ));
                     env_vars.insert(MIRRORD_SIP_X64_FALLBACK_ENV.to_owned(), "1".to_owned());
                 }
 

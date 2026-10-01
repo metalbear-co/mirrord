@@ -1,0 +1,1 @@
+- Added analytics and `mirrord diagnose sip` reports for protected macOS binaries that still require Rosetta.
