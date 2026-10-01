@@ -8,6 +8,13 @@ use bincode::{Decode, Encode};
 /// sockets over the connection handoff socket.
 pub const CONNECTION_HANDOFF_SOCKET_ENV: &str = "MIRRORD_REMOTE_HANDOFF_SOCKET";
 
+/// Environment variable carrying the path of the remote layer library, published by the bootstrap
+/// before it loads the layer.
+///
+/// The layer reads it once at load time, so its `execve` hook can put the layer back on
+/// `LD_PRELOAD` for a child started with an environment that doesn't list it.
+pub const REMOTE_LAYER_PATH_ENV: &str = "MIRRORD_REMOTE_LAYER_PATH";
+
 /// Metadata sent alongside a transferred accepted socket fd on the connection handoff side channel.
 #[derive(Encode, Decode, Debug, Eq, PartialEq, Hash, Clone)]
 pub struct ConnectionHandoffRequest {
