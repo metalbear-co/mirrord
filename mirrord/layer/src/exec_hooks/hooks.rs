@@ -1,5 +1,7 @@
 use base64::prelude::*;
 use libc::{c_char, c_int};
+#[cfg(not(target_os = "macos"))]
+use mirrord_layer_core::{attach_probe, hooks::ProbedCall};
 use mirrord_layer_lib::detour::{Bypass, Detour};
 #[cfg(not(target_os = "macos"))]
 use mirrord_layer_macro::hook_fn;
@@ -66,30 +68,26 @@ unsafe fn environ() -> *const *const c_char {
 #[cfg(not(target_os = "macos"))]
 #[hook_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
-    unsafe {
-        let envp = environ();
-        match prepare_execve_envp(envp.checked_into()) {
-            Detour::Success(envp) => FN_EXECVE(path, argv, envp.leak()),
-            _ => FN_EXECVE(path, argv, envp),
-        }
-    }
+    // `execve` is probed below. Calling libc's export routes this through the probe, which adds
+    // the shared-socket environment to the inherited `environ`.
+    unsafe { libc::execve(path, argv, environ()) }
 }
 
-/// Hook for `libc::execve`.
+/// Runs at the entry of Linux `execve`, replacing `envp` with one that carries socket metadata to
+/// the new image.
 ///
-/// We can't change the pointers, to get around that we create our own and **leak** them.
+/// A successful `execve` in glibc's `posix_spawn` runs from a `vfork` child and never returns. A
+/// replacing hook would leave Frida's per-thread replacement state in the parent, causing later
+/// calls on that thread to bypass the hook. A probe returns before the original call begins and
+/// does not retain that state.
 #[cfg(not(target_os = "macos"))]
-#[hook_fn]
-pub(crate) unsafe extern "C" fn execve_detour(
-    path: *const c_char,
-    argv: *const *const c_char,
-    envp: *const *const c_char,
-) -> c_int {
-    unsafe {
-        match prepare_execve_envp(envp.checked_into()) {
-            Detour::Success(envp) => FN_EXECVE(path, argv, envp.leak()),
-            _ => FN_EXECVE(path, argv, envp),
-        }
+fn on_execve(call: &ProbedCall<'_>) {
+    /// `execve(path, argv, envp)`.
+    const ENVP: u32 = 2;
+
+    let envp = call.arg(ENVP) as *const *const c_char;
+    if let Detour::Success(envp) = unsafe { prepare_execve_envp(envp.checked_into()) } {
+        call.set_arg(ENVP, envp.leak() as usize);
     }
 }
 
@@ -140,10 +138,15 @@ pub(crate) unsafe extern "C" fn execve_detour(
 
 /// Enables `exec` hooks.
 pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {
+    #[cfg(not(target_os = "macos"))]
     unsafe {
-        #[cfg(not(target_os = "macos"))]
         replace!(hook_manager, "execv", execv_detour, FnExecv, FN_EXECV);
 
+        attach_probe!(hook_manager, "execve", on_execve);
+    }
+
+    #[cfg(target_os = "macos")]
+    unsafe {
         replace!(hook_manager, "execve", execve_detour, FnExecve, FN_EXECVE);
     }
 }
