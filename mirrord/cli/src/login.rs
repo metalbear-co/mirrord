@@ -23,11 +23,12 @@ use chrono::{DateTime, Local, Utc};
 use miette::Diagnostic;
 use mirrord_progress::{Progress, ProgressTracker};
 use rand::RngExt;
+use reqwest::{StatusCode, redirect::Policy};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tracing::warn;
-use url::Url;
+use url::{Host, Url};
 
 use crate::{
     config::LoginArgs,
@@ -44,12 +45,17 @@ const APPROVAL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const LOGIN_PAGE_PATH: &str = "auth-cli";
 /// Backend path at which we can exchange the grant for the auth token.
 const GRANT_EXCHANGE_PATH: &str = "api/v1/cli-login/token";
+/// How long the CLI waits for the backend to exchange the grant.
+const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(30);
+/// How much of the backend's response body is shown when it rejects the exchange.
+const MAX_REJECTION_BODY_CHARS: usize = 512;
 
 /// Implementation of the `mirrord login` command.
 pub(crate) async fn login_command(args: LoginArgs) -> Result<(), LoginError> {
     let mut progress = ProgressTracker::from_env("mirrord login");
 
-    let login_page = args.url.join(LOGIN_PAGE_PATH)?;
+    let backend_url = backend_base_url(args.url)?;
+    let login_page = backend_url.join(LOGIN_PAGE_PATH)?;
     let callback = LoginCallbackServer::prepare(&login_page).await?;
     let callback_uri = callback.url();
     let verifier = Verifier::random();
@@ -75,7 +81,7 @@ pub(crate) async fn login_command(args: LoginArgs) -> Result<(), LoginError> {
 
     // The grant is exchanged for the auth token.
     let mut subtask = progress.subtask("Exchanging grant for the auth token");
-    let token = exchange_grant(&args.url, &grant, &verifier, &callback_uri).await?;
+    let token = exchange_grant(&backend_url, &grant, &verifier, &callback_uri).await?;
     let claims = decode_claims(&token).ok_or_else(|| LoginError::BadToken("malformed".into()))?;
     let expires_at = DateTime::from_timestamp(claims.exp, 0)
         .ok_or_else(|| LoginError::BadToken("expiration time out of valid range".into()))?;
@@ -111,6 +117,29 @@ pub(crate) async fn login_command(args: LoginArgs) -> Result<(), LoginError> {
     Ok(())
 }
 
+/// Validates the backend URL passed in [`LoginArgs`], and turns it into a base for [`Url::join`].
+///
+/// The grant and the verifier are sent to the backend, so it must use TLS, unless it runs on this
+/// machine. [`Url::join`] replaces the last path segment of a base that does not end with `/`, so
+/// the slash is added to keep backends mounted under a path working.
+fn backend_base_url(mut url: Url) -> Result<Url, LoginError> {
+    let loopback = match url.host() {
+        Some(Host::Domain(domain)) => domain == "localhost",
+        Some(Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    };
+    if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
+        return Err(LoginError::InsecureBackendUrl(url));
+    }
+
+    if !url.path().ends_with('/') {
+        url.set_path(&format!("{}/", url.path()));
+    }
+
+    Ok(url)
+}
+
 /// PKCE verifier (RFC 7636 §4.1) and its S256 challenge (RFC 7636 §4.2).
 struct Verifier {
     /// base64url-encoded 32 random bytes.
@@ -142,6 +171,9 @@ impl Verifier {
 ///
 /// The backend requires the verifier behind the grant's challenge, and the exact callback URI the
 /// grant was issued for.
+///
+/// Redirects are not followed, so that the grant and the verifier are never sent anywhere but the
+/// backend.
 async fn exchange_grant(
     backend_url: &Url,
     grant: &str,
@@ -157,7 +189,11 @@ async fn exchange_grant(
     }
 
     let url = backend_url.join(GRANT_EXCHANGE_PATH)?;
-    let response = reqwest::Client::new()
+    // Built fallibly: `reqwest::Client::new` panics when the system has no CA certificates.
+    let response = reqwest::Client::builder()
+        .redirect(Policy::none())
+        .timeout(EXCHANGE_TIMEOUT)
+        .build()?
         .post(url)
         .json(&TokenRequest {
             grant,
@@ -172,8 +208,16 @@ async fn exchange_grant(
         token: String,
     }
 
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(LoginError::Rejected {
+            status,
+            body: body.trim().chars().take(MAX_REJECTION_BODY_CHARS).collect(),
+        });
+    }
+
     response
-        .error_for_status()?
         .json::<TokenResponse>()
         .await
         .map_err(From::from)
@@ -205,6 +249,9 @@ pub(crate) enum LoginError {
     /// Backend [`Url`] passed in CLI args was invalid.
     #[error("invalid backend URL: {0}")]
     InvalidBackendUrl(#[from] url::ParseError),
+    /// Backend [`Url`] passed in CLI args does not use TLS, and is not on this machine.
+    #[error("the backend URL must use HTTPS, unless it points to this machine: {0}")]
+    InsecureBackendUrl(Url),
     /// Loopback callback handler failed.
     #[error("failed to listen on a loopback port: {0}")]
     LoopbackListen(#[source] io::Error),
@@ -215,6 +262,10 @@ pub(crate) enum LoginError {
     /// Failed to exchange the grant for a login token.
     #[error("failed to exchange the login approval for a login token: {0}")]
     Exchange(#[from] reqwest::Error),
+    /// The backend refused to exchange the grant for a login token.
+    #[error("the backend rejected the login with {status}: {body}")]
+    #[diagnostic(help("Run `mirrord login` again to start a new login."))]
+    Rejected { status: StatusCode, body: String },
     /// Exchanged grant for an invalid token.
     #[error("received a bad login token: {0}")]
     BadToken(String),
@@ -225,6 +276,8 @@ pub(crate) enum LoginError {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     #[test]
@@ -242,6 +295,31 @@ mod tests {
             challenge.as_slice(),
             Sha256::digest(&verifier.verifier).as_slice(),
         );
+    }
+
+    #[rstest]
+    #[case::root("https://app.metalbear.com", "https://app.metalbear.com/auth-cli")]
+    #[case::path("https://host/backend", "https://host/backend/auth-cli")]
+    #[case::path_with_slash("https://host/backend/", "https://host/backend/auth-cli")]
+    #[case::localhost("http://localhost:3000", "http://localhost:3000/auth-cli")]
+    #[case::loopback_ipv4("http://127.0.0.1:3000", "http://127.0.0.1:3000/auth-cli")]
+    #[case::loopback_ipv6("http://[::1]:3000", "http://[::1]:3000/auth-cli")]
+    fn backend_url_is_a_base_for_endpoints(#[case] url: &str, #[case] login_page: &str) {
+        let backend_url = backend_base_url(url.parse().unwrap()).unwrap();
+        assert_eq!(
+            backend_url.join(LOGIN_PAGE_PATH).unwrap().as_str(),
+            login_page
+        );
+    }
+
+    #[rstest]
+    #[case::remote_http("http://app.metalbear.com")]
+    #[case::other_scheme("ftp://localhost")]
+    fn insecure_backend_url_is_rejected(#[case] url: &str) {
+        assert!(matches!(
+            backend_base_url(url.parse().unwrap()),
+            Err(LoginError::InsecureBackendUrl(..))
+        ));
     }
 
     #[test]

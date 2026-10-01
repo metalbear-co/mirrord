@@ -85,6 +85,10 @@ where
 /// On Windows, the directory gets a protected DACL that grants access only to the current user,
 /// and that the document, its lock and the temporary files of each commit inherit when they are
 /// created.
+///
+/// An existing document and lock are restricted as well, even when the document is not replaced,
+/// since they may have been created with broader permissions, or have explicit entries in their
+/// own Windows DACLs that the directory's DACL does not override.
 pub(crate) async fn update_owner_only_at_path<T, E>(
     path: &Path,
     update: impl FnOnce(&mut T) -> Result<(), E> + Send + 'static,
@@ -150,6 +154,18 @@ fn create_owner_only_parent(path: &Path) -> io::Result<()> {
     utils_win::security::restrict_path_to_current_user(parent)
 }
 
+/// Restricts an existing file to the current user, see [`update_owner_only_at_path`].
+#[cfg(unix)]
+fn restrict_owner_only_file(path: &Path) -> io::Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+}
+
+/// Restricts an existing file to the current user, see [`update_owner_only_at_path`].
+#[cfg(windows)]
+fn restrict_owner_only_file(path: &Path) -> io::Result<()> {
+    utils_win::security::restrict_path_to_current_user(path)
+}
+
 fn create_parent_for_missing_target(path: &Path) -> io::Result<()> {
     match fs::metadata(path) {
         Ok(_) => Ok(()),
@@ -198,11 +214,11 @@ where
             .write(true)
             .create(true)
             .truncate(false)
-            .open(lock_path)?;
-        // Also restricts a lock created before the document held credentials.
-        #[cfg(unix)]
+            .open(&lock_path)?;
+        // Before locking, so that another user who could open the lock cannot hold it to stall
+        // saves.
         if owner_only {
-            lock_file.set_permissions(fs::Permissions::from_mode(0o600))?;
+            restrict_owner_only_file(&lock_path)?;
         }
         lock_file.lock_exclusive()?;
 
@@ -211,6 +227,10 @@ where
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(E::from(error)),
         };
+        // An unchanged document is not replaced below, so it would keep its permissions.
+        if owner_only && previous.is_some() {
+            restrict_owner_only_file(&path)?;
+        }
         let mut data = match previous.as_deref().map(serde_json::from_slice) {
             Some(Ok(data)) => data,
             Some(Err(error)) if recover_invalid => {

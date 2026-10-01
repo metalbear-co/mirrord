@@ -255,4 +255,32 @@ mod tests {
         assert_eq!(mode(&path), 0o600);
         assert_eq!(mode(&lock_path), 0o600);
     }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unchanged_store_is_restricted_to_the_owner() {
+        let home = tempdir().unwrap();
+        let path = home.path().join(".mirrord").join("auth.json");
+        let now = Utc::now();
+        let save = || {
+            AuthStore::save_at(
+                &path,
+                ISSUER.to_owned(),
+                "org-a".to_owned(),
+                token("a", now + TimeDelta::hours(24)),
+                now,
+            )
+        };
+
+        save().await.unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let contents = std::fs::read(&path).unwrap();
+        save().await.unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), contents);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
 }
