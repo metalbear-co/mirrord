@@ -23,6 +23,7 @@ members = [
     "mirrord/layer-tests/tests/apps/issue3248",
     "mirrord/layer-tests/tests/apps/rebind0",
     "mirrord/layer-tests/tests/apps/dup_listen",
+    "mirrord/layer-tests/tests/apps/posix_spawn_shared_sockets",
     "sample/rust",
     "medschool",
     "tests",
