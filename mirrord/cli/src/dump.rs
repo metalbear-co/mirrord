@@ -288,9 +288,15 @@ fn transport_label(transport: &IncomingTrafficTransportType, plain: &str, tls: &
         IncomingTrafficTransportType::Tls {
             alpn_protocol,
             server_name,
+        }
+        | IncomingTrafficTransportType::TlsV2 {
+            alpn_protocol,
+            server_name,
+            ..
         } => format!(
-            "{tls} (ALPN={:?}, SNI={server_name:?})",
+            "{tls} (ALPN={:?}, SNI={server_name:?}, client identity={})",
             alpn_protocol.as_deref().map(String::from_utf8_lossy),
+            transport.client_identity().is_some(),
         ),
     }
 }

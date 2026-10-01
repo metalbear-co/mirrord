@@ -1,10 +1,18 @@
 use std::{fmt, io, net::IpAddr, sync::Arc};
 
 use http::Uri;
-use mirrord_tls_util::UriExt;
+use mirrord_protocol::tcp::{
+    IncomingTrafficTransportType, TLS_CLIENT_IDENTITY_VERSION, TlsClientIdentity,
+};
+use mirrord_tls_util::{CertIdentity, UriExt};
 use rustls::{ClientConfig, ServerConfig, ServerConnection, pki_types::ServerName};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
+
+use crate::util::protocol_version::ClientProtocolVersion;
+
+/// [`ClientConfig`]s presenting certificates with known identities.
+pub type IdentityClientConfigs = Vec<(CertIdentity, Arc<ClientConfig>)>;
 
 /// Provides a [`TlsAcceptor`] and a [`PassThroughTlsConnector`] to allow for filtered stealing on
 /// TLS connections.
@@ -19,6 +27,11 @@ pub struct StealTlsHandler {
     ///
     /// Also [`Debug`](std::fmt::Debug) derive is nicer.
     pub(super) client_config: Arc<ClientConfig>,
+    /// Like [`Self::client_config`], but presenting certificates configured in
+    /// [`AgentClientConfig::identities`](mirrord_agent_env::steal_tls::AgentClientConfig::identities).
+    ///
+    /// Used instead of [`Self::client_config`] when the identity of the original client matches.
+    pub(super) identity_client_configs: IdentityClientConfigs,
     /// Configured name to verify the original destination against when the stolen connection
     /// carries no SNI.
     pub(super) server_name: Option<ServerName<'static>>,
@@ -42,13 +55,27 @@ impl StealTlsHandler {
             .into_iter()
             .map(Vec::from)
             .collect::<Vec<_>>();
+        let client_identity = original_connection
+            .peer_certificates()
+            .and_then(|certs| certs.first())
+            .and_then(|cert| CertIdentity::from_der(cert));
 
-        let mut client_config = self.client_config.as_ref().clone();
+        let base_config = client_identity
+            .as_ref()
+            .and_then(|identity| {
+                self.identity_client_configs
+                    .iter()
+                    .find(|(candidate, _)| candidate == identity)
+            })
+            .map(|(_, config)| config)
+            .unwrap_or(&self.client_config);
+        let mut client_config = base_config.as_ref().clone();
         client_config.alpn_protocols = client_alpn;
 
         PassThroughTlsConnector {
             client_config: Arc::new(client_config),
             server_name,
+            client_identity,
         }
     }
 }
@@ -67,6 +94,8 @@ pub struct PassThroughTlsConnector {
     /// From the SNI extension received in the stolen connection, or else configured in the steal
     /// config.
     server_name: Option<ServerName<'static>>,
+    /// Identity from the certificate presented in the stolen connection.
+    client_identity: Option<CertIdentity>,
 }
 
 impl PassThroughTlsConnector {
@@ -114,6 +143,7 @@ impl PassThroughTlsConnector {
             .map(Box::new)
     }
 
+    #[cfg(test)]
     pub fn server_name(&self) -> Option<&ServerName<'static>> {
         self.server_name.as_ref()
     }
@@ -123,6 +153,37 @@ impl PassThroughTlsConnector {
             .alpn_protocols
             .first()
             .map(|proto| proto.as_slice())
+    }
+
+    /// Describes the stolen connection's TLS session for an agent client, taking into account
+    /// the client's [`mirrord_protocol`] version.
+    pub fn transport_type(
+        &self,
+        protocol_version: &ClientProtocolVersion,
+    ) -> IncomingTrafficTransportType {
+        let alpn_protocol = self.alpn_protocol().map(Vec::from);
+        let server_name = self.server_name.as_ref().map(|s| s.to_str().into_owned());
+
+        if protocol_version.matches(&TLS_CLIENT_IDENTITY_VERSION) {
+            IncomingTrafficTransportType::TlsV2 {
+                alpn_protocol,
+                server_name,
+                client_identity: self.client_identity.clone().map(
+                    |CertIdentity {
+                         subject,
+                         subject_alternative_names,
+                     }| TlsClientIdentity {
+                        subject,
+                        subject_alternative_names,
+                    },
+                ),
+            }
+        } else {
+            IncomingTrafficTransportType::Tls {
+                alpn_protocol,
+                server_name,
+            }
+        }
     }
 }
 
@@ -138,6 +199,7 @@ impl fmt::Debug for PassThroughTlsConnector {
                     .map(|proto| String::from_utf8_lossy(proto)),
             )
             .field("server_name", &self.server_name)
+            .field("client_identity", &self.client_identity)
             .finish()
     }
 }

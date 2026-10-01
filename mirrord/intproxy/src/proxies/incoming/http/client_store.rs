@@ -8,7 +8,7 @@ use std::{
 
 use futures::FutureExt;
 use hyper::{Uri, Version};
-use mirrord_protocol::tcp::IncomingTrafficTransportType;
+use mirrord_protocol::tcp::{IncomingTrafficTransportType, TlsClientIdentity};
 use mirrord_tls_util::{MaybeTls, UriExt};
 use rustls::pki_types::ServerName;
 use tokio::{
@@ -51,6 +51,10 @@ impl fmt::Debug for IdleLocalClient {
 /// 1. Destination socket address
 /// 2. HTTP [`Version`]
 /// 3. Whether the client uses TLS
+/// 4. Identity of the original client, if it decides which certificate the client presents (see
+///    [`LocalTlsSetup::selects_client_cert`]). The user application may authorize requests based on
+///    the identity established in the TLS handshake, so requests from different original clients
+///    must not share a connection.
 ///
 /// We ignore the fact that [`IncomingTrafficTransportType::Tls::alpn_protocol`] and
 /// [`IncomingTrafficTransportType::Tls::server_name`] might be different.
@@ -128,11 +132,12 @@ impl ClientStore {
         transport: &IncomingTrafficTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let uses_tls = matches!(transport, IncomingTrafficTransportType::Tls { .. })
+        let uses_tls = matches!(transport, IncomingTrafficTransportType::Tcp).not()
             && self.tls_setup.is_some();
+        let original_client = self.original_client(transport);
 
         if let Some(ready) = self
-            .wait_for_ready(server_addr, version, uses_tls)
+            .wait_for_ready(server_addr, version, uses_tls, original_client)
             .now_or_never()
         {
             tracing::debug!(?ready, "Reused an idle client");
@@ -142,7 +147,7 @@ impl ClientStore {
         tokio::select! {
             biased;
 
-            ready = self.wait_for_ready(server_addr, version, uses_tls) => {
+            ready = self.wait_for_ready(server_addr, version, uses_tls, original_client) => {
                 tracing::debug!(?ready, "Reused an idle client");
                 Ok(ready)
             },
@@ -225,6 +230,18 @@ impl ClientStore {
         std::mem::drop(client);
     }
 
+    /// Returns the original client's identity, if it decides which certificate a client
+    /// presents to the user application.
+    fn original_client<'a>(
+        &self,
+        transport: &'a IncomingTrafficTransportType,
+    ) -> Option<&'a TlsClientIdentity> {
+        self.tls_setup
+            .as_ref()
+            .filter(|setup| setup.selects_client_cert())
+            .and(transport.client_identity())
+    }
+
     /// Waits until there is a ready unused client.
     #[tracing::instrument(level = Level::TRACE, skip_all, ret)]
     async fn wait_for_ready(
@@ -232,6 +249,7 @@ impl ClientStore {
         server_addr: SocketAddr,
         version: Version,
         uses_tls: bool,
+        original_client: Option<&TlsClientIdentity>,
     ) -> LocalHttpClient {
         loop {
             let notified = {
@@ -248,6 +266,7 @@ impl ClientStore {
                     idle.client.handles_version(version)
                         && idle.client.local_server_address() == server_addr
                         && idle.client.uses_tls() == uses_tls
+                        && idle.client.original_client() == original_client
                 });
 
                 match position {
@@ -276,11 +295,18 @@ impl ClientStore {
                 IncomingTrafficTransportType::Tls {
                     alpn_protocol,
                     server_name: original_server_name,
+                }
+                | IncomingTrafficTransportType::TlsV2 {
+                    alpn_protocol,
+                    server_name: original_server_name,
+                    ..
                 },
                 Some(setup),
             ) => {
                 let alpn_protocol = alpn_protocol.clone();
-                let (connector, server_name) = setup.get(alpn_protocol).await?;
+                let (connector, server_name) = setup
+                    .get(alpn_protocol, transport.client_identity())
+                    .await?;
 
                 let server_name = server_name
                     .or_else(|| {
@@ -329,6 +355,10 @@ impl ClientStore {
             local_server_address,
             address,
             uses_tls,
+            original_client: uses_tls
+                .then(|| self.original_client(transport))
+                .flatten()
+                .cloned(),
         })
     }
 }
@@ -395,17 +425,23 @@ mod test {
         service::service_fn,
     };
     use hyper_util::rt::{TokioExecutor, TokioIo};
-    use mirrord_protocol::tcp::{HttpRequest, IncomingTrafficTransportType, InternalHttpRequest};
+    use mirrord_protocol::tcp::{
+        HttpRequest, IncomingTrafficTransportType, InternalHttpRequest, TlsClientIdentity,
+    };
+    use mirrord_tls_util::CertIdentity;
     use rcgen::{
         BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, IsCa, Issuer, KeyPair,
         KeyUsagePurpose,
     };
-    use rustls::ServerConfig;
+    use rustls::{ServerConfig, pki_types::PrivatePkcs8KeyDer};
     use tokio::{io::AsyncReadExt, net::TcpListener, time};
     use tokio_rustls::TlsAcceptor;
 
     use super::{ClientStore, HttpSender};
-    use crate::proxies::incoming::{http::StreamingBody, tls::LocalTlsSetup};
+    use crate::proxies::incoming::{
+        http::StreamingBody,
+        tls::{LocalClientAuth, LocalTlsSetup},
+    };
 
     /// Reusing an idle HTTP/1 client for an HTTP/2 request silently converts the request to
     /// HTTP/1, which makes the protocol that the local application sees depend on what happens to
@@ -464,6 +500,88 @@ mod test {
             1,
             "the idle HTTP/1 client should have been left in the store",
         );
+    }
+
+    /// The local application may authorize requests based on the identity established in the
+    /// TLS handshake, so when the presented certificate depends on the original client, a
+    /// connection made for one original client must not be reused for another.
+    #[tokio::test]
+    async fn does_not_reuse_tls_client_across_original_clients() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = generate_cert("localhost", None, false);
+        let acceptor = TlsAcceptor::from(Arc::new(
+            ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![server.cert.der().clone()],
+                    PrivatePkcs8KeyDer::from(server.signing_key.serialize_der()).into(),
+                )
+                .unwrap(),
+        ));
+        tokio::spawn(async move {
+            loop {
+                let (connection, _) = listener.accept().await.unwrap();
+                let connection = acceptor.accept(connection).await.unwrap();
+                let service = service_fn(|_req: Request<Incoming>| {
+                    std::future::ready(Ok::<_, Infallible>(Response::new(Empty::<Bytes>::new())))
+                });
+                tokio::spawn(
+                    http1::Builder::new().serve_connection(TokioIo::new(connection), service),
+                );
+            }
+        });
+
+        let identity = generate_cert("client-a", None, false);
+        let tls_setup = LocalTlsSetup::new(
+            None,
+            None,
+            Some("localhost".try_into().unwrap()),
+            None,
+            vec![LocalClientAuth::Pem {
+                cert: identity.cert.pem().into_bytes(),
+                key: identity.signing_key.serialize_pem().into_bytes(),
+            }],
+        );
+        let client_store =
+            ClientStore::new_with_timeout(Duration::from_secs(60), Some(Arc::new(tls_setup)));
+        let transport = |name: &str| IncomingTrafficTransportType::TlsV2 {
+            alpn_protocol: None,
+            server_name: None,
+            client_identity: CertIdentity::from_der(generate_cert(name, None, false).cert.der())
+                .map(
+                    |CertIdentity {
+                         subject,
+                         subject_alternative_names,
+                     }| TlsClientIdentity {
+                        subject,
+                        subject_alternative_names,
+                    },
+                ),
+        };
+        let client_a = transport("client-a");
+        let uri = "https://localhost".parse().unwrap();
+
+        let client = client_store
+            .get(addr, Version::HTTP_11, &client_a, &uri)
+            .await
+            .unwrap();
+        let first_address = client.address;
+        client_store.push_idle(client);
+
+        let client = client_store
+            .get(addr, Version::HTTP_11, &transport("client-b"), &uri)
+            .await
+            .unwrap();
+        assert_ne!(client.address, first_address);
+        client_store.push_idle(client);
+
+        let client = client_store
+            .get(addr, Version::HTTP_11, &client_a, &uri)
+            .await
+            .unwrap();
+        assert_eq!(client.address, first_address);
     }
 
     /// Verifies that [`ClientStore`] cleans up unused connections.

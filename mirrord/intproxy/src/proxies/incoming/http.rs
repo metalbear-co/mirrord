@@ -10,7 +10,7 @@ use hyper::{
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::{
     ConnectionId, Payload, Port, RequestId,
-    tcp::{HttpRequest, HttpResponse, InternalHttpResponse},
+    tcp::{HttpRequest, HttpResponse, InternalHttpResponse, TlsClientIdentity},
 };
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -36,6 +36,9 @@ pub struct LocalHttpClient {
     address: SocketAddr,
     /// Whether this client uses TLS.
     uses_tls: bool,
+    /// Identity of the original client, when it decided which certificate this client presents
+    /// to the user application.
+    original_client: Option<TlsClientIdentity>,
 }
 
 impl LocalHttpClient {
@@ -70,6 +73,10 @@ impl LocalHttpClient {
 
     pub fn uses_tls(&self) -> bool {
         self.uses_tls
+    }
+
+    pub fn original_client(&self) -> Option<&TlsClientIdentity> {
+        self.original_client.as_ref()
     }
 
     /// Whether the connection with the user application's HTTP server is gone.

@@ -123,6 +123,18 @@ pub struct AgentClientConfig {
     /// Optional. If not present, mirrord-agent will make connections anonymously.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authentication: Option<TlsAuthentication>,
+    /// Additional client certificates, for servers that authorize requests based on the
+    /// client's identity.
+    ///
+    /// When passing through a connection from a client that presented a certificate,
+    /// mirrord-agent uses the first of these whose subject and subject alternative names are
+    /// the same as in the client's certificate. If none matches, `authentication` is used.
+    ///
+    /// The client's certificate is known only when `agentAsServer.verification` is present.
+    ///
+    /// Optional. Defaults to an empty list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub identities: Vec<TlsAuthentication>,
     /// Configures how mirrord-agent verifies the server's certificate.
     pub verification: TlsServerVerification,
 }

@@ -1,10 +1,11 @@
-use std::{fmt, path::PathBuf, sync::Arc};
+use std::{fmt, ops::Not, path::PathBuf, sync::Arc};
 
 use mirrord_config::feature::network::incoming::tls_delivery::{
-    LocalTlsDelivery, TlsDeliveryProtocol,
+    LocalClientIdentity, LocalTlsDelivery, TlsDeliveryProtocol,
 };
+use mirrord_protocol::tcp::TlsClientIdentity;
 use mirrord_tls_util::{
-    DangerousNoVerifierServer, FromPemError, HasSubjectAlternateNames, ParsePemError,
+    CertIdentity, DangerousNoVerifierServer, FromPemError, HasSubjectAlternateNames, ParsePemError,
     best_effort_root_store, parse_cert_chain, parse_key_der, read_cert_chain, read_key_der,
 };
 use rustls::{
@@ -28,6 +29,11 @@ pub enum LocalTlsSetupError {
     ParsePemError(#[from] ParsePemError),
     #[error("the client certificate and its key were rejected: {0}")]
     ClientAuthRejected(#[from] rustls::Error),
+    #[error(
+        "client certificate {0:?} has neither a subject nor subject alternative names, \
+        so it cannot be matched with the original client's identity"
+    )]
+    NoClientIdentity(LocalClientAuth),
 }
 
 impl From<JoinError> for LocalTlsSetupError {
@@ -38,6 +44,7 @@ impl From<JoinError> for LocalTlsSetupError {
 
 /// Client certificate presented to the user application's TLS server, for servers that require
 /// one (mutual TLS).
+#[derive(Clone)]
 pub enum LocalClientAuth {
     /// PEM files on disk, read when the setup is first used.
     Files { cert: PathBuf, key: PathBuf },
@@ -88,8 +95,20 @@ pub struct LocalTlsSetup {
     server_cert: Option<PathBuf>,
     server_name: Option<ServerName<'static>>,
     client_auth: Option<LocalClientAuth>,
+    /// Presented instead of [`Self::client_auth`] when the identity of the original client
+    /// matches, see [`LocalTlsDelivery::client_identities`].
+    client_identities: Vec<LocalClientAuth>,
 
-    resolved: OnceCell<(ClientConfig, Option<ServerName<'static>>)>,
+    resolved: OnceCell<ResolvedLocalTls>,
+}
+
+/// Result of [`LocalTlsSetup::resolve`].
+struct ResolvedLocalTls {
+    config: ClientConfig,
+    /// Like [`Self::config`], but presenting certificates from
+    /// [`LocalTlsSetup::client_identities`].
+    identity_configs: Vec<(CertIdentity, ClientConfig)>,
+    server_name: Option<ServerName<'static>>,
 }
 
 impl LocalTlsSetup {
@@ -98,12 +117,14 @@ impl LocalTlsSetup {
         server_cert: Option<PathBuf>,
         server_name: Option<ServerName<'static>>,
         client_auth: Option<LocalClientAuth>,
+        client_identities: Vec<LocalClientAuth>,
     ) -> Self {
         Self {
             trust_roots,
             server_cert,
             server_name,
             client_auth,
+            client_identities,
             resolved: OnceCell::new(),
         }
     }
@@ -128,36 +149,59 @@ impl LocalTlsSetup {
                     .client_cert
                     .zip(config.client_key)
                     .map(|(cert, key)| LocalClientAuth::Files { cert, key });
+                let client_identities = config
+                    .client_identities
+                    .into_iter()
+                    .map(|LocalClientIdentity { cert, key }| LocalClientAuth::Files { cert, key })
+                    .collect();
 
                 Some(Arc::new(Self::new(
                     config.trust_roots,
                     config.server_cert,
                     server_name,
                     client_auth,
+                    client_identities,
                 )))
             }
         }
     }
 
+    /// Whether connections made with [`Self::get`] may present different client certificates,
+    /// depending on the original client's identity.
+    pub fn selects_client_cert(&self) -> bool {
+        self.client_identities.is_empty().not()
+    }
+
     /// Returns a [`TlsConnector`] and an optional [`ServerName`] to use when making the TLS
     /// connection.
+    ///
+    /// `original_client` is used to pick the certificate presented to the user application.
     pub async fn get(
         &self,
         alpn_protocol: Option<Vec<u8>>,
+        original_client: Option<&TlsClientIdentity>,
     ) -> Result<(TlsConnector, Option<ServerName<'static>>), LocalTlsSetupError> {
-        let (mut config, server_name) = self
-            .resolved
-            .get_or_try_init(|| self.resolve())
-            .await?
+        let resolved = self.resolved.get_or_try_init(|| self.resolve()).await?;
+
+        let mut config = original_client
+            .and_then(|identity| {
+                resolved.identity_configs.iter().find(|(candidate, _)| {
+                    candidate.subject == identity.subject
+                        && candidate.subject_alternative_names == identity.subject_alternative_names
+                })
+            })
+            .map(|(_, config)| config)
+            .unwrap_or(&resolved.config)
             .clone();
         config.alpn_protocols.extend(alpn_protocol);
 
-        Ok((TlsConnector::from(Arc::new(config)), server_name))
+        Ok((
+            TlsConnector::from(Arc::new(config)),
+            resolved.server_name.clone(),
+        ))
     }
 
-    async fn resolve(
-        &self,
-    ) -> Result<(ClientConfig, Option<ServerName<'static>>), LocalTlsSetupError> {
+    async fn resolve(&self) -> Result<ResolvedLocalTls, LocalTlsSetupError> {
         let mut server_name = self.server_name.clone();
 
         let builder = if let Some(cert_pem) = self.server_cert.clone() {
@@ -206,12 +250,27 @@ impl LocalTlsSetup {
         let config = match self.client_auth.as_ref() {
             Some(client_auth) => {
                 let (cert_chain, key) = client_auth.load().await?;
-                builder.with_client_auth_cert(cert_chain, key)?
+                builder.clone().with_client_auth_cert(cert_chain, key)?
             }
-            None => builder.with_no_client_auth(),
+            None => builder.clone().with_no_client_auth(),
         };
 
-        Ok((config, server_name))
+        let mut identity_configs = Vec::with_capacity(self.client_identities.len());
+        for client_auth in &self.client_identities {
+            let (cert_chain, key) = client_auth.load().await?;
+            let identity = cert_chain
+                .first()
+                .and_then(|cert| CertIdentity::from_der(cert))
+                .ok_or_else(|| LocalTlsSetupError::NoClientIdentity(client_auth.clone()))?;
+            let config = builder.clone().with_client_auth_cert(cert_chain, key)?;
+            identity_configs.push((identity, config));
+        }
+
+        Ok(ResolvedLocalTls {
+            config,
+            identity_configs,
+            server_name,
+        })
     }
 }
 
@@ -222,6 +281,7 @@ impl fmt::Debug for LocalTlsSetup {
             .field("server_cert", &self.server_cert)
             .field("server_name", &self.server_name)
             .field("client_auth", &self.client_auth)
+            .field("client_identities", &self.client_identities)
             .finish()
     }
 }
@@ -241,11 +301,12 @@ mod tests {
     use super::*;
 
     /// Accepts one connection on a server that requires a client certificate signed by the
-    /// returned root, and reports whether the handshake succeeded.
+    /// returned root, and reports the presented end-entity certificate if the handshake
+    /// succeeded.
     async fn mtls_server() -> (
         std::net::SocketAddr,
         rcgen::CertifiedKey<rcgen::KeyPair>,
-        tokio::task::JoinHandle<Result<(), std::io::Error>>,
+        tokio::task::JoinHandle<Result<CertificateDer<'static>, std::io::Error>>,
     ) {
         let root = generate_cert("test.root", None, true).unwrap();
         let server = generate_cert("localhost", Some(&root), false).unwrap();
@@ -272,14 +333,26 @@ mod tests {
             let mut buf = [0u8; 1];
             stream.read_exact(&mut buf).await?;
             stream.write_all(&buf).await?;
-            Ok(())
+            let presented = stream
+                .get_ref()
+                .1
+                .peer_certificates()
+                .unwrap()
+                .first()
+                .unwrap()
+                .clone();
+            Ok(presented)
         });
 
         (addr, root, task)
     }
 
-    async fn connect(setup: LocalTlsSetup, addr: std::net::SocketAddr) {
-        let (connector, server_name) = setup.get(None).await.unwrap();
+    async fn connect(
+        setup: LocalTlsSetup,
+        addr: std::net::SocketAddr,
+        original_client: Option<&TlsClientIdentity>,
+    ) {
+        let (connector, server_name) = setup.get(None, original_client).await.unwrap();
         let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
         let mut stream = connector
             .connect(server_name.unwrap(), stream)
@@ -307,8 +380,9 @@ mod tests {
                 cert: client.cert.pem().into_bytes(),
                 key: client.signing_key.serialize_pem().into_bytes(),
             }),
+            Vec::new(),
         );
-        connect(setup, addr).await;
+        connect(setup, addr, None).await;
 
         server
             .await
@@ -325,12 +399,62 @@ mod tests {
             None,
             Some(ServerName::try_from("localhost").unwrap()),
             None,
+            Vec::new(),
         );
-        connect(setup, addr).await;
+        connect(setup, addr, None).await;
 
         server
             .await
             .unwrap()
             .expect_err("the server should reject a client without a certificate");
+    }
+
+    /// The local server may authorize requests based on the client's identity, so the intproxy
+    /// presents the client certificate with the same identity as the original client, and falls
+    /// back to `client_auth` when none matches.
+    #[rstest::rstest]
+    #[case::matching_identity(Some("client-b"), "client-b")]
+    #[case::no_matching_identity(Some("client-c"), "default")]
+    #[case::anonymous_original_client(None, "default")]
+    #[tokio::test]
+    async fn client_identity_matching_original_client_is_presented(
+        #[case] original_client: Option<&str>,
+        #[case] expected_identity: &str,
+    ) {
+        let (addr, root, server) = mtls_server().await;
+        let client_auth = |name: &str| {
+            let client = generate_cert(name, Some(&root), false).unwrap();
+            LocalClientAuth::Pem {
+                cert: client.cert.pem().into_bytes(),
+                key: client.signing_key.serialize_pem().into_bytes(),
+            }
+        };
+
+        let setup = LocalTlsSetup::new(
+            None,
+            None,
+            Some(ServerName::try_from("localhost").unwrap()),
+            Some(client_auth("default")),
+            vec![client_auth("client-a"), client_auth("client-b")],
+        );
+        let original_client = original_client.map(|name| {
+            let CertIdentity {
+                subject,
+                subject_alternative_names,
+            } = CertIdentity::from_der(generate_cert(name, None, false).unwrap().cert.der())
+                .unwrap();
+            TlsClientIdentity {
+                subject,
+                subject_alternative_names,
+            }
+        });
+        connect(setup, addr, original_client.as_ref()).await;
+
+        let presented = server.await.unwrap().unwrap();
+        let expected = generate_cert(expected_identity, None, false).unwrap();
+        assert_eq!(
+            CertIdentity::from_der(&presented),
+            CertIdentity::from_der(expected.cert.der()),
+        );
     }
 }
