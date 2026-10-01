@@ -12,7 +12,12 @@
 
 use std::{ops::Not, path::Path};
 
-use jsonschema::{ValidationError, error::ValidationErrorKind, paths::Location};
+use jsonschema::{
+    ValidationError,
+    error::{TypeKind, ValidationErrorKind},
+    paths::Location,
+    types::JsonType,
+};
 use mirrord_config::{
     LayerFileConfig,
     config::{ConfigContext, ConfigError, MirrordConfig},
@@ -262,7 +267,8 @@ fn schema_issues(error: &ValidationError<'_>, raw_schema: &Value) -> Vec<ConfigI
 
     match error.kind() {
         ValidationErrorKind::AnyOf { context } | ValidationErrorKind::OneOfNotValid { context }
-            if let Some(branch) = intended_branch(context, error) =>
+            if let Some(branch) = intended_branch(context, error)
+                && is_enumeration(branch, error.instance_path()).not() =>
         {
             branch
                 .iter()
@@ -284,11 +290,30 @@ fn schema_issues(error: &ValidationError<'_>, raw_schema: &Value) -> Vec<ConfigI
             let allowed_values = allowed_values(error);
             let message = match (&allowed_values, error.kind()) {
                 // The generic "not valid under any of the schemas" says nothing useful when the
-                // alternatives are just the allowed values.
+                // alternatives are the allowed values, plus maybe other forms of the setting.
                 (
                     Some(_),
-                    ValidationErrorKind::AnyOf { .. } | ValidationErrorKind::OneOfNotValid { .. },
-                ) => format!("{} is not an allowed value", error.instance()),
+                    ValidationErrorKind::AnyOf { context }
+                    | ValidationErrorKind::OneOfNotValid { context },
+                ) => {
+                    let mut types = Vec::new();
+                    for branch in context {
+                        expected_types(branch, error.instance_path(), &mut types);
+                    }
+                    let other_forms = types
+                        .iter()
+                        .filter(|json_type| **json_type != JsonType::Null)
+                        .map(|json_type| format!("`{json_type}`"))
+                        .collect::<Vec<_>>();
+                    match other_forms.as_slice() {
+                        [] => format!("{} is not an allowed value", error.instance()),
+                        _ => format!(
+                            "{} is not an allowed value; a value of type {} is also accepted",
+                            error.instance(),
+                            other_forms.join(" or ")
+                        ),
+                    }
+                }
                 _ => error.to_string(),
             };
             vec![ConfigIssue {
@@ -335,6 +360,58 @@ fn is_wrong_type(branch: &[ValidationError<'_>], path: &Location) -> bool {
                 _ => false,
             }
     })
+}
+
+/// Whether an alternative failed only because the value isn't one of the values it enumerates.
+///
+/// Such an alternative is not reported on its own even when it is the only one of the right JSON
+/// type: for a setting that is either one of a few strings or an object (like `target: none` in a
+/// `mirrord-up.yaml`), a string that isn't allowed may well have been meant as the object, and
+/// the issue has to say that the object is accepted too.
+fn is_enumeration(branch: &[ValidationError<'_>], path: &Location) -> bool {
+    branch.iter().all(|error| {
+        error.instance_path() == path
+            && match error.kind() {
+                ValidationErrorKind::Enum { .. } | ValidationErrorKind::Constant { .. } => true,
+                ValidationErrorKind::AnyOf { context }
+                | ValidationErrorKind::OneOfNotValid { context } => {
+                    let mut plausible = context
+                        .iter()
+                        .filter(|branch| is_wrong_type(branch, path).not())
+                        .peekable();
+                    plausible.peek().is_some()
+                        && plausible.all(|branch| is_enumeration(branch, path))
+                }
+                _ => false,
+            }
+    })
+}
+
+/// Collects the JSON types that `errors` show the value at `path` was expected to have, looking
+/// into nested `anyOf`/`oneOf`s.
+fn expected_types(errors: &[ValidationError<'_>], path: &Location, types: &mut Vec<JsonType>) {
+    for error in errors.iter().filter(|error| error.instance_path() == path) {
+        match error.kind() {
+            ValidationErrorKind::Type { kind } => {
+                let expected = match kind {
+                    TypeKind::Single(json_type) => vec![*json_type],
+                    TypeKind::Multiple(set) => set.iter().collect(),
+                };
+                for json_type in expected {
+                    if types.contains(&json_type).not() {
+                        types.push(json_type);
+                    }
+                }
+            }
+            ValidationErrorKind::AnyOf { context }
+            | ValidationErrorKind::OneOfNotValid { context } => {
+                for branch in context {
+                    expected_types(branch, path, types);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// The values enumerated by the schema that `error` was checked against: an `enum`, a `const`, or
@@ -665,6 +742,19 @@ services:
         );
         assert_eq!(issue.path, "/services/app/run/directory");
         assert!(issue.message.contains("type: exec"), "{}", issue.message);
+    }
+
+    /// `target` is `none` or a mapping, so a string other than `none` is reported along with the
+    /// mapping it could have been.
+    #[test]
+    fn up_yaml_string_target() {
+        let issue = single_issue(
+            ConfigFormat::MirrordUpYaml,
+            "services:\n  api:\n    target: deployment/api\n    run:\n      command: [\"true\"]\n",
+        );
+        assert_eq!(issue.path, "/services/api/target");
+        assert_eq!(issue.allowed_values, Some(vec![json!("none")]));
+        assert!(issue.message.contains("`object`"), "{}", issue.message);
     }
 
     #[test]
