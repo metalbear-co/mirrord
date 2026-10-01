@@ -49,7 +49,7 @@ jobs:
             done
             for app in fileops outgoing recv_from dns_resolve listen_ports issue1776 \
               issue1776portnot53 issue1899 issue2001 issue2438 issue3248 rebind0 dup_listen \
-              double_listen; do
+              double_listen posix_spawn_shared_sockets; do
               (cd "$app" && cargo build)
             done
             ./dlopen_cgo/build_test_app.sh

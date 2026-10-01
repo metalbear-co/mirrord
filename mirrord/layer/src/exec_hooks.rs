@@ -9,6 +9,26 @@ pub(crate) mod hooks;
 #[derive(Default, Debug, Clone)]
 pub(crate) struct Argv(Vec<CString>);
 
+/// Owns an environment and its null-terminated pointer array for an execve call.
+pub(crate) struct PreparedEnvp {
+    env: Argv,
+    pointers: Vec<*const c_char>,
+}
+
+impl PreparedEnvp {
+    pub(crate) fn new(env: Argv) -> Self {
+        let mut pointers = env.0.iter().map(|value| value.as_ptr()).collect::<Vec<_>>();
+        pointers.push(ptr::null());
+
+        Self { env, pointers }
+    }
+
+    pub(crate) fn as_ptr(&self) -> *const *const c_char {
+        debug_assert_eq!(self.pointers.len(), self.env.0.len() + 1);
+        self.pointers.as_ptr()
+    }
+}
+
 impl Argv {
     /// Turns this list of [`CString`] into a C list of pointers (null-terminated).
     ///

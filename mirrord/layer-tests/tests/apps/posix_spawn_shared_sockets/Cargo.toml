@@ -1,5 +1,8 @@
 [package]
 name = "posix-spawn-shared-sockets"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license.workspace = true
+
+[lints]
+workspace = true

@@ -5,11 +5,7 @@
 //! - [`replace!`](`macro@crate::replace`)
 //!
 //! Replaces a [`libc`] function with a hook.
-//!
-//! - [`attach_probe!`](`macro@crate::attach_probe`)
-//!
-//! Runs a callback when a [`libc`] function is entered without replacing it.
-//!
+
 //! - `hook_symbol!` (Linux x86_64/aarch64 only)
 //!
 //! Used to hook go symbols.
@@ -57,38 +53,6 @@ macro_rules! replace {
 
         let _ = intercept($hook_manager, $func, $detour_function)
             .and_then(|hooked| Ok($hook_fn.set(hooked).unwrap()));
-    }};
-}
-
-/// Runs `$on_hit` when the `$func` [`libc`] function is entered by calling
-/// [`HookManager::probe_export_or_any`](crate::hooks::HookManager::probe_export_or_any).
-///
-/// Unlike [`replace!`], a probe lets the original function run without replacing it. This is
-/// suitable for functions such as `execve` that might not return to their caller.
-///
-/// ## Parameters
-///
-/// - `$hook_manager`: a valid [`HookManager`](crate::hooks::HookManager) instance that is used to
-///   probe the [`libc`] function;
-///
-/// - `$func`: the function to probe;
-///
-/// - `$on_hit`: callback run at the function entry.
-///
-/// Returns an error when the probe cannot be installed.
-///
-/// ## Examples
-///
-/// ```text
-/// attach_probe!(&mut hook_manager, "execve", on_execve);
-/// ```
-#[macro_export]
-macro_rules! attach_probe {
-    ($hook_manager:expr_2021, $func:expr_2021, $on_hit:expr_2021) => {{
-        let symbol_name = $func;
-        $hook_manager
-            .probe_export_or_any(symbol_name, $on_hit)
-            .inspect(|_| tracing::trace!("probed {symbol_name:?}"))
     }};
 }
 
