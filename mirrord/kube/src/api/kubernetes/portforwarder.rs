@@ -228,14 +228,18 @@ pub async fn retry_portforward(
 mod test {
     use http::{Request, Response, StatusCode};
     use kube::client::Body;
+    use rstest::rstest;
 
     use super::*;
 
     /// A proxy between mirrord and the API server can reject the port-forward upgrade with a
-    /// response that is not a Kubernetes `Status`. The HTTP status and the response body are the
-    /// only hints about what rejected it, so the error must keep both.
+    /// response that is not a Kubernetes `Status`, as text or as JSON. The HTTP status and the
+    /// response body are the only hints about what rejected it, so the error must keep both.
+    #[rstest]
+    #[case::text("proxy rejected the upgrade")]
+    #[case::json_without_code(r#"{"error":"no healthy upstream"}"#)]
     #[tokio::test]
-    async fn rejected_upgrade_keeps_status_and_body() {
+    async fn rejected_upgrade_keeps_status_and_body(#[case] body: &'static str) {
         let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
         let pod_api = Api::<Pod>::namespaced(Client::new(service, "default"), "default");
         let connect_info = AgentKubernetesConnectInfo {
@@ -253,7 +257,7 @@ mod test {
                 send.send_response(
                     Response::builder()
                         .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Body::from(b"proxy rejected the upgrade".to_vec()))
+                        .body(Body::from(body.as_bytes().to_vec()))
                         .unwrap(),
                 );
             },
@@ -268,6 +272,6 @@ mod test {
             "{message}"
         );
         assert!(message.contains("500"), "{message}");
-        assert!(message.contains("proxy rejected the upgrade"), "{message}");
+        assert!(message.contains(body), "{message}");
     }
 }
