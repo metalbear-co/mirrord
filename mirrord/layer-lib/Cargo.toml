@@ -41,6 +41,7 @@ thiserror.workspace = true
 dns-lookup.workspace = true
 regex.workspace = true
 http.workspace = true
+itertools.workspace = true
 libc.workspace = true
 serde_json.workspace = true
 

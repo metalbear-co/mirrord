@@ -25,11 +25,11 @@ the user's local process with the mirrord layer loaded.
 ```bash
 # check the entire workspace at once
 # always use when a change spans multiple crates instead of checking each crate individually
-cargo clippy --all-targets --all-features --keep-going -- --deny warnings
+CARGO_BUILD_WARNINGS=deny cargo clippy --all-targets --all-features --keep-going
 
 # check a specific crate
 # the agent is linux only
-cargo clippy -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going -- --deny warnings
+CARGO_BUILD_WARNINGS=deny cargo clippy -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going
 
 # layer and cli bundled with the new layer
 # use only when a fresh mirrord + layer binary is needed for testing
@@ -67,6 +67,11 @@ cargo fmt
 mirrord is actively maintained by dozens of people, it is not a greenfield project. When adding or changing things,
 maximize simplicity. Reuse existing abstractions and codepaths instead of introducing new ones. Every new path is
 something someone has to understand, maintain, and keep compatible.
+
+Avoid extracting trivial, self-contained logic into a function used only once. Keep it near its point of use when the
+helper would merely add indirection or exist to make a tiny test possible. Extract a function when it is reused or hides
+non-obvious details that would distract from the surrounding flow. Test meaningful behavior rather than trivial
+wrappers around a library API.
 
 ## Comments and Documentation
 

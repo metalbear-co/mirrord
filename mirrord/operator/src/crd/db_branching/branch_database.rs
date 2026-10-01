@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
+    iter,
 };
 
 use k8s_openapi::ByteString;
@@ -312,6 +313,25 @@ pub struct PostgresOptions {
     /// source connection demands.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub query_params: BTreeMap<String, String>,
+    /// More databases from the same source server, copied into the same branch pod. Each is
+    /// dumped with the branch's own source connection, only the database name differs, and
+    /// keeps its name on the branch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional_databases: Vec<PgAdditionalDatabase>,
+}
+
+/// One more database a PostgreSQL branch copies from its source server.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PgAdditionalDatabase {
+    /// Database name on the source server, reused on the branch.
+    pub name: String,
+    /// The app's connection to this database. The operator points it at the branch pod with
+    /// this database's name. When unset, the database is only created and copied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_source: Option<ConnectionSource>,
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
 }
 
 /// MySQL-specific branch options.
@@ -769,8 +789,15 @@ impl BranchDatabaseSpec {
         if dialects.next().is_some() {
             return Err(DialectValidationError::MultipleSet);
         }
-        if let ConnectionSource::Params(params) = &self.connection_source {
-            Self::validate_extra_params(&config, &params.extra)?;
+        let additional_sources = self
+            .postgres_options
+            .iter()
+            .flat_map(|options| &options.additional_databases)
+            .filter_map(|database| database.connection_source.as_ref());
+        for source in iter::once(&self.connection_source).chain(additional_sources) {
+            if let ConnectionSource::Params(params) = source {
+                Self::validate_extra_params(&config, &params.extra)?;
+            }
         }
         Ok(config)
     }
@@ -1302,6 +1329,7 @@ impl From<BranchItemCopyConfig> for ItemCopyConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crd::db_branching::core::ConnectionParamsSpec;
 
     /// `Unknown` exists for deserialization only; publishing it in the CRD's `flavor` enum
     /// would make it a value users can set.
@@ -1484,6 +1512,7 @@ mod tests {
             iam_auth: None,
             connection_settings: BTreeMap::new(),
             query_params: BTreeMap::new(),
+            additional_databases: Vec::new(),
         };
         let config = DialectConfig::Postgres(&options);
 
@@ -1498,6 +1527,102 @@ mod tests {
                 dialect: DatabaseDialect::Postgres,
                 ..
             }
+        ));
+    }
+
+    /// A branch written before `additionalDatabases` existed still reads, and one that
+    /// carries it reads the camelCase shape the CLI writes.
+    #[test]
+    fn postgres_options_additional_databases_are_optional_and_camel_case() {
+        let old: PostgresOptions =
+            serde_json::from_value(serde_json::json!({ "copy": { "mode": "all" } })).unwrap();
+        assert!(old.additional_databases.is_empty());
+        assert!(
+            serde_json::to_value(&old)
+                .unwrap()
+                .get("additionalDatabases")
+                .is_none(),
+            "an empty list must not be written, older operators see the same spec as before"
+        );
+
+        let new: PostgresOptions = serde_json::from_value(serde_json::json!({
+            "additionalDatabases": [
+                { "name": "analytics", "copy": { "mode": "schema" } },
+                { "name": "audit" }
+            ]
+        }))
+        .unwrap();
+        let [analytics, audit] = new.additional_databases.as_slice() else {
+            panic!("expected two additional databases, got {new:?}");
+        };
+        assert_eq!(analytics.name, "analytics");
+        assert!(matches!(analytics.copy.mode, SqlBranchCopyMode::Schema));
+        assert!(audit.connection_source.is_none());
+        assert!(matches!(audit.copy.mode, SqlBranchCopyMode::Empty));
+    }
+
+    /// The additional databases' app connections go through the same extra-param allowlist
+    /// as the branch's own, so a typo there fails the branch instead of being ignored.
+    #[test]
+    fn dialect_checks_extra_params_of_additional_connections() {
+        let params = |key: &str| {
+            ConnectionSource::Params(Box::new(ConnectionParamsSpec {
+                url: None,
+                host: Some(env_source("ANALYTICS_HOST")),
+                port: None,
+                user: None,
+                password: None,
+                database: None,
+                extra: BTreeMap::from([(key.to_owned(), env_source("X"))]),
+            }))
+        };
+        let spec = |extra_key: &str| BranchDatabaseSpec {
+            id: "id".to_owned(),
+            connection_source: ConnectionSource::Url(env_source("DATABASE_URL")),
+            database_name: None,
+            target: KubeResourceTarget {
+                api_version: "apps/v1".to_owned(),
+                kind: "Deployment".to_owned(),
+                name: "app".to_owned(),
+                container: String::new(),
+            },
+            ttl_secs: 60,
+            version: None,
+            image: None,
+            profile: None,
+            postgres_options: Some(PostgresOptions {
+                copy: SqlBranchCopyConfig::default(),
+                iam_auth: None,
+                connection_settings: BTreeMap::new(),
+                query_params: BTreeMap::new(),
+                additional_databases: vec![PgAdditionalDatabase {
+                    name: "analytics".to_owned(),
+                    connection_source: Some(params(extra_key)),
+                    copy: SqlBranchCopyConfig::default(),
+                }],
+            }),
+            mysql_options: None,
+            mariadb_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: None,
+            dynamodb_options: None,
+            spanner_options: None,
+            clickhouse_options: None,
+            cockroachdb_options: None,
+            s3_options: None,
+            turbopuffer_options: None,
+            generic_options: None,
+            migrations: None,
+        };
+
+        assert!(spec("sslmode").dialect().is_ok());
+        assert!(matches!(
+            spec("sslrootcert").dialect(),
+            Err(DialectValidationError::UnknownConnectionParam {
+                dialect: DatabaseDialect::Postgres,
+                ..
+            })
         ));
     }
 }

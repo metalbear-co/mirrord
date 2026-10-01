@@ -1,7 +1,13 @@
-use std::{collections::HashSet, net::SocketAddr, ops::Not, sync::OnceLock};
+use std::{
+    collections::{BTreeSet, HashSet},
+    net::SocketAddr,
+    ops::Not,
+    sync::OnceLock,
+};
 
+use itertools::Itertools;
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_TARGET_CONTAINER_PORTS,
     experimental::ExperimentalConfig,
     feature::{
         env::EnvConfig,
@@ -89,6 +95,10 @@ pub struct LayerSetup {
     dns_selector: DnsSelector,
     proxy_address: SocketAddr,
     incoming_mode: IncomingMode,
+    /// Ports declared by the target container, see [`MIRRORD_LAYER_TARGET_CONTAINER_PORTS`].
+    ///
+    /// Empty when we do not know them.
+    target_container_ports: BTreeSet<Port>,
     local_hostname: bool,
     // to be used on macOS to restore env on execv
     #[cfg(target_os = "macos")]
@@ -132,6 +142,13 @@ impl LayerSetup {
 
         let incoming_mode = IncomingMode::new(&mut config.feature.network.incoming);
         tracing::info!(?incoming_mode, ?config, "incoming has changed");
+
+        let target_container_ports = std::env::var(MIRRORD_LAYER_TARGET_CONTAINER_PORTS)
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|port| port.trim().parse().ok())
+            .collect();
+
         #[cfg(target_os = "macos")]
         let env_backup = std::env::vars()
             .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")
@@ -149,6 +166,7 @@ impl LayerSetup {
             dns_selector,
             proxy_address,
             incoming_mode,
+            target_container_ports,
             local_hostname,
             #[cfg(target_os = "macos")]
             env_backup,
@@ -245,6 +263,29 @@ impl LayerSetup {
 
     pub fn incoming_mode(&self) -> &IncomingMode {
         &self.incoming_mode
+    }
+
+    /// Prints to stderr, not `tracing`: the layer logs nothing unless `MIRRORD_LOG` is set.
+    pub fn warn_if_port_not_in_target(&self, local_port: Port, remote_port: Port) {
+        let Some(example_port) = self.target_container_ports.first() else {
+            return;
+        };
+        // The Windows layer subscribes also sockets bound to port 0. For these, the OS picks the
+        // local port, so we cannot suggest a correct `port_mapping`.
+        if local_port == 0 || self.target_container_ports.contains(&remote_port) {
+            return;
+        }
+
+        let declared_ports = self.target_container_ports.iter().join(", ");
+
+        eprintln!(
+            "mirrord: your application listens on port {local_port}, so mirrord subscribed to \
+            port {remote_port} of the target. The target container does not declare port \
+            {remote_port}, it declares only these ports: {declared_ports}. Traffic may not reach \
+            your application. If the target container uses a different port than your \
+            application, set `feature.network.incoming.port_mapping` in the mirrord config, for \
+            example: `[[{local_port}, {example_port}]]`."
+        );
     }
 
     pub fn local_hostname(&self) -> bool {

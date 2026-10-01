@@ -8,6 +8,59 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.267.0](https://github.com/metalbear-co/mirrord/tree/3.267.0) - 2026-09-30
+
+
+### Added
+
+- PostgreSQL branches can copy several databases from one source server into
+  one branch with `additional_databases`.
+
+
+### Changed
+
+- Two `db_branches` entries that would be the same branch now fail the session
+  instead of one silently using the source database.
+
+
+### Fixed
+
+- Database branches of different types sharing an `id` no longer share, and
+  overwrite, one credential Secret.
+- Database branches of different types that share an `id`, or set none, each
+  get their own branch instead of one reaching the source.
+- `mirrord ci` persists its cleanup state atomically and rejects malformed
+  state instead of silently discarding recorded cleanup targets.
+
+## [3.266.0](https://github.com/metalbear-co/mirrord/tree/3.266.0) - 2026-09-29
+
+
+### Added
+
+- Added a JSON schema, `mirrord-up-schema.json`, for `mirrord-up.yaml`.
+- Preview environments accept a label target covering several workloads.
+
+
+### Changed
+
+- `mirrord up` replace mode no longer automatically adds queue splitting
+  config.
+
+
+### Fixed
+
+- Fixed remote `stat`-family calls in the agent: `fstatat` relative to a
+  directory fd looked up a path with the target root prefixed twice, and in
+  targetless mode paths were resolved relative to the agent's working directory
+  instead of `/`.
+- The internal proxy terminates registered mirrord-injected processes during
+  shutdown, including processes outside the launched application's process
+  group.
+- `mirrord ci stop` lets the internal proxy terminate registered injected
+  processes and retains failed cleanup targets for a later retry.
+- `mirrord ci stop` terminates background application process groups so child
+  processes started by wrappers do not keep running.
+
 ## [3.265.0](https://github.com/metalbear-co/mirrord/tree/3.265.0) - 2026-09-27
 
 
