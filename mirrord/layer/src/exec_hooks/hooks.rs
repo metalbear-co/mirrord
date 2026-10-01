@@ -1,7 +1,13 @@
+#[cfg(not(target_os = "macos"))]
+use std::{
+    cell::RefCell,
+    sync::atomic::{AtomicBool, Ordering},
+};
+
 use base64::prelude::*;
 use libc::{c_char, c_int};
 #[cfg(not(target_os = "macos"))]
-use mirrord_layer_core::{attach_probe, hooks::ProbedCall};
+use mirrord_layer_core::hooks::ProbedCall;
 use mirrord_layer_lib::detour::{Bypass, Detour};
 #[cfg(not(target_os = "macos"))]
 use mirrord_layer_macro::hook_fn;
@@ -18,6 +24,14 @@ use crate::{
     replace,
     socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS, UserSocket},
 };
+
+#[cfg(not(target_os = "macos"))]
+static EXECVE_PROBE_ENABLED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(not(target_os = "macos"))]
+thread_local! {
+    static PREPARED_ENVP: RefCell<Option<PreparedEnvp>> = const { RefCell::new(None) };
+}
 
 /// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
 /// it as a map.
@@ -61,15 +75,20 @@ unsafe fn environ() -> *const *const c_char {
     }
 }
 
-/// Hook for `libc::execv` for linux only.
+/// Hook for `libc::execv` on Linux.
 ///
-/// On macos this just calls `execve(path, argv, _environ)`, so the macOS execve detour handles
-/// it.
+/// `execv` reaches the `execve` probe when it is installed. When installation fails, this detour
+/// retains the previous prepared-environment path so `execv` children still receive socket
+/// metadata.
 #[cfg(not(target_os = "macos"))]
 #[hook_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
     unsafe {
         let envp = environ();
+        if EXECVE_PROBE_ENABLED.load(Ordering::Relaxed) {
+            return libc::execve(path, argv, envp);
+        }
+
         match prepare_execve_envp(envp.checked_into()) {
             Detour::Success(envp) => libc::execve(path, argv, envp.leak()),
             _ => libc::execve(path, argv, envp),
@@ -77,20 +96,22 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
     }
 }
 
-/// Runs at the entry of Linux `execve`, replacing `envp` with one that carries socket metadata to
-/// the new image.
-///
-/// A successful `execve` in glibc's `posix_spawn` runs from a `vfork` child and never returns. A
-/// replacing hook would leave Frida's per-thread replacement state in the parent, causing later
-/// calls on that thread to bypass the hook. A probe returns before the original call begins and
-/// does not retain that state.
+/// Replaces Linux `execve`'s environment with socket metadata for the new image.
 #[cfg(not(target_os = "macos"))]
 fn on_execve(call: &ProbedCall<'_>) {
     const ENVP: u32 = 2;
 
     let envp = call.arg(ENVP) as *const *const c_char;
     if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
-        call.set_arg(ENVP, envp.leak() as usize);
+        PREPARED_ENVP.with(|prepared| {
+            *prepared.borrow_mut() = Some(PreparedEnvp::new(envp));
+            let envp = prepared
+                .borrow()
+                .as_ref()
+                .expect("prepared environment was just set")
+                .as_ptr();
+            call.set_arg(ENVP, envp as usize);
+        });
     }
 }
 
@@ -144,13 +165,16 @@ pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {
     #[cfg(not(target_os = "macos"))]
     unsafe {
         replace!(hook_manager, "execv", execv_detour, FnExecv, FN_EXECV);
+    }
 
-        if let Err(error) = attach_probe!(hook_manager, "execve", on_execve) {
-            tracing::warn!(
-                ?error,
-                "failed to install execve probe; direct execve calls will not carry shared socket metadata"
-            );
-        }
+    #[cfg(not(target_os = "macos"))]
+    if let Err(error) = hook_manager.probe_export_or_any("execve", on_execve) {
+        tracing::warn!(
+            ?error,
+            "failed to install execve probe; new and spawned processes will not get shared socket metadata"
+        );
+    } else {
+        EXECVE_PROBE_ENABLED.store(true, Ordering::Relaxed);
     }
 
     #[cfg(target_os = "macos")]

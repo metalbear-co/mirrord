@@ -193,7 +193,7 @@ pub enum Application {
     /// Rust app that closes a clone socket.
     DupListen,
     /// Rust app that spawns children which must inherit socket metadata.
-    PosixSpawnSharedSockets(String),
+    PosixSpawnSharedSockets,
     /// Rust app that listens on a socket twice
     DoubleListen,
     /// C app that calls `connect(2)` on a unix socket with a too-large `addrlen`
@@ -400,7 +400,7 @@ impl Application {
                     "../../target/debug/dup-listen"
                 )
             }
-            Application::PosixSpawnSharedSockets(_) => {
+            Application::PosixSpawnSharedSockets => {
                 format!(
                     "{}/{}",
                     env!("CARGO_MANIFEST_DIR"),
@@ -592,7 +592,7 @@ impl Application {
                     format!("exec 0<&- ; exec node {}", app_path.to_string_lossy()),
                 ]
             }
-            Application::PosixSpawnSharedSockets(mode) => vec![mode.clone()],
+            Application::PosixSpawnSharedSockets => vec![],
         }
     }
 
@@ -603,8 +603,7 @@ impl Application {
             | Application::NodeHTTP
             | Application::RustIssue1054
             | Application::PythonFlaskHTTP
-            | Application::DupListen
-            | Application::PosixSpawnSharedSockets(_) => 80,
+            | Application::DupListen => 80,
             // mapped from 9999 in `configs/port_mapping.json`
             Application::PythonFastApiHTTP | Application::PythonIssue864 => 1234,
             Application::RustIssue1123 => 41222,

@@ -13,7 +13,7 @@ static GUM: LazyLock<Gum> = LazyLock::new(Gum::obtain);
 pub struct ProbedCall<'a>(InvocationContext<'a>);
 
 impl ProbedCall<'_> {
-    /// The `n`th argument, as passed in its register or stack slot.
+    /// The zero-based `n`th argument, as passed in its register or stack slot.
     pub fn arg(&self, n: u32) -> usize {
         self.0.arg(n)
     }
@@ -75,7 +75,7 @@ impl<'a> HookManager<'a> {
     }
 
     /// Runs `on_hit` at the entry of the exported `symbol`, then lets the original function run,
-    /// for functions whose hook may never return to the caller.
+    /// for functions that may never return to the caller.
     ///
     /// A hook installed with [`Self::hook_export_or_any`] replaces the function, and frida records,
     /// per thread, that the replacement is running until it returns. One that never returns
@@ -92,8 +92,11 @@ impl<'a> HookManager<'a> {
         let probe = Box::leak(Box::new(Probe(on_hit)));
 
         if let Some(function) = Module::find_global_export_by_name(symbol)
-            && self.interceptor.attach_instruction(function, probe).is_ok()
+            && let Ok(listener) = self.interceptor.attach_instruction(function, probe)
         {
+            // Frida does not keep its own reference to the listener while the probe is attached.
+            std::mem::forget(listener);
+            trace!("probed {symbol:?}");
             return Ok(());
         }
 
@@ -106,7 +109,13 @@ impl<'a> HookManager<'a> {
             if let Some(function) = module.find_export_by_name(symbol) {
                 trace!("found {symbol:?} in {module_name:?}, probing");
                 match self.interceptor.attach_instruction(function, probe) {
-                    Ok(_) => return Ok(()),
+                    Ok(listener) => {
+                        // Frida does not keep its own reference to the listener while the probe is
+                        // attached.
+                        std::mem::forget(listener);
+                        trace!("probed {symbol:?}");
+                        return Ok(());
+                    }
                     Err(err) => {
                         trace!("probe {symbol:?} in {module_name:?} failed with err {err:?}")
                     }
