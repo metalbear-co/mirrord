@@ -37,10 +37,10 @@ The following guide details the steps to setup a local development environment f
 ### Building mirrord layer and binary
 
 If you run integration or e2e tests, both are automatically built.
-To build it from scratch, run `cargo xtask build-layer`. 
-This will result in a `target/<arch>/debug/<layer binary name>` 
-Then, build the project with `MIRRORD_LAYER_FILE=$(pwd)/target/<arch>/debug/<layer binary name> cargo build --all` 
-On macOS always use `universal-apple-darwin` arch (rather than e.g. `aarch64-apple-darwin`) whenever an explicit path to the layer binary is required.
+To build it from scratch, run `cargo xtask build-layer`.
+The layer is at `target/debug/<layer binary name>`.
+Then, build the project with `MIRRORD_LAYER_FILE=$(pwd)/target/debug/<layer binary name> cargo build --all`.
+On macOS, when you give an explicit path to the layer binary, use the universal layer at `target/universal-apple-darwin/debug/<layer binary name>`.
 
 <layer binary name> is OS specific:
 - Linux: libmirrord_layer.so
