@@ -100,6 +100,12 @@ pub struct RuntimeData {
     /// Ports where HTTP/gRPC probes are configured
     /// in the target pod.
     pub containers_probe_ports: Vec<u16>,
+
+    /// Ports declared in `.spec.containers[].ports` of the target container.
+    ///
+    /// Kubernetes does not require containers to declare their ports, so an empty list means that
+    /// we do not know which ports the target container listens on.
+    pub container_ports: Vec<u16>,
 }
 
 impl RuntimeData {
@@ -206,6 +212,28 @@ impl RuntimeData {
         }
 
         let container_name = chosen_status.name.clone();
+
+        let container_ports = pod
+            .spec
+            .as_ref()
+            .and_then(|spec| {
+                spec.containers
+                    .iter()
+                    .find(|container| container.name == container_name)
+            })
+            .and_then(|container| container.ports.as_deref())
+            .unwrap_or_default()
+            .iter()
+            // mirrord subscribes only to TCP ports, and Kubernetes uses TCP when no protocol is
+            // set.
+            .filter(|port| {
+                port.protocol
+                    .as_deref()
+                    .is_none_or(|protocol| protocol == "TCP")
+            })
+            .filter_map(|port| u16::try_from(port.container_port).ok())
+            .collect();
+
         let container_id_full = chosen_status.container_id.as_ref().ok_or_else(|| {
             KubeApiError::missing_field(pod, ".status.containerStatuses.[].containerID")
         })?;
@@ -248,6 +276,7 @@ impl RuntimeData {
                 .and_then(|spec| spec.share_process_namespace)
                 .unwrap_or_default(),
             containers_probe_ports,
+            container_ports,
         })
     }
 
@@ -648,6 +677,59 @@ mod tests {
             RuntimeData::host_ips(&status),
             vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))]
         );
+    }
+
+    /// [`RuntimeData::container_ports`] must hold only the TCP ports of the target container, and
+    /// not the ports of other containers in the pod.
+    #[rstest]
+    #[case(Some("app"), vec![8080, 9090, 9091])]
+    #[case(Some("sidecar"), vec![15001])]
+    #[case(Some("no-ports"), vec![])]
+    fn container_ports_come_from_target_container(
+        #[case] container_name: Option<&str>,
+        #[case] expected: Vec<u16>,
+    ) {
+        let container_statuses = ["app", "sidecar", "no-ports"].map(|name| {
+            serde_json::json!({
+                "name": name,
+                "ready": true,
+                "containerID": format!("containerd://{name}"),
+                "image": "image",
+                "imageID": "image",
+                "restartCount": 0,
+            })
+        });
+
+        let pod: Pod = serde_json::from_value(serde_json::json!({
+            "metadata": { "name": "pod", "namespace": "default" },
+            "spec": {
+                "nodeName": "node",
+                "containers": [
+                    {
+                        "name": "app",
+                        "ports": [
+                            { "containerPort": 8080 },
+                            { "containerPort": 9090, "protocol": "TCP" },
+                            { "containerPort": 9091, "protocol": "TCP" },
+                            { "containerPort": 9091, "protocol": "UDP" },
+                            { "containerPort": 5353, "protocol": "UDP" },
+                        ],
+                    },
+                    { "name": "sidecar", "ports": [{ "containerPort": 15001 }] },
+                    { "name": "no-ports" },
+                ],
+            },
+            "status": {
+                "phase": "Running",
+                "podIPs": [{ "ip": "10.0.0.2" }],
+                "containerStatuses": container_statuses,
+            },
+        }))
+        .unwrap();
+
+        let runtime_data = RuntimeData::from_pod(&pod, container_name).unwrap();
+
+        assert_eq!(runtime_data.container_ports, expected);
     }
 
     #[rstest]

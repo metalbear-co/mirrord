@@ -31,6 +31,7 @@ use crate::{
     dump::DumpSessionError,
     fix::FixKubeconfigError,
     login::LoginError,
+    operator::OperatorInstallError,
     port_forward::PortForwardError,
     profile::ProfileError,
     tui::TuiCliError,
@@ -79,7 +80,7 @@ pub(crate) fn format_preview_logs(logs: &[PreviewPodLogs]) -> String {
     format!("\n\nlast output from the preview pods:\n\n{rendered}")
 }
 
-const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or GitHub repository.
+pub(crate) const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or GitHub repository.
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
@@ -203,6 +204,11 @@ pub(crate) enum InternalProxyError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     ListenerSetup(std::io::Error),
 
+    #[cfg(unix)]
+    #[error("Failed to register CI intproxy SIGTERM handler: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    SignalHandler(std::io::Error),
+
     #[cfg(not(target_os = "windows"))]
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -241,7 +247,7 @@ pub(crate) enum InternalProxyError {
 pub(crate) enum OperatorSetupError {
     #[error("mirrord operator setup was deleted")]
     #[diagnostic(help(
-        "Please use the helm chart instead https://github.com/metalbear-co/charts/"
+        "Please use `mirrord operator install`, or the helm chart https://github.com/metalbear-co/charts/"
     ))]
     Deleted,
 }
@@ -317,6 +323,15 @@ pub(crate) enum CliError {
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(#[from] mirrord_config::config::ConfigError),
 
+    #[cfg(unix)]
+    #[error("Failed to set up the local directory for prefetched files: {0}")]
+    #[diagnostic(help(
+        "The files listed in `feature.fs.prefetch` are copied into a new directory under your \
+        temporary directory (`$TMPDIR`, or `/tmp` when unset). Please check that it exists, is \
+        writable, and has free space.{GENERAL_HELP}"
+    ))]
+    Prefetch(#[from] crate::prefetch::PrefetchError),
+
     #[error("Failed to run command `{command}` due to missing argument `{arg}`")]
     MissingArg { command: String, arg: String },
 
@@ -337,6 +352,10 @@ pub(crate) enum CliError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     OperatorSetupError(#[from] OperatorSetupError),
+
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    OperatorInstall(#[from] OperatorInstallError),
 
     #[error("`mirrord operator status` command failed! Could not retrieve operator status API.")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -410,7 +429,10 @@ pub(crate) enum CliError {
     FeatureRequiresOperatorError(String),
 
     #[error("Feature `{feature}` is not supported in mirrord operator {operator_version}.")]
-    #[diagnostic(help("{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "Upgrade the mirrord operator to a version that supports it, or remove the setting \
+         that needs it from your mirrord config.{GENERAL_HELP}"
+    ))]
     FeatureNotSupportedInOperatorError {
         feature: String,
         operator_version: String,
@@ -703,6 +725,20 @@ pub(crate) enum CliError {
         Check that the operator is running and healthy, and see its logs for details.{GENERAL_HELP}"
     ))]
     PreviewSecretMountFailed(String),
+
+    #[error(
+        "Failed to read the TLS client certificate file `{path}` for preview delivery: {error}"
+    )]
+    #[diagnostic(help(
+        "`feature.network.incoming.tls_delivery.client_cert` and `client_key` must be readable PEM \
+        files on this machine: the CLI stores their contents in the preview session's Secret so \
+        the operator can present them to the preview pod.{GENERAL_HELP}"
+    ))]
+    PreviewTlsClientAuthFile {
+        path: PathBuf,
+        #[source]
+        error: io::Error,
+    },
 
     #[error("Preview session failed: {message}{}", format_preview_logs(logs))]
     #[diagnostic(help(

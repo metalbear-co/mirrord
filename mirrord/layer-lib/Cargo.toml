@@ -41,7 +41,9 @@ thiserror.workspace = true
 dns-lookup.workspace = true
 regex.workspace = true
 http.workspace = true
+itertools.workspace = true
 libc.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }

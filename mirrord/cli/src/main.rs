@@ -349,6 +349,10 @@ mod operator;
 #[cfg(windows)]
 mod pitm;
 mod port_forward;
+// Prefetched files exist for the layer to serve in place of remote ones, and the layer is unix
+// only, so copying them anywhere else would be work nothing can use.
+#[cfg(unix)]
+mod prefetch;
 mod preview;
 mod profile;
 mod queue_splitting;
@@ -1117,13 +1121,14 @@ fn main() -> miette::Result<()> {
                 ..
             } => {
                 let config = mirrord_config::util::read_resolved_config()?;
+                let shutdown_handler = internal_proxy::install_ci_shutdown_handler(mirrord_for_ci)?;
 
                 if mirrord_for_ci {
-                    MirrordCi::prepare_intproxy().await?;
+                    MirrordCi::prepare_intproxy(&shutdown_handler).await?;
                 }
 
                 logging::init_intproxy_tracing_registry(&config).await?;
-                internal_proxy::proxy(config, port, watch, &user_data).await?
+                internal_proxy::proxy(config, port, watch, &user_data, shutdown_handler).await?
             }
             #[cfg(windows)]
             Commands::CrashMonitor { port, root_pid, .. } => {

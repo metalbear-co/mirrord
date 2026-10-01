@@ -103,8 +103,15 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                     // - SYS_statx: not supported in go
                     libc::SYS_newfstatat => {
                         fstatat_logic(param1 as _, param2 as _, param3 as _, param4 as _)
-                            .unwrap_or_bypass_with(|_| {
-                                passthrough(syscall, param1, param2, param3, param4, param5, param6)
+                            .unwrap_or_bypass_with(|bypass| {
+                                // The bypass carries a path of its own when `fs.mapping` remapped
+                                // it, or when `feature.fs.prefetch` copied the file locally.
+                                // Passing the syscall through with the path the application asked
+                                // for would stat the wrong file, so substitute it the way the libc
+                                // hooks do. `bypass` owns the substitute and outlives the call.
+                                let path = update_ptr_from_bypass(param2 as _, &bypass) as i64;
+
+                                passthrough(syscall, param1, path, param3, param4, param5, param6)
                                     as i32
                             })
                             .into()
