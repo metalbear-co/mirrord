@@ -83,6 +83,15 @@ pub(crate) async fn login_command(args: LoginArgs) -> Result<(), LoginError> {
     let mut subtask = progress.subtask("Exchanging grant for the auth token");
     let token = exchange_grant(&backend_url, &grant, &verifier, &callback_uri).await?;
     let claims = decode_claims(&token).ok_or_else(|| LoginError::BadToken("malformed".into()))?;
+    // The token is filed under its issuer, so a backend must not be able to file a token under
+    // another backend's entry. The backend's issuer is its base URL, without the trailing slash.
+    let expected_issuer = backend_url.as_str().trim_end_matches('/');
+    if claims.iss != expected_issuer {
+        return Err(LoginError::BadToken(format!(
+            "issued by {}, expected {expected_issuer}",
+            claims.iss,
+        )));
+    }
     let expires_at = DateTime::from_timestamp(claims.exp, 0)
         .ok_or_else(|| LoginError::BadToken("expiration time out of valid range".into()))?;
     if expires_at <= Utc::now() {
@@ -236,7 +245,8 @@ struct LoginTokenClaims {
 /// Reads the claims of a login token without verifying its signature.
 ///
 /// The CLI receives the token directly from the backend over TLS, and only uses the claims to
-/// file the token and show it to the user. Session managers verify the token when it is used.
+/// check the issuer, file the token and show it to the user. Session managers verify the token
+/// when it is used.
 fn decode_claims(token: &str) -> Option<LoginTokenClaims> {
     let payload = token.split('.').nth(1)?;
     let payload = URL_SAFE_NO_PAD.decode(payload).ok()?;
