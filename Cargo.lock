@@ -5088,6 +5088,7 @@ dependencies = [
  "tokio-util",
  "tower",
  "tower-http",
+ "tower-test",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -5392,6 +5393,7 @@ version = "3.267.0"
 dependencies = [
  "async-stream",
  "futures",
+ "http 1.5.0",
  "itertools 0.14.0",
  "k8s-openapi",
  "kube",
@@ -5409,6 +5411,7 @@ dependencies = [
  "tokio",
  "tokio-retry",
  "tower",
+ "tower-test",
  "tracing",
 ]
 

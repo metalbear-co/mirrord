@@ -981,7 +981,7 @@ async fn port_forward(
     .connector;
 
     let friendly = |err| match err {
-        connector::ConnectionError::Kube(error) => {
+        connector::ConnectionError::AgentPortForward(error) => {
             CliError::friendlier_error_or_else(error.into(), CliError::PortForwardingSetupError)
         }
         _ => CliError::PortForwardingError(err.into()),
