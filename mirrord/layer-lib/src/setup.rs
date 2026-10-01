@@ -1,11 +1,17 @@
-use std::{collections::HashSet, net::SocketAddr, ops::Not, sync::OnceLock};
+use std::{
+    collections::{BTreeSet, HashSet},
+    net::SocketAddr,
+    ops::Not,
+    sync::OnceLock,
+};
 
+use itertools::Itertools;
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_TARGET_CONTAINER_PORTS,
     experimental::ExperimentalConfig,
     feature::{
         env::EnvConfig,
-        fs::{FsConfig, FsModeConfig, READONLY_FILE_BUFFER_DEFAULT},
+        fs::{FsConfig, FsModeConfig, PREFETCH_TIMEOUT_DEFAULT, READONLY_FILE_BUFFER_DEFAULT},
         network::{
             NetworkConfig,
             incoming::{IncomingConfig, IncomingMode as ConfigIncomingMode},
@@ -50,6 +56,8 @@ pub fn init_layer_setup(mut config: LayerConfig, sip_only: bool) {
             not_found: None,
             mapping: None,
             readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
+            prefetch: None,
+            prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
         };
     } else {
         if config.target.path.is_none() && config.feature.fs.mode.ne(&FsModeConfig::Local) {
@@ -78,12 +86,19 @@ pub struct LayerSetup {
     config: LayerConfig,
     file_filter: FileFilter,
     file_remapper: FileRemapper,
+    /// The copies the file hooks serve in place of remote files, for `feature.fs.prefetch`.
+    #[cfg(unix)]
+    prefetched_files: crate::file::prefetched::PrefetchedFiles,
     debugger_ports: DebuggerPorts,
     remote_unix_streams: RegexSet,
     outgoing_selector: OutgoingSelector,
     dns_selector: DnsSelector,
     proxy_address: SocketAddr,
     incoming_mode: IncomingMode,
+    /// Ports declared by the target container, see [`MIRRORD_LAYER_TARGET_CONTAINER_PORTS`].
+    ///
+    /// Empty when we do not know them.
+    target_container_ports: BTreeSet<Port>,
     local_hostname: bool,
     // to be used on macOS to restore env on execv
     #[cfg(target_os = "macos")]
@@ -99,6 +114,11 @@ impl LayerSetup {
         let file_filter = FileFilter::new(config.feature.fs.clone());
         let file_remapper =
             FileRemapper::new(config.feature.fs.mapping.clone().unwrap_or_default());
+        #[cfg(unix)]
+        let prefetched_files = crate::file::prefetched::PrefetchedFiles::new(
+            std::env::var_os(mirrord_config::MIRRORD_FS_PREFETCH_DIR).map(std::path::PathBuf::from),
+            config.feature.fs.prefetch.as_deref().unwrap_or_default(),
+        );
 
         let remote_unix_streams = config
             .feature
@@ -122,6 +142,13 @@ impl LayerSetup {
 
         let incoming_mode = IncomingMode::new(&mut config.feature.network.incoming);
         tracing::info!(?incoming_mode, ?config, "incoming has changed");
+
+        let target_container_ports = std::env::var(MIRRORD_LAYER_TARGET_CONTAINER_PORTS)
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|port| port.trim().parse().ok())
+            .collect();
+
         #[cfg(target_os = "macos")]
         let env_backup = std::env::vars()
             .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")
@@ -131,12 +158,15 @@ impl LayerSetup {
             config,
             file_filter,
             file_remapper,
+            #[cfg(unix)]
+            prefetched_files,
             debugger_ports,
             remote_unix_streams,
             outgoing_selector,
             dns_selector,
             proxy_address,
             incoming_mode,
+            target_container_ports,
             local_hostname,
             #[cfg(target_os = "macos")]
             env_backup,
@@ -161,6 +191,11 @@ impl LayerSetup {
 
     pub fn file_remapper(&self) -> &FileRemapper {
         &self.file_remapper
+    }
+
+    #[cfg(unix)]
+    pub fn prefetched_files(&self) -> &crate::file::prefetched::PrefetchedFiles {
+        &self.prefetched_files
     }
 
     pub fn network_config(&self) -> &NetworkConfig {
@@ -228,6 +263,29 @@ impl LayerSetup {
 
     pub fn incoming_mode(&self) -> &IncomingMode {
         &self.incoming_mode
+    }
+
+    /// Prints to stderr, not `tracing`: the layer logs nothing unless `MIRRORD_LOG` is set.
+    pub fn warn_if_port_not_in_target(&self, local_port: Port, remote_port: Port) {
+        let Some(example_port) = self.target_container_ports.first() else {
+            return;
+        };
+        // The Windows layer subscribes also sockets bound to port 0. For these, the OS picks the
+        // local port, so we cannot suggest a correct `port_mapping`.
+        if local_port == 0 || self.target_container_ports.contains(&remote_port) {
+            return;
+        }
+
+        let declared_ports = self.target_container_ports.iter().join(", ");
+
+        eprintln!(
+            "mirrord: your application listens on port {local_port}, so mirrord subscribed to \
+            port {remote_port} of the target. The target container does not declare port \
+            {remote_port}, it declares only these ports: {declared_ports}. Traffic may not reach \
+            your application. If the target container uses a different port than your \
+            application, set `feature.network.incoming.port_mapping` in the mirrord config, for \
+            example: `[[{local_port}, {example_port}]]`."
+        );
     }
 
     pub fn local_hostname(&self) -> bool {

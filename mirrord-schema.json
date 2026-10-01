@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Getting Started",
-  "description": "mirrord allows for a high degree of customization when it comes to which features you want to\nenable, and how they should function.\n\nAll of the configuration fields have a default value, so a minimal configuration would be no\nconfiguration at all.\n\nThe configuration supports [templating](#root-templating), so values can be derived at runtime\ninstead of hardcoded.\n\nTo use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.\nOr if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file\nor use the UI.\n\n## Templating {#root-templating}\n\nConfig files are rendered with the [Tera](https://keats.github.io/tera/) template engine before\nthey are parsed, so Tera's built-in functions and filters all work. On top of those, mirrord\nprovides these variables:\n\n- `key` - the [session key](#root-key), either the one you provided or the one mirrord generated\n  for this session.\n- `git_branch` - the branch checked out in the working directory mirrord was started from. Set\n  `MIRRORD_BRANCH_NAME` to override it; the JetBrains plugin does exactly that, with the branch\n  of the project you have open.\n\nmirrord generates a session key for you, and you can reference it as `{{ key }}` in your HTTP\nfilter like so:\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        }\n      }\n    }\n  }\n}\n```\n\nIt also supports setting your git branch as the key, so that each branch gets its own session:\n\n```json\n{\n  \"key\": \"{{ git_branch }}\",\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        }\n      }\n    }\n  }\n}\n```\n\n### Templating the `key` field {#root-templating-key}\n\nThe [`key`](#root-key) field is read out of the config file *before* any templating happens, to\nbreak the cycle where the key is needed to render templates but is itself defined in the file\nbeing rendered. Two consequences:\n\n1. The file has to stay valid JSON/TOML/YAML as written. A double-quoted string inside a `key`\n   template ends the surrounding JSON string early, so the `key` field is silently ignored and\n   mirrord falls back to a generated key, leaving a session that looks healthy but filters on\n   the wrong value. Tera accepts single-quoted string literals, so use those in `key`:\n   `default(value='shared')` rather than `default(value=\"shared\")`. Every other field is\n   rendered before parsing and accepts either quote style.\n2. Only variables that don't depend on the key are available there, which today means\n   `git_branch`.\n\n### When a variable is undefined {#root-templating-undefined}\n\n`git_branch` is left out of the context entirely when the branch can't be determined - the\ndirectory isn't a git repository, `git` isn't installed, or `HEAD` is detached, which is the\nusual state in CI. Referencing it then fails the render with\n``Variable `git_branch` not found in context``, rather than quietly resolving to an empty\nstring and producing a filter that matches nothing.\n\nGive configs that also have to work in those environments a fallback:\n\n```json\n{\n  \"key\": \"{{ git_branch | default(value='shared') }}\"\n}\n```\n\nIf you want us to provide any other value, please let us know.\n\n## Examples\n\nTo help you get started, here are examples of a basic configuration file, and a complete\nconfiguration file containing all fields.\n\n### Basic `config.json` {#root-basic}\n\n```json\n{\n  \"target\": \"pod/bear-pod\",\n  \"feature\": {\n    \"env\": true,\n    \"fs\": \"read\",\n    \"network\": true\n  }\n}\n```\n\n### Basic `config.json` with templating {#root-basic-templating}\n\n```json\n{\n  \"target\": \"{{ get_env(name=\"TARGET\", default=\"pod/fallback\") }}\",\n  \"feature\": {\n    \"env\": true,\n    \"fs\": \"read\",\n    \"network\": true\n  }\n}\n```\n\n### Complete `config.json` {#root-complete}\n\n Don't use this example as a starting point, it's just here to show you all the available\n options.\n```json\n{\n  \"accept_invalid_certificates\": false,\n  \"skip_processes\": \"ide-debugger\",\n  \"target\": {\n    \"path\": \"pod/bear-pod\",\n    \"namespace\": \"default\"\n  },\n  \"connect_tcp\": null,\n  \"agent\": {\n    \"log_level\": \"info\",\n    \"json_log\": false,\n    \"labels\": { \"user\": \"meow\" },\n    \"annotations\": { \"cats.io/inject\": \"enabled\" },\n    \"namespace\": \"default\",\n    \"image\": \"ghcr.io/metalbear-co/mirrord:latest\",\n    \"image_pull_policy\": \"IfNotPresent\",\n    \"image_pull_secrets\": [ { \"name\": \"secret\" } ],\n    \"ttl\": 30,\n    \"ephemeral\": false,\n    \"communication_timeout\": 30,\n    \"startup_timeout\": 360,\n    \"flush_connections\": true,\n    \"metrics\": \"0.0.0.0:9000\",\n  },\n  \"feature\": {\n    \"env\": {\n      \"include\": \"DATABASE_USER;PUBLIC_ENV\",\n      \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\",\n      \"override\": {\n        \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\",\n        \"LOCAL_BEAR\": \"panda\"\n      },\n      \"mapping\": {\n        \".+_TIMEOUT\": \"1000\"\n      }\n    },\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ]\n    },\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        },\n        \"port_mapping\": [[ 7777, 8888 ]],\n        \"ignore_localhost\": false,\n        \"ignore_ports\": [9999, 10000]\n      },\n      \"outgoing\": {\n        \"tcp\": true,\n        \"udp\": true,\n        \"filter\": {\n          \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"]\n        },\n        \"ignore_localhost\": false,\n        \"unix_streams\": \"bear.+\"\n      },\n      \"dns\": {\n        \"enabled\": true,\n        \"filter\": {\n          \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"]\n        }\n      }\n    },\n    \"copy_target\": {\n      \"scale_down\": false\n    }\n  },\n  \"operator\": true,\n  \"kubeconfig\": \"~/.kube/config\",\n  \"sip_binaries\": \"bash\",\n  \"telemetry\": true,\n  \"kube_context\": \"my-cluster\"\n}\n```\n\n# Options {#root-options}",
+  "description": "mirrord allows for a high degree of customization when it comes to which features you want to\nenable, and how they should function.\n\nAll of the configuration fields have a default value, so a minimal configuration would be no\nconfiguration at all.\n\nThe configuration supports [templating](#root-templating), so values can be derived at runtime\ninstead of hardcoded.\n\nTo use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag.\nOr if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file\nor use the UI.\n\n## Templating {#root-templating}\n\nConfig files are rendered with the [Tera](https://keats.github.io/tera/) template engine before\nthey are parsed, so Tera's built-in functions and filters all work. On top of those, mirrord\nprovides these variables:\n\n- `key` - the [session key](#root-key), either the one you provided or the one mirrord generated\n  for this session.\n- `git_branch` - the branch checked out in the working directory mirrord was started from. Set\n  `MIRRORD_BRANCH_NAME` to override it; the JetBrains plugin does exactly that, with the branch\n  of the project you have open.\n\nmirrord generates a session key for you, and you can reference it as `{{ key }}` in your HTTP\nfilter like so:\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        }\n      }\n    }\n  }\n}\n```\n\nIt also supports setting your git branch as the key, so that each branch gets its own session:\n\n```json\n{\n  \"key\": \"{{ git_branch }}\",\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        }\n      }\n    }\n  }\n}\n```\n\n### Templating the `key` field {#root-templating-key}\n\nThe [`key`](#root-key) field is read out of the config file *before* any templating happens, to\nbreak the cycle where the key is needed to render templates but is itself defined in the file\nbeing rendered. Two consequences:\n\n1. The file has to stay valid JSON/TOML/YAML as written. A double-quoted string inside a `key`\n   template ends the surrounding JSON string early, so the `key` field is silently ignored and\n   mirrord falls back to a generated key, leaving a session that looks healthy but filters on\n   the wrong value. Tera accepts single-quoted string literals, so use those in `key`:\n   `default(value='shared')` rather than `default(value=\"shared\")`. Every other field is\n   rendered before parsing and accepts either quote style.\n2. Only variables that don't depend on the key are available there, which today means\n   `git_branch`.\n\n### When a variable is undefined {#root-templating-undefined}\n\n`git_branch` is left out of the context entirely when the branch can't be determined - the\ndirectory isn't a git repository, `git` isn't installed, or `HEAD` is detached, which is the\nusual state in CI. Referencing it then fails the render with\n``Variable `git_branch` not found in context``, rather than quietly resolving to an empty\nstring and producing a filter that matches nothing.\n\nGive configs that also have to work in those environments a fallback:\n\n```json\n{\n  \"key\": \"{{ git_branch | default(value='shared') }}\"\n}\n```\n\nIf you want us to provide any other value, please let us know.\n\n## Examples\n\nTo help you get started, here are examples of a basic configuration file, and a complete\nconfiguration file containing all fields.\n\n### Basic `config.json` {#root-basic}\n\n```json\n{\n  \"target\": \"pod/bear-pod\",\n  \"feature\": {\n    \"env\": true,\n    \"fs\": \"read\",\n    \"network\": true\n  }\n}\n```\n\n### Basic `config.json` with templating {#root-basic-templating}\n\n```json\n{\n  \"target\": \"{{ get_env(name=\"TARGET\", default=\"pod/fallback\") }}\",\n  \"feature\": {\n    \"env\": true,\n    \"fs\": \"read\",\n    \"network\": true\n  }\n}\n```\n\n### Complete `config.json` {#root-complete}\n\n Don't use this example as a starting point, it's just here to show you all the available\n options.\n```json\n{\n  \"accept_invalid_certificates\": false,\n  \"skip_processes\": \"ide-debugger\",\n  \"target\": {\n    \"path\": \"pod/bear-pod\",\n    \"namespace\": \"default\"\n  },\n  \"connect_tcp\": null,\n  \"agent\": {\n    \"log_level\": \"info\",\n    \"json_log\": false,\n    \"labels\": { \"user\": \"meow\" },\n    \"annotations\": { \"cats.io/inject\": \"enabled\" },\n    \"namespace\": \"default\",\n    \"image\": \"ghcr.io/metalbear-co/mirrord:latest\",\n    \"image_pull_policy\": \"IfNotPresent\",\n    \"image_pull_secrets\": [ { \"name\": \"secret\" } ],\n    \"ttl\": 30,\n    \"ephemeral\": false,\n    \"communication_timeout\": 30,\n    \"startup_timeout\": 360,\n    \"flush_connections\": true,\n    \"metrics\": \"0.0.0.0:9000\",\n  },\n  \"feature\": {\n    \"env\": {\n      \"include\": \"DATABASE_USER;PUBLIC_ENV\",\n      \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\",\n      \"override\": {\n        \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\",\n        \"LOCAL_BEAR\": \"panda\"\n      },\n      \"mapping\": {\n        \".+_TIMEOUT\": \"1000\"\n      }\n    },\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ],\n      \"prefetch\": [ \"/etc/ssl\" ]\n    },\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        },\n        \"port_mapping\": [[ 7777, 8888 ]],\n        \"ignore_localhost\": false,\n        \"ignore_ports\": [9999, 10000]\n      },\n      \"outgoing\": {\n        \"tcp\": true,\n        \"udp\": true,\n        \"filter\": {\n          \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"]\n        },\n        \"ignore_localhost\": false,\n        \"unix_streams\": \"bear.+\"\n      },\n      \"dns\": {\n        \"enabled\": true,\n        \"filter\": {\n          \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"]\n        }\n      }\n    },\n    \"copy_target\": {\n      \"scale_down\": false\n    }\n  },\n  \"operator\": true,\n  \"kubeconfig\": \"~/.kube/config\",\n  \"sip_binaries\": \"bash\",\n  \"telemetry\": true,\n  \"kube_context\": \"my-cluster\"\n}\n```\n\n# Options {#root-options}",
   "type": "object",
   "properties": {
     "accept_invalid_certificates": {
@@ -263,7 +263,7 @@
   "additionalProperties": false,
   "$defs": {
     "AdvancedFsUserConfig": {
-      "description": "Allows the user to specify the default behavior for file operations:\n\n1. `\"read\"` or `true` - Read from the remote file system (default)\n2. `\"write\"` - Read/Write from the remote file system.\n3. `\"local\"` or `false` - Read from the local file system.\n4. `\"localwithoverrides\"` - perform fs operation locally, unless the path matches a pre-defined\n   or user-specified exception.\n\n> Note: by default, some paths are read locally or remotely, regardless of the selected FS mode.\n> This is described in further detail below.\n\nBesides the default behavior, the user can specify behavior for specific regex patterns.\nCase insensitive.\n\n1. `\"read_write\"` - List of patterns that should be read/write remotely.\n2. `\"read_only\"` - List of patterns that should be read only remotely.\n3. `\"local\"` - List of patterns that should be read locally.\n4. `\"not_found\"` - List of patterns that should never be read nor written. These files should be\n   treated as non-existent.\n4. `\"mapping\"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))\n\nThe logic for choosing the behavior is as follows:\n\n\n1. Check against \"mapping\" if path needs to be replaced, if matched then continue to next step\n   with new path after replacements otherwise continue as usual.\n2. Check if one of the patterns match the file path, do the corresponding action. There's no\n   specified order if two lists match the same path, we will use the first one (and we do not\n   guarantee what is first).\n\n   **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined\n   behaviour.\n\n3. There are pre-defined exceptions to the set FS mode.\n  1. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_local_by_default.rs)\n     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_local_by_default.rs)\n     are read locally by default.\n  2. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_remote_by_default.rs)\n     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_remote_by_default.rs)\n     are read remotely by default when the mode is `localwithoverrides`.\n  3. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/not_found_by_default.rs)\n     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/not_found_by_default.rs)\n     under the running user's home directory will not be found by the application when the mode\n     is not `local`.\n\n  In order to override that default setting for a path, or a pattern, include it the\n  appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even\n  though it is covered by the set of pre-defined patterns that are read locally by default,\n  add `\"^/etc/.\"` to the `read_only` set.\n\n4. If none of the above match, use the default behavior (mode).\n\nFor more information, check the file operations\n[technical reference](https://metalbear.com/mirrord/docs/reference/fileops/).\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ],\n      \"not_found\": [ \"\\\\.config/gcloud\" ]\n    }\n  }\n}\n```",
+      "description": "Allows the user to specify the default behavior for file operations:\n\n1. `\"read\"` or `true` - Read from the remote file system (default)\n2. `\"write\"` - Read/Write from the remote file system.\n3. `\"local\"` or `false` - Read from the local file system.\n4. `\"localwithoverrides\"` - perform fs operation locally, unless the path matches a pre-defined\n   or user-specified exception.\n\n> Note: by default, some paths are read locally or remotely, regardless of the selected FS mode.\n> This is described in further detail below.\n\nBesides the default behavior, the user can specify behavior for specific regex patterns.\nCase insensitive.\n\n1. `\"read_write\"` - List of patterns that should be read/write remotely.\n2. `\"read_only\"` - List of patterns that should be read only remotely.\n3. `\"local\"` - List of patterns that should be read locally.\n4. `\"not_found\"` - List of patterns that should never be read nor written. These files should be\n   treated as non-existent.\n4. `\"mapping\"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))\n\nThe logic for choosing the behavior is as follows:\n\n\n1. Check against \"mapping\" if path needs to be replaced, if matched then continue to next step\n   with new path after replacements otherwise continue as usual.\n2. Check if one of the patterns match the file path, do the corresponding action. There's no\n   specified order if two lists match the same path, we will use the first one (and we do not\n   guarantee what is first).\n\n   **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined\n   behaviour.\n\n3. There are pre-defined exceptions to the set FS mode.\n  1. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_local_by_default.rs)\n     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_local_by_default.rs)\n     are read locally by default.\n  2. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_remote_by_default.rs)\n     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_remote_by_default.rs)\n     are read remotely by default when the mode is `localwithoverrides`.\n  3. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/not_found_by_default.rs)\n     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/not_found_by_default.rs)\n     under the running user's home directory will not be found by the application when the mode\n     is not `local`.\n\n  In order to override that default setting for a path, or a pattern, include it the\n  appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even\n  though it is covered by the set of pre-defined patterns that are read locally by default,\n  add `\"^/etc/.\"` to the `read_only` set.\n\n4. If none of the above match, use the default behavior (mode).\n\nFor more information, check the file operations\n[technical reference](https://metalbear.com/mirrord/docs/reference/fileops/).\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ],\n      \"not_found\": [ \"\\\\.config/gcloud\" ],\n      \"prefetch\": [ \"/etc/ssl\" ]\n    }\n  }\n}\n```",
       "type": "object",
       "properties": {
         "local": {
@@ -311,6 +311,27 @@
               "type": "null"
             }
           ]
+        },
+        "prefetch": {
+          "title": "feature.fs.prefetch {#feature-fs-prefetch}",
+          "description": "Remote paths to download from the target before the local process starts.\n\nEach path is copied from the remote filesystem into a temporary local directory, along\nwith its permissions. Operations on these paths are then served from that local copy,\nwithout involving the agent at all. Directories are copied recursively.\n\nWrites go to the copy as well, and are never sent to the target. The application reads\nback whatever it wrote for the rest of the run, and the copy is abandoned when the run\nends, leaving the target untouched. A write reaches the copy only when the\n[`mode`](#feature-fs-mode) would otherwise have sent it to the target, that is under\n`write`; under the other modes writes stay on the local filesystem under their original\npath, as they do for every other file.\n\nThe copy keeps the permissions it had in the target, so a file that is read-only there is\nread-only here, and writing to it fails locally much as it would remotely.\n\n**Do not prefetch secrets.** The copy is written to a temporary directory on the machine\nrunning mirrord, guarded by nothing more than that machine's own permissions, rather than\nby the cluster. It is deleted when the session ends, but a session that is killed outright\nleaves it behind, since nothing gets to run.\n\nCreating, deleting and renaming still act on the target: a file created under a prefetched\ndirectory is not part of the copy, and deleting or renaming a prefetched path takes effect\nremotely rather than in the copy.\n\nThis trades startup time for read throughput, and is meant for applications that\nrepeatedly read a small and stable set of remote files, e.g. an HTTP server that reads\n`/etc/ssl` on every request.\n\nBecause the copy is taken once, before the application starts, changes made to these\npaths in the pod afterwards are invisible to the application.\n\nPaths must start with `/`, as they are resolved in the remote pod, where the local\nprocess's working directory is meaningless.\n\nNot supported on Windows, where the option is ignored.\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mode\": \"read\",\n      \"prefetch\": [ \"/etc/ssl\", \"/app/config.yaml\" ]\n    }\n  }\n}\n```",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "prefetch_timeout": {
+          "title": "feature.fs.prefetch_timeout {#feature-fs-prefetch_timeout}",
+          "description": "How long to wait, in seconds, for each request to the agent made while copying\n[`prefetch`](#feature-fs-prefetch) paths. By default, the value is 30 seconds.\n\nThe limit is per request rather than for the whole copy, which makes many requests: one\nper directory listing, and one per chunk of every file. Raise it when copying from a slow\nor distant cluster, where a single request can outlast the default.\n\nA path that runs out of time is skipped with a warning, and is read from the remote as\nusual.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
         },
         "read_only": {
           "title": "feature.fs.read_only {#feature-fs-read_only}",
@@ -1045,6 +1066,16 @@
           ]
         },
         "port": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SingleOrVec_ParamSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "url": {
           "anyOf": [
             {
               "$ref": "#/$defs/SingleOrVec_ParamSource"
@@ -2080,6 +2111,14 @@
           "description": "When configuring a branch for PostgreSQL, set `type` to `pg`.",
           "type": "object",
           "properties": {
+            "additional_databases": {
+              "title": "feature.db_branches[].additional_databases (type: pg) {#feature-db_branches-pg-additional_databases}",
+              "description": "More databases from the same source server, copied into the same branch server. Use\nit when your application talks to several databases on one PostgreSQL server: every\ndatabase lands on one branch pod, so the application keeps using a single host.\n\nEach entry is dumped with the source connection of this branch (same host, port,\nuser, password, TLS, `iam_auth` and `connection_settings`); only the database name\ndiffers. The database gets the same name on the branch.\n\n- `name`: the database name on the source server. Must differ from the branch's own\n  database and from every other entry.\n- `connection` (optional): how the application reaches this database, in the same shape as\n  [`connection`](#feature-db_branches-sql-connection). mirrord points it at the branch with\n  this database's name. Without it, the database is only created and copied, and the\n  application switches to it on the branch host by itself.\n- `copy` (optional): copy mode and table filters for this database, in the same shape as\n  the branch's own `copy`. Defaults to `empty`.\n\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\n      {\n        \"type\": \"pg\",\n        \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DATABASE_URL\" } },\n        \"copy\": { \"mode\": \"all\" },\n        \"additional_databases\": [\n          {\n            \"name\": \"analytics\",\n            \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"ANALYTICS_DATABASE_URL\" } },\n            \"copy\": { \"mode\": \"schema\" }\n          }\n        ]\n      }\n    ]\n  }\n}\n```",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PgAdditionalDatabaseConfig"
+              }
+            },
             "connection": {
               "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
@@ -2515,6 +2554,73 @@
           "required": [
             "type",
             "connection"
+          ]
+        },
+        {
+          "description": "When configuring a branch for a turbopuffer namespace, set `type` to `turbopuffer`.\n\nThe branch namespace is a copy-on-write clone made by turbopuffer itself, so - like an S3\nbranch - it has no pod in the cluster and takes no `image` nor `version`. It is otherwise\na normal branch: the standard `id`, `ttl_secs`/`ttl_mins` and `creation_timeout_secs`\noptions all apply.\n\nturbopuffer clients pick the namespace per request, so the app has to read the namespace\nname from an env var for mirrord to redirect it. The `namespace` param names that var;\nonce the branch exists, the operator points it at the branch namespace. The `api_key`\nparam names where the operator reads the API key it branches with, and `region` (or\n`base_url`) where the namespace lives. Those two are only read, never rewritten.\n\nExample:\n```json\n{\n  \"type\": \"turbopuffer\",\n  \"source\": {\n    \"params\": {\n      \"namespace\": \"TPUF_NAMESPACE\",\n      \"api_key\": \"TURBOPUFFER_API_KEY\",\n      \"region\": { \"env_var_name\": \"TURBOPUFFER_REGION\", \"value\": \"gcp-us-central1\" }\n    }\n  },\n  \"copy\": { \"mode\": \"all\" }\n}\n```",
+          "type": "object",
+          "properties": {
+            "copy": {
+              "title": "feature.db_branches[].copy (type: turbopuffer) {#feature-db_branches-turbopuffer-copy}",
+              "description": "How the branch namespace is seeded from the source namespace.",
+              "$ref": "#/$defs/TurbopufferBranchCopyConfig",
+              "default": {
+                "mode": "empty"
+              }
+            },
+            "creation_timeout_secs": {
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "id": {
+              "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "profile": {
+              "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "title": "feature.db_branches[].source (type: turbopuffer) {#feature-db_branches-turbopuffer-source}",
+              "description": "Where to read the source namespace, the API key and the region from, in the same\nparams shape the other engines use for their connection details - `type` picks how\nthe variables are resolved on the target (`env` for the pod spec's own `env`,\n`env_from` for its `envFrom` sources), and is auto-detected when omitted.\n\nThe params a turbopuffer branch takes:\n\n- `namespace` (required): the env var holding the source namespace name. The operator\n  rewrites it to the branch namespace, so it must name an env var.\n- `api_key` (required): the API key used to branch and later delete the namespace.\n- `region`: the turbopuffer region, e.g. `gcp-us-central1`.\n- `base_url`: the full API endpoint, for dedicated clusters. Exactly one of `region` and\n  `base_url` must be set.\n\n```json\n{\n  \"source\": {\n    \"params\": {\n      \"namespace\": \"TPUF_NAMESPACE\",\n      \"api_key\": { \"secret\": \"turbopuffer\", \"key\": \"api-key\" },\n      \"base_url\": \"TURBOPUFFER_BASE_URL\"\n    }\n  }\n}\n```\n\nEach value is as flexible as any other engine's params: a Kubernetes Secret\n(`{ \"secret\": \"my-secret\", \"key\": \"namespace\" }`), a literal\n(`{ \"env_var_name\": \"TURBOPUFFER_REGION\", \"value\": \"gcp-us-central1\" }`), or a regex\nextracting the name out of a larger variable\n(`{ \"env_var_name\": \"TPUF_URI\", \"value_pattern\": \"...\" }`).",
+              "$ref": "#/$defs/ConnectionParamsConfig"
+            },
+            "ttl_mins": {
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "type": {
+              "type": "string",
+              "const": "turbopuffer"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "source"
           ]
         }
       ]
@@ -3140,7 +3246,7 @@
       "additionalProperties": false
     },
     "FeatureFileConfig": {
-      "description": "Controls mirrord features.\n\nSee the\n[technical reference, Technical Reference](https://metalbear.com/mirrord/docs/reference/)\nto learn more about what each feature does.\n\nThe [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options\nhave support for a shortened version, that you can see [here](#root-shortened).\n\n```json\n{\n  \"feature\": {\n    \"env\": {\n      \"include\": \"DATABASE_USER;PUBLIC_ENV\",\n      \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\",\n      \"override\": {\n        \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\",\n        \"LOCAL_BEAR\": \"panda\"\n      }\n    },\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ]\n    },\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        },\n        \"port_mapping\": [[ 7777, 8888 ]],\n        \"ignore_localhost\": false,\n        \"ignore_ports\": [9999, 10000]\n      },\n      \"outgoing\": {\n        \"tcp\": true,\n        \"udp\": true,\n        \"filter\": {\n          \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"]\n        },\n        \"ignore_localhost\": false,\n        \"unix_streams\": \"bear.+\"\n      },\n      \"dns\": false\n    },\n    \"copy_target\": false,\n    \"hostname\": true\n  }\n}\n```",
+      "description": "Controls mirrord features.\n\nSee the\n[technical reference, Technical Reference](https://metalbear.com/mirrord/docs/reference/)\nto learn more about what each feature does.\n\nThe [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options\nhave support for a shortened version, that you can see [here](#root-shortened).\n\n```json\n{\n  \"feature\": {\n    \"env\": {\n      \"include\": \"DATABASE_USER;PUBLIC_ENV\",\n      \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\",\n      \"override\": {\n        \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\",\n        \"LOCAL_BEAR\": \"panda\"\n      }\n    },\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ],\n      \"prefetch\": [ \"/etc/ssl\" ]\n    },\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        },\n        \"port_mapping\": [[ 7777, 8888 ]],\n        \"ignore_localhost\": false,\n        \"ignore_ports\": [9999, 10000]\n      },\n      \"outgoing\": {\n        \"tcp\": true,\n        \"udp\": true,\n        \"filter\": {\n          \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"]\n        },\n        \"ignore_localhost\": false,\n        \"unix_streams\": \"bear.+\"\n      },\n      \"dns\": false\n    },\n    \"copy_target\": false,\n    \"hostname\": true\n  }\n}\n```",
       "type": "object",
       "properties": {
         "copy_target": {
@@ -3306,7 +3412,7 @@
     },
     "FsUserConfig": {
       "title": "feature.fs {#fs}",
-      "description": "Changes file operations behavior based on user configuration.\n\nSee the file operations [reference](https://metalbear.com/mirrord/docs/reference/fileops/)\nfor more details, and [fs advanced](#fs-advanced) for more information on how to fully setup\nmirrord file operations.\n\n### Minimal `fs` config {#fs-minimal}\n\n```json\n{\n  \"feature\": {\n    \"fs\": \"read\"\n  }\n}\n```\n\n### Advanced `fs` config {#fs-advanced}\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ]\n    }\n  }\n}\n```",
+      "description": "Changes file operations behavior based on user configuration.\n\nSee the file operations [reference](https://metalbear.com/mirrord/docs/reference/fileops/)\nfor more details, and [fs advanced](#fs-advanced) for more information on how to fully setup\nmirrord file operations.\n\n### Minimal `fs` config {#fs-minimal}\n\n```json\n{\n  \"feature\": {\n    \"fs\": \"read\"\n  }\n}\n```\n\n### Advanced `fs` config {#fs-advanced}\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ],\n      \"prefetch\": [ \"/etc/ssl\" ]\n    }\n  }\n}\n```",
       "anyOf": [
         {
           "description": "<!--${internal}-->\nBasic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`\n(default).",
@@ -3867,6 +3973,24 @@
         }
       ]
     },
+    "InnerMessageFilter": {
+      "description": "One filter inside `all_of` / `any_of`. Only `metadata` regexes for now; the list form leaves\nroom for other leaf kinds without changing the shape.",
+      "anyOf": [
+        {
+          "description": "A regex matched against each message attribute rendered as `<name>: <value>`.",
+          "type": "object",
+          "properties": {
+            "metadata": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metadata"
+          ]
+        }
+      ]
+    },
     "InternalProxyFileConfig": {
       "description": "Configuration for the internal proxy mirrord spawns for each local mirrord session\nthat local layers use to connect to the remote agent\n\nThis is seldom used, but if you get `ConnectionRefused` errors, you might\nwant to increase the timeouts a bit.\n\n```json\n{\n  \"internal_proxy\": {\n    \"start_idle_timeout\": 30,\n    \"idle_timeout\": 5\n  }\n}\n```",
       "type": "object",
@@ -4052,13 +4176,30 @@
       "additionalProperties": false
     },
     "LocalTlsDelivery": {
-      "description": "Stolen TLS traffic can be delivered to the local application either as TLS or as plain TCP.\nNote that stealing TLS traffic requires mirrord Operator support.\n\nTo have the stolen TLS traffic delivered with plain TCP, use:\n\n```json\n{\n  \"protocol\": \"tcp\"\n}\n```\n\nTo have the traffic delivered with TLS, use:\n```json\n{\n  \"protocol\": \"tls\"\n}\n```\n\nBy default, the local mirrord TLS client will trust any certificate presented by the local\napplication's TLS server. To override this behavior, you can either:\n\n1. Specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file\n   directories. Each found certificate will be used as a trust anchor.\n2. Specify a path to the cartificate chain used by the server.\n\nExample with trust roots:\n```json\n{\n  \"protocol\": \"tls\",\n  \"trust_roots\": [\"/path/to/cert.pem\", \"/path/to/cert/dir\"]\n}\n```\n\nExample with certificate chain:\n```json\n{\n  \"protocol\": \"tls\",\n  \"server_cert\": \"/path/to/cert.pem\"\n}\n```\n\nTo make a TLS connection to the local application's server,\nmirrord's TLS client needs a server name. You can supply it manually like this:\n```json\n{\n  \"protocol\": \"tls\",\n  \"server_name\": \"my.test.server.name\"\n}\n```\n\nIf you don't supply the server name:\n\n1. If `server_cert` is given, and the found end-entity certificate contains a valid server name,\n   this server name will be used;\n2. Otherwise, if the original client supplied an SNI extension, the server name from that\n   extension will be used;\n3. Otherwise, if the stolen request's URL contains a valid server name, that server name will be\n   used;\n4. Otherwise, `localhost` will be used.",
+      "description": "Stolen TLS traffic can be delivered to the local application either as TLS or as plain TCP.\nNote that stealing TLS traffic requires mirrord Operator support.\n\nTo have the stolen TLS traffic delivered with plain TCP, use:\n\n```json\n{\n  \"protocol\": \"tcp\"\n}\n```\n\nTo have the traffic delivered with TLS, use:\n```json\n{\n  \"protocol\": \"tls\"\n}\n```\n\nBy default, the local mirrord TLS client will trust any certificate presented by the local\napplication's TLS server. To override this behavior, you can either:\n\n1. Specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file\n   directories. Each found certificate will be used as a trust anchor.\n2. Specify a path to the cartificate chain used by the server.\n\nExample with trust roots:\n```json\n{\n  \"protocol\": \"tls\",\n  \"trust_roots\": [\"/path/to/cert.pem\", \"/path/to/cert/dir\"]\n}\n```\n\nExample with certificate chain:\n```json\n{\n  \"protocol\": \"tls\",\n  \"server_cert\": \"/path/to/cert.pem\"\n}\n```\n\nTo make a TLS connection to the local application's server,\nmirrord's TLS client needs a server name. You can supply it manually like this:\n```json\n{\n  \"protocol\": \"tls\",\n  \"server_name\": \"my.test.server.name\"\n}\n```\n\nIf you don't supply the server name:\n\n1. If `server_cert` is given, and the found end-entity certificate contains a valid server name,\n   this server name will be used;\n2. Otherwise, if the original client supplied an SNI extension, the server name from that\n   extension will be used;\n3. Otherwise, if the stolen request's URL contains a valid server name, that server name will be\n   used;\n4. Otherwise, `localhost` will be used.\n\nIf the local application's TLS server requires a client certificate (mutual TLS), give\nmirrord's TLS client one to present:\n```json\n{\n  \"protocol\": \"tls\",\n  \"client_cert\": \"/path/to/client.cert.pem\",\n  \"client_key\": \"/path/to/client.key.pem\"\n}\n```\n\nIn preview sessions (`mirrord preview start`) the mirrord operator makes the TLS connection to\nthe preview pod, so `client_cert` and `client_key` are read locally, stored in the session's\nSecret and presented by the operator. `server_name` is used the same way. The other settings\ndo not apply to previews: the operator always delivers over TLS and does not verify the\npreview pod's certificate.",
       "type": "object",
       "properties": {
+        "client_cert": {
+          "title": "feature.network.incoming.tls_delivery.client_cert {#feature-network-incoming-tls_delivery-client_cert}",
+          "description": "Path to a PEM file containing the certificate chain mirrord presents to the local\napplication's TLS server, for applications that require a client certificate.\n\nThis file must contain at least one certificate. Must be set together with `client_key`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "client_key": {
+          "title": "feature.network.incoming.tls_delivery.client_key {#feature-network-incoming-tls_delivery-client_key}",
+          "description": "Path to a PEM file containing the private key of `client_cert`.\n\nThis file must contain exactly one private key. Must be set together with `client_cert`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "protocol": {
           "title": "feature.network.incoming.tls_delivery.protocol {#feature-network-incoming-tls_delivery-protocol}",
-          "description": "Protocol to use when delivering the TLS traffic locally.",
-          "$ref": "#/$defs/TlsDeliveryProtocol"
+          "description": "Protocol to use when delivering the TLS traffic locally. Defaults to `tls`.",
+          "$ref": "#/$defs/TlsDeliveryProtocol",
+          "default": "tls"
         },
         "server_cert": {
           "description": "Path to a PEM file containing the certificate chain used by the local application's\nTLS server.\n\nThis file must contain at least one certificate.\nIt can contain entries of other types, e.g private keys, which are ignored.",
@@ -4087,10 +4228,7 @@
           }
         }
       },
-      "additionalProperties": false,
-      "required": [
-        "protocol"
-      ]
+      "additionalProperties": false
     },
     "MagicFileConfig": {
       "description": "Sensible default behaviors that help most users. Disable individual flags only if they conflict\nwith your setup.\n\n```json\n{\n  \"feature\": {\n    \"magic\": {\n      \"aws\": true\n    }\n  }\n}\n```",
@@ -4208,6 +4346,59 @@
           "additionalProperties": false,
           "required": [
             "mode"
+          ]
+        }
+      ]
+    },
+    "MessageFilterConfig": {
+      "title": "feature.split_queues.{}.filter {#feature-split_queues-queue_id-filter}",
+      "description": "A composable message filter, shaped like the HTTP `http_filter`: one `metadata` regex, or an\n`all_of` / `any_of` list of `metadata` regexes.\n\nA `metadata` regex is matched against every message attribute (SQS message attributes, Kafka\nand RabbitMQ headers, Pub/Sub attributes, Service Bus application properties, Temporal task\nmetadata, top-level JSON fields for Redis Pub/Sub and BullMQ) rendered as\n`<name>: <value>`, the same way the HTTP filter sees headers. The message matches when any\nattribute line matches, so one regex can target an attribute by name (`^tenant: blue$`) or\na value wherever it appears (`.*mirrord-session={{ key }}.*`). Matching is case sensitive.\n\nUse `filter` **or** the older `message_filter`, not both. `message_filter` is a map from an\nexact attribute name to a regex on its value, and is equivalent to an `all_of` of one\n`metadata` filter per entry.\n\n```json\n{\n  \"feature\": {\n    \"split_queues\": [\n      {\n        \"queue_id\": \"*\",\n        \"queue_type\": \"SQS\",\n        \"filter\": { \"metadata\": \"^tenant: blue-.*$\" }\n      },\n      {\n        \"queue_id\": \"*\",\n        \"queue_type\": \"Temporal\",\n        \"filter\": {\n          \"any_of\": [\n            { \"metadata\": \"^header.baggage: .*mirrord-session={{ key }}.*$\" },\n            { \"metadata\": \"^header.test: .*mirrord-session={{ key }}.*$\" }\n          ]\n        }\n      }\n    ]\n  }\n}\n```",
+      "anyOf": [
+        {
+          "description": "A regex matched against each message attribute rendered as `<name>: <value>`. Supports\nthe syntax of the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/)\ncrate.",
+          "type": "object",
+          "properties": {
+            "metadata": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "metadata"
+          ]
+        },
+        {
+          "description": "The message must match every filter in the list. Cannot be empty.",
+          "type": "object",
+          "properties": {
+            "all_of": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/InnerMessageFilter"
+              },
+              "minItems": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "all_of"
+          ]
+        },
+        {
+          "description": "The message must match at least one filter in the list. Cannot be empty.",
+          "type": "object",
+          "properties": {
+            "any_of": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/InnerMessageFilter"
+              },
+              "minItems": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "any_of"
           ]
         }
       ]
@@ -4547,6 +4738,39 @@
         }
       ]
     },
+    "PgAdditionalDatabaseConfig": {
+      "description": "<!--${internal}-->\nOne more database copied into a PostgreSQL branch. Documented on\n`PgBranchConfig::additional_databases`.",
+      "type": "object",
+      "properties": {
+        "connection": {
+          "description": "How the application connects to this database. mirrord points it at the branch.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "copy": {
+          "description": "Copy mode and table filters for this database.",
+          "$ref": "#/$defs/PgBranchCopyConfig",
+          "default": {
+            "mode": "empty",
+            "tables": null
+          }
+        },
+        "name": {
+          "description": "Database name on the source server, reused on the branch.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
     "PgBranchCopyConfig": {
       "description": "Users can choose from the following copy mode to bootstrap their PostgreSQL branch database.\n\nAll copy modes accept `dump_args`. When this field is set, it replaces the default `pg_dump`\narguments. The defaults are `--no-owner` and `--no-acl`; include them explicitly when\noverriding if you want to preserve the default behavior. An empty list means no dump args.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.",
       "oneOf": [
@@ -4685,7 +4909,7 @@
       "properties": {
         "config_mounts": {
           "title": "feature.preview.config_mounts {#feature-preview-config_mounts}",
-          "description": "Files to mount into the preview pod at session start.\n\nEach entry projects a single file at an absolute path inside the\ncontainer's filesystem, without shadowing the surrounding directory's\nother contents. Useful for overriding individual config files\n(`/etc/app/config.yaml`, `/etc/nginx/conf.d/custom.conf`, ...) without\nrebuilding the image.\n\nFiles are read once at session creation and never refreshed — re-run\n`mirrord preview start` with the same `key` to change them.\n\n`config_mounts` is not a confidentiality boundary: the `payload` is\nstored on the `PreviewSession` resource and is visible to anyone with\n`get` permission on it. Do not put credentials or secrets here.\n\nEach entry sources its content one of two ways:\n- **Inline:** set `type` (`\"text\"` or `\"binary\"`) and `payload` directly.\n- **From file:** set `from_file` to a path on the local filesystem. The file is read at\n  session creation time; valid UTF-8 contents are sent as `\"text\"`, anything else is\n  base64-encoded and sent as `\"binary\"`. The local path is not transmitted to the operator.\n\n`payload`/`type` and `from_file` are mutually exclusive on a single entry.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"config_mounts\": [\n        {\n          \"mount_at\": \"/etc/app/config.yaml\",\n          \"type\": \"text\",\n          \"payload\": \"server:\\n  listen: 8080\\n\"\n        },\n        {\n          \"mount_at\": \"/usr/local/bin/probe\",\n          \"from_file\": \"./build/probe\"\n        }\n      ]\n    }\n  }\n}\n```\n\n##### Implementation\n\nEach session creates one `ConfigMap` owned by the `PreviewSession`,\nholding all mount payloads. The ConfigMap is mounted into the preview pod\nwith one per-file `subPath` bind per entry, so each mount overlays a\nsingle path without shadowing the surrounding directory. The ConfigMap is\ngarbage-collected automatically when the session ends.\n\nBecause both the `PreviewSession` resource and the generated `ConfigMap`\nlive in etcd, the **combined size of all `payload` payloads in a single\nsession is bound by Kubernetes' ~1 MiB per-object limit**. For `\"text\"`\npayloads that's roughly 1 MiB of content; for `\"binary\"`, base64\ninflates the encoded form by ~33%, leaving roughly 750 KiB of raw bytes.\nExceeding the limit causes the apiserver to reject the session at\ncreation time.",
+          "description": "Files to mount into the preview pod at session start.\n\nEach entry projects a single file at an absolute path inside the\ncontainer's filesystem, without shadowing the surrounding directory's\nother contents. Useful for overriding individual config files\n(`/etc/app/config.yaml`, `/etc/nginx/conf.d/custom.conf`, ...) without\nrebuilding the image.\n\nFiles are read once at session creation and never refreshed — re-run\n`mirrord preview start` with the same `key` to change them.\n\n`config_mounts` is not a confidentiality boundary: the `payload` is\nstored on the `PreviewSession` resource and is visible to anyone with\n`get` permission on it. Do not put credentials or secrets here.\n\nEach entry sources its content one of two ways:\n- **Inline:** set `type` (`\"text\"` or `\"binary\"`) and `payload` directly.\n- **From file:** set `from_file` to a path on the local filesystem. The file is read at\n  session creation time; valid UTF-8 contents are sent as `\"text\"`, anything else is\n  base64-encoded and sent as `\"binary\"`. The local path is not transmitted to the operator.\n\n`payload`/`type` and `from_file` are mutually exclusive on a single entry.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"config_mounts\": [\n        {\n          \"mount_at\": \"/etc/app/config.yaml\",\n          \"type\": \"text\",\n          \"payload\": \"server:\\n  listen: 8080\\n\"\n        },\n        {\n          \"mount_at\": \"/usr/local/bin/probe\",\n          \"from_file\": \"./build/probe\"\n        }\n      ]\n    }\n  }\n}\n```\n\n##### Implementation\n\nEach session creates one `ConfigMap` owned by the `PreviewSession`,\nholding all mount payloads. The ConfigMap is mounted into the preview pod\nwith one per-file `subPath` bind per entry, so each mount overlays a\nsingle path without shadowing the surrounding directory. An entry inside\na ConfigMap, Secret, downward API, or projected volume the container\nalready mounts is projected into that volume instead. The ConfigMap is\ngarbage-collected automatically when the session ends.\n\nBecause both the `PreviewSession` resource and the generated `ConfigMap`\nlive in etcd, the **combined size of all `payload` payloads in a single\nsession is bound by Kubernetes' ~1 MiB per-object limit**. For `\"text\"`\npayloads that's roughly 1 MiB of content; for `\"binary\"`, base64\ninflates the encoded form by ~33%, leaving roughly 750 KiB of raw bytes.\nExceeding the limit causes the apiserver to reject the session at\ncreation time.",
           "type": [
             "array",
             "null"
@@ -4759,7 +4983,7 @@
         },
         "secret_mounts": {
           "title": "feature.preview.secret_mounts {#feature-preview-secret_mounts}",
-          "description": "Files to mount into the preview pod at session start, stored as a\nKubernetes `Secret` instead of on the `PreviewSession` resource.\n\nSame shape and behavior as [`config_mounts`](#feature-preview-config_mounts):\neach entry projects a single file at an absolute path inside the\ncontainer's filesystem without shadowing the surrounding directory, and\nfiles are read once at session creation and never refreshed.\n\nUse `secret_mounts` for sensitive files (credentials, connection\nstrings, ...). Unlike `config_mounts`, the file contents are never stored\non the `PreviewSession` resource. The CLI sends them to the operator,\nwhich creates a `Secret` holding them; the session stores only where each\nfile mounts, not the contents. Access to the contents can then be\ncontrolled via RBAC on the `Secret` independently of who can read the\nsession.\n\nEach entry sources its content one of two ways:\n- **Inline:** set `type` (`\"text\"` or `\"binary\"`) and `payload` directly.\n- **From file:** set `from_file` to a path on the local filesystem. The file is read at\n  session creation time; valid UTF-8 contents are sent as `\"text\"`, anything else is\n  base64-encoded and sent as `\"binary\"`. The local path is not transmitted to the operator.\n\n`payload`/`type` and `from_file` are mutually exclusive on a single entry.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"secret_mounts\": [\n        {\n          \"mount_at\": \"/app/appsettings.ci.json\",\n          \"from_file\": \"./appsettings.ci.json\"\n        }\n      ]\n    }\n  }\n}\n```\n\n##### Implementation\n\nThe operator creates one `Secret` per session, holding all mount contents,\nwith its own service account - so the developer running the CLI does not\nneed permission to create `Secret`s. The `Secret` carries the session's\nowner reference and is garbage-collected when the session ends. It is\nmounted into the preview pod with one per-file `subPath` bind per entry, so\neach mount overlays a single path without shadowing the surrounding\ndirectory.\n\nThe same ~1 MiB per-object Kubernetes limit as `config_mounts` applies to\nthe combined size of all contents in a single session.",
+          "description": "Files to mount into the preview pod at session start, stored as a\nKubernetes `Secret` instead of on the `PreviewSession` resource.\n\nSame shape and behavior as [`config_mounts`](#feature-preview-config_mounts):\neach entry projects a single file at an absolute path inside the\ncontainer's filesystem without shadowing the surrounding directory, and\nfiles are read once at session creation and never refreshed.\n\nUse `secret_mounts` for sensitive files (credentials, connection\nstrings, ...). Unlike `config_mounts`, the file contents are never stored\non the `PreviewSession` resource. The CLI sends them to the operator,\nwhich creates a `Secret` holding them; the session stores only where each\nfile mounts, not the contents. Access to the contents can then be\ncontrolled via RBAC on the `Secret` independently of who can read the\nsession.\n\nEach entry sources its content one of two ways:\n- **Inline:** set `type` (`\"text\"` or `\"binary\"`) and `payload` directly.\n- **From file:** set `from_file` to a path on the local filesystem. The file is read at\n  session creation time; valid UTF-8 contents are sent as `\"text\"`, anything else is\n  base64-encoded and sent as `\"binary\"`. The local path is not transmitted to the operator.\n\n`payload`/`type` and `from_file` are mutually exclusive on a single entry.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"secret_mounts\": [\n        {\n          \"mount_at\": \"/app/appsettings.ci.json\",\n          \"from_file\": \"./appsettings.ci.json\"\n        }\n      ]\n    }\n  }\n}\n```\n\n##### Implementation\n\nThe operator creates one `Secret` per session, holding all mount contents,\nwith its own service account - so the developer running the CLI does not\nneed permission to create `Secret`s. The `Secret` carries the session's\nowner reference and is garbage-collected when the session ends. It is\nmounted into the preview pod with one per-file `subPath` bind per entry, so\neach mount overlays a single path without shadowing the surrounding\ndirectory. An entry inside a ConfigMap, Secret, downward API, or projected\nvolume the container already mounts is projected into that volume instead.\n\nThe same ~1 MiB per-object Kubernetes limit as `config_mounts` applies to\nthe combined size of all contents in a single session.",
           "type": [
             "array",
             "null"
@@ -4879,6 +5103,27 @@
         "infinite"
       ]
     },
+    "QueueKind": {
+      "title": "feature.split_queues.{}.queue_type {#feature-split_queues-queue_id-queue_type}",
+      "description": "The broker the queue lives on. One of `SQS`, `Kafka`, `RMQ`, `GCPPubSub`, `RedisPubSub`,\n`AzureServiceBus`, `Temporal`, `BullMQ`, `NATS`, or `NATSPubSub`.\n\nThe `Display` form is the snake_case name used in analytics keys and logs.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "SQS",
+            "Kafka",
+            "RMQ",
+            "GCPPubSub",
+            "RedisPubSub",
+            "AzureServiceBus",
+            "Temporal",
+            "BullMQ",
+            "NATS",
+            "NATSPubSub"
+          ]
+        }
+      ]
+    },
     "QueueMode": {
       "title": "feature.split_queues.{}.queue_mode {#feature-split_queues-queue_id-queue_mode}",
       "description": "Controls what happens to a message that matches this session's filter.\n\n- `steal` (default): the matched message is delivered only to this session, so the deployed\n  application never sees it.\n- `mirror`: the matched message is delivered to this session **and** still delivered to the\n  deployed application, so both process a copy.",
@@ -4892,644 +5137,6 @@
           "description": "Deliver matched messages to this session while the deployed application still gets them.",
           "type": "string",
           "const": "mirror"
-        }
-      ]
-    },
-    "QueueSplit": {
-      "title": "feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}",
-      "description": "A single queue splitting entry: the queue id together with its filter. Keeping the id next to\nthe filter (instead of using it as a map key) is what lets the same id show up more than once,\nwhich a map cannot do.",
-      "type": "object",
-      "properties": {
-        "queue_id": {
-          "description": "The id of the queue to split. Does not have to be unique across entries.",
-          "type": "string"
-        },
-        "queue_mode": {
-          "description": "Whether matched messages are stolen from the deployed application or mirrored to it.",
-          "$ref": "#/$defs/QueueMode"
-        }
-      },
-      "oneOf": [
-        {
-          "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
-          "description": "When this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nis used.\n\nFor **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,\n`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8. With `payload_protobuf` set, the\nobject additionally has a `payload_decoded` field holding the payload decoded from\nprotobuf.\n\nFor **RabbitMQ**, an object with `headers` (the AMQP basic-properties headers table),\n`properties`, and `payload` fields is used. The `payload` and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8.\n\nFor **Azure Service Bus**, an object with `body`, `application_properties`,\n`message_id`, `content_type`, and `subject` fields is used.\n\nFor **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose\npayload is not valid JSON never match.\n\nFor **Temporal**, an object the operator builds for each task is used. Every object has\na `task_type` field, set to either `\"activity\"` or `\"workflow\"`. Activity tasks also\ncarry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,\n`activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).\nWorkflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,\n`task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,\n`search_attributes`, `memo`, and `input`.\n\nFor **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not\nvalid JSON never match.\n\nFor **NATS**, an object with `subject`, `headers`, and `payload` fields is used.\n`payload` is the message body parsed as JSON when the body is JSON, and a string\notherwise (base64-encoded when not valid UTF-8).\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each SQS message, the jq filter runs on a JSON\nrepresentation of the SQS `Message` object.\n\nSee [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between message attribute names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the attributes in the\nfilter, with values of those attributes matching the respective patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "SQS"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each Kafka message, the jq filter runs on a JSON\nrepresentation of the message record: an object with `topic`, `partition`, `offset`,\n`timestamp` (milliseconds, present when the record has one), `key`, `payload`, and\n`headers` (an object mapping header names to their values) fields. `key`, `payload`,\nand header values are UTF-8 strings, or base64-encoded when not valid UTF-8.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.\n\nFor example, `\".payload | fromjson | .customer_id == 2137\"` matches messages whose\npayload is a JSON object with a `customer_id` field equal to `2137`.\n\nWhen `payload_protobuf` is set, the object additionally has a `payload_decoded`\nfield holding the payload decoded from protobuf, so the program can target schema\nfields directly, e.g. `\".payload_decoded.merchant_id == 2137\"`.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "payload_protobuf": {
-              "description": "Decodes the raw protobuf payload into a `payload_decoded` field for `jq_filter`,\nfor topics that carry plain protobuf instead of JSON.",
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/KafkaPayloadProtobuf"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "Kafka"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each RabbitMQ message, the jq filter runs on a JSON\nrepresentation of the message: an object with `headers` (the AMQP basic-properties\nheaders table), `properties` (the remaining basic properties), and `payload` fields.\nThe `payload` and header values are UTF-8 strings, or base64-encoded when not valid\nUTF-8.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "RMQ"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each Pub/Sub message, the jq filter runs on a JSON\nrepresentation of the full\n[`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nobject.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between Pub/Sub message attribute names and regexes they\nshould match. The local application will only receive messages whose attributes\nmatch **all** of the given patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "GCPPubSub"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter that runs on the JSON representation of the message payload.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between top-level JSON field names and regexes they\nshould match. The local application will only receive messages whose JSON\npayload contains fields matching **all** of the given patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "RedisPubSub"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each Service Bus message, the jq filter runs on a JSON\nobject with `body`, `application_properties`, `message_id`, `content_type`, and\n`subject` fields.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between Azure Service Bus application property names and\nregexes they should match. The local application will only receive messages whose\napplication properties match **all** of the given patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "AzureServiceBus"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "JQ filter on activity task input JSON. Workflow tasks ignore this filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "Regex filters on Temporal task metadata (`workflow_id`, `workflow_type`,\n`activity_type`, or custom search attribute keys). All patterns must match.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "Temporal"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter that runs on the JSON representation of the job's `data` payload.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter on top-level JSON fields in the job's `data` payload and regexes\nthey should match. Only jobs whose data contains fields matching **all**\npatterns are delivered to the local application.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "BullMQ"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each NATS message, the jq filter runs on a JSON\nobject with `subject`, `headers`, and `payload` fields. `payload` is the message\nbody parsed as JSON when the body is JSON, and a string otherwise.\n\nIf the jq program outputs `true`, that message is considered as matching the\nfilter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between NATS message header names and regexes they should\nmatch. The local application will only receive messages whose headers match\n**all** of the given patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "NATS"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each NATS message, the jq filter runs on a JSON\nobject with `subject`, `headers`, and `payload` fields. `payload` is the message\nbody parsed as JSON when the body is JSON, and a string otherwise.\n\nIf the jq program outputs `true`, that message is considered as matching the\nfilter.\n\nUnlike `NATS` (JetStream), core NATS pub/sub stores nothing, so delivery to the\nlocal application is best-effort: messages published while the split is being set\nup or torn down are not replayed.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between NATS message header names and regexes they should\nmatch. The local application will only receive messages whose headers match\n**all** of the given patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "NATSPubSub"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        }
-      ],
-      "required": [
-        "queue_id"
-      ]
-    },
-    "QueueSplitMapValueOwned": {
-      "title": "feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}",
-      "description": "Owned counterpart of [`QueueSplitMapValue`] used when reading the map form. Also drives the\nJSON schema for the map value so `queue_mode` is documented alongside the filter.",
-      "type": "object",
-      "properties": {
-        "queue_mode": {
-          "$ref": "#/$defs/QueueMode"
-        }
-      },
-      "oneOf": [
-        {
-          "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
-          "description": "When this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nis used.\n\nFor **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,\n`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8. With `payload_protobuf` set, the\nobject additionally has a `payload_decoded` field holding the payload decoded from\nprotobuf.\n\nFor **RabbitMQ**, an object with `headers` (the AMQP basic-properties headers table),\n`properties`, and `payload` fields is used. The `payload` and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8.\n\nFor **Azure Service Bus**, an object with `body`, `application_properties`,\n`message_id`, `content_type`, and `subject` fields is used.\n\nFor **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose\npayload is not valid JSON never match.\n\nFor **Temporal**, an object the operator builds for each task is used. Every object has\na `task_type` field, set to either `\"activity\"` or `\"workflow\"`. Activity tasks also\ncarry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,\n`activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).\nWorkflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,\n`task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,\n`search_attributes`, `memo`, and `input`.\n\nFor **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not\nvalid JSON never match.\n\nFor **NATS**, an object with `subject`, `headers`, and `payload` fields is used.\n`payload` is the message body parsed as JSON when the body is JSON, and a string\notherwise (base64-encoded when not valid UTF-8).\n\nThis can be used to filter messages based on their body content, for example.\n\n\nThis filter, for example, will tell mirrord to only make available to this local application\nmessages with a json in the message body, with a `customer_email` field that contains\n\"metalbear.com\": `\".Body | fromjson | .customer_email | test(\\\"metalbear\\\\\\\\.com\\\")\"`",
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each SQS message, the jq filter runs on a JSON\nrepresentation of the SQS `Message` object.\n\nSee [SQS `Message` object reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html).\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between message attribute names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the attributes in the\nfilter, with values of those attributes matching the respective patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "SQS"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each Kafka message, the jq filter runs on a JSON\nrepresentation of the message record: an object with `topic`, `partition`, `offset`,\n`timestamp` (milliseconds, present when the record has one), `key`, `payload`, and\n`headers` (an object mapping header names to their values) fields. `key`, `payload`,\nand header values are UTF-8 strings, or base64-encoded when not valid UTF-8.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.\n\nFor example, `\".payload | fromjson | .customer_id == 2137\"` matches messages whose\npayload is a JSON object with a `customer_id` field equal to `2137`.\n\nWhen `payload_protobuf` is set, the object additionally has a `payload_decoded`\nfield holding the payload decoded from protobuf, so the program can target schema\nfields directly, e.g. `\".payload_decoded.merchant_id == 2137\"`.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "payload_protobuf": {
-              "description": "Decodes the raw protobuf payload into a `payload_decoded` field for `jq_filter`,\nfor topics that carry plain protobuf instead of JSON.",
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/KafkaPayloadProtobuf"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "Kafka"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each RabbitMQ message, the jq filter runs on a JSON\nrepresentation of the message: an object with `headers` (the AMQP basic-properties\nheaders table), `properties` (the remaining basic properties), and `payload` fields.\nThe `payload` and header values are UTF-8 strings, or base64-encoded when not valid\nUTF-8.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between message header names and regexes they should match.\nThe local application will only receive messages that match **all** of the given\npatterns. This means, only messages that have **all** of the headers in the\nfilter, with values of those headers matching the respective patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "RMQ"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each Pub/Sub message, the jq filter runs on a JSON\nrepresentation of the full\n[`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nobject.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between Pub/Sub message attribute names and regexes they\nshould match. The local application will only receive messages whose attributes\nmatch **all** of the given patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "GCPPubSub"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter that runs on the JSON representation of the message payload.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between top-level JSON field names and regexes they\nshould match. The local application will only receive messages whose JSON\npayload contains fields matching **all** of the given patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "RedisPubSub"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each Service Bus message, the jq filter runs on a JSON\nobject with `body`, `application_properties`, `message_id`, `content_type`, and\n`subject` fields.\n\nIf the jq program outputs `true`, that message is considered as matching the filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between Azure Service Bus application property names and\nregexes they should match. The local application will only receive messages whose\napplication properties match **all** of the given patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "AzureServiceBus"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "JQ filter on activity task input JSON. Workflow tasks ignore this filter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "Regex filters on Temporal task metadata (`workflow_id`, `workflow_type`,\n`activity_type`, or custom search attribute keys). All patterns must match.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "Temporal"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter that runs on the JSON representation of the job's `data` payload.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter on top-level JSON fields in the job's `data` payload and regexes\nthey should match. Only jobs whose data contains fields matching **all**\npatterns are delivered to the local application.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "BullMQ"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each NATS message, the jq filter runs on a JSON\nobject with `subject`, `headers`, and `payload` fields. `payload` is the message\nbody parsed as JSON when the body is JSON, and a string otherwise.\n\nIf the jq program outputs `true`, that message is considered as matching the\nfilter.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between NATS message header names and regexes they should\nmatch. The local application will only receive messages whose headers match\n**all** of the given patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "NATS"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jq_filter": {
-              "description": "A jq filter.\n\nWhen this is specified, for each NATS message, the jq filter runs on a JSON\nobject with `subject`, `headers`, and `payload` fields. `payload` is the message\nbody parsed as JSON when the body is JSON, and a string otherwise.\n\nIf the jq program outputs `true`, that message is considered as matching the\nfilter.\n\nUnlike `NATS` (JetStream), core NATS pub/sub stores nothing, so delivery to the\nlocal application is best-effort: messages published while the split is being set\nup or torn down are not replayed.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "message_filter": {
-              "description": "A filter is a mapping between NATS message header names and regexes they should\nmatch. The local application will only receive messages whose headers match\n**all** of the given patterns.",
-              "type": [
-                "object",
-                "null"
-              ],
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "queue_type": {
-              "type": "string",
-              "const": "NATSPubSub"
-            }
-          },
-          "required": [
-            "queue_type"
-          ]
         }
       ]
     },
@@ -6032,13 +5639,131 @@
         {
           "type": "object",
           "additionalProperties": {
-            "$ref": "#/$defs/QueueSplitMapValueOwned"
+            "description": "One queue to split: which broker it is on, which of its messages reach the local application,\nand what happens to those messages. The same struct backs both config shapes: in the list form\nit carries its `queue_id`, in the map form the id is the map key.\n\nAdding a broker is one [`QueueKind`] variant; adding a filter option is one field here, read by\nevery broker through the operator's shared filter code.",
+            "type": "object",
+            "properties": {
+              "filter": {
+                "description": "The composable filter. See `feature.split_queues.{}.filter`.",
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/MessageFilterConfig"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "jq_filter": {
+                "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
+                "description": "When this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter. Combined with `filter` or\n`message_filter`, a message must match both.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nis used.\n\nFor **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,\n`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8. With `payload_protobuf` set, the\nobject additionally has a `payload_decoded` field holding the payload decoded from\nprotobuf.\n\nFor **RabbitMQ**, an object with `headers` (the AMQP basic-properties headers table),\n`properties`, and `payload` fields is used. The `payload` and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8.\n\nFor **Azure Service Bus**, an object with `body`, `application_properties`,\n`message_id`, `content_type`, and `subject` fields is used.\n\nFor **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose\npayload is not valid JSON never match.\n\nFor **Temporal**, an object the operator builds for each task is used. Every object has\na `task_type` field, set to either `\"activity\"` or `\"workflow\"`. Activity tasks also\ncarry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,\n`activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).\nWorkflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,\n`task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,\n`search_attributes`, `memo`, and `input`.\n\nFor **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not\nvalid JSON never match.\n\nFor **NATS** and **NATSPubSub**, an object with `subject`, `headers`, and `payload`\nfields is used. `payload` is the message body parsed as JSON when the body is JSON, and\na string otherwise (base64-encoded when not valid UTF-8). Unlike `NATS` (JetStream),\ncore NATS pub/sub stores nothing, so delivery to the local application is best-effort:\nmessages published while the split is being set up or torn down are not replayed.\n\nThis can be used to filter messages based on their body content, for example.\n\nThis filter, for example, will tell mirrord to only make available to this local\napplication messages with a json in the message body, with a `customer_email` field\nthat contains \"metalbear.com\": `\".Body | fromjson | .customer_email |\ntest(\\\"metalbear\\\\\\\\.com\\\")\"`",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "message_filter": {
+                "title": "feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}",
+                "description": "The older filter shape: a mapping between message attribute (or header) names and regexes\ntheir values should match. The local application only receives messages that have\n**all** of the named attributes, each matching its pattern. Still supported; new configs\nshould prefer `filter`, which can also match attributes without naming them and compose\nwith `any_of` / `all_of`.\n\nFor Temporal the names are `workflow_id`, `workflow_type`, `activity_type`,\n`header.<name>`, or a search attribute key. For Redis Pub/Sub and BullMQ they are\ntop-level fields of the JSON payload.",
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "payload_protobuf": {
+                "description": "Decodes the raw protobuf payload into a `payload_decoded` field for `jq_filter`, for\nKafka topics that carry plain protobuf instead of JSON. See\n`feature.split_queues.{}.payload_protobuf`.",
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/KafkaPayloadProtobuf"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "queue_mode": {
+                "description": "Whether matched messages are stolen from the deployed application or mirrored to it.",
+                "$ref": "#/$defs/QueueMode"
+              },
+              "queue_type": {
+                "description": "The broker this queue lives on.",
+                "$ref": "#/$defs/QueueKind"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "queue_type"
+            ]
           }
         },
         {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/QueueSplit"
+            "description": "One queue to split: which broker it is on, which of its messages reach the local application,\nand what happens to those messages. The same struct backs both config shapes: in the list form\nit carries its `queue_id`, in the map form the id is the map key.\n\nAdding a broker is one [`QueueKind`] variant; adding a filter option is one field here, read by\nevery broker through the operator's shared filter code.",
+            "type": "object",
+            "properties": {
+              "filter": {
+                "description": "The composable filter. See `feature.split_queues.{}.filter`.",
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/MessageFilterConfig"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "jq_filter": {
+                "title": "feature.split_queues.{}.jq_filter {#feature-split_queues-queue_id-jq_filter}",
+                "description": "When this field is specified, for each message, the jq filter runs on a JSON\nrepresentation of the message. If the jq program outputs `true`, that\nmessage is considered as matching the filter. Combined with `filter` or\n`message_filter`, a message must match both.\n\nFor **SQS**, [an SQS `Message` object](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_Message.html)\nis used.\n\nFor **GCP Pub/Sub**, the JSON representation of [`PubsubMessage`](https://cloud.google.com/pubsub/docs/reference/rest/v1/PubsubMessage)\nis used.\n\nFor **Kafka**, an object with `topic`, `partition`, `offset`, `timestamp`, `key`,\n`payload`, and `headers` fields is used. `key`, `payload`, and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8. With `payload_protobuf` set, the\nobject additionally has a `payload_decoded` field holding the payload decoded from\nprotobuf.\n\nFor **RabbitMQ**, an object with `headers` (the AMQP basic-properties headers table),\n`properties`, and `payload` fields is used. The `payload` and header values are UTF-8\nstrings, or base64-encoded when not valid UTF-8.\n\nFor **Azure Service Bus**, an object with `body`, `application_properties`,\n`message_id`, `content_type`, and `subject` fields is used.\n\nFor **Redis Pub/Sub**, the message payload parsed as JSON is used. Messages whose\npayload is not valid JSON never match.\n\nFor **Temporal**, an object the operator builds for each task is used. Every object has\na `task_type` field, set to either `\"activity\"` or `\"workflow\"`. Activity tasks also\ncarry `workflow_namespace`, `workflow_id`, `run_id`, `workflow_type`, `activity_type`,\n`activity_id`, `attempt`, `header`, and `input` (an array of the decoded arguments).\nWorkflow tasks also carry `workflow_id`, `run_id`, `workflow_type`, `attempt`,\n`task_queue`, `cron_schedule`, `identity`, `first_execution_run_id`, `header`,\n`search_attributes`, `memo`, and `input`.\n\nFor **BullMQ**, the job's `data` field parsed as JSON is used. Jobs whose `data` is not\nvalid JSON never match.\n\nFor **NATS** and **NATSPubSub**, an object with `subject`, `headers`, and `payload`\nfields is used. `payload` is the message body parsed as JSON when the body is JSON, and\na string otherwise (base64-encoded when not valid UTF-8). Unlike `NATS` (JetStream),\ncore NATS pub/sub stores nothing, so delivery to the local application is best-effort:\nmessages published while the split is being set up or torn down are not replayed.\n\nThis can be used to filter messages based on their body content, for example.\n\nThis filter, for example, will tell mirrord to only make available to this local\napplication messages with a json in the message body, with a `customer_email` field\nthat contains \"metalbear.com\": `\".Body | fromjson | .customer_email |\ntest(\\\"metalbear\\\\\\\\.com\\\")\"`",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "message_filter": {
+                "title": "feature.split_queues.{}.message_filter {#feature-split_queues-queue_id-message_filter}",
+                "description": "The older filter shape: a mapping between message attribute (or header) names and regexes\ntheir values should match. The local application only receives messages that have\n**all** of the named attributes, each matching its pattern. Still supported; new configs\nshould prefer `filter`, which can also match attributes without naming them and compose\nwith `any_of` / `all_of`.\n\nFor Temporal the names are `workflow_id`, `workflow_type`, `activity_type`,\n`header.<name>`, or a search attribute key. For Redis Pub/Sub and BullMQ they are\ntop-level fields of the JSON payload.",
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "payload_protobuf": {
+                "description": "Decodes the raw protobuf payload into a `payload_decoded` field for `jq_filter`, for\nKafka topics that carry plain protobuf instead of JSON. See\n`feature.split_queues.{}.payload_protobuf`.",
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/KafkaPayloadProtobuf"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "queue_id": {
+                "title": "feature.split_queues.{}.queue_id {#feature-split_queues-queue_id-queue_id}",
+                "description": "The id of the queue to split, as it appears in the target's split configuration. List form\nonly: in the map form the id is the key. Does not have to be unique across entries. Use\n`*` to split every queue of the given `queue_type` with this filter.\n\nEmpty only while a map-form entry is being read, before the key is copied in.",
+                "type": "string"
+              },
+              "queue_mode": {
+                "description": "Whether matched messages are stolen from the deployed application or mirrored to it.",
+                "$ref": "#/$defs/QueueMode"
+              },
+              "queue_type": {
+                "description": "The broker this queue lives on.",
+                "$ref": "#/$defs/QueueKind"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "queue_type",
+              "queue_id"
+            ]
           }
         }
       ]
@@ -6387,6 +6112,37 @@
         },
         {
           "$ref": "#/$defs/DnsFileConfig"
+        }
+      ]
+    },
+    "TurbopufferBranchCopyConfig": {
+      "description": "Users can choose from the following copy modes to bootstrap their turbopuffer branch:\n\n- Empty (default)\n\n  Reserves a fresh namespace name with nothing in it; turbopuffer creates the namespace on\n  the app's first write.\n\n- All\n\n  Branches the source namespace: an instant copy-on-write clone with every document and\n  the schema. Writes to either side never reach the other.\n\n```json\n{ \"copy\": { \"mode\": \"all\" } }\n```",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
         }
       ]
     },

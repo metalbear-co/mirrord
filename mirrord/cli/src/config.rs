@@ -941,6 +941,12 @@ pub(super) enum OperatorCommand {
     // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
     #[clap(hide(true))]
     Setup,
+    /// Install the mirrord operator into the cluster of the current kubecontext.
+    ///
+    /// Without `--api-key`, starts an Enterprise trial and opens a link to claim it. Installs the
+    /// latest version of the helm chart with default values; use the helm chart directly for a
+    /// customized installation.
+    Install(Box<OperatorInstallArgs>),
     /// Print operator status
     Status {
         /// Specify config file to use
@@ -958,6 +964,42 @@ pub(super) enum OperatorCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1, global = true)]
         config_file: Option<PathBuf>,
     },
+}
+
+#[derive(Args, Debug)]
+pub(super) struct OperatorInstallArgs {
+    /// Operator API key, the same key the helm chart takes as `cloud.apiKey.key`.
+    ///
+    /// Registers the operator under the key's organization instead of starting a trial.
+    #[arg(long, env = "MIRRORD_OPERATOR_API_KEY", hide_env_values = true)]
+    pub api_key: Option<String>,
+
+    /// Print the trial claim URL instead of opening it in the browser.
+    #[arg(long)]
+    pub no_browser: bool,
+
+    /// Name shown on the trial claim page to identify this cluster.
+    ///
+    /// Defaults to the cluster's ID, the UID of its `default` namespace.
+    #[arg(long, conflicts_with_all = ["api_key", "no_hint"])]
+    pub cluster_hint: Option<String>,
+
+    /// Do not send a cluster hint to the trial claim page.
+    #[arg(long, conflicts_with = "api_key")]
+    pub no_hint: bool,
+
+    /// Install from a local rendered chart manifest instead of the latest published one.
+    #[arg(long, env = "MIRRORD_OPERATOR_INSTALL_MANIFEST", hide = true)]
+    pub manifest: Option<PathBuf>,
+
+    /// Base URL of the MetalBear app, used for the trial signup.
+    #[arg(
+        long,
+        env = "MIRRORD_OPERATOR_INSTALL_APP_URL",
+        hide = true,
+        default_value = "https://app.metalbear.com"
+    )]
+    pub app_url: String,
 }
 
 /// `mirrord operator session` family of commands.
@@ -1752,8 +1794,14 @@ pub(super) struct UpArgs {
     pub key: Option<String>,
 
     /// Start `mirrord ui` in the background.
-    #[arg(short = 'u', long)]
+    ///
+    /// *DEPRECATED*: `mirrord ui` is started by default in the background.
+    #[arg(short = 'u', long, hide = true)]
     pub ui: bool,
+
+    /// Don't start `mirrord ui` in the background.
+    #[arg(long, conflicts_with = "ui")]
+    pub no_ui: bool,
 
     /// Names of the services to launch. When omitted, every service in the
     /// config is launched, except those marked `skip: true`. Naming a
@@ -2034,6 +2082,10 @@ impl Default for LocalSessionCommand {
 /// Arguments for listing local and in-cluster mirrord sessions.
 #[derive(Args, Debug, Default)]
 pub struct SessionListArgs {
+    /// Format output for terminal display or scripting.
+    #[arg(long, default_value_t)]
+    pub format: SessionListFormat,
+
     /// Only list sessions started with this `key`.
     ///
     /// `key` is the session identifier set via `mirrord exec --key`, `MIRRORD_KEY`, or the
@@ -2042,6 +2094,14 @@ pub struct SessionListArgs {
     /// `spec.session.key` field selector. When omitted, all sessions are listed.
     #[arg(long)]
     pub key: Option<String>,
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum, Display)]
+#[strum(serialize_all = "lowercase")]
+pub enum SessionListFormat {
+    #[default]
+    Pretty,
+    Json,
 }
 
 /// Arguments for deleting local mirrord sessions.

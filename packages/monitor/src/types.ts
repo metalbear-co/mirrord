@@ -6,6 +6,7 @@ export interface ProcessInfo {
 export interface PortSubscription {
   port: number
   mode: string
+  hit_count?: number | undefined
 }
 
 export interface SessionInfo {
@@ -48,7 +49,12 @@ export type MonitorEvent =
       port: number
       chaos_rule?: string | null
     }
-  | { type: 'port_subscription'; port: number; mode: string }
+  | {
+      type: 'port_subscription'
+      port: number
+      mode: string
+      hit_count?: number | undefined
+    }
   | { type: 'env_var'; vars: string[] }
   | { type: 'layer_connected'; pid: number; process_name: string }
   | { type: 'layer_disconnected'; pid: number }
@@ -75,6 +81,7 @@ export interface OperatorLockedPort {
   port: number
   kind: string
   filter?: string | null
+  hitCount?: number
 }
 
 export interface OperatorQueueSplits {

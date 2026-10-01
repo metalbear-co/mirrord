@@ -133,17 +133,26 @@ async fn update_session_info_from_events(
                 let mut info = state.session_info.write().await;
                 info.processes.retain(|p| p.pid != pid);
             }
-            Ok(MonitorEvent::PortSubscription { port, mode }) => {
+            Ok(MonitorEvent::PortSubscription {
+                port,
+                mode,
+                hit_count,
+            }) => {
                 let mut info = state.session_info.write().await;
                 match info
                     .port_subscriptions
                     .iter_mut()
                     .find(|ps| ps.port == port)
                 {
-                    Some(existing) => existing.mode = mode,
-                    None => info
-                        .port_subscriptions
-                        .push(PortSubscription { port, mode }),
+                    Some(existing) => {
+                        existing.mode = mode;
+                        existing.hit_count = hit_count;
+                    }
+                    None => info.port_subscriptions.push(PortSubscription {
+                        port,
+                        mode,
+                        hit_count,
+                    }),
                 }
             }
             Ok(_) => {}

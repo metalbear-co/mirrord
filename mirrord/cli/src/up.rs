@@ -130,9 +130,8 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
 
     let ready = ReadyTracker::default();
 
-    // Run UI
-    analytics.get_mut().add("ui_enabled", args.ui);
-    if args.ui {
+    analytics.get_mut().add("ui_enabled", !args.no_ui);
+    if !args.no_ui {
         tokio::spawn(async move {
             match ui_command(
                 UiCommonArgs {

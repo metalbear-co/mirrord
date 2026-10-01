@@ -75,7 +75,9 @@ where
     }
 }
 
-fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
+/// Schema for an `Option<Target>` that is deserialized with [`string_or_struct_option`], so it
+/// also accepts a target path string like `deployment/my-app`.
+pub fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Schema {
     // generate the schema for the Option<Target> like usual, then just push a string type to the
     // any_of.
     let mut schema = <Option<Target>>::json_schema(generator);
