@@ -1,10 +1,37 @@
 use std::{ptr::null_mut, sync::LazyLock};
 
-use frida_gum::{Gum, Module, NativePointer, Process, interceptor::Interceptor};
+use frida_gum::{
+    Gum, Module, NativePointer, Process,
+    interceptor::{Interceptor, InvocationContext, ProbeListener},
+};
 use mirrord_layer_lib::error::{LayerError, Result};
 use tracing::trace;
 
 static GUM: LazyLock<Gum> = LazyLock::new(Gum::obtain);
+
+/// A call intercepted by [`HookManager::probe_export_or_any`], before the original function runs.
+pub struct ProbedCall<'a>(InvocationContext<'a>);
+
+impl ProbedCall<'_> {
+    /// The `n`th argument, as passed in its register or stack slot.
+    pub fn arg(&self, n: u32) -> usize {
+        self.0.arg(n)
+    }
+
+    /// Replaces the `n`th argument the original function is called with.
+    pub fn set_arg(&self, n: u32, value: usize) {
+        self.0.set_arg(n, value)
+    }
+}
+
+/// Listener [`HookManager::probe_export_or_any`] attaches.
+struct Probe(fn(&ProbedCall<'_>));
+
+impl ProbeListener for Probe {
+    fn on_hit(&mut self, context: InvocationContext) {
+        (self.0)(&ProbedCall(context))
+    }
+}
 
 /// Struct for managing the hooks using Frida.
 pub struct HookManager<'a> {
@@ -40,6 +67,48 @@ impl<'a> HookManager<'a> {
                     Ok(original) => return Ok(original),
                     Err(err) => {
                         trace!("hook {symbol:?} in {module_name:?} failed with err {err:?}")
+                    }
+                }
+            }
+        }
+        Err(LayerError::NoExportName(symbol.to_owned()))
+    }
+
+    /// Runs `on_hit` at the entry of the exported `symbol`, then lets the original function run,
+    /// for functions whose hook may never return to the caller.
+    ///
+    /// A hook installed with [`Self::hook_export_or_any`] replaces the function, and frida records,
+    /// per thread, that the replacement is running until it returns. One that never returns
+    /// leaves the record behind. That is harmless when the whole process image goes away, but not
+    /// when it runs in a `vfork` child sharing the caller's memory, as glibc's `posix_spawn` does
+    /// for `execve`: the caller's thread keeps the record, and frida then sends every later call on
+    /// that thread straight to the original, skipping the replacement.
+    ///
+    /// A probe keeps no such record. `on_hit` runs and returns before the original starts, and can
+    /// only change the arguments the original is called with, see [`ProbedCall`].
+    pub fn probe_export_or_any(&mut self, symbol: &str, on_hit: fn(&ProbedCall<'_>)) -> Result<()> {
+        // frida keeps a pointer to the listener for as long as the probe is attached, which is
+        // for the rest of the process.
+        let probe = Box::leak(Box::new(Probe(on_hit)));
+
+        if let Some(function) = Module::find_global_export_by_name(symbol)
+            && self.interceptor.attach_instruction(function, probe).is_ok()
+        {
+            return Ok(());
+        }
+
+        for module in &self.modules {
+            let module_name = module.name();
+            if !module_name.starts_with("lib") {
+                continue;
+            }
+
+            if let Some(function) = module.find_export_by_name(symbol) {
+                trace!("found {symbol:?} in {module_name:?}, probing");
+                match self.interceptor.attach_instruction(function, probe) {
+                    Ok(_) => return Ok(()),
+                    Err(err) => {
+                        trace!("probe {symbol:?} in {module_name:?} failed with err {err:?}")
                     }
                 }
             }
