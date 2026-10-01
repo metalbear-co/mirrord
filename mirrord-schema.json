@@ -10,7 +10,8 @@
       "type": [
         "boolean",
         "null"
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "agent": {
       "title": "agent {#root-agent}",
@@ -21,7 +22,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "api": {
       "title": "api {#root-api}",
@@ -29,7 +31,8 @@
       "type": [
         "boolean",
         "null"
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "baggage": {
       "title": "baggage {#root-baggage}",
@@ -37,7 +40,8 @@
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "ci": {
       "title": "ci {#root-ci}",
@@ -48,7 +52,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "container": {
       "title": "container {#root-container}",
@@ -59,7 +64,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "experimental": {
       "title": "experimental {#root-experimental}",
@@ -70,7 +76,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "external_proxy": {
       "title": "external_proxy {#root-external_proxy}",
@@ -81,7 +88,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "feature": {
       "title": "feature {#root-feature}",
@@ -92,7 +100,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "internal_proxy": {
       "title": "internal_proxy {#root-internal_proxy}",
@@ -103,7 +112,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "key": {
       "title": "key {#root-key}",
@@ -115,7 +125,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "kube_context": {
       "title": "kube_context {#root-kube_context}",
@@ -123,7 +134,8 @@
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "kubeconfig": {
       "title": "kubeconfig {#root-kubeconfig}",
@@ -131,7 +143,8 @@
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "multi_cluster": {
       "title": "multi_cluster {#root-multi_cluster}",
@@ -147,7 +160,8 @@
       "type": [
         "boolean",
         "null"
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "profile": {
       "title": "profile {#root-profile}",
@@ -155,7 +169,8 @@
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "x-mirrord-plan": "team"
     },
     "sip_binaries": {
       "title": "sip_binaries {#root-sip_binaries}",
@@ -167,7 +182,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "skip_build_tools": {
       "title": "skip_build_tools {#root-skip_build_tools}",
@@ -175,7 +191,8 @@
       "type": [
         "boolean",
         "null"
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "skip_extra_build_tools": {
       "title": "skip_extra_build_tools {#root-skip_build_tools}",
@@ -187,7 +204,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "skip_processes": {
       "title": "skip_processes {#root-skip_processes}",
@@ -199,7 +217,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "skip_sip": {
       "title": "skip_sip {#root-skip_sip}",
@@ -211,7 +230,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "startup_retry": {
       "title": "startup_retry {#root-startup_retry}",
@@ -222,7 +242,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "target": {
       "title": "target {#root-target}",
@@ -241,7 +262,8 @@
       "type": [
         "boolean",
         "null"
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "traceparent": {
       "title": "traceparent {#root-traceparent}",
@@ -249,7 +271,8 @@
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "use_proxy": {
       "title": "use_proxy {#root-use_proxy}",
@@ -257,7 +280,8 @@
       "type": [
         "boolean",
         "null"
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     }
   },
   "additionalProperties": false,

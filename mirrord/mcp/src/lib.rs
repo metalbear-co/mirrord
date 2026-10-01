@@ -31,6 +31,7 @@ use thiserror::Error;
 pub use crate::telemetry::McpTelemetry;
 use crate::telemetry::{McpTool, ToolOutcome};
 
+mod schema;
 mod telemetry;
 pub mod tools;
 
@@ -38,8 +39,9 @@ pub mod tools;
 pub const INSTRUCTIONS: &str = "mirrord runs local processes in the context of a Kubernetes \
 cluster. Before writing or changing a mirrord config file (`mirrord.json` or `mirrord-up.yaml`), \
 call `validate_config` with the complete file content and fix every issue it reports; never write \
-a config that has not validated with an empty `issues` list. The `mirrord://info` resource gives \
-the installed mirrord version.";
+a config that has not validated with an empty `issues` list. To learn what an option does, which \
+values it takes or which mirrord plan it needs, call `explain_config_option` with its path instead \
+of guessing. The `mirrord://info` resource gives the installed mirrord version.";
 
 /// URI of the resource describing this mirrord installation.
 const INFO_RESOURCE_URI: &str = "mirrord://info";
