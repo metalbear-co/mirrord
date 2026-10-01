@@ -8,6 +8,30 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.267.0](https://github.com/metalbear-co/mirrord/tree/3.267.0) - 2026-09-30
+
+
+### Added
+
+- PostgreSQL branches can copy several databases from one source server into
+  one branch with `additional_databases`.
+
+
+### Changed
+
+- Two `db_branches` entries that would be the same branch now fail the session
+  instead of one silently using the source database.
+
+
+### Fixed
+
+- Database branches of different types sharing an `id` no longer share, and
+  overwrite, one credential Secret.
+- Database branches of different types that share an `id`, or set none, each
+  get their own branch instead of one reaching the source.
+- `mirrord ci` persists its cleanup state atomically and rejects malformed
+  state instead of silently discarding recorded cleanup targets.
+
 ## [3.266.0](https://github.com/metalbear-co/mirrord/tree/3.266.0) - 2026-09-29
 
 

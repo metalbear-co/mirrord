@@ -8,8 +8,11 @@ use crate::{
     error::{CliError, OperatorSetupError},
 };
 
+mod install;
 mod session;
 pub(super) mod status;
+
+pub(crate) use install::OperatorInstallError;
 
 /// Set up the operator into a file or to stdout, with explanation.
 async fn operator_setup() -> CliResult<(), OperatorSetupError> {
@@ -20,6 +23,9 @@ async fn operator_setup() -> CliResult<(), OperatorSetupError> {
 pub(crate) async fn operator_command(args: OperatorArgs) -> CliResult<()> {
     match args.command {
         OperatorCommand::Setup => operator_setup().await.map_err(CliError::from),
+        OperatorCommand::Install(args) => install::operator_install(*args)
+            .await
+            .map_err(CliError::from),
         OperatorCommand::Status { config_file } => {
             StatusCommandHandler::new(config_file)
                 .and_then(StatusCommandHandler::handle)
