@@ -30,6 +30,7 @@ use crate::{
     data::GlobalConfigError,
     dump::DumpSessionError,
     fix::FixKubeconfigError,
+    operator::OperatorInstallError,
     port_forward::PortForwardError,
     profile::ProfileError,
     tui::TuiCliError,
@@ -78,7 +79,7 @@ pub(crate) fn format_preview_logs(logs: &[PreviewPodLogs]) -> String {
     format!("\n\nlast output from the preview pods:\n\n{rendered}")
 }
 
-const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or GitHub repository.
+pub(crate) const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or GitHub repository.
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
@@ -202,6 +203,11 @@ pub(crate) enum InternalProxyError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     ListenerSetup(std::io::Error),
 
+    #[cfg(unix)]
+    #[error("Failed to register CI intproxy SIGTERM handler: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    SignalHandler(std::io::Error),
+
     #[cfg(not(target_os = "windows"))]
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -240,7 +246,7 @@ pub(crate) enum InternalProxyError {
 pub(crate) enum OperatorSetupError {
     #[error("mirrord operator setup was deleted")]
     #[diagnostic(help(
-        "Please use the helm chart instead https://github.com/metalbear-co/charts/"
+        "Please use `mirrord operator install`, or the helm chart https://github.com/metalbear-co/charts/"
     ))]
     Deleted,
 }
@@ -346,6 +352,10 @@ pub(crate) enum CliError {
     #[diagnostic(transparent)]
     OperatorSetupError(#[from] OperatorSetupError),
 
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    OperatorInstall(#[from] OperatorInstallError),
+
     #[error("`mirrord operator status` command failed! Could not retrieve operator status API.")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorStatusNotFound,
@@ -418,7 +428,10 @@ pub(crate) enum CliError {
     FeatureRequiresOperatorError(String),
 
     #[error("Feature `{feature}` is not supported in mirrord operator {operator_version}.")]
-    #[diagnostic(help("{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "Upgrade the mirrord operator to a version that supports it, or remove the setting \
+         that needs it from your mirrord config.{GENERAL_HELP}"
+    ))]
     FeatureNotSupportedInOperatorError {
         feature: String,
         operator_version: String,

@@ -46,7 +46,8 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
 /// Request body for `POST /branchcredentials` - asks the operator to create a K8s
 /// Secret with the given values in the target namespace. The Secret name is derived
-/// from `branch_id` so the same branch always reuses the same Secret.
+/// from `branch_id`, which carries the branch's resource name, so the same branch always
+/// reuses the same Secret.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateCredentialSecretRequest {
     pub namespace: String,
@@ -828,6 +829,12 @@ pub enum NewOperatorFeature {
     /// deserialize there.
     QueueSplittingWithComposedFilters,
 
+    /// This operator copies `additionalDatabases` of `postgresOptions` into the same PostgreSQL
+    /// branch pod and points each one's app connection at it. Gated so the CLI fails fast: an
+    /// older operator's CRD schema prunes the field, and the branch would come up with only
+    /// the first database while the app keeps talking to the source for the others.
+    PgBranchAdditionalDatabases,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -910,6 +917,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
             NewOperatorFeature::QueueSplittingWithComposedFilters => {
                 "queue splitting with composable message filters"
+            }
+            NewOperatorFeature::PgBranchAdditionalDatabases => {
+                "PostgreSQL branches with additional databases"
             }
             NewOperatorFeature::Unknown => "unknown feature",
         };

@@ -27,8 +27,8 @@ jobs:
   integration-tests:
     runs-on: ${{ inputs.runner }}
     env:
-      MIRRORD_TESTS_USE_BINARY: /workspace/mirrord/target/x86_64-unknown-linux-gnu/debug/mirrord
-      MIRRORD_LAYER_FILE: /workspace/mirrord/target/x86_64-unknown-linux-gnu/debug/libmirrord_layer.so
+      MIRRORD_TESTS_USE_BINARY: /workspace/mirrord/target/debug/mirrord
+      MIRRORD_LAYER_FILE: /workspace/mirrord/target/debug/libmirrord_layer.so
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Rust cache
@@ -59,78 +59,78 @@ jobs:
       - uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo build --target x86_64-unknown-linux-gnu -p mirrord-layer
+            cargo build -p mirrord-layer
       - uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo build --target x86_64-unknown-linux-gnu -p mirrord
+            cargo build -p mirrord
       - uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer-lib
+            cargo nextest run -p mirrord-layer-lib
       - uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer-tests --no-default-features
+            cargo nextest run -p mirrord-layer-tests --no-default-features
       - uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-layer
+            cargo nextest run -p mirrord-layer
       - name: mirrord protocol UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-protocol
+            cargo nextest run -p mirrord-protocol
       - name: mirrord config UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-config
+            cargo nextest run -p mirrord-config
       - name: mirrord kube UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
+            cargo nextest run -p mirrord-kube --all-features
       - name: mirrord intproxy UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-intproxy
+            cargo nextest run -p mirrord-intproxy
       - name: mirrord auth UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-auth
+            cargo nextest run -p mirrord-auth
       - name: mirrord operator UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
+            cargo nextest run -p mirrord-operator --features "crd, client"
       - name: mirrord cli UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo xtask test-ut -- --target x86_64-unknown-linux-gnu
+            cargo xtask test-ut
       - name: mirrord protocol-io UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-protocol-io
+            cargo nextest run -p mirrord-protocol-io
       - name: mirrord jaq UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-jaq
+            cargo nextest run -p mirrord-jaq
       - name: mirrord vpn UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-vpn
+            cargo nextest run -p mirrord-vpn
       - name: mirrord up UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-up
+            cargo nextest run -p mirrord-up
       - name: mirrord tui build and UT
         uses: ./.github/actions/run-in-ci-runner
         with:
@@ -139,8 +139,8 @@ jobs:
             # Built from its own directory, so that the crate is checked the way someone working
             # only on it builds it, rather than with whatever features the rest of the workspace
             # happens to turn on.
-            (cd mirrord/tui && cargo build --target x86_64-unknown-linux-gnu)
-            cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-tui
+            (cd mirrord/tui && cargo build)
+            cargo nextest run -p mirrord-tui
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}

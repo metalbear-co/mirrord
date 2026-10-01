@@ -2111,6 +2111,14 @@
           "description": "When configuring a branch for PostgreSQL, set `type` to `pg`.",
           "type": "object",
           "properties": {
+            "additional_databases": {
+              "title": "feature.db_branches[].additional_databases (type: pg) {#feature-db_branches-pg-additional_databases}",
+              "description": "More databases from the same source server, copied into the same branch server. Use\nit when your application talks to several databases on one PostgreSQL server: every\ndatabase lands on one branch pod, so the application keeps using a single host.\n\nEach entry is dumped with the source connection of this branch (same host, port,\nuser, password, TLS, `iam_auth` and `connection_settings`); only the database name\ndiffers. The database gets the same name on the branch.\n\n- `name`: the database name on the source server. Must differ from the branch's own\n  database and from every other entry.\n- `connection` (optional): how the application reaches this database, in the same shape as\n  [`connection`](#feature-db_branches-sql-connection). mirrord points it at the branch with\n  this database's name. Without it, the database is only created and copied, and the\n  application switches to it on the branch host by itself.\n- `copy` (optional): copy mode and table filters for this database, in the same shape as\n  the branch's own `copy`. Defaults to `empty`.\n\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\n      {\n        \"type\": \"pg\",\n        \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DATABASE_URL\" } },\n        \"copy\": { \"mode\": \"all\" },\n        \"additional_databases\": [\n          {\n            \"name\": \"analytics\",\n            \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"ANALYTICS_DATABASE_URL\" } },\n            \"copy\": { \"mode\": \"schema\" }\n          }\n        ]\n      }\n    ]\n  }\n}\n```",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PgAdditionalDatabaseConfig"
+              }
+            },
             "connection": {
               "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
               "$ref": "#/$defs/DbBranchingConnectionSource"
@@ -4728,6 +4736,39 @@
             "local"
           ]
         }
+      ]
+    },
+    "PgAdditionalDatabaseConfig": {
+      "description": "<!--${internal}-->\nOne more database copied into a PostgreSQL branch. Documented on\n`PgBranchConfig::additional_databases`.",
+      "type": "object",
+      "properties": {
+        "connection": {
+          "description": "How the application connects to this database. mirrord points it at the branch.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DbBranchingConnectionSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "copy": {
+          "description": "Copy mode and table filters for this database.",
+          "$ref": "#/$defs/PgBranchCopyConfig",
+          "default": {
+            "mode": "empty",
+            "tables": null
+          }
+        },
+        "name": {
+          "description": "Database name on the source server, reused on the branch.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
       ]
     },
     "PgBranchCopyConfig": {
