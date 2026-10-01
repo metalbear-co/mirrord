@@ -473,8 +473,10 @@ pub struct PreviewIncomingConfig {
 /// The operator, not the CLI, makes the TLS connection to the preview pod, so paths on the
 /// user's machine mean nothing here: the CLI reads the client certificate files and stores
 /// their contents in the session's secret mounts `Secret` (see [`secret_mounts_secret_name`]),
-/// and this only names the keys. `protocol`, `trust_roots` and `server_cert` have no preview
-/// counterpart: delivery is always TLS and the pod's certificate is never verified.
+/// and this only names the keys. Alternatively the certificate can live in the target's
+/// container, in which case this names the in-container paths and the operator reads them
+/// itself. `protocol`, `trust_roots` and `server_cert` have no preview counterpart: delivery
+/// is always TLS and the pod's certificate is never verified.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewTlsDelivery {
@@ -490,6 +492,23 @@ pub struct PreviewTlsDelivery {
     /// request with a `BadCertificate` alert, which surfaces as a 502.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_auth: Option<PreviewTlsClientAuth>,
+
+    /// Client certificate the operator reads from a running pod of the target and presents to
+    /// the preview pod, for targets whose own process already holds the identity the preview
+    /// pod expects. Nothing leaves the cluster. Ignored when `client_auth` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_auth_from_target: Option<PreviewTlsClientAuthFromTarget>,
+}
+
+/// Paths inside the target's container of the client certificate and its key.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewTlsClientAuthFromTarget {
+    /// Path of the PEM certificate chain.
+    pub cert_path: String,
+
+    /// Path of the PEM private key.
+    pub key_path: String,
 }
 
 /// Keys in the session's secret mounts `Secret` holding the client certificate and its key.

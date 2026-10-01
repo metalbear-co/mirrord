@@ -34,7 +34,9 @@ use mirrord_config::{
     LayerConfig,
     config::{ConfigContext, ConfigError, EnvKey},
     feature::{
-        network::incoming::tls_delivery::{LocalTlsDelivery, TlsDeliveryProtocol},
+        network::incoming::tls_delivery::{
+            LocalTlsDelivery, TlsClientCertSource, TlsDeliveryProtocol,
+        },
         preview::{ConfigMount, ConfigMountType},
     },
     target::{Target, TargetDisplay, label::LabelTarget},
@@ -48,7 +50,8 @@ use mirrord_operator::{
             PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvVarsConfig,
             PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs,
             PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
-            PreviewSessionPhase, PreviewSessionSpec, PreviewTlsClientAuth, PreviewTlsDelivery,
+            PreviewSessionPhase, PreviewSessionSpec, PreviewTlsClientAuth,
+            PreviewTlsClientAuthFromTarget, PreviewTlsDelivery,
             view::{PreviewEnv, PreviewMessageKind},
         },
         session::{PodSetTarget, SessionTarget},
@@ -1251,9 +1254,11 @@ fn resolve_secret_mounts(
 }
 
 /// Resolves the TLS delivery settings a preview honors. The operator makes the TLS connection
-/// to the preview pod, so the client certificate and its key are read here and stored in
-/// `secret_values` for the session's Secret; the CR only names their keys. Also returns a
-/// warning for every configured setting a preview cannot honor.
+/// to the preview pod, so a local client certificate and its key are read here and stored in
+/// `secret_values` for the session's Secret; the CR only names their keys. With
+/// `client_cert_source: target` the files stay in the cluster and the CR carries their
+/// in-container paths for the operator to read. Also returns a warning for every configured
+/// setting a preview cannot honor.
 fn resolve_tls_delivery(
     config: Option<&LocalTlsDelivery>,
     secret_values: &mut BTreeMap<String, ByteString>,
@@ -1275,6 +1280,9 @@ fn resolve_tls_delivery(
     if config.client_cert.is_some() || config.server_name.is_some() {
         operator.require_feature(NewOperatorFeature::PreviewTlsDelivery)?;
     }
+    if config.client_cert_source == TlsClientCertSource::Target {
+        operator.require_feature(NewOperatorFeature::PreviewTlsClientAuthFromTarget)?;
+    }
 
     let mut warnings = Vec::new();
     if config.protocol == TlsDeliveryProtocol::Tcp {
@@ -1292,8 +1300,14 @@ fn resolve_tls_delivery(
         );
     }
 
-    let client_auth = match (config.client_cert.as_deref(), config.client_key.as_deref()) {
-        (Some(cert), Some(key)) => {
+    let mut client_auth = None;
+    let mut client_auth_from_target = None;
+    match (
+        config.client_cert.as_deref(),
+        config.client_key.as_deref(),
+        config.client_cert_source,
+    ) {
+        (Some(cert), Some(key), TlsClientCertSource::Local) => {
             secret_values.insert(
                 PreviewTlsClientAuth::CERT_SECRET_KEY.to_owned(),
                 ByteString(read_tls_client_auth_file(cert)?),
@@ -1302,18 +1316,26 @@ fn resolve_tls_delivery(
                 PreviewTlsClientAuth::KEY_SECRET_KEY.to_owned(),
                 ByteString(read_tls_client_auth_file(key)?),
             );
-            Some(PreviewTlsClientAuth {
+            client_auth = Some(PreviewTlsClientAuth {
                 cert_secret_key: PreviewTlsClientAuth::CERT_SECRET_KEY.to_owned(),
                 key_secret_key: PreviewTlsClientAuth::KEY_SECRET_KEY.to_owned(),
-            })
+            });
+        }
+        // Config paths come from JSON, so they are UTF-8 and the lossy conversion is exact.
+        (Some(cert), Some(key), TlsClientCertSource::Target) => {
+            client_auth_from_target = Some(PreviewTlsClientAuthFromTarget {
+                cert_path: cert.to_string_lossy().into_owned(),
+                key_path: key.to_string_lossy().into_owned(),
+            });
         }
         // Pairing was checked above, including for TCP configuration.
-        _ => None,
-    };
+        _ => {}
+    }
 
     let tls_delivery = PreviewTlsDelivery {
         server_name: config.server_name.clone(),
         client_auth,
+        client_auth_from_target,
     };
     // Nothing to honor: leave the CR identical to what older CLIs send.
     let tls_delivery = (tls_delivery != PreviewTlsDelivery::default()).then_some(tls_delivery);
@@ -1444,10 +1466,17 @@ mod tests {
     }
 
     fn operator(supports_tls: bool) -> MirrordOperatorSpec {
-        let mut features = vec![NewOperatorFeature::PreviewEnv];
         if supports_tls {
-            features.push(NewOperatorFeature::PreviewTlsDelivery);
+            operator_with(&[NewOperatorFeature::PreviewTlsDelivery])
+        } else {
+            operator_with(&[])
         }
+    }
+
+    /// An operator supporting previews plus the given features.
+    fn operator_with(extra_features: &[NewOperatorFeature]) -> MirrordOperatorSpec {
+        let mut features = vec![NewOperatorFeature::PreviewEnv];
+        features.extend_from_slice(extra_features);
         serde_json::from_value(serde_json::json!({
             "operator_version": "3.211.0",
             "default_namespace": "default",
@@ -1548,6 +1577,7 @@ mod tests {
                     cert_secret_key: "tls-client-cert".to_owned(),
                     key_secret_key: "tls-client-key".to_owned(),
                 }),
+                client_auth_from_target: None,
             })
         );
         assert_eq!(
@@ -1558,6 +1588,63 @@ mod tests {
             secret_values.get("tls-client-key"),
             Some(&ByteString(b"KEY PEM".to_vec()))
         );
+    }
+
+    /// With `client_cert_source: target` the paths name files in the target's container, so
+    /// the CLI must not try to read them (they do not exist locally) and nothing goes into the
+    /// Secret; the CR carries the paths for the operator.
+    #[test]
+    fn target_source_puts_paths_on_the_cr_and_reads_nothing() {
+        let config = LocalTlsDelivery {
+            client_cert_source: TlsClientCertSource::Target,
+            client_cert: Some(PathBuf::from("/etc/tls/client.crt")),
+            client_key: Some(PathBuf::from("/etc/tls/client.key")),
+            ..Default::default()
+        };
+        let mut secret_values = BTreeMap::new();
+        let (tls_delivery, warnings) = resolve_tls_delivery(
+            Some(&config),
+            &mut secret_values,
+            &operator_with(&[
+                NewOperatorFeature::PreviewTlsDelivery,
+                NewOperatorFeature::PreviewTlsClientAuthFromTarget,
+            ]),
+        )
+        .unwrap();
+
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            tls_delivery,
+            Some(PreviewTlsDelivery {
+                server_name: None,
+                client_auth: None,
+                client_auth_from_target: Some(PreviewTlsClientAuthFromTarget {
+                    cert_path: "/etc/tls/client.crt".to_owned(),
+                    key_path: "/etc/tls/client.key".to_owned(),
+                }),
+            })
+        );
+        assert!(secret_values.is_empty());
+    }
+
+    /// An operator without the feature prunes `clientAuthFromTarget` from the CR and the
+    /// preview pod rejects every stolen request with a TLS alert, so the CLI refuses up front.
+    #[test]
+    fn operator_without_target_source_support_is_rejected() {
+        let config = LocalTlsDelivery {
+            client_cert_source: TlsClientCertSource::Target,
+            client_cert: Some(PathBuf::from("/etc/tls/client.crt")),
+            client_key: Some(PathBuf::from("/etc/tls/client.key")),
+            ..Default::default()
+        };
+        let mut secret_values = BTreeMap::new();
+        let error =
+            resolve_tls_delivery(Some(&config), &mut secret_values, &operator(true)).unwrap_err();
+
+        assert!(
+            matches!(error, CliError::FeatureNotSupportedInOperatorError { feature, .. } if feature == NewOperatorFeature::PreviewTlsClientAuthFromTarget.to_string())
+        );
+        assert!(secret_values.is_empty());
     }
 
     /// Settings a preview cannot honor are reported instead of silently ignored, and a config
