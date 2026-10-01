@@ -13,6 +13,7 @@ use mirrord_intproxy::{
     error::ProxyStartupError,
 };
 use mirrord_kube::error::KubeApiError;
+use mirrord_mcp::McpError;
 use mirrord_operator::{
     client::error::{HttpError, OperatorApiError, OperatorOperation},
     crd::preview::PreviewPodLogs,
@@ -809,6 +810,10 @@ pub(crate) enum CliError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Tui(#[from] TuiCliError),
+
+    /// Errors produced by the `mirrord mcp` command.
+    #[error(transparent)]
+    Mcp(#[from] McpError),
 
     /// Errors produced by the `mirrord login` command.
     #[error(transparent)]

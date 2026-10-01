@@ -344,6 +344,7 @@ mod list;
 mod local_redis;
 mod logging;
 mod login;
+mod mcp;
 mod newsletter;
 mod operator;
 #[cfg(windows)]
@@ -1208,6 +1209,7 @@ fn main() -> miette::Result<()> {
             Commands::Tui => windows_unsupported!((), "tui", {
                 tui::tui_command(watch.clone(), &user_data).await?
             }),
+            Commands::Mcp => mcp::mcp_command(watch.clone(), &user_data).await?,
             Commands::Ui { args, command } => ui::ui_command(*args, command, "/").await?,
             Commands::Wizard { args, no_telemetry } => {
                 ui::wizard_command(args, no_telemetry, watch, &user_data).await?

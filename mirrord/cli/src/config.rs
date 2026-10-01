@@ -313,6 +313,12 @@ pub(super) enum Commands {
     /// cluster the current kubecontext points at, and open a shell alongside them.
     Tui,
 
+    /// Serve the mirrord MCP server over stdio, for AI agents.
+    ///
+    /// Register it in an MCP client (Claude Code, Cursor, VS Code, ...) as the command
+    /// `mirrord mcp`.
+    Mcp,
+
     /// Launch the mirrord local UI. Respects the `$BROWSER` env var.
     ///
     /// Watches active mirrord sessions and displays a web dashboard showing
