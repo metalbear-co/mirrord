@@ -9,12 +9,14 @@ pub(crate) mod hooks;
 #[derive(Default, Debug, Clone)]
 pub(crate) struct Argv(Vec<CString>);
 
+#[cfg(not(target_os = "macos"))]
 /// Owns an environment and its null-terminated pointer array for an execve call.
 pub(crate) struct PreparedEnvp {
     env: Argv,
     pointers: Vec<*const c_char>,
 }
 
+#[cfg(not(target_os = "macos"))]
 impl PreparedEnvp {
     pub(crate) fn new(env: Argv) -> Self {
         let mut pointers = env.0.iter().map(|value| value.as_ptr()).collect::<Vec<_>>();
