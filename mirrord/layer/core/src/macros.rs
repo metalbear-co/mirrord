@@ -75,7 +75,7 @@ macro_rules! replace {
 ///
 /// - `$on_hit`: callback run at the function entry.
 ///
-/// Failures to install the probe are ignored, consistent with [`replace!`].
+/// Returns an error when the probe cannot be installed.
 ///
 /// ## Examples
 ///
@@ -85,16 +85,10 @@ macro_rules! replace {
 #[macro_export]
 macro_rules! attach_probe {
     ($hook_manager:expr_2021, $func:expr_2021, $on_hit:expr_2021) => {{
-        let probe = |hook_manager: &mut $crate::hooks::HookManager,
-                     symbol_name,
-                     on_hit|
-         -> mirrord_layer_lib::error::Result<()> {
-            hook_manager.probe_export_or_any(symbol_name, on_hit)?;
-            tracing::trace!("probed {symbol_name:?}");
-            Ok(())
-        };
-
-        let _ = probe($hook_manager, $func, $on_hit);
+        let symbol_name = $func;
+        $hook_manager
+            .probe_export_or_any(symbol_name, $on_hit)
+            .inspect(|_| tracing::trace!("probed {symbol_name:?}"))
     }};
 }
 

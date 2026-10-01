@@ -68,9 +68,13 @@ unsafe fn environ() -> *const *const c_char {
 #[cfg(not(target_os = "macos"))]
 #[hook_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
-    // `execve` is probed below. Calling libc's export routes this through the probe, which adds
-    // the shared-socket environment to the inherited `environ`.
-    unsafe { libc::execve(path, argv, environ()) }
+    unsafe {
+        let envp = environ();
+        match prepare_execve_envp(envp.checked_into()) {
+            Detour::Success(envp) => libc::execve(path, argv, envp.leak()),
+            _ => libc::execve(path, argv, envp),
+        }
+    }
 }
 
 /// Runs at the entry of Linux `execve`, replacing `envp` with one that carries socket metadata to
@@ -142,7 +146,12 @@ pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {
     unsafe {
         replace!(hook_manager, "execv", execv_detour, FnExecv, FN_EXECV);
 
-        attach_probe!(hook_manager, "execve", on_execve);
+        if let Err(error) = attach_probe!(hook_manager, "execve", on_execve) {
+            tracing::warn!(
+                ?error,
+                "failed to install execve probe; direct execve calls will not carry shared socket metadata"
+            );
+        }
     }
 
     #[cfg(target_os = "macos")]
