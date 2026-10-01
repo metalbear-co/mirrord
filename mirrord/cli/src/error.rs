@@ -30,6 +30,7 @@ use crate::{
     data::GlobalConfigError,
     dump::DumpSessionError,
     fix::FixKubeconfigError,
+    login::LoginError,
     operator::OperatorInstallError,
     port_forward::PortForwardError,
     profile::ProfileError,
@@ -808,6 +809,11 @@ pub(crate) enum CliError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Tui(#[from] TuiCliError),
+
+    /// Errors produced by the `mirrord login` command.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Login(#[from] LoginError),
 
     /// Errors produced by the `mirrord ui` and `mirrord chaos` commands.
     #[error(transparent)]
