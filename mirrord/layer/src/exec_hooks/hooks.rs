@@ -63,8 +63,8 @@ unsafe fn environ() -> *const *const c_char {
 
 /// Hook for `libc::execv` for linux only.
 ///
-/// On macos this just calls `execve(path, argv, _environ)`, so we'll be handling it in our
-/// [`execve_detour`].
+/// On macos this just calls `execve(path, argv, _environ)`, so the macOS execve detour handles
+/// it.
 #[cfg(not(target_os = "macos"))]
 #[hook_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
@@ -89,7 +89,7 @@ fn on_execve(call: &ProbedCall<'_>) {
     const ENVP: u32 = 2;
 
     let envp = call.arg(ENVP) as *const *const c_char;
-    if let Detour::Success(envp) = unsafe { prepare_execve_envp(envp.checked_into()) } {
+    if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
         call.set_arg(ENVP, envp.leak() as usize);
     }
 }

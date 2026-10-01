@@ -193,7 +193,7 @@ pub enum Application {
     /// Rust app that closes a clone socket.
     DupListen,
     /// Rust app that spawns children which must inherit socket metadata.
-    PosixSpawnSharedSockets(&'static str),
+    PosixSpawnSharedSockets(String),
     /// Rust app that listens on a socket twice
     DoubleListen,
     /// C app that calls `connect(2)` on a unix socket with a too-large `addrlen`
@@ -592,7 +592,7 @@ impl Application {
                     format!("exec 0<&- ; exec node {}", app_path.to_string_lossy()),
                 ]
             }
-            Application::PosixSpawnSharedSockets(mode) => vec![(*mode).to_owned()],
+            Application::PosixSpawnSharedSockets(mode) => vec![mode.clone()],
         }
     }
 
