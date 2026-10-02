@@ -234,6 +234,15 @@ impl Manifest {
     }
 }
 
+/// Whether an object in the cluster belongs to the [`RELEASE_NAME`] helm release, which is the
+/// case for objects that `mirrord operator install` or the documented `helm install` created.
+pub(super) fn is_attributed_to_release(object: &impl ResourceExt) -> bool {
+    object
+        .annotations()
+        .get(RELEASE_NAME_ANNOTATION)
+        .is_some_and(|release| release == RELEASE_NAME)
+}
+
 fn for_each_placeholder(value: &mut Value, f: &mut impl FnMut(&mut String)) {
     match value {
         Value::String(string) if string == API_KEY_PLACEHOLDER => f(string),

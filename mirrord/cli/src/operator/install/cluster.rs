@@ -3,6 +3,7 @@
 
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
+    ops::Not,
     time::Duration,
 };
 
@@ -19,7 +20,10 @@ use kube::{
 use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME};
 use tokio::time::Instant;
 
-use super::{error::OperatorInstallError, manifest::Manifest};
+use super::{
+    error::OperatorInstallError,
+    manifest::{self, Manifest},
+};
 
 /// Registers the operator API with the Kubernetes API server, present as long as an operator is
 /// installed.
@@ -136,8 +140,8 @@ pub(super) async fn ensure_no_operator(
     }
 }
 
-/// Dry-runs creating every object, so missing permissions and leftovers of an earlier
-/// installation surface before anything is created or a trial is started.
+/// Dry-runs creating every object, so missing permissions, leftovers of an earlier installation and
+/// objects of other tools surface before anything is created or a trial is started.
 ///
 /// A plain create finds the leftovers, which a server-side apply would silently merge into. Since
 /// [`create`] applies server-side, which also needs the `patch` permission, each object is then
@@ -163,6 +167,7 @@ pub(super) async fn dry_run(
         .collect::<HashSet<_>>();
 
     let mut leftovers = Vec::new();
+    let mut foreign = Vec::new();
     for (object, api) in manifest.objects().iter().zip(apis) {
         match api.create(&create_params, object).await {
             Ok(_) => {
@@ -174,7 +179,25 @@ pub(super) async fn dry_run(
                     })?;
             }
             Err(kube::Error::Api(status)) if status.code == StatusCode::CONFLICT => {
-                leftovers.push(describe(object))
+                let existing = api
+                    .get_metadata(&object.name_any())
+                    .await
+                    .map_err(|source| OperatorInstallError::Lookup {
+                        object: describe(object),
+                        source: Box::new(source),
+                    })?;
+
+                if manifest::is_attributed_to_release(&existing) {
+                    leftovers.push(describe(object));
+                } else if kind(object) == "Namespace" {
+                    // A namespace that the user made can hold other workloads, and only the user
+                    // can decide to remove it.
+                    return Err(OperatorInstallError::ExistingNamespace {
+                        namespace: object.name_any(),
+                    });
+                } else {
+                    foreign.push(describe(object));
+                }
             }
             Err(kube::Error::Api(status))
                 if status.code == StatusCode::NOT_FOUND
@@ -190,10 +213,13 @@ pub(super) async fn dry_run(
         }
     }
 
-    if leftovers.is_empty() {
-        Ok(())
-    } else {
+    // Reported first, since the user must remove them in a different way than the leftovers.
+    if foreign.is_empty().not() {
+        Err(OperatorInstallError::ForeignObjects { objects: foreign })
+    } else if leftovers.is_empty().not() {
         Err(OperatorInstallError::LeftoverObjects { objects: leftovers })
+    } else {
+        Ok(())
     }
 }
 

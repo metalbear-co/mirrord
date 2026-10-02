@@ -116,10 +116,35 @@ pub(crate) enum OperatorInstallError {
 
     #[error(
         "found objects left over from an earlier mirrord operator installation:\n{}",
-        objects.iter().map(|object| format!("- {object}")).join("\n")
+        bullet_list(objects)
     )]
     #[diagnostic(help("Remove them before installing the operator again."))]
     LeftoverObjects { objects: Vec<String> },
+
+    #[error("namespace `{namespace}` already exists")]
+    #[diagnostic(help(
+        "The operator is installed into its own namespace, which the installation creates. If \
+        nothing uses the namespace, delete it. To install the operator into a different \
+        namespace, use the helm chart."
+    ))]
+    ExistingNamespace { namespace: String },
+
+    #[error(
+        "found objects that `mirrord operator install` did not create:\n{}",
+        bullet_list(objects)
+    )]
+    #[diagnostic(help(
+        "They belong to an operator that was installed in a different way. Remove it the same \
+        way that it was installed."
+    ))]
+    ForeignObjects { objects: Vec<String> },
+
+    #[error("failed to look up {object}")]
+    Lookup {
+        object: String,
+        #[source]
+        source: Box<kube::Error>,
+    },
 
     #[error("the cluster rejected {object}")]
     #[diagnostic(help(
@@ -155,4 +180,12 @@ pub(crate) enum OperatorInstallError {
 
     #[error("failed to start a trial, the server responded with {status}: {body}")]
     SignupFailed { status: StatusCode, body: String },
+}
+
+/// Formats the descriptions of objects as a list with one object on each line.
+fn bullet_list(objects: &[String]) -> String {
+    objects
+        .iter()
+        .map(|object| format!("- {object}"))
+        .join("\n")
 }
