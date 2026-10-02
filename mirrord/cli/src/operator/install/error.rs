@@ -207,6 +207,17 @@ pub(crate) enum OperatorInstallError {
         source: Box<kube::Error>,
     },
 
+    #[error("failed to remove the finalizers of {object}")]
+    #[diagnostic(help(
+        "Removing the operator requires permissions to patch the mirrord custom resources, such \
+        as MirrordClusterSessions."
+    ))]
+    RemoveFinalizers {
+        object: String,
+        #[source]
+        source: Box<kube::Error>,
+    },
+
     #[error("{remaining} objects that the operator finalizes were not removed in time")]
     #[diagnostic(help("Run the command again to retry."))]
     NotFinalized { remaining: usize },
