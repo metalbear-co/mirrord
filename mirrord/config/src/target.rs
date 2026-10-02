@@ -284,7 +284,25 @@ trait FromSplit {
         Self: Sized;
 }
 
-const FAIL_PARSE_DEPLOYMENT_OR_POD: &str = r#"
+/// The forms a target path can take, as listed in [`FAIL_PARSE_DEPLOYMENT_OR_POD`], for tools
+/// that explain an invalid one without the rest of that runtime guide.
+pub const TARGET_PATH_FORMATS: &[&str] = &[
+    "targetless",
+    "pod/{pod-name}[/container/{container-name}]",
+    "deployment/{deployment-name}[/container/{container-name}]",
+    "rollout/{rollout-name}[/container/{container-name}]",
+    "job/{job-name}[/container/{container-name}]",
+    "cronjob/{cronjob-name}[/container/{container-name}]",
+    "statefulset/{statefulset-name}[/container/{container-name}]",
+    "service/{service-name}[/container/{container-name}]",
+    "replicaset/{replicaset-name}[/container/{container-name}]",
+    "label/{key}={value}[,{key}={value}...][/container/{container-name}]",
+    "serverless/{service-name}[/container/{container-name}]",
+];
+
+/// The error message for a target path that doesn't parse, which tells the user how to fix the
+/// target they gave to `mirrord exec` and friends.
+pub const FAIL_PARSE_DEPLOYMENT_OR_POD: &str = r#"
 mirrord-layer failed to parse the provided target!
 
 - Valid format:
@@ -297,6 +315,7 @@ mirrord-layer failed to parse the provided target!
     >> `statefulset/{statefulset-name}[/container/{container-name}]`;
     >> `service/{service-name}[/container/{container-name}]`;
     >> `replicaset/{replicaset-name}[/container/{container-name}]`;
+    >> `label/{key}={value}[,{key}={value}...][/container/{container-name}]`;
     >> `serverless/{service-name}[/container/{container-name}]`;
 
 - Note:
@@ -951,6 +970,18 @@ mod tests {
             .generate_config(&mut cfg_context)
             .unwrap();
         assert_eq!(target_config, expected_target_config);
+    }
+
+    /// [`TARGET_PATH_FORMATS`] lists the formats the parse error lists.
+    #[test]
+    fn target_path_formats_match_parse_error() {
+        let listed = FAIL_PARSE_DEPLOYMENT_OR_POD
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix(">> `"))
+            .filter_map(|line| line.split_once('`'))
+            .map(|(format, _)| format)
+            .collect::<Vec<_>>();
+        assert_eq!(listed, TARGET_PATH_FORMATS);
     }
 
     #[test]

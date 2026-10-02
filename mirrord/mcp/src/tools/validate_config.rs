@@ -10,7 +10,7 @@
 //! that failed to deserialize, because it reports every problem at once, each with its location
 //! and, where the schema lists them, the allowed values, where serde stops at the first error.
 
-use std::{fmt, ops::Not, path::Path};
+use std::{fmt, ops::Not, path::Path, str::FromStr};
 
 use jsonschema::{
     ValidationError,
@@ -22,6 +22,7 @@ use mirrord_config::{
     LayerFileConfig,
     config::{ConfigContext, ConfigError, MirrordConfig},
     env_key::{EnvKey, MIRRORD_ENV_KEY},
+    target::{FAIL_PARSE_DEPLOYMENT_OR_POD, TARGET_PATH_FORMATS, Target},
 };
 use mirrord_up::{LAYER_CONFIG_PATHS, ServiceMode, UpConfig, UpError};
 use schemars::JsonSchema;
@@ -191,7 +192,12 @@ fn check_layer_config(
 ) -> Result<Vec<ConfigIssue>, ValidateConfigError> {
     let config = match check::<LayerFileConfig>(value, &LAYER_SCHEMA)? {
         Ok(config) => config,
-        Err(issues) => return Ok(issues),
+        Err(issues) => {
+            return Ok(issues
+                .into_iter()
+                .map(|issue| target_path_issue(issue, value))
+                .collect());
+        }
     };
 
     let mut context = context.empty_target_final(false);
@@ -232,6 +238,50 @@ fn dotted_to_pointer(path: &str) -> String {
     path.split('.')
         .map(|segment| format!("/{}", escape_pointer_token(segment)))
         .collect()
+}
+
+/// Explains why the target path of a mirrord config doesn't parse, listing the forms it takes.
+///
+/// The schema takes any string as a target path, and `target` is an untagged enum, so serde
+/// reports an invalid path only as matching none of the forms of `target`. Parsing the path on its
+/// own, as mirrord does, gives the reason; the generic one is a guide for fixing a target at
+/// runtime (e.g. checking it with `kubectl`), which the listed forms replace here.
+fn target_path_issue(issue: ConfigIssue, config: &Value) -> ConfigIssue {
+    if issue.path != "/target" {
+        return issue;
+    }
+
+    let target = config.get("target");
+    let (path, target_path) = match target.and_then(|target| target.get("path")) {
+        Some(target_path) => ("/target/path", target_path),
+        None => ("/target", target.unwrap_or(&Value::Null)),
+    };
+    let Some((target_path, Err(error))) = target_path
+        .as_str()
+        .map(|target_path| (target_path, Target::from_str(target_path)))
+    else {
+        return issue;
+    };
+
+    let message = match error {
+        ConfigError::InvalidTarget(reason) if reason.contains(FAIL_PARSE_DEPLOYMENT_OR_POD) => {
+            format!("`{target_path}` is not a valid target path")
+        }
+        ConfigError::InvalidTarget(reason) => {
+            format!("`{target_path}` is not a valid target path: {reason}")
+        }
+        error => format!("`{target_path}` is not a valid target path: {error}"),
+    };
+    ConfigIssue {
+        path: path.to_owned(),
+        message,
+        allowed_values: Some(
+            TARGET_PATH_FORMATS
+                .iter()
+                .map(|format| Value::from(*format))
+                .collect(),
+        ),
+    }
 }
 
 /// An issue found by [`UpConfig::verify`], pointing at the offending setting where the error names
@@ -576,8 +626,9 @@ fn schema_issues(error: &ValidationError<'_>, raw_schema: &Value) -> Vec<ConfigI
     }
 }
 
-/// The one alternative of a failed `anyOf`/`oneOf` that the value was evidently meant to match,
-/// judged by it being the only alternative of the right JSON type.
+/// The one alternative of a failed `anyOf`/`oneOf` that the value was evidently meant to match:
+/// the only alternative of the right JSON type or, among several alternatives taking an object,
+/// the one that knows the most of the object's fields.
 ///
 /// Every optional field is rendered by schemars as `anyOf: [<field schema>, {type: null}]`, and
 /// config fields often accept a short form (a string) or a full object. Without this, a typo deep
@@ -587,23 +638,67 @@ fn intended_branch<'e>(
     branches: &'e [Vec<ValidationError<'static>>],
     error: &ValidationError<'_>,
 ) -> Option<&'e [ValidationError<'static>]> {
-    let mut plausible = branches
+    let path = error.instance_path();
+    let plausible: Vec<&Vec<ValidationError>> = branches
         .iter()
-        .filter(|branch| is_wrong_type(branch, error.instance_path()).not());
+        .filter(|branch| is_wrong_type(branch, path).not())
+        .collect();
+    if let [branch] = plausible.as_slice() {
+        return Some(branch);
+    }
 
-    match (plausible.next(), plausible.next()) {
-        (Some(branch), None) => Some(branch),
+    let fields = error.instance().as_object()?.len();
+    let mut ranked: Vec<(usize, &Vec<ValidationError>)> = plausible
+        .into_iter()
+        .map(|branch| (known_fields(branch, path, fields), branch))
+        .collect();
+    ranked.sort_by_key(|(known, _)| std::cmp::Reverse(*known));
+    match ranked.as_slice() {
+        [(best, branch), rest @ ..] if *best > 0 && rest.iter().all(|(known, _)| known < best) => {
+            Some(branch)
+        }
         _ => None,
     }
 }
 
-/// Whether the errors of an alternative show the value at `path` has the wrong JSON type for it,
-/// directly or because every alternative of a nested `anyOf`/`oneOf` does.
+/// How many of the `fields` of the object at `path` an alternative knows: all of them unless its
+/// errors name some as unknown.
+fn known_fields(branch: &[ValidationError<'_>], path: &Location, fields: usize) -> usize {
+    branch
+        .iter()
+        .filter(|error| error.instance_path() == path)
+        .map(|error| match error.kind() {
+            ValidationErrorKind::AdditionalProperties { unexpected } => {
+                fields.saturating_sub(unexpected.len())
+            }
+            ValidationErrorKind::AnyOf { context }
+            | ValidationErrorKind::OneOfNotValid { context } => context
+                .iter()
+                .filter(|branch| is_wrong_type(branch, path).not())
+                .map(|branch| known_fields(branch, path, fields))
+                .max()
+                .unwrap_or(0),
+            _ => fields,
+        })
+        .min()
+        .unwrap_or(fields)
+}
+
+/// Whether the errors of an alternative show the value at `path` has the wrong JSON type for it:
+/// the alternative takes another type, enumerates values of other types only, or is an
+/// `anyOf`/`oneOf` of such alternatives.
 fn is_wrong_type(branch: &[ValidationError<'_>], path: &Location) -> bool {
     branch.iter().any(|error| {
+        let same_type = |value: &Value| {
+            std::mem::discriminant(value) == std::mem::discriminant(error.instance().as_ref())
+        };
         error.instance_path() == path
             && match error.kind() {
                 ValidationErrorKind::Type { .. } => true,
+                ValidationErrorKind::Constant { expected_value } => same_type(expected_value).not(),
+                ValidationErrorKind::Enum { options } => options
+                    .as_array()
+                    .is_some_and(|options| options.iter().any(same_type).not()),
                 ValidationErrorKind::AnyOf { context }
                 | ValidationErrorKind::OneOfNotValid { context } => {
                     context.iter().all(|nested| is_wrong_type(nested, path))
@@ -1076,6 +1171,29 @@ services:
         assert!(issue.message.contains("`([`"), "{}", issue.message);
     }
 
+    /// Both formats offer `target` as a string or a mapping, so the unknown field has to be found
+    /// in the mapping.
+    #[rstest]
+    #[case::mirrord_json(
+        ConfigFormat::MirrordJson,
+        r#"{ "target": { "path": "deployment/api", "bogus": 1 } }"#,
+        "/target/bogus"
+    )]
+    #[case::up_yaml(
+        ConfigFormat::MirrordUpYaml,
+        "services:\n  api:\n    target:\n      path: deployment/api\n      bogus: 1\n    run:\n      command: [\"true\"]\n",
+        "/services/api/target/bogus"
+    )]
+    fn unknown_target_field(
+        #[case] format: ConfigFormat,
+        #[case] content: &str,
+        #[case] path: &str,
+    ) {
+        let issue = single_issue(format, content);
+        assert_eq!(issue.path, path);
+        assert_eq!(issue.message, "unknown field `bogus`");
+    }
+
     /// Conflicts point at the setting to change.
     #[rstest]
     #[case::http_filters(
@@ -1108,6 +1226,40 @@ services:
         assert_eq!(issue.path, path);
         assert!(
             issue.message.starts_with("Conflicting configuration"),
+            "{}",
+            issue.message
+        );
+    }
+
+    /// The reason a target path doesn't parse, rather than serde's "did not match any variant".
+    #[rstest]
+    #[case::simple(r#"{ "target": "banana/api" }"#, "/target")]
+    #[case::advanced(
+        r#"{ "target": { "path": "banana/api", "namespace": "default" } }"#,
+        "/target/path"
+    )]
+    fn invalid_target_path(#[case] content: &str, #[case] path: &str) {
+        let issue = single_issue(ConfigFormat::MirrordJson, content);
+        assert_eq!(issue.path, path);
+        assert_eq!(issue.message, "`banana/api` is not a valid target path");
+        let formats = issue.allowed_values.unwrap();
+        assert!(
+            formats.contains(&json!(
+                "deployment/{deployment-name}[/container/{container-name}]"
+            )),
+            "{formats:?}"
+        );
+    }
+
+    /// A specific reason is kept, a malformed label target here.
+    #[test]
+    fn invalid_label_target() {
+        let issue = single_issue(ConfigFormat::MirrordJson, r#"{ "target": "label/app" }"#);
+        assert_eq!(issue.path, "/target");
+        assert!(
+            issue
+                .message
+                .starts_with("`label/app` is not a valid target path: Label target"),
             "{}",
             issue.message
         );
