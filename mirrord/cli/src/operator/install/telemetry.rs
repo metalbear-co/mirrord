@@ -11,6 +11,9 @@ use uuid::Uuid;
 
 use super::OperatorInstallError;
 
+#[cfg(test)]
+mod tests;
+
 /// What the commands need to report their runs. Built by the CLI, which owns the machine id, the
 /// telemetry setting and the drain that sends pending reports before the CLI exits.
 pub(crate) struct OperatorTelemetry {

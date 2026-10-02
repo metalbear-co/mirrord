@@ -223,8 +223,9 @@ impl Connection {
 /// get changed by mistake.
 ///
 /// Does not ask with `yes`, or without a terminal, so that agents and CI can run the command.
-/// Declining, also by cancelling the prompt (e.g. with Ctrl+C), fails with
-/// [`OperatorInstallError::Declined`].
+/// Declining, also by cancelling the prompt with Esc, fails with
+/// [`OperatorInstallError::Declined`]. Ctrl+C at the prompt fails with
+/// [`OperatorInstallError::Interrupted`], like Ctrl+C at any other moment of the command.
 fn confirm(
     progress: &ProgressTracker,
     yes: bool,
@@ -238,9 +239,8 @@ fn confirm(
     // clients connect again if the server closed an idle connection.
     match progress.suspend(|| Confirm::new(question).with_default(false).prompt()) {
         Ok(true) => Ok(()),
-        Ok(false) | Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-            Err(OperatorInstallError::Declined)
-        }
+        Ok(false) | Err(InquireError::OperationCanceled) => Err(OperatorInstallError::Declined),
+        Err(InquireError::OperationInterrupted) => Err(OperatorInstallError::Interrupted),
         Err(error) => Err(OperatorInstallError::Prompt(error)),
     }
 }
