@@ -20,6 +20,13 @@ pub(crate) enum OperatorInstallError {
     #[error("failed to create an HTTP client")]
     HttpClient(#[source] reqwest::Error),
 
+    #[error("failed to ask for confirmation")]
+    #[diagnostic(help("Pass `--yes` to continue without confirmation."))]
+    Prompt(#[source] inquire::InquireError),
+
+    #[error("cancelled, the cluster was not changed")]
+    Declined,
+
     #[error("failed to fetch `{url}`")]
     Fetch {
         url: String,

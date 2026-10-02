@@ -3,6 +3,7 @@
 
 use std::{io::IsTerminal, ops::Not};
 
+use inquire::{Confirm, InquireError};
 use kube::Client;
 use mirrord_kube::api::kubernetes::create_kube_config_with_context;
 use mirrord_progress::{Progress, ProgressTracker};
@@ -28,6 +29,7 @@ pub(super) async fn operator_install(
         cluster_hint,
         no_hint,
         context,
+        yes,
         manifest: manifest_path,
         app_url,
     } = args;
@@ -75,6 +77,14 @@ pub(super) async fn operator_install(
     let apis = cluster::resolve_apis(&client, &manifest, &release_namespace).await?;
     cluster::dry_run(&manifest, &apis).await?;
     subtask.success(None);
+
+    // Asked after the checks, which change nothing, so that an installation that can't succeed
+    // fails without asking first.
+    let question = format!(
+        "Install the mirrord operator into {}?",
+        location(manifest.operator_namespace(), context.as_deref())
+    );
+    confirm(&progress, yes, &question)?;
 
     let trial = match api_key {
         Some(api_key) => {
@@ -146,6 +156,40 @@ pub(super) async fn operator_install(
     Ok(())
 }
 
+/// Asks the user to confirm a change to the cluster, so that a wrong current kubecontext does not
+/// get changed by mistake.
+///
+/// Does not ask with `yes`, or without a terminal, so that agents and CI can run the command.
+/// Declining, also by cancelling the prompt (e.g. with Ctrl+C), fails with
+/// [`OperatorInstallError::Declined`].
+fn confirm(
+    progress: &ProgressTracker,
+    yes: bool,
+    question: &str,
+) -> Result<(), OperatorInstallError> {
+    if yes || std::io::stdin().is_terminal().not() {
+        return Ok(());
+    }
+
+    // Blocks the runtime until the user answers. No other task has work to do meanwhile, and the
+    // clients connect again if the server closed an idle connection.
+    match progress.suspend(|| Confirm::new(question).with_default(false).prompt()) {
+        Ok(true) => Ok(()),
+        Ok(false) | Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
+            Err(OperatorInstallError::Declined)
+        }
+        Err(error) => Err(OperatorInstallError::Prompt(error)),
+    }
+}
+
+/// Names the namespace and the kubecontext the operator is in, for messages to the user.
+fn location(namespace: &str, context: Option<&str>) -> String {
+    match context {
+        Some(context) => format!("namespace `{namespace}` of kubecontext `{context}`"),
+        None => format!("namespace `{namespace}`"),
+    }
+}
+
 /// What the user needs to know about a trial, printed once as soon as it starts.
 fn trial_details(trial: &Trial) -> String {
     format!(
@@ -159,12 +203,10 @@ fn trial_details(trial: &Trial) -> String {
 
 /// What the user needs to know after a successful installation, printed once.
 fn summary(version: &semver::Version, manifest: &Manifest, context: Option<&str>) -> String {
-    let namespace = manifest.operator_namespace();
-    let location = match context {
-        Some(context) => format!("namespace `{namespace}` of kubecontext `{context}`"),
-        None => format!("namespace `{namespace}`"),
-    };
-    let mut summary = format!("mirrord operator {version} is installed in {location}.\n\n");
+    let mut summary = format!(
+        "mirrord operator {version} is installed in {}.\n\n",
+        location(manifest.operator_namespace(), context)
+    );
 
     let kube_context_arg = context
         .map(|context| format!(" --kube-context {context}"))

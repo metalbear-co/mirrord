@@ -1031,6 +1031,10 @@ pub(super) struct OperatorInstallArgs {
     #[arg(long)]
     pub context: Option<String>,
 
+    /// Install without asking for confirmation. Without a terminal, the command never asks.
+    #[arg(short, long)]
+    pub yes: bool,
+
     /// Install from a local rendered chart manifest instead of the latest published one.
     #[arg(long, env = "MIRRORD_OPERATOR_INSTALL_MANIFEST", hide = true)]
     pub manifest: Option<PathBuf>,
