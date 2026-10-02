@@ -11,6 +11,7 @@ use std::{
     io::SeekFrom,
     os::unix::io::RawFd,
     path::{Path, PathBuf},
+    sync::PoisonError,
 };
 
 use libc::{AT_FDCWD, c_int, iovec};
@@ -39,9 +40,9 @@ use tracing::Level;
 use tracing::error;
 
 use super::{hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
-use crate::common;
 #[cfg(target_os = "linux")]
 use crate::common::CheckedInto;
+use crate::{CLOSE_FORK_LOCK, common};
 
 /// 1 Megabyte. Large read requests can lead to timeouts.
 const MAX_READ_SIZE: u64 = 1024 * 1024;
@@ -299,14 +300,33 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     // the fd to a string.
     let local_file_fd = create_local_fake_file(remote_fd)?;
 
-    // Dropped after the `OPEN_FILES` guard, see [`OPEN_FILES`].
-    let replaced_file = OPEN_FILES.lock()?.insert(
+    insert_open_file(
         local_file_fd,
-        Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
-    );
-    drop(replaced_file);
+        RemoteFile::new(remote_fd, path.display().to_string()),
+    )?;
 
     Detour::Success(local_file_fd)
+}
+
+/// Adds `file` to [`OPEN_FILES`] at `local_fd`.
+///
+/// `local_fd` can still have an entry when the layer did not see the close of an earlier fd with
+/// the same number, for example when that close is between the original close and
+/// `close_layer_fd`, or when it was a `close_range`. Then the old `RemoteFile` is dropped here,
+/// which sends its close request, and a `fork` must not split that, see [`CLOSE_FORK_LOCK`].
+fn insert_open_file(local_fd: RawFd, file: RemoteFile) -> Detour<()> {
+    let replaces_file = OPEN_FILES.lock()?.contains_key(&local_fd);
+    let _fork_guard = replaces_file.then(|| {
+        CLOSE_FORK_LOCK
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    });
+
+    // Dropped after the `OPEN_FILES` guard, see [`OPEN_FILES`].
+    let replaced_file = OPEN_FILES.lock()?.insert(local_fd, Arc::new(file));
+    drop(replaced_file);
+
+    Detour::Success(())
 }
 
 /// creates a directory stream for the `remote_fd` in the agent
@@ -364,12 +384,10 @@ pub(crate) fn openat(
 
     let local_file_fd = create_local_fake_file(remote_fd)?;
 
-    // Dropped after the `OPEN_FILES` guard, see [`OPEN_FILES`].
-    let replaced_file = OPEN_FILES.lock()?.insert(
+    insert_open_file(
         local_file_fd,
-        Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
-    );
-    drop(replaced_file);
+        RemoteFile::new(remote_fd, path.display().to_string()),
+    )?;
 
     Detour::Success(local_file_fd)
 }

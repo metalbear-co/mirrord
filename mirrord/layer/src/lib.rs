@@ -692,11 +692,12 @@ fn enable_hooks(state: &LayerSetup) {
 
 /// Keeps a `fork` out of the middle of a close.
 ///
-/// [`close_layer_fd`], `closedir` of a remote directory, and `dup2`, `dup3` or `fcntl(F_DUPFD)`
-/// onto a remote file hold this lock from the change of [`SOCKETS`], [`OPEN_FILES`] or `OPEN_DIRS`
-/// until they have sent the close requests to the intproxy. [`atfork_prepare`] takes it too.
-/// Without it, a `fork` on another thread can happen after the layer removed the fd but before it
-/// sent the close request. When the child connects, the intproxy copies the port subscriptions,
+/// [`close_layer_fd`], `closedir` of a remote directory, and the calls that put a new fd on top of
+/// a remote file (`dup2`, `dup3`, and `dup`, `fcntl(F_DUPFD)`, `open` or `openat` on an fd number
+/// that still has an entry) hold this lock from the change of [`SOCKETS`], [`OPEN_FILES`] or
+/// `OPEN_DIRS` until they have sent the close requests to the intproxy. [`atfork_prepare`] takes it
+/// too. Without it, a `fork` on another thread can happen after the layer removed the fd but before
+/// it sent the close request. When the child connects, the intproxy copies the port subscriptions,
 /// remote files and remote directories of the parent to the child. The child does not have the fd,
 /// so nothing closes its copy until the child exits.
 ///

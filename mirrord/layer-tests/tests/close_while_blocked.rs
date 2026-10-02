@@ -155,9 +155,48 @@ async fn assert_close_waits(process: &TestProcess, action: &str) {
 #[tokio::test]
 async fn fork_waits_for_close(#[case] target: &str) {
     let (mut process, mut intproxy, mut parent) = start("fork", target).await;
+    check_fork_waits(&mut process, &mut intproxy, &mut parent).await;
+}
 
+/// A `fork` waits until an `open` on another thread has sent the close request of the remote file
+/// that it replaced. The layer can still have an entry for the fd number that the `open` gets, for
+/// example after a `close_range`.
+#[rstest]
+#[tokio::test]
+async fn fork_waits_for_replaced_file_close() {
+    let (mut process, mut intproxy, mut parent) = start("fork", "replaced-file").await;
+
+    // The `open` of the second thread gets its answer only after the write blocks the connection,
+    // so that the close request of the replaced file waits behind the write.
+    let LocalMessage { message_id, inner } = tokio::time::timeout(TIMEOUT, parent.recv())
+        .await
+        .expect("the layer sent nothing")
+        .expect("the layer closed the connection");
+    assert!(
+        matches!(inner, LayerToProxyMessage::File(FileRequest::Open(_))),
+        "expected the `open` of the second thread, got {inner:?}"
+    );
+    process.wait_for_line_stdout(TIMEOUT, "respond").await;
+    parent
+        .send(
+            message_id,
+            ProxyToLayerMessage::File(FileResponse::Open(Ok(OpenFileResponse { fd: message_id }))),
+        )
+        .await;
+
+    check_fork_waits(&mut process, &mut intproxy, &mut parent).await;
+    process.assert_stdout_contains("replaced").await;
+}
+
+/// Checks that the `fork` of the application waits until the close in the second thread has sent
+/// its close request, and then lets the application finish.
+async fn check_fork_waits(
+    process: &mut TestProcess,
+    intproxy: &mut FakeIntProxy,
+    parent: &mut FakeLayerConnection,
+) {
     process.wait_for_line_stdout(TIMEOUT, "fork start").await;
-    assert_close_waits(&process, "fork").await;
+    assert_close_waits(process, "fork").await;
     assert!(
         intproxy.try_accept(NOTHING_HAPPENS).await.is_none(),
         "the child connected while the parent was in the middle of a close"
@@ -165,19 +204,19 @@ async fn fork_waits_for_close(#[case] target: &str) {
 
     // Let the parent send its close request, so that the `fork` can continue.
     loop {
-        let request = answer(&mut parent)
+        let request = answer(parent)
             .await
             .expect("the parent closed the connection");
         if is_close_request(&request) {
             break;
         }
     }
-    let mut child = accept(&mut intproxy).await;
+    let mut child = accept(intproxy).await;
     assert_eq!(child.session.parent_layer, Some(parent.id));
     answer_all(&mut child).await;
 
     process.wait_for_line_stdout(TIMEOUT, "fork done").await;
-    answer_all(&mut parent).await;
+    answer_all(parent).await;
     process.wait_assert_success().await;
 }
 
