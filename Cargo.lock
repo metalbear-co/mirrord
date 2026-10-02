@@ -5131,6 +5131,7 @@ dependencies = [
  "libc",
  "mirrord-agent-env",
  "mirrord-agent-iptables",
+ "mirrord-cluster-auth",
  "mirrord-nightly-polyfill",
  "mirrord-protocol",
  "mirrord-protocol-io",
@@ -5240,6 +5241,39 @@ dependencies = [
  "tracing",
  "whoami",
  "x509-certificate",
+]
+
+[[package]]
+name = "mirrord-cluster-auth"
+version = "3.267.0"
+dependencies = [
+ "aws-config",
+ "aws-credential-types",
+ "aws-sigv4",
+ "base64 0.22.1",
+ "futures",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "k8s-openapi",
+ "kube",
+ "mirrord-nightly-polyfill",
+ "mirrord-operator-websocket",
+ "rcgen",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-retry",
+ "tokio-rustls",
+ "tokio-tungstenite",
+ "tower",
+ "tracing",
+ "url",
+ "webpki-roots",
 ]
 
 [[package]]
