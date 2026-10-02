@@ -21,7 +21,13 @@ use tokio::{
 };
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
-use crate::{incoming::tls::StealTlsHandlerStore, util::path_resolver::InTargetPathResolver};
+use crate::{
+    incoming::tls::{
+        StealTlsHandlerStore,
+        error::{StealTlsSetupError, StealTlsSetupErrorInner},
+    },
+    util::path_resolver::InTargetPathResolver,
+};
 
 pub struct CertChainWithKey {
     pub key: PrivateKeyDer<'static>,
@@ -606,7 +612,7 @@ async fn agent_presents_matching_identity(
             },
             agent_as_client: AgentClientConfig {
                 authentication: Some(authentication("mirrord-agent")),
-                identities: vec![authentication("client-a"), authentication("client-b")],
+                identities: vec!["/client-a.pem".into(), "/client-b.pem".into()],
                 verification: TlsServerVerification {
                     server_name: None,
                     accept_any_cert: true,
@@ -698,6 +704,128 @@ async fn agent_presents_matching_identity(
         CertIdentity::from_der(&presented),
         CertIdentity::from_der(expected.cert.der()),
     );
+}
+
+/// The identity of a client whose certificate was not verified cannot be trusted, so
+/// `agentAsClient.identities` cannot be used without client verification.
+#[rstest::rstest]
+#[case::no_verification(None)]
+#[case::accept_any_cert(Some(TlsClientVerification {
+    allow_anonymous: false,
+    accept_any_cert: true,
+    trust_roots: Default::default(),
+}))]
+#[tokio::test]
+async fn identities_require_client_verification(
+    #[case] verification: Option<TlsClientVerification>,
+) {
+    let root_dir = tempfile::tempdir().unwrap();
+    for name in ["mirrord-agent", "client-a"] {
+        CertChainWithKey::new(name, None).to_file(&root_dir.path().join(format!("{name}.pem")));
+    }
+
+    let store = StealTlsHandlerStore::new(
+        vec![StealPortTlsConfig {
+            port: 443,
+            agent_as_server: AgentServerConfig {
+                authentication: TlsAuthentication {
+                    cert_pem: "/mirrord-agent.pem".into(),
+                    key_pem: "/mirrord-agent.pem".into(),
+                },
+                alpn_protocols: Default::default(),
+                verification,
+            },
+            agent_as_client: AgentClientConfig {
+                authentication: None,
+                identities: vec!["/client-a.pem".into()],
+                verification: TlsServerVerification {
+                    server_name: None,
+                    accept_any_cert: true,
+                    trust_roots: Default::default(),
+                },
+            },
+        }],
+        InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+    );
+
+    let error = store.get(443).await.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            StealTlsSetupError::ClientSetupError(
+                StealTlsSetupErrorInner::IdentitiesWithoutClientVerification
+            )
+        ),
+        "{error:?}"
+    );
+}
+
+/// With `accept_any_cert`, anyone can present a certificate with any identity, so the identity
+/// is not passed to the agent's clients.
+#[tokio::test]
+async fn unverified_client_identity_is_not_reported() {
+    let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
+
+    let root_dir = tempfile::tempdir().unwrap();
+    CertChainWithKey::new("mirrord-agent", None)
+        .to_file(&root_dir.path().join("mirrord-agent.pem"));
+
+    let store = StealTlsHandlerStore::new(
+        vec![StealPortTlsConfig {
+            port: 443,
+            agent_as_server: AgentServerConfig {
+                authentication: TlsAuthentication {
+                    cert_pem: "/mirrord-agent.pem".into(),
+                    key_pem: "/mirrord-agent.pem".into(),
+                },
+                alpn_protocols: Default::default(),
+                verification: Some(TlsClientVerification {
+                    allow_anonymous: false,
+                    accept_any_cert: true,
+                    trust_roots: Default::default(),
+                }),
+            },
+            agent_as_client: AgentClientConfig {
+                authentication: None,
+                identities: Default::default(),
+                verification: TlsServerVerification {
+                    server_name: None,
+                    accept_any_cert: true,
+                    trust_roots: Default::default(),
+                },
+            },
+        }],
+        InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+    );
+    let handler = store.get(443).await.unwrap().unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let self_signed = CertChainWithKey::new("client-a", None);
+    let client_config = ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(DangerousNoVerifierServer))
+        .with_client_auth_cert(self_signed.certs, self_signed.key)
+        .unwrap();
+    let _client_handle = tokio::spawn(async move {
+        let client_agent = TcpStream::connect(addr).await.unwrap();
+        TlsConnector::from(Arc::new(client_config))
+            .connect(ServerName::try_from("mirrord-agent").unwrap(), client_agent)
+            .await
+    });
+    let agent_client = listener.accept().await.unwrap().0;
+    let agent_client = handler.acceptor().accept(agent_client).await.unwrap();
+    assert!(agent_client.get_ref().1.peer_certificates().is_some());
+
+    let connector = handler.connector(agent_client.get_ref().1);
+    let IncomingTrafficTransportType::TlsV2 {
+        client_identity, ..
+    } = connector.transport_type(&"1.30.0".parse().unwrap())
+    else {
+        panic!("expected TlsV2 transport");
+    };
+    assert_eq!(client_identity, None);
 }
 
 pub struct SimpleStore {

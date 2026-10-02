@@ -126,15 +126,20 @@ pub struct AgentClientConfig {
     /// Additional client certificates, for servers that authorize requests based on the
     /// client's identity.
     ///
-    /// When passing through a connection from a client that presented a certificate,
-    /// mirrord-agent uses the first of these whose subject and subject alternative names are
-    /// the same as in the client's certificate. If none matches, `authentication` is used.
+    /// Each entry is a path to a PEM file containing the certificate chain and its private key.
     ///
-    /// The client's certificate is known only when `agentAsServer.verification` is present.
+    /// When passing through a connection from a client that presented a certificate,
+    /// mirrord-agent uses the first of these with the same identity as the client's certificate.
+    /// The identity is the set of subject alternative names, or the subject if the certificate
+    /// has no SANs. If none matches, or the client presented no certificate, `authentication` is
+    /// used.
+    ///
+    /// Requires `agentAsServer.verification` with `acceptAnyCert` disabled, because the
+    /// identity of an unverified client cannot be trusted.
     ///
     /// Optional. Defaults to an empty list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub identities: Vec<TlsAuthentication>,
+    pub identities: Vec<PathBuf>,
     /// Configures how mirrord-agent verifies the server's certificate.
     pub verification: TlsServerVerification,
 }

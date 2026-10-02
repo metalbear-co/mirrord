@@ -14,22 +14,39 @@ use x509_parser::{
     prelude::{FromDer, X509Certificate},
 };
 
+/// Tag of a `dNSName` [GeneralName](https://www.rfc-editor.org/rfc/rfc5280#section-4.2.1.6):
+/// context-specific, primitive, number 2.
+const DNS_NAME_TAG: u8 = 0x82;
+
 /// Identity of a TLS client, as seen by a server that authorizes requests based on the client's
 /// certificate.
 ///
-/// Consists of the certificate's subject and subject alternative names, which is where servers
-/// look for the client's identity (e.g. the common name, or a SPIFFE ID in a URI SAN).
-/// Other certificate properties, like the validity period or the issuer, are ignored, so that
-/// a certificate re-issued for the same client still matches.
+/// Servers look for the client's identity in the subject alternative names (e.g. a SPIFFE ID in
+/// a URI SAN), and in the subject only when there are no SANs (e.g. the common name). Two
+/// identities are equal according to the same rule: if they carry SANs, only the SANs are
+/// compared, otherwise only the subjects are. This way a certificate re-issued for the same
+/// workload still matches, even if its issuer, validity period or subject differ (some issuers
+/// put a per-certificate unique identifier in the subject).
 ///
 /// Names are kept DER-encoded, so that the identity can be sent over mirrord-protocol and
-/// compared on the other side without depending on how names are formatted.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// compared on the other side. DNS names are normalized (ASCII lowercase, no trailing dot), and
+/// all other names are compared byte by byte. In particular, there is no RFC 5280 normalization
+/// of distinguished names, so subjects with the same attributes stored with different string
+/// types (e.g. `PrintableString` and `UTF8String`) do not match.
+#[derive(Debug, Clone, Eq)]
 pub struct CertIdentity {
     /// DER encoding of the subject's distinguished name.
     pub subject: Vec<u8>,
-    /// DER encodings of the subject alternative names (including their tags).
+    /// DER encodings of the subject alternative names (including their tags), sorted and
+    /// deduplicated.
     pub subject_alternative_names: Vec<Vec<u8>>,
+}
+
+impl PartialEq for CertIdentity {
+    fn eq(&self, other: &Self) -> bool {
+        self.subject_alternative_names == other.subject_alternative_names
+            && (self.subject_alternative_names.is_empty().not() || self.subject == other.subject)
+    }
 }
 
 impl CertIdentity {
@@ -55,11 +72,16 @@ impl CertIdentity {
                 .ok()?;
             let mut remaining = names.content.as_ref();
             while remaining.is_empty().not() {
-                let (rest, _) = Any::from_der(remaining)
+                let (rest, name) = Any::from_der(remaining)
                     .inspect_err(|error| tracing::warn!(%error, "Invalid X509 SAN extension"))
                     .ok()?;
-                let (name, _) = remaining.split_at(remaining.len() - rest.len());
-                subject_alternative_names.insert(name.to_vec());
+                let (encoded, _) = remaining.split_at(remaining.len() - rest.len());
+                let encoded = if encoded.first() == Some(&DNS_NAME_TAG) {
+                    normalized_dns_name(name.as_bytes())
+                } else {
+                    encoded.to_vec()
+                };
+                subject_alternative_names.insert(encoded);
                 remaining = rest;
             }
         }
@@ -73,6 +95,31 @@ impl CertIdentity {
             subject_alternative_names: subject_alternative_names.into_iter().collect(),
         })
     }
+}
+
+/// Returns the DER encoding of a `dNSName` with the given value, lowercased and stripped of a
+/// trailing dot, since DNS names are case-insensitive and `example.com.` is the same name as
+/// `example.com`.
+fn normalized_dns_name(value: &[u8]) -> Vec<u8> {
+    let value = value
+        .strip_suffix(b".")
+        .unwrap_or(value)
+        .to_ascii_lowercase();
+
+    let mut encoded = vec![DNS_NAME_TAG];
+    if let Ok(len) = u8::try_from(value.len())
+        && len < 0x80
+    {
+        encoded.push(len);
+    } else {
+        let len = value.len().to_be_bytes();
+        let len = &len[len.iter().take_while(|byte| **byte == 0).count()..];
+        encoded.push(0x80 | len.len() as u8);
+        encoded.extend_from_slice(len);
+    }
+    encoded.extend_from_slice(&value);
+
+    encoded
 }
 
 #[cfg(test)]
@@ -166,6 +213,70 @@ mod test {
             make("spiffe://cluster.local/ns/default/sa/first"),
             make("spiffe://cluster.local/ns/default/sa/second"),
         );
+    }
+
+    /// When there are SANs, the identity is in the SANs, and the subject may be unique for every
+    /// issued certificate.
+    #[test]
+    fn subject_ignored_with_sans() {
+        let make = |common_name: &str| {
+            let mut params = CertificateParams::new(vec!["client.example.com".to_owned()]).unwrap();
+            params
+                .distinguished_name
+                .push(DnType::CommonName, common_name);
+            let cert = params.self_signed(&KeyPair::generate().unwrap()).unwrap();
+            CertIdentity::from_der(cert.der()).unwrap()
+        };
+
+        assert_eq!(make("first"), make("second"));
+    }
+
+    #[test]
+    fn subject_compared_without_sans() {
+        let make = |common_name: &str| {
+            let mut params = CertificateParams::default();
+            params.distinguished_name = DistinguishedName::new();
+            params
+                .distinguished_name
+                .push(DnType::CommonName, common_name);
+            let cert = params.self_signed(&KeyPair::generate().unwrap()).unwrap();
+            CertIdentity::from_der(cert.der()).unwrap()
+        };
+
+        assert_eq!(make("client"), make("client"));
+        assert_ne!(make("client"), make("other-client"));
+    }
+
+    #[rstest::rstest]
+    #[case::case("Client.Example.COM", "client.example.com")]
+    #[case::trailing_dot("client.example.com.", "client.example.com")]
+    #[case::long_name(&format!("{}.Example.com", "a".repeat(200)), &format!("{}.example.com", "a".repeat(200)))]
+    fn dns_names_normalized(#[case] first: &str, #[case] second: &str) {
+        let make = |name: &str| {
+            let mut params = CertificateParams::default();
+            params.distinguished_name = DistinguishedName::new();
+            params.subject_alt_names = vec![SanType::DnsName(name.try_into().unwrap())];
+            let cert = params.self_signed(&KeyPair::generate().unwrap()).unwrap();
+            CertIdentity::from_der(cert.der()).unwrap()
+        };
+
+        assert_eq!(make(first), make(second));
+    }
+
+    /// Normalized names are valid DER, so that they can be compared with names that did not
+    /// need normalization.
+    #[rstest::rstest]
+    #[case::short(10)]
+    #[case::long(200)]
+    #[case::very_long(300)]
+    fn normalized_dns_name_is_der(#[case] len: usize) {
+        let value = "a".repeat(len);
+        let encoded = normalized_dns_name(value.as_bytes());
+
+        let (rest, name) = Any::from_der(&encoded).unwrap();
+        assert!(rest.is_empty());
+        assert_eq!(encoded.first(), Some(&DNS_NAME_TAG));
+        assert_eq!(name.as_bytes(), value.as_bytes());
     }
 
     #[test]

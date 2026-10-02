@@ -96,6 +96,19 @@ impl StealTlsHandlerStore {
             .transpose()
             .map_err(StealTlsSetupError::ClientSetupError)?;
 
+        // Without verification, the client's certificate proves nothing, and anyone could have
+        // the agent present any of the configured identities on their behalf.
+        let verifies_clients = config
+            .agent_as_server
+            .verification
+            .as_ref()
+            .is_some_and(|verification| verification.accept_any_cert.not());
+        if config.agent_as_client.identities.is_empty().not() && verifies_clients.not() {
+            return Err(StealTlsSetupError::ClientSetupError(
+                StealTlsSetupErrorInner::IdentitiesWithoutClientVerification,
+            ));
+        }
+
         let (server_config, (client_config, identity_client_configs)) = tokio::try_join!(
             async {
                 self.build_server_config(config.agent_as_server)
@@ -113,6 +126,7 @@ impl StealTlsHandlerStore {
             server_config,
             client_config,
             identity_client_configs,
+            verifies_clients,
             server_name,
         };
 
@@ -239,16 +253,31 @@ impl StealTlsHandlerStore {
             None => builder.clone().with_no_client_auth(),
         };
 
-        let mut identity_client_configs = Vec::with_capacity(config.identities.len());
-        for authentication in config.identities {
-            let cert_pem = authentication.cert_pem.clone();
-            let (cert_chain, key_der) = self.read_authentication(authentication).await?;
+        let mut identity_client_configs: IdentityClientConfigs =
+            Vec::with_capacity(config.identities.len());
+        for path in config.identities {
+            let (cert_chain, key_der) = self
+                .read_authentication(TlsAuthentication {
+                    cert_pem: path.clone(),
+                    key_pem: path.clone(),
+                })
+                .await?;
             let Some(identity) = cert_chain
                 .first()
                 .and_then(|cert| CertIdentity::from_der(cert))
             else {
-                return Err(StealTlsSetupErrorInner::NoCertIdentity(cert_pem));
+                return Err(StealTlsSetupErrorInner::NoCertIdentity(path));
             };
+            if identity_client_configs
+                .iter()
+                .any(|(existing, _)| *existing == identity)
+            {
+                tracing::warn!(
+                    path = %path.display(),
+                    "Certificate has the same identity as an earlier one in \
+                    `agentAsClient.identities`, the earlier one is used",
+                );
+            }
             let config = builder
                 .clone()
                 .with_client_auth_cert(cert_chain, key_der)

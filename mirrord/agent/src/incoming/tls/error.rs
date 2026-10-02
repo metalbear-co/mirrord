@@ -54,6 +54,11 @@ pub enum StealTlsSetupErrorInner {
         .0.display()
     )]
     NoCertIdentity(PathBuf),
+    #[error(
+        "`agentAsClient.identities` requires `agentAsServer.verification` without \
+        `acceptAnyCert`, because the identity of an unverified client cannot be trusted"
+    )]
+    IdentitiesWithoutClientVerification,
     #[error("background task panicked")]
     BackgroundTaskPanicked,
     #[error(transparent)]

@@ -6008,6 +6008,7 @@ dependencies = [
  "http 1.5.0",
  "pem 3.0.6",
  "rcgen",
+ "rstest",
  "rustls",
  "rustls-pemfile",
  "tempfile",

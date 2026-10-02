@@ -1,7 +1,7 @@
-use std::{fmt, ops::Not, path::PathBuf, sync::Arc};
+use std::{fmt, path::PathBuf, sync::Arc};
 
 use mirrord_config::feature::network::incoming::tls_delivery::{
-    LocalClientIdentity, LocalTlsDelivery, TlsDeliveryProtocol,
+    LocalTlsDelivery, TlsDeliveryProtocol,
 };
 use mirrord_protocol::tcp::TlsClientIdentity;
 use mirrord_tls_util::{
@@ -152,7 +152,10 @@ impl LocalTlsSetup {
                 let client_identities = config
                     .client_identities
                     .into_iter()
-                    .map(|LocalClientIdentity { cert, key }| LocalClientAuth::Files { cert, key })
+                    .map(|path| LocalClientAuth::Files {
+                        cert: path.clone(),
+                        key: path,
+                    })
                     .collect();
 
                 Some(Arc::new(Self::new(
@@ -166,30 +169,50 @@ impl LocalTlsSetup {
         }
     }
 
-    /// Whether connections made with [`Self::get`] may present different client certificates,
-    /// depending on the original client's identity.
-    pub fn selects_client_cert(&self) -> bool {
-        self.client_identities.is_empty().not()
+    /// Picks the client certificate to present to the user application, based on the identity of
+    /// the original client.
+    ///
+    /// Returns the index of the first matching certificate in [`Self::client_identities`], or
+    /// [`None`] if the default [`Self::client_auth`] should be used. Pass the result to
+    /// [`Self::get`].
+    pub async fn select_identity(
+        &self,
+        original_client: Option<&TlsClientIdentity>,
+    ) -> Result<Option<usize>, LocalTlsSetupError> {
+        let resolved = self.resolved.get_or_try_init(|| self.resolve()).await?;
+
+        let Some(original_client) = original_client else {
+            return Ok(None);
+        };
+        let original_client = CertIdentity {
+            subject: original_client.subject.clone(),
+            subject_alternative_names: original_client.subject_alternative_names.clone(),
+        };
+
+        Ok(resolved
+            .identity_configs
+            .iter()
+            .position(|(candidate, _)| *candidate == original_client))
     }
 
     /// Returns a [`TlsConnector`] and an optional [`ServerName`] to use when making the TLS
     /// connection.
     ///
-    /// `original_client` is used to pick the certificate presented to the user application.
+    /// `identity` is the client certificate selected with [`Self::select_identity`].
     pub async fn get(
         &self,
         alpn_protocol: Option<Vec<u8>>,
-        original_client: Option<&TlsClientIdentity>,
+        identity: Option<usize>,
     ) -> Result<(TlsConnector, Option<ServerName<'static>>), LocalTlsSetupError> {
         let resolved = self.resolved.get_or_try_init(|| self.resolve()).await?;
 
-        let mut config = original_client
-            .and_then(|identity| {
-                resolved.identity_configs.iter().find(|(candidate, _)| {
-                    candidate.subject == identity.subject
-                        && candidate.subject_alternative_names == identity.subject_alternative_names
-                })
-            })
+        tracing::debug!(
+            ?identity,
+            "Selected the client certificate for the local connection \
+            (index in `client_identities`, or `client_cert` if none)",
+        );
+        let mut config = identity
+            .and_then(|index| resolved.identity_configs.get(index))
             .map(|(_, config)| config)
             .unwrap_or(&resolved.config)
             .clone();
@@ -255,13 +278,25 @@ impl LocalTlsSetup {
             None => builder.clone().with_no_client_auth(),
         };
 
-        let mut identity_configs = Vec::with_capacity(self.client_identities.len());
+        let mut identity_configs: Vec<(CertIdentity, ClientConfig)> =
+            Vec::with_capacity(self.client_identities.len());
         for client_auth in &self.client_identities {
             let (cert_chain, key) = client_auth.load().await?;
             let identity = cert_chain
                 .first()
                 .and_then(|cert| CertIdentity::from_der(cert))
                 .ok_or_else(|| LocalTlsSetupError::NoClientIdentity(client_auth.clone()))?;
+            if identity_configs
+                .iter()
+                .any(|(existing, _)| *existing == identity)
+            {
+                tracing::warn!(
+                    ?client_auth,
+                    "Client certificate has the same identity as an earlier one in \
+                    `feature.network.incoming.tls_delivery.client_identities`, \
+                    the earlier one is used",
+                );
+            }
             let config = builder.clone().with_client_auth_cert(cert_chain, key)?;
             identity_configs.push((identity, config));
         }
@@ -352,7 +387,8 @@ mod tests {
         addr: std::net::SocketAddr,
         original_client: Option<&TlsClientIdentity>,
     ) {
-        let (connector, server_name) = setup.get(None, original_client).await.unwrap();
+        let identity = setup.select_identity(original_client).await.unwrap();
+        let (connector, server_name) = setup.get(None, identity).await.unwrap();
         let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
         let mut stream = connector
             .connect(server_name.unwrap(), stream)

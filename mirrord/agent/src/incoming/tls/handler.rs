@@ -32,6 +32,10 @@ pub struct StealTlsHandler {
     ///
     /// Used instead of [`Self::client_config`] when the identity of the original client matches.
     pub(super) identity_client_configs: IdentityClientConfigs,
+    /// Whether the certificates of the original clients are verified against trust roots.
+    ///
+    /// The identity from an unverified certificate is never used, as anyone could claim it.
+    pub(super) verifies_clients: bool,
     /// Configured name to verify the original destination against when the stolen connection
     /// carries no SNI.
     pub(super) server_name: Option<ServerName<'static>>,
@@ -57,17 +61,24 @@ impl StealTlsHandler {
             .collect::<Vec<_>>();
         let client_identity = original_connection
             .peer_certificates()
+            .filter(|_| self.verifies_clients)
             .and_then(|certs| certs.first())
             .and_then(|cert| CertIdentity::from_der(cert));
 
-        let base_config = client_identity
-            .as_ref()
-            .and_then(|identity| {
-                self.identity_client_configs
-                    .iter()
-                    .find(|(candidate, _)| candidate == identity)
-            })
-            .map(|(_, config)| config)
+        let identity_config = client_identity.as_ref().and_then(|identity| {
+            self.identity_client_configs
+                .iter()
+                .enumerate()
+                .find(|(_, (candidate, _))| candidate == identity)
+        });
+        tracing::debug!(
+            has_client_identity = client_identity.is_some(),
+            identity_index = ?identity_config.map(|(index, _)| index),
+            "Selected the client certificate for the passthrough connection \
+            (index in `agentAsClient.identities`, or `authentication` if none)",
+        );
+        let base_config = identity_config
+            .map(|(_, (_, config))| config)
             .unwrap_or(&self.client_config);
         let mut client_config = base_config.as_ref().clone();
         client_config.alpn_protocols = client_alpn;

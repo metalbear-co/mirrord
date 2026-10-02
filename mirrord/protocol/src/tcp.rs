@@ -200,7 +200,7 @@ pub struct TlsClientIdentity {
     /// DER encoding of the certificate subject's distinguished name.
     pub subject: Vec<u8>,
     /// DER encodings of the certificate's subject alternative names (including their tags),
-    /// sorted and deduplicated.
+    /// sorted and deduplicated. DNS names are lowercased and stripped of a trailing dot.
     pub subject_alternative_names: Vec<Vec<u8>>,
 }
 
