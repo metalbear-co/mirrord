@@ -607,22 +607,23 @@ fn known_paths(root: &Value) -> Vec<String> {
 /// the asked one come first, so a path given without its parents (`incoming.mode`) still finds
 /// the option; then the closest by edit distance.
 ///
-/// Map keys in `known` take the asked path's own key at that position, so the suggestions for
-/// `services.api.htp_filter` are under `services.api`.
+/// Map keys in `known` take the asked path's own key at that position when the paths agree up to
+/// there, so the suggestions for `services.api.htp_filter` are under `services.api`.
 fn suggestions(segments: &[&str], known: &[String]) -> Vec<String> {
     let asked = segments.join(".");
     let mut ranked: Vec<(bool, f64, String)> = known
         .iter()
         .map(|path| {
-            let candidate = path
-                .split('.')
-                .enumerate()
-                .map(|(index, segment)| match segment {
-                    ANY_KEY => segments.get(index).copied().unwrap_or(segment),
+            let mut candidate: Vec<&str> = Vec::new();
+            for (index, segment) in path.split('.').enumerate() {
+                let asked = segments.get(index).copied();
+                let agrees = segments.get(..index) == Some(candidate.as_slice());
+                candidate.push(match (segment, asked) {
+                    (ANY_KEY, Some(asked)) if agrees => asked,
                     _ => segment,
-                })
-                .collect::<Vec<_>>()
-                .join(".");
+                });
+            }
+            let candidate = candidate.join(".");
             let is_suffix = candidate.ends_with(&format!(".{asked}"));
             let similarity = strsim::normalized_damerau_levenshtein(&asked, &candidate);
             (is_suffix, similarity, candidate)
@@ -796,6 +797,21 @@ mod tests {
             "{description}"
         );
         assert!(output.allowed_values.is_none());
+    }
+
+    /// A map key is only filled in from the asked path where the paths agree up to it: asked in a
+    /// `mirrord-up.yaml`, `feature.network.…` is not under a service called `network`.
+    #[test]
+    fn mirrord_json_path_in_up() {
+        let output = explain_path(ConfigFormat::MirrordUpYaml, "feature.network.incoming.mode");
+        assert!(output.found.not());
+        let suggestions = output.suggestions.unwrap();
+        assert!(
+            suggestions
+                .iter()
+                .all(|path| path.starts_with("services.<name>.")),
+            "{suggestions:?}"
+        );
     }
 
     /// A service's `target` holds a `path`, so `target.deployment` exists only in `mirrord.json`.
