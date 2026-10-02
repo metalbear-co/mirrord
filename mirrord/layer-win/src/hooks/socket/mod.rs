@@ -378,6 +378,7 @@ unsafe fn bind_detour_impl(s: SOCKET, name: *const SOCKADDR, namelen: INT) -> (I
 
         let Some(entry) = sockets.remove(&s) else {
             // fallback / early return when the socket isn’t tracked
+            drop(sockets);
             return bind_fn(name, namelen, "non-managed socket", true);
         };
 
@@ -525,17 +526,15 @@ unsafe extern "system" fn listen_detour(s: SOCKET, backlog: INT) -> INT {
 
         res
     };
-    let mut socket = {
-        let mut sockets = SOCKETS
-            .lock()
-            .expect("listen_detour -> failed to lock sockets for socket retrieval");
-
-        let Some(entry) = sockets.remove(&s) else {
-            // fallback / early return when the socket isn’t tracked
-            return listen_fn("non-managed socket");
-        };
-
-        entry
+    // Remove from sockets in a separate statement, so that the `SOCKETS` guard is dropped before
+    // the original `listen`.
+    let removed = SOCKETS
+        .lock()
+        .expect("listen_detour -> failed to lock sockets for socket retrieval")
+        .remove(&s);
+    let Some(mut socket) = removed else {
+        // fallback / early return when the socket isn’t tracked
+        return listen_fn("non-managed socket");
     };
 
     // Check if this socket is managed by mirrord and get bound state
@@ -839,12 +838,16 @@ unsafe extern "system" fn getsockname_detour(
         unsafe { original(s, name, namelen) }
     };
 
-    let socket = match SOCKETS
+    // Look up the socket in a separate statement, so that the `SOCKETS` guard is dropped before
+    // the original `getsockname`. A guard in the `match` scrutinee stays alive until the end of
+    // the `match`.
+    let managed = SOCKETS
         .lock()
         .expect("getsockname_detour -> failed to lock sockets for socket retrieval")
         .get(&s)
-    {
-        Some(sock) => sock.clone(),
+        .cloned();
+    let socket = match managed {
+        Some(sock) => sock,
         None => {
             tracing::warn!("getsockname_detour -> socket not managed: {}", s);
             return getsockname_fn();
@@ -2013,7 +2016,11 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     let original = CLOSE_SOCKET_ORIGINAL.get().unwrap();
     let res = unsafe { original(s) };
 
-    if let Some(socket) = SOCKETS.lock().expect("SOCKETS lock failed").remove(&s)
+    // Remove from sockets in a separate statement, so that the `SOCKETS` guard is dropped before
+    // `UserSocket::close` sends a request to the intproxy. A guard in the `if let` scrutinee stays
+    // alive until the end of the `if` block.
+    let removed = SOCKETS.lock().expect("SOCKETS lock failed").remove(&s);
+    if let Some(socket) = removed
         && matches!(socket.state, SocketState::Listening(_))
     {
         // Call close() method to send PortUnsubscribe if socket was listening
