@@ -27,6 +27,12 @@ pub(crate) enum OperatorInstallError {
     #[error("cancelled, the cluster was not changed")]
     Declined,
 
+    #[error("interrupted")]
+    #[diagnostic(help(
+        "The command stopped before it completed. Run it again to see what to do next."
+    ))]
+    Interrupted,
+
     #[error("failed to fetch `{url}`")]
     Fetch {
         url: String,

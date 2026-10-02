@@ -32,6 +32,14 @@ config values are included.
 
 The opt-out below disables all of it.
 
+## `mirrord operator install` and `mirrord operator uninstall`
+
+Each run of `mirrord operator install` and `mirrord operator uninstall` sends one anonymous event with the outcome of the run and how long it took. The outcome is success, failure, that the user declined the confirmation prompt, or that the user stopped the command (for example with Ctrl+C). For `mirrord operator uninstall`, the outcome can also be that no operator was installed. When the run fails or is stopped, the event also has the step that it ended in, from a fixed list (for example "fetching the manifest" or "waiting for the operator"). The `mirrord operator install` event also has whether `--api-key` was given and whether a trial was started.
+
+No API key, claim URL, cluster ID, kubecontext, namespace name or manifest content is included.
+
+These commands do not read a mirrord config file. To disable their events, use the environment variable below.
+
 ## Disabling
 
 Telemetry can be disabled by specifying the following in the mirrord config file:
@@ -43,4 +51,10 @@ Alternatively, in the wizard, it is disabled via command-line flag:
 
 ```bash
 mirrord wizard --telemetry=false
+```
+
+For `mirrord operator install` and `mirrord operator uninstall`, it is disabled via environment variable:
+
+```bash
+MIRRORD_TELEMETRY=false mirrord operator install
 ```
