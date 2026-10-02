@@ -42,7 +42,7 @@ use crate::{
 ///
 /// For example, both `https://example.com/sm` and `https://sm.example.com` are valid; API version
 /// and resource segments are appended to the configured path.
-const SESSIONS_MANAGER_URL_ENV: &str = "MIRRORD_SESSIONS_MANAGER_URL";
+pub const SESSIONS_MANAGER_URL_ENV: &str = "MIRRORD_SESSIONS_MANAGER_URL";
 
 /// Bound on establishing the TCP (and TLS) connection for control-plane HTTP requests.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
