@@ -1,12 +1,10 @@
 mod tasks;
 
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use mirrord_command::resolve_command;
 use tasks::{
     layer::CargoOptions,
     release::{BuildOptions, Platform},
@@ -326,7 +324,7 @@ fn main() -> Result<()> {
 
             let cli_path = tasks::release::build_release_cli(options)?;
 
-            match Command::new(cli_path).args(mirrord_args).spawn() {
+            match resolve_command(cli_path).args(mirrord_args).spawn() {
                 Ok(mut child) => {
                     if let Err(err) = child.wait() {
                         println!("error while waiting for child: {err}");

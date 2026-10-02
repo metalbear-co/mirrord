@@ -395,10 +395,12 @@ mod tests {
     use std::{
         io::{BufRead, BufReader},
         os::unix::process::ExitStatusExt,
-        process::{Command, Stdio},
+        process::Stdio,
     };
 
     use futures::{SinkExt, StreamExt};
+    #[cfg(unix)]
+    use mirrord_command::resolve_command;
     use mirrord_config::{config::MirrordConfig, experimental::ExperimentalFileConfig};
     use mirrord_intproxy_protocol::{
         LayerId, LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo,
@@ -483,7 +485,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn agent_failure_allows_term_handler_before_kill() {
-        let mut child = Command::new("sh")
+        let mut child = resolve_command("sh")
             .args([
                 "-c",
                 "trap 'echo term' TERM; echo ready; while :; do :; done",

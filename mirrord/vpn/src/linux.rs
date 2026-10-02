@@ -4,10 +4,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use mirrord_command::resolve_tokio_command;
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, FileRequest, FileResponse, file::*, vpn::NetworkConfiguration,
 };
-use tokio::process::Command;
 
 use crate::{agent::VpnAgent, config::VpnConfig, error::VpnError};
 
@@ -130,7 +130,7 @@ pub async fn mount_linux<'a>(
         .await
         .map_err(VpnError::SetupIO)?;
 
-    Command::new("ip")
+    resolve_tokio_command("ip")
         .args([
             "route".to_owned(),
             "add".to_owned(),

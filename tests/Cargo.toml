@@ -13,6 +13,7 @@ doctest = false
 [dependencies]
 k8s-openapi.workspace = true
 kube.workspace = true
+mirrord-command = { path = "../mirrord/command" }
 reqwest.workspace = true
 tokio = { workspace = true, features = [
     "rt",
