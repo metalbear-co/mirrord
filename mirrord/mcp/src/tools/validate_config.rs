@@ -10,7 +10,7 @@
 //! that failed to deserialize, because it reports every problem at once, each with its location
 //! and, where the schema lists them, the allowed values, where serde stops at the first error.
 
-use std::{ops::Not, path::Path};
+use std::{fmt, ops::Not, path::Path};
 
 use jsonschema::{
     ValidationError,
@@ -25,8 +25,12 @@ use mirrord_config::{
 };
 use mirrord_up::{UpConfig, UpError};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{DeserializeOwned, MapAccess, SeqAccess, Visitor},
+};
 use serde_json::Value;
+use serde_saphyr::{DuplicateKeyPolicy, Spanned};
 use thiserror::Error;
 
 use crate::schema::{LAYER_SCHEMA, Schema, UP_SCHEMA};
@@ -105,19 +109,53 @@ pub fn validate_config(
                 LayerFileConfig::render(&content, Path::new("mirrord.json"), &mut context)
                     .map_err(|error| error.to_string());
             let parsed = rendered.and_then(|rendered| {
-                serde_json::from_str(&rendered).map_err(|error| error.to_string())
+                let value = serde_json::from_str(&rendered).map_err(|error| error.to_string())?;
+                Ok((rendered, value))
             });
             match parsed {
-                Ok(value) => check_layer_config(&value, context)?,
+                Ok((rendered, value)) => {
+                    let mut issues = check_layer_config(&value, context)?;
+                    // Read the way `mirrord exec` reads it, which rejects a field given twice
+                    // where the `Value` above silently keeps the last one.
+                    if issues.is_empty()
+                        && let Err(error) = serde_path_to_error::deserialize::<_, LayerFileConfig>(
+                            &mut serde_json::Deserializer::from_str(&rendered),
+                        )
+                    {
+                        let mut path = pointer_from_serde_path(error.path());
+                        let message = error.into_inner().to_string();
+                        // serde reports a repeated field at the object holding it.
+                        if let Some((field, _)) = message
+                            .strip_prefix("duplicate field `")
+                            .and_then(|rest| rest.split_once('`'))
+                        {
+                            path = format!("{path}/{}", escape_pointer_token(field));
+                        }
+                        issues.push(ConfigIssue {
+                            path,
+                            message,
+                            allowed_values: None,
+                        });
+                    }
+                    issues
+                }
                 Err(message) => vec![file_issue(message)],
             }
         }
         ConfigFormat::MirrordUpYaml => {
             let key = EnvKey::Provided(key.unwrap_or_else(|| TEMPLATE_KEY.to_owned()));
-            let rendered =
-                mirrord_up::render_template(&content, &key).map_err(|error| error.to_string());
+            let rendered = mirrord_up::render_template(&content, &key)
+                .map_err(|error| file_issue(error.to_string()));
             let parsed = rendered.and_then(|rendered| {
-                serde_saphyr::from_str(&rendered).map_err(|error| error.to_string())
+                serde_saphyr::from_str(&rendered).map_err(|error| ConfigIssue {
+                    path: duplicate_key_pointer(&error, &rendered).unwrap_or_default(),
+                    // The default rendering is meant for the program calling the parser, e.g. it
+                    // suggests a `DuplicateKeyPolicy` for a key given twice.
+                    message: error
+                        .without_snippet()
+                        .render_with_formatter(&serde_saphyr::UserMessageFormatter),
+                    allowed_values: None,
+                })
             });
             match parsed {
                 Ok(value) => {
@@ -128,7 +166,7 @@ pub fn validate_config(
                     issues.extend(check_config_patches(&value)?);
                     issues
                 }
-                Err(message) => vec![file_issue(message)],
+                Err(issue) => vec![issue],
             }
         }
     };
@@ -182,6 +220,113 @@ fn up_issue(error: UpError) -> ConfigIssue {
         message: error.to_string(),
         allowed_values: None,
     }
+}
+
+/// The keys of a YAML document, each with the place it's written, to find the path of a key that
+/// the parser reports only by its line and column.
+enum YamlKeys {
+    Mapping(Vec<(Spanned<Value>, YamlKeys)>),
+    Sequence(Vec<YamlKeys>),
+    Scalar,
+}
+
+impl<'de> Deserialize<'de> for YamlKeys {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct KeysVisitor;
+
+        impl<'de> Visitor<'de> for KeysVisitor {
+            type Value = YamlKeys;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("any YAML value")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<YamlKeys, A::Error> {
+                let mut entries = Vec::new();
+                while let Some(entry) = map.next_entry()? {
+                    entries.push(entry);
+                }
+                Ok(YamlKeys::Mapping(entries))
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<YamlKeys, A::Error> {
+                let mut items = Vec::new();
+                while let Some(item) = seq.next_element()? {
+                    items.push(item);
+                }
+                Ok(YamlKeys::Sequence(items))
+            }
+
+            fn visit_bool<E>(self, _: bool) -> Result<YamlKeys, E> {
+                Ok(YamlKeys::Scalar)
+            }
+
+            fn visit_i64<E>(self, _: i64) -> Result<YamlKeys, E> {
+                Ok(YamlKeys::Scalar)
+            }
+
+            fn visit_u64<E>(self, _: u64) -> Result<YamlKeys, E> {
+                Ok(YamlKeys::Scalar)
+            }
+
+            fn visit_f64<E>(self, _: f64) -> Result<YamlKeys, E> {
+                Ok(YamlKeys::Scalar)
+            }
+
+            fn visit_str<E>(self, _: &str) -> Result<YamlKeys, E> {
+                Ok(YamlKeys::Scalar)
+            }
+
+            fn visit_unit<E>(self) -> Result<YamlKeys, E> {
+                Ok(YamlKeys::Scalar)
+            }
+
+            fn visit_none<E>(self) -> Result<YamlKeys, E> {
+                Ok(YamlKeys::Scalar)
+            }
+        }
+
+        deserializer.deserialize_any(KeysVisitor)
+    }
+}
+
+impl YamlKeys {
+    /// The JSON pointer of the key written at `location`.
+    fn pointer_at(&self, location: &serde_saphyr::Location) -> Option<String> {
+        match self {
+            Self::Mapping(entries) => entries.iter().find_map(|(key, value)| {
+                let segment = match &key.value {
+                    Value::String(key) => escape_pointer_token(key),
+                    key => escape_pointer_token(&key.to_string()),
+                };
+                if key.referenced.line() == location.line()
+                    && key.referenced.column() == location.column()
+                {
+                    return Some(format!("/{segment}"));
+                }
+                value
+                    .pointer_at(location)
+                    .map(|rest| format!("/{segment}{rest}"))
+            }),
+            Self::Sequence(items) => items.iter().enumerate().find_map(|(index, item)| {
+                item.pointer_at(location)
+                    .map(|rest| format!("/{index}{rest}"))
+            }),
+            Self::Scalar => None,
+        }
+    }
+}
+
+/// The JSON pointer of the key a duplicate-key error is about, found by reading the document
+/// again with duplicates allowed.
+fn duplicate_key_pointer(error: &serde_saphyr::Error, content: &str) -> Option<String> {
+    let serde_saphyr::Error::DuplicateMappingKey { location, .. } = error.without_snippet() else {
+        return None;
+    };
+    let options = serde_saphyr::options! { duplicate_keys: DuplicateKeyPolicy::LastWins };
+    serde_saphyr::from_str_with_options::<YamlKeys>(content, options)
+        .ok()?
+        .pointer_at(location)
 }
 
 /// An issue with the file as a whole: a template or syntax error that prevented reading it.
@@ -469,6 +614,7 @@ fn pointer_from_serde_path(path: &serde_path_to_error::Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
     use serde_json::json;
 
     use super::*;
@@ -755,6 +901,73 @@ services:
         assert_eq!(issue.path, "/services/api/target");
         assert_eq!(issue.allowed_values, Some(vec![json!("none")]));
         assert!(issue.message.contains("`object`"), "{}", issue.message);
+    }
+
+    /// A repeated field is reported at the field itself.
+    #[rstest]
+    #[case::top_level(
+        r#"{ "target": "deployment/a", "target": "pod/b" }"#,
+        "/target",
+        "target"
+    )]
+    #[case::nested(
+        r#"{ "feature": { "network": { "incoming": { "port_mapping": [[1, 2]], "port_mapping": [[3, 4]] } } } }"#,
+        "/feature/network/incoming/port_mapping",
+        "port_mapping"
+    )]
+    fn duplicate_field(#[case] content: &str, #[case] path: &str, #[case] field: &str) {
+        let issue = single_issue(ConfigFormat::MirrordJson, content);
+        assert_eq!(issue.path, path);
+        assert!(
+            issue
+                .message
+                .contains(&format!("duplicate field `{field}`")),
+            "{}",
+            issue.message
+        );
+    }
+
+    /// A key given twice in a `mirrord-up.yaml` is rejected, as `mirrord up` rejects it, with a
+    /// message for the author of the file rather than for the program parsing it.
+    #[test]
+    fn up_yaml_duplicate_key() {
+        let issue = single_issue(
+            ConfigFormat::MirrordUpYaml,
+            "services:\n  api:\n    target: none\n    target: none\n    run:\n      command: [\"true\"]\n",
+        );
+        assert!(
+            issue.message.contains("duplicate mapping key: target"),
+            "{}",
+            issue.message
+        );
+        assert!(issue.message.contains("line 4"), "{}", issue.message);
+        assert_eq!(issue.path, "/services/api/target");
+        assert!(
+            issue.message.contains("DuplicateKeyPolicy").not(),
+            "{}",
+            issue.message
+        );
+    }
+
+    /// The duplicate key is found wherever and however it's written.
+    #[rstest]
+    #[case::flow(
+        "services: {api: {target: none, target: none, run: {command: [x]}}}\n",
+        "/services/api/target"
+    )]
+    #[case::in_config_patch(
+        "services:\n  api:\n    config_patch:\n      feature:\n        env:\n          override:\n            A: x\n            A: y\n    run:\n      command: [x]\n",
+        "/services/api/config_patch/feature/env/override/A"
+    )]
+    #[case::in_sequence(
+        "services:\n  api:\n    run:\n      command: [{a: 1, a: 2}]\n",
+        "/services/api/run/command/0/a"
+    )]
+    fn up_yaml_duplicate_key_path(#[case] content: &str, #[case] path: &str) {
+        assert_eq!(
+            single_issue(ConfigFormat::MirrordUpYaml, content).path,
+            path
+        );
     }
 
     #[test]
