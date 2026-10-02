@@ -1,6 +1,7 @@
 #[cfg(not(target_os = "macos"))]
 use std::{
-    cell::RefCell,
+    ffi::{CStr, CString},
+    ptr,
     sync::atomic::{AtomicBool, Ordering},
 };
 
@@ -28,18 +29,6 @@ use crate::{
 #[cfg(not(target_os = "macos"))]
 static EXECVE_PROBE_ENABLED: AtomicBool = AtomicBool::new(false);
 
-#[cfg(not(target_os = "macos"))]
-thread_local! {
-    /// The environment that [`on_execve`] gave to the last `execve` on this thread. It is replaced
-    /// on the next call, so each thread keeps at most one copy.
-    ///
-    /// This is also correct in the `vfork` child of glibc’s `posix_spawn`: the child uses the
-    /// parent thread’s thread-local, and the parent waits until the child calls `execve`. When
-    /// `execve` succeeds, the kernel has copied the environment; when it fails, nothing uses the
-    /// buffer again.
-    static PREPARED_ENVP: RefCell<Option<PreparedEnvp>> = const { RefCell::new(None) };
-}
-
 /// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
 /// it as a map.
 fn shared_sockets() -> Detour<Vec<(i32, UserSocket)>> {
@@ -63,12 +52,18 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
         other => Detour::Bypass(other),
     })?;
 
+    env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded_shared_sockets()?)?;
+
+    Detour::Success(env_vars)
+}
+
+/// Encodes [`SOCKETS`] as the value of [`SHARED_SOCKETS_ENV_VAR`], which the layer in the new
+/// image reads to rebuild them.
+fn encoded_shared_sockets() -> Detour<String> {
     let encoded = bincode::encode_to_vec(shared_sockets()?, bincode::config::standard())
         .map(|bytes| BASE64_URL_SAFE.encode(bytes))?;
 
-    env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded)?;
-
-    Detour::Success(env_vars)
+    Detour::Success(encoded)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -103,22 +98,45 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
     }
 }
 
-/// Replaces Linux `execve`'s environment with socket metadata for the new image.
+/// Replaces Linux `execve`'s environment with one that also carries socket metadata for the
+/// new image.
+///
+/// The environment must stay valid until `execve` returns or replaces the image, and a probe
+/// cannot free it after the call. In glibc’s `posix_spawn`, the `vfork` child shares the parent’s
+/// memory, so the allocation stays in the parent on each spawn. To keep that leak small, the new
+/// list reuses the strings in `envp`, which remain valid for the call, and allocates only the
+/// pointer list and `MIRRORD_SHARED_SOCKETS` string.
 #[cfg(not(target_os = "macos"))]
 fn on_execve(call: &ProbedCall<'_>) {
     const ENVP: u32 = 2;
 
+    let Detour::Success(encoded) = encoded_shared_sockets() else {
+        return;
+    };
+    let Ok(shared_sockets) = CString::new(format!("{SHARED_SOCKETS_ENV_VAR}={encoded}")) else {
+        return;
+    };
+
     let envp = call.arg(ENVP) as *const *const c_char;
-    if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
-        let envp = PreparedEnvp::new(envp);
-        let pointer = envp.as_ptr();
-        let mut envp = Some(envp);
-        let _ = PREPARED_ENVP.try_with(|prepared| *prepared.borrow_mut() = envp.take());
-        // The thread-local is gone while the thread exits, for example in an `atexit` handler.
-        // The thread is about to end, so leak the environment then.
-        std::mem::forget(envp);
-        call.set_arg(ENVP, pointer as usize);
+    let prefix = format!("{SHARED_SOCKETS_ENV_VAR}=");
+    let mut pointers = Vec::new();
+
+    if !envp.is_null() {
+        pointers.extend(
+            (0..)
+                .map(|index| unsafe { *envp.add(index) })
+                .take_while(|variable| !variable.is_null())
+                .filter(|variable| {
+                    !unsafe { CStr::from_ptr(*variable) }
+                        .to_bytes()
+                        .starts_with(prefix.as_bytes())
+                }),
+        );
     }
+
+    pointers.push(shared_sockets.into_raw().cast_const());
+    pointers.push(ptr::null());
+    call.set_arg(ENVP, pointers.leak().as_ptr() as usize);
 }
 
 /// Hook for `libc::execve`.
