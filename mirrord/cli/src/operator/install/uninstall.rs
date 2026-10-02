@@ -5,7 +5,7 @@
 //! hook (`helm-cleanup` in the operator image) lets the operator finalize its sessions, then the
 //! objects of the manifest are deleted.
 
-use std::{ops::Not, time::Duration};
+use std::{collections::HashSet, ops::Not, time::Duration};
 
 use futures::future::try_join_all;
 use http::StatusCode;
@@ -24,7 +24,7 @@ use mirrord_progress::{Progress, ProgressTracker};
 use tokio::time::Instant;
 
 use super::{
-    Connection, OperatorInstallError, OperatorTelemetry, cluster, confirm, location,
+    Connection, OperatorInstallError, OperatorTelemetry, cluster, confirm, context_flag, location,
     manifest::{self, Manifest},
     telemetry::{self, Outcome, UninstallPhase},
 };
@@ -135,23 +135,25 @@ async fn uninstall(
 
     *phase = UninstallPhase::FinalizeSessions;
     let mut subtask = progress.subtask("finalizing operator sessions");
-    finalize_sessions(&client).await?;
+    let installed_crds = installed
+        .iter()
+        .filter(|(object, _)| cluster::kind(object) == "CustomResourceDefinition")
+        .map(|(object, _)| object.name_any())
+        .collect();
+    finalize_sessions(&client, &installed_crds).await?;
     subtask.success(None);
 
     *phase = UninstallPhase::DeleteObjects;
     let mut subtask = progress.subtask("removing the operator");
     try_join_all(installed.iter().map(|(object, api)| async move {
-        match api
-            .delete(&object.name_any(), &DeleteParams::default())
-            .await
-        {
-            Ok(_) => Ok(()),
-            Err(kube::Error::Api(status)) if status.code == StatusCode::NOT_FOUND => Ok(()),
-            Err(source) => Err(OperatorInstallError::Delete {
-                object: cluster::describe(object),
-                source: Box::new(source),
-            }),
-        }
+        ignore_not_found(
+            api.delete(&object.name_any(), &DeleteParams::default())
+                .await,
+        )
+        .map_err(|source| OperatorInstallError::Delete {
+            object: cluster::describe(object),
+            source: Box::new(source),
+        })
     }))
     .await?;
     subtask.success(None);
@@ -253,7 +255,11 @@ async fn find_installed<'a>(
         let releases = Api::<Secret>::namespaced(client.clone(), &namespace)
             .list_metadata(
                 &ListParams::default()
-                    .labels(&format!("owner=helm,name={}", manifest::RELEASE_NAME)),
+                    // `helm uninstall --keep-history` keeps the revisions with this status.
+                    .labels(&format!(
+                        "owner=helm,name={},status!=uninstalled",
+                        manifest::RELEASE_NAME
+                    )),
             )
             .await
             .map_err(|source| OperatorInstallError::Lookup {
@@ -261,13 +267,11 @@ async fn find_installed<'a>(
                 source: Box::new(source),
             })?;
         if releases.items.is_empty().not() {
-            let kube_context_arg = context
-                .map(|context| format!(" --kube-context {context}"))
-                .unwrap_or_default();
             return Err(OperatorInstallError::ManagedByHelm {
                 uninstall: format!(
-                    "helm uninstall {} -n {namespace}{kube_context_arg}",
-                    manifest::RELEASE_NAME
+                    "helm uninstall {} -n {namespace}{}",
+                    manifest::RELEASE_NAME,
+                    context_flag("--kube-context", context),
                 ),
             });
         }
@@ -278,18 +282,39 @@ async fn find_installed<'a>(
 
 /// Lets the operator finalize its objects, one group of [`FINALIZED_CRDS`] after the other, as
 /// the chart's `pre-delete` hook does.
-async fn finalize_sessions(client: &Client) -> Result<(), OperatorInstallError> {
+///
+/// Only the CRDs in `installed_crds` are cleared, since the objects of other CRDs do not belong to
+/// this installation, and their CRDs are not deleted with it.
+async fn finalize_sessions(
+    client: &Client,
+    installed_crds: &HashSet<String>,
+) -> Result<(), OperatorInstallError> {
     for crds in FINALIZED_CRDS {
-        // Without a responding operator, nothing removes the finalizers, so there is no point in
-        // waiting for it.
+        let crds = crds
+            .iter()
+            .copied()
+            .filter(|crd| installed_crds.contains(*crd))
+            .collect::<Vec<_>>();
+        if crds.is_empty() {
+            continue;
+        }
+
+        // When the operator API is gone (404) or does not respond (503), nothing removes the
+        // finalizers, so there is no point in waiting. Other errors, e.g. of the network, say
+        // nothing about the operator, so it still gets the time.
         let strip_finalizers_after = match Api::<MirrordOperatorCrd>::all(client.clone())
             .get(OPERATOR_STATUS_NAME)
             .await
         {
-            Ok(_) => STRIP_FINALIZERS_AFTER,
-            Err(_) => Duration::ZERO,
+            Err(kube::Error::Api(status))
+                if status.code == StatusCode::NOT_FOUND
+                    || status.code == StatusCode::SERVICE_UNAVAILABLE =>
+            {
+                Duration::ZERO
+            }
+            _ => STRIP_FINALIZERS_AFTER,
         };
-        clear_finalized(client, crds, strip_finalizers_after).await?;
+        clear_finalized(client, &crds, strip_finalizers_after).await?;
     }
 
     Ok(())
@@ -335,7 +360,7 @@ async fn clear_finalized(
         // A CRD that was created moments before, e.g. by an installation that was stopped right
         // after, answers with 429 until its storage is ready. Its objects are listed again on the
         // next pass.
-        let mut unready = false;
+        let mut unready = None;
         for (crd, resource) in &resources {
             match Api::<DynamicObject>::all_with(client.clone(), resource)
                 .list_metadata(&ListParams::default())
@@ -344,8 +369,13 @@ async fn clear_finalized(
                 Ok(objects) => {
                     remaining.extend(objects.items.into_iter().map(|object| (resource, object)))
                 }
-                Err(kube::Error::Api(status)) if status.code == StatusCode::TOO_MANY_REQUESTS => {
-                    unready = true
+                Err(error)
+                    if matches!(
+                        &error,
+                        kube::Error::Api(status) if status.code == StatusCode::TOO_MANY_REQUESTS
+                    ) =>
+                {
+                    unready = Some((crd, error))
                 }
                 Err(source) => {
                     return Err(OperatorInstallError::Lookup {
@@ -356,13 +386,21 @@ async fn clear_finalized(
             }
         }
 
-        if remaining.is_empty() && unready.not() {
-            return Ok(());
-        }
-        if started.elapsed() >= CLEAR_TIMEOUT {
-            return Err(OperatorInstallError::NotFinalized {
-                remaining: remaining.len(),
-            });
+        let timed_out = started.elapsed() >= CLEAR_TIMEOUT;
+        match unready {
+            None if remaining.is_empty() => return Ok(()),
+            Some((crd, source)) if timed_out && remaining.is_empty() => {
+                return Err(OperatorInstallError::Lookup {
+                    object: format!("the objects of CustomResourceDefinition `{crd}`"),
+                    source: Box::new(source),
+                });
+            }
+            _ if timed_out => {
+                return Err(OperatorInstallError::NotFinalized {
+                    remaining: remaining.len(),
+                });
+            }
+            _ => {}
         }
 
         let strip_finalizers = started.elapsed() >= strip_finalizers_after;
@@ -372,30 +410,41 @@ async fn clear_finalized(
                 None => Api::all_with(client.clone(), resource),
             };
             let name = object.name_any();
+            let describe = || format!("{} `{name}`", resource.kind);
 
-            let result = if object.metadata.deletion_timestamp.is_none() {
-                api.delete(&name, &DeleteParams::default()).await.map(drop)
+            if object.metadata.deletion_timestamp.is_none() {
+                ignore_not_found(api.delete(&name, &DeleteParams::default()).await).map_err(
+                    |source| OperatorInstallError::Delete {
+                        object: describe(),
+                        source: Box::new(source),
+                    },
+                )
             } else if strip_finalizers && object.finalizers().is_empty().not() {
                 let patch = serde_json::json!({ "metadata": { "finalizers": null } });
-                api.patch_metadata(&name, &PatchParams::default(), &Patch::Merge(&patch))
-                    .await
-                    .map(drop)
+                ignore_not_found(
+                    api.patch_metadata(&name, &PatchParams::default(), &Patch::Merge(&patch))
+                        .await,
+                )
+                .map_err(|source| OperatorInstallError::RemoveFinalizers {
+                    object: describe(),
+                    source: Box::new(source),
+                })
             } else {
                 Ok(())
-            };
-
-            match result {
-                Ok(()) => Ok(()),
-                Err(kube::Error::Api(status)) if status.code == StatusCode::NOT_FOUND => Ok(()),
-                Err(source) => Err(OperatorInstallError::Delete {
-                    object: format!("{} `{name}`", resource.kind),
-                    source: Box::new(source),
-                }),
             }
         }))
         .await?;
 
         tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+/// Maps a 404 to success, since the goal of each request here is that the object is gone.
+fn ignore_not_found<T>(result: kube::Result<T>) -> kube::Result<()> {
+    match result {
+        Ok(_) => Ok(()),
+        Err(kube::Error::Api(status)) if status.code == StatusCode::NOT_FOUND => Ok(()),
+        Err(error) => Err(error),
     }
 }
 

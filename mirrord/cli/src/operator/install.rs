@@ -22,6 +22,8 @@ mod error;
 mod manifest;
 mod signup;
 mod telemetry;
+#[cfg(test)]
+mod tests;
 mod uninstall;
 
 pub(crate) use error::OperatorInstallError;
@@ -86,12 +88,7 @@ async fn install(
         release_namespace,
         context,
     } = Connection::new(context).await?;
-    // The commands printed to the user name the kubecontext, so that they do not use a different
-    // cluster if it is not the current one.
-    let context_arg = context
-        .as_deref()
-        .map(|context| format!(" --context {context}"))
-        .unwrap_or_default();
+    let context_arg = context_flag("--context", context.as_deref());
 
     run.phase = InstallPhase::CheckExistingOperator;
     let mut subtask = progress.subtask("checking for an existing operator");
@@ -267,14 +264,25 @@ fn trial_details(trial: &Trial) -> String {
     )
 }
 
+/// The `flag` that gives a command printed to the user the kubecontext of the run, so that the
+/// command does not use a different cluster if the kubecontext is not the current one. Empty if
+/// the kubecontext has no name.
+///
+/// The name is quoted for the shell, since a kubeconfig can give a kubecontext any name, also
+/// with spaces or shell syntax.
+fn context_flag(flag: &str, context: Option<&str>) -> String {
+    context
+        .map(|context| {
+            let context = shlex::try_quote(context).unwrap_or(context.into());
+            format!(" {flag} {context}")
+        })
+        .unwrap_or_default()
+}
+
 /// What the user needs to know after a successful installation, printed once.
 fn summary(version: &semver::Version, manifest: &Manifest, context: Option<&str>) -> String {
-    let kube_context_arg = context
-        .map(|context| format!(" --kube-context {context}"))
-        .unwrap_or_default();
-    let context_arg = context
-        .map(|context| format!(" --context {context}"))
-        .unwrap_or_default();
+    let kube_context_arg = context_flag("--kube-context", context);
+    let context_arg = context_flag("--context", context);
 
     let mut summary = format!(
         "mirrord operator {version} is installed in {}. To remove it, run `mirrord operator \
