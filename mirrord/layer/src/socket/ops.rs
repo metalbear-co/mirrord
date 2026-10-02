@@ -12,7 +12,7 @@ use std::{
     },
     path::PathBuf,
     ptr::{self, copy_nonoverlapping},
-    sync::{Arc, OnceLock},
+    sync::{Arc, OnceLock, PoisonError},
 };
 
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
@@ -50,7 +50,10 @@ use tracing::Level;
 use tracing::{error, trace, warn};
 
 use super::{hooks::*, *};
-use crate::file::{self, OPEN_FILES};
+use crate::{
+    CLOSE_FORK_LOCK,
+    file::{self, OPEN_FILES},
+};
 
 /// Hostname initialized from the agent with [`gethostname`].
 pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
@@ -721,6 +724,16 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
 /// Extra relevant for node on macos.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
+    // `dup2`, `dup3` and `fcntl(F_DUPFD)` can put the copy on an fd that is still in `OPEN_FILES`.
+    // Then the old `RemoteFile` can be dropped, which sends its close request, and a `fork` must
+    // not split that, see [`CLOSE_FORK_LOCK`].
+    let replaces_remote_file = SWITCH_MAP && OPEN_FILES.lock()?.contains_key(&dup_fd);
+    let _fork_guard = replaces_remote_file.then(|| {
+        CLOSE_FORK_LOCK
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    });
+
     let mut sockets = SOCKETS.lock()?;
     if let Some(socket) = sockets.get(&fd).cloned() {
         sockets.insert(dup_fd as RawFd, socket);

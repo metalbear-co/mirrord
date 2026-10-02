@@ -79,7 +79,7 @@ use std::{
         unix::process::parent_id,
     },
     panic,
-    sync::{Arc, MutexGuard, OnceLock, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError},
     time::Duration,
 };
 
@@ -690,16 +690,35 @@ fn enable_hooks(state: &LayerSetup) {
     }
 }
 
+/// Keeps a `fork` out of the middle of a close.
+///
+/// [`close_layer_fd`], `closedir` of a remote directory, and `dup2`, `dup3` or `fcntl(F_DUPFD)`
+/// onto a remote file hold this lock from the change of [`SOCKETS`], [`OPEN_FILES`] or `OPEN_DIRS`
+/// until they have sent the close requests to the intproxy. [`atfork_prepare`] takes it too.
+/// Without it, a `fork` on another thread can happen after the layer removed the fd but before it
+/// sent the close request. When the child connects, the intproxy copies the port subscriptions,
+/// remote files and remote directories of the parent to the child. The child does not have the fd,
+/// so nothing closes its copy until the child exits.
+///
+/// This lock is separate from [`SOCKETS`] and [`OPEN_FILES`], so that the close code can release
+/// these locks before its I/O, and other hooks do not wait for that I/O.
+pub(crate) static CLOSE_FORK_LOCK: Mutex<()> = Mutex::new(());
+
 /// Shared code for closing `fd` in our data structures.
 ///
 /// Callers should call their respective close before calling this.
 ///
 /// ## Details
 ///
-/// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
+/// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`], and sends the close requests
+/// to the intproxy, while it holds [`CLOSE_FORK_LOCK`].
 /// **DON'T ADD LOGS HERE SINCE CALLER MIGHT CLOSE STDOUT/STDERR CAUSING THIS TO CRASH**
 #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()))]
 pub(crate) fn close_layer_fd(fd: c_int) {
+    let _fork_guard = CLOSE_FORK_LOCK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+
     // Remove from sockets.
     match SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) {
         Some(socket) => {
@@ -755,6 +774,7 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 
 /// The layer's global mutexes, locked by [`atfork_prepare`] and released by [`atfork_release`].
 struct ForkGuards {
+    _close: MutexGuard<'static, ()>,
     _sockets: MutexGuard<'static, HashMap<RawFd, Arc<UserSocket>>>,
     _open_files: MutexGuard<'static, HashMap<RawFd, Arc<RemoteFile>>>,
     _addr_info: MutexGuard<'static, HashSet<usize>>,
@@ -788,7 +808,11 @@ thread_local! {
 /// user app starts so our handler runs after user apps' handlers.
 extern "C" fn atfork_prepare() {
     // Poisoning doesn't matter here, we want the lock and not the data.
+    // `CLOSE_FORK_LOCK` comes first, because the code that takes it locks the maps after it.
     let guards = ForkGuards {
+        _close: CLOSE_FORK_LOCK
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner),
         _sockets: SOCKETS.lock().unwrap_or_else(PoisonError::into_inner),
         _open_files: OPEN_FILES.lock().unwrap_or_else(PoisonError::into_inner),
         _addr_info: MANAGED_ADDRINFO
