@@ -5648,6 +5648,7 @@ dependencies = [
  "libc",
  "mirrord-config",
  "mirrord-intproxy",
+ "mirrord-intproxy-protocol",
  "mirrord-protocol",
  "mirrord-sip",
  "mirrord-test-utils",
