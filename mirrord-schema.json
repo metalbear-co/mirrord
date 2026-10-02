@@ -6038,6 +6038,7 @@
       ]
     },
     "TargetFileConfig": {
+      "description": "The Kubernetes workload mirrord runs against: a target path such as `deployment/my-app` or `pod/my-pod/container/my-container`, `targetless`, or an object with the `path` (as a string or a mapping such as `{ \"deployment\": \"my-app\" }`) and the `namespace` to look for it in.",
       "anyOf": [
         {
           "anyOf": [

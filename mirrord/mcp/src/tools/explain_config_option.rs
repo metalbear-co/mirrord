@@ -225,7 +225,8 @@ fn layer_config_path(segments: &[&str]) -> Option<String> {
 
 /// Describes the option at `segments` in `root`, or `None` when there is no such option.
 fn explain(root: &Value, segments: &[&str]) -> Option<ExplainConfigOptionOutput> {
-    let mut nodes = expand(root, [Node::root(root)]).nodes;
+    let mut option = vec![Node::root(root)];
+    let mut nodes = expand(root, option.iter().copied()).nodes;
 
     for segment in segments {
         let children = children(root, &nodes);
@@ -245,7 +246,8 @@ fn explain(root: &Value, segments: &[&str]) -> Option<ExplainConfigOptionOutput>
             return None;
         }
 
-        nodes = expand(root, matching).nodes;
+        nodes = expand(root, matching.iter().copied()).nodes;
+        option = matching;
     }
 
     let mut types = Vec::new();
@@ -294,9 +296,9 @@ fn explain(root: &Value, segments: &[&str]) -> Option<ExplainConfigOptionOutput>
     let (plan, plan_by_alternative) = plans(&nodes);
     Some(ExplainConfigOptionOutput {
         found: true,
-        description: nodes
+        description: option
             .iter()
-            .find_map(|node| node.schema.get("description")?.as_str())
+            .find_map(|node| description(root, node.schema, &mut HashSet::new()))
             .map(str::to_owned),
         types: types.is_empty().not().then_some(types),
         allowed_values: allowed_values.is_empty().not().then_some(allowed_values),
@@ -312,6 +314,51 @@ fn explain(root: &Value, segments: &[&str]) -> Option<ExplainConfigOptionOutput>
         plan_by_alternative,
         ..Default::default()
     })
+}
+
+/// The description of `schema`: its own, or else the one of the type it refers to, or else the one
+/// description among its alternatives. Several alternatives each with their own description (like
+/// the target kinds) describe the alternatives rather than the option, and descriptions marked
+/// `<!--${internal}-->` are notes for mirrord developers.
+fn description<'s>(
+    root: &'s Value,
+    schema: &'s Value,
+    refs: &mut HashSet<&'s str>,
+) -> Option<&'s str> {
+    if let Some(own) = schema.get("description").and_then(Value::as_str)
+        && own.starts_with("<!--${internal}-->").not()
+    {
+        return Some(own);
+    }
+
+    if let Some(reference) = schema.get("$ref").and_then(Value::as_str)
+        && refs.insert(reference)
+        && let Some(target) = reference
+            .strip_prefix('#')
+            .and_then(|pointer| root.pointer(pointer))
+    {
+        return description(root, target, refs);
+    }
+
+    let mut found: Vec<&str> = Vec::new();
+    for keyword in ["anyOf", "oneOf", "allOf"] {
+        for branch in schema
+            .get(keyword)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(branch) = description(root, branch, refs)
+                && found.contains(&branch).not()
+            {
+                found.push(branch);
+            }
+        }
+    }
+    match found.as_slice() {
+        [only] => Some(only),
+        _ => None,
+    }
 }
 
 /// The plan of an option, from the alternatives it accepts (the expanded `nodes` that offer no
@@ -706,6 +753,17 @@ mod tests {
         assert!(types.contains(&JsonType::String), "{types:?}");
         assert!(types.contains(&JsonType::Object), "{types:?}");
         assert_eq!(output.allowed_values, Some(vec![json!("none")]));
+    }
+
+    /// `target`'s own description rather than that of one of its kinds.
+    #[test]
+    fn target() {
+        let output = explain_path(ConfigFormat::MirrordJson, "target");
+        let description = output.description.unwrap();
+        assert!(
+            description.starts_with("The Kubernetes workload"),
+            "{description}"
+        );
     }
 
     /// A service's `target` holds a `path`, so `target.deployment` exists only in `mirrord.json`.

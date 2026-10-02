@@ -34,6 +34,12 @@ pub mod stateful_set;
 
 #[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
+#[schemars(
+    description = "The Kubernetes workload mirrord runs against: a target path such as \
+    `deployment/my-app` or `pod/my-pod/container/my-container`, `targetless`, or an object with \
+    the `path` (as a string or a mapping such as `{ \"deployment\": \"my-app\" }`) and the \
+    `namespace` to look for it in."
+)]
 pub enum TargetFileConfig {
     // Generated when the value of the `target` field is a string, or when there is no target.
     // we need default else target value will be required in some scenarios.
