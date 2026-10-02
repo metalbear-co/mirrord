@@ -260,7 +260,6 @@ pub const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
 ///     "path": "pod/bear-pod",
 ///     "namespace": "default"
 ///   },
-///   "connect_tcp": null,
 ///   "agent": {
 ///     "log_level": "info",
 ///     "json_log": false,
