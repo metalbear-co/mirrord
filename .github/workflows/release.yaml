@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
 
 env:
-  PINNED_NIGHTLY: nightly-2026-08-13
+  PINNED_TOOLCHAIN: 1.99.0
 
 jobs:
   validate_release_request:
@@ -99,7 +99,7 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         if: steps.precheck.outputs.sha != ''
         with:
-          toolchain: ${{ env.PINNED_NIGHTLY }}
+          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           cache: false
           rustflags: ""
 
@@ -441,7 +441,7 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           target: x86_64-apple-darwin
-          toolchain: ${{ env.PINNED_NIGHTLY }}
+          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           rustflags: ""
           cache: false
       - name: Import Code-Signing Certificates
@@ -457,7 +457,7 @@ jobs:
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-layer --platform macos-x86_64 --release
+        run: cargo +${{ env.PINNED_TOOLCHAIN }} xtask build-layer --platform macos-x86_64 --release
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: layer-x86_64-apple-darwin
@@ -478,7 +478,7 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           target: aarch64-apple-darwin
-          toolchain: ${{ env.PINNED_NIGHTLY }}
+          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           rustflags: ""
           cache: false
       - name: Import Code-Signing Certificates
@@ -494,7 +494,7 @@ jobs:
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-layer --platform macos-aarch64 --release
+        run: cargo +${{ env.PINNED_TOOLCHAIN }} xtask build-layer --platform macos-aarch64 --release
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: layer-aarch64-apple-darwin
@@ -564,7 +564,7 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           target: x86_64-apple-darwin
-          toolchain: ${{ env.PINNED_NIGHTLY }}
+          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           rustflags: ""
           cache: false
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
@@ -597,7 +597,7 @@ jobs:
           MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/aarch64-apple-darwin/release/libmirrord_layer.dylib
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-cli --platform macos-x86_64 --release
+        run: cargo +${{ env.PINNED_TOOLCHAIN }} xtask build-cli --platform macos-x86_64 --release
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: cli-x86_64-apple-darwin
@@ -618,7 +618,7 @@ jobs:
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           target: aarch64-apple-darwin
-          toolchain: ${{ env.PINNED_NIGHTLY }}
+          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           rustflags: ""
           cache: false
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
@@ -651,7 +651,7 @@ jobs:
           MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/release/libmirrord_layer.dylib
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: cargo +${{ env.PINNED_NIGHTLY }} xtask build-cli --platform macos-aarch64 --release
+        run: cargo +${{ env.PINNED_TOOLCHAIN }} xtask build-cli --platform macos-aarch64 --release
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: cli-aarch64-apple-darwin
@@ -992,7 +992,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
-          toolchain: ${{ env.PINNED_NIGHTLY }}
+          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           cache: false
       - run: mkdir ${{ env.TEMP_DIR_NAME }}
       - name: Generate new GitBook files from our config
