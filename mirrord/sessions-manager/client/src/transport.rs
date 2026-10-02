@@ -9,7 +9,7 @@ mod operator;
 
 use std::{future::Future, time::Duration};
 
-pub use direct::DirectTransport;
+pub use direct::{DirectTransport, SESSIONS_MANAGER_URL_ENV};
 use hyper::header::HeaderValue;
 use mirrord_operator_websocket::connection::OperatorConnection;
 use mirrord_protocol_io::ProtocolEndpoint;

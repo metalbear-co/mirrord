@@ -15,15 +15,17 @@ use client_connection::AgentTlsConnector;
 use dns::{ClientGetAddrInfoRequest, DnsCommand};
 use futures::{TryFutureExt, future::OptionFuture};
 use metrics::{CLIENT_COUNT, start_metrics};
-use mirrord_agent_env::envs;
+use mirrord_agent_env::{checked_env::CheckedEnv, envs};
 use mirrord_agent_iptables::{
     ChainNames, IPTablesWrapper, SafeIpTables,
     error::{IPTablesError, IPTablesResult},
 };
+use mirrord_cluster_auth::{AuthMethod, ClusterClientFactory, ClusterCredentials};
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use mirrord_protocol_io::{Agent, Connection};
 use mirrord_sessions_manager_client::{
-    AgentClient, DirectTransport, ServiceScope, SessionsManagerClientError,
+    AgentClient, DirectTransport, OperatorTransport, ReplicaId, SESSIONS_MANAGER_URL_ENV,
+    ServiceScope, SessionsManagerClientError,
 };
 use socket2::SockRef;
 use tokio::{
@@ -1188,6 +1190,97 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
+/// Registers the workload companion with the operator-hosted sessions-manager when
+/// [`envs::OPERATOR_API_URL`] is set, and with a standalone one at [`SESSIONS_MANAGER_URL_ENV`]
+/// otherwise.
+///
+/// The operator is reached through the EKS API server, authenticated as the companion's AWS
+/// identity. The token is refreshed in the background until `cancellation_token` fires.
+async fn start_control_plane(
+    scope: ServiceScope,
+    replica_id: ReplicaId,
+    cancellation_token: CancellationToken,
+) -> AgentResult<AgentClient> {
+    let required = |env: &CheckedEnv<String>| {
+        env.try_from_env()
+            .expect("String environment variables are infallible")
+            .ok_or(AgentError::MissingOperatorConfig(env.name))
+    };
+
+    let Some(api_url) = envs::OPERATOR_API_URL
+        .try_from_env()
+        .expect("String environment variables are infallible")
+    else {
+        return Ok(AgentClient::start(
+            scope,
+            replica_id,
+            DirectTransport::from_env()?,
+            cancellation_token,
+        )?);
+    };
+
+    if std::env::var_os(SESSIONS_MANAGER_URL_ENV).is_some() {
+        return Err(AgentError::ConflictingSessionsManagerEndpoints);
+    }
+
+    let cluster_name = required(&envs::OPERATOR_EKS_CLUSTER_NAME)?;
+    let region = eks_region(&api_url).ok_or(AgentError::MissingOperatorRegion)?;
+    let factory = ClusterClientFactory::new();
+    let connection = factory
+        .connect_eks(ClusterCredentials {
+            name: cluster_name.clone(),
+            server: api_url,
+            namespace: "default".to_owned(),
+            ca_data: Some(required(&envs::OPERATOR_API_CA_DATA)?),
+            auth_method: AuthMethod::AwsIam {
+                region,
+                cluster_name,
+            },
+            token: None,
+            client_cert_pem: None,
+            client_key_pem: None,
+        })
+        .await?;
+    let transport = OperatorTransport::new(connection.client.clone());
+
+    let refresh_cancellation = cancellation_token.clone();
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = refresh_cancellation.cancelled() => {}
+            _ = factory.run_token_refresh(connection) => {}
+        }
+    });
+
+    Ok(AgentClient::start(
+        scope,
+        replica_id,
+        transport,
+        cancellation_token,
+    )?)
+}
+
+/// AWS region EKS tokens are signed for: `AWS_REGION`, then `AWS_DEFAULT_REGION`, then the region
+/// in an EKS API server hostname such as `ABC123.gr7.us-east-1.eks.amazonaws.com`.
+fn eks_region(api_url: &str) -> Option<String> {
+    ["AWS_REGION", "AWS_DEFAULT_REGION"]
+        .into_iter()
+        .find_map(|name| std::env::var(name).ok().filter(|region| !region.is_empty()))
+        .or_else(|| {
+            let uri = api_url.parse::<http::Uri>().ok()?;
+            region_from_eks_host(uri.host()?)
+        })
+}
+
+/// The label before `eks` in an EKS API server hostname.
+fn region_from_eks_host(host: &str) -> Option<String> {
+    let labels = host.split('.').collect::<Vec<_>>();
+    let eks = labels.iter().position(|label| *label == "eks")?;
+    labels
+        .get(eks.checked_sub(1)?)
+        .filter(|region| !region.is_empty())
+        .map(|region| (*region).to_owned())
+}
+
 /// The remote workload-companion version of `start_agent` used in Serverless.
 ///
 /// It simultaneously:
@@ -1239,15 +1332,15 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
     let replica_id = resolve_replica_id()
         .await
         .ok_or::<AgentError>(SessionsManagerClientError::MissingAgentReplicaID.into())?;
-    let mut control_plane = AgentClient::start(
+    let mut control_plane = start_control_plane(
         ServiceScope {
             environment,
             service,
         },
         replica_id.into(),
-        DirectTransport::from_env()?,
         cancellation_token.clone(),
-    )?;
+    )
+    .await?;
 
     let mut join_set: JoinSet<()> = JoinSet::new();
 
@@ -1510,5 +1603,24 @@ pub async fn main() -> AgentResult<()> {
         start_agent_workload_companion(args).await
     } else {
         start_iptable_guard(args).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::region_from_eks_host;
+
+    #[test]
+    fn region_is_read_from_eks_api_server_hostnames() {
+        assert_eq!(
+            region_from_eks_host("ABC123.gr7.us-east-1.eks.amazonaws.com").as_deref(),
+            Some("us-east-1")
+        );
+        assert_eq!(
+            region_from_eks_host("ABC123.yl4.cn-north-1.eks.amazonaws.com.cn").as_deref(),
+            Some("cn-north-1")
+        );
+        assert_eq!(region_from_eks_host("kubernetes.example.com"), None);
+        assert_eq!(region_from_eks_host("eks.amazonaws.com"), None);
     }
 }
