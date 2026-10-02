@@ -234,10 +234,7 @@ impl TcpMirrorApi {
                         transport: tcp
                             .info
                             .tls_connector
-                            .map(|tls| IncomingTrafficTransportType::Tls {
-                                alpn_protocol: tls.alpn_protocol().map(From::from),
-                                server_name: tls.server_name().map(|s| s.to_str().into_owned()),
-                            })
+                            .map(|tls| tls.transport_type(&self.protocol_version))
                             .unwrap_or(IncomingTrafficTransportType::Tcp),
                     };
                     self.incoming_streams.insert(id, tcp.stream);
@@ -287,10 +284,7 @@ impl TcpMirrorApi {
                             .info
                             .tls_connector
                             .as_ref()
-                            .map(|tls| IncomingTrafficTransportType::Tls {
-                                alpn_protocol: tls.alpn_protocol().map(From::from),
-                                server_name: tls.server_name().map(|s| s.to_str().into_owned()),
-                            })
+                            .map(|tls| tls.transport_type(&self.protocol_version))
                             .unwrap_or(IncomingTrafficTransportType::Tcp),
                         request: InternalHttpRequest {
                             method: http.request_head.parts.method,

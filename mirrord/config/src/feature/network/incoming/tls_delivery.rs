@@ -76,11 +76,25 @@ use crate::config::{ConfigContext, ConfigError};
 /// }
 /// ```
 ///
+/// If the local application authorizes requests based on the identity of the client, give
+/// mirrord more client certificates to choose from. Each entry is a path to a PEM file containing
+/// the certificate chain and its private key. When the original client presented a certificate,
+/// mirrord presents the first of these with the same identity, and falls back to `client_cert`
+/// and `client_key` when none has it:
+/// ```json
+/// {
+///   "protocol": "tls",
+///   "client_cert": "/path/to/default.cert.pem",
+///   "client_key": "/path/to/default.key.pem",
+///   "client_identities": ["/path/to/client-a.pem", "/path/to/client-b.pem"]
+/// }
+/// ```
+///
 /// In preview sessions (`mirrord preview start`) the mirrord operator makes the TLS connection to
 /// the preview pod, so `client_cert` and `client_key` are read locally, stored in the session's
-/// Secret and presented by the operator. `server_name` is used the same way. The other settings
-/// do not apply to previews: the operator always delivers over TLS and does not verify the
-/// preview pod's certificate.
+/// Secret and presented by the operator. `server_name` is used the same way. The other settings,
+/// including `client_identities`, do not apply to previews: the operator always delivers over TLS
+/// and does not verify the preview pod's certificate.
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct LocalTlsDelivery {
@@ -131,6 +145,28 @@ pub struct LocalTlsDelivery {
     ///
     /// This file must contain exactly one private key. Must be set together with `client_cert`.
     pub client_key: Option<PathBuf>,
+
+    /// ##### feature.network.incoming.tls_delivery.client_identities {#feature-network-incoming-tls_delivery-client_identities}
+    ///
+    /// Additional client certificates, for local applications that authorize requests based on
+    /// the identity of the client.
+    ///
+    /// Each entry is a path to a PEM file containing the certificate chain and its private key.
+    ///
+    /// When the original client presented a certificate, mirrord presents the first of these
+    /// with the same identity. The identity is the set of subject alternative names, or the
+    /// subject if the certificate has no SANs. DNS names are compared case-insensitively, all
+    /// other names byte by byte. If none matches, or the original client presented no
+    /// certificate, `client_cert` and `client_key` are used.
+    ///
+    /// The original client's certificate is known only when the mirrord operator's TLS steal
+    /// configuration verifies clients against trust roots.
+    ///
+    /// Certificates can be presented only during the TLS handshake. Local applications that
+    /// request a client certificate later (TLS 1.2 renegotiation, TLS 1.3 post-handshake
+    /// authentication) are not supported.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub client_identities: Vec<PathBuf>,
 }
 
 impl LocalTlsDelivery {

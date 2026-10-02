@@ -9,6 +9,7 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
     ffi::OsStr,
+    ops::Not,
     path::Path,
     time::{Duration, Instant},
 };
@@ -1291,6 +1292,13 @@ fn resolve_tls_delivery(
                 .to_owned(),
         );
     }
+    if config.client_identities.is_empty().not() {
+        warnings.push(
+            "`feature.network.incoming.tls_delivery.client_identities` does not apply to \
+            previews: the operator presents only `client_cert` to the preview pod"
+                .to_owned(),
+        );
+    }
 
     let client_auth = match (config.client_cert.as_deref(), config.client_key.as_deref()) {
         (Some(cert), Some(key)) => {
@@ -1567,6 +1575,7 @@ mod tests {
         let config = LocalTlsDelivery {
             protocol: TlsDeliveryProtocol::Tcp,
             trust_roots: Some(vec![PathBuf::from("/roots")]),
+            client_identities: vec![PathBuf::from("/client.pem")],
             ..Default::default()
         };
         let mut secret_values = BTreeMap::new();
@@ -1574,7 +1583,7 @@ mod tests {
             resolve_tls_delivery(Some(&config), &mut secret_values, &operator(true)).unwrap();
 
         assert_eq!(tls_delivery, None);
-        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert_eq!(warnings.len(), 3, "{warnings:?}");
         assert!(secret_values.is_empty());
     }
 

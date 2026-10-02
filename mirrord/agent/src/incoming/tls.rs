@@ -7,17 +7,17 @@ use std::{
 };
 
 use error::{StealTlsSetupError, StealTlsSetupErrorInner};
-use handler::StealTlsHandler;
+use handler::{IdentityClientConfigs, StealTlsHandler};
 use mirrord_agent_env::steal_tls::{
     AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication,
     TlsClientVerification, TlsServerVerification,
 };
 use mirrord_tls_util::{
-    DangerousNoVerifierClient, DangerousNoVerifierServer, best_effort_root_store,
+    CertIdentity, DangerousNoVerifierClient, DangerousNoVerifierServer, best_effort_root_store,
 };
 use rustls::{
     ClientConfig, RootCertStore, ServerConfig,
-    pki_types::{CertificateDer, ServerName},
+    pki_types::{CertificateDer, PrivateKeyDer, ServerName},
     server::{NoClientAuth, WebPkiClientVerifier, danger::ClientCertVerifier},
 };
 use tracing::Level;
@@ -96,14 +96,27 @@ impl StealTlsHandlerStore {
             .transpose()
             .map_err(StealTlsSetupError::ClientSetupError)?;
 
-        let (server_config, client_config) = tokio::try_join!(
+        // Without verification, the client's certificate proves nothing, and anyone could have
+        // the agent present any of the configured identities on their behalf.
+        let verifies_clients = config
+            .agent_as_server
+            .verification
+            .as_ref()
+            .is_some_and(|verification| verification.accept_any_cert.not());
+        if config.agent_as_client.identities.is_empty().not() && verifies_clients.not() {
+            return Err(StealTlsSetupError::ClientSetupError(
+                StealTlsSetupErrorInner::IdentitiesWithoutClientVerification,
+            ));
+        }
+
+        let (server_config, (client_config, identity_client_configs)) = tokio::try_join!(
             async {
                 self.build_server_config(config.agent_as_server)
                     .await
                     .map_err(StealTlsSetupError::ServerSetupError)
             },
             async {
-                self.build_client_config(config.agent_as_client)
+                self.build_client_configs(config.agent_as_client)
                     .await
                     .map_err(StealTlsSetupError::ClientSetupError)
             },
@@ -112,6 +125,8 @@ impl StealTlsHandlerStore {
         let handler = StealTlsHandler {
             server_config,
             client_config,
+            identity_client_configs,
+            verifies_clients,
             server_name,
         };
 
@@ -178,15 +193,7 @@ impl StealTlsHandlerStore {
             None => Arc::new(NoClientAuth),
         };
 
-        let TlsAuthentication { cert_pem, key_pem } = config.authentication;
-        let cert_chain = {
-            let path = self.resolve_path(cert_pem)?;
-            mirrord_tls_util::read_cert_chain(path).await?
-        };
-        let key_der = {
-            let path = self.resolve_path(key_pem)?;
-            mirrord_tls_util::read_key_der(path).await?
-        };
+        let (cert_chain, key_der) = self.read_authentication(config.authentication).await?;
 
         let mut server_config = ServerConfig::builder()
             .with_client_cert_verifier(verifier)
@@ -202,12 +209,15 @@ impl StealTlsHandlerStore {
         Ok(Arc::new(server_config))
     }
 
-    /// Builds base [`ClientConfig`] for the mirrord-agent's TLS connector.
+    /// Builds base [`ClientConfig`]s for the mirrord-agent's TLS connector.
+    ///
+    /// Returns the default config, and configs presenting [`AgentClientConfig::identities`],
+    /// each with the identity of its certificate.
     #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))] // errors are already logged on `ERROR` level in `get`
-    async fn build_client_config(
+    async fn build_client_configs(
         &self,
         config: AgentClientConfig,
-    ) -> Result<Arc<ClientConfig>, StealTlsSetupErrorInner> {
+    ) -> Result<(Arc<ClientConfig>, IdentityClientConfigs), StealTlsSetupErrorInner> {
         let TlsServerVerification {
             accept_any_cert,
             trust_roots,
@@ -233,24 +243,67 @@ impl StealTlsHandlerStore {
         };
 
         let client_config = match config.authentication {
-            Some(TlsAuthentication { cert_pem, key_pem }) => {
-                let cert_chain = {
-                    let path = self.resolve_path(cert_pem)?;
-                    mirrord_tls_util::read_cert_chain(path).await?
-                };
-                let key_der = {
-                    let path = self.resolve_path(key_pem)?;
-                    mirrord_tls_util::read_key_der(path).await?
-                };
-
+            Some(authentication) => {
+                let (cert_chain, key_der) = self.read_authentication(authentication).await?;
                 builder
+                    .clone()
                     .with_client_auth_cert(cert_chain, key_der)
                     .map_err(StealTlsSetupErrorInner::CertChainInvalid)?
             }
-            None => builder.with_no_client_auth(),
+            None => builder.clone().with_no_client_auth(),
         };
 
-        Ok(Arc::new(client_config))
+        let mut identity_client_configs: IdentityClientConfigs =
+            Vec::with_capacity(config.identities.len());
+        for path in config.identities {
+            let (cert_chain, key_der) = self
+                .read_authentication(TlsAuthentication {
+                    cert_pem: path.clone(),
+                    key_pem: path.clone(),
+                })
+                .await?;
+            let Some(identity) = cert_chain
+                .first()
+                .and_then(|cert| CertIdentity::from_der(cert))
+            else {
+                return Err(StealTlsSetupErrorInner::NoCertIdentity(path));
+            };
+            if identity_client_configs
+                .iter()
+                .any(|(existing, _)| *existing == identity)
+            {
+                tracing::warn!(
+                    path = %path.display(),
+                    "Certificate has the same identity as an earlier one in \
+                    `agentAsClient.identities`, the earlier one is used",
+                );
+            }
+            let config = builder
+                .clone()
+                .with_client_auth_cert(cert_chain, key_der)
+                .map_err(StealTlsSetupErrorInner::CertChainInvalid)?;
+            identity_client_configs.push((identity, Arc::new(config)));
+        }
+
+        Ok((Arc::new(client_config), identity_client_configs))
+    }
+
+    /// Reads the certificate chain and the private key from the target container filesystem.
+    async fn read_authentication(
+        &self,
+        TlsAuthentication { cert_pem, key_pem }: TlsAuthentication,
+    ) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), StealTlsSetupErrorInner>
+    {
+        let cert_chain = {
+            let path = self.resolve_path(cert_pem)?;
+            mirrord_tls_util::read_cert_chain(path).await?
+        };
+        let key_der = {
+            let path = self.resolve_path(key_pem)?;
+            mirrord_tls_util::read_key_der(path).await?
+        };
+
+        Ok((cert_chain, key_der))
     }
 
     /// Adds a dummy self-signed certificate to the given [`RootCertStore`].
