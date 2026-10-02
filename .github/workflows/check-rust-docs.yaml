@@ -12,7 +12,7 @@ permissions:
 
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  RUSTDOCFLAGS: "--enable-index-page -Zunstable-options -Dwarnings"
+  RUSTDOCFLAGS: "-Dwarnings"
 
 jobs:
   rust-docs:
