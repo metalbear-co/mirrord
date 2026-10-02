@@ -40,7 +40,7 @@ if target == "dir":
 
 elif target == "socket":
     listener = socket.socket()
-    listener.bind(("0.0.0.0", 41234))
+    listener.bind(("127.0.0.1", 41234))
     listener.listen()
 
     def close_target():
