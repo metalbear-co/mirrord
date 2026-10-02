@@ -719,8 +719,11 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
 
-    // Remove from sockets.
-    match SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) {
+    // Remove from sockets in a separate statement, so that the `SOCKETS` guard is dropped before
+    // the requests to the intproxy below: `UserSocket::close`, and the drop of a `RemoteFile`. A
+    // guard in the `match` scrutinee stays alive until the end of the `match`.
+    let removed = SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd);
+    match removed {
         Some(socket) => {
             // Closed file is a socket, so if it's already bound to a port - notify agent to stop
             // mirroring/stealing that port.

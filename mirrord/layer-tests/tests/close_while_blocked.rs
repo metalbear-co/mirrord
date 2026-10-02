@@ -11,7 +11,9 @@
 
 use std::{path::PathBuf, time::Duration};
 
-use mirrord_intproxy_protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage};
+use mirrord_intproxy_protocol::{
+    IncomingRequest, IncomingResponse, LayerToProxyMessage, LocalMessage, ProxyToLayerMessage,
+};
 use mirrord_layer_tests::fake_intproxy::{FakeIntProxy, FakeLayerConnection};
 use mirrord_protocol::{
     FileRequest, FileResponse,
@@ -88,6 +90,9 @@ async fn answer(layer: &mut FakeLayerConnection) -> Option<LayerToProxyMessage> 
         .expect("the layer sent nothing")?;
 
     let response = match &inner {
+        LayerToProxyMessage::Incoming(IncomingRequest::PortSubscribe(_)) => Some(
+            ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(Ok(()))),
+        ),
         LayerToProxyMessage::File(FileRequest::Open(_)) => Some(ProxyToLayerMessage::File(
             FileResponse::Open(Ok(OpenFileResponse { fd: message_id })),
         )),
@@ -99,7 +104,8 @@ async fn answer(layer: &mut FakeLayerConnection) -> Option<LayerToProxyMessage> 
                 written_amount: write.write_bytes.len() as u64,
             })),
         )),
-        LayerToProxyMessage::File(FileRequest::CloseDir(_)) => None,
+        LayerToProxyMessage::File(FileRequest::CloseDir(_))
+        | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_)) => None,
         other => panic!("unexpected request from the layer: {other:?}"),
     };
     if let Some(response) = response {
@@ -107,6 +113,15 @@ async fn answer(layer: &mut FakeLayerConnection) -> Option<LayerToProxyMessage> 
     }
 
     Some(inner)
+}
+
+/// Whether `request` is the close request of the second thread of the application.
+fn is_close_request(request: &LayerToProxyMessage) -> bool {
+    matches!(
+        request,
+        LayerToProxyMessage::File(FileRequest::CloseDir(_))
+            | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_))
+    )
 }
 
 /// Answers the requests of the layer until it closes the connection.
@@ -127,6 +142,7 @@ async fn assert_close_waits(process: &TestProcess) {
 /// intproxy copies the closed resource of the parent to the child, and nothing closes that copy.
 #[rstest]
 #[case::closedir("dir")]
+#[case::socket("socket")]
 #[tokio::test]
 async fn fork_waits_for_close(#[case] target: &str) {
     let (mut process, mut intproxy, mut parent) = start("fork", target).await;
@@ -143,7 +159,7 @@ async fn fork_waits_for_close(#[case] target: &str) {
         let request = answer(&mut parent)
             .await
             .expect("the parent closed the connection");
-        if matches!(request, LayerToProxyMessage::File(FileRequest::CloseDir(_))) {
+        if is_close_request(&request) {
             break;
         }
     }
@@ -153,5 +169,20 @@ async fn fork_waits_for_close(#[case] target: &str) {
 
     process.wait_for_line_stdout(TIMEOUT, "fork done").await;
     answer_all(&mut parent).await;
+    process.wait_assert_success().await;
+}
+
+/// `posix_spawn` does not wait for a close on another thread. The exec hooks lock `SOCKETS`, so a
+/// close must not hold that lock during its request to the intproxy.
+#[rstest]
+#[case::socket("socket")]
+#[tokio::test]
+async fn spawn_does_not_wait_for_close(#[case] target: &str) {
+    let (mut process, _intproxy, mut layer) = start("spawn", target).await;
+
+    process.wait_for_line_stdout(TIMEOUT, "spawn done").await;
+    assert_close_waits(&process).await;
+
+    answer_all(&mut layer).await;
     process.wait_assert_success().await;
 }

@@ -8,12 +8,14 @@ The main thread must not close an fd during the action, because closes wait for 
 
 Usage: close_while_blocked.py <action> <target>
 
-- action: `fork`.
-- target: what the second thread closes. `dir` is a remote directory.
+- action: `fork` or `spawn`.
+- target: what the second thread closes. `dir` is a remote directory, `socket` is a listening
+  socket.
 """
 
 import ctypes
 import os
+import socket
 import sys
 import threading
 import time
@@ -36,6 +38,14 @@ if target == "dir":
     def close_target():
         libc.closedir(directory)
 
+elif target == "socket":
+    listener = socket.socket()
+    listener.bind(("0.0.0.0", 41234))
+    listener.listen()
+
+    def close_target():
+        listener.close()
+
 
 blocker = os.open(f"{REMOTE_DIR}/blocker", os.O_WRONLY)
 
@@ -56,5 +66,9 @@ if action == "fork":
     pid = os.fork()
     if pid == 0:
         os._exit(0)
+    os.waitpid(pid, 0)
+elif action == "spawn":
+    # An empty environment, so that the child does not load the layer.
+    pid = os.posix_spawn(sys.executable, [sys.executable, "-c", ""], {})
     os.waitpid(pid, 0)
 print(f"{action} done", flush=True)
