@@ -15,6 +15,8 @@ mod cluster;
 mod error;
 mod manifest;
 mod signup;
+#[cfg(test)]
+mod tests;
 
 pub(crate) use error::OperatorInstallError;
 
@@ -50,12 +52,7 @@ pub(super) async fn operator_install(
         .user_agent(USER_AGENT)
         .build()
         .map_err(OperatorInstallError::HttpClient)?;
-    // The commands printed to the user name the kubecontext, so that they do not use a different
-    // cluster if it is not the current one.
-    let context_arg = context
-        .as_deref()
-        .map(|context| format!(" --context {context}"))
-        .unwrap_or_default();
+    let context_arg = context_flag("--context", context.as_deref());
 
     let mut subtask = progress.subtask("checking for an existing operator");
     cluster::ensure_no_operator(&client, &context_arg).await?;
@@ -137,7 +134,7 @@ pub(super) async fn operator_install(
         if let Some(trial) = &trial {
             println!(
                 "To retry without starting another trial, reuse its API key: mirrord operator \
-                install --api-key {}",
+                install{context_arg} --api-key {}",
                 trial.api_key
             );
         }
@@ -201,6 +198,21 @@ fn trial_details(trial: &Trial) -> String {
     )
 }
 
+/// The `flag` that gives a command printed to the user the kubecontext of the run, so that the
+/// command does not use a different cluster if the kubecontext is not the current one. Empty if
+/// the kubecontext has no name.
+///
+/// The name is quoted for the shell, since a kubeconfig can give a kubecontext any name, also
+/// with spaces or shell syntax.
+fn context_flag(flag: &str, context: Option<&str>) -> String {
+    context
+        .map(|context| {
+            let context = shlex::try_quote(context).unwrap_or(context.into());
+            format!(" {flag} {context}")
+        })
+        .unwrap_or_default()
+}
+
 /// What the user needs to know after a successful installation, printed once.
 fn summary(version: &semver::Version, manifest: &Manifest, context: Option<&str>) -> String {
     let mut summary = format!(
@@ -208,12 +220,8 @@ fn summary(version: &semver::Version, manifest: &Manifest, context: Option<&str>
         location(manifest.operator_namespace(), context)
     );
 
-    let kube_context_arg = context
-        .map(|context| format!(" --kube-context {context}"))
-        .unwrap_or_default();
-    let context_arg = context
-        .map(|context| format!(" --context {context}"))
-        .unwrap_or_default();
+    let kube_context_arg = context_flag("--kube-context", context);
+    let context_arg = context_flag("--context", context);
     summary.push_str(&format!(
         "This is a default installation. For anything custom (namespace, tolerations, pull \
         secrets, OIDC, ...), manage it with the helm chart, which takes over this installation \
