@@ -1,5 +1,6 @@
 //! `mirrord operator install`: gets a license, installs the operator into the cluster of a
-//! kubecontext, and hands ownership of the license to the user.
+//! kubecontext, and hands ownership of the license to the user. `mirrord operator uninstall`
+//! removes it again, see [`uninstall`].
 
 use std::{io::IsTerminal, ops::Not};
 
@@ -15,8 +16,10 @@ mod cluster;
 mod error;
 mod manifest;
 mod signup;
+mod uninstall;
 
 pub(crate) use error::OperatorInstallError;
+pub(super) use uninstall::operator_uninstall;
 
 const USER_AGENT: &str = concat!("mirrord-cli/", env!("CARGO_PKG_VERSION"));
 

@@ -271,7 +271,7 @@ pub(super) async fn wait_for_operator(
     }
 }
 
-fn kind(object: &DynamicObject) -> &str {
+pub(super) fn kind(object: &DynamicObject) -> &str {
     object
         .types
         .as_ref()
@@ -279,6 +279,6 @@ fn kind(object: &DynamicObject) -> &str {
         .unwrap_or_default()
 }
 
-fn describe(object: &DynamicObject) -> String {
+pub(super) fn describe(object: &DynamicObject) -> String {
     format!("{} `{}`", kind(object), object.name_any())
 }

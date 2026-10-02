@@ -1,0 +1,1 @@
+Added `mirrord operator uninstall`, which removes the operator that `mirrord operator install` installed, also when the installation failed half-way. Like `mirrord operator install`, it does not require the helm CLI, takes `--context`, and on a terminal asks for confirmation first.

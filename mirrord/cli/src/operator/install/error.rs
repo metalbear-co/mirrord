@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use crate::error::GENERAL_BUG;
 
-/// Errors of the `mirrord operator install` command.
+/// Errors of the `mirrord operator install` and `mirrord operator uninstall` commands.
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum OperatorInstallError {
     #[error("failed to load the kubeconfig")]
@@ -180,6 +180,39 @@ pub(crate) enum OperatorInstallError {
 
     #[error("failed to start a trial, the server responded with {status}: {body}")]
     SignupFailed { status: StatusCode, body: String },
+
+    #[error("the mirrord operator is managed by helm")]
+    #[diagnostic(help("Remove it with `{uninstall}`."))]
+    ManagedByHelm {
+        /// The `helm uninstall` command that removes it from the same kubecontext.
+        uninstall: String,
+    },
+
+    #[error("failed to delete {object}")]
+    #[diagnostic(help(
+        "Removing the operator requires permissions to delete cluster-scoped resources, such as \
+        CustomResourceDefinitions and ClusterRoles."
+    ))]
+    Delete {
+        object: String,
+        #[source]
+        source: Box<kube::Error>,
+    },
+
+    #[error("{remaining} objects that the operator finalizes were not removed in time")]
+    #[diagnostic(help("Run the command again to retry."))]
+    NotFinalized { remaining: usize },
+
+    #[error(
+        "these objects were not removed within {} minutes:\n{}",
+        .timeout.as_secs() / 60,
+        bullet_list(objects)
+    )]
+    #[diagnostic(help("Run the command again to retry."))]
+    NotRemoved {
+        objects: Vec<String>,
+        timeout: std::time::Duration,
+    },
 }
 
 /// Formats the descriptions of objects as a list with one object on each line.

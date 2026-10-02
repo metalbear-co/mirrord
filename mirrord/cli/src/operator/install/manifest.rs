@@ -33,7 +33,7 @@ const HOOK_ANNOTATION: &str = "helm.sh/hook";
 /// it instead of failing because it already exists.
 const RELEASE_NAME_ANNOTATION: &str = "meta.helm.sh/release-name";
 
-const RELEASE_NAMESPACE_ANNOTATION: &str = "meta.helm.sh/release-namespace";
+pub(super) const RELEASE_NAMESPACE_ANNOTATION: &str = "meta.helm.sh/release-namespace";
 
 /// Names the chart and version an object was rendered from, as `<chart>-<version>` with `+`
 /// replaced by `_`.
@@ -187,6 +187,10 @@ impl Manifest {
 
     pub(super) fn operator_namespace(&self) -> &str {
         &self.operator_namespace
+    }
+
+    pub(super) fn operator_deployment(&self) -> &str {
+        &self.operator_deployment
     }
 
     pub(super) fn chart_version(&self) -> &semver::Version {

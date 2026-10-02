@@ -26,6 +26,9 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> CliResult<()> {
         OperatorCommand::Install(args) => install::operator_install(*args)
             .await
             .map_err(CliError::from),
+        OperatorCommand::Uninstall(args) => install::operator_uninstall(args)
+            .await
+            .map_err(CliError::from),
         OperatorCommand::Status { config_file } => {
             StatusCommandHandler::new(config_file)
                 .and_then(StatusCommandHandler::handle)
