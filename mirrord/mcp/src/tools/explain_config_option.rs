@@ -252,7 +252,13 @@ fn explain(root: &Value, segments: &[&str]) -> Option<ExplainConfigOptionOutput>
 
     let mut types = Vec::new();
     let mut allowed_values = Vec::new();
+    // Types taken without enumerating the values, like the target paths next to `targetless`.
+    let mut free_types = Vec::new();
     for Node { schema, .. } in &nodes {
+        if is_alternative(schema) && schema.get("const").is_none() && schema.get("enum").is_none() {
+            free_types.extend(schema.get("type").cloned());
+        }
+
         let node_types = match schema.get("type") {
             Some(Value::Array(names)) => names.iter().collect(),
             name => Vec::from_iter(name),
@@ -293,6 +299,14 @@ fn explain(root: &Value, segments: &[&str]) -> Option<ExplainConfigOptionOutput>
         }
     }
 
+    // Values of a type the option also takes freely are examples rather than the allowed values.
+    allowed_values.retain(|value| {
+        free_types.iter().all(|free| match free {
+            Value::Array(free) => free.iter().all(|free| type_name_differs(free, value)),
+            free => type_name_differs(free, value),
+        })
+    });
+
     let (plan, plan_by_alternative) = plans(&nodes);
     Some(ExplainConfigOptionOutput {
         found: true,
@@ -314,6 +328,26 @@ fn explain(root: &Value, segments: &[&str]) -> Option<ExplainConfigOptionOutput>
         plan_by_alternative,
         ..Default::default()
     })
+}
+
+/// Whether `value` is not of the JSON Schema type named by `type_name`.
+fn type_name_differs(type_name: &Value, value: &Value) -> bool {
+    let name = match value {
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+        Value::Null => "null",
+    };
+    type_name.as_str() != Some(name)
+}
+
+/// Whether `schema` is one of the forms an option takes, rather than a choice between forms.
+fn is_alternative(schema: &Value) -> bool {
+    ["$ref", "anyOf", "oneOf", "allOf"]
+        .iter()
+        .all(|keyword| schema.get(keyword).is_none())
 }
 
 /// The description of `schema`: its own, or else the one of the type it refers to, or else the one
@@ -367,11 +401,7 @@ fn description<'s>(
 fn plans(nodes: &[Node]) -> (Plan, Option<Vec<AlternativePlan>>) {
     let alternatives: Vec<Node> = nodes
         .iter()
-        .filter(|node| {
-            ["$ref", "anyOf", "oneOf", "allOf"]
-                .iter()
-                .all(|keyword| node.schema.get(keyword).is_none())
-        })
+        .filter(|node| is_alternative(node.schema))
         .copied()
         .collect();
 
@@ -755,7 +785,8 @@ mod tests {
         assert_eq!(output.allowed_values, Some(vec![json!("none")]));
     }
 
-    /// `target`'s own description rather than that of one of its kinds.
+    /// `target`'s own description rather than that of one of its kinds, and no allowed values:
+    /// `targetless` is one of many target strings.
     #[test]
     fn target() {
         let output = explain_path(ConfigFormat::MirrordJson, "target");
@@ -764,6 +795,7 @@ mod tests {
             description.starts_with("The Kubernetes workload"),
             "{description}"
         );
+        assert!(output.allowed_values.is_none());
     }
 
     /// A service's `target` holds a `path`, so `target.deployment` exists only in `mirrord.json`.
