@@ -143,9 +143,35 @@ pub fn explain_config_option(
         ConfigFormat::MirrordUpYaml => (explain_up(&segments), UP_PATHS.as_slice()),
     };
 
-    Ok(explained.unwrap_or_else(|| ExplainConfigOptionOutput {
-        suggestions: Some(suggestions(&segments, known)),
-        ..Default::default()
+    Ok(explained.unwrap_or_else(|| {
+        let mut suggestions = suggestions(&segments, known);
+        // A `mirrord.json` option is set for a service through the `mirrord-up.yaml` setting
+        // that maps onto it, or else through the service's `config_patch`.
+        if format == Some(ConfigFormat::MirrordUpYaml)
+            && explain(&LAYER_SCHEMA.raw, &segments).is_some()
+        {
+            let asked = segments.join(".");
+            let mut up_paths: Vec<String> = LAYER_CONFIG_PATHS
+                .iter()
+                .filter(|(up_path, _)| up_path.starts_with("services.*."))
+                .filter_map(|(up_path, layer_path)| {
+                    let rest = match asked.strip_prefix(layer_path)? {
+                        "" => "",
+                        rest => rest.strip_prefix('.').map(|_| rest)?,
+                    };
+                    (layer_path.is_empty().not())
+                        .then(|| format!("{}{rest}", up_path.replace('*', ANY_KEY)))
+                })
+                .collect();
+            up_paths.push(format!("services.{ANY_KEY}.config_patch.{asked}"));
+            suggestions.retain(|suggestion| up_paths.contains(suggestion).not());
+            suggestions.splice(0..0, up_paths);
+            suggestions.truncate(SUGGESTIONS);
+        }
+        ExplainConfigOptionOutput {
+            suggestions: Some(suggestions),
+            ..Default::default()
+        }
     }))
 }
 
@@ -799,13 +825,25 @@ mod tests {
         assert!(output.allowed_values.is_none());
     }
 
-    /// A map key is only filled in from the asked path where the paths agree up to it: asked in a
-    /// `mirrord-up.yaml`, `feature.network.…` is not under a service called `network`.
+    /// A `mirrord.json` option asked in a `mirrord-up.yaml` suggests the up setting that maps onto
+    /// it, then setting it through `config_patch`. A map key is only filled in from the asked path
+    /// where the paths agree up to it, so `feature.network.…` is not under a service called
+    /// `network`.
     #[test]
     fn mirrord_json_path_in_up() {
         let output = explain_path(ConfigFormat::MirrordUpYaml, "feature.network.incoming.mode");
         assert!(output.found.not());
         let suggestions = output.suggestions.unwrap();
+        assert_eq!(
+            suggestions.get(..2),
+            Some(
+                [
+                    "services.<name>.default_mode".to_owned(),
+                    "services.<name>.config_patch.feature.network.incoming.mode".to_owned(),
+                ]
+                .as_slice()
+            )
+        );
         assert!(
             suggestions
                 .iter()
