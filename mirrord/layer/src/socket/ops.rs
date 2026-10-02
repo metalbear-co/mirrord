@@ -734,26 +734,33 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
             .unwrap_or_else(PoisonError::into_inner)
     });
 
-    let mut sockets = SOCKETS.lock()?;
-    if let Some(socket) = sockets.get(&fd).cloned() {
-        sockets.insert(dup_fd as RawFd, socket);
+    // The block gives back the replaced remote file, so that it is dropped after the `SOCKETS` and
+    // `OPEN_FILES` guards (see [`OPEN_FILES`]).
+    let replaced_file = {
+        let mut sockets = SOCKETS.lock()?;
+        if let Some(socket) = sockets.get(&fd).cloned() {
+            sockets.insert(dup_fd as RawFd, socket);
 
-        if SWITCH_MAP {
-            OPEN_FILES.lock()?.remove(&dup_fd);
+            if SWITCH_MAP {
+                OPEN_FILES.lock()?.remove(&dup_fd)
+            } else {
+                None
+            }
+        } else {
+            let mut open_files = OPEN_FILES.lock()?;
+            match open_files.get(&fd).cloned() {
+                Some(file) => {
+                    if SWITCH_MAP {
+                        sockets.remove(&dup_fd);
+                    }
+
+                    open_files.insert(dup_fd as RawFd, file)
+                }
+                None => None,
+            }
         }
-
-        return Ok(());
-    }
-
-    let mut open_files = OPEN_FILES.lock()?;
-    if let Some(file) = open_files.get(&fd) {
-        let cloned_file = file.clone();
-        open_files.insert(dup_fd as RawFd, cloned_file);
-
-        if SWITCH_MAP {
-            sockets.remove(&dup_fd);
-        }
-    }
+    };
+    drop(replaced_file);
 
     Ok(())
 }

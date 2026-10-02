@@ -747,10 +747,12 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         }
         _ => {
             if setup().fs_config().is_active() {
-                OPEN_FILES
+                // Dropped after the `OPEN_FILES` guard, see [`OPEN_FILES`].
+                let removed_file = OPEN_FILES
                     .lock()
                     .expect("OPEN_FILES lock failed")
                     .remove(&fd);
+                drop(removed_file);
             }
         }
     }

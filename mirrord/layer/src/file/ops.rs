@@ -197,12 +197,13 @@ impl RemoteFile {
 
 impl Drop for RemoteFile {
     fn drop(&mut self) {
-        // Warning: Don't log from here. This is called when self is removed from OPEN_FILES, so
-        // during the whole execution of this function, OPEN_FILES is locked.
-        // When emitting logs, sometimes a file `write` operation is required, in order for the
-        // operation to complete. The write operation is hooked and at some point tries to lock
-        // `OPEN_FILES`, which means the thread deadlocks with itself (we call
-        // `OPEN_FILES.lock()?.remove()` and then while still locked, `OPEN_FILES.lock()` again)
+        // This sends a request to the intproxy, so drop a `RemoteFile` only after the `OPEN_FILES`
+        // guard is released (see [`OPEN_FILES`]).
+        //
+        // Warning: Don't log from here, for two reasons:
+        // - This can run from `close_layer_fd`, after the caller closed stdout or stderr.
+        // - A log can need a `write`, and the hooked `write` locks `OPEN_FILES`. If a caller drops
+        //   a `RemoteFile` under that guard, the thread deadlocks with itself.
         let result = Self::remote_close(self.fd);
         assert!(
             result.is_ok(),
@@ -298,10 +299,12 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     // the fd to a string.
     let local_file_fd = create_local_fake_file(remote_fd)?;
 
-    OPEN_FILES.lock()?.insert(
+    // Dropped after the `OPEN_FILES` guard, see [`OPEN_FILES`].
+    let replaced_file = OPEN_FILES.lock()?.insert(
         local_file_fd,
         Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
     );
+    drop(replaced_file);
 
     Detour::Success(local_file_fd)
 }
@@ -361,10 +364,12 @@ pub(crate) fn openat(
 
     let local_file_fd = create_local_fake_file(remote_fd)?;
 
-    OPEN_FILES.lock()?.insert(
+    // Dropped after the `OPEN_FILES` guard, see [`OPEN_FILES`].
+    let replaced_file = OPEN_FILES.lock()?.insert(
         local_file_fd,
         Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
     );
+    drop(replaced_file);
 
     Detour::Success(local_file_fd)
 }

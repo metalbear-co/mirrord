@@ -104,7 +104,7 @@ async fn answer(layer: &mut FakeLayerConnection) -> Option<LayerToProxyMessage> 
                 written_amount: write.write_bytes.len() as u64,
             })),
         )),
-        LayerToProxyMessage::File(FileRequest::CloseDir(_))
+        LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
         | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_)) => None,
         other => panic!("unexpected request from the layer: {other:?}"),
     };
@@ -119,7 +119,7 @@ async fn answer(layer: &mut FakeLayerConnection) -> Option<LayerToProxyMessage> 
 fn is_close_request(request: &LayerToProxyMessage) -> bool {
     matches!(
         request,
-        LayerToProxyMessage::File(FileRequest::CloseDir(_))
+        LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
             | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_))
     )
 }
@@ -143,6 +143,7 @@ async fn assert_close_waits(process: &TestProcess) {
 #[rstest]
 #[case::closedir("dir")]
 #[case::socket("socket")]
+#[case::file("file")]
 #[tokio::test]
 async fn fork_waits_for_close(#[case] target: &str) {
     let (mut process, mut intproxy, mut parent) = start("fork", target).await;
@@ -181,6 +182,21 @@ async fn spawn_does_not_wait_for_close(#[case] target: &str) {
     let (mut process, _intproxy, mut layer) = start("spawn", target).await;
 
     process.wait_for_line_stdout(TIMEOUT, "spawn done").await;
+    assert_close_waits(&process).await;
+
+    answer_all(&mut layer).await;
+    process.wait_assert_success().await;
+}
+
+/// `dup` does not wait for a close of a remote file on another thread. `dup` locks `SOCKETS` and
+/// `OPEN_FILES`, so a close must not hold these locks during its request to the intproxy.
+#[rstest]
+#[case::file("file")]
+#[tokio::test]
+async fn dup_does_not_wait_for_close(#[case] target: &str) {
+    let (mut process, _intproxy, mut layer) = start("dup", target).await;
+
+    process.wait_for_line_stdout(TIMEOUT, "dup done").await;
     assert_close_waits(&process).await;
 
     answer_all(&mut layer).await;
