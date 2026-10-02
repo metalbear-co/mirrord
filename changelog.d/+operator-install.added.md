@@ -1,1 +1,0 @@
-Added `mirrord operator install`, which installs the operator from the helm chart without requiring the helm CLI, and starts a claimable trial when no API key is given.
