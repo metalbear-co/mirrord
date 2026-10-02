@@ -4,11 +4,12 @@ Used by `close_while_blocked.rs`. The test stops reading the intproxy connection
 the large remote write below fills the socket buffer and blocks while it holds that connection.
 The close in the second thread then waits in the middle of its request to the intproxy.
 
-The main thread must not close an fd during the action, because closes wait for each other.
+The main thread must not close a socket or a remote file during the action, because these closes
+wait for each other. Closes of other fds do not wait.
 
 Usage: close_while_blocked.py <action> <target>
 
-- action: `fork`, `spawn` or `dup`.
+- action: `fork`, `spawn`, `dup` or `close-local` (closes a pipe).
 - target: what the second thread closes. `dir` is a remote directory, `socket` is a listening
   socket, `file` is a remote file.
 """
@@ -53,6 +54,9 @@ elif target == "file":
         os.close(closed_file)
 
 
+# A local fd, which the layer does not manage.
+local_read, local_write = os.pipe()
+
 blocker = os.open(f"{REMOTE_DIR}/blocker", os.O_WRONLY)
 
 
@@ -80,4 +84,6 @@ elif action == "spawn":
 elif action == "dup":
     # Python calls `fcntl(F_DUPFD_CLOEXEC)`, which the layer handles like `dup`.
     os.dup(1)
+elif action == "close-local":
+    os.close(local_read)
 print(f"{action} done", flush=True)

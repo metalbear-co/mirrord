@@ -701,7 +701,8 @@ fn enable_hooks(state: &LayerSetup) {
 /// so nothing closes its copy until the child exits.
 ///
 /// This lock is separate from [`SOCKETS`] and [`OPEN_FILES`], so that the close code can release
-/// these locks before its I/O, and other hooks do not wait for that I/O.
+/// these locks before its I/O, and other hooks do not wait for that I/O. Also, [`close_layer_fd`]
+/// takes it only for an fd that is in one of these maps, so a close of another fd does not wait.
 pub(crate) static CLOSE_FORK_LOCK: Mutex<()> = Mutex::new(());
 
 /// Shared code for closing `fd` in our data structures.
@@ -711,10 +712,27 @@ pub(crate) static CLOSE_FORK_LOCK: Mutex<()> = Mutex::new(());
 /// ## Details
 ///
 /// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`], and sends the close requests
-/// to the intproxy, while it holds [`CLOSE_FORK_LOCK`].
+/// to the intproxy, while it holds [`CLOSE_FORK_LOCK`]. It does nothing for an fd that is in
+/// neither map.
 /// **DON'T ADD LOGS HERE SINCE CALLER MIGHT CLOSE STDOUT/STDERR CAUSING THIS TO CRASH**
 #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()))]
 pub(crate) fn close_layer_fd(fd: c_int) {
+    // Most fds are not in the maps, so look first, and only take the lock for an fd that is. If
+    // another thread adds `fd` to a map after this check, the entry is for its own new resource,
+    // and this close must keep it.
+    let in_sockets = SOCKETS
+        .lock()
+        .expect("SOCKETS lock failed")
+        .contains_key(&fd);
+    let in_open_files = setup().fs_config().is_active()
+        && OPEN_FILES
+            .lock()
+            .expect("OPEN_FILES lock failed")
+            .contains_key(&fd);
+    if !in_sockets && !in_open_files {
+        return;
+    }
+
     let _fork_guard = CLOSE_FORK_LOCK
         .lock()
         .unwrap_or_else(PoisonError::into_inner);

@@ -202,3 +202,21 @@ async fn dup_does_not_wait_for_close(#[case] target: &str) {
     answer_all(&mut layer).await;
     process.wait_assert_success().await;
 }
+
+/// A close of an fd that the layer does not manage does not wait for a close on another thread.
+#[rstest]
+#[case::closedir("dir")]
+#[case::socket("socket")]
+#[case::file("file")]
+#[tokio::test]
+async fn local_close_does_not_wait_for_close(#[case] target: &str) {
+    let (mut process, _intproxy, mut layer) = start("close-local", target).await;
+
+    process
+        .wait_for_line_stdout(TIMEOUT, "close-local done")
+        .await;
+    assert_close_waits(&process).await;
+
+    answer_all(&mut layer).await;
+    process.wait_assert_success().await;
+}
