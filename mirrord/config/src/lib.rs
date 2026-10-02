@@ -1573,6 +1573,7 @@ mod tests {
         agent::AgentFileConfig,
         feature::{
             FeatureFileConfig,
+            env::EnvFileConfig,
             fs::{FsModeConfig, FsUserConfig},
             network::{
                 NetworkFileConfig,
@@ -2087,9 +2088,19 @@ mod tests {
     ///
     /// The example is the first JSON block after `heading` in the docs of the type. An empty
     /// `heading` selects the first JSON block in the docs.
+    ///
+    /// With `ide`, the test does the checks of `mirrord verify-config --ide`, where the user
+    /// selects the target later. The `feature` example needs this, because it uses steal mode
+    /// and has no target, and steal mode needs a target.
     #[rstest]
-    #[case::complete(schemars::schema_for!(LayerFileConfig), "### Complete `config.json`")]
-    fn docs_example_is_valid(#[case] schema: Schema, #[case] heading: &str) {
+    #[case::complete(
+        schemars::schema_for!(LayerFileConfig),
+        "### Complete `config.json`",
+        false
+    )]
+    #[case::feature(schemars::schema_for!(FeatureFileConfig), "", true)]
+    #[case::env(schemars::schema_for!(EnvFileConfig), "", false)]
+    fn docs_example_is_valid(#[case] schema: Schema, #[case] heading: &str, #[case] ide: bool) {
         let example = {
             let docs = schema
                 .get("description")
@@ -2111,7 +2122,7 @@ mod tests {
         let mut context = ConfigContext::default()
             .override_env(LayerConfig::FILE_PATH_ENV, file.path())
             .strict_env(true)
-            .empty_target_final(true);
+            .empty_target_final(!ide);
         let config = LayerConfig::resolve(&mut context).unwrap();
         config.verify(&mut context).unwrap();
     }

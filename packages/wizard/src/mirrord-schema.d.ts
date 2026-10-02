@@ -1493,7 +1493,7 @@ export interface ExternalProxyFileConfig {
  *
  * The [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options have support for a shortened version, that you can see [here](#root-shortened).
  *
- * ```json { "feature": { "env": { "include": "DATABASE_USER;PUBLIC_ENV", "exclude": "DATABASE_PASSWORD;SECRET_ENV", "override": { "DATABASE_CONNECTION": "db://localhost:7777/my-db", "LOCAL_BEAR": "panda" } }, "fs": { "mode": "write", "read_write": ".+\\.json" , "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ], "local": [ ".+\\.js", ".+\\.mjs" ] }, "network": { "incoming": { "mode": "steal", "http_filter": { "header_filter": "host: api\\..+" }, "port_mapping": [[ 7777, 8888 ]], "ignore_localhost": false, "ignore_ports": [9999, 10000] }, "outgoing": { "tcp": true, "udp": true, "filter": { "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"] }, "ignore_localhost": false, "unix_streams": "bear.+" }, "dns": false }, "copy_target": false, "hostname": true } } ```
+ * ```json { "feature": { "env": { "include": "DATABASE_USER;PUBLIC_ENV", "override": { "DATABASE_CONNECTION": "db://localhost:7777/my-db", "LOCAL_BEAR": "panda" } }, "fs": { "mode": "write", "read_write": ".+\\.json" , "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ], "local": [ ".+\\.js", ".+\\.mjs" ] }, "network": { "incoming": { "mode": "steal", "http_filter": { "header_filter": "host: api\\..+" }, "port_mapping": [[ 7777, 8888 ]], "ignore_localhost": false, "ignore_ports": [9999, 10000] }, "outgoing": { "tcp": true, "udp": true, "filter": { "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"] }, "ignore_localhost": false, "unix_streams": "bear.+" }, "dns": false }, "copy_target": false, "hostname": true } } ```
  */
 export interface FeatureFileConfig {
   copy_target?: FeatureCopyTargetFeatureCopyTarget
@@ -1515,7 +1515,7 @@ export interface FeatureFileConfig {
  *
  * See the environment variables [reference](https://metalbear.com/mirrord/docs/reference/env/) for more details.
  *
- * ```json { "feature": { "env": { "include": "DATABASE_USER;PUBLIC_ENV;MY_APP_*", "exclude": "DATABASE_PASSWORD;SECRET_ENV", "override": { "DATABASE_CONNECTION": "db://localhost:7777/my-db", "LOCAL_BEAR": "panda" }, "mapping": { ".+_TIMEOUT": "1000" } } } } ```
+ * ```json { "feature": { "env": { "include": "DATABASE_USER;PUBLIC_ENV;MY_APP_*", "override": { "DATABASE_CONNECTION": "db://localhost:7777/my-db", "LOCAL_BEAR": "panda" }, "mapping": { ".+_TIMEOUT": "1000" } } } } ```
  */
 export interface EnvFileConfig {
   env_file?: FeatureEnvFileFeatureEnvFile
