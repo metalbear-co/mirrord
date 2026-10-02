@@ -129,11 +129,19 @@ async fn answer_all(layer: &mut FakeLayerConnection) {
     while answer(layer).await.is_some() {}
 }
 
-/// Checks that the close in the second thread has not finished, so it still waits for the
-/// intproxy. Otherwise the test does not check anything.
-async fn assert_close_waits(process: &TestProcess) {
+/// Checks that the close in the second thread started before the `action` and has not finished.
+/// The application starts its action one second after it starts the close, so the close has had
+/// time to reach its request to the intproxy and wait there. This does not prove that the close
+/// waited during the whole action, but a close that has not started does not check anything.
+async fn assert_close_waits(process: &TestProcess, action: &str) {
+    let stdout = process.get_stdout().await;
+    let closing = stdout.find("closing\n").expect("the close did not start");
+    let action_start = stdout
+        .find(&format!("{action} start"))
+        .expect("the action did not start");
+    assert!(closing < action_start, "the close started after the action");
     assert!(
-        !process.get_stdout().await.contains("close done"),
+        !stdout.contains("close done"),
         "the close did not wait for the intproxy"
     );
 }
@@ -149,13 +157,13 @@ async fn fork_waits_for_close(#[case] target: &str) {
     let (mut process, mut intproxy, mut parent) = start("fork", target).await;
 
     process.wait_for_line_stdout(TIMEOUT, "fork start").await;
-    assert_close_waits(&process).await;
+    assert_close_waits(&process, "fork").await;
     assert!(
         intproxy.try_accept(NOTHING_HAPPENS).await.is_none(),
         "the child connected while the parent was in the middle of a close"
     );
 
-    // The parent sends its close request before the child connects.
+    // Let the parent send its close request, so that the `fork` can continue.
     loop {
         let request = answer(&mut parent)
             .await
@@ -182,7 +190,7 @@ async fn spawn_does_not_wait_for_close(#[case] target: &str) {
     let (mut process, _intproxy, mut layer) = start("spawn", target).await;
 
     process.wait_for_line_stdout(TIMEOUT, "spawn done").await;
-    assert_close_waits(&process).await;
+    assert_close_waits(&process, "spawn").await;
 
     answer_all(&mut layer).await;
     process.wait_assert_success().await;
@@ -197,7 +205,7 @@ async fn dup_does_not_wait_for_close(#[case] target: &str) {
     let (mut process, _intproxy, mut layer) = start("dup", target).await;
 
     process.wait_for_line_stdout(TIMEOUT, "dup done").await;
-    assert_close_waits(&process).await;
+    assert_close_waits(&process, "dup").await;
 
     answer_all(&mut layer).await;
     process.wait_assert_success().await;
@@ -215,7 +223,7 @@ async fn local_close_does_not_wait_for_close(#[case] target: &str) {
     process
         .wait_for_line_stdout(TIMEOUT, "close-local done")
         .await;
-    assert_close_waits(&process).await;
+    assert_close_waits(&process, "close-local").await;
 
     answer_all(&mut layer).await;
     process.wait_assert_success().await;

@@ -61,6 +61,7 @@ blocker = os.open(f"{REMOTE_DIR}/blocker", os.O_WRONLY)
 
 
 def close_in_thread():
+    print("closing", flush=True)
     close_target()
     print("close done", flush=True)
 
