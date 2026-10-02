@@ -915,6 +915,8 @@ impl LayerConfig {
             http_filter.all_of.is_some(),
             http_filter.any_of.is_some(),
             http_filter.body_filter.is_some(),
+            http_filter.method_filter.is_some(),
+            http_filter.header_filter_jq.is_some(),
         ]
         .into_iter()
         .filter(|used| *used)
@@ -976,6 +978,52 @@ impl LayerConfig {
                     verify_body_filter(body)?
                 }
             }
+        }
+
+        // The layer converts the filter when it starts, and panics on an invalid one. The regexes
+        // are compiled one by one first, with the engine the conversion uses, so that the error
+        // names the one that doesn't compile; `mirrord_protocol::tcp::Filter::new` would log every
+        // failure as an error on top.
+        let filter_path = "feature.network.incoming.http_filter";
+        let verify_regex = |name: String, pattern: &str| {
+            fancy_regex::Regex::new(pattern)
+                .map(drop)
+                .map_err(|error| ConfigError::InvalidValue {
+                    name: name.into(),
+                    provided: pattern.to_owned(),
+                    error: Box::new(error),
+                })
+        };
+        if let Some(header) = &http_filter.header_filter {
+            verify_regex(format!("{filter_path}.header_filter"), header)?;
+        }
+        if let Some(path) = &http_filter.path_filter {
+            verify_regex(format!("{filter_path}.path_filter"), path)?;
+        }
+        for (name, filters) in [
+            ("all_of", &http_filter.all_of),
+            ("any_of", &http_filter.any_of),
+        ] {
+            for (index, filter) in filters.iter().flatten().enumerate() {
+                match filter {
+                    InnerFilter::Header { header } => {
+                        verify_regex(format!("{filter_path}.{name}[{index}].header"), header)?
+                    }
+                    InnerFilter::Path { path } => {
+                        verify_regex(format!("{filter_path}.{name}[{index}].path"), path)?
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if http_filter.is_filter_set() {
+            http_filter
+                .as_protocol_http_filter()
+                .map_err(|error| ConfigError::InvalidValue {
+                    name: filter_path.into(),
+                    provided: serde_json::to_string(http_filter).unwrap_or_default(),
+                    error: Box::new(error),
+                })?;
         }
 
         if !self.feature.network.incoming.ignore_ports.is_empty()
@@ -1570,6 +1618,7 @@ mod tests {
     use k8s_openapi::api::core::v1::{Container, VolumeMount};
     use rstest::*;
     use schemars::Schema;
+    use serde_json::json;
     use tempfile::NamedTempFile;
 
     use super::*;
@@ -2065,6 +2114,62 @@ mod tests {
         } else {
             write_schema_to_file(&fresh_schema);
         }
+    }
+
+    /// Every kind of HTTP filter counts towards the one allowed at a time, or the layer would hit
+    /// an unexpected combination when converting the filter.
+    #[rstest]
+    #[case::method(json!({ "header_filter": "a", "method_filter": "GET" }))]
+    #[case::jq(json!({ "path_filter": "/a", "header_filter_jq": "." }))]
+    fn verify_rejects_multiple_http_filters(#[case] http_filter: serde_json::Value) {
+        let config: LayerFileConfig = serde_json::from_value(json!({
+            "feature": { "network": { "incoming": { "mode": "steal", "http_filter": http_filter } } }
+        }))
+        .unwrap();
+        let mut context = ConfigContext::default().strict_env(true);
+        let error = config
+            .generate_config(&mut context)
+            .and_then(|config| config.verify(&mut context))
+            .unwrap_err();
+        assert!(matches!(error, ConfigError::Conflict(_)), "{error}");
+    }
+
+    /// The error names the filter that doesn't compile and the value given for it.
+    #[rstest]
+    #[case::header(json!({ "header_filter": "([" }), "feature.network.incoming.http_filter.header_filter", "([")]
+    #[case::path(json!({ "path_filter": "([" }), "feature.network.incoming.http_filter.path_filter", "([")]
+    #[case::inner(
+        json!({ "any_of": [{ "path": "/ok" }, { "header": "([" }] }),
+        "feature.network.incoming.http_filter.any_of[1].header",
+        "(["
+    )]
+    #[case::method(
+        json!({ "method_filter": "NOT A METHOD" }),
+        "feature.network.incoming.http_filter",
+        "NOT A METHOD"
+    )]
+    fn verify_rejects_invalid_http_filter(
+        #[case] http_filter: serde_json::Value,
+        #[case] expected_name: &str,
+        #[case] expected_value: &str,
+    ) {
+        let config: LayerFileConfig = serde_json::from_value(json!({
+            "feature": { "network": { "incoming": { "mode": "steal", "http_filter": http_filter } } }
+        }))
+        .unwrap();
+        let mut context = ConfigContext::default().strict_env(true);
+        let error = config
+            .generate_config(&mut context)
+            .and_then(|config| config.verify(&mut context))
+            .unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                ConfigError::InvalidValue { name, provided, .. }
+                    if name == expected_name && provided.contains(expected_value)
+            ),
+            "{error}"
+        );
     }
 
     #[test]
