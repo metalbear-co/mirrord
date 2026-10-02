@@ -96,11 +96,13 @@ pub(crate) enum OperatorInstallError {
         "a mirrord operator is registered in namespace `{namespace}`, but it is not responding"
     )]
     #[diagnostic(help(
-        "Inspect it with `kubectl get pods -n {namespace}`. Fix or uninstall the existing \
-        operator before installing it again."
+        "Inspect it with `kubectl{context_arg} get pods -n {namespace}`. Fix or uninstall the \
+        existing operator before installing it again."
     ))]
     Unhealthy {
         namespace: String,
+        /// Gives kubectl the kubecontext of the run, if it has a name.
+        context_arg: String,
         #[source]
         source: Box<kube::Error>,
     },
@@ -124,9 +126,10 @@ pub(crate) enum OperatorInstallError {
     },
 
     #[error("the operator did not become ready within {} minutes", .timeout.as_secs() / 60)]
-    #[diagnostic(help("Inspect it with `kubectl get pods -n {namespace}`."))]
+    #[diagnostic(help("Inspect it with `kubectl{context_arg} get pods -n {namespace}`."))]
     NotReady {
         namespace: String,
+        context_arg: String,
         timeout: std::time::Duration,
         #[source]
         source: Box<kube::Error>,

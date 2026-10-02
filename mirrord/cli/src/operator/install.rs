@@ -1,5 +1,5 @@
-//! `mirrord operator install`: gets a license, installs the operator into the cluster of the
-//! current kubecontext, and hands ownership of the license to the user.
+//! `mirrord operator install`: gets a license, installs the operator into the cluster of a
+//! kubecontext, and hands ownership of the license to the user.
 
 use std::{io::IsTerminal, ops::Not};
 
@@ -27,13 +27,14 @@ pub(super) async fn operator_install(
         no_browser,
         cluster_hint,
         no_hint,
+        context,
         manifest: manifest_path,
         app_url,
     } = args;
 
     let mut progress = ProgressTracker::from_env("mirrord operator install");
 
-    let (mut kube_config, context) = create_kube_config_with_context(None, None::<&str>, None)
+    let (mut kube_config, context) = create_kube_config_with_context(None, None::<&str>, context)
         .await
         .map_err(|error| OperatorInstallError::KubeConfig(Box::new(error)))?;
     // The default policy retries 503s for minutes, which is exactly how a registered but
@@ -47,9 +48,15 @@ pub(super) async fn operator_install(
         .user_agent(USER_AGENT)
         .build()
         .map_err(OperatorInstallError::HttpClient)?;
+    // The commands printed to the user name the kubecontext, so that they do not use a different
+    // cluster if it is not the current one.
+    let context_arg = context
+        .as_deref()
+        .map(|context| format!(" --context {context}"))
+        .unwrap_or_default();
 
     let mut subtask = progress.subtask("checking for an existing operator");
-    cluster::ensure_no_operator(&client).await?;
+    cluster::ensure_no_operator(&client, &context_arg).await?;
     subtask.success(Some("no operator installed"));
 
     let mut subtask = progress.subtask("fetching the operator manifest");
@@ -106,7 +113,9 @@ pub(super) async fn operator_install(
         subtask.success(None);
 
         let mut subtask = progress.subtask("waiting for the operator to become ready");
-        let operator = cluster::wait_for_operator(&client, manifest.operator_namespace()).await?;
+        let operator =
+            cluster::wait_for_operator(&client, manifest.operator_namespace(), &context_arg)
+                .await?;
         subtask.success(None);
 
         Ok(operator)
@@ -157,14 +166,20 @@ fn summary(version: &semver::Version, manifest: &Manifest, context: Option<&str>
     };
     let mut summary = format!("mirrord operator {version} is installed in {location}.\n\n");
 
+    let kube_context_arg = context
+        .map(|context| format!(" --kube-context {context}"))
+        .unwrap_or_default();
+    let context_arg = context
+        .map(|context| format!(" --context {context}"))
+        .unwrap_or_default();
     summary.push_str(&format!(
         "This is a default installation. For anything custom (namespace, tolerations, pull \
         secrets, OIDC, ...), manage it with the helm chart, which takes over this installation \
         and keeps its API key:\n\n  helm repo add metalbear {repo}\n  helm install {release} \
-        metalbear/{chart} --version {chart_version} \\\n    --set \
+        metalbear/{chart} --version {chart_version}{kube_context_arg} \\\n    --set \
         cloud.apiKey.key=\"{api_key}\"",
         chart_version = manifest.chart_version(),
-        api_key = manifest.api_key_lookup(),
+        api_key = manifest.api_key_lookup(&context_arg),
         repo = manifest::CHARTS_REPO_URL,
         release = manifest::RELEASE_NAME,
         chart = manifest::CHART_NAME,

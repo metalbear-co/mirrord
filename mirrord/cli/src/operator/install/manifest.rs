@@ -200,10 +200,11 @@ impl Manifest {
     /// A shell command substitution that reads the installed operator's API key from the cluster.
     ///
     /// Lets users move the installation to helm with the key it already uses, which they may have
-    /// never seen, e.g. when it came from a trial signup.
-    pub(super) fn api_key_lookup(&self) -> String {
+    /// never seen, e.g. when it came from a trial signup. `context_arg` gives kubectl the
+    /// kubecontext of the installation.
+    pub(super) fn api_key_lookup(&self, context_arg: &str) -> String {
         format!(
-            "$(kubectl -n {} get deployment {} -o \
+            "$(kubectl{context_arg} -n {} get deployment {} -o \
             jsonpath='{{.spec.template.spec.containers[*].env[?(@.name==\"{API_KEY_ENV}\")].value}}')",
             self.operator_namespace, self.operator_deployment,
         )

@@ -979,7 +979,8 @@ pub(super) enum OperatorCommand {
     // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
     #[clap(hide(true))]
     Setup,
-    /// Install the mirrord operator into the cluster of the current kubecontext.
+    /// Install the mirrord operator into the cluster of the current kubecontext, or of the one
+    /// given with `--context`.
     ///
     /// Without `--api-key`, starts an Enterprise trial and opens a link to claim it. Installs the
     /// latest version of the helm chart with default values; use the helm chart directly for a
@@ -1025,6 +1026,10 @@ pub(super) struct OperatorInstallArgs {
     /// Do not send a cluster hint to the trial claim page.
     #[arg(long, conflicts_with = "api_key")]
     pub no_hint: bool,
+
+    /// Kube context to install the operator into, instead of the current one.
+    #[arg(long)]
+    pub context: Option<String>,
 
     /// Install from a local rendered chart manifest instead of the latest published one.
     #[arg(long, env = "MIRRORD_OPERATOR_INSTALL_MANIFEST", hide = true)]
