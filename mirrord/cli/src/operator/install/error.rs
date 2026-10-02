@@ -91,20 +91,22 @@ pub(crate) enum OperatorInstallError {
 
     #[error("mirrord operator {version} is already installed in namespace `{namespace}`")]
     #[diagnostic(help(
-        "Run `mirrord operator status` to see its details. To install it again, uninstall the \
-        existing operator first."
+        "Run `mirrord operator status` to see its details. To install it again, remove it \
+        first with `mirrord operator uninstall{context_arg}`."
     ))]
     AlreadyInstalled {
         namespace: String,
         version: semver::Version,
+        /// Gives the commands the kubecontext of the run, if it has a name.
+        context_arg: String,
     },
 
     #[error(
         "a mirrord operator is registered in namespace `{namespace}`, but it is not responding"
     )]
     #[diagnostic(help(
-        "Inspect it with `kubectl{context_arg} get pods -n {namespace}`. Fix or uninstall the \
-        existing operator before installing it again."
+        "Inspect it with `kubectl{context_arg} get pods -n {namespace}`. Fix it, or remove it \
+        with `mirrord operator uninstall{context_arg}` before installing it again."
     ))]
     Unhealthy {
         namespace: String,
@@ -118,8 +120,14 @@ pub(crate) enum OperatorInstallError {
         "found objects left over from an earlier mirrord operator installation:\n{}",
         bullet_list(objects)
     )]
-    #[diagnostic(help("Remove them before installing the operator again."))]
-    LeftoverObjects { objects: Vec<String> },
+    #[diagnostic(help(
+        "Remove them with `mirrord operator uninstall{context_arg}` before installing the \
+        operator again."
+    ))]
+    LeftoverObjects {
+        objects: Vec<String>,
+        context_arg: String,
+    },
 
     #[error("namespace `{namespace}` already exists")]
     #[diagnostic(help(

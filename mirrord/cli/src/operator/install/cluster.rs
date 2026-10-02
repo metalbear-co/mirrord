@@ -131,6 +131,7 @@ pub(super) async fn ensure_no_operator(
         Ok(operator) => Err(OperatorInstallError::AlreadyInstalled {
             namespace,
             version: operator.spec.operator_version,
+            context_arg: context_arg.to_owned(),
         }),
         Err(error) => Err(OperatorInstallError::Unhealthy {
             namespace,
@@ -149,9 +150,12 @@ pub(super) async fn ensure_no_operator(
 ///
 /// Objects in a namespace that the manifest itself creates can't be dry-run before the namespace
 /// exists, so those are skipped.
+///
+/// `context_arg` gives the command in the error about leftovers the kubecontext of the run.
 pub(super) async fn dry_run(
     manifest: &Manifest,
     apis: &[Api<DynamicObject>],
+    context_arg: &str,
 ) -> Result<(), OperatorInstallError> {
     let create_params = PostParams {
         dry_run: true,
@@ -217,7 +221,10 @@ pub(super) async fn dry_run(
     if foreign.is_empty().not() {
         Err(OperatorInstallError::ForeignObjects { objects: foreign })
     } else if leftovers.is_empty().not() {
-        Err(OperatorInstallError::LeftoverObjects { objects: leftovers })
+        Err(OperatorInstallError::LeftoverObjects {
+            objects: leftovers,
+            context_arg: context_arg.to_owned(),
+        })
     } else {
         Ok(())
     }

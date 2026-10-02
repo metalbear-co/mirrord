@@ -69,7 +69,7 @@ pub(super) async fn operator_install(
 
     let mut subtask = progress.subtask("checking permissions");
     let apis = cluster::resolve_apis(&client, &manifest, &release_namespace).await?;
-    cluster::dry_run(&manifest, &apis).await?;
+    cluster::dry_run(&manifest, &apis, &context_arg).await?;
     subtask.success(None);
 
     // Asked after the checks, which change nothing, so that an installation that can't succeed
@@ -127,11 +127,12 @@ pub(super) async fn operator_install(
     .await;
 
     let operator = installed.inspect_err(|_| {
-        // Printed rather than put in the error, where the command would be wrapped across lines.
+        // Printed rather than put in the error, where the commands would be wrapped across lines.
         if let Some(trial) = &trial {
             println!(
-                "To retry without starting another trial, reuse its API key: mirrord operator \
-                install --api-key {}",
+                "To retry without starting another trial, remove what was installed, then reuse \
+                the API key of the trial:\n\n  mirrord operator uninstall{context_arg}\n  mirrord \
+                operator install{context_arg} --api-key {}\n",
                 trial.api_key
             );
         }
@@ -235,17 +236,18 @@ fn trial_details(trial: &Trial) -> String {
 
 /// What the user needs to know after a successful installation, printed once.
 fn summary(version: &semver::Version, manifest: &Manifest, context: Option<&str>) -> String {
-    let mut summary = format!(
-        "mirrord operator {version} is installed in {}.\n\n",
-        location(manifest.operator_namespace(), context)
-    );
-
     let kube_context_arg = context
         .map(|context| format!(" --kube-context {context}"))
         .unwrap_or_default();
     let context_arg = context
         .map(|context| format!(" --context {context}"))
         .unwrap_or_default();
+
+    let mut summary = format!(
+        "mirrord operator {version} is installed in {}. To remove it, run `mirrord operator \
+        uninstall{context_arg}`.\n\n",
+        location(manifest.operator_namespace(), context)
+    );
     summary.push_str(&format!(
         "This is a default installation. For anything custom (namespace, tolerations, pull \
         secrets, OIDC, ...), manage it with the helm chart, which takes over this installation \
