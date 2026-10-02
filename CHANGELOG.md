@@ -8,6 +8,47 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.268.0](https://github.com/metalbear-co/mirrord/tree/3.268.0) - 2026-10-02
+
+
+### Added
+
+- Added `mirrord mcp`, an MCP server over stdio for AI agents, with a
+  `validate_config` tool that checks `mirrord.json` and `mirrord-up.yaml`
+  content against the installed mirrord version's schema.
+- Added `mirrord operator install`, which installs the operator from the helm
+  chart without requiring the helm CLI, and starts a claimable trial when no
+  API key is given.
+- Added `mirrord session list --format json` so scripts can select sessions
+  without parsing a table.
+- CLI errors now show the Kubernetes context, cluster, namespace and mirrord
+  config file used for the run.
+- Show a warning when the local application listens on a port that the target
+  container does not declare. The warning suggests setting
+  `feature.network.incoming.port_mapping`.
+- `mirrord up` suggests the closest allowed name when `mirrord-up.yaml` has an
+  unknown field or value, for example "did you mean `target`?".
+
+
+### Changed
+
+- The agent no longer logs an error when the kernel does not support
+  `pidfd_open`. It logs a warning that says the agent won't stop when the
+  target container exits.
+  [#4918](https://github.com/metalbear-co/mirrord/issues/4918)
+
+
+### Fixed
+
+- Fixed `sendfile` on macOS reporting a failed send as fully sent when the
+  socket would block, which made callers like Ruby's
+   `IO.copy_stream` silently drop data.
+- Start the local UI daemon for DB branch port forwarding only when needed, and
+  keep it running when the process that started it receives Ctrl+C.
+- When the port-forward to the agent fails because the WebSocket upgrade is
+  rejected, the error now says that this step failed, and shows the HTTP status
+  and the response body.
+
 ## [3.267.0](https://github.com/metalbear-co/mirrord/tree/3.267.0) - 2026-09-30
 
 
