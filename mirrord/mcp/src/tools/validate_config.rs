@@ -615,6 +615,17 @@ fn schema_issues(error: &ValidationError<'_>, raw_schema: &Value) -> Vec<ConfigI
                         ),
                     }
                 }
+                (
+                    None,
+                    ValidationErrorKind::AnyOf { .. } | ValidationErrorKind::OneOfNotValid { .. },
+                ) => match accepted_forms(error, raw_schema).as_slice() {
+                    [] => error.to_string(),
+                    forms => format!(
+                        "{} matches none of the accepted forms: {}",
+                        error.instance(),
+                        forms.join("; ")
+                    ),
+                },
                 _ => error.to_string(),
             };
             vec![ConfigIssue {
@@ -780,6 +791,79 @@ fn allowed_values(error: &ValidationError<'_>) -> Option<Vec<Value>> {
     };
 
     values.is_empty().not().then_some(values)
+}
+
+/// Describes the alternatives of a failed `anyOf`/`oneOf`, e.g. "a `string`" or "an object with
+/// `local`", leaving out `null`.
+fn accepted_forms(error: &ValidationError<'_>, raw_schema: &Value) -> Vec<String> {
+    fn describe(raw_schema: &Value, schema: &Value, forms: &mut Vec<String>, depth: usize) {
+        // Guards against `$ref` cycles.
+        if depth > 8 {
+            return;
+        }
+        if let Some(target) = schema
+            .get("$ref")
+            .and_then(Value::as_str)
+            .and_then(|reference| raw_schema.pointer(reference.strip_prefix('#')?))
+        {
+            describe(raw_schema, target, forms, depth + 1);
+        }
+        for keyword in ["anyOf", "oneOf"] {
+            for branch in schema
+                .get(keyword)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                describe(raw_schema, branch, forms, depth + 1);
+            }
+        }
+
+        let form = if let Some(value) = schema.get("const") {
+            Some(format!("`{value}`"))
+        } else if let Some(values) = schema.get("enum").and_then(Value::as_array) {
+            let values: Vec<String> = values.iter().map(|value| format!("`{value}`")).collect();
+            Some(values.join(" or "))
+        } else if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+            let fields: Vec<String> = properties
+                .keys()
+                .map(|field| format!("`{field}`"))
+                .collect();
+            Some(format!("an object with {}", fields.join(", ")))
+        } else {
+            match schema.get("type") {
+                Some(Value::String(json_type)) if json_type != "null" => {
+                    Some(format!("a `{json_type}`"))
+                }
+                Some(Value::Array(types)) => {
+                    let types: Vec<String> = types
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .filter(|json_type| *json_type != "null")
+                        .map(|json_type| format!("a `{json_type}`"))
+                        .collect();
+                    (types.is_empty().not()).then(|| types.join(" or "))
+                }
+                _ => None,
+            }
+        };
+        if let Some(form) = form
+            && forms.contains(&form).not()
+        {
+            forms.push(form);
+        }
+    }
+
+    let mut forms = Vec::new();
+    if let Some(alternatives) = raw_schema
+        .pointer(error.schema_path().as_str())
+        .and_then(Value::as_array)
+    {
+        for alternative in alternatives {
+            describe(raw_schema, alternative, &mut forms, 0);
+        }
+    }
+    forms
 }
 
 /// The field names declared next to an `additionalProperties: false`, found by following the
@@ -1316,6 +1400,14 @@ services:
             "services:\n  api:\n    default_mode: replace\n    http_filter:\n      header_filter: \"(\"\n    run:\n      command: [\"true\"]\n",
         );
         assert!(output.valid, "{:?}", output.issues);
+    }
+
+    #[test]
+    fn accepted_forms() {
+        let issue = single_issue(ConfigFormat::MirrordJson, r#"{ "agent": { "image": 5 } }"#);
+        assert_eq!(issue.path, "/agent/image");
+        assert!(issue.message.contains("a `string`"), "{}", issue.message);
+        assert!(issue.message.contains("`registry`"), "{}", issue.message);
     }
 
     #[test]
