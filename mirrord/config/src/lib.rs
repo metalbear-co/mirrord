@@ -922,9 +922,10 @@ impl LayerConfig {
         .filter(|used| *used)
         .count();
         if used_filters > 1 {
-            Err(ConfigError::Conflict(
-                "Cannot use multiple types of HTTP filter at the same time, use 'any_of' or 'all_of' to combine filters".to_owned(),
-            ))?
+            Err(ConfigError::ConflictAt {
+                setting: "feature.network.incoming.http_filter".into(),
+                message: "Cannot use multiple types of HTTP filter at the same time, use 'any_of' or 'all_of' to combine filters".to_owned(),
+            })?
         }
 
         if [http_filter.all_of.as_ref(), http_filter.any_of.as_ref()]
@@ -932,9 +933,10 @@ impl LayerConfig {
             .flatten()
             .any(Vec::is_empty)
         {
-            Err(ConfigError::Conflict(
-                "Composite HTTP filter cannot be empty".to_owned(),
-            ))?;
+            Err(ConfigError::ConflictAt {
+                setting: "feature.network.incoming.http_filter".into(),
+                message: "Composite HTTP filter cannot be empty".to_owned(),
+            })?;
         }
 
         http_filter
@@ -1029,10 +1031,12 @@ impl LayerConfig {
         if !self.feature.network.incoming.ignore_ports.is_empty()
             && self.feature.network.incoming.ports.is_some()
         {
-            Err(ConfigError::Conflict(
-                "Cannot use both `incoming.ignore_ports` and `incoming.ports` at the same time"
-                    .to_owned(),
-            ))?
+            Err(ConfigError::ConflictAt {
+                setting: "feature.network.incoming.ports".into(),
+                message:
+                    "Cannot use both `incoming.ignore_ports` and `incoming.ports` at the same time"
+                        .to_owned(),
+            })?
         }
 
         match (
@@ -1040,11 +1044,12 @@ impl LayerConfig {
             &self.feature.network.incoming.tls_delivery,
         ) {
             (Some(..), Some(..)) => {
-                return Err(ConfigError::Conflict(
-                    "Cannot use both `feature.network.incoming.https_delivery` \
+                return Err(ConfigError::ConflictAt {
+                    setting: "feature.network.incoming.https_delivery".into(),
+                    message: "Cannot use both `feature.network.incoming.https_delivery` \
                     and `feature.network.incoming.tls_delivery` at the same time"
                         .to_owned(),
-                ));
+                });
             }
             (Some(config), ..) => {
                 context.add_warning(
@@ -1066,16 +1071,20 @@ impl LayerConfig {
 
         if is_targetless {
             if self.feature.network.incoming.is_steal() {
-                Err(ConfigError::Conflict("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into()))?
+                Err(ConfigError::ConflictAt {
+                    setting: "feature.network.incoming.mode".into(),
+                    message: "Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into(),
+                })?
             }
 
             if self.agent.ephemeral {
-                Err(ConfigError::Conflict(
-                    "Using an ephemeral container for the agent is not \
+                Err(ConfigError::ConflictAt {
+                    setting: "agent.ephemeral".into(),
+                    message: "Using an ephemeral container for the agent is not \
                          compatible with a targetless agent, please either disable this option or \
                         specify a target."
                         .into(),
-                ))?
+                })?
             }
 
             if self.agent.namespace.is_some() {
@@ -1089,28 +1098,31 @@ impl LayerConfig {
 
         if self.feature.copy_target.enabled {
             if self.operator == Some(false) {
-                return Err(ConfigError::Conflict(
-                    "The copy target feature requires a mirrord operator, \
+                return Err(ConfigError::ConflictAt {
+                    setting: "feature.copy_target".into(),
+                    message: "The copy target feature requires a mirrord operator, \
                    please either disable this option or use the operator."
                         .into(),
-                ));
+                });
             }
 
             // Target may also be set later in the UI.
             if is_targetless {
-                return Err(ConfigError::Conflict(
-                    "The copy target feature is not compatible with a targetless agent, \
+                return Err(ConfigError::ConflictAt {
+                    setting: "feature.copy_target".into(),
+                    message: "The copy target feature is not compatible with a targetless agent, \
                     please either disable this option or specify a target."
                         .into(),
-                ));
+                });
             }
 
             if matches!(self.target.path, Some(Target::Service(..))) {
-                return Err(ConfigError::Conflict(
-                    "The copy target feature is not yet supported with service targets, \
+                return Err(ConfigError::ConflictAt {
+                    setting: "feature.copy_target".into(),
+                    message: "The copy target feature is not yet supported with service targets, \
                     please either disable this option or specify an exact workload covered by this service."
-                        .into()
-                ));
+                        .into(),
+                });
             }
 
             if !self.feature.network.incoming.is_steal() {
@@ -1154,10 +1166,12 @@ impl LayerConfig {
 
         // Env vars
         if self.feature.env.exclude.is_some() && self.feature.env.include.is_some() {
-            return Err(ConfigError::Conflict(
-                "cannot use both `include` and `exclude` filters for environment variables"
-                    .to_owned(),
-            ));
+            return Err(ConfigError::ConflictAt {
+                setting: "feature.env".into(),
+                message:
+                    "cannot use both `include` and `exclude` filters for environment variables"
+                        .to_owned(),
+            });
         }
 
         if let Some(env_vars_mapping) = self.feature.env.mapping.clone() {
@@ -1185,14 +1199,17 @@ impl LayerConfig {
             if conflicts.is_empty().not() {
                 conflicts.sort();
                 conflicts.dedup();
-                return Err(ConfigError::Conflict(format!(
-                    "the following environment variables appear in both \
+                return Err(ConfigError::ConflictAt {
+                    setting: "feature.env.override".into(),
+                    message: format!(
+                        "the following environment variables appear in both \
                      `feature.env.override` and `feature.db_branches[].connection`: {}. \
                      Database branching redirects these variables through the operator, \
                      so overriding them locally would defeat the redirection. Remove \
                      them from `feature.env.override`.",
-                    conflicts.join(", "),
-                )));
+                        conflicts.join(", "),
+                    ),
+                });
             }
         }
 
@@ -2131,7 +2148,10 @@ mod tests {
             .generate_config(&mut context)
             .and_then(|config| config.verify(&mut context))
             .unwrap_err();
-        assert!(matches!(error, ConfigError::Conflict(_)), "{error}");
+        assert!(
+            matches!(&error, ConfigError::ConflictAt { setting, .. } if setting == "feature.network.incoming.http_filter"),
+            "{error}"
+        );
     }
 
     /// The error names the filter that doesn't compile and the value given for it.
@@ -2648,7 +2668,11 @@ mod tests {
             .expect_err("overlapping env.override and db_branches keys should be rejected");
 
         assert!(
-            matches!(&error, ConfigError::Conflict(msg) if msg.contains("DB_URL")),
+            matches!(
+                &error,
+                ConfigError::ConflictAt { setting, message }
+                    if setting == "feature.env.override" && message.contains("DB_URL")
+            ),
             "unexpected error: {error}"
         );
     }

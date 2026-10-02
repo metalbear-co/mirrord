@@ -197,12 +197,38 @@ fn check_layer_config(
         .and_then(|config| config.verify(&mut context))
         .err()
         .map(|error: ConfigError| ConfigIssue {
-            path: String::new(),
+            path: config_error_path(&error),
             message: error.to_string(),
             allowed_values: None,
         })
         .into_iter()
         .collect())
+}
+
+/// The JSON pointer of the setting a [`ConfigError`] names, where it names one as a dotted path
+/// such as `startup_retry.max_ms` or `feature.preview.config_mounts[0].payload`. An index-less `[]`
+/// (as in `feature.db_branches[].name`, meaning "any entry") points at the list itself.
+fn config_error_path(error: &ConfigError) -> String {
+    let name = match error {
+        ConfigError::InvalidValue { name, .. } => name,
+        ConfigError::ConflictAt { setting, .. } => setting,
+        _ => return String::new(),
+    };
+    // Otherwise the name of an environment variable.
+    if name.contains('.').not() {
+        return String::new();
+    }
+
+    let name = name.trim_start_matches('.');
+    let name = name.split_once("[]").map_or(name, |(list, _)| list);
+    dotted_to_pointer(&name.replace('[', ".").replace(']', ""))
+}
+
+/// The JSON pointer of a dotted path such as `feature.network.incoming.http_filter`.
+fn dotted_to_pointer(path: &str) -> String {
+    path.split('.')
+        .map(|segment| format!("/{}", escape_pointer_token(segment)))
+        .collect()
 }
 
 /// An issue found by [`UpConfig::verify`], pointing at the offending setting where the error names
@@ -949,6 +975,54 @@ services:
         );
     }
 
+    #[rstest]
+    #[case::mirrord_json(
+        ConfigFormat::MirrordJson,
+        r#"{ "feature": { "network": { "incoming": { "http_filter": { "header_filter": "([" } } } } }"#,
+        "/feature/network/incoming/http_filter/header_filter"
+    )]
+    fn invalid_http_filter_regex(
+        #[case] format: ConfigFormat,
+        #[case] content: &str,
+        #[case] path: &str,
+    ) {
+        let issue = single_issue(format, content);
+        assert_eq!(issue.path, path);
+        assert!(issue.message.contains("`([`"), "{}", issue.message);
+    }
+
+    /// Conflicts point at the setting to change.
+    #[rstest]
+    #[case::http_filters(
+        ConfigFormat::MirrordJson,
+        r#"{ "feature": { "network": { "incoming": { "mode": "steal", "http_filter": { "header_filter": "a", "path_filter": "b" } } } } }"#,
+        "/feature/network/incoming/http_filter"
+    )]
+    #[case::env_include_exclude(
+        ConfigFormat::MirrordJson,
+        r#"{ "feature": { "env": { "include": "A", "exclude": "B" } } }"#,
+        "/feature/env"
+    )]
+    #[case::copy_target_targetless(
+        ConfigFormat::MirrordJson,
+        r#"{ "target": "targetless", "feature": { "copy_target": true } }"#,
+        "/feature/copy_target"
+    )]
+    #[case::config_patch(
+        ConfigFormat::MirrordUpYaml,
+        "services:\n  api:\n    config_patch:\n      feature:\n        env:\n          include: A\n          exclude: B\n    run:\n      command: [\"true\"]\n",
+        "/services/api/config_patch/feature/env"
+    )]
+    fn conflict_location(#[case] format: ConfigFormat, #[case] content: &str, #[case] path: &str) {
+        let issue = single_issue(format, content);
+        assert_eq!(issue.path, path);
+        assert!(
+            issue.message.starts_with("Conflicting configuration"),
+            "{}",
+            issue.message
+        );
+    }
+
     /// The duplicate key is found wherever and however it's written.
     #[rstest]
     #[case::flow(
@@ -968,6 +1042,28 @@ services:
             single_issue(ConfigFormat::MirrordUpYaml, content).path,
             path
         );
+    }
+
+    /// An index-less `[]` stands for any entry, so the path stops at the list.
+    #[rstest]
+    #[case::field("startup_retry.max_ms", "/startup_retry/max_ms")]
+    #[case::leading_dot(
+        ".feature.network.incoming.tls_delivery.server_name",
+        "/feature/network/incoming/tls_delivery/server_name"
+    )]
+    #[case::indexed(
+        "feature.preview.config_mounts[0].payload",
+        "/feature/preview/config_mounts/0/payload"
+    )]
+    #[case::any_entry("feature.db_branches[].copy.image", "/feature/db_branches")]
+    #[case::env_var("MIRRORD_AGENT_TTL", "")]
+    fn config_error_location(#[case] name: &'static str, #[case] path: &str) {
+        let error = ConfigError::InvalidValue {
+            name: name.into(),
+            provided: String::new(),
+            error: "invalid".into(),
+        };
+        assert_eq!(config_error_path(&error), path);
     }
 
     #[test]

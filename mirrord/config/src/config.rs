@@ -41,6 +41,15 @@ pub enum ConfigError {
     #[error("Conflicting configuration found `{0}`")]
     Conflict(String),
 
+    /// A [`ConfigError::Conflict`] that is resolved by changing one setting, so tools such as
+    /// `mirrord mcp` can point at it.
+    #[error("Conflicting configuration found `{message}`")]
+    ConflictAt {
+        /// Path of the setting in the config, e.g. `feature.copy_target`.
+        setting: Cow<'static, str>,
+        message: String,
+    },
+
     #[error(
         "A target namespace was specified, but no target was specified. If you want to set the \
         namespace in which the agent will be created, please set the agent namespace, not the \
