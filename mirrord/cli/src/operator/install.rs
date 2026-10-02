@@ -35,21 +35,12 @@ pub(super) async fn operator_install(
     } = args;
 
     let mut progress = ProgressTracker::from_env("mirrord operator install");
-
-    let (mut kube_config, context) = create_kube_config_with_context(None, None::<&str>, context)
-        .await
-        .map_err(|error| OperatorInstallError::KubeConfig(Box::new(error)))?;
-    // The default policy retries 503s for minutes, which is exactly how a registered but
-    // unavailable operator API answers, both when checking for an existing operator and while
-    // waiting for the new one to come up.
-    kube_config.default_retry = false;
-    let release_namespace = kube_config.default_namespace.clone();
-    let client = Client::try_from(kube_config)
-        .map_err(|error| OperatorInstallError::KubeClient(Box::new(error)))?;
-    let http = reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-        .map_err(OperatorInstallError::HttpClient)?;
+    let Connection {
+        client,
+        http,
+        release_namespace,
+        context,
+    } = Connection::new(context).await?;
     // The commands printed to the user name the kubecontext, so that they do not use a different
     // cluster if it is not the current one.
     let context_arg = context
@@ -154,6 +145,44 @@ pub(super) async fn operator_install(
     );
 
     Ok(())
+}
+
+/// What the operator commands need to reach the cluster and the internet.
+struct Connection {
+    client: Client,
+    http: reqwest::Client,
+    /// The default namespace of the kubecontext, where `helm install` puts its release.
+    release_namespace: String,
+    /// The name of the kubecontext, if it has one.
+    context: Option<String>,
+}
+
+impl Connection {
+    /// Loads the given kubecontext, or the current one, and creates the clients.
+    async fn new(context: Option<String>) -> Result<Self, OperatorInstallError> {
+        let (mut kube_config, context) =
+            create_kube_config_with_context(None, None::<&str>, context)
+                .await
+                .map_err(|error| OperatorInstallError::KubeConfig(Box::new(error)))?;
+        // The default policy retries 503s for minutes, which is exactly how a registered but
+        // unavailable operator API answers, both when checking for an existing operator and while
+        // waiting for the new one to come up.
+        kube_config.default_retry = false;
+        let release_namespace = kube_config.default_namespace.clone();
+        let client = Client::try_from(kube_config)
+            .map_err(|error| OperatorInstallError::KubeClient(Box::new(error)))?;
+        let http = reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .build()
+            .map_err(OperatorInstallError::HttpClient)?;
+
+        Ok(Self {
+            client,
+            http,
+            release_namespace,
+            context,
+        })
+    }
 }
 
 /// Asks the user to confirm a change to the cluster, so that a wrong current kubecontext does not

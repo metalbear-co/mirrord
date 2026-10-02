@@ -166,12 +166,8 @@ impl Manifest {
                     .is_some_and(|types| types.kind == "Deployment")
             })
             .ok_or(OperatorInstallError::NoDeployment)?;
-        let chart_version = deployment
-            .labels()
-            .get(CHART_LABEL)
-            .and_then(|chart| chart.strip_prefix(&format!("{CHART_NAME}-")))
-            .and_then(|version| semver::Version::parse(&version.replace('_', "+")).ok())
-            .ok_or(OperatorInstallError::NoChartVersionLabel)?;
+        let chart_version =
+            chart_version(deployment).ok_or(OperatorInstallError::NoChartVersionLabel)?;
         let operator_deployment = deployment.name_any();
         let operator_namespace = deployment
             .namespace()
@@ -232,6 +228,15 @@ impl Manifest {
             for_each_placeholder(&mut object.data, &mut |value| api_key.clone_into(value));
         }
     }
+}
+
+/// The version of the chart that an object was rendered from, from its [`CHART_LABEL`].
+pub(super) fn chart_version(object: &impl ResourceExt) -> Option<semver::Version> {
+    object
+        .labels()
+        .get(CHART_LABEL)
+        .and_then(|chart| chart.strip_prefix(&format!("{CHART_NAME}-")))
+        .and_then(|version| semver::Version::parse(&version.replace('_', "+")).ok())
 }
 
 /// Whether an object in the cluster belongs to the [`RELEASE_NAME`] helm release, which is the
