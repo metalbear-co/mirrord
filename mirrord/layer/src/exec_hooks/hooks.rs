@@ -1,14 +1,10 @@
 #[cfg(not(target_os = "macos"))]
-use std::{
-    ffi::{CStr, CString},
-    ptr,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use base64::prelude::*;
 use libc::{c_char, c_int};
 #[cfg(not(target_os = "macos"))]
-use mirrord_layer_core::hooks::ProbedCall;
+use mirrord_layer_core::{envp::Envp, hooks::ProbedCall};
 use mirrord_layer_lib::detour::{Bypass, Detour};
 #[cfg(not(target_os = "macos"))]
 use mirrord_layer_macro::hook_fn;
@@ -103,9 +99,9 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
 ///
 /// The environment must stay valid until `execve` returns or replaces the image, and a probe
 /// cannot free it after the call. In glibc’s `posix_spawn`, the `vfork` child shares the parent’s
-/// memory, so the allocation stays in the parent on each spawn. To keep that leak small, the new
-/// list reuses the strings in `envp`, which remain valid for the call, and allocates only the
-/// pointer list and `MIRRORD_SHARED_SOCKETS` string.
+/// memory, so the allocation stays in the parent on each spawn. To keep that leak small, [`Envp`]
+/// reuses the strings in `envp`, which remain valid for the call, and allocates only the pointer
+/// list and `MIRRORD_SHARED_SOCKETS` string.
 #[cfg(not(target_os = "macos"))]
 fn on_execve(call: &ProbedCall<'_>) {
     const ENVP: u32 = 2;
@@ -113,30 +109,13 @@ fn on_execve(call: &ProbedCall<'_>) {
     let Detour::Success(encoded) = encoded_shared_sockets() else {
         return;
     };
-    let Ok(shared_sockets) = CString::new(format!("{SHARED_SOCKETS_ENV_VAR}={encoded}")) else {
-        return;
-    };
 
-    let envp = call.arg(ENVP) as *const *const c_char;
-    let prefix = format!("{SHARED_SOCKETS_ENV_VAR}=");
-    let mut pointers = Vec::new();
-
-    if !envp.is_null() {
-        pointers.extend(
-            (0..)
-                .map(|index| unsafe { *envp.add(index) })
-                .take_while(|variable| !variable.is_null())
-                .filter(|variable| {
-                    !unsafe { CStr::from_ptr(*variable) }
-                        .to_bytes()
-                        .starts_with(prefix.as_bytes())
-                }),
-        );
+    // SAFETY: `execve` requires `envp` to be null or a null-terminated array of C strings.
+    let mut envp = unsafe { Envp::from_raw(call.arg(ENVP) as *const *const c_char) };
+    envp.set(SHARED_SOCKETS_ENV_VAR, encoded.as_bytes());
+    if let Some(prepared) = envp.into_raw() {
+        call.set_arg(ENVP, prepared as usize);
     }
-
-    pointers.push(shared_sockets.into_raw().cast_const());
-    pointers.push(ptr::null());
-    call.set_arg(ENVP, pointers.leak().as_ptr() as usize);
 }
 
 /// Hook for `libc::execve`.
