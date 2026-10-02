@@ -23,7 +23,7 @@ use mirrord_config::{
     config::{ConfigContext, ConfigError, MirrordConfig},
     env_key::{EnvKey, MIRRORD_ENV_KEY},
 };
-use mirrord_up::{UpConfig, UpError};
+use mirrord_up::{LAYER_CONFIG_PATHS, ServiceMode, UpConfig, UpError};
 use schemars::JsonSchema;
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -163,6 +163,9 @@ pub fn validate_config(
                         Ok(config) => config.verify().err().map(up_issue).into_iter().collect(),
                         Err(issues) => issues,
                     };
+                    if issues.is_empty() {
+                        issues.extend(check_service_settings(&value)?);
+                    }
                     issues.extend(check_config_patches(&value)?);
                     issues
                 }
@@ -362,6 +365,83 @@ fn file_issue(message: String) -> ConfigIssue {
         message,
         allowed_values: None,
     }
+}
+
+/// Runs the checks of a mirrord config on the settings of every service in a `mirrord-up.yaml` that
+/// `mirrord up` copies into the mirrord config it generates for the service (per
+/// [`LAYER_CONFIG_PATHS`]), such as the regexes of an `http_filter`.
+///
+/// `default_mode` is left out, as `mirrord up` translates its values, and so are the settings that
+/// need the cluster to resolve, like `target`. So is the `http_filter` of a service in `replace`
+/// mode, which `mirrord up` ignores (unless `mirrord up --mode` overrides the mode, which a file
+/// can't tell).
+fn check_service_settings(up_config: &Value) -> Result<Vec<ConfigIssue>, ValidateConfigError> {
+    let Some(services) = up_config.get("services").and_then(Value::as_object) else {
+        return Ok(Vec::new());
+    };
+
+    let mut issues = Vec::new();
+    for (service, settings) in services {
+        let service_pointer = format!("/services/{}", escape_pointer_token(service));
+        let replace_mode = settings
+            .get("default_mode")
+            .and_then(|mode| ServiceMode::deserialize(mode).ok())
+            == Some(ServiceMode::Replace);
+        let mut layer_config = Value::Object(Default::default());
+        let mut copied = Vec::new();
+        for (up_path, layer_path) in LAYER_CONFIG_PATHS {
+            let Some(setting) = up_path.strip_prefix("services.*.") else {
+                continue;
+            };
+            if layer_path.starts_with("feature.").not()
+                || setting == "default_mode"
+                || (setting == "http_filter" && replace_mode)
+            {
+                continue;
+            }
+            let Some(value) = settings.get(setting) else {
+                continue;
+            };
+            let layer_pointer = dotted_to_pointer(layer_path);
+            insert_at(&mut layer_config, &layer_pointer, value.clone());
+            copied.push((layer_pointer, format!("{service_pointer}/{setting}")));
+        }
+        if copied.is_empty() {
+            continue;
+        }
+
+        let context = ConfigContext::default().strict_env(true);
+        issues.extend(
+            check_layer_config(&layer_config, context)?
+                .into_iter()
+                .map(|issue| {
+                    let path = copied
+                        .iter()
+                        .find_map(|(layer_pointer, up_pointer)| {
+                            let rest = issue.path.strip_prefix(layer_pointer.as_str())?;
+                            Some(format!("{up_pointer}{rest}"))
+                        })
+                        .unwrap_or_else(|| service_pointer.clone());
+                    ConfigIssue { path, ..issue }
+                }),
+        );
+    }
+
+    Ok(issues)
+}
+
+/// Sets `value` at `pointer` in `root`, creating the objects on the way.
+fn insert_at(root: &mut Value, pointer: &str, value: Value) {
+    let mut target = root;
+    for segment in pointer.split('/').skip(1) {
+        let Value::Object(fields) = target else {
+            return;
+        };
+        target = fields
+            .entry(segment.to_owned())
+            .or_insert_with(|| Value::Object(Default::default()));
+    }
+    *target = value;
 }
 
 /// Validates the `config_patch` of every service in a `mirrord-up.yaml`.
@@ -981,6 +1061,11 @@ services:
         r#"{ "feature": { "network": { "incoming": { "http_filter": { "header_filter": "([" } } } } }"#,
         "/feature/network/incoming/http_filter/header_filter"
     )]
+    #[case::up_yaml(
+        ConfigFormat::MirrordUpYaml,
+        "services:\n  api:\n    http_filter:\n      header_filter: \"([\"\n    run:\n      command: [\"true\"]\n",
+        "/services/api/http_filter/header_filter"
+    )]
     fn invalid_http_filter_regex(
         #[case] format: ConfigFormat,
         #[case] content: &str,
@@ -1012,6 +1097,11 @@ services:
         ConfigFormat::MirrordUpYaml,
         "services:\n  api:\n    config_patch:\n      feature:\n        env:\n          include: A\n          exclude: B\n    run:\n      command: [\"true\"]\n",
         "/services/api/config_patch/feature/env"
+    )]
+    #[case::service_setting(
+        ConfigFormat::MirrordUpYaml,
+        "services:\n  api:\n    env:\n      include: A\n      exclude: B\n    run:\n      command: [\"true\"]\n",
+        "/services/api/env"
     )]
     fn conflict_location(#[case] format: ConfigFormat, #[case] content: &str, #[case] path: &str) {
         let issue = single_issue(format, content);
@@ -1064,6 +1154,16 @@ services:
             error: "invalid".into(),
         };
         assert_eq!(config_error_path(&error), path);
+    }
+
+    /// `mirrord up` ignores the `http_filter` of a service in `replace` mode.
+    #[test]
+    fn up_yaml_replace_mode_ignores_http_filter() {
+        let output = validate(
+            ConfigFormat::MirrordUpYaml,
+            "services:\n  api:\n    default_mode: replace\n    http_filter:\n      header_filter: \"(\"\n    run:\n      command: [\"true\"]\n",
+        );
+        assert!(output.valid, "{:?}", output.issues);
     }
 
     #[test]
