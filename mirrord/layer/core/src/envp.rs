@@ -58,8 +58,13 @@ impl<'a> Envp<'a> {
 
     /// Sets `key` to `value`, unless the caller's environment already has it.
     ///
-    /// Replaces any earlier [`Envp::set`] or [`Envp::remove`] of `key`.
+    /// Replaces any earlier [`Envp::set`] or [`Envp::remove`] of `key`. Ignored, keeping any
+    /// earlier change, when `key` or `value` contains a NUL byte, which can't be part of an entry.
     pub fn set(&mut self, key: &'static str, value: &[u8]) {
+        if key.as_bytes().contains(&0) || value.contains(&0) {
+            return;
+        }
+
         self.forget(key);
         if self.get(key) == Some(value) {
             return;
