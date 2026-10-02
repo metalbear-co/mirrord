@@ -5305,6 +5305,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-cluster-auth"
+version = "3.272.0"
+dependencies = [
+ "aws-config",
+ "aws-credential-types",
+ "aws-sigv4",
+ "base64 0.22.1",
+ "futures",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "k8s-openapi",
+ "kube",
+ "mirrord-nightly-polyfill",
+ "mirrord-operator-websocket",
+ "rcgen",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-retry",
+ "tokio-rustls",
+ "tokio-tungstenite",
+ "tower",
+ "tracing",
+ "url",
+ "webpki-roots",
+]
+
+[[package]]
 name = "mirrord-command"
 version = "3.272.0"
 dependencies = [
@@ -5883,6 +5916,7 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-util",
+ "kube",
  "mirrord-operator-websocket",
  "mirrord-protocol-io",
  "mirrord-sessions-manager-protocol",
@@ -5890,12 +5924,14 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "slug",
  "thiserror 2.0.20",
  "tokio",
  "tokio-retry",
  "tokio-tungstenite",
  "tokio-util",
+ "tower",
  "tracing",
  "url",
  "uuid",
