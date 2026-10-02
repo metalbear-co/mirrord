@@ -57,7 +57,10 @@ impl<'a> Envp<'a> {
     }
 
     /// Sets `key` to `value`, unless the caller's environment already has it.
+    ///
+    /// Replaces any earlier [`Envp::set`] or [`Envp::remove`] of `key`.
     pub fn set(&mut self, key: &'static str, value: &[u8]) {
+        self.forget(key);
         if self.get(key) == Some(value) {
             return;
         }
@@ -68,10 +71,18 @@ impl<'a> Envp<'a> {
     }
 
     /// Removes every entry for `key` from the caller's environment.
+    ///
+    /// Replaces any earlier [`Envp::set`] or [`Envp::remove`] of `key`.
     pub fn remove(&mut self, key: &'static str) {
+        self.forget(key);
         if self.get(key).is_some() {
             self.changes.push((key, None));
         }
+    }
+
+    /// Drops the pending change to `key`, so [`Envp::into_raw`] sees at most one per key.
+    fn forget(&mut self, key: &str) {
+        self.changes.retain(|(changed, _)| *changed != key);
     }
 
     /// Builds the list to `exec` with, or [`None`] when nothing changed and the caller's list can

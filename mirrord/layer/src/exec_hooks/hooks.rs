@@ -1,6 +1,3 @@
-#[cfg(not(target_os = "macos"))]
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use base64::prelude::*;
 use libc::{c_char, c_int};
 #[cfg(not(target_os = "macos"))]
@@ -21,9 +18,6 @@ use crate::{
     replace,
     socket::{SHARED_SOCKETS_ENV_VAR, SOCKETS, UserSocket},
 };
-
-#[cfg(not(target_os = "macos"))]
-static EXECVE_PROBE_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
 /// it as a map.
@@ -73,20 +67,15 @@ unsafe fn environ() -> *const *const c_char {
     }
 }
 
-/// Hook for `libc::execv` on Linux.
+/// Hook for `libc::execv` on Linux, installed only when the `execve` probe can't be.
 ///
-/// `execv` reaches the `execve` probe when it is installed. When installation fails, this detour
-/// retains the previous prepared-environment path so `execv` children still receive socket
-/// metadata.
+/// With the probe installed, `execv` reaches it through `execve` and needs no hook. Without it,
+/// this detour prepares the environment itself so `execv` children still receive socket metadata.
 #[cfg(not(target_os = "macos"))]
 #[hook_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
     unsafe {
         let envp = environ();
-        if EXECVE_PROBE_ENABLED.load(Ordering::Relaxed) {
-            return libc::execve(path, argv, envp);
-        }
-
         match prepare_execve_envp(envp.checked_into()) {
             Detour::Success(envp) => libc::execve(path, argv, envp.leak()),
             _ => libc::execve(path, argv, envp),
@@ -165,19 +154,18 @@ pub(crate) unsafe extern "C" fn execve_detour(
 
 /// Enables `exec` hooks.
 pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {
-    #[cfg(not(target_os = "macos"))]
-    unsafe {
-        replace!(hook_manager, "execv", execv_detour, FnExecv, FN_EXECV);
-    }
-
+    // A replacement hook leaves frida's per-thread state behind when the function never returns,
+    // as after a successful `exec` in a `vfork` child, so `execv` is replaced only as a fallback.
     #[cfg(not(target_os = "macos"))]
     if let Err(error) = hook_manager.probe_export_or_any("execve", on_execve) {
         tracing::warn!(
             ?error,
-            "failed to install execve probe; new and spawned processes will not get shared socket metadata"
+            "failed to install execve probe; processes started through execve or posix_spawn will not get shared socket metadata"
         );
-    } else {
-        EXECVE_PROBE_ENABLED.store(true, Ordering::Relaxed);
+
+        unsafe {
+            replace!(hook_manager, "execv", execv_detour, FnExecv, FN_EXECV);
+        }
     }
 
     #[cfg(target_os = "macos")]
