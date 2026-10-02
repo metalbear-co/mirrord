@@ -1,5 +1,3 @@
-#[cfg(target_os = "linux")]
-use core::ffi::{c_size_t, c_ssize_t};
 /// FFI functions that override the `libc` calls (see `file` module documentation on how to
 /// enable/disable these).
 ///
@@ -573,8 +571,8 @@ pub(crate) unsafe extern "C" fn openat_nocancel_detour(
 pub(crate) unsafe extern "C" fn getdents64_detour(
     fd: RawFd,
     dirent_buf: *mut c_void,
-    buf_size: c_size_t,
-) -> c_ssize_t {
+    buf_size: size_t,
+) -> ssize_t {
     unsafe {
         match getdents64(fd, buf_size as u64) {
             Ok(res) => {
@@ -606,13 +604,13 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
                         Ok(()) => next = next.byte_add((*next).d_reclen as usize),
                     }
                 }
-                res.result_size as c_ssize_t
+                res.result_size as ssize_t
             }
             Err(DetourError::Bypass(_)) => {
                 mirrord_layer_macro::trace!(
                     "bypassing getdents64: calling syscall locally (fd: {fd})."
                 );
-                libc::syscall(libc::SYS_getdents64, fd, dirent_buf, buf_size) as c_ssize_t
+                libc::syscall(libc::SYS_getdents64, fd, dirent_buf, buf_size) as ssize_t
             }
             Err(DetourError::Error(ResponseError(NotFound(not_found_fd)))) => {
                 info!(
