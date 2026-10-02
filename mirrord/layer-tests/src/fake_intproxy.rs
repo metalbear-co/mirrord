@@ -41,12 +41,18 @@ impl FakeIntProxy {
 
     /// Accepts the next layer connection, and answers its [`NewSessionRequest`]. Gives [`None`]
     /// when no layer connects within `timeout`.
+    ///
+    /// Panics when a layer connects but does not start its session within `timeout`. [`None`]
+    /// would tell a test that checks that no layer connects that its check passed.
     pub async fn try_accept(&mut self, timeout: Duration) -> Option<FakeLayerConnection> {
         let (stream, _) = tokio::time::timeout(timeout, self.listener.accept())
             .await
             .ok()?
             .unwrap();
-        Some(self.start_session(stream).await)
+        let connection = tokio::time::timeout(timeout, self.start_session(stream))
+            .await
+            .expect("a layer connected, but did not start its session");
+        Some(connection)
     }
 
     async fn start_session(&mut self, stream: TcpStream) -> FakeLayerConnection {
