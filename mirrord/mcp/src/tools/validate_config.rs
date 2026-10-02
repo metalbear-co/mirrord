@@ -537,9 +537,12 @@ fn check<T: DeserializeOwned>(
     value: &Value,
     schema: &'static Schema,
 ) -> Result<Result<T, Vec<ConfigIssue>>, ValidateConfigError> {
+    // serde also takes a struct written as an array of its field values, which no mirrord config
+    // is meant to be; the schema rejects it.
     let serde_error = match serde_path_to_error::deserialize::<_, T>(value) {
-        Ok(config) => return Ok(Ok(config)),
-        Err(error) => error,
+        Ok(config) if value.is_object() => return Ok(Ok(config)),
+        Ok(_) => None,
+        Err(error) => Some(error),
     };
 
     let validator = schema
@@ -554,10 +557,13 @@ fn check<T: DeserializeOwned>(
         return Ok(Err(issues));
     }
 
-    Ok(Err(vec![ConfigIssue {
-        path: pointer_from_serde_path(serde_error.path()),
-        message: serde_error.into_inner().to_string(),
-        allowed_values: None,
+    Ok(Err(vec![match serde_error {
+        Some(error) => ConfigIssue {
+            path: pointer_from_serde_path(error.path()),
+            message: error.into_inner().to_string(),
+            allowed_values: None,
+        },
+        None => file_issue("the config must be an object".to_owned()),
     }]))
 }
 
@@ -1408,6 +1414,12 @@ services:
         assert_eq!(issue.path, "/agent/image");
         assert!(issue.message.contains("a `string`"), "{}", issue.message);
         assert!(issue.message.contains("`registry`"), "{}", issue.message);
+    }
+
+    #[test]
+    fn top_level_array() {
+        let issue = single_issue(ConfigFormat::MirrordJson, "[]");
+        assert_eq!(issue.path, "");
     }
 
     #[test]
