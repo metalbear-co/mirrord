@@ -62,13 +62,6 @@ async fn connect_websocket(
     };
 
     let url = assignment.data_plane_endpoint.resolve(&base_url, scheme)?;
-    let mut request = Request::builder().uri(url.as_str()).body(Vec::new())?;
-    request.headers_mut().extend(credentials.headers()?);
-
-    let mut authorization = HeaderValue::from_str(assignment.authorization.expose_secret())
-        .map_err(|_| SessionsManagerClientError::InvalidAuthorization)?;
-    authorization.set_sensitive(true);
-    request.headers_mut().insert(AUTHORIZATION, authorization);
 
     let connector = HttpsConnectorBuilder::new()
         .with_webpki_roots()
@@ -80,6 +73,18 @@ async fn connect_websocket(
 
     let started_at = Instant::now();
     tokio::time::timeout(WEBSOCKET_UPGRADE_TIMEOUT, async {
+        // The credentials are gathered inside the timeout: a provider may have to reach the
+        // network for them, and that wait belongs to the upgrade it is holding up.
+        let mut request = Request::builder().uri(url.as_str()).body(Vec::new())?;
+        request
+            .headers_mut()
+            .extend(credentials.data_plane_headers().await?);
+
+        let mut authorization = HeaderValue::from_str(assignment.authorization.expose_secret())
+            .map_err(|_| SessionsManagerClientError::InvalidAuthorization)?;
+        authorization.set_sensitive(true);
+        request.headers_mut().insert(AUTHORIZATION, authorization);
+
         // The data-plane upgrade request never carries a body, so the (always-empty) `Vec<u8>`
         // built above is simply dropped in favor of the client's own `Empty<Bytes>` body type.
         let stream = connect_ws_direct(request, UpgradeContract::Direct, |request| async {
