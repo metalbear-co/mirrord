@@ -215,10 +215,16 @@ impl Progress for SpinnerProgress {
             self.progress
                 .finish_with_message(format!("✓ {}", self.progress.message()));
         }
-        // On Windows, we need to print a final line break to avoid having exec process's stdout
-        // begin the same line as the "Ready"
+        // On Windows, the console cursor is left at the end of the last progress line, so the
+        // exec'd process's output would begin on the same line as the final progress message.
+        // The line break is only written once the root task finishes: the spinners are drawn to
+        // stderr, and indicatif redraws them by moving the cursor up as many lines as it drew
+        // last time, so a line break written while other spinners are still ticking shifts every
+        // subsequent redraw by one line and leaves stale progress lines behind.
         #[cfg(target_os = "windows")]
-        println!();
+        if self.indent == 0 && !self.root_progress.is_hidden() {
+            eprintln!();
+        }
         self.message_buffer.iter().for_each(|msg| println!("{msg}"));
     }
 
