@@ -47,6 +47,8 @@ pub enum SessionsManagerClientError {
          `metalbear_key_`"
     )]
     InvalidApiKey,
+    #[error("MIRRORD_METALBEAR_CLOUD_BAGGAGE_SESSION is not a valid header value")]
+    InvalidCloudBaggageSession,
     #[error(
         "MIRRORD_METALBEAR_CLOUD_URL must be an https URL, or http only on a loopback address \
          (any address in debug builds), got {0}"

@@ -4,6 +4,9 @@ long-lived MetalBear API key for a short-lived token and sending it as
 `MIRRORD_SESSIONS_MANAGER_API_KEY` to enable it, and `MIRRORD_METALBEAR_CLOUD_URL`
 to point the exchange at somewhere other than `https://app.metalbear.com`. The
 token is opaque to the client and exchanged afresh for each request;
-sessions-manager is the one that verifies it. This is independent of the
-`MIRRORD_SESSIONS_MANAGER_AUTH_TOKEN` shared secret, which keeps meaning
-"whatever fronts sessions-manager"; both may be set at once.
+sessions-manager is the one that verifies it. For local development,
+`MIRRORD_METALBEAR_CLOUD_BAGGAGE_SESSION` tags the exchange with
+`baggage: mirrord-session=<key>` so it routes to a locally-run app-server under
+mirrord, the same way the operator's `OPERATOR_CLOUD_BAGGAGE_SESSION` does. This
+is independent of the `MIRRORD_SESSIONS_MANAGER_AUTH_TOKEN` shared secret, which
+keeps meaning "whatever fronts sessions-manager"; both may be set at once.
