@@ -12,6 +12,8 @@ use kube::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 
+use crate::utils::origin_labels;
+
 /// RAII-style guard for deleting kube resources after tests.
 /// This guard deletes the kube resource when dropped.
 /// This guard can be configured not to delete the resource if dropped during a panic.
@@ -57,7 +59,12 @@ impl ResourceGuard {
             K::kind(&()),
             data.meta().name.as_deref().unwrap_or("?")
         );
-        let created = api.create(&PostParams::default(), data).await?;
+        let mut data = data.clone();
+        data.meta_mut()
+            .labels
+            .get_or_insert_default()
+            .extend(origin_labels());
+        let created = api.create(&PostParams::default(), &data).await?;
         // Use the server response to get name and namespace: the input `data` may omit namespace
         // (relying on the Api scope to route the request), which would cause cleanup to target the
         // wrong namespace.
