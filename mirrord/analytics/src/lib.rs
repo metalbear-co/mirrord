@@ -49,6 +49,18 @@ pub fn read_kube_version_from_env() -> Option<(u16, u16)> {
     Some((major, minor))
 }
 
+/// Environment variable carrying the identifier of the connected cluster from the CLI, which
+/// holds the kube client, down to the proxy that reports session analytics.
+pub const MIRRORD_CLUSTER_ID_ENV: &str = "MIRRORD_CLUSTER_ID";
+
+/// Reads the identifier of the connected cluster set by the parent CLI, if present.
+///
+/// [`None`] when the variable is unset, empty, or not a UUID, so a stale or malformed value
+/// is reported as an absent identifier rather than as a wrong one.
+pub fn read_cluster_id_from_env() -> Option<Uuid> {
+    std::env::var(MIRRORD_CLUSTER_ID_ENV).ok()?.parse().ok()
+}
+
 /// Possible values for analytic data
 /// This is strict so we won't send sensitive data by accident.
 /// (Don't add strings)
@@ -607,6 +619,41 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    /// A cluster identifier is reported only when the CLI handed down a well-formed one.
+    /// Anything else must read as an absent identifier, never as a wrong cluster.
+    #[test]
+    fn cluster_id_is_read_only_when_well_formed() {
+        const VALID: &str = "6f1f0a2c-4b3d-4a1e-9c2b-5d8e7f0a1b2c";
+
+        // No other test in this crate touches the environment, so these writes cannot race.
+        let cases: [(Option<&str>, Option<&str>); 5] = [
+            (None, None),
+            (Some(""), None),
+            (Some("kube-system"), None),
+            (Some("6f1f0a2c-4b3d-4a1e-9c2b"), None),
+            (Some(VALID), Some(VALID)),
+        ];
+
+        for (env_value, expected) in cases {
+            // SAFETY: see the comment above; the value is read back immediately.
+            unsafe {
+                match env_value {
+                    Some(value) => std::env::set_var(MIRRORD_CLUSTER_ID_ENV, value),
+                    None => std::env::remove_var(MIRRORD_CLUSTER_ID_ENV),
+                }
+            }
+
+            assert_eq!(
+                read_cluster_id_from_env(),
+                expected.map(|value| value.parse::<Uuid>().unwrap()),
+                "env value {env_value:?} should read as {expected:?}"
+            );
+        }
+
+        // SAFETY: as above.
+        unsafe { std::env::remove_var(MIRRORD_CLUSTER_ID_ENV) };
+    }
     /// this tests creates a struct that is flatten and one that is nested
     /// serializes it and verifies it's correct
     #[test]

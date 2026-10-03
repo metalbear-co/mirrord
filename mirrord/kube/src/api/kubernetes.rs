@@ -3,7 +3,7 @@ use std::{
     ops::{Deref, Not},
 };
 
-use k8s_openapi::NamespaceResourceScope;
+use k8s_openapi::{NamespaceResourceScope, api::core::v1::Namespace};
 use kube::{
     Api, Client, Config, Discovery,
     client::ClientBuilder,
@@ -335,6 +335,26 @@ pub async fn apiserver_version(client: &Client) -> Result<(u16, u16), KubeApiErr
     let major = parse_version_component("major", &version.major)?;
     let minor = parse_version_component("minor", &version.minor)?;
     Ok((major, minor))
+}
+
+/// Fetches the UID of the cluster's `default` namespace.
+///
+/// Kubernetes assigns this UID when the namespace is created along with the cluster, and it
+/// stays fixed for the cluster's lifetime, so every client connected to the same cluster reads
+/// the same value. It is a randomly generated UUID that describes nothing about the cluster or
+/// its contents.
+///
+/// The operator derives its own cluster identity from this same namespace, so a client and an
+/// operator in one cluster report the same value. Keep the two in step: reading a different
+/// namespace here would make the identifiers disagree and silently break any join between
+/// client sessions and operator events.
+///
+/// Returns `Ok(None)` when the apiserver omits the UID. Reading a namespace requires `get` on
+/// `namespaces`, which not every role grants, so callers should treat a failure here as the
+/// absence of an identifier rather than as a fatal error.
+pub async fn cluster_uid(client: &Client) -> Result<Option<String>, KubeApiError> {
+    let namespaces: Api<Namespace> = Api::all(client.clone());
+    Ok(namespaces.get("default").await?.metadata.uid)
 }
 
 fn parse_version_component(field: &'static str, data: &str) -> Result<u16, KubeApiError> {

@@ -8,7 +8,7 @@ use std::{
 
 use itertools::Itertools;
 use mirrord_analytics::{
-    AnalyticsError, AnalyticsReporter, MIRRORD_KUBE_VERSION_MAJOR_ENV,
+    AnalyticsError, AnalyticsReporter, MIRRORD_CLUSTER_ID_ENV, MIRRORD_KUBE_VERSION_MAJOR_ENV,
     MIRRORD_KUBE_VERSION_MINOR_ENV, Reporter,
 };
 #[cfg(any(windows, test))]
@@ -470,6 +470,7 @@ impl MirrordExecution {
             connect_info,
             connector,
             api_version,
+            cluster_id,
             target_container_ports,
         } = create_and_connect(
             config,
@@ -527,6 +528,13 @@ impl MirrordExecution {
             .env(MIRRORD_KUBE_VERSION_MAJOR_ENV, api_version.0.to_string())
             .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string())
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
+
+        match cluster_id {
+            Some(cluster_id) => proxy_command.env(MIRRORD_CLUSTER_ID_ENV, cluster_id.to_string()),
+            // Clear any value inherited from this process's environment, so a session with no
+            // cluster identity cannot report one belonging to a different cluster.
+            None => proxy_command.env_remove(MIRRORD_CLUSTER_ID_ENV),
+        };
 
         if let Some(tls) = tls {
             proxy_command.env(MIRRORD_EXTPROXY_TLS_SETUP_PEM, tls.server_pem());
@@ -624,6 +632,7 @@ impl MirrordExecution {
             connect_info,
             connector,
             api_version,
+            cluster_id,
             target_container_ports,
         } = create_and_connect(
             config,
@@ -706,6 +715,13 @@ impl MirrordExecution {
             )
             .env(MIRRORD_KUBE_VERSION_MAJOR_ENV, api_version.0.to_string())
             .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string());
+
+        match cluster_id {
+            Some(cluster_id) => proxy_command.env(MIRRORD_CLUSTER_ID_ENV, cluster_id.to_string()),
+            // Clear any value inherited from this process's environment, so a session with no
+            // cluster identity cannot report one belonging to a different cluster.
+            None => proxy_command.env_remove(MIRRORD_CLUSTER_ID_ENV),
+        };
 
         #[cfg(unix)]
         if let Some(directory) = prefetch_guard.as_ref().map(|guard| guard.path()) {
