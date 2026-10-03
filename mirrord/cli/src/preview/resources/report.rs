@@ -30,30 +30,30 @@ pub(crate) fn summary(plan: &ResourcePlan<'_>) -> Vec<String> {
     }
 
     if !plan.planned.is_empty() {
-        let unchanged = plan
+        let total = plan.planned.len();
+        let applied = plan
             .planned
             .iter()
-            .filter(|planned| planned.verdict == Verdict::Unchanged)
+            .filter(|planned| plan.is_applied(planned))
             .count();
-        let total = plan.planned.len();
+        let skipped = total - applied;
 
         let mut block = format!(
-            "Applying {} of {total} in-scope {} from {}",
-            total - unchanged,
+            "Applying {applied} of {total} in-scope {} from {}",
             plural(total, "resource", "resources"),
             plan.sources,
         );
-        if unchanged > 0 {
-            let _ = write!(block, " ({unchanged} unchanged, skipped)");
+        if skipped > 0 {
+            let _ = write!(block, " ({skipped} unchanged, skipped)");
         }
         block.push(':');
         for planned in &plan.planned {
-            let verdict = match planned.verdict {
-                Verdict::Changed => "changed",
-                Verdict::New => "new",
-                Verdict::Unchanged => "unchanged, skipped",
-            };
-            let _ = write!(block, "\n{} {verdict}", planned.object.display());
+            let _ = write!(
+                block,
+                "\n{} {}",
+                planned.object.display(),
+                verdict_label(plan, planned)
+            );
         }
         messages.push(block);
     }
@@ -87,7 +87,7 @@ pub(crate) fn render_diff(plan: &ResourcePlan<'_>) -> String {
     }
 
     for planned in &plan.planned {
-        render_object(&mut output, planned);
+        render_object(&mut output, plan, planned);
     }
 
     for object in &plan.out_of_scope {
@@ -102,12 +102,18 @@ pub(crate) fn render_diff(plan: &ResourcePlan<'_>) -> String {
     output
 }
 
-fn render_object(output: &mut String, planned: &PlannedObject<'_>) {
-    let verdict = match planned.verdict {
+fn verdict_label(plan: &ResourcePlan<'_>, planned: &PlannedObject<'_>) -> &'static str {
+    match planned.verdict {
         Verdict::Changed => "changed",
         Verdict::New => "new",
-        Verdict::Unchanged => "unchanged",
-    };
+        // An unchanged Secret the live target does not use is still copied.
+        Verdict::Unchanged if plan.is_applied(planned) => "unchanged, copied",
+        Verdict::Unchanged => "unchanged, skipped",
+    }
+}
+
+fn render_object(output: &mut String, plan: &ResourcePlan<'_>, planned: &PlannedObject<'_>) {
+    let verdict = verdict_label(plan, planned);
     let _ = writeln!(
         output,
         "{} from {}: {verdict}",
@@ -164,7 +170,7 @@ fn plural_count(count: usize, one: &str, many: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{collections::BTreeSet, path::Path};
 
     use serde_json::json;
 
@@ -220,7 +226,8 @@ mod tests {
             ],
             out_of_scope: vec![&ingress],
             notes: vec![],
-            live_secrets: Default::default(),
+            // The live target already uses this Secret, so the unchanged copy is not sent.
+            live_secrets: BTreeSet::from(["qa-workflowsvc-tls".to_owned()]),
         };
 
         assert_eq!(
@@ -234,6 +241,39 @@ mod tests {
                  secret/qa-workflowsvc-tls unchanged, skipped",
                 "Skipped 1 resource outside the target's scope: ingress/web.",
             ]
+        );
+    }
+
+    /// An unchanged Secret the live target does not use is copied, so it counts as applied.
+    #[test]
+    fn unchanged_secret_the_live_target_does_not_use_is_counted_as_copied() {
+        let secret = object("Secret", "newly-used", "./k8s/secret.yaml");
+        let plan = ResourcePlan {
+            sources: "./k8s/".to_owned(),
+            target_display: "deployment/app".to_owned(),
+            planned: vec![planned(
+                &secret,
+                ObjectRole::Secret,
+                Verdict::Unchanged,
+                vec![],
+            )],
+            out_of_scope: vec![],
+            notes: vec![],
+            live_secrets: BTreeSet::new(),
+        };
+
+        assert_eq!(
+            summary(&plan),
+            [
+                "No definition for deployment/app found in the supplied manifests (./k8s/).\n\
+              The preview pod will use the target's live spec.",
+                "Applying 1 of 1 in-scope resource from ./k8s/:\n\
+              secret/newly-used unchanged, copied"
+            ]
+        );
+        assert!(
+            render_diff(&plan)
+                .contains("secret/newly-used from ./k8s/secret.yaml: unchanged, copied")
         );
     }
 

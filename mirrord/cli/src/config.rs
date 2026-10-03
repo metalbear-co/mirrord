@@ -405,7 +405,7 @@ impl Commands {
                 PreviewCommand::Status(args) => args.all_namespaces,
                 PreviewCommand::Stop(args) => args.all_namespaces,
                 PreviewCommand::Logs(args) => args.all_namespaces,
-                PreviewCommand::Start(_) => false,
+                PreviewCommand::Start(_) | PreviewCommand::Diff(_) => false,
             },
             Self::Session(args) => args.common.all_namespaces,
             Self::Kill(args) => args.common.all_namespaces,

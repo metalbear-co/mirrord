@@ -8,6 +8,8 @@
 
 use std::collections::BTreeSet;
 
+use k8s_openapi::api::core::v1::PodSpec;
+use mirrord_operator::preview_template::referenced_names;
 use serde_json::Value;
 
 use super::{ResourcesError, SuppliedObject};
@@ -95,84 +97,24 @@ pub(crate) struct References {
     pub secrets: BTreeSet<String>,
 }
 
-/// Collects every ConfigMap and Secret the pod uses: through `env` (`configMapKeyRef`,
-/// `secretKeyRef`), `envFrom`, and volumes (including projected ones) in regular and init
-/// containers, and `imagePullSecrets`, since a changed registry credential decides whether
-/// the preview can pull its image at all.
+/// Collects every ConfigMap and Secret the pod uses.
+///
+/// The sites are [`referenced_names`], the same walk the operator uses to retarget those
+/// names. A changed registry credential is included (`imagePullSecrets`), since it decides
+/// whether the preview can pull its image at all. A spec that is not a pod spec has nothing
+/// the operator can retarget.
 pub(crate) fn references(template: &Value) -> References {
-    let mut references = References::default();
     let Some(spec) = template.get("spec") else {
-        return references;
+        return References::default();
     };
-
-    let containers = ["containers", "initContainers"]
-        .into_iter()
-        .filter_map(|field| spec.get(field).and_then(Value::as_array))
-        .flatten();
-
-    for container in containers {
-        for env in array(container, "env") {
-            let value_from = env.get("valueFrom");
-            if let Some(name) = name_at(value_from, "configMapKeyRef", "name") {
-                references.config_maps.insert(name);
-            }
-            if let Some(name) = name_at(value_from, "secretKeyRef", "name") {
-                references.secrets.insert(name);
-            }
-        }
-
-        for env_from in array(container, "envFrom") {
-            if let Some(name) = name_at(Some(env_from), "configMapRef", "name") {
-                references.config_maps.insert(name);
-            }
-            if let Some(name) = name_at(Some(env_from), "secretRef", "name") {
-                references.secrets.insert(name);
-            }
-        }
+    let Ok(spec) = serde_json::from_value::<PodSpec>(spec.clone()) else {
+        return References::default();
+    };
+    let names = referenced_names(&spec);
+    References {
+        config_maps: names.config_maps,
+        secrets: names.secrets,
     }
-
-    for pull_secret in array(spec, "imagePullSecrets") {
-        if let Some(name) = pull_secret.get("name").and_then(Value::as_str) {
-            references.secrets.insert(name.to_owned());
-        }
-    }
-
-    for volume in array(spec, "volumes") {
-        if let Some(name) = name_at(Some(volume), "configMap", "name") {
-            references.config_maps.insert(name);
-        }
-        if let Some(name) = name_at(Some(volume), "secret", "secretName") {
-            references.secrets.insert(name);
-        }
-
-        let projected = volume.get("projected");
-        for source in projected
-            .map(|projected| array(projected, "sources"))
-            .into_iter()
-            .flatten()
-        {
-            if let Some(name) = name_at(Some(source), "configMap", "name") {
-                references.config_maps.insert(name);
-            }
-            if let Some(name) = name_at(Some(source), "secret", "name") {
-                references.secrets.insert(name);
-            }
-        }
-    }
-
-    references
-}
-
-fn array<'a>(value: &'a Value, field: &str) -> impl Iterator<Item = &'a Value> {
-    value
-        .get(field)
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-}
-
-fn name_at(value: Option<&Value>, object: &str, field: &str) -> Option<String> {
-    value?.get(object)?.get(field)?.as_str().map(str::to_owned)
 }
 
 /// The objects from the files that can affect the preview, and the ones that cannot.

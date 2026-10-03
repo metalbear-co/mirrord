@@ -237,7 +237,8 @@ async fn preview_start(
     .await
     .inspect_err(|_| subtask.failure(None))?;
 
-    // Planned before an existing session is replaced: a rejected manifest leaves the running
+    // Planned before an existing session is replaced. `plan` dry-runs the manifests and rejects
+    // a template that would widen the preview's access, so either failure leaves the running
     // preview alone.
     if let Some(objects) = supplied_objects.as_mut() {
         resources::resolve_workload_refs(

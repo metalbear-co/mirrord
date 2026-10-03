@@ -6,8 +6,9 @@
 //! 1. [`manifest::load`] reads the YAML files into [`SuppliedObject`]s, on this machine.
 //! 2. [`scope::select`] keeps the target and the ConfigMaps and Secrets its pod reads.
 //! 3. [`plan`] compares each of those with the live cluster ([`compare`]).
-//! 4. [`plan`] also validates every changed object with a server-side dry run, so a spec the
-//!    cluster would reject fails the command before anything is created.
+//! 4. [`plan`] validates every changed object with a server-side dry run, and rejects a pod
+//!    template that would give the preview more access than the live target. Either failure stops
+//!    the command before anything is created, including before an existing session is replaced.
 //!
 //! `preview start` then turns the plan into the session's `spec.specResources`
 //! ([`ResourcePlan::spec_resources`]); the operator builds the preview pod from it. `preview
@@ -22,6 +23,7 @@
 //! from beyond [`SuppliedObject::source`], the label messages print. Another manifest source
 //! (a Helm chart rendered to documents, for example) plugs in by producing the same objects.
 
+mod access;
 mod compare;
 mod manifest;
 mod report;
@@ -187,21 +189,6 @@ pub(crate) enum ResourcesError {
     },
 
     #[error(
-        "{object} from {} is a `kubernetes.io/service-account-token` Secret, which a preview \
-         cannot copy: the cluster mints a token for the named ServiceAccount into every Secret \
-         of that type.\nNothing was created.",
-        source_path.display()
-    )]
-    #[diagnostic(help(
-        "Leave that Secret out of the files you pass, or reference the live one from the pod \
-         template."
-    ))]
-    ServiceAccountTokenSecret {
-        object: String,
-        source_path: PathBuf,
-    },
-
-    #[error(
         "{object} from {} has no pod template.\nNothing was created.",
         source_path.display()
     )]
@@ -224,6 +211,57 @@ pub(crate) enum ResourcesError {
         source_path: PathBuf,
         container: String,
         target: String,
+    },
+
+    #[error(
+        "{object} from {} sets `{field}` differently from the live target.\n\
+         A preview built from manifests keeps the target's identity, host access, privileges \
+         and storage, because the operator creates the preview with its own permissions.\n\
+         Nothing was created.",
+        source_path.display()
+    )]
+    #[diagnostic(help(
+        "Set `{field}` back to the live value in this manifest, or roll that change out to the \
+         target first. The running preview was left as it is."
+    ))]
+    TemplateAccessChanged {
+        object: String,
+        source_path: PathBuf,
+        field: String,
+    },
+
+    #[error(
+        "{object} from {} refers to Secret `{secret}`, which the live target does not use and \
+         these manifests do not define.\n\
+         The operator creates the preview with its own permissions, so the preview reads only \
+         the Secrets the target uses and copies of Secrets from the files you pass.\n\
+         Nothing was created.",
+        source_path.display()
+    )]
+    #[diagnostic(help(
+        "Add Secret `{secret}` to the files you pass with `--resource`, or refer only to Secrets \
+         the target already uses. The running preview was left as it is."
+    ))]
+    TemplateUnknownSecret {
+        object: String,
+        source_path: PathBuf,
+        secret: String,
+    },
+
+    #[error(
+        "{object} from {} has a pod template that could not be checked against the live target.\n\
+         Nothing was created.",
+        source_path.display()
+    )]
+    #[diagnostic(help(
+        "The template has to be a pod template this CLI can read. The error below names the \
+         field; fix it in the manifest, or in the live target if that is what failed to parse."
+    ))]
+    TemplateAccessUnreadable {
+        object: String,
+        source_path: PathBuf,
+        #[source]
+        source: serde_json::Error,
     },
 
     #[error(
@@ -275,7 +313,8 @@ pub(crate) enum Verdict {
     Changed,
     /// Does not exist in the cluster.
     New,
-    /// Same as the live object: nothing happens for it.
+    /// Same as the live object. Left out, except an unchanged Secret the live target does not
+    /// use, which is still copied (see [`ResourcePlan::is_applied`]).
     Unchanged,
 }
 
@@ -315,6 +354,18 @@ impl ResourcePlan<'_> {
             .find(|planned| planned.role == ObjectRole::Target)
     }
 
+    /// Whether the preview actually receives this object.
+    ///
+    /// An unchanged ConfigMap or target is left out. An unchanged Secret is left out only when
+    /// the live target already uses it; otherwise it is copied, because the operator lets the
+    /// preview read just the target's Secrets and copies of Secrets from the files.
+    pub(crate) fn is_applied(&self, planned: &PlannedObject<'_>) -> bool {
+        if planned.verdict != Verdict::Unchanged {
+            return true;
+        }
+        planned.role == ObjectRole::Secret && !self.live_secrets.contains(&planned.object.name)
+    }
+
     /// The session's `spec.specResources`: the user's pod template when the target changed,
     /// every changed or new ConfigMap and Secret, and every Secret the live target does not use.
     /// Secret values go into `secret_values`, the contents of the session's secret mounts
@@ -326,11 +377,11 @@ impl ResourcePlan<'_> {
     ) -> Result<Option<PreviewSpecResources>, ResourcesError> {
         let mut resources = PreviewSpecResources::default();
 
-        for planned in self.planned.iter().filter(|planned| {
-            planned.verdict != Verdict::Unchanged
-                || (planned.role == ObjectRole::Secret
-                    && !self.live_secrets.contains(&planned.object.name))
-        }) {
+        for planned in self
+            .planned
+            .iter()
+            .filter(|planned| self.is_applied(planned))
+        {
             let object = planned.object;
             match planned.role {
                 ObjectRole::Target => {
@@ -363,13 +414,6 @@ impl ResourcePlan<'_> {
                 }
                 ObjectRole::Secret => {
                     let secret_type = object.value.get("type").and_then(Value::as_str);
-                    if secret_type == Some(SERVICE_ACCOUNT_TOKEN_SECRET_TYPE) {
-                        return Err(ResourcesError::ServiceAccountTokenSecret {
-                            object: object.display(),
-                            source_path: object.source.clone(),
-                        });
-                    }
-
                     let secret_index = resources.secrets.len();
                     let bytes = compare::secret_bytes(&object.value)
                         .map_err(|error| invalid_secret(object, error))?;
@@ -394,11 +438,6 @@ impl ResourcePlan<'_> {
         Ok((resources != PreviewSpecResources::default()).then_some(resources))
     }
 }
-
-/// Secret type the API server fills in itself with a token for the ServiceAccount named in the
-/// Secret's annotations. A copy would be a new token for that ServiceAccount, so it is never
-/// copied.
-const SERVICE_ACCOUNT_TOKEN_SECRET_TYPE: &str = "kubernetes.io/service-account-token";
 
 /// The paths as the user wrote them, for messages.
 pub(crate) fn sources_label(paths: &[PathBuf]) -> String {
@@ -459,12 +498,19 @@ pub(crate) async fn plan<'a>(
         live_secrets: scope::references(&live_template).secrets,
     };
 
+    let file_secrets = scope
+        .secrets
+        .iter()
+        .map(|secret| secret.name.clone())
+        .collect();
+
     if let Some(definition) = scope.target {
         let planned = plan_target(
             &target_api,
             definition,
             target_ref,
             &live_template,
+            &file_secrets,
             &mut plan.notes,
         )
         .await?;
@@ -650,6 +696,7 @@ async fn plan_target<'a>(
     definition: &'a SuppliedObject,
     target: TargetRef<'_>,
     live_template: &Value,
+    file_secrets: &BTreeSet<String>,
     notes: &mut Vec<String>,
 ) -> Result<PlannedObject<'a>, ResourcesError> {
     let object = definition.display();
@@ -672,13 +719,12 @@ async fn plan_target<'a>(
 
     let dry_run_object = for_dry_run(&definition.value, target.namespace, true);
     let compared_template = match dry_run_create(api, &dry_run_object, &object).await? {
-        DryRun::Accepted(accepted) => {
-            scope::pod_template(&definition.kind, &accepted).unwrap_or(supplied_template)
-        }
-        DryRun::AlreadyExists => supplied_template,
+        DryRun::Accepted(accepted) => scope::pod_template(&definition.kind, &accepted)
+            .unwrap_or_else(|| supplied_template.clone()),
+        DryRun::AlreadyExists => supplied_template.clone(),
         DryRun::Forbidden => {
             notes.push(forbidden_dry_run_note(definition));
-            supplied_template
+            supplied_template.clone()
         }
         DryRun::Rejected(message) => return Err(rejected(definition, message)),
     };
@@ -693,6 +739,20 @@ async fn plan_target<'a>(
     } else {
         Verdict::Changed
     };
+
+    // The operator only sees this template when it differs from the live one. An unchanged
+    // target keeps the live spec, so a file that would fail the check is never applied. When
+    // the template is sent, reject it here: the operator's check runs only while building the
+    // pod, after `preview start` has deleted the previous session.
+    if verdict == Verdict::Changed {
+        access::verify_template_access(
+            definition,
+            live_template,
+            &supplied_template,
+            file_secrets,
+            target.container,
+        )?;
+    }
 
     Ok(PlannedObject {
         object: definition,
@@ -830,6 +890,11 @@ fn for_dry_run(object: &Value, namespace: &str, generate_name: bool) -> Value {
         return object;
     };
     fields.remove("status");
+    let kind = fields
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
 
     let metadata = fields
         .entry("metadata")
@@ -849,11 +914,45 @@ fn for_dry_run(object: &Value, namespace: &str, generate_name: bool) -> Value {
         metadata.insert("namespace".to_owned(), Value::String(namespace.to_owned()));
 
         if generate_name && let Some(Value::String(name)) = metadata.remove("name") {
-            metadata.insert("generateName".to_owned(), Value::String(format!("{name}-")));
+            metadata.insert(
+                "generateName".to_owned(),
+                Value::String(dry_run_generate_name(&kind, &name)),
+            );
         }
     }
 
     object
+}
+
+/// The API server appends 5 characters to `generateName`. CronJob names stop at 52, because
+/// the controller builds a Job name from the CronJob name plus an 11 character timestamp, and
+/// a Job name stops at 63. A prefix that does not leave room for the suffix makes a valid
+/// manifest fail this dry run.
+const GENERATED_NAME_SUFFIX_LEN: usize = 5;
+
+fn dry_run_name_limit(kind: &str) -> usize {
+    match kind.to_ascii_lowercase().as_str() {
+        "cronjob" => 52,
+        "job" => 63,
+        _ => 253,
+    }
+}
+
+fn dry_run_generate_name(kind: &str, name: &str) -> String {
+    let max_prefix = dry_run_name_limit(kind).saturating_sub(GENERATED_NAME_SUFFIX_LEN);
+    let mut prefix = format!("{name}-");
+    if prefix.len() > max_prefix {
+        let mut end = max_prefix;
+        while end > 0 && !prefix.is_char_boundary(end) {
+            end -= 1;
+        }
+        prefix.truncate(end);
+    }
+    if prefix.is_empty() {
+        "dry-".to_owned()
+    } else {
+        prefix
+    }
 }
 
 fn api_resource(target: &KubeResourceTarget) -> ApiResource {
@@ -943,6 +1042,25 @@ mod tests {
         );
     }
 
+    /// The API server appends 5 characters to `generateName`, and a CronJob name stops at 52.
+    /// A valid 52 character CronJob must still pass this dry run.
+    #[test]
+    fn dry_run_generate_name_fits_a_long_cronjob() {
+        let name = "a".repeat(52);
+        let saved = json!({
+            "kind": "CronJob",
+            "metadata": {"name": name},
+        });
+        let dry_run = for_dry_run(&saved, "default", true);
+        let generated = dry_run["metadata"]["generateName"].as_str().unwrap();
+
+        assert!(
+            generated.len() + 5 <= 52,
+            "{generated} len {}",
+            generated.len()
+        );
+    }
+
     #[test]
     fn api_resource_handles_core_and_grouped_kinds() {
         let target = |api_version: &str, kind: &str| KubeResourceTarget {
@@ -959,43 +1077,6 @@ mod tests {
         );
         let pod = api_resource(&target("v1", "Pod"));
         assert_eq!((pod.group.as_str(), pod.plural.as_str()), ("", "pods"));
-    }
-
-    /// A service-account-token Secret is filled in by the API server for the ServiceAccount its
-    /// annotation names, so copying it would mint a token. It is refused before anything is
-    /// created rather than left for the cluster to reject the copy without that annotation.
-    #[test]
-    fn spec_resources_refuse_a_service_account_token_secret() {
-        let secret = object(json!({
-            "kind": "Secret",
-            "metadata": {
-                "name": "app-token",
-                "annotations": {"kubernetes.io/service-account.name": "app"},
-            },
-            "type": "kubernetes.io/service-account-token",
-        }));
-        let plan = ResourcePlan {
-            sources: "./k8s/".to_owned(),
-            target_display: "deployment/app".to_owned(),
-            planned: vec![PlannedObject {
-                object: &secret,
-                role: ObjectRole::Secret,
-                verdict: Verdict::New,
-                changes: vec![],
-            }],
-            out_of_scope: vec![],
-            notes: vec![],
-            live_secrets: BTreeSet::new(),
-        };
-
-        let mut secret_values = BTreeMap::new();
-        let error = plan.spec_resources(&mut secret_values).unwrap_err();
-
-        assert!(
-            matches!(error, ResourcesError::ServiceAccountTokenSecret { ref object, .. } if object == "secret/app-token"),
-            "{error:?}"
-        );
-        assert!(secret_values.is_empty());
     }
 
     /// Only what differs travels on the CR, and Secret values go to the session Secret instead,
