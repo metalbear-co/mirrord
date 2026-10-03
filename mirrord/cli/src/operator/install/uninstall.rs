@@ -18,13 +18,15 @@ use kube::{
     api::{ApiResource, DeleteParams, DynamicObject, ListParams, Patch, PatchParams},
     core::GroupVersionKind,
 };
+use mirrord_analytics::{ReportTarget, Reporter};
 use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME};
 use mirrord_progress::{Progress, ProgressTracker};
 use tokio::time::Instant;
 
 use super::{
-    Connection, OperatorInstallError, cluster, confirm, context_flag, location,
+    Connection, OperatorInstallError, OperatorTelemetry, cluster, confirm, context_flag, location,
     manifest::{self, Manifest},
+    telemetry::{self, Outcome, UninstallPhase},
 };
 use crate::config::OperatorUninstallArgs;
 
@@ -59,9 +61,39 @@ const REMOVAL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
+/// What a run of `mirrord operator uninstall` that completed did.
+enum Uninstalled {
+    Removed,
+    /// There was no operator to remove.
+    NotInstalled,
+}
+
 pub(in crate::operator) async fn operator_uninstall(
     args: OperatorUninstallArgs,
+    telemetry: &OperatorTelemetry,
 ) -> Result<(), OperatorInstallError> {
+    let mut reporter = telemetry.reporter(ReportTarget::OperatorUninstall);
+
+    let mut phase = UninstallPhase::default();
+    let result = tokio::select! {
+        result = uninstall(args, &mut phase) => result,
+        // Otherwise, the process ends before the run is reported.
+        Ok(()) = tokio::signal::ctrl_c() => Err(OperatorInstallError::Interrupted),
+    };
+
+    let completed = result.as_ref().map(|uninstalled| match uninstalled {
+        Uninstalled::Removed => Outcome::Success,
+        Uninstalled::NotInstalled => Outcome::NotInstalled,
+    });
+    telemetry::add_outcome(reporter.get_mut(), completed, phase as u32);
+
+    result.map(drop)
+}
+
+async fn uninstall(
+    args: OperatorUninstallArgs,
+    phase: &mut UninstallPhase,
+) -> Result<Uninstalled, OperatorInstallError> {
     let OperatorUninstallArgs {
         context,
         yes,
@@ -76,11 +108,13 @@ pub(in crate::operator) async fn operator_uninstall(
         context,
     } = Connection::new(context).await?;
 
+    *phase = UninstallPhase::FetchManifest;
     let mut subtask = progress.subtask("looking for the operator");
     let manifest = match &manifest_path {
         Some(path) => Manifest::parse(&manifest::read_manifest(path)?)?,
         None => installed_manifest(&client, &http).await?,
     };
+    *phase = UninstallPhase::FindInstallation;
     let apis = cluster::resolve_apis(&client, &manifest, &release_namespace).await?;
     let installed = find_installed(&client, &manifest, &apis, context.as_deref()).await?;
     let installation = location(manifest.operator_namespace(), context.as_deref());
@@ -88,7 +122,7 @@ pub(in crate::operator) async fn operator_uninstall(
         subtask.success(Some("no operator installed"));
         progress.success(None);
         println!("No mirrord operator is installed in {installation}.");
-        return Ok(());
+        return Ok(Uninstalled::NotInstalled);
     }
     subtask.success(None);
 
@@ -96,8 +130,10 @@ pub(in crate::operator) async fn operator_uninstall(
         "Remove the mirrord operator from {installation}? This also deletes all mirrord policies \
         and profiles of the cluster."
     );
+    *phase = UninstallPhase::Confirm;
     confirm(&progress, yes, &question)?;
 
+    *phase = UninstallPhase::FinalizeSessions;
     let mut subtask = progress.subtask("finalizing operator sessions");
     let installed_crds = installed
         .iter()
@@ -107,6 +143,7 @@ pub(in crate::operator) async fn operator_uninstall(
     finalize_sessions(&client, &installed_crds).await?;
     subtask.success(None);
 
+    *phase = UninstallPhase::DeleteObjects;
     let mut subtask = progress.subtask("removing the operator");
     try_join_all(installed.iter().map(|(object, api)| async move {
         ignore_not_found(
@@ -121,6 +158,7 @@ pub(in crate::operator) async fn operator_uninstall(
     .await?;
     subtask.success(None);
 
+    *phase = UninstallPhase::WaitForRemoval;
     let mut subtask = progress.subtask("waiting for the objects to be removed");
     wait_for_removal(installed).await?;
     subtask.success(None);
@@ -128,7 +166,7 @@ pub(in crate::operator) async fn operator_uninstall(
 
     println!("Removed the mirrord operator from {installation}.");
 
-    Ok(())
+    Ok(Uninstalled::Removed)
 }
 
 /// The manifest of the chart version that is installed, which can be older than the latest one

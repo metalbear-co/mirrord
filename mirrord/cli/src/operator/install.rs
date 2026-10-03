@@ -6,27 +6,69 @@ use std::{io::IsTerminal, ops::Not};
 
 use inquire::{Confirm, InquireError};
 use kube::Client;
+use mirrord_analytics::{ReportTarget, Reporter};
 use mirrord_kube::api::kubernetes::create_kube_config_with_context;
 use mirrord_progress::{Progress, ProgressTracker};
 
-use self::{manifest::Manifest, signup::Trial};
+use self::{
+    manifest::Manifest,
+    signup::Trial,
+    telemetry::{InstallPhase, InstallRun, Outcome},
+};
 use crate::config::OperatorInstallArgs;
 
 mod cluster;
 mod error;
 mod manifest;
 mod signup;
+mod telemetry;
 #[cfg(test)]
 mod tests;
 mod uninstall;
 
 pub(crate) use error::OperatorInstallError;
+pub(crate) use telemetry::OperatorTelemetry;
 pub(super) use uninstall::operator_uninstall;
 
 const USER_AGENT: &str = concat!("mirrord-cli/", env!("CARGO_PKG_VERSION"));
 
 pub(super) async fn operator_install(
     args: OperatorInstallArgs,
+    telemetry: &OperatorTelemetry,
+) -> Result<(), OperatorInstallError> {
+    let mut reporter = telemetry.reporter(ReportTarget::OperatorInstall);
+    reporter
+        .get_mut()
+        .add("api_key_given", args.api_key.is_some());
+
+    let mut run = InstallRun::default();
+    let result = tokio::select! {
+        result = install(args, &mut run) => result,
+        // Otherwise, the process ends before the run is reported.
+        Ok(()) = tokio::signal::ctrl_c() => Err(OperatorInstallError::Interrupted),
+    };
+
+    // Printed rather than put in the error, where the commands would be wrapped across lines.
+    if result.is_err()
+        && let Some(retry) = &run.retry
+    {
+        println!("{retry}");
+    }
+
+    let analytics = reporter.get_mut();
+    analytics.add("trial_started", run.retry.is_some());
+    telemetry::add_outcome(
+        analytics,
+        result.as_ref().map(|()| Outcome::Success),
+        run.phase as u32,
+    );
+
+    result
+}
+
+async fn install(
+    args: OperatorInstallArgs,
+    run: &mut InstallRun,
 ) -> Result<(), OperatorInstallError> {
     let OperatorInstallArgs {
         api_key,
@@ -48,10 +90,12 @@ pub(super) async fn operator_install(
     } = Connection::new(context).await?;
     let context_arg = context_flag("--context", context.as_deref());
 
+    run.phase = InstallPhase::CheckExistingOperator;
     let mut subtask = progress.subtask("checking for an existing operator");
     cluster::ensure_no_operator(&client, &context_arg).await?;
     subtask.success(Some("no operator installed"));
 
+    run.phase = InstallPhase::FetchManifest;
     let mut subtask = progress.subtask("fetching the operator manifest");
     let manifest = match &manifest_path {
         Some(path) => manifest::read_manifest(path)?,
@@ -64,6 +108,7 @@ pub(super) async fn operator_install(
     manifest.attribute_to_release(&release_namespace);
     subtask.success(None);
 
+    run.phase = InstallPhase::CheckPermissions;
     let mut subtask = progress.subtask("checking permissions");
     let apis = cluster::resolve_apis(&client, &manifest, &release_namespace).await?;
     cluster::dry_run(&manifest, &apis, &context_arg).await?;
@@ -71,18 +116,17 @@ pub(super) async fn operator_install(
 
     // Asked after the checks, which change nothing, so that an installation that can't succeed
     // fails without asking first.
+    run.phase = InstallPhase::Confirm;
     let question = format!(
         "Install the mirrord operator into {}?",
         location(manifest.operator_namespace(), context.as_deref())
     );
     confirm(&progress, yes, &question)?;
 
-    let trial = match api_key {
-        Some(api_key) => {
-            manifest.set_api_key(&api_key);
-            None
-        }
+    match api_key {
+        Some(api_key) => manifest.set_api_key(&api_key),
         None => {
+            run.phase = InstallPhase::StartTrial;
             let mut subtask = progress.subtask("starting a trial");
             let cluster_hint = match (no_hint, cluster_hint) {
                 (true, _) => None,
@@ -91,6 +135,12 @@ pub(super) async fn operator_install(
             };
             let trial =
                 signup::start_trial(&http, &app_url, USER_AGENT, cluster_hint.as_deref()).await?;
+            run.retry = Some(format!(
+                "To retry without starting another trial, remove what was installed, then reuse \
+                the API key of the trial:\n\n  mirrord operator uninstall{context_arg}\n  mirrord \
+                operator install{context_arg} --api-key {}\n",
+                trial.api_key
+            ));
             subtask.success(None);
 
             // Printed right away, so the claim URL and the API key are not lost if the
@@ -104,36 +154,19 @@ pub(super) async fn operator_install(
             }
 
             manifest.set_api_key(&trial.api_key);
-            Some(trial)
         }
-    };
-
-    let installed = async {
-        let mut subtask = progress.subtask("installing the operator");
-        cluster::create(&manifest, &apis).await?;
-        subtask.success(None);
-
-        let mut subtask = progress.subtask("waiting for the operator to become ready");
-        let operator =
-            cluster::wait_for_operator(&client, manifest.operator_namespace(), &context_arg)
-                .await?;
-        subtask.success(None);
-
-        Ok(operator)
     }
-    .await;
 
-    let operator = installed.inspect_err(|_| {
-        // Printed rather than put in the error, where the commands would be wrapped across lines.
-        if let Some(trial) = &trial {
-            println!(
-                "To retry without starting another trial, remove what was installed, then reuse \
-                the API key of the trial:\n\n  mirrord operator uninstall{context_arg}\n  mirrord \
-                operator install{context_arg} --api-key {}\n",
-                trial.api_key
-            );
-        }
-    })?;
+    run.phase = InstallPhase::CreateObjects;
+    let mut subtask = progress.subtask("installing the operator");
+    cluster::create(&manifest, &apis).await?;
+    subtask.success(None);
+
+    run.phase = InstallPhase::WaitForOperator;
+    let mut subtask = progress.subtask("waiting for the operator to become ready");
+    let operator =
+        cluster::wait_for_operator(&client, manifest.operator_namespace(), &context_arg).await?;
+    subtask.success(None);
     progress.success(None);
 
     println!(
@@ -190,8 +223,9 @@ impl Connection {
 /// get changed by mistake.
 ///
 /// Does not ask with `yes`, or without a terminal, so that agents and CI can run the command.
-/// Declining, also by cancelling the prompt (e.g. with Ctrl+C), fails with
-/// [`OperatorInstallError::Declined`].
+/// Declining, also by cancelling the prompt with Esc, fails with
+/// [`OperatorInstallError::Declined`]. Ctrl+C at the prompt fails with
+/// [`OperatorInstallError::Interrupted`], like Ctrl+C at any other moment of the command.
 fn confirm(
     progress: &ProgressTracker,
     yes: bool,
@@ -205,9 +239,8 @@ fn confirm(
     // clients connect again if the server closed an idle connection.
     match progress.suspend(|| Confirm::new(question).with_default(false).prompt()) {
         Ok(true) => Ok(()),
-        Ok(false) | Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-            Err(OperatorInstallError::Declined)
-        }
+        Ok(false) | Err(InquireError::OperationCanceled) => Err(OperatorInstallError::Declined),
+        Err(InquireError::OperationInterrupted) => Err(OperatorInstallError::Interrupted),
         Err(error) => Err(OperatorInstallError::Prompt(error)),
     }
 }
