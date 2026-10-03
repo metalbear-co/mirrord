@@ -1277,6 +1277,18 @@ fn resolve_tls_delivery(
         )
         .into());
     }
+    // Exec skips a target source with no files under `protocol: tcp`, because it
+    // never opens TLS. A preview still does, and would otherwise start with no
+    // client certificate for the operator to present.
+    if config.client_cert_source == TlsClientCertSource::Target && config.client_cert.is_none() {
+        return Err(ConfigError::Conflict(
+            ".feature.network.incoming.tls_delivery.client_cert_source is `target` \
+             but .feature.network.incoming.tls_delivery.client_cert and \
+             .feature.network.incoming.tls_delivery.client_key are not set"
+                .to_owned(),
+        )
+        .into());
+    }
     if config.client_cert.is_some() || config.server_name.is_some() {
         operator.require_feature(NewOperatorFeature::PreviewTlsDelivery)?;
     }
@@ -1544,6 +1556,28 @@ mod tests {
                 ));
                 assert!(values.is_empty());
             }
+        }
+    }
+
+    /// `protocol: tcp` makes exec ignore TLS settings, but a preview still delivers over TLS.
+    /// `client_cert_source: target` with no paths must be rejected here, otherwise the preview
+    /// starts and the pod rejects every stolen request for lack of a client certificate.
+    #[test]
+    fn preview_rejects_target_source_without_paths_even_with_tcp() {
+        for protocol in [TlsDeliveryProtocol::Tcp, TlsDeliveryProtocol::Tls] {
+            let config = LocalTlsDelivery {
+                protocol,
+                client_cert_source: TlsClientCertSource::Target,
+                ..Default::default()
+            };
+            let mut values = BTreeMap::new();
+            let error = resolve_tls_delivery(Some(&config), &mut values, &operator(true))
+                .expect_err("target source without files must be rejected");
+            assert!(
+                matches!(error, CliError::ConfigError(ConfigError::Conflict(ref message)) if message.contains("client_cert_source")),
+                "{error}",
+            );
+            assert!(values.is_empty());
         }
     }
 
