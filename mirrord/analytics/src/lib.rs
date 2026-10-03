@@ -49,6 +49,21 @@ pub fn read_kube_version_from_env() -> Option<(u16, u16)> {
     Some((major, minor))
 }
 
+/// Environment variable carrying the hashed identifier of the connected cluster from the CLI
+/// down to the proxy that reports session analytics.
+///
+/// The CLI holds the kube client and hashes the namespace UID before setting this, so the raw
+/// UID never leaves the CLI process.
+pub const MIRRORD_CLUSTER_ID_ENV: &str = "MIRRORD_CLUSTER_ID";
+
+/// Reads the hashed cluster identifier set by the parent CLI, if present.
+pub fn read_cluster_id_from_env() -> Option<AnalyticsHash> {
+    std::env::var(MIRRORD_CLUSTER_ID_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(|value| AnalyticsHash::from_base64(&value))
+}
+
 /// Possible values for analytic data
 /// This is strict so we won't send sensitive data by accident.
 /// (Don't add strings)
@@ -223,6 +238,17 @@ impl AnalyticsHash {
         let mut hasher = Sha256::new();
         hasher.update(license_fingerprint.as_bytes());
         hasher.update(key.as_bytes());
+        Self::from_bytes(&hasher.finalize())
+    }
+
+    /// Deterministically hashes the connected cluster's `kube-system` namespace UID.
+    ///
+    /// The domain prefix keeps this value distinct from a hash of the same UID computed for
+    /// any other purpose.
+    pub fn for_cluster_uid(namespace_uid: &str) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(b"mirrord-cluster-id-v1");
+        hasher.update(namespace_uid.as_bytes());
         Self::from_bytes(&hasher.finalize())
     }
 
@@ -607,6 +633,28 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    /// The cluster identifier must be stable for a given namespace UID, differ between
+    /// clusters, and stay distinct from a hash of the same value computed for another purpose.
+    #[test]
+    fn cluster_uid_hash_is_stable_and_domain_separated() {
+        let uid = "6f1f0a2c-4b3d-4a1e-9c2b-5d8e7f0a1b2c";
+
+        assert_eq!(
+            AnalyticsHash::for_cluster_uid(uid).as_str(),
+            AnalyticsHash::for_cluster_uid(uid).as_str()
+        );
+
+        assert_ne!(
+            AnalyticsHash::for_cluster_uid(uid).as_str(),
+            AnalyticsHash::for_cluster_uid("0e9d8c7b-6a5f-4e3d-2c1b-0a9f8e7d6c5b").as_str()
+        );
+
+        assert_ne!(
+            AnalyticsHash::for_cluster_uid(uid).as_str(),
+            AnalyticsHash::from_bytes(uid.as_bytes()).as_str()
+        );
+    }
     /// this tests creates a struct that is flatten and one that is nested
     /// serializes it and verifies it's correct
     #[test]

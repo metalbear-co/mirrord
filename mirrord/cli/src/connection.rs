@@ -1,7 +1,7 @@
 use std::{collections::HashSet, ops::Not, time::Duration};
 
 use kube::Api;
-use mirrord_analytics::Reporter;
+use mirrord_analytics::{AnalyticsHash, Reporter};
 use mirrord_config::{
     LayerConfig,
     agent::AgentFileConfig,
@@ -12,7 +12,7 @@ use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
     api::{
         container::ContainerConfig,
-        kubernetes::{CreatedAgent, KubernetesAPI, apiserver_version},
+        kubernetes::{CreatedAgent, KubernetesAPI, apiserver_version, cluster_uid},
     },
     error::KubeApiError,
     resolved::ResolvedTarget,
@@ -262,6 +262,8 @@ where
         .await
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
+    let cluster_id = resolve_cluster_id(api.client()).await;
+
     if let Err(error) = GlobalConfig::remember_operator().await {
         progress.warning(&format!(
             "Failed to remember operator availability for future mirrord sessions: {error}"
@@ -277,8 +279,28 @@ where
             failed: false,
         }),
         api_version,
+        cluster_id,
         target_container_ports,
     }))
+}
+
+/// Hashes the connected cluster's identity for session analytics.
+///
+/// Returns [`None`] when the identity cannot be read, which includes clusters where the
+/// caller's role does not permit reading namespaces. An absent identifier is expected and must
+/// never interrupt the session, so failures are logged and discarded.
+async fn resolve_cluster_id(client: &kube::Client) -> Option<AnalyticsHash> {
+    match cluster_uid(client).await {
+        Ok(Some(uid)) => Some(AnalyticsHash::for_cluster_uid(&uid)),
+        Ok(None) => {
+            tracing::debug!("Cluster identity is unavailable: the apiserver omitted the UID");
+            None
+        }
+        Err(error) => {
+            tracing::debug!(%error, "Failed to read the cluster identity");
+            None
+        }
+    }
 }
 
 pub(crate) struct ConnectData {
@@ -286,6 +308,10 @@ pub(crate) struct ConnectData {
     pub(crate) connector: AgentConnector,
     /// Kube apiserver version (major, minor).
     pub(crate) api_version: (u16, u16),
+    /// Hash identifying the connected cluster, shared by every client that connects to it.
+    ///
+    /// [`None`] when the cluster identity could not be read.
+    pub(crate) cluster_id: Option<AnalyticsHash>,
     /// Ports declared by the target container, see
     /// [`RuntimeData::container_ports`](mirrord_kube::api::runtime::RuntimeData::container_ports).
     ///
@@ -338,6 +364,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
             connector,
             // Implement - see MBE-1981
             api_version: (0, 0),
+            cluster_id: None,
             target_container_ports: Vec::new(),
         });
     }
@@ -364,6 +391,8 @@ pub(crate) async fn create_and_connect<R: Reporter>(
     let api_version = apiserver_version(k8s_api.client())
         .await
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
+
+    let cluster_id = resolve_cluster_id(k8s_api.client()).await;
 
     k8s_api
         .detect_openshift(progress)
@@ -426,6 +455,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         connect_info: AgentConnectInfo::DirectKubernetes(agent_connect_info),
         connector,
         api_version,
+        cluster_id,
         target_container_ports: runtime_data
             .map(|runtime_data| runtime_data.container_ports)
             .unwrap_or_default(),
