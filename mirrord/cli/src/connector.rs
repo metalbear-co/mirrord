@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     num::NonZeroUsize,
     ops::Not,
     pin::Pin,
@@ -22,7 +23,8 @@ use mirrord_operator_websocket::connection::OperatorConnection;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
 use mirrord_sessions_manager_client::{
-    IntproxyClient, SessionsManagerClientError, SessionsManagerConnectInfo,
+    DirectTransport, IntproxyClient, OperatorTransport, SessionsManagerClientError,
+    SessionsManagerConnectInfo, SessionsManagerTransport,
 };
 use tokio::io::DuplexStream;
 use tokio_util::codec::Encoder;
@@ -119,9 +121,41 @@ pub(crate) struct DirectConnector {
 /// Each [`connect`](AgentConnector::connect) call opens a fresh, one-shot data plane connection
 /// to the room. There is no reconnect support: once a connection to the room fails, the session
 /// is over, same as [`DirectConnector`].
-#[derive(Debug)]
 pub(crate) struct SessionsManagerConnector {
     pub(crate) connect_info: SessionsManagerConnectInfo,
+    /// Set when the sessions-manager is hosted by the operator and reached through
+    /// kube-apiserver; otherwise it's the standalone one configured by the environment.
+    pub(crate) operator_client: Option<kube::Client>,
+}
+
+impl SessionsManagerConnector {
+    async fn connect(&self) -> Result<OperatorConnection, SessionsManagerClientError> {
+        match &self.operator_client {
+            Some(client) => {
+                self.connect_with(OperatorTransport::new(client.clone()))
+                    .await
+            }
+            None => self.connect_with(DirectTransport::from_env()?).await,
+        }
+    }
+
+    /// Generic over the transport because [`SessionsManagerTransport`] isn't object-safe.
+    async fn connect_with<T: SessionsManagerTransport>(
+        &self,
+        transport: T,
+    ) -> Result<OperatorConnection, SessionsManagerClientError> {
+        let client = IntproxyClient::new(self.connect_info.clone(), transport)?;
+        Box::pin(client.connect(Duration::from_mins(10))).await
+    }
+}
+
+impl fmt::Debug for SessionsManagerConnector {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SessionsManagerConnector")
+            .field("connect_info", &self.connect_info)
+            .field("operator_hosted", &self.operator_client.is_some())
+            .finish()
+    }
 }
 
 pub struct Codec;
@@ -316,8 +350,7 @@ impl ProtocolConnector for AgentConnector {
                 Ok(AgentConnection::Direct(Framed::new(stream, Codec)))
             }
             AgentConnector::SessionsManager(sessions_manager) => {
-                let client = IntproxyClient::new(sessions_manager.connect_info.clone())?;
-                let conn = Box::pin(client.connect(Duration::from_mins(10))).await?;
+                let conn = sessions_manager.connect().await?;
 
                 Ok(AgentConnection::SessionsManager(Box::new(conn)))
             }

@@ -65,6 +65,28 @@ fn send_upgrade_ide_message<P: Progress>(
     Ok(())
 }
 
+/// Verifies that the operator is installed, licensed, and serves its hosted sessions-manager, and
+/// returns the Kubernetes client to reach it with.
+async fn operator_sessions_manager_client<P, R>(
+    layer_config: &LayerConfig,
+    progress: &P,
+    analytics: &mut R,
+) -> CliResult<kube::Client>
+where
+    P: Progress,
+    R: Reporter,
+{
+    let mut subtask = progress.subtask("checking operator sessions-manager");
+    let api = OperatorApi::try_new(layer_config, analytics, progress)
+        .await?
+        .ok_or(CliError::OperatorNotInstalled)?;
+    api.check_license_validity(&subtask)?;
+    api.check_serverless_sessions_manager_served().await?;
+    subtask.success(Some("operator sessions-manager available"));
+
+    Ok(api.client().clone())
+}
+
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], prepares an operator
 ///    session, connects to it, and returns [`Some`] [`ConnectData`] with an [`OperatorConnector`]
 ///    holding that connection.
@@ -329,12 +351,24 @@ pub(crate) async fn create_and_connect<R: Reporter>(
             user_session_id,
             replica_filter: agent_replica_filter.map(Into::into),
         };
+        let (operator_client, agent_connect_info) = if config.operator == Some(true) {
+            (
+                Some(operator_sessions_manager_client(config, progress, analytics).await?),
+                AgentConnectInfo::OperatorSessionsManager(connect_info.clone()),
+            )
+        } else {
+            (
+                None,
+                AgentConnectInfo::SessionsManager(connect_info.clone()),
+            )
+        };
         let connector = AgentConnector::SessionsManager(SessionsManagerConnector {
-            connect_info: connect_info.clone(),
+            connect_info,
+            operator_client,
         });
 
         return Ok(ConnectData {
-            connect_info: AgentConnectInfo::SessionsManager(connect_info),
+            connect_info: agent_connect_info,
             connector,
             // Implement - see MBE-1981
             api_version: (0, 0),
