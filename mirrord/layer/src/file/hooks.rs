@@ -240,12 +240,16 @@ pub(super) unsafe extern "C" fn sendfile_detour(
             return -1;
         };
 
-        sendfile_impl(fd, s, Some(offset), *count as usize)
-            .map(|(written, _)| {
+        match sendfile_impl(fd, s, Some(offset), *count as usize) {
+            Some((written, _)) => {
                 *count = written as off_t;
                 0
-            })
-            .unwrap_or(-1)
+            }
+            None => {
+                *count = 0;
+                -1
+            }
+        }
     }
 }
 

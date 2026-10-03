@@ -343,6 +343,8 @@ mod kube;
 mod list;
 mod local_redis;
 mod logging;
+mod login;
+mod mcp;
 mod newsletter;
 mod operator;
 #[cfg(windows)]
@@ -981,7 +983,7 @@ async fn port_forward(
     .connector;
 
     let friendly = |err| match err {
-        connector::ConnectionError::Kube(error) => {
+        connector::ConnectionError::AgentPortForward(error) => {
             CliError::friendlier_error_or_else(error.into(), CliError::PortForwardingSetupError)
         }
         _ => CliError::PortForwardingError(err.into()),
@@ -1049,6 +1051,10 @@ fn main() -> miette::Result<()> {
         .map_err(CliError::RuntimeError)?;
 
     let (signal, watch) = drain::channel();
+
+    // The IDE plugins parse the JSON error from stderr, so they must not get the environment.
+    let print_kube_environment = !logging::reports_json_errors(&cli.commands);
+    let all_namespaces = cli.commands.all_namespaces();
 
     let res: CliResult<(), CliError> = rt.block_on(async move {
         logging::init_tracing_registry(&cli.commands, watch.clone()).await?;
@@ -1196,6 +1202,7 @@ fn main() -> miette::Result<()> {
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             Commands::Queues(args) => queues::queues_command(*args).await?,
             Commands::Fix(args) => fix::fix_command(args).await?,
+            Commands::Login(args) => login::login_command(*args).await?,
             #[cfg(windows)]
             Commands::Attach(args) => {
                 let progress = ProgressTracker::from_env("mirrord attach");
@@ -1206,6 +1213,7 @@ fn main() -> miette::Result<()> {
             Commands::Tui => windows_unsupported!((), "tui", {
                 tui::tui_command(watch.clone(), &user_data).await?
             }),
+            Commands::Mcp => mcp::mcp_command(watch.clone(), &user_data).await?,
             Commands::Ui { args, command } => ui::ui_command(*args, command, "/").await?,
             Commands::Wizard { args, no_telemetry } => {
                 ui::wizard_command(args, no_telemetry, watch, &user_data).await?
@@ -1244,6 +1252,10 @@ fn main() -> miette::Result<()> {
                 warn!("Failed to drain in a timely manner, ongoing tasks dropped.");
             });
     });
+
+    if res.is_err() && print_kube_environment {
+        error::print_run_kube_environment(all_namespaces);
+    }
 
     res.map_err(Into::into)
 }

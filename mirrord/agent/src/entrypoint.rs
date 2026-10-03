@@ -814,6 +814,15 @@ pub async fn notify_client_about_dirty_iptables(
 fn monitor_main_container(cancel: CancellationToken, pid: libc::pid_t) {
     let fd = match AsyncPidFd::from_pid(pid) {
         Ok(fd) => fd,
+        // Kernels older than 5.3 don't have `pidfd_open`.
+        Err(error) if error.raw_os_error() == Some(libc::ENOSYS) => {
+            tracing::warn!(
+                %error,
+                "pidfd_open is not supported on this kernel, \
+                the agent won't stop when the target container exits",
+            );
+            return;
+        }
         Err(error) => {
             tracing::error!(
                 %error,

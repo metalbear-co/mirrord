@@ -30,6 +30,7 @@ use mirrord_config::{
 use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
+use url::Url;
 
 use crate::{
     config::{ci::CiArgs, global_config::GlobalConfigArgs},
@@ -274,6 +275,12 @@ pub(super) enum Commands {
     /// Fix issues related to mirrord.
     Fix(FixArgs),
 
+    /// Log in to mirrord Cloud.
+    ///
+    /// Opens the browser to approve the login, and stores the auth token locally.
+    #[command(hide = true)] // the flow is not released yet
+    Login(Box<LoginArgs>),
+
     /// Attach mirrord layer to an already-running process by PID.
     ///
     /// Used by IDE extensions that spawn a process with mirrord env vars
@@ -305,6 +312,12 @@ pub(super) enum Commands {
     /// Browse the targets, sessions, queue splits, branch databases and preview environments on the
     /// cluster the current kubecontext points at, and open a shell alongside them.
     Tui,
+
+    /// Serve the mirrord MCP server over stdio, for AI agents.
+    ///
+    /// Register it in an MCP client (Claude Code, Cursor, VS Code, ...) as the command
+    /// `mirrord mcp`.
+    Mcp,
 
     /// Launch the mirrord local UI. Respects the `$BROWSER` env var.
     ///
@@ -374,6 +387,31 @@ pub(super) enum Commands {
     /// Used by IDE plugins. IDEs can use the schema to improve config editing experience.
     #[command(hide = true)]
     PrintSchema,
+}
+
+impl Commands {
+    /// Whether the command spans every namespace (`-A`).
+    pub(super) fn all_namespaces(&self) -> bool {
+        match self {
+            Self::DbBranches(args) => args.all_namespaces,
+            Self::Queues(args) => matches!(
+                args.command,
+                QueuesCommand::Status {
+                    all_namespaces: true,
+                    ..
+                }
+            ),
+            Self::Preview(args) => match &args.command {
+                PreviewCommand::Status(args) => args.all_namespaces,
+                PreviewCommand::Stop(args) => args.all_namespaces,
+                PreviewCommand::Logs(args) => args.all_namespaces,
+                PreviewCommand::Start(_) => false,
+            },
+            Self::Session(args) => args.common.all_namespaces,
+            Self::Kill(args) => args.common.all_namespaces,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -1410,6 +1448,14 @@ pub(super) struct PreviewArgs {
     /// Subcommand to use with `mirrord preview`.
     #[command(subcommand)]
     pub command: PreviewCommand,
+}
+
+/// Arguments for the `mirrord login` command.
+#[derive(Args, Debug)]
+pub(super) struct LoginArgs {
+    /// URL of the authentication backend.
+    #[arg(long, hide = true, default_value = "https://app.metalbear.com")]
+    pub url: Url,
 }
 
 /// Arguments for the `mirrord subscribe` command.
