@@ -986,6 +986,11 @@ pub(super) enum OperatorCommand {
     /// latest version of the helm chart with default values; use the helm chart directly for a
     /// customized installation.
     Install(Box<OperatorInstallArgs>),
+    /// Remove the mirrord operator that `mirrord operator install` installed from the cluster of
+    /// the current kubecontext, or of the one given with `--context`.
+    ///
+    /// Also removes what a failed `mirrord operator install` left behind.
+    Uninstall(OperatorUninstallArgs),
     /// Print operator status
     Status {
         /// Specify config file to use
@@ -1047,6 +1052,21 @@ pub(super) struct OperatorInstallArgs {
         default_value = "https://app.metalbear.com"
     )]
     pub app_url: String,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct OperatorUninstallArgs {
+    /// Kube context to remove the operator from, instead of the current one.
+    #[arg(long)]
+    pub context: Option<String>,
+
+    /// Remove without asking for confirmation. Without a terminal, the command never asks.
+    #[arg(short, long)]
+    pub yes: bool,
+
+    /// Remove the objects of a local rendered chart manifest instead of the published one.
+    #[arg(long, env = "MIRRORD_OPERATOR_INSTALL_MANIFEST", hide = true)]
+    pub manifest: Option<PathBuf>,
 }
 
 /// `mirrord operator session` family of commands.
