@@ -169,9 +169,11 @@ const SYSTEM_VARIABLES: &[&str] = &["SystemRoot", "windir"];
 
 /// Environment variables that should be explicitly forwarded from parent to child process
 ///
-/// A creator that passes its own environment block gets these added to it, so they include
-/// everything the layer's setup reads: without the internal proxy address, the child's layer
-/// fails to start.
+/// A creator that passes its own environment block gets these added to it when the block leaves
+/// them out, so they include everything the layer's setup reads: without the internal proxy
+/// address, the child's layer fails to start. A value the block already has wins: under
+/// `mirrord exec` that block is the session's composed environment, whose log directory, monitor
+/// address and proxy address are fresher than the ones in the CLI's own environment.
 const FORWARDED_ENV_VARS: &[&str] = &[
     MIRRORD_LAYER_INTPROXY_ADDR,
     MIRRORD_LAYER_TARGET_CONTAINER_PORTS,
@@ -278,8 +280,11 @@ impl LayerManagedProcess {
     /// * `parent` - the launching process's environment, where the forwarded variables come from.
     /// * `env_vars` - the environment the child is created with.
     fn add_mirrord_env_vars(parent: &WindowsEnv, env_vars: &mut WindowsEnv) {
-        // Forward explicitly configured environment variables from parent to child
+        // Forward the configured variables the child's environment does not already set.
         for &env_var in FORWARDED_ENV_VARS {
+            if env_vars.get(env_var).is_some() {
+                continue;
+            }
             if let Some(value) = parent.get(env_var) {
                 env_vars.set(env_var, value.to_owned());
             } else {
@@ -1440,6 +1445,34 @@ mod tests {
                 "{name} is forwarded"
             );
         }
+    }
+
+    /// Under `mirrord exec` the child's environment is the session's, and its values must win
+    /// over the CLI's own: a relative log directory the CLI made absolute, or the proxy of an
+    /// outer session in a nested `mirrord exec`.
+    #[test]
+    fn the_childs_own_settings_win_over_the_parents() {
+        let mut launch = Launch::new(InjectionMethod::LoadLibrary, Layer::Ready);
+        launch.parent.set(MIRRORD_LAYER_LOG_PATH, "logs".to_owned());
+        launch
+            .parent
+            .set(MIRRORD_LAYER_INTPROXY_ADDR, "127.0.0.1:1".to_owned());
+        launch
+            .environment
+            .set(MIRRORD_LAYER_LOG_PATH, r"C:\session-logs".to_owned());
+        let launched = launch.run();
+
+        assert_eq!(launched.exit_code(), RAN);
+        assert_eq!(
+            launched.child_environment.get(MIRRORD_LAYER_LOG_PATH),
+            Some(r"C:\session-logs"),
+            "the session's log directory reaches the child"
+        );
+        assert_eq!(
+            launched.child_environment.get(MIRRORD_LAYER_INTPROXY_ADDR),
+            Some("127.0.0.1:1"),
+            "a setting the child's environment leaves out still comes from the parent"
+        );
     }
 
     /// Resumes a child left suspended for its creator.
