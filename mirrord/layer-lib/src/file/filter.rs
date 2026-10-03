@@ -19,6 +19,15 @@ use super::unix::*;
 #[cfg(windows)]
 use super::windows::*;
 
+/// A `feature.fs` pattern list that is not a valid regex set.
+#[derive(Debug, thiserror::Error)]
+#[error("`feature.fs.{list}`: {source}")]
+pub struct InvalidPatterns {
+    /// The list, as the configuration names it.
+    pub list: &'static str,
+    pub source: regex::Error,
+}
+
 /// List of files that mirrord should use locally, as they probably exist only in the local user
 /// machine, or are system configuration files (that could break the process if we used the remote
 /// version).
@@ -99,8 +108,12 @@ impl FileFilter {
     /// removed) If path matches include, it continues to check if the path has specific
     /// behavior, if not, it checks if the path matches the default exclude list.
     /// If not, it does the default behavior set by user (default is read only remote).
+    ///
+    /// # Errors
+    ///
+    /// A configured pattern that is not a valid regex, with the list it is in.
     #[mirrord_layer_macro::instrument(level = "trace")]
-    pub fn new(fs_config: FsConfig) -> Self {
+    pub fn try_new(fs_config: FsConfig) -> Result<Self, InvalidPatterns> {
         let FsConfig {
             read_write,
             read_only,
@@ -110,19 +123,19 @@ impl FileFilter {
             ..
         } = fs_config;
 
-        let read_write =
-            Self::make_regex_set(read_write).expect("building read-write regex set failed");
-        let read_only =
-            Self::make_regex_set(read_only).expect("building read-only regex set failed");
-        let local = Self::make_regex_set(local).expect("building local path regex set failed");
-        let not_found =
-            Self::make_regex_set(not_found).expect("building not-found regex set failed");
+        let make = |list, patterns| {
+            Self::make_regex_set(patterns).map_err(|source| InvalidPatterns { list, source })
+        };
+        let read_write = make("read_write", read_write)?;
+        let read_only = make("read_only", read_only)?;
+        let local = make("local", local)?;
+        let not_found = make("not_found", not_found)?;
 
         let default_local = generate_local_set();
         let default_remote_ro = generate_remote_ro_set();
         let default_not_found = generate_not_found_set();
 
-        Self {
+        Ok(Self {
             read_only,
             read_write,
             local,
@@ -131,7 +144,7 @@ impl FileFilter {
             default_remote_ro,
             default_not_found,
             mode,
-        }
+        })
     }
 
     pub fn check<T: AsRef<str>>(&self, path: T) -> Option<FileMode> {
@@ -171,6 +184,6 @@ impl FileFilter {
 
 impl Default for FileFilter {
     fn default() -> Self {
-        Self::new(FsConfig::default())
+        Self::try_new(FsConfig::default()).expect("the default configuration has no patterns")
     }
 }

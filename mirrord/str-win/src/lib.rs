@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    ffi::CStr,
+    path::{Path, PathBuf},
+};
 
 // This prefix is a way to explicitly indicate that we're looking in
 // the global namespace for a path.
@@ -70,46 +73,6 @@ impl MultiBufferChar for u16 {
     }
 }
 
-/// Multi-buffer parser for both u8 and u16 character types
-pub fn multi_buffer_to_strings<T: MultiBufferChar>(buffer: &[T]) -> Vec<String> {
-    if buffer.is_empty() {
-        return vec![];
-    }
-
-    let mut result = Vec::new();
-    let mut start = 0;
-
-    while let Some(remaining) = buffer.get(start..) {
-        if remaining.is_empty() {
-            break;
-        }
-
-        // Find the length of current string using utility function
-        let len = find_null_terminator_length(remaining, T::default());
-
-        if len > 0
-            && let Some(slice) = remaining.get(..len)
-        {
-            let substring = T::slice_to_string(slice);
-            if !substring.is_empty() {
-                result.push(substring);
-            }
-        }
-
-        // Move past the null terminator (or to the end if none was found)
-        start = start.saturating_add(len).saturating_add(1);
-
-        // Check for double null terminator (end of MULTI_SZ)
-        match buffer.get(start) {
-            Some(value) if *value == T::default() => break,
-            None => break,
-            _ => {}
-        }
-    }
-
-    result
-}
-
 pub fn string_to_u8_buffer<T: AsRef<str>>(string: T) -> Vec<u8> {
     let mut bytes = string.as_ref().as_bytes().to_vec();
     bytes.push(0); // Add null terminator
@@ -124,143 +87,92 @@ pub fn string_to_u16_buffer<T: AsRef<str>>(string: T) -> Vec<u16> {
     string.as_ref().encode_utf16().chain(Some(0)).collect()
 }
 
-/// Convert a null-terminated C string pointer to a Rust String.
+/// Counts the units of a NUL-terminated string, without its NUL.
 ///
-/// This function safely converts a C-style string (char*) to a Rust String
-/// by finding the null terminator and converting the resulting slice.
+/// The string is read one unit at a time, up to and including its NUL and never past it, so a
+/// string that ends at the edge of readable memory is safe to measure, and a long one is measured
+/// whole.
 ///
 /// # Safety
 ///
-/// The caller must ensure that `ptr` points to a valid null-terminated C string.
-/// The function will read memory until it finds a null terminator (0).
+/// `ptr` must point to a readable, properly aligned string that ends with a NUL.
+unsafe fn nul_terminated_len<T: Copy + PartialEq + Default>(ptr: *const T) -> usize {
+    let mut len = 0;
+    // SAFETY: every unit up to the string's NUL is readable, and the loop stops there.
+    while unsafe { ptr.add(len).read() } != T::default() {
+        len += 1;
+    }
+    len
+}
+
+/// Convert a null-terminated C string pointer to a Rust String.
 ///
-/// # Arguments
+/// Invalid UTF-8 becomes the replacement character.
 ///
-/// * `ptr` - A pointer to a null-terminated C string (char array)
+/// # Safety
+///
+/// `ptr` must be null or point to a readable null-terminated C string. Nothing past its null
+/// terminator is read.
 ///
 /// # Returns
 ///
-/// A Rust String containing the converted text, or an empty string if the pointer is null.
+/// The converted text, or an empty string if the pointer is null.
 pub unsafe fn u8_ptr_to_string(ptr: *const i8) -> String {
     if ptr.is_null() {
         return String::new();
     }
 
-    // Safely determine a reasonable maximum length for the search
-    const MAX_C_STRING_LEN: usize = 32768; // 32KB should be plenty for most use cases
-
-    // Create a slice with maximum safe length, then find the null terminator
-    let c_slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, MAX_C_STRING_LEN) };
-    let len = find_null_terminator_length(c_slice, 0);
-
-    if len == 0 {
-        return String::new();
-    }
-
-    // Create a slice from the pointer and length, then convert
-    let c_slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, len) };
-    u8_buffer_to_string(c_slice)
+    unsafe { CStr::from_ptr(ptr.cast()) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Convert a null-terminated wide string pointer to a Rust String.
 ///
-/// This function safely converts a Windows-style wide string (LPCWSTR) to a Rust String
-/// by finding the null terminator and converting the resulting slice.
+/// An unpaired surrogate becomes the replacement character.
 ///
 /// # Safety
 ///
-/// The caller must ensure that `ptr` points to a valid null-terminated wide string.
-/// The function will read memory until it finds a null terminator (0).
-///
-/// # Arguments
-///
-/// * `ptr` - A pointer to a null-terminated wide string (u16 array)
+/// `ptr` must be null or point to a readable, properly aligned null-terminated wide string.
+/// Nothing past its null terminator is read.
 ///
 /// # Returns
 ///
-/// A Rust String containing the converted text, or an empty string if the pointer is null.
+/// The converted text, or an empty string if the pointer is null.
 pub unsafe fn u16_ptr_to_string(ptr: *const u16) -> String {
     if ptr.is_null() {
         return String::new();
     }
 
-    // Safely determine a reasonable maximum length for the search
-    const MAX_WIDE_STRING_LEN: usize = 32768; // 32KB should be plenty for most use cases
-
-    // Create a slice with maximum safe length, then find the null terminator
-    let wide_slice = unsafe { std::slice::from_raw_parts(ptr, MAX_WIDE_STRING_LEN) };
-    let len = find_null_terminator_length(wide_slice, 0);
-
-    if len == 0 {
-        return String::new();
-    }
-
-    // Create a slice from the pointer and length, then convert
-    let wide_slice = unsafe { std::slice::from_raw_parts(ptr, len) };
-    u16_buffer_to_string(wide_slice)
+    let len = unsafe { nul_terminated_len(ptr) };
+    String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(ptr, len) })
 }
 
-/// Find the safe length of a multi-buffer by locating the double null terminator
+/// The strings of a multi-string block (`MULTI_SZ`, such as an environment block): NUL-terminated
+/// strings, ended by an empty string.
 ///
-/// This function safely searches for the end of a multi-buffer (MULTI_SZ format)
-/// by finding the double null terminator pattern. It bounds the search to prevent
-/// reading beyond reasonable memory limits.
+/// The block is read one string at a time, from its start up to and including the NUL of that
+/// empty string, and never past it, so a block that ends at the edge of readable memory is safe to
+/// read. There is no size limit: Windows limits one environment variable to 32767 characters, but
+/// not the block that holds them.
 ///
 /// # Safety
 ///
-/// The caller must ensure that `ptr` points to a valid multi-buffer or null pointer.
-/// The function will not read beyond `max_bytes` to maintain safety.
-///
-/// # Arguments
-///
-/// * `ptr` - A pointer to the start of a multi-buffer
-/// * `max_bytes` - Maximum number of bytes to search (safety limit)
-///
-/// # Returns
-///
-/// * `Some(usize)` - The length including the double null terminator if found
-/// * `None` - If double null terminator not found within max_bytes or ptr is null
-pub unsafe fn find_multi_buffer_safe_len<T: MultiBufferChar>(
-    ptr: *const T,
-    max_bytes: usize,
-) -> Option<usize> {
-    if ptr.is_null() {
-        return None;
-    }
-
-    let max_elements = max_bytes / std::mem::size_of::<T>();
-
-    // Create a slice with the maximum safe length to search within
-    let slice = unsafe { std::slice::from_raw_parts(ptr, max_elements) };
-
-    // Search for double null terminator pattern using our utility function
-    let mut pos = 0;
-    while let Some(remaining_slice) = slice.get(pos..) {
-        if remaining_slice.is_empty() {
-            break;
+/// `ptr` must point to a readable, properly aligned block that is ended by an empty string.
+pub unsafe fn multi_buffer_ptr_to_strings<T: MultiBufferChar>(mut ptr: *const T) -> Vec<String> {
+    let mut strings = Vec::new();
+    loop {
+        let len = unsafe { nul_terminated_len(ptr) };
+        if len == 0 {
+            return strings;
         }
-
-        let next_null = find_null_terminator_length(remaining_slice, T::default());
-
-        if next_null == 0 {
-            // Found a null at current position, check if next is also null (double null)
-            if let Some(next_value) = slice.get(pos + 1) {
-                if *next_value == T::default() {
-                    // Found double null terminator
-                    return Some(pos + 2);
-                }
-            } else {
-                break;
-            }
-            // Single null, move past it
-            pos += 1;
-        } else {
-            // Move past this string and its null terminator
-            pos = pos.saturating_add(next_null).saturating_add(1);
-        }
+        strings.push(T::slice_to_string(unsafe {
+            std::slice::from_raw_parts(ptr, len)
+        }));
+        // SAFETY: the string's NUL is readable, so the unit after it is the next string's start
+        // or the block's terminator.
+        ptr = unsafe { ptr.add(len + 1) };
     }
-
-    None // Double null terminator not found within bounds
 }
 
 /// Responsible for turning a Windows absolute path (potentially Device path) into a Unix-compatible
