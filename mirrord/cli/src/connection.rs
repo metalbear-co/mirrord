@@ -264,6 +264,7 @@ where
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
     let cluster_id = resolve_cluster_id(api.client()).await;
+    report_cluster_id(analytics, cluster_id);
 
     if let Err(error) = GlobalConfig::remember_operator().await {
         progress.warning(&format!(
@@ -294,7 +295,7 @@ const CLUSTER_ID_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Resolves the identity of the cluster this client connected to, for session analytics.
 ///
-/// The value is the UID of the cluster's `kube-system` namespace, which is what the operator
+/// The value is the UID of the cluster's `default` namespace, which is what the operator
 /// reports as its own cluster identity, so events originating from the same cluster carry the
 /// same identifier whether a client or the operator sent them.
 ///
@@ -331,6 +332,18 @@ async fn resolve_cluster_id(client: &kube::Client) -> Option<Uuid> {
             );
             None
         }
+    }
+}
+
+/// Records the cluster identity on the reporter owned by the calling command.
+///
+/// Commands that spawn a proxy hand the identity down through the environment, but
+/// `port-forward`, `dump`, `vpn` and `diagnose` keep their own reporter in this process and
+/// take only the connector from [`create_and_connect`], so they would otherwise report
+/// sessions with no cluster attached.
+fn report_cluster_id<R: Reporter>(analytics: &mut R, cluster_id: Option<Uuid>) {
+    if let Some(cluster_id) = cluster_id {
+        analytics.get_mut().add("cluster_id", cluster_id);
     }
 }
 
@@ -425,6 +438,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
     let cluster_id = resolve_cluster_id(k8s_api.client()).await;
+    report_cluster_id(analytics, cluster_id);
 
     k8s_api
         .detect_openshift(progress)
