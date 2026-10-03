@@ -836,6 +836,15 @@ fn register_atfork_handlers() {
 /// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
+    unsafe { fork_inner() }
+}
+
+/// The body of [`fork_detour`], callable from a detour that already holds a [`DetourGuard`].
+///
+/// [`vfork_detour`] emulates `vfork` with a real fork, and needs this handling to run. Calling
+/// [`fork_detour`] from there finds the guard already held and falls through to `FN_FORK`,
+/// leaving the child without a proxy connection.
+pub(crate) unsafe fn fork_inner() -> pid_t {
     unsafe {
         tracing::debug!("Process {} forking!.", std::process::id());
 
@@ -936,7 +945,7 @@ pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
         }
     };
 
-    let fork_result = unsafe { fork_detour() };
+    let fork_result = unsafe { fork_inner() };
     match fork_result.cmp(&0) {
         // We're the child.
         // Write end of the pipe will be dropped when we exit or exec,
