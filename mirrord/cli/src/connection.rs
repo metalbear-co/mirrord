@@ -1,7 +1,7 @@
 use std::{collections::HashSet, ops::Not, time::Duration};
 
 use kube::Api;
-use mirrord_analytics::{AnalyticsHash, Reporter};
+use mirrord_analytics::Reporter;
 use mirrord_config::{
     LayerConfig,
     agent::AgentFileConfig,
@@ -28,6 +28,7 @@ use mirrord_progress::{
 };
 use mirrord_sessions_manager_client::{ServiceScope, SessionsManagerConnectInfo};
 use tracing::Level;
+use uuid::Uuid;
 
 use crate::{
     CliError, CliResult, MirrordCi,
@@ -284,20 +285,50 @@ where
     }))
 }
 
-/// Hashes the connected cluster's identity for session analytics.
+/// How long to wait for the cluster's identity before continuing without it.
 ///
-/// Returns [`None`] when the identity cannot be read, which includes clusters where the
-/// caller's role does not permit reading namespaces. An absent identifier is expected and must
-/// never interrupt the session, so failures are logged and discarded.
-async fn resolve_cluster_id(client: &kube::Client) -> Option<AnalyticsHash> {
-    match cluster_uid(client).await {
-        Ok(Some(uid)) => Some(AnalyticsHash::for_cluster_uid(&uid)),
-        Ok(None) => {
+/// The identifier is optional analytics data, so it must never hold up session setup. This
+/// bound is deliberately short and separate from the `agent.startup_timeout` config, which
+/// covers a later stage of the connection.
+const CLUSTER_ID_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Resolves the identity of the cluster this client connected to, for session analytics.
+///
+/// The value is the UID of the cluster's `kube-system` namespace, which is what the operator
+/// reports as its own cluster identity, so events originating from the same cluster carry the
+/// same identifier whether a client or the operator sent them.
+///
+/// Under multi-cluster this identifies the cluster the client connected to, which is the
+/// primary and not necessarily the one a session ran on. Attributing an individual session to
+/// a workload cluster has to come from the operator, which reads the identity of the cluster
+/// it runs in.
+///
+/// Returns [`None`] whenever the identity is unavailable: a role without `get` on
+/// `namespaces`, an apiserver that omits the UID, a value that is not a UUID, or a read that
+/// outlives [`CLUSTER_ID_TIMEOUT`]. An absent identifier is expected and never interrupts the
+/// session, so every failure is logged and discarded.
+async fn resolve_cluster_id(client: &kube::Client) -> Option<Uuid> {
+    match tokio::time::timeout(CLUSTER_ID_TIMEOUT, cluster_uid(client)).await {
+        Ok(Ok(Some(uid))) => match uid.parse() {
+            Ok(uid) => Some(uid),
+            Err(error) => {
+                tracing::debug!(%error, uid, "Cluster identity is not a valid UUID");
+                None
+            }
+        },
+        Ok(Ok(None)) => {
             tracing::debug!("Cluster identity is unavailable: the apiserver omitted the UID");
             None
         }
-        Err(error) => {
+        Ok(Err(error)) => {
             tracing::debug!(%error, "Failed to read the cluster identity");
+            None
+        }
+        Err(..) => {
+            tracing::debug!(
+                timeout_secs = CLUSTER_ID_TIMEOUT.as_secs(),
+                "Timed out reading the cluster identity"
+            );
             None
         }
     }
@@ -308,10 +339,11 @@ pub(crate) struct ConnectData {
     pub(crate) connector: AgentConnector,
     /// Kube apiserver version (major, minor).
     pub(crate) api_version: (u16, u16),
-    /// Hash identifying the connected cluster, shared by every client that connects to it.
+    /// Identifies the cluster this client connected to, shared by every client and by the
+    /// operator in that same cluster. See [`resolve_cluster_id`].
     ///
     /// [`None`] when the cluster identity could not be read.
-    pub(crate) cluster_id: Option<AnalyticsHash>,
+    pub(crate) cluster_id: Option<Uuid>,
     /// Ports declared by the target container, see
     /// [`RuntimeData::container_ports`](mirrord_kube::api::runtime::RuntimeData::container_ports).
     ///

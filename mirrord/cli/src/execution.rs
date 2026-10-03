@@ -529,9 +529,12 @@ impl MirrordExecution {
             .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string())
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
-        if let Some(cluster_id) = cluster_id.as_ref() {
-            proxy_command.env(MIRRORD_CLUSTER_ID_ENV, cluster_id.as_str());
-        }
+        match cluster_id {
+            Some(cluster_id) => proxy_command.env(MIRRORD_CLUSTER_ID_ENV, cluster_id.to_string()),
+            // Clear any value inherited from this process's environment, so a session with no
+            // cluster identity cannot report one belonging to a different cluster.
+            None => proxy_command.env_remove(MIRRORD_CLUSTER_ID_ENV),
+        };
 
         if let Some(tls) = tls {
             proxy_command.env(MIRRORD_EXTPROXY_TLS_SETUP_PEM, tls.server_pem());
@@ -713,9 +716,12 @@ impl MirrordExecution {
             .env(MIRRORD_KUBE_VERSION_MAJOR_ENV, api_version.0.to_string())
             .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string());
 
-        if let Some(cluster_id) = cluster_id.as_ref() {
-            proxy_command.env(MIRRORD_CLUSTER_ID_ENV, cluster_id.as_str());
-        }
+        match cluster_id {
+            Some(cluster_id) => proxy_command.env(MIRRORD_CLUSTER_ID_ENV, cluster_id.to_string()),
+            // Clear any value inherited from this process's environment, so a session with no
+            // cluster identity cannot report one belonging to a different cluster.
+            None => proxy_command.env_remove(MIRRORD_CLUSTER_ID_ENV),
+        };
 
         #[cfg(unix)]
         if let Some(directory) = prefetch_guard.as_ref().map(|guard| guard.path()) {
