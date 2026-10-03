@@ -1,6 +1,10 @@
 #![allow(unstable_name_collisions)]
 #![warn(clippy::indexing_slicing)]
 #![cfg(target_os = "macos")]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "macOS-only, the Windows lookup in `mirrord_command::resolve_command` never applies"
+)]
 #![deny(unused_crate_dependencies)]
 
 mod bundle;

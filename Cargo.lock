@@ -5153,6 +5153,7 @@ dependencies = [
  "mime_guess",
  "mirrord-analytics",
  "mirrord-auth",
+ "mirrord-command",
  "mirrord-config",
  "mirrord-console",
  "mirrord-intproxy",
@@ -5356,6 +5357,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-command"
+version = "3.268.0"
+dependencies = [
+ "tempfile",
+ "tokio",
+ "which",
+]
+
+[[package]]
 name = "mirrord-config"
 version = "3.268.0"
 dependencies = [
@@ -5369,6 +5379,7 @@ dependencies = [
  "itertools 0.14.0",
  "k8s-openapi",
  "mirrord-analytics",
+ "mirrord-command",
  "mirrord-config-derive",
  "mirrord-jaq",
  "mirrord-protocol",
@@ -5437,6 +5448,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "mirrord-analytics",
+ "mirrord-command",
  "mirrord-config",
  "mirrord-intproxy-protocol",
  "mirrord-kube",
@@ -5646,6 +5658,7 @@ dependencies = [
  "apple-codesign",
  "futures",
  "libc",
+ "mirrord-command",
  "mirrord-config",
  "mirrord-intproxy",
  "mirrord-protocol",
@@ -5973,6 +5986,7 @@ dependencies = [
  "chrono",
  "fancy-regex 0.14.0",
  "futures",
+ "mirrord-command",
  "tempfile",
  "tokio",
 ]
@@ -5990,6 +6004,7 @@ dependencies = [
  "hyper-util",
  "k8s-openapi",
  "kube",
+ "mirrord-command",
  "mirrord-kube",
  "mirrord-operator",
  "mirrord-test-utils",
@@ -6034,6 +6049,7 @@ dependencies = [
  "kube",
  "libc",
  "mirrord-analytics",
+ "mirrord-command",
  "mirrord-config",
  "mirrord-kube",
  "mirrord-operator",
@@ -6069,6 +6085,7 @@ dependencies = [
  "kube",
  "miette",
  "mirrord-analytics",
+ "mirrord-command",
  "mirrord-config",
  "mirrord-kube",
  "mirrord-progress",
@@ -6100,6 +6117,7 @@ dependencies = [
  "ipnet",
  "k8s-openapi",
  "kube",
+ "mirrord-command",
  "mirrord-protocol",
  "mirrord-protocol-io",
  "pnet_packet",
@@ -11435,6 +11453,7 @@ dependencies = [
  "clap",
  "dirs 6.0.0",
  "dunce",
+ "mirrord-command",
  "reqwest 0.13.4",
  "serde_json",
 ]

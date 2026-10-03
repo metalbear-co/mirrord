@@ -999,13 +999,15 @@ mod test {
     use std::{
         io::{BufRead, BufReader},
         os::unix::process::CommandExt,
-        process::{Command, Stdio},
+        process::Stdio,
     };
     use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
     use futures::{SinkExt, StreamExt, TryStreamExt};
     use hyper::{HeaderMap, Method, StatusCode, Uri, Version};
     use mirrord_analytics::NullReporter;
+    #[cfg(unix)]
+    use mirrord_command::resolve_command;
     use mirrord_config::{
         LayerFileConfig, config::MirrordConfig, experimental::ExperimentalFileConfig,
     };
@@ -1387,7 +1389,7 @@ mod test {
                 .background_tasks
                 .suspend_messages(MainTaskId::LayerInitializer);
 
-            let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+            let mut child = resolve_command("sleep").arg("30").spawn().unwrap();
             let pid = i32::try_from(child.id()).unwrap();
             let conn = TcpStream::connect(proxy_addr).await.unwrap();
             let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
@@ -1492,7 +1494,7 @@ mod test {
             ChaosWatcherRx::new(chaos_rx),
         );
 
-        let mut command = Command::new("sh");
+        let mut command = resolve_command("sh");
         command
             .args(["-c", "echo ready; exec sleep 30"])
             .stdout(Stdio::piped());

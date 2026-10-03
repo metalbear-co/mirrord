@@ -7,6 +7,7 @@ use std::{
 };
 
 use crossterm::event::{KeyCode, KeyEvent};
+use mirrord_command::{resolve_command, resolve_tokio_command};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -14,10 +15,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Paragraph},
 };
-use tokio::{
-    io::{AsyncBufReadExt, AsyncRead, BufReader},
-    process::Command,
-};
+use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 
 use crate::{
     context::Context,
@@ -97,7 +95,7 @@ pub fn lingering_sessions(targets: &[(String, Option<String>)]) -> Vec<String> {
     let Ok(binary) = mirrord_binary() else {
         return Vec::new();
     };
-    let Ok(output) = std::process::Command::new(&binary)
+    let Ok(output) = resolve_command(&binary)
         .args(["operator", "status"])
         .stdin(Stdio::null())
         .output()
@@ -165,7 +163,7 @@ pub fn kill_sessions(sessions: &[String]) -> anyhow::Result<()> {
     };
 
     for args in commands {
-        let status = std::process::Command::new(&binary)
+        let status = resolve_command(&binary)
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -238,7 +236,7 @@ impl Launch {
 
         // Simple progress prints plain lines instead of spinner control
         // sequences, which would garble the log pane.
-        let mut command = Command::new(&binary);
+        let mut command = resolve_tokio_command(&binary);
         command
             .arg("up")
             .arg("-f")
@@ -351,7 +349,7 @@ impl Launch {
 
         let signal = if self.term_sent { "-KILL" } else { "-TERM" };
         self.term_sent = true;
-        _ = std::process::Command::new("kill")
+        _ = resolve_command("kill")
             .args([signal, &pid.to_string()])
             .status();
     }

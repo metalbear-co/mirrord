@@ -25,6 +25,7 @@ use axum::{
     routing::{get, post},
 };
 use fs4::fs_std::FileExt;
+use mirrord_command::resolve_tokio_command;
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use mirrord_session_monitor_client::sessions_dir;
 #[cfg(unix)]
@@ -38,7 +39,6 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     fs::create_dir_all,
     io::{AsyncBufReadExt, BufReader},
-    process::Command,
     sync::{Mutex, broadcast},
 };
 use tokio_util::sync::CancellationToken;
@@ -322,7 +322,7 @@ pub(super) async fn ui_start(
         env_vars.insert("MIRRORD_LOG".to_owned(), "mirrord=debug".to_owned());
     }
 
-    let mut command = Command::new(mirrord_binary);
+    let mut command = resolve_tokio_command(mirrord_binary);
     command
         .arg("ui")
         .envs(env_vars)
@@ -645,7 +645,7 @@ pub(super) async fn stop_daemon(with_printouts: bool) -> Result<(), UiCliError> 
             }
 
             #[cfg(windows)]
-            std::process::Command::new("taskkill")
+            mirrord_command::resolve_command("taskkill")
                 .args(["/pid", &pid, "/t"])
                 .output()?;
 
