@@ -19,44 +19,30 @@ permissions:
   actions: read
 
 jobs:
-  collect:
-    name: Collect flaky failures
+  report:
+    name: Report flaky tests
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion != 'skipped' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    outputs:
-      count: ${{ steps.collect.outputs.count }}
-      tests: ${{ steps.collect.outputs.tests }}
+    env:
+      RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: "Collect retried tests"
         id: collect
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
         run: |
           .github/scripts/flaky-tests.sh \
             "$GITHUB_REPOSITORY" \
-            "$RUN_ID"
-  report:
-    needs: collect
-    if: ${{ needs.collect.outputs.count != '0' }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      # The collector must finish before GitHub makes its complete log available for line lookup.
-      - name: Resolve failure log links
-        id: links
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CI_FLAKY_TESTS: ${{ needs.collect.outputs.tests }}
-        run: python3 .github/scripts/flaky-links.py
+            "$RUN_ID" \
+            "$RUNNER_TEMP/flaky-tests"
       - name: "File issues and notify #ci-alerts"
+        if: ${{ steps.collect.outputs.count != '0' }}
         env:
-          CI_FLAKY_TESTS: ${{ steps.links.outputs.tests }}
+          CI_FLAKY_TESTS: ${{ steps.collect.outputs.tests }}
           CI_FLAKY_THRESHOLD: ${{ inputs.threshold || vars.CI_FLAKY_THRESHOLD || '1' }}
           LINEAR_APP_CLIENT_ID: ${{ secrets.LINEAR_APP_CLIENT_ID }}
           LINEAR_APP_CLIENT_SECRET: ${{ secrets.LINEAR_APP_CLIENT_SECRET }}
-          RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
           SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
         run: |
           set -euo pipefail
@@ -82,9 +68,9 @@ jobs:
           fi
 
           : > new.tsv
-          stale=false
+          unnoted=false
 
-          while IFS=$'\t' read -r retries package test failure_url; do
+          while IFS=$'\t' read -r retries package test sighting; do
             [ -n "$test" ] || continue
 
             if [ -z "${LINEAR_APP_TOKEN:-}" ]; then
@@ -94,10 +80,16 @@ jobs:
               continue
             fi
 
-            if ! filed=$(.github/scripts/flaky-issue.sh \
+            status=0
+            filed=$(.github/scripts/flaky-issue.sh \
               "$GITHUB_REPOSITORY" MBE "$package" "$test" "$retries" "$CI_FLAKY_THRESHOLD" \
-              "$run_url" "$failure_url"); then
-              echo "::warning::could not reach Linear for $package/$test"
+              "$run_url" "$sighting") || status=$?
+
+            if [ "$status" -eq 2 ]; then
+              echo "::error::could not note this sighting of $package/$test on its issue"
+              unnoted=true
+            elif [ "$status" -ne 0 ]; then
+              echo "::warning::could not record $package/$test in Linear"
               if [ "$retries" -ge "$CI_FLAKY_THRESHOLD" ]; then
                 printf '%s\t%s\t\t\n' "$package" "$test" >> new.tsv
               fi
@@ -114,10 +106,6 @@ jobs:
               echo "\`$package\`/\`$test\` filed as [$identifier]($issue_url)" >> "$GITHUB_STEP_SUMMARY"
             else
               echo "\`$package\`/\`$test\` already tracked in [$identifier]($issue_url)" >> "$GITHUB_STEP_SUMMARY"
-
-              if [ "$state" = stale ]; then
-                stale=true
-              fi
             fi
           done <<< "$CI_FLAKY_TESTS"
 
@@ -135,7 +123,8 @@ jobs:
             fi
           fi
 
-          if [ "$stale" = true ]; then
-            echo "::error::a flake tally could not be advanced; it will stay wrong until this is fixed"
+          # A sighting missing from its issue cannot be restored by a later run, so the run that lost
+          # it fails rather than pass for recorded.
+          if [ "$unnoted" = true ]; then
             exit 1
           fi
