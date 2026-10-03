@@ -5,7 +5,7 @@ use mirrord_config::feature::network::{
     filter::AddressFilter,
 };
 
-use crate::detour::{Bypass, Detour};
+use crate::detour::{Bypass, Detour, DetourError};
 
 /// Generated from [`DnsConfig`] provided in the [`LayerConfig`](mirrord_config::LayerConfig).
 /// Decides whether DNS queries are done locally or remotely.
@@ -45,9 +45,9 @@ impl DnsSelector {
             });
 
         if matched == self.filter_is_local {
-            Detour::Bypass(Bypass::LocalDns)
+            Err(DetourError::Bypass(Bypass::LocalDns))
         } else {
-            Detour::Success(())
+            Ok(())
         }
     }
 }

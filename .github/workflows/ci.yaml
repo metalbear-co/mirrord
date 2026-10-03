@@ -54,7 +54,9 @@ env:
   NEXTEST_NO_TESTS: warn
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
-  PINNED_NIGHTLY: nightly-2026-08-13
+  PINNED_TOOLCHAIN: 1.99.0
+  # `rustfmt.toml` uses nightly-only options, so formatting is checked with a pinned nightly rustfmt.
+  PINNED_RUSTFMT_TOOLCHAIN: nightly-2026-08-13
 
 jobs:
   # ── plan ────────────────────────────────────────────────────────────
@@ -65,6 +67,7 @@ jobs:
     if: github.event.pull_request.draft == false
     outputs:
       rust_toolchain: ${{ steps.toolchain.outputs.rust_toolchain }}
+      rustfmt_toolchain: ${{ steps.toolchain.outputs.rustfmt_toolchain }}
       rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
       vale_changed: ${{ steps.changed-vale.outputs.any_changed }}
       windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
@@ -105,7 +108,9 @@ jobs:
         with:
           fetch-depth: 0
       - id: toolchain
-        run: echo "rust_toolchain=${{ env.PINNED_NIGHTLY }}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "rust_toolchain=${{ env.PINNED_TOOLCHAIN }}" >> "$GITHUB_OUTPUT"
+          echo "rustfmt_toolchain=${{ env.PINNED_RUSTFMT_TOOLCHAIN }}" >> "$GITHUB_OUTPUT"
       - name: get CI changes
         id: changed-ci
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -303,6 +308,7 @@ jobs:
       run_wizard_frontend: ${{ needs.plan.outputs.frontend_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
       run_ui_frontend: ${{ needs.plan.outputs.frontend_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
+      rustfmt_toolchain: ${{ needs.plan.outputs.rustfmt_toolchain }}
     secrets: inherit
 
   cargo-deny:
@@ -378,7 +384,7 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: rm rust-toolchain.toml
-      - run: rustup default ${{ env.PINNED_NIGHTLY }}
+      - run: rustup default ${{ env.PINNED_TOOLCHAIN }}
       - name: Rust cache
         uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
         with:

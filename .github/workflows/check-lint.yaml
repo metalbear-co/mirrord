@@ -21,6 +21,10 @@ on:
       rust_toolchain:
         required: true
         type: string
+      rustfmt_toolchain:
+        description: "Nightly toolchain whose rustfmt checks formatting; `rustfmt.toml` uses nightly-only options."
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -184,7 +188,11 @@ jobs:
         id: cargo_fmt
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         continue-on-error: true
-        run: cargo fmt --all -- --check
+        env:
+          RUSTFMT_TOOLCHAIN: ${{ inputs.rustfmt_toolchain }}
+        run: |
+          rustup toolchain install "$RUSTFMT_TOOLCHAIN" --profile minimal --component rustfmt
+          cargo "+$RUSTFMT_TOOLCHAIN" fmt --all -- --check
       - name: operator crd check (run only on one platform)
         id: operator_crd_check
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}

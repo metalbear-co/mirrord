@@ -29,7 +29,8 @@ use tracing::{error, info};
 use winapi::shared::winerror::{WSAHOST_NOT_FOUND, WSANO_RECOVERY, WSATRY_AGAIN};
 
 use crate::{
-    graceful_exit, proxy_connection::ProxyError, setup::setup, socket::sockets::SocketDescriptor,
+    detour::DetourError, graceful_exit, proxy_connection::ProxyError, setup::setup,
+    socket::sockets::SocketDescriptor,
 };
 
 mod ignore_codes {
@@ -131,6 +132,9 @@ pub enum SendToError {
 /// Errors that occur in the layer's hook functions, and will reach the user's application.
 ///
 /// These errors are converted to `libc` error codes, and are also used to `Errno::set_raw`.
+///
+/// When you add a new `#[from] E` or `From<E>` conversion, add `E` in
+/// `detour_error_from_hook_error` too so `?` keeps working inside hooks.
 #[derive(Error, Debug)]
 pub enum HookError {
     #[error("mirrord-layer: `{0}`")]
@@ -363,6 +367,49 @@ impl From<SerializationError> for HookError {
 impl<T> From<PoisonError<MutexGuard<'_, T>>> for HookError {
     fn from(_: PoisonError<MutexGuard<'_, T>>) -> Self {
         HookError::LockError
+    }
+}
+
+/// Forwards every error type convertible into [`HookError`] into [`DetourError::Error`].
+///
+/// A [`Detour`](crate::detour::Detour) is a `Result<_, DetourError>`, so the `?` operator relies on
+/// `From` for error conversion. A blanket `impl<E: Into<HookError>> From<E> for DetourError` is
+/// rejected by coherence (it overlaps the reflexive `From<T> for T`), so each convertible error
+/// type is listed explicitly here, mirroring the `#[from]`/`From` conversions on [`HookError`]
+/// above.
+macro_rules! detour_error_from_hook_error {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl From<$ty> for DetourError {
+                fn from(error: $ty) -> Self {
+                    DetourError::Error(HookError::from(error))
+                }
+            }
+        )*
+    };
+}
+
+detour_error_from_hook_error!(
+    ResponseError,
+    std::io::Error,
+    std::num::TryFromIntError,
+    std::ffi::NulError,
+    std::str::Utf8Error,
+    ProxyError,
+    bincode::error::EncodeError,
+    ConnectError,
+    SendToError,
+    HostnameResolveError,
+    SerializationError,
+);
+
+#[cfg(target_os = "macos")]
+detour_error_from_hook_error!(SipError);
+
+// Generic, like the `HookError` impl above; cannot go through the macro.
+impl<T> From<PoisonError<MutexGuard<'_, T>>> for DetourError {
+    fn from(error: PoisonError<MutexGuard<'_, T>>) -> Self {
+        DetourError::Error(HookError::from(error))
     }
 }
 
