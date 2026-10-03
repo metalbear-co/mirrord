@@ -1,6 +1,10 @@
 #![deny(unused_crate_dependencies)]
 
-use std::{collections::HashMap, str::FromStr, time::Instant};
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
@@ -138,7 +142,7 @@ impl AiAgent {
             Some(Self::ClaudeCode)
         } else if set("CURSOR_TRACE_ID") || set("CURSOR_AGENT") {
             Some(Self::Cursor)
-        } else if set("CODEX_SANDBOX") {
+        } else if set("CODEX_THREAD_ID") || set("CODEX_SANDBOX") {
             Some(Self::Codex)
         } else if set("GEMINI_CLI") {
             Some(Self::GeminiCli)
@@ -148,6 +152,55 @@ impl AiAgent {
             None
         }
     }
+}
+
+/// Environment variable carrying the [`OperatorWall`] a run met from the CLI down to the proxy
+/// that reports session analytics, since the CLI's own report is only sent on failure.
+pub const MIRRORD_OPERATOR_WALL_ENV: &str = "MIRRORD_OPERATOR_WALL";
+
+/// Reads the [`MIRRORD_OPERATOR_WALL_ENV`] wall set by the parent CLI, if present.
+pub fn read_operator_wall_from_env() -> Option<u32> {
+    std::env::var(MIRRORD_OPERATOR_WALL_ENV).ok()?.parse().ok()
+}
+
+/// The point at which a run without the operator learned it needed it, reported as
+/// `operator_wall`. Only the first wall a run meets is kept.
+///
+/// - Ends the run: `TargetType`, `CopyTarget`, `OperatorRequested`, `LicenseExpired` with
+///   `operator: true`, `AgentPodDeleted`, and every `*Command` variant.
+/// - Only warns or is silently skipped: the rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum OperatorWall {
+    TargetType = 1,
+    CopyTarget = 2,
+    /// `operator: true` in the config, but no operator in the cluster.
+    OperatorRequested = 3,
+    MultiPod = 4,
+    HttpFilter = 5,
+    /// The operator's license expired. Without `operator: true` the run goes on without it.
+    LicenseExpired = 6,
+    /// `feature.split_queues` is set, but is not applied without the operator.
+    SplitQueues = 7,
+    /// `feature.db_branches` is set, but is not applied without the operator.
+    DbBranches = 8,
+    /// The target's environment names a queue the operator could split.
+    QueueSplittingHint = 9,
+    PreviewCommand = 10,
+    CiCommand = 11,
+    /// `mirrord operator status` or `mirrord operator session`.
+    OperatorCommand = 12,
+    /// `mirrord ls` with `operator: true`.
+    ListTargetsCommand = 13,
+    /// The agent's pod was deleted while starting, and the error points to the operator.
+    AgentPodDeleted = 14,
+    /// `tls_delivery` or `https_delivery` is set, but is not applied without the operator.
+    TlsDelivery = 15,
+    /// `on_concurrent_steal` is set to a non-default value, but is not applied without the
+    /// operator.
+    ConcurrentSteal = 16,
+    /// `multi_cluster: true`, but is not applied without the operator.
+    MultiCluster = 17,
 }
 
 /// Struct to store analytics data.
@@ -197,6 +250,28 @@ pub struct Analytics {
 impl Analytics {
     pub fn add<Key: ToString, Value: Into<AnalyticValue>>(&mut self, key: Key, value: Value) {
         self.data.insert(key.to_string(), value.into());
+    }
+
+    /// Records `wall` as `operator_wall`, unless the run already met an earlier one.
+    pub fn add_operator_wall(&mut self, wall: OperatorWall) {
+        self.data
+            .entry("operator_wall".to_owned())
+            .or_insert(AnalyticValue::Number(wall as u32));
+    }
+
+    /// Removes `operator_wall` once a proxy has taken over reporting it.
+    pub fn take_operator_wall(&mut self) -> Option<u32> {
+        match self.data.remove("operator_wall") {
+            Some(AnalyticValue::Number(wall)) => Some(wall),
+            _ => None,
+        }
+    }
+
+    pub fn operator_wall(&self) -> Option<u32> {
+        match self.data.get("operator_wall") {
+            Some(AnalyticValue::Number(wall)) => Some(*wall),
+            _ => None,
+        }
     }
 }
 
@@ -586,6 +661,10 @@ struct AnalyticsReport {
 
 const ANALYTICS_ENDPOINT: &str = "https://analytics.metalbear.com/api/v1/event";
 
+/// Bounds how long a report can hold up the CLI's exit, which waits for pending reports, when the
+/// analytics endpoint is unreachable or slow.
+const ANALYTICS_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.com
 #[tracing::instrument(level = Level::TRACE)]
 async fn send_analytics(report: AnalyticsReport, target: ReportTarget) {
@@ -593,6 +672,7 @@ async fn send_analytics(report: AnalyticsReport, target: ReportTarget) {
     let res = client
         .post(ANALYTICS_ENDPOINT)
         .header(EVENT_KIND_HEADER, target.event_kind())
+        .timeout(ANALYTICS_TIMEOUT)
         .json(&report)
         .send()
         .await;
@@ -662,6 +742,18 @@ mod tests {
     }
 
     #[test]
+    fn first_operator_wall_is_kept() {
+        let mut analytics = Analytics::default();
+        analytics.add_operator_wall(OperatorWall::MultiPod);
+        analytics.add_operator_wall(OperatorWall::QueueSplittingHint);
+
+        assert_eq!(
+            analytics.operator_wall(),
+            Some(OperatorWall::MultiPod as u32)
+        );
+    }
+
+    #[test]
     fn ai_agent_detection() {
         let env = |vars: &'static [(&'static str, &'static str)]| {
             move |name: &str| {
@@ -680,7 +772,7 @@ mod tests {
             Some(AiAgent::Cursor)
         );
         assert_eq!(
-            AiAgent::detect_from(env(&[("CODEX_SANDBOX", "seatbelt")])),
+            AiAgent::detect_from(env(&[("CODEX_THREAD_ID", "abc123")])),
             Some(AiAgent::Codex)
         );
         assert_eq!(

@@ -12,7 +12,7 @@ use std::{fs::File, os::unix::process::ExitStatusExt, process::Stdio, time::Syst
 use ci_info::types::CiInfo;
 use drain::Watch;
 use fs4::tokio::AsyncFileExt;
-use mirrord_analytics::NullReporter;
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, ExecutionKind, OperatorWall, Reporter};
 use mirrord_auth::credentials::CiApiKey;
 use mirrord_config::{
     LayerConfig, ci::CiConfig, config::ConfigContext, container::ContainerRuntime,
@@ -65,7 +65,9 @@ pub(crate) async fn ci_command(
     user_data: &mut UserData,
 ) -> CliResult<()> {
     match args.command {
-        CiCommand::ApiKey { config_file } => generate_ci_api_key(config_file).await,
+        CiCommand::ApiKey { config_file } => {
+            generate_ci_api_key(config_file, watch, user_data).await
+        }
         CiCommand::Start(exec_args) => Ok(start::CiStartCommandHandler::new(
             exec_args, watch, user_data,
         )
@@ -93,7 +95,11 @@ pub(crate) async fn ci_command(
 /// Generate a new API key for CI usage by calling the operator API:
 /// `POST /mirrordclusteroperatorusercredentials`
 #[tracing::instrument(level = Level::TRACE, ret)]
-async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
+async fn generate_ci_api_key(
+    config_file: Option<PathBuf>,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord ci api-key");
 
     let mut cfg_context =
@@ -104,14 +110,33 @@ async fn generate_ci_api_key(config_file: Option<PathBuf>) -> CliResult<()> {
             progress.failure(Some(&format!("failed to read config from env: {error}")));
         })?;
 
-    let operator_api = OperatorApi::try_new(&layer_config, &mut NullReporter::default(), &progress)
+    let mut analytics = AnalyticsReporter::only_error(
+        layer_config.telemetry,
+        ExecutionKind::Other,
+        watch,
+        user_data.machine_id(),
+        Some(layer_config.key.as_str().to_owned()),
+    );
+
+    let operator_api = OperatorApi::try_new(&layer_config, &mut analytics, &progress)
         .await?
         .ok_or_else(|| {
             progress.failure(Some("operator not found"));
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::CiCommand);
+            analytics.set_error(AnalyticsError::Unknown);
             CliError::OperatorNotInstalled
         })?;
 
-    operator_api.check_license_validity(&progress)?;
+    operator_api
+        .check_license_validity(&progress)
+        .inspect_err(|_| {
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::LicenseExpired);
+            analytics.set_error(AnalyticsError::Unknown);
+        })?;
 
     let mut subtask = progress.subtask("creating API key");
     let api_key = operator_api

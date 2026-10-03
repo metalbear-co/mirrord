@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use kube::Api;
-use mirrord_analytics::NullReporter;
+use mirrord_analytics::{ExecutionKind, NullReporter, OperatorWall};
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
     client::{
@@ -13,7 +13,7 @@ use mirrord_operator::{
 use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
 
-use crate::{CliError, CliResult, SessionCommand};
+use crate::{CliError, CliResult, SessionCommand, connection::report_command_wall, data::UserData};
 
 /// Handles the [`SessionCommand`]s that deal with session management in the operator.
 pub(super) struct SessionCommandHandler {
@@ -37,6 +37,8 @@ impl SessionCommandHandler {
     pub(super) async fn new(
         command: SessionCommand,
         config_file: Option<PathBuf>,
+        watch: drain::Watch,
+        user_data: &UserData,
     ) -> CliResult<Self> {
         let mut progress = ProgressTracker::from_env("Operator session action");
 
@@ -64,6 +66,13 @@ impl SessionCommandHandler {
 
                 None => {
                     subtask.failure(Some("operator not found"));
+                    report_command_wall(
+                        &layer_config,
+                        ExecutionKind::Other,
+                        OperatorWall::OperatorCommand,
+                        watch,
+                        user_data,
+                    );
                     return Err(CliError::OperatorNotInstalled);
                 }
             };

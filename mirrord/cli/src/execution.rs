@@ -9,7 +9,7 @@ use std::{
 use itertools::Itertools;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, MIRRORD_KUBE_VERSION_MAJOR_ENV,
-    MIRRORD_KUBE_VERSION_MINOR_ENV, Reporter,
+    MIRRORD_KUBE_VERSION_MINOR_ENV, MIRRORD_OPERATOR_WALL_ENV, OperatorWall, Reporter,
 };
 #[cfg(any(windows, test))]
 use mirrord_config::MIRRORD_LAYER_CRASH_REPORTING;
@@ -482,7 +482,10 @@ impl MirrordExecution {
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let mut client = connector.into_client().await?;
+        let mut client = connector
+            .into_client()
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
@@ -528,13 +531,23 @@ impl MirrordExecution {
             .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string())
             .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
+        if let Some(wall) = analytics.get_mut().operator_wall() {
+            proxy_command.env(MIRRORD_OPERATOR_WALL_ENV, wall.to_string());
+        }
+
         if let Some(tls) = tls {
             proxy_command.env(MIRRORD_EXTPROXY_TLS_SETUP_PEM, tls.server_pem());
         }
 
-        let mut proxy_process = proxy_command.spawn().map_err(|e| {
-            CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
-        })?;
+        let mut proxy_process = proxy_command
+            .spawn()
+            .map_err(|e| {
+                CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
+            })
+            .inspect_err(|_| analytics.set_error(AnalyticsError::Unknown))?;
+        // The proxy reports the wall from here on. Keeping a copy would count it twice whenever
+        // both the proxy and the CLI report a failed start.
+        analytics.get_mut().take_operator_wall();
 
         let stderr = proxy_process.stderr.take().expect("stderr was piped");
         let _stderr_guard = watch_stderr(stderr, progress).await;
@@ -636,7 +649,10 @@ impl MirrordExecution {
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let mut client = connector.into_client().await?;
+        let mut client = connector
+            .into_client()
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
         config
             .feature
@@ -707,6 +723,17 @@ impl MirrordExecution {
             .env(MIRRORD_KUBE_VERSION_MAJOR_ENV, api_version.0.to_string())
             .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string());
 
+        if matches!(connect_info, AgentConnectInfo::DirectKubernetes(_))
+            && crate::queue_splitting::detects_splittable_queues(config, &env_vars)
+        {
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::QueueSplittingHint);
+        }
+        if let Some(wall) = analytics.get_mut().operator_wall() {
+            proxy_command.env(MIRRORD_OPERATOR_WALL_ENV, wall.to_string());
+        }
+
         #[cfg(unix)]
         if let Some(directory) = prefetch_guard.as_ref().map(|guard| guard.path()) {
             proxy_command.env(mirrord_config::MIRRORD_FS_PREFETCH_DIR, directory);
@@ -727,9 +754,15 @@ impl MirrordExecution {
             proxy_command.pre_exec(|| reparent_to_init().map_err(Into::into));
         }
 
-        let mut proxy_process = proxy_command.spawn().map_err(|e| {
-            CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
-        })?;
+        let mut proxy_process = proxy_command
+            .spawn()
+            .map_err(|e| {
+                CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
+            })
+            .inspect_err(|_| analytics.set_error(AnalyticsError::Unknown))?;
+        // The proxy reports the wall from here on. Keeping a copy would count it twice whenever
+        // both the proxy and the CLI report a failed start.
+        analytics.get_mut().take_operator_wall();
 
         let stderr = proxy_process.stderr.take().expect("stderr was piped");
         let _stderr_guard = watch_stderr(stderr, progress).await;

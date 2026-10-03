@@ -2,7 +2,7 @@ use std::{sync::LazyLock, time::Instant};
 
 use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
-use mirrord_analytics::NullReporter;
+use mirrord_analytics::{ExecutionKind, NullReporter, OperatorWall};
 use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetType};
 use mirrord_kube::{api::kubernetes::seeker::KubeResourceSeeker, error::KubeApiError};
 use mirrord_operator::client::OperatorApi;
@@ -11,7 +11,8 @@ use serde::{Serialize, Serializer, ser::SerializeSeq};
 use tracing::Level;
 
 use crate::{
-    CliError, CliResult, Format, ListTargetArgs, kube::kube_client_from_layer_config, util,
+    CliError, CliResult, Format, ListTargetArgs, connection::report_command_wall, data::UserData,
+    kube::kube_client_from_layer_config, util,
 };
 
 /// Name of the environment variable used to specify which resource types to list with `mirrord ls`.
@@ -224,7 +225,12 @@ static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
 /// Otherwise:
 /// 1. targets are printed as a plain JSON array of strings (backward compatibility);
 /// 2. all available target types are fetched.
-pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> CliResult<()> {
+pub(super) async fn print_targets(
+    args: ListTargetArgs,
+    rich_output: bool,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
     let mut cfg_config =
         ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file);
 
@@ -252,7 +258,19 @@ pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> Cl
         }
     };
 
-    let targets = FoundTargets::resolve(layer_config, rich_output, target_types).await?;
+    let targets = FoundTargets::resolve(layer_config.clone(), rich_output, target_types)
+        .await
+        .inspect_err(|error| {
+            if matches!(error, CliError::OperatorNotInstalled) {
+                report_command_wall(
+                    &layer_config,
+                    ExecutionKind::Other,
+                    OperatorWall::ListTargetsCommand,
+                    watch,
+                    user_data,
+                );
+            }
+        })?;
 
     match args.output {
         Format::Json => {

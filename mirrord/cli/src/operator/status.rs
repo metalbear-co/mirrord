@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use mirrord_analytics::NullReporter;
+use mirrord_analytics::{ExecutionKind, NullReporter, OperatorWall};
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
@@ -20,7 +20,10 @@ use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{Row, Table, row};
 use tracing::Level;
 
-use crate::{CliResult, error::CliError, util::remove_proxy_env};
+use crate::{
+    CliResult, connection::report_command_wall, data::UserData, error::CliError,
+    util::remove_proxy_env,
+};
 
 /// Handles the `mirrord operator status` command.
 pub(super) struct StatusCommandHandler {
@@ -30,7 +33,11 @@ pub(super) struct StatusCommandHandler {
 
 impl StatusCommandHandler {
     #[tracing::instrument(level = Level::TRACE, err)]
-    pub(super) async fn new(config_file: Option<PathBuf>) -> CliResult<Self> {
+    pub(super) async fn new(
+        config_file: Option<PathBuf>,
+        watch: drain::Watch,
+        user_data: &UserData,
+    ) -> CliResult<Self> {
         let mut progress = ProgressTracker::from_env("Operator Status");
 
         let mut cfg_context =
@@ -48,7 +55,16 @@ impl StatusCommandHandler {
                 status_progress.failure(Some("failed to get status"));
             })?
             .ok_or(CliError::OperatorNotInstalled)
-            .inspect_err(|_| status_progress.failure(Some("operator not found")))?;
+            .inspect_err(|_| {
+                status_progress.failure(Some("operator not found"));
+                report_command_wall(
+                    &layer_config,
+                    ExecutionKind::Other,
+                    OperatorWall::OperatorCommand,
+                    watch,
+                    user_data,
+                );
+            })?;
 
         status_progress.success(Some("fetched status"));
         progress.success(None);
