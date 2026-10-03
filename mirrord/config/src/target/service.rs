@@ -8,6 +8,7 @@ use crate::config::{ConfigError, Result};
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(extend("x-mirrord-plan" = "team"))]
 pub struct ServiceTarget {
     pub service: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -65,6 +65,7 @@ pub enum ServiceMode {
     ///
     /// The service's `http_filter` is ignored, with a warning. The target must support
     /// `copy_target` with `scale_down`.
+    #[schemars(extend("x-mirrord-plan" = "team"))]
     Replace,
 
     /// Incoming traffic is mirrored to the local service, leaving traffic to the original service
@@ -491,8 +492,10 @@ pub struct ServiceConfig {
 pub struct UpConfig {
     /// Settings applied to all services.
     #[serde(default)]
+    #[schemars(extend("x-mirrord-plan" = "oss"))]
     pub common: CommonConfig,
     /// Per-service configurations keyed by service name.
+    #[schemars(extend("x-mirrord-plan" = "oss"))]
     pub services: HashMap<Arc<str>, ServiceConfig>,
 }
 
@@ -507,6 +510,36 @@ pub enum WindowsSupportError {
     #[error("mirrord for CI is not supported on Windows")]
     Ci,
 }
+
+/// Where `mirrord-up.yaml` settings end up in the mirrord config generated for each service, as
+/// pairs of dotted paths (`*` standing for any service name). The settings below them map the same
+/// way, e.g. `services.*.http_filter.header_filter` sets
+/// `feature.network.incoming.http_filter.header_filter`; a `config_patch` maps onto the root of the
+/// mirrord config. Settings missing here, like `run`, only steer `mirrord up` itself.
+///
+/// Mirrors [`ServiceConfig::assemble`], and must be changed along with it.
+pub const LAYER_CONFIG_PATHS: &[(&str, &str)] = &[
+    (
+        "common.accept_invalid_certificates",
+        "accept_invalid_certificates",
+    ),
+    ("common.operator", "operator"),
+    ("common.telemetry", "telemetry"),
+    ("common.context", "kube_context"),
+    ("services.*.context", "kube_context"),
+    ("services.*.target", "target"),
+    ("services.*.env", "feature.env"),
+    ("services.*.default_mode", "feature.network.incoming.mode"),
+    (
+        "services.*.http_filter",
+        "feature.network.incoming.http_filter",
+    ),
+    (
+        "services.*.ignore_ports",
+        "feature.network.incoming.ignore_ports",
+    ),
+    ("services.*.config_patch", ""),
+];
 
 impl ServiceConfig {
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service.

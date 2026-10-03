@@ -22,6 +22,7 @@ use crate::config::{ConfigError, Result};
 /// eligible agent with the lowest replica id.
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(extend("x-mirrord-plan" = "enterprise"))]
 pub struct ServerlessTarget {
     /// Name of the service in sessions-manager: the logical workload whose replicas
     /// each run an agent companion. Together with the environment it forms the

@@ -345,7 +345,7 @@ pub struct LayerConfig {
     /// certificates).
     ///
     /// If not provided, mirrord will use value from the kubeconfig.
-    #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES")]
+    #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", plan = "oss")]
     pub accept_invalid_certificates: Option<bool>,
 
     /// ## skip_processes {#root-skip_processes}
@@ -361,7 +361,7 @@ pub struct LayerConfig {
     ///  "skip_processes": ["bash", "node"]
     /// }
     /// ```
-    #[config(env = "MIRRORD_SKIP_PROCESSES")]
+    #[config(env = "MIRRORD_SKIP_PROCESSES", plan = "oss")]
     pub skip_processes: Option<VecOrSingle<String>>,
 
     /// ## skip_build_tools {#root-skip_build_tools}
@@ -374,7 +374,7 @@ pub struct LayerConfig {
     /// Build-Tools: `["as", "cc", "ld", "go", "air", "asm", "cc1", "cgo", "dlv", "gcc", "git",
     /// "link", "math", "cargo", "hpack", "rustc", "compile", "collect2", "cargo-watch",
     /// "debugserver"]`
-    #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
+    #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true, plan = "oss")]
     pub skip_build_tools: bool,
 
     /// ## skip_extra_build_tools {#root-skip_build_tools}
@@ -394,7 +394,7 @@ pub struct LayerConfig {
     ///  "skip_extra_build_tools": ["bash", "node"]
     /// }
     /// ```
-    #[config(env = "MIRRORD_SKIP_EXTRA_BUILD_TOOLS")]
+    #[config(env = "MIRRORD_SKIP_EXTRA_BUILD_TOOLS", plan = "oss")]
     pub skip_extra_build_tools: Option<VecOrSingle<String>>,
 
     /// ## operator {#root-operator}
@@ -402,7 +402,7 @@ pub struct LayerConfig {
     /// Whether mirrord should use the operator.
     /// If not set, mirrord will first attempt to use the operator, but continue without it in case
     /// of failure.
-    #[config(env = "MIRRORD_OPERATOR_ENABLE")]
+    #[config(env = "MIRRORD_OPERATOR_ENABLE", plan = "oss")]
     pub operator: Option<bool>,
 
     /// ## multi_cluster {#root-multi_cluster}
@@ -411,7 +411,7 @@ pub struct LayerConfig {
     /// operator. When set to `false`, forces a single-cluster session on the Primary cluster
     /// instead of creating a multi-cluster session that spans all workload clusters.
     /// When `true` or unset, multi-cluster sessions are used when the operator supports them.
-    #[config(env = "MIRRORD_MULTI_CLUSTER")]
+    #[config(env = "MIRRORD_MULTI_CLUSTER", plan = "enterprise")]
     pub multi_cluster: Option<bool>,
 
     /// ## api {#root-api}
@@ -422,7 +422,7 @@ pub struct LayerConfig {
     /// with HTTP endpoints for observing session activity in real time.
     ///
     /// Defaults to `true`.
-    #[config(default = true, env = "MIRRORD_API")]
+    #[config(default = true, env = "MIRRORD_API", plan = "oss")]
     pub api: bool,
 
     /// ## profile {#root-profile}
@@ -444,6 +444,7 @@ pub struct LayerConfig {
     ///   "profile": "my-namespace/my-profile-name"
     /// }
     /// ```
+    #[config(plan = "team")]
     pub profile: Option<String>,
 
     /// ## kubeconfig {#root-kubeconfig}
@@ -456,7 +457,7 @@ pub struct LayerConfig {
     ///   "kubeconfig": "~/bear/kube-config"
     /// }
     /// ```
-    #[config(env = "MIRRORD_KUBECONFIG")]
+    #[config(env = "MIRRORD_KUBECONFIG", plan = "oss")]
     pub kubeconfig: Option<String>,
 
     /// ## sip_binaries {#root-sip_binaries}
@@ -474,22 +475,23 @@ pub struct LayerConfig {
     ///   "sip_binaries": ["bash", "python"]
     /// }
     /// ```
+    #[config(plan = "oss")]
     pub sip_binaries: Option<VecOrSingle<String>>,
 
     /// ## target {#root-target}
-    #[config(nested)]
+    #[config(nested, plan = "oss")]
     pub target: TargetConfig,
 
     /// ## agent {#root-agent}
-    #[config(nested)]
+    #[config(nested, plan = "oss")]
     pub agent: AgentConfig,
 
     /// ## container {#root-container}
-    #[config(nested, unstable)]
+    #[config(nested, unstable, plan = "oss")]
     pub container: ContainerConfig,
 
     /// ## feature {#root-feature}
-    #[config(nested)]
+    #[config(nested, plan = "oss")]
     pub feature: FeatureConfig,
 
     /// ## telemetry {#root-telemetry}
@@ -497,7 +499,7 @@ pub struct LayerConfig {
     /// Telemetry sent doesn't contain personal identifiers or any data that
     /// should be considered sensitive. It is used to improve the product.
     /// [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)
-    #[config(env = "MIRRORD_TELEMETRY", default = true)]
+    #[config(env = "MIRRORD_TELEMETRY", default = true, plan = "oss")]
     pub telemetry: bool,
 
     /// ## kube_context {#root-kube_context}
@@ -510,15 +512,15 @@ pub struct LayerConfig {
     ///   "kube_context": "mycluster"
     /// }
     /// ```
-    #[config(env = "MIRRORD_KUBE_CONTEXT")]
+    #[config(env = "MIRRORD_KUBE_CONTEXT", plan = "oss")]
     pub kube_context: Option<String>,
 
     /// ## internal_proxy {#root-internal_proxy}
-    #[config(nested)]
+    #[config(nested, plan = "oss")]
     pub internal_proxy: InternalProxyConfig,
 
     /// ## external_proxy {#root-external_proxy}
-    #[config(nested)]
+    #[config(nested, plan = "oss")]
     pub external_proxy: ExternalProxyConfig,
 
     /// ## use_proxy {#root-use_proxy}
@@ -528,11 +530,11 @@ pub struct LayerConfig {
     /// but you don't want mirrord to use it.
     /// This also applies to the mirrord process (as it just removes the env).
     /// If the remote pod sets this env, the mirrord process will still use it.
-    #[config(env = "MIRRORD_PROXY", default = true)]
+    #[config(env = "MIRRORD_PROXY", default = true, plan = "oss")]
     pub use_proxy: bool,
 
     /// ## experimental {#root-experimental}
-    #[config(nested)]
+    #[config(nested, plan = "oss")]
     pub experimental: ExperimentalConfig,
 
     /// ## skip_sip {#root-skip_sip}
@@ -546,15 +548,15 @@ pub struct LayerConfig {
     ///
     /// When specified, the given value will replace the default list rather than
     /// being added to.
-    #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_owned()))]
+    #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_owned()), plan = "oss")]
     pub skip_sip: VecOrSingle<String>,
 
     /// ## startup_retry {#root-startup_retry}
-    #[config(nested)]
+    #[config(nested, plan = "oss")]
     pub startup_retry: StartupRetryConfig,
 
     /// ## ci {#root-ci}
-    #[config(nested)]
+    #[config(nested, plan = "oss")]
     pub ci: CiConfig,
 
     /// ## key {#root-key}
@@ -596,7 +598,7 @@ pub struct LayerConfig {
     /// 2. Environment variable: `MIRRORD_KEY`
     /// 3. Config file: `{ "key": "my-key" }`
     /// 4. Fallback: A unique key is randomly generated if no other option is provided
-    #[config(nested)]
+    #[config(nested, plan = "oss")]
     pub key: EnvKey,
 
     /// ## traceparent {#root-traceparent}
@@ -607,7 +609,7 @@ pub struct LayerConfig {
     /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     ///
     /// Only relevant for use with the operator. For more details, read the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).
-    #[config(env = "TRACEPARENT")]
+    #[config(env = "TRACEPARENT", plan = "oss")]
     pub traceparent: Option<String>,
 
     /// ## baggage {#root-baggage}
@@ -617,7 +619,7 @@ pub struct LayerConfig {
     /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     ///
     /// Only relevant for use with the operator. For more details, read the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).
-    #[config(env = "BAGGAGE")]
+    #[config(env = "BAGGAGE", plan = "oss")]
     pub baggage: Option<String>,
 }
 
@@ -913,14 +915,17 @@ impl LayerConfig {
             http_filter.all_of.is_some(),
             http_filter.any_of.is_some(),
             http_filter.body_filter.is_some(),
+            http_filter.method_filter.is_some(),
+            http_filter.header_filter_jq.is_some(),
         ]
         .into_iter()
         .filter(|used| *used)
         .count();
         if used_filters > 1 {
-            Err(ConfigError::Conflict(
-                "Cannot use multiple types of HTTP filter at the same time, use 'any_of' or 'all_of' to combine filters".to_owned(),
-            ))?
+            Err(ConfigError::ConflictAt {
+                setting: "feature.network.incoming.http_filter".into(),
+                message: "Cannot use multiple types of HTTP filter at the same time, use 'any_of' or 'all_of' to combine filters".to_owned(),
+            })?
         }
 
         if [http_filter.all_of.as_ref(), http_filter.any_of.as_ref()]
@@ -928,9 +933,10 @@ impl LayerConfig {
             .flatten()
             .any(Vec::is_empty)
         {
-            Err(ConfigError::Conflict(
-                "Composite HTTP filter cannot be empty".to_owned(),
-            ))?;
+            Err(ConfigError::ConflictAt {
+                setting: "feature.network.incoming.http_filter".into(),
+                message: "Composite HTTP filter cannot be empty".to_owned(),
+            })?;
         }
 
         http_filter
@@ -976,13 +982,61 @@ impl LayerConfig {
             }
         }
 
+        // The layer converts the filter when it starts, and panics on an invalid one. The regexes
+        // are compiled one by one first, with the engine the conversion uses, so that the error
+        // names the one that doesn't compile; `mirrord_protocol::tcp::Filter::new` would log every
+        // failure as an error on top.
+        let filter_path = "feature.network.incoming.http_filter";
+        let verify_regex = |name: String, pattern: &str| {
+            fancy_regex::Regex::new(pattern)
+                .map(drop)
+                .map_err(|error| ConfigError::InvalidValue {
+                    name: name.into(),
+                    provided: pattern.to_owned(),
+                    error: Box::new(error),
+                })
+        };
+        if let Some(header) = &http_filter.header_filter {
+            verify_regex(format!("{filter_path}.header_filter"), header)?;
+        }
+        if let Some(path) = &http_filter.path_filter {
+            verify_regex(format!("{filter_path}.path_filter"), path)?;
+        }
+        for (name, filters) in [
+            ("all_of", &http_filter.all_of),
+            ("any_of", &http_filter.any_of),
+        ] {
+            for (index, filter) in filters.iter().flatten().enumerate() {
+                match filter {
+                    InnerFilter::Header { header } => {
+                        verify_regex(format!("{filter_path}.{name}[{index}].header"), header)?
+                    }
+                    InnerFilter::Path { path } => {
+                        verify_regex(format!("{filter_path}.{name}[{index}].path"), path)?
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if http_filter.is_filter_set() {
+            http_filter
+                .as_protocol_http_filter()
+                .map_err(|error| ConfigError::InvalidValue {
+                    name: filter_path.into(),
+                    provided: serde_json::to_string(http_filter).unwrap_or_default(),
+                    error: Box::new(error),
+                })?;
+        }
+
         if !self.feature.network.incoming.ignore_ports.is_empty()
             && self.feature.network.incoming.ports.is_some()
         {
-            Err(ConfigError::Conflict(
-                "Cannot use both `incoming.ignore_ports` and `incoming.ports` at the same time"
-                    .to_owned(),
-            ))?
+            Err(ConfigError::ConflictAt {
+                setting: "feature.network.incoming.ports".into(),
+                message:
+                    "Cannot use both `incoming.ignore_ports` and `incoming.ports` at the same time"
+                        .to_owned(),
+            })?
         }
 
         match (
@@ -990,11 +1044,12 @@ impl LayerConfig {
             &self.feature.network.incoming.tls_delivery,
         ) {
             (Some(..), Some(..)) => {
-                return Err(ConfigError::Conflict(
-                    "Cannot use both `feature.network.incoming.https_delivery` \
+                return Err(ConfigError::ConflictAt {
+                    setting: "feature.network.incoming.https_delivery".into(),
+                    message: "Cannot use both `feature.network.incoming.https_delivery` \
                     and `feature.network.incoming.tls_delivery` at the same time"
                         .to_owned(),
-                ));
+                });
             }
             (Some(config), ..) => {
                 context.add_warning(
@@ -1016,16 +1071,20 @@ impl LayerConfig {
 
         if is_targetless {
             if self.feature.network.incoming.is_steal() {
-                Err(ConfigError::Conflict("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into()))?
+                Err(ConfigError::ConflictAt {
+                    setting: "feature.network.incoming.mode".into(),
+                    message: "Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into(),
+                })?
             }
 
             if self.agent.ephemeral {
-                Err(ConfigError::Conflict(
-                    "Using an ephemeral container for the agent is not \
+                Err(ConfigError::ConflictAt {
+                    setting: "agent.ephemeral".into(),
+                    message: "Using an ephemeral container for the agent is not \
                          compatible with a targetless agent, please either disable this option or \
                         specify a target."
                         .into(),
-                ))?
+                })?
             }
 
             if self.agent.namespace.is_some() {
@@ -1039,28 +1098,31 @@ impl LayerConfig {
 
         if self.feature.copy_target.enabled {
             if self.operator == Some(false) {
-                return Err(ConfigError::Conflict(
-                    "The copy target feature requires a mirrord operator, \
+                return Err(ConfigError::ConflictAt {
+                    setting: "feature.copy_target".into(),
+                    message: "The copy target feature requires a mirrord operator, \
                    please either disable this option or use the operator."
                         .into(),
-                ));
+                });
             }
 
             // Target may also be set later in the UI.
             if is_targetless {
-                return Err(ConfigError::Conflict(
-                    "The copy target feature is not compatible with a targetless agent, \
+                return Err(ConfigError::ConflictAt {
+                    setting: "feature.copy_target".into(),
+                    message: "The copy target feature is not compatible with a targetless agent, \
                     please either disable this option or specify a target."
                         .into(),
-                ));
+                });
             }
 
             if matches!(self.target.path, Some(Target::Service(..))) {
-                return Err(ConfigError::Conflict(
-                    "The copy target feature is not yet supported with service targets, \
+                return Err(ConfigError::ConflictAt {
+                    setting: "feature.copy_target".into(),
+                    message: "The copy target feature is not yet supported with service targets, \
                     please either disable this option or specify an exact workload covered by this service."
-                        .into()
-                ));
+                        .into(),
+                });
             }
 
             if !self.feature.network.incoming.is_steal() {
@@ -1104,10 +1166,12 @@ impl LayerConfig {
 
         // Env vars
         if self.feature.env.exclude.is_some() && self.feature.env.include.is_some() {
-            return Err(ConfigError::Conflict(
-                "cannot use both `include` and `exclude` filters for environment variables"
-                    .to_owned(),
-            ));
+            return Err(ConfigError::ConflictAt {
+                setting: "feature.env".into(),
+                message:
+                    "cannot use both `include` and `exclude` filters for environment variables"
+                        .to_owned(),
+            });
         }
 
         if let Some(env_vars_mapping) = self.feature.env.mapping.clone() {
@@ -1135,14 +1199,17 @@ impl LayerConfig {
             if conflicts.is_empty().not() {
                 conflicts.sort();
                 conflicts.dedup();
-                return Err(ConfigError::Conflict(format!(
-                    "the following environment variables appear in both \
+                return Err(ConfigError::ConflictAt {
+                    setting: "feature.env.override".into(),
+                    message: format!(
+                        "the following environment variables appear in both \
                      `feature.env.override` and `feature.db_branches[].connection`: {}. \
                      Database branching redirects these variables through the operator, \
                      so overriding them locally would defeat the redirection. Remove \
                      them from `feature.env.override`.",
-                    conflicts.join(", "),
-                )));
+                        conflicts.join(", "),
+                    ),
+                });
             }
         }
 
@@ -1568,6 +1635,7 @@ mod tests {
     use k8s_openapi::api::core::v1::{Container, VolumeMount};
     use rstest::*;
     use schemars::Schema;
+    use serde_json::json;
     use tempfile::NamedTempFile;
 
     use super::*;
@@ -2065,6 +2133,65 @@ mod tests {
         }
     }
 
+    /// Every kind of HTTP filter counts towards the one allowed at a time, or the layer would hit
+    /// an unexpected combination when converting the filter.
+    #[rstest]
+    #[case::method(json!({ "header_filter": "a", "method_filter": "GET" }))]
+    #[case::jq(json!({ "path_filter": "/a", "header_filter_jq": "." }))]
+    fn verify_rejects_multiple_http_filters(#[case] http_filter: serde_json::Value) {
+        let config: LayerFileConfig = serde_json::from_value(json!({
+            "feature": { "network": { "incoming": { "mode": "steal", "http_filter": http_filter } } }
+        }))
+        .unwrap();
+        let mut context = ConfigContext::default().strict_env(true);
+        let error = config
+            .generate_config(&mut context)
+            .and_then(|config| config.verify(&mut context))
+            .unwrap_err();
+        assert!(
+            matches!(&error, ConfigError::ConflictAt { setting, .. } if setting == "feature.network.incoming.http_filter"),
+            "{error}"
+        );
+    }
+
+    /// The error names the filter that doesn't compile and the value given for it.
+    #[rstest]
+    #[case::header(json!({ "header_filter": "([" }), "feature.network.incoming.http_filter.header_filter", "([")]
+    #[case::path(json!({ "path_filter": "([" }), "feature.network.incoming.http_filter.path_filter", "([")]
+    #[case::inner(
+        json!({ "any_of": [{ "path": "/ok" }, { "header": "([" }] }),
+        "feature.network.incoming.http_filter.any_of[1].header",
+        "(["
+    )]
+    #[case::method(
+        json!({ "method_filter": "NOT A METHOD" }),
+        "feature.network.incoming.http_filter",
+        "NOT A METHOD"
+    )]
+    fn verify_rejects_invalid_http_filter(
+        #[case] http_filter: serde_json::Value,
+        #[case] expected_name: &str,
+        #[case] expected_value: &str,
+    ) {
+        let config: LayerFileConfig = serde_json::from_value(json!({
+            "feature": { "network": { "incoming": { "mode": "steal", "http_filter": http_filter } } }
+        }))
+        .unwrap();
+        let mut context = ConfigContext::default().strict_env(true);
+        let error = config
+            .generate_config(&mut context)
+            .and_then(|config| config.verify(&mut context))
+            .unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                ConfigError::InvalidValue { name, provided, .. }
+                    if name == expected_name && provided.contains(expected_value)
+            ),
+            "{error}"
+        );
+    }
+
     #[test]
     fn schema_file_exists() {
         let _ = File::open(SCHEMA_FILE_PATH).expect("Schema file doesn't exist!");
@@ -2541,7 +2668,11 @@ mod tests {
             .expect_err("overlapping env.override and db_branches keys should be rejected");
 
         assert!(
-            matches!(&error, ConfigError::Conflict(msg) if msg.contains("DB_URL")),
+            matches!(
+                &error,
+                ConfigError::ConflictAt { setting, message }
+                    if setting == "feature.env.override" && message.contains("DB_URL")
+            ),
             "unexpected error: {error}"
         );
     }

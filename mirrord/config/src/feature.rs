@@ -82,17 +82,17 @@ pub mod split_queues;
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct FeatureConfig {
     /// ### feature.env {#feature-env}
-    #[config(nested, toggleable)]
+    #[config(nested, toggleable, plan = "oss")]
     pub env: EnvConfig,
 
     // TODO(alex) [high] 2023-05-18: This links to `FsConfig`, not `FsUserConfig` as I thought
     // before.
     /// ### feature.fs {#feature-fs}
-    #[config(nested, toggleable)]
+    #[config(nested, toggleable, plan = "oss")]
     pub fs: FsConfig,
 
     /// ### feature.network {#feature-network}
-    #[config(nested, toggleable)]
+    #[config(nested, toggleable, plan = "oss")]
     pub network: NetworkConfig,
 
     /// ### feature.copy_target {#feature-copy_target}
@@ -102,13 +102,13 @@ pub struct FeatureConfig {
     ///
     /// This feature is not compatible with rollout targets and running without a target
     /// (`targetless` mode).
-    #[config(nested)]
+    #[config(nested, plan = "team")]
     pub copy_target: CopyTargetConfig,
 
     /// ### feature.hostname {#feature-hostname}
     ///
     /// Should mirrord return the hostname of the target pod when calling `gethostname`
-    #[config(default = true)]
+    #[config(default = true, plan = "oss")]
     pub hostname: bool,
 
     /// ### feature.split_queues {#feature-split_queues}
@@ -118,26 +118,26 @@ pub struct FeatureConfig {
     /// If you don't specify any filter for a queue that is however declared in the
     /// `MirrordWorkloadQueueRegistry` of the target you're using, a match-nothing filter
     /// will be used, and your local application will not receive any messages from that queue.
-    #[config(nested, default, unstable)]
+    #[config(nested, default, unstable, plan = "team")]
     pub split_queues: SplitQueuesConfig,
 
     /// ### feature.db_branches {#feature-db_branches}
     ///
     /// Configuration for the database branching feature.
-    #[config(nested, default, unstable)]
+    #[config(nested, default, unstable, plan = "team")]
     pub db_branches: DatabaseBranchesConfig,
 
     /// ### feature.magic {#feature-magic}
     ///
     /// Sensible defaults that improve the experience for most users. Each flag can be disabled
     /// individually if it conflicts with your setup.
-    #[config(nested)]
+    #[config(nested, plan = "oss")]
     pub magic: MagicConfig,
 
     /// ### feature.preview {#feature-preview}
     ///
     /// Configuration for preview environments.
-    #[config(nested, default)]
+    #[config(nested, default, plan = "enterprise")]
     pub preview: PreviewConfig,
 }
 
