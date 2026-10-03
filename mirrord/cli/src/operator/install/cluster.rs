@@ -101,8 +101,11 @@ pub(super) async fn resolve_apis(
 }
 
 /// Stops the installation if an operator is already registered in the cluster, whether it's
-/// healthy or not.
-pub(super) async fn ensure_no_operator(client: &Client) -> Result<(), OperatorInstallError> {
+/// healthy or not. `context_arg` gives the commands in the error the kubecontext of the run.
+pub(super) async fn ensure_no_operator(
+    client: &Client,
+    context_arg: &str,
+) -> Result<(), OperatorInstallError> {
     let Some(api_service) = Api::<APIService>::all(client.clone())
         .get_opt(OPERATOR_API_SERVICE)
         .await
@@ -127,6 +130,7 @@ pub(super) async fn ensure_no_operator(client: &Client) -> Result<(), OperatorIn
         }),
         Err(error) => Err(OperatorInstallError::Unhealthy {
             namespace,
+            context_arg: context_arg.to_owned(),
             source: Box::new(error),
         }),
     }
@@ -216,10 +220,11 @@ pub(super) async fn create(
 }
 
 /// Waits until the operator serves its status, which requires its pod to be up and its API to be
-/// registered.
+/// registered. `context_arg` gives the command in the error the kubecontext of the run.
 pub(super) async fn wait_for_operator(
     client: &Client,
     namespace: &str,
+    context_arg: &str,
 ) -> Result<MirrordOperatorCrd, OperatorInstallError> {
     let api = Api::<MirrordOperatorCrd>::all(client.clone());
     let deadline = Instant::now() + READY_TIMEOUT;
@@ -230,6 +235,7 @@ pub(super) async fn wait_for_operator(
             Err(error) if Instant::now() >= deadline => {
                 return Err(OperatorInstallError::NotReady {
                     namespace: namespace.to_owned(),
+                    context_arg: context_arg.to_owned(),
                     timeout: READY_TIMEOUT,
                     source: Box::new(error),
                 });

@@ -1,8 +1,9 @@
-//! `mirrord operator install`: gets a license, installs the operator into the cluster of the
-//! current kubecontext, and hands ownership of the license to the user.
+//! `mirrord operator install`: gets a license, installs the operator into the cluster of a
+//! kubecontext, and hands ownership of the license to the user.
 
 use std::{io::IsTerminal, ops::Not};
 
+use inquire::{Confirm, InquireError};
 use kube::Client;
 use mirrord_kube::api::kubernetes::create_kube_config_with_context;
 use mirrord_progress::{Progress, ProgressTracker};
@@ -14,6 +15,8 @@ mod cluster;
 mod error;
 mod manifest;
 mod signup;
+#[cfg(test)]
+mod tests;
 
 pub(crate) use error::OperatorInstallError;
 
@@ -27,13 +30,15 @@ pub(super) async fn operator_install(
         no_browser,
         cluster_hint,
         no_hint,
+        context,
+        yes,
         manifest: manifest_path,
         app_url,
     } = args;
 
     let mut progress = ProgressTracker::from_env("mirrord operator install");
 
-    let (mut kube_config, context) = create_kube_config_with_context(None, None::<&str>, None)
+    let (mut kube_config, context) = create_kube_config_with_context(None, None::<&str>, context)
         .await
         .map_err(|error| OperatorInstallError::KubeConfig(Box::new(error)))?;
     // The default policy retries 503s for minutes, which is exactly how a registered but
@@ -47,9 +52,10 @@ pub(super) async fn operator_install(
         .user_agent(USER_AGENT)
         .build()
         .map_err(OperatorInstallError::HttpClient)?;
+    let context_arg = context_flag("--context", context.as_deref());
 
     let mut subtask = progress.subtask("checking for an existing operator");
-    cluster::ensure_no_operator(&client).await?;
+    cluster::ensure_no_operator(&client, &context_arg).await?;
     subtask.success(Some("no operator installed"));
 
     let mut subtask = progress.subtask("fetching the operator manifest");
@@ -68,6 +74,14 @@ pub(super) async fn operator_install(
     let apis = cluster::resolve_apis(&client, &manifest, &release_namespace).await?;
     cluster::dry_run(&manifest, &apis).await?;
     subtask.success(None);
+
+    // Asked after the checks, which change nothing, so that an installation that can't succeed
+    // fails without asking first.
+    let question = format!(
+        "Install the mirrord operator into {}?",
+        location(manifest.operator_namespace(), context.as_deref())
+    );
+    confirm(&progress, yes, &question)?;
 
     let trial = match api_key {
         Some(api_key) => {
@@ -106,7 +120,9 @@ pub(super) async fn operator_install(
         subtask.success(None);
 
         let mut subtask = progress.subtask("waiting for the operator to become ready");
-        let operator = cluster::wait_for_operator(&client, manifest.operator_namespace()).await?;
+        let operator =
+            cluster::wait_for_operator(&client, manifest.operator_namespace(), &context_arg)
+                .await?;
         subtask.success(None);
 
         Ok(operator)
@@ -118,7 +134,7 @@ pub(super) async fn operator_install(
         if let Some(trial) = &trial {
             println!(
                 "To retry without starting another trial, reuse its API key: mirrord operator \
-                install --api-key {}",
+                install{context_arg} --api-key {}",
                 trial.api_key
             );
         }
@@ -137,6 +153,40 @@ pub(super) async fn operator_install(
     Ok(())
 }
 
+/// Asks the user to confirm a change to the cluster, so that a wrong current kubecontext does not
+/// get changed by mistake.
+///
+/// Does not ask with `yes`, or without a terminal, so that agents and CI can run the command.
+/// Declining, also by cancelling the prompt (e.g. with Ctrl+C), fails with
+/// [`OperatorInstallError::Declined`].
+fn confirm(
+    progress: &ProgressTracker,
+    yes: bool,
+    question: &str,
+) -> Result<(), OperatorInstallError> {
+    if yes || std::io::stdin().is_terminal().not() {
+        return Ok(());
+    }
+
+    // Blocks the runtime until the user answers. No other task has work to do meanwhile, and the
+    // clients connect again if the server closed an idle connection.
+    match progress.suspend(|| Confirm::new(question).with_default(false).prompt()) {
+        Ok(true) => Ok(()),
+        Ok(false) | Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
+            Err(OperatorInstallError::Declined)
+        }
+        Err(error) => Err(OperatorInstallError::Prompt(error)),
+    }
+}
+
+/// Names the namespace and the kubecontext the operator is in, for messages to the user.
+fn location(namespace: &str, context: Option<&str>) -> String {
+    match context {
+        Some(context) => format!("namespace `{namespace}` of kubecontext `{context}`"),
+        None => format!("namespace `{namespace}`"),
+    }
+}
+
 /// What the user needs to know about a trial, printed once as soon as it starts.
 fn trial_details(trial: &Trial) -> String {
     format!(
@@ -148,23 +198,38 @@ fn trial_details(trial: &Trial) -> String {
     )
 }
 
+/// The `flag` that gives a command printed to the user the kubecontext of the run, so that the
+/// command does not use a different cluster if the kubecontext is not the current one. Empty if
+/// the kubecontext has no name.
+///
+/// The name is quoted for the shell, since a kubeconfig can give a kubecontext any name, also
+/// with spaces or shell syntax.
+fn context_flag(flag: &str, context: Option<&str>) -> String {
+    context
+        .map(|context| {
+            let context = shlex::try_quote(context).unwrap_or(context.into());
+            format!(" {flag} {context}")
+        })
+        .unwrap_or_default()
+}
+
 /// What the user needs to know after a successful installation, printed once.
 fn summary(version: &semver::Version, manifest: &Manifest, context: Option<&str>) -> String {
-    let namespace = manifest.operator_namespace();
-    let location = match context {
-        Some(context) => format!("namespace `{namespace}` of kubecontext `{context}`"),
-        None => format!("namespace `{namespace}`"),
-    };
-    let mut summary = format!("mirrord operator {version} is installed in {location}.\n\n");
+    let mut summary = format!(
+        "mirrord operator {version} is installed in {}.\n\n",
+        location(manifest.operator_namespace(), context)
+    );
 
+    let kube_context_arg = context_flag("--kube-context", context);
+    let context_arg = context_flag("--context", context);
     summary.push_str(&format!(
         "This is a default installation. For anything custom (namespace, tolerations, pull \
         secrets, OIDC, ...), manage it with the helm chart, which takes over this installation \
         and keeps its API key:\n\n  helm repo add metalbear {repo}\n  helm install {release} \
-        metalbear/{chart} --version {chart_version} \\\n    --set \
+        metalbear/{chart} --version {chart_version}{kube_context_arg} \\\n    --set \
         cloud.apiKey.key=\"{api_key}\"",
         chart_version = manifest.chart_version(),
-        api_key = manifest.api_key_lookup(),
+        api_key = manifest.api_key_lookup(&context_arg),
         repo = manifest::CHARTS_REPO_URL,
         release = manifest::RELEASE_NAME,
         chart = manifest::CHART_NAME,
