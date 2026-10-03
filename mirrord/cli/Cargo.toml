@@ -127,5 +127,9 @@ rcgen.workspace = true
 tempfile.workspace = true
 tower-test.workspace = true
 
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+portable-pty.workspace = true
+vt100.workspace = true
+
 [features]
 windows_build = []
