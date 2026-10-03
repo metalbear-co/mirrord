@@ -1,7 +1,7 @@
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use mirrord_config::feature::network::incoming::tls_delivery::{
-    LocalTlsDelivery, TlsDeliveryProtocol,
+    LocalTlsDelivery, TlsClientCertSource, TlsDeliveryProtocol,
 };
 use mirrord_tls_util::{
     DangerousNoVerifierServer, FromPemError, HasSubjectAlternateNames, ParsePemError,
@@ -124,10 +124,23 @@ impl LocalTlsSetup {
                 });
 
                 // Config verification guarantees the cert and the key come together.
-                let client_auth = config
-                    .client_cert
-                    .zip(config.client_key)
-                    .map(|(cert, key)| LocalClientAuth::Files { cert, key });
+                let client_auth = match config.client_cert_source {
+                    TlsClientCertSource::Local => config
+                        .client_cert
+                        .zip(config.client_key)
+                        .map(|(cert, key)| LocalClientAuth::Files { cert, key }),
+                    // In-target paths are only readable by the operator, which builds its
+                    // setup with `LocalTlsSetup::new` instead. Here the paths are on the
+                    // user's machine, where they most likely do not exist.
+                    TlsClientCertSource::Target => {
+                        tracing::warn!(
+                            "`tls_delivery.client_cert_source: target` only applies to preview \
+                             sessions, connecting to the local application without a client \
+                             certificate"
+                        );
+                        None
+                    }
+                };
 
                 Some(Arc::new(Self::new(
                     config.trust_roots,
