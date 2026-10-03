@@ -9,7 +9,7 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
     ffi::OsStr,
-    path::Path,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
@@ -51,7 +51,7 @@ use mirrord_operator::{
             PreviewSessionPhase, PreviewSessionSpec, PreviewTlsClientAuth, PreviewTlsDelivery,
             view::{PreviewEnv, PreviewMessageKind},
         },
-        session::{PodSetTarget, SessionTarget},
+        session::{KubeResourceTarget, PodSetTarget, SessionTarget},
     },
     types::OPERATOR_OWNERSHIP_LABEL,
 };
@@ -61,14 +61,15 @@ use tracing::Level;
 
 use crate::{
     config::{
-        PreviewArgs, PreviewCommand, PreviewCommonArgs, PreviewLogsArgs, PreviewStartArgs,
-        PreviewStatusArgs, PreviewStopArgs,
+        PreviewArgs, PreviewCommand, PreviewCommonArgs, PreviewDiffArgs, PreviewLogsArgs,
+        PreviewStartArgs, PreviewStatusArgs, PreviewStopArgs,
     },
     data::UserData,
     error::{CliError, CliResult, format_preview_logs},
 };
 
 mod multicluster;
+pub(crate) mod resources;
 
 /// Handle commands related to preview environments: `mirrord preview ...`
 pub(crate) async fn preview_command(
@@ -87,6 +88,7 @@ pub(crate) async fn preview_command(
         }
         PreviewCommand::Stop(stop_args) => preview_stop(&common, stop_args, watch, user_data).await,
         PreviewCommand::Logs(logs_args) => preview_logs(&common, logs_args, watch, user_data).await,
+        PreviewCommand::Diff(diff_args) => preview_diff(&common, diff_args, watch, user_data).await,
     }
 }
 
@@ -113,6 +115,14 @@ async fn preview_start(
 
     let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
 
+    // Read before contacting the cluster, so a broken manifest fails without side effects.
+    let resource_paths = resource_paths(args.resources, &mut layer_config);
+    let mut supplied_objects = if resource_paths.is_empty() {
+        None
+    } else {
+        Some(load_manifests(&resource_paths, &progress)?)
+    };
+
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
         ExecutionKind::Preview,
@@ -124,6 +134,10 @@ async fn preview_start(
     let (operator_api, api) =
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
     operator_api.check_feature_support(&layer_config, false)?;
+
+    if supplied_objects.is_some() {
+        require_spec_resources_support(&operator_api.operator().spec)?;
+    }
 
     let is_cronjob_target = matches!(layer_config.target.path, Some(Target::CronJob(_)));
     if is_cronjob_target {
@@ -222,6 +236,46 @@ async fn preview_start(
     )
     .await
     .inspect_err(|_| subtask.failure(None))?;
+
+    // Planned before an existing session is replaced. `plan` dry-runs the manifests and rejects
+    // a template that would widen the preview's access, so either failure leaves the running
+    // preview alone.
+    if let Some(objects) = supplied_objects.as_mut() {
+        resources::resolve_workload_refs(
+            operator_api.client(),
+            objects,
+            resources_target(&session_target).inspect_err(|_| subtask.failure(None))?,
+            target_namespace(&operator_api, &layer_config),
+        )
+        .await
+        .inspect_err(|_| subtask.failure(None))?;
+    }
+    let resource_plan = match &supplied_objects {
+        Some(objects) => {
+            let plan = resources::plan(
+                operator_api.client(),
+                objects,
+                resources::sources_label(&resource_paths),
+                resources_target(&session_target)?,
+                target_namespace(&operator_api, &layer_config),
+            )
+            .await
+            .inspect_err(|_| subtask.failure(None))?;
+            for message in resources::summary(&plan) {
+                subtask.info(&message);
+            }
+            for note in &plan.notes {
+                subtask.warning(note);
+            }
+            Some(plan)
+        }
+        None => None,
+    };
+    let spec_resources = resource_plan
+        .as_ref()
+        .map(|plan| plan.spec_resources(&mut secret_values))
+        .transpose()?
+        .flatten();
 
     // Check for an existing session with the same key+target.
     let key = layer_config.key.as_str();
@@ -345,6 +399,7 @@ async fn preview_start(
         secret_mounts,
         idle,
         cronjob,
+        spec_resources,
     };
 
     let annotations = operator_api
@@ -1064,6 +1119,158 @@ async fn preview_stop(
     Ok(())
 }
 
+/// Handle `mirrord preview diff` command.
+///
+/// Runs the `--resource` checks of `preview start` (scope, comparison with the live cluster,
+/// server-side dry runs) and prints how each object in scope differs. Creates nothing.
+#[tracing::instrument(level = Level::TRACE, ret, skip_all)]
+async fn preview_diff(
+    common: &PreviewCommonArgs,
+    args: PreviewDiffArgs,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
+    let mut progress = ProgressTracker::from_env("mirrord preview diff");
+
+    let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
+
+    let resource_paths = resource_paths(args.resources, &mut layer_config);
+    if resource_paths.is_empty() {
+        return Err(CliError::PreviewResourcesRequired);
+    }
+    let mut objects = load_manifests(&resource_paths, &progress)?;
+
+    let mut analytics = AnalyticsReporter::only_error(
+        layer_config.telemetry,
+        ExecutionKind::Preview,
+        watch,
+        user_data.machine_id(),
+        Some(layer_config.key.as_str().to_owned()),
+    );
+
+    let (operator_api, _) =
+        create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
+    // Nothing is sent to the operator, so an operator without `PreviewSpecResources` can still
+    // show what would change.
+    reject_management_only(&operator_api.operator().spec)?;
+
+    let mut subtask = progress.subtask("comparing manifests with the cluster");
+
+    let config_target = layer_config.target.path.as_ref().ok_or_else(|| {
+        subtask.failure(None);
+        CliError::PreviewTargetRequired
+    })?;
+
+    let session_target = resolve_config_target(
+        config_target,
+        operator_api.client(),
+        layer_config.target.namespace.as_deref(),
+    )
+    .await
+    .inspect_err(|_| subtask.failure(None))?;
+    let session_target =
+        resources_target(&session_target).inspect_err(|_| subtask.failure(None))?;
+
+    resources::resolve_workload_refs(
+        operator_api.client(),
+        &mut objects,
+        session_target,
+        target_namespace(&operator_api, &layer_config),
+    )
+    .await
+    .inspect_err(|_| subtask.failure(None))?;
+
+    let plan = resources::plan(
+        operator_api.client(),
+        &objects,
+        resources::sources_label(&resource_paths),
+        session_target,
+        target_namespace(&operator_api, &layer_config),
+    )
+    .await
+    .inspect_err(|_| subtask.failure(None))?;
+
+    for note in &plan.notes {
+        subtask.warning(note);
+    }
+    subtask.success(Some(
+        "compared manifests with the cluster, nothing was created",
+    ));
+    progress.success(None);
+
+    print!("{}", resources::render_diff(&plan));
+
+    Ok(())
+}
+
+/// The manifest paths for `--resource`. Paths on the command line replace the config's list
+/// instead of adding to it, so a CI job can point one shared config at the manifests of the
+/// change it is previewing.
+fn resource_paths(from_args: Vec<PathBuf>, config: &mut LayerConfig) -> Vec<PathBuf> {
+    let from_config = std::mem::take(&mut config.feature.preview.spec_resources);
+    if from_args.is_empty() {
+        from_config
+    } else {
+        from_args
+    }
+}
+
+fn load_manifests(
+    paths: &[PathBuf],
+    progress: &ProgressTracker,
+) -> CliResult<Vec<resources::SuppliedObject>> {
+    let mut subtask = progress.subtask("reading manifests");
+    let objects = resources::load(paths).inspect_err(|_| subtask.failure(None))?;
+    subtask.success(Some(&format!(
+        "read {} object{} from {}",
+        objects.len(),
+        if objects.len() == 1 { "" } else { "s" },
+        resources::sources_label(paths),
+    )));
+    Ok(objects)
+}
+
+/// `--resource` compares against and builds from objects in the target's cluster, which the
+/// CLI reaches with the user's own credentials. A management-only operator lives in a cluster
+/// without the target, and an operator without `PreviewSpecResources` would drop the field
+/// the files travel in and silently run the live spec: both are refused up front.
+fn require_spec_resources_support(spec: &MirrordOperatorSpec) -> CliResult<()> {
+    spec.require_feature(NewOperatorFeature::PreviewSpecResources)?;
+    reject_management_only(spec)
+}
+
+fn reject_management_only(spec: &MirrordOperatorSpec) -> CliResult<()> {
+    if spec.operator_namespace.is_some() {
+        return Err(CliError::PreviewResourcesManagementOnly);
+    }
+    Ok(())
+}
+
+/// `--resource` compares the files with one workload's live pod template, and a label target
+/// matches pods of any number of workloads.
+fn resources_target(target: &SessionTarget) -> CliResult<&KubeResourceTarget> {
+    match target {
+        SessionTarget::KubeResource(target) => Ok(target),
+        SessionTarget::PodSet(_) => Err(CliError::UnsupportedTargetConfig(format!(
+            "`--resource` does not support label target `{}`; target a single workload, or leave \
+             out `--resource`",
+            target.display_name()
+        ))),
+    }
+}
+
+/// The target's namespace: the configured one, or the kubeconfig default.
+fn target_namespace<'a>(
+    operator_api: &'a OperatorApi<NoClientCert>,
+    config: &'a LayerConfig,
+) -> &'a str {
+    config
+        .target
+        .namespace
+        .as_deref()
+        .unwrap_or(operator_api.client().default_namespace())
+}
+
 /// Resolves a [`Target`] to a [`SessionTarget`] by fetching the target from the operator's
 /// GET TargetCrd API. The operator validates the target exists and resolves the container if
 /// not specified. Works for both single-cluster and multi-cluster.
@@ -1455,6 +1662,33 @@ mod tests {
             "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
         }))
         .unwrap()
+    }
+
+    /// An operator without `PreviewSpecResources` would have the API server prune
+    /// `spec.specResources` from the session and run the live spec, silently ignoring the
+    /// user's files. The CLI refuses instead.
+    #[test]
+    fn old_operator_refuses_resource_instead_of_ignoring_it() {
+        let error = require_spec_resources_support(&operator(false)).unwrap_err();
+        assert!(
+            matches!(&error, CliError::FeatureNotSupportedInOperatorError { feature, .. } if *feature == NewOperatorFeature::PreviewSpecResources.to_string()),
+            "{error}"
+        );
+
+        let mut supported: MirrordOperatorSpec = serde_json::from_value(serde_json::json!({
+            "operator_version": "3.213.0",
+            "default_namespace": "default",
+            "supported_features": [NewOperatorFeature::PreviewEnv, NewOperatorFeature::PreviewSpecResources],
+            "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
+        }))
+        .unwrap();
+        assert!(require_spec_resources_support(&supported).is_ok());
+
+        supported.operator_namespace = Some("mirrord".to_owned());
+        assert!(matches!(
+            require_spec_resources_support(&supported),
+            Err(CliError::PreviewResourcesManagementOnly)
+        ));
     }
 
     #[test]

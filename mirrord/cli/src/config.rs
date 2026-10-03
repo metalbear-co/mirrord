@@ -405,7 +405,7 @@ impl Commands {
                 PreviewCommand::Status(args) => args.all_namespaces,
                 PreviewCommand::Stop(args) => args.all_namespaces,
                 PreviewCommand::Logs(args) => args.all_namespaces,
-                PreviewCommand::Start(_) => false,
+                PreviewCommand::Start(_) | PreviewCommand::Diff(_) => false,
             },
             Self::Session(args) => args.common.all_namespaces,
             Self::Kill(args) => args.common.all_namespaces,
@@ -1516,6 +1516,12 @@ pub(super) enum PreviewCommand {
     Stop(PreviewStopArgs),
     /// Print the output of preview environments' pods.
     Logs(PreviewLogsArgs),
+    /// Show how the manifests passed with `--resource` differ from the live cluster.
+    ///
+    /// Runs the same checks as `mirrord preview start --resource` (which objects the target's
+    /// pod uses, how each compares with the live one, and whether the cluster accepts the
+    /// changed ones) and prints a diff per object. Creates nothing.
+    Diff(PreviewDiffArgs),
 }
 
 /// Arguments shared across all `mirrord preview` subcommands.
@@ -1618,6 +1624,15 @@ pub(super) struct PreviewStartArgs {
     /// nothing.
     #[arg(long)]
     pub force: bool,
+
+    /// Kubernetes manifest file or directory to build the preview from, instead of the
+    /// target's live spec. Repeat it to pass several.
+    ///
+    /// Only the target and the ConfigMaps and Secrets its pod uses are taken from the files,
+    /// and only where they differ from what is live. Live objects are never changed: the
+    /// preview gets its own copies. Replaces `feature.preview.spec_resources` from the config.
+    #[arg(long = "resource", value_name = "PATH", value_hint = ValueHint::AnyPath)]
+    pub resources: Vec<PathBuf>,
 }
 
 impl PreviewStartArgs {
@@ -1661,6 +1676,49 @@ impl PreviewStartArgs {
             envs.insert(
                 "MIRRORD_PREVIEW_CREATION_TIMEOUT_SECS".as_ref(),
                 Cow::Owned(timeout),
+            );
+        }
+
+        envs
+    }
+}
+
+/// Arguments for `mirrord preview diff` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewDiffArgs {
+    /// Target whose live spec the manifests are compared with. Same formats as
+    /// `mirrord preview start --target`.
+    #[arg(short = 't', long)]
+    pub target: Option<String>,
+
+    /// Namespace of the target.
+    #[arg(short = 'n', long)]
+    pub target_namespace: Option<String>,
+
+    /// Kubernetes manifest file or directory to compare. Repeat it to pass several. Replaces
+    /// `feature.preview.spec_resources` from the config.
+    #[arg(long = "resource", value_name = "PATH", value_hint = ValueHint::AnyPath)]
+    pub resources: Vec<PathBuf>,
+}
+
+impl PreviewDiffArgs {
+    /// Convert CLI arguments to environment variable overrides for config resolution.
+    pub fn as_env_vars<'a>(
+        &'a self,
+        common: &'a PreviewCommonArgs,
+    ) -> HashMap<&'static OsStr, Cow<'a, OsStr>> {
+        let mut envs = common.as_env_vars();
+
+        if let Some(target) = &self.target {
+            envs.insert(
+                "MIRRORD_IMPERSONATED_TARGET".as_ref(),
+                Cow::Borrowed(target.as_ref()),
+            );
+        }
+        if let Some(namespace) = &self.target_namespace {
+            envs.insert(
+                "MIRRORD_TARGET_NAMESPACE".as_ref(),
+                Cow::Borrowed(namespace.as_ref()),
             );
         }
 
