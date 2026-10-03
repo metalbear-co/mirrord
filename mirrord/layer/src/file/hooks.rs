@@ -188,13 +188,16 @@ pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> u
 /// This allows copying files when the input/output fds are on different
 /// machines.
 ///
-/// Returns (bytes_written, new_offset) on success.
+/// Returns the number of bytes written on success.
+///
+/// When `offset` is `None`, `read()` moves the file position while `write()` does not
+/// guarantee all read bytes are written. Roll back the file position by calling `lseek`.
 unsafe fn sendfile_impl(
     in_fd: RawFd,
     out_fd: RawFd,
     offset: Option<off_t>,
     count: size_t,
-) -> Option<(ssize_t, off_t)> {
+) -> Option<ssize_t> {
     let mut buffer = vec![0u8; count];
 
     let bytes_read = unsafe {
@@ -217,11 +220,14 @@ unsafe fn sendfile_impl(
         )
     };
 
-    if written < 0 {
-        return None;
+    let unsent = bytes_read - written.max(0);
+    if offset.is_none() && unsent > 0 {
+        let errno = Errno::last_raw();
+        unsafe { libc::lseek(in_fd, -(unsent as off_t), libc::SEEK_CUR) };
+        Errno::set_raw(errno);
     }
 
-    Some((written, offset.unwrap_or(0) + bytes_read as off_t))
+    (written >= 0).then_some(written)
 }
 
 /// Hook for macos's [`libc::sendfile`].
@@ -241,7 +247,7 @@ pub(super) unsafe extern "C" fn sendfile_detour(
         };
 
         match sendfile_impl(fd, s, Some(offset), *count as usize) {
-            Some((written, _)) => {
+            Some(written) => {
                 *count = written as off_t;
                 0
             }
@@ -263,20 +269,17 @@ pub(super) unsafe extern "C" fn sendfile_detour(
     count: size_t,
 ) -> ssize_t {
     unsafe {
-        let offset_val = if offset.is_null() {
-            None
-        } else {
-            Some(*offset)
-        };
+        let offset = offset.as_mut();
 
-        sendfile_impl(in_fd, out_fd, offset_val, count)
-            .map(|(written, new_offset)| {
-                if !offset.is_null() {
-                    *offset = new_offset;
+        match sendfile_impl(in_fd, out_fd, offset.as_deref().copied(), count) {
+            Some(written) => {
+                if let Some(offset) = offset {
+                    *offset += written as off_t;
                 }
                 written
-            })
-            .unwrap_or(-1)
+            }
+            None => -1,
+        }
     }
 }
 
