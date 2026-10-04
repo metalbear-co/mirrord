@@ -89,8 +89,9 @@ pub const REMOTE_ENVIRONMENT: CheckedEnv<String> = CheckedEnv::new("MIRRORD_REMO
 /// access entry, and RBAC must grant that identity `proxy` on `sessionassignments` and `get` on
 /// `sessiondataplanes` in `operator.metalbear.co`.
 ///
-/// Tokens are signed for the region in `AWS_REGION` or `AWS_DEFAULT_REGION`, or else the one in
-/// this endpoint's hostname.
+/// Tokens are signed for the cluster's region, read from this endpoint's hostname. When it isn't
+/// an EKS endpoint hostname (e.g. a proxy in front of the API server), `AWS_REGION` or
+/// `AWS_DEFAULT_REGION` must name the cluster's region.
 ///
 /// Requires [`OPERATOR_EKS_CLUSTER_NAME`] and [`OPERATOR_API_CA_DATA`].
 pub const OPERATOR_API_URL: CheckedEnv<String> = CheckedEnv::new("MIRRORD_OPERATOR_API_URL");

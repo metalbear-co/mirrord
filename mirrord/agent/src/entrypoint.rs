@@ -1259,26 +1259,34 @@ async fn start_control_plane(
     )?)
 }
 
-/// AWS region EKS tokens are signed for: `AWS_REGION`, then `AWS_DEFAULT_REGION`, then the region
-/// in an EKS API server hostname such as `ABC123.gr7.us-east-1.eks.amazonaws.com`.
+/// AWS region EKS tokens are signed for: the cluster's region, read from an EKS API server
+/// hostname such as `ABC123.gr7.us-east-1.eks.amazonaws.com`, then `AWS_REGION`, then
+/// `AWS_DEFAULT_REGION`.
+///
+/// The hostname comes first because the token is validated by the cluster, and the task may run
+/// in another region. The variables cover an API server reached under another name, e.g. through
+/// a proxy.
 fn eks_region(api_url: &str) -> Option<String> {
-    ["AWS_REGION", "AWS_DEFAULT_REGION"]
-        .into_iter()
-        .find_map(|name| std::env::var(name).ok().filter(|region| !region.is_empty()))
+    api_url
+        .parse::<http::Uri>()
+        .ok()
+        .and_then(|uri| region_from_eks_host(uri.host()?))
         .or_else(|| {
-            let uri = api_url.parse::<http::Uri>().ok()?;
-            region_from_eks_host(uri.host()?)
+            ["AWS_REGION", "AWS_DEFAULT_REGION"]
+                .into_iter()
+                .find_map(|name| std::env::var(name).ok().filter(|region| !region.is_empty()))
         })
 }
 
-/// The label before `eks` in an EKS API server hostname.
+/// The region of an EKS API server hostname: the label right before `eks.amazonaws.com`, or
+/// `eks.amazonaws.com.cn` in China.
 fn region_from_eks_host(host: &str) -> Option<String> {
-    let labels = host.split('.').collect::<Vec<_>>();
-    let eks = labels.iter().position(|label| *label == "eks")?;
-    labels
-        .get(eks.checked_sub(1)?)
-        .filter(|region| !region.is_empty())
-        .map(|region| (*region).to_owned())
+    let host = host.to_ascii_lowercase();
+    let prefix = [".eks.amazonaws.com", ".eks.amazonaws.com.cn"]
+        .into_iter()
+        .find_map(|suffix| host.strip_suffix(suffix))?;
+    let (_, region) = prefix.rsplit_once('.')?;
+    (!region.is_empty()).then(|| region.to_owned())
 }
 
 /// The remote workload-companion version of `start_agent` used in Serverless.
@@ -1620,7 +1628,13 @@ mod tests {
             region_from_eks_host("ABC123.yl4.cn-north-1.eks.amazonaws.com.cn").as_deref(),
             Some("cn-north-1")
         );
+        assert_eq!(
+            region_from_eks_host("E1F2A3B4C5.GR7.EU-WEST-2.EKS.AMAZONAWS.COM").as_deref(),
+            Some("eu-west-2")
+        );
         assert_eq!(region_from_eks_host("kubernetes.example.com"), None);
+        assert_eq!(region_from_eks_host("api.eks.example.com"), None);
+        assert_eq!(region_from_eks_host("us-east-1.eks.amazonaws.com"), None);
         assert_eq!(region_from_eks_host("eks.amazonaws.com"), None);
     }
 }
