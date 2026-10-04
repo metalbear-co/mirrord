@@ -1,7 +1,7 @@
 use base64::prelude::*;
 use libc::{c_char, c_int};
 #[cfg(not(target_os = "macos"))]
-use mirrord_layer_core::hooks::ProbedCall;
+use mirrord_layer_core::{envp::Envp, hooks::ProbedCall};
 use mirrord_layer_lib::detour::{Bypass, Detour};
 #[cfg(not(target_os = "macos"))]
 use mirrord_layer_macro::hook_fn;
@@ -85,8 +85,9 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
 
 /// Adds socket metadata for the new image to Linux `execve`'s environment.
 ///
-/// In glibc's `posix_spawn`, this runs on the small stack of the `vfork` child (about 36 KiB), so
-/// keep large values off the stack.
+/// [`Envp`] reuses the caller's strings and allocates only the new entry and the pointer list,
+/// which leak once per spawn. In glibc's `posix_spawn`, this runs on the small stack of the `vfork`
+/// child (about 36 KiB), so keep large values off the stack.
 #[cfg(not(target_os = "macos"))]
 fn on_execve(call: &ProbedCall<'_>) {
     const ENVP: u32 = 2;
@@ -96,14 +97,9 @@ fn on_execve(call: &ProbedCall<'_>) {
     };
 
     // SAFETY: `execve` requires `envp` to be null or a null-terminated array of C strings.
-    let envp = unsafe {
-        with_env(
-            call.arg(ENVP) as *const *const c_char,
-            SHARED_SOCKETS_ENV_VAR,
-            &encoded,
-        )
-    };
-    if let Some(envp) = envp {
+    let mut envp = unsafe { Envp::from_raw(call.arg(ENVP) as *const *const c_char) };
+    envp.set(SHARED_SOCKETS_ENV_VAR, encoded.as_bytes());
+    if let Some(envp) = envp.into_raw() {
         call.set_arg(ENVP, envp as usize);
     }
 }
