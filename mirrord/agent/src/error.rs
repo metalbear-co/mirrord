@@ -89,8 +89,8 @@ pub(crate) enum AgentError {
     ConflictingSessionsManagerEndpoints,
 
     #[error(
-        "no AWS region to sign the EKS token for: set AWS_REGION, or use the cluster's EKS \
-         endpoint in MIRRORD_OPERATOR_API_URL"
+        "no AWS region to sign the EKS token for: MIRRORD_OPERATOR_API_URL is not an EKS \
+         endpoint hostname, so set AWS_REGION to the cluster's region"
     )]
     MissingOperatorRegion,
 
