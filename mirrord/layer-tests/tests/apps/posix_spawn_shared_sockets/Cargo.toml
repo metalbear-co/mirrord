@@ -4,5 +4,8 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 
+[dependencies]
+libc.workspace = true
+
 [lints]
 workspace = true
