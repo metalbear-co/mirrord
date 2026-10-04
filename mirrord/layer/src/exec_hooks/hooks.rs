@@ -1,7 +1,7 @@
 use base64::prelude::*;
 use libc::{c_char, c_int};
 #[cfg(not(target_os = "macos"))]
-use mirrord_layer_core::{envp::Envp, hooks::ProbedCall};
+use mirrord_layer_core::hooks::ProbedCall;
 use mirrord_layer_lib::detour::{Bypass, Detour};
 #[cfg(not(target_os = "macos"))]
 use mirrord_layer_macro::hook_fn;
@@ -83,14 +83,10 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
     }
 }
 
-/// Replaces Linux `execve`'s environment with one that also carries socket metadata for the
-/// new image.
+/// Adds socket metadata for the new image to Linux `execve`'s environment.
 ///
-/// The environment must stay valid until `execve` returns or replaces the image, and a probe
-/// cannot free it after the call. In glibc’s `posix_spawn`, the `vfork` child shares the parent’s
-/// memory, so the allocation stays in the parent on each spawn. To keep that leak small, [`Envp`]
-/// reuses the strings in `envp`, which remain valid for the call, and allocates only the pointer
-/// list and `MIRRORD_SHARED_SOCKETS` string.
+/// In glibc's `posix_spawn`, this runs on the small stack of the `vfork` child (about 36 KiB), so
+/// keep large values off the stack.
 #[cfg(not(target_os = "macos"))]
 fn on_execve(call: &ProbedCall<'_>) {
     const ENVP: u32 = 2;
@@ -100,10 +96,15 @@ fn on_execve(call: &ProbedCall<'_>) {
     };
 
     // SAFETY: `execve` requires `envp` to be null or a null-terminated array of C strings.
-    let mut envp = unsafe { Envp::from_raw(call.arg(ENVP) as *const *const c_char) };
-    envp.set(SHARED_SOCKETS_ENV_VAR, encoded.as_bytes());
-    if let Some(prepared) = envp.into_raw() {
-        call.set_arg(ENVP, prepared as usize);
+    let envp = unsafe {
+        with_env(
+            call.arg(ENVP) as *const *const c_char,
+            SHARED_SOCKETS_ENV_VAR,
+            &encoded,
+        )
+    };
+    if let Some(envp) = envp {
+        call.set_arg(ENVP, envp as usize);
     }
 }
 
