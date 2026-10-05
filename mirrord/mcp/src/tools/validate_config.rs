@@ -10,7 +10,7 @@
 //! that failed to deserialize, because it reports every problem at once, each with its location
 //! and, where the schema lists them, the allowed values, where serde stops at the first error.
 
-use std::{ops::Not, path::Path, str::FromStr};
+use std::{collections::HashSet, fmt, ops::Not, path::Path, str::FromStr};
 
 use jsonschema::{
     ValidationError,
@@ -26,7 +26,10 @@ use mirrord_config::{
 };
 use mirrord_up::{LAYER_CONFIG_PATHS, ServiceMode, UpConfig, UpError};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{DeserializeOwned, DeserializeSeed, MapAccess, SeqAccess, Visitor},
+};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -111,29 +114,10 @@ pub fn validate_config(
             });
             match parsed {
                 Ok((rendered, value)) => {
-                    let mut issues = check_layer_config(&value, context)?;
-                    // Read the way `mirrord exec` reads it, which rejects a field given twice
-                    // where the `Value` above silently keeps the last one.
-                    if issues.is_empty()
-                        && let Err(error) = serde_path_to_error::deserialize::<_, LayerFileConfig>(
-                            &mut serde_json::Deserializer::from_str(&rendered),
-                        )
-                    {
-                        let mut path = pointer_from_serde_path(error.path());
-                        let message = error.into_inner().to_string();
-                        // serde reports a repeated field at the object holding it.
-                        if let Some((field, _)) = message
-                            .strip_prefix("duplicate field `")
-                            .and_then(|rest| rest.split_once('`'))
-                        {
-                            path = format!("{path}/{}", escape_pointer_token(field));
-                        }
-                        issues.push(ConfigIssue {
-                            path,
-                            message,
-                            allowed_values: None,
-                        });
-                    }
+                    // The `Value` keeps the last of a key given twice, which `mirrord exec`
+                    // rejects for the fields of the config.
+                    let mut issues = duplicate_keys(&rendered);
+                    issues.extend(check_layer_config(&value, context)?);
                     issues
                 }
                 Err(message) => vec![file_issue(message)],
@@ -306,6 +290,100 @@ fn up_issue(error: UpError) -> ConfigIssue {
         message: error.to_string(),
         allowed_values: None,
     }
+}
+
+/// A key given twice in an object of a JSON document, at the second one.
+///
+/// Read from the text rather than from the config types, so it's found in any object, including
+/// those of options with several forms, which serde would only report as matching none of them.
+fn duplicate_keys(json: &str) -> Vec<ConfigIssue> {
+    struct DuplicateKeys<'a> {
+        path: String,
+        issues: &'a mut Vec<ConfigIssue>,
+    }
+
+    impl<'de> DeserializeSeed<'de> for DuplicateKeys<'_> {
+        type Value = ();
+
+        fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+            deserializer.deserialize_any(self)
+        }
+    }
+
+    impl<'de> Visitor<'de> for DuplicateKeys<'_> {
+        type Value = ();
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("any JSON value")
+        }
+
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
+            let mut keys = HashSet::new();
+            while let Some(key) = map.next_key::<String>()? {
+                let path = format!("{}/{}", self.path, escape_pointer_token(&key));
+                if keys.contains(&key) {
+                    self.issues.push(ConfigIssue {
+                        path: path.clone(),
+                        message: format!("duplicate field `{key}`"),
+                        allowed_values: None,
+                    });
+                }
+                keys.insert(key);
+                map.next_value_seed(DuplicateKeys {
+                    path,
+                    issues: &mut *self.issues,
+                })?;
+            }
+            Ok(())
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+            let mut index = 0;
+            while seq
+                .next_element_seed(DuplicateKeys {
+                    path: format!("{}/{index}", self.path),
+                    issues: &mut *self.issues,
+                })?
+                .is_some()
+            {
+                index += 1;
+            }
+            Ok(())
+        }
+
+        fn visit_bool<E>(self, _: bool) -> Result<(), E> {
+            Ok(())
+        }
+
+        fn visit_i64<E>(self, _: i64) -> Result<(), E> {
+            Ok(())
+        }
+
+        fn visit_u64<E>(self, _: u64) -> Result<(), E> {
+            Ok(())
+        }
+
+        fn visit_f64<E>(self, _: f64) -> Result<(), E> {
+            Ok(())
+        }
+
+        fn visit_str<E>(self, _: &str) -> Result<(), E> {
+            Ok(())
+        }
+
+        fn visit_unit<E>(self) -> Result<(), E> {
+            Ok(())
+        }
+    }
+
+    let mut issues = Vec::new();
+    // The document parsed as a `Value` before, so reading it again doesn't fail.
+    let _ = DuplicateKeys {
+        path: String::new(),
+        issues: &mut issues,
+    }
+    .deserialize(&mut serde_json::Deserializer::from_str(json));
+    issues
 }
 
 /// An issue with the file as a whole: a template or syntax error that prevented reading it.
@@ -1112,6 +1190,27 @@ services:
                 .contains(&format!("duplicate field `{field}`")),
             "{}",
             issue.message
+        );
+    }
+
+    /// A repeated field is found inside an option with several forms too, and next to other
+    /// issues.
+    #[test]
+    fn duplicate_field_next_to_other_issues() {
+        let output = validate(
+            ConfigFormat::MirrordJson,
+            r#"{ "feature": { "fs": { "mode": "read", "mode": "write" }, "network": { "incoming": { "mode": "foo" } } } }"#,
+        );
+        let paths: Vec<&str> = output
+            .issues
+            .iter()
+            .map(|issue| issue.path.as_str())
+            .collect();
+        assert!(paths.contains(&"/feature/fs/mode"), "{:?}", output.issues);
+        assert!(
+            paths.contains(&"/feature/network/incoming/mode"),
+            "{:?}",
+            output.issues
         );
     }
 
