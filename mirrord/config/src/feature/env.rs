@@ -35,7 +35,6 @@ pub const MIRRORD_OVERRIDE_ENV_FILE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_FILE"
 ///   "feature": {
 ///     "env": {
 ///       "include": "DATABASE_USER;PUBLIC_ENV;MY_APP_*",
-///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
 ///       "override": {
 ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
 ///         "LOCAL_BEAR": "panda"
