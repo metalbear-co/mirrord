@@ -348,6 +348,18 @@ fn describe(issues: &[ConfigIssue]) -> String {
         .join("; ")
 }
 
+/// Where `mirrord-up.yaml` service fields go in the `mirrord.json` that `ServiceConfig::assemble`
+/// builds for the service. Options with no service field of their own go in its `config_patch`.
+const SERVICE_FIELDS: &[(&str, &[&str])] = &[
+    ("target", &["target"]),
+    ("context", &["kube_context"]),
+    ("env", &["feature", "env"]),
+    (
+        "http_filter",
+        &["feature", "network", "incoming", "http_filter"],
+    ),
+];
+
 pub fn generate_config(
     GenerateConfigArgs {
         format,
@@ -511,6 +523,87 @@ fn check_filter(
     }
 }
 
+/// Builds a `mirrord-up.yaml`, along with pointers to the options in it that need the operator.
+fn up_config(
+    common: Option<CommonOptions>,
+    services: Vec<ServiceOptions>,
+) -> Result<(Value, Vec<String>), GenerateConfigError> {
+    if services.is_empty() {
+        return Err(GenerateConfigError::NoServices);
+    }
+
+    let mut config = Map::new();
+    if let Some(CommonOptions { kube_context }) = common {
+        let mut common = Map::new();
+        set(&mut common, &["context"], kube_context);
+        config.insert("common".to_owned(), common.into());
+    }
+
+    let mut requires_operator = Vec::new();
+    let mut up_services = Map::new();
+    for ServiceOptions {
+        name,
+        run,
+        mode,
+        config,
+    } in services
+    {
+        let config = config.unwrap_or_default();
+        let incoming = config.incoming.as_ref();
+        if name.is_empty() {
+            return Err(GenerateConfigError::EmptyServiceName);
+        }
+        if run.command.is_empty() {
+            return Err(GenerateConfigError::EmptyCommand(name));
+        }
+        if incoming.is_some_and(|incoming| incoming.mode.is_some()) {
+            return Err(GenerateConfigError::IncomingModeInService(name));
+        }
+        if mode == Some(ServiceMode::Replace)
+            && incoming.is_some_and(|incoming| incoming.http_filter.is_some())
+        {
+            return Err(GenerateConfigError::HttpFilterWithReplace(name));
+        }
+
+        let service_pointer = format!("/services/{}", escape_pointer_token(&name));
+        let (mut patch, patch_requires_operator) = layer_config(config)?;
+
+        let mut service = Map::new();
+        for (field, layer_path) in SERVICE_FIELDS {
+            if let Some(value) = take(&mut patch, layer_path) {
+                service.insert((*field).to_owned(), value);
+            }
+        }
+        requires_operator.extend(patch_requires_operator.into_iter().map(|pointer| {
+            let moved = SERVICE_FIELDS
+                .iter()
+                .find(|(_, layer_path)| pointer == format!("/{}", layer_path.join("/")));
+            match moved {
+                Some((field, _)) => format!("{service_pointer}/{field}"),
+                None => format!("{service_pointer}/config_patch{pointer}"),
+            }
+        }));
+        if patch.is_empty().not() {
+            service.insert("config_patch".to_owned(), patch.into());
+        }
+        if let Some(mode) = mode {
+            if mode == ServiceMode::Replace {
+                requires_operator.push(format!("{service_pointer}/default_mode"));
+            }
+            service.insert("default_mode".to_owned(), json!(mode));
+        }
+        service.insert("run".to_owned(), json!(run));
+
+        if up_services.insert(name.clone(), service.into()).is_some() {
+            return Err(GenerateConfigError::DuplicateService(name));
+        }
+    }
+    config.insert("services".to_owned(), up_services.into());
+    requires_operator.sort();
+
+    Ok((config.into(), requires_operator))
+}
+
 /// Sets `value` at `path` in `config`, creating the objects on the way, unless it is `None`.
 fn set(config: &mut Map<String, Value>, path: &[&str], value: Option<impl Serialize>) {
     let Some(value) = value else {
@@ -527,5 +620,21 @@ fn set(config: &mut Map<String, Value>, path: &[&str], value: Option<impl Serial
         };
     }
     object.insert((*last).to_owned(), json!(value));
+}
+
+/// Removes the value at `path` from `config`, along with the objects it leaves empty.
+fn take(config: &mut Map<String, Value>, path: &[&str]) -> Option<Value> {
+    let (first, rest) = path.split_first()?;
+    if rest.is_empty() {
+        return config.remove(*first);
+    }
+    let Value::Object(object) = config.get_mut(*first)? else {
+        return None;
+    };
+    let value = take(object, rest);
+    if object.is_empty() {
+        config.remove(*first);
+    }
+    value
 }
 
