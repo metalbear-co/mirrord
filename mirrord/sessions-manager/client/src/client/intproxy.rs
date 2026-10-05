@@ -13,7 +13,7 @@ use crate::{
     control_plane::subscriber::ControlPlaneSubscriber,
     error::SessionsManagerClientError,
     retry::{RetryBudget, with_deadline},
-    transport::SessionsManagerTransport,
+    transport::{DirectTransport, SessionsManagerTransport},
 };
 
 /// Describes the sessions-manager control-plane subscription an intproxy opens.
@@ -31,7 +31,7 @@ pub struct SessionsManagerConnectInfo {
 }
 
 /// Connects an intproxy to the data plane assigned by sessions-manager.
-pub struct IntproxyClient<T> {
+pub struct IntproxyClient<T = DirectTransport> {
     scope: ServiceScope,
     /// The connection id isolates this client's allocation from other intproxies in the user
     /// session while staying stable across the control-plane subscriber's SSE reconnects.
@@ -40,8 +40,16 @@ pub struct IntproxyClient<T> {
     transport: T,
 }
 
-impl<T: SessionsManagerTransport> IntproxyClient<T> {
+impl IntproxyClient<DirectTransport> {
     pub fn new(
+        connect_info: SessionsManagerConnectInfo,
+    ) -> Result<Self, SessionsManagerClientError> {
+        Self::with_transport(connect_info, DirectTransport::from_env()?)
+    }
+}
+
+impl<T: SessionsManagerTransport> IntproxyClient<T> {
+    pub fn with_transport(
         connect_info: SessionsManagerConnectInfo,
         transport: T,
     ) -> Result<Self, SessionsManagerClientError> {

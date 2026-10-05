@@ -840,6 +840,8 @@ pub enum NewOperatorFeature {
     /// the first database while the app keeps talking to the source for the others.
     PgBranchAdditionalDatabases,
 
+    ServerlessSessionsManager,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -929,6 +931,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::PgBranchAdditionalDatabases => {
                 "PostgreSQL branches with additional databases"
             }
+            NewOperatorFeature::ServerlessSessionsManager => "serverless sessions-manager",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

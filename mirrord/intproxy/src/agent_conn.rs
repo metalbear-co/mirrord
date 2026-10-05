@@ -20,8 +20,7 @@ use mirrord_protocol::DaemonMessage;
 use mirrord_protocol_io::ConnectionOutput;
 use mirrord_protocol_io::{Client, Connection, ProtocolError};
 use mirrord_sessions_manager_client::{
-    DirectTransport, IntproxyClient, OperatorTransport, SessionsManagerClientError,
-    SessionsManagerConnectInfo,
+    IntproxyClient, OperatorTransport, SessionsManagerClientError, SessionsManagerConnectInfo,
 };
 #[cfg(not(test))]
 use serde::Deserialize;
@@ -93,6 +92,12 @@ pub enum AgentConnectInfo {
     /// For tests only.
     #[cfg(test)]
     Dummy(#[serde(skip)] mpsc::Sender<(mpsc::Sender<DaemonMessage>, ConnectionOutput<Client>)>),
+}
+
+impl AgentConnectInfo {
+    pub fn is_operator(&self) -> bool {
+        matches!(self, Self::Operator(_) | Self::OperatorSessionsManager(_))
+    }
 }
 
 impl fmt::Display for AgentConnectInfoDiscriminants {
@@ -249,8 +254,7 @@ impl AgentConnection {
             }
 
             AgentConnectInfo::SessionsManager(connect_info) => {
-                let proxy_client =
-                    IntproxyClient::new(connect_info.clone(), DirectTransport::from_env()?)?;
+                let proxy_client = IntproxyClient::new(connect_info.clone())?;
                 let conn = Box::pin(proxy_client.connect(Duration::from_secs(60)))
                     .await
                     .map(Connection::from_channel)?;
@@ -267,7 +271,7 @@ impl AgentConnection {
                 let transport = OperatorTransport::new(
                     OperatorApi::serverless_sessions_manager_client(config).await?,
                 );
-                let proxy_client = IntproxyClient::new(connect_info.clone(), transport)?;
+                let proxy_client = IntproxyClient::with_transport(connect_info.clone(), transport)?;
                 let conn = Box::pin(proxy_client.connect(Duration::from_secs(60)))
                     .await
                     .map(Connection::from_channel)?;
