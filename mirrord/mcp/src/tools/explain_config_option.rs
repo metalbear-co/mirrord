@@ -7,9 +7,10 @@
 //! to the full object, and types are shared through `$ref`s. A path is resolved by following every
 //! branch at once, and what is reported about an option is gathered from all of its branches.
 //!
-//! The plan an option needs comes from the schema's [`PLAN_ANNOTATION`]s, which an option inherits
-//! from the options and types above it. Where the alternatives of an option need different plans,
-//! such as the target kinds of `target.path`, each alternative's plan is reported as well.
+//! The plan an option needs comes from the schema's
+//! [`PLAN_ANNOTATION`](crate::schema::PLAN_ANNOTATION)s, which an option inherits from the options
+//! and types above it. Where the alternatives of an option need different plans, such as the target
+//! kinds of `target.path`, each alternative's plan is reported as well.
 
 use std::{collections::HashSet, ops::Not, sync::LazyLock};
 
@@ -20,13 +21,9 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::{
-    schema::{LAYER_SCHEMA, UP_SCHEMA},
+    schema::{LAYER_SCHEMA, Node, UP_SCHEMA, expand},
     tools::validate_config::ConfigFormat,
 };
-
-/// Schema annotation naming the [`Plan`] an option needs. Options without it inherit it from the
-/// closest annotated option above them.
-const PLAN_ANNOTATION: &str = "x-mirrord-plan";
 
 /// Stands for any key of a map (such as a service name) in the paths suggested for an unknown one.
 const ANY_KEY: &str = "<name>";
@@ -501,76 +498,6 @@ fn alternative_name(schema: &Value) -> Option<String> {
     }
 }
 
-/// A schema reached while resolving a path.
-#[derive(Debug, Clone, Copy)]
-struct Node<'s> {
-    schema: &'s Value,
-    /// The plan from the schema's own [`PLAN_ANNOTATION`], or else the one inherited from the
-    /// schemas that led to it.
-    plan: Option<Plan>,
-}
-
-impl<'s> Node<'s> {
-    fn root(schema: &'s Value) -> Self {
-        Self { schema, plan: None }.child(schema)
-    }
-
-    /// `schema`, reached from `self`.
-    fn child(self, schema: &'s Value) -> Self {
-        let plan = schema
-            .get(PLAN_ANNOTATION)
-            .and_then(|plan| Plan::deserialize(plan).ok())
-            .or(self.plan);
-        Self { schema, plan }
-    }
-}
-
-/// The schemas some value may be checked against.
-struct Expanded<'s> {
-    /// The given schemas and every schema they refer to or offer as an alternative, outermost
-    /// first, so the docs of an option come before those of its type.
-    nodes: Vec<Node<'s>>,
-    /// The `$ref`s that were followed, to stop at recursive types when walking the schema.
-    refs: HashSet<&'s str>,
-}
-
-/// Follows `$ref`, `anyOf`, `oneOf` and `allOf` from `nodes`.
-fn expand<'s>(root: &'s Value, nodes: impl IntoIterator<Item = Node<'s>>) -> Expanded<'s> {
-    fn visit<'s>(root: &'s Value, node: Node<'s>, expanded: &mut Expanded<'s>) {
-        expanded.nodes.push(node);
-
-        if let Some(reference) = node.schema.get("$ref").and_then(Value::as_str)
-            && expanded.refs.insert(reference)
-            && let Some(target) = reference
-                .strip_prefix('#')
-                .and_then(|pointer| root.pointer(pointer))
-        {
-            visit(root, node.child(target), expanded);
-        }
-
-        for keyword in ["anyOf", "oneOf", "allOf"] {
-            for branch in node
-                .schema
-                .get(keyword)
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                visit(root, node.child(branch), expanded);
-            }
-        }
-    }
-
-    let mut expanded = Expanded {
-        nodes: Vec::new(),
-        refs: HashSet::new(),
-    };
-    for node in nodes {
-        visit(root, node, &mut expanded);
-    }
-    expanded
-}
-
 /// The options directly below `nodes`, keyed by name, or by `None` for the entries of a map. The
 /// options of an array's items count as the array's own, so `ports` of a list of filters is
 /// reached as `<list>.ports`.
@@ -695,6 +622,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::schema::PLAN_ANNOTATION;
 
     fn explain_path(format: ConfigFormat, path: &str) -> ExplainConfigOptionOutput {
         explain_config_option(ExplainConfigOptionArgs {

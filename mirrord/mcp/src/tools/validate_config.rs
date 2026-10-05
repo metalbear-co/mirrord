@@ -34,7 +34,7 @@ use serde_json::Value;
 use serde_saphyr::{DuplicateKeyPolicy, Spanned};
 use thiserror::Error;
 
-use crate::schema::{LAYER_SCHEMA, Schema, UP_SCHEMA};
+use crate::schema::{LAYER_SCHEMA, Node, Schema, UP_SCHEMA, expand};
 
 /// Which config file the content belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -802,29 +802,15 @@ fn allowed_values(error: &ValidationError<'_>) -> Option<Vec<Value>> {
 /// Describes the alternatives of a failed `anyOf`/`oneOf`, e.g. "a `string`" or "an object with
 /// `local`", leaving out `null`.
 fn accepted_forms(error: &ValidationError<'_>, raw_schema: &Value) -> Vec<String> {
-    fn describe(raw_schema: &Value, schema: &Value, forms: &mut Vec<String>, depth: usize) {
-        // Guards against `$ref` cycles.
-        if depth > 8 {
-            return;
-        }
-        if let Some(target) = schema
-            .get("$ref")
-            .and_then(Value::as_str)
-            .and_then(|reference| raw_schema.pointer(reference.strip_prefix('#')?))
-        {
-            describe(raw_schema, target, forms, depth + 1);
-        }
-        for keyword in ["anyOf", "oneOf"] {
-            for branch in schema
-                .get(keyword)
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                describe(raw_schema, branch, forms, depth + 1);
-            }
-        }
+    let Some(alternatives) = raw_schema
+        .pointer(error.schema_path().as_str())
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
 
+    let mut forms = Vec::new();
+    for Node { schema, .. } in expand(raw_schema, alternatives.iter().map(Node::root)).nodes {
         let form = if let Some(value) = schema.get("const") {
             Some(format!("`{value}`"))
         } else if let Some(values) = schema.get("enum").and_then(Value::as_array) {
@@ -857,16 +843,6 @@ fn accepted_forms(error: &ValidationError<'_>, raw_schema: &Value) -> Vec<String
             && forms.contains(&form).not()
         {
             forms.push(form);
-        }
-    }
-
-    let mut forms = Vec::new();
-    if let Some(alternatives) = raw_schema
-        .pointer(error.schema_path().as_str())
-        .and_then(Value::as_array)
-    {
-        for alternative in alternatives {
-            describe(raw_schema, alternative, &mut forms, 0);
         }
     }
     forms
