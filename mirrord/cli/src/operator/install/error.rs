@@ -73,6 +73,22 @@ pub(crate) enum OperatorInstallError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     NoChartVersionLabel,
 
+    #[error(
+        "the operator Deployment in the manifest has no valid `app.kubernetes.io/version` label"
+    )]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    NoOperatorVersionLabel,
+
+    #[error(
+        "the operator manifest is for mirrord operator {version}, but `mirrord operator install` \
+        requires {minimum} or newer"
+    )]
+    #[diagnostic(help("Use a manifest of mirrord operator {minimum} or newer."))]
+    UnsupportedOperatorVersion {
+        version: semver::Version,
+        minimum: semver::Version,
+    },
+
     #[error("the operator manifest has an object with an invalid `apiVersion` or `kind`")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     InvalidObjectType(#[source] kube::core::gvk::ParseGroupVersionError),
