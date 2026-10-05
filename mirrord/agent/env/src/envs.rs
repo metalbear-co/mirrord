@@ -86,8 +86,8 @@ pub const REMOTE_ENVIRONMENT: CheckedEnv<String> = CheckedEnv::new("MIRRORD_REMO
 /// The value is the EKS cluster's API server endpoint, e.g.
 /// `https://ABC123.gr7.us-east-1.eks.amazonaws.com`. The companion authenticates as its AWS
 /// identity (the task role, on ECS), which the cluster must map to a Kubernetes identity with an
-/// access entry, and RBAC must grant that identity `proxy` on `sessionassignments` and `get` on
-/// `sessiondataplanes` in `operator.metalbear.co`.
+/// access entry, and RBAC must grant that identity `proxy` on `serverlessagentassignments` and
+/// `get` on `serverlessdataplanes` in `operator.metalbear.co`.
 ///
 /// Tokens are signed for the cluster's region, read from this endpoint's hostname. When it isn't
 /// an EKS endpoint hostname (e.g. a proxy in front of the API server), `AWS_REGION` or

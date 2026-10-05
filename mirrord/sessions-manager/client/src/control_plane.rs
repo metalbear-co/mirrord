@@ -182,15 +182,15 @@ mod tests {
 
     use super::*;
 
-    /// The body `sessionassignments` streams, split across chunks the way a transport may
-    /// deliver it, including a keep-alive comment and an event this client doesn't know.
+    /// The body the operator's assignment resources stream, split across chunks the way a transport
+    /// may deliver it, including a keep-alive comment and an event this client doesn't know.
     #[tokio::test]
     async fn operator_sse_body_decodes_into_assignment() {
         let chunks = [
             ": keep-alive\n\n",
             "event: unknown\ndata: {}\n\n",
             "event: assignment\ndata: {\"assignment_id\":\"assignment-1\",",
-            "\"data_plane_endpoint\":\"/apis/operator.metalbear.co/v1alpha1/sessiondataplanes/assignment-1\",",
+            "\"data_plane_endpoint\":\"/apis/operator.metalbear.co/v1alpha1/serverlessdataplanes/assignment-1\",",
             "\"authorization\":\"Bearer secret\"}\n\n",
             "event: superseded\ndata: {}\n\n",
         ];
@@ -205,7 +205,7 @@ mod tests {
         assert_eq!(assignment.assignment_id.to_string(), "assignment-1");
         assert_eq!(
             assignment.data_plane_endpoint.as_str(),
-            "/apis/operator.metalbear.co/v1alpha1/sessiondataplanes/assignment-1"
+            "/apis/operator.metalbear.co/v1alpha1/serverlessdataplanes/assignment-1"
         );
         assert!(matches!(
             events.next().await.unwrap(),
