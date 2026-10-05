@@ -1,5 +1,6 @@
 //! `mirrord operator install`: gets a license, installs the operator into the cluster of a
-//! kubecontext, and hands ownership of the license to the user.
+//! kubecontext, and hands ownership of the license to the user. `mirrord operator uninstall`
+//! removes it again, see [`uninstall`].
 
 use std::{io::IsTerminal, ops::Not};
 
@@ -17,8 +18,10 @@ mod manifest;
 mod signup;
 #[cfg(test)]
 mod tests;
+mod uninstall;
 
 pub(crate) use error::OperatorInstallError;
+pub(super) use uninstall::operator_uninstall;
 
 const USER_AGENT: &str = concat!("mirrord-cli/", env!("CARGO_PKG_VERSION"));
 
@@ -37,21 +40,12 @@ pub(super) async fn operator_install(
     } = args;
 
     let mut progress = ProgressTracker::from_env("mirrord operator install");
-
-    let (mut kube_config, context) = create_kube_config_with_context(None, None::<&str>, context)
-        .await
-        .map_err(|error| OperatorInstallError::KubeConfig(Box::new(error)))?;
-    // The default policy retries 503s for minutes, which is exactly how a registered but
-    // unavailable operator API answers, both when checking for an existing operator and while
-    // waiting for the new one to come up.
-    kube_config.default_retry = false;
-    let release_namespace = kube_config.default_namespace.clone();
-    let client = Client::try_from(kube_config)
-        .map_err(|error| OperatorInstallError::KubeClient(Box::new(error)))?;
-    let http = reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-        .map_err(OperatorInstallError::HttpClient)?;
+    let Connection {
+        client,
+        http,
+        release_namespace,
+        context,
+    } = Connection::new(context).await?;
     let context_arg = context_flag("--context", context.as_deref());
 
     let mut subtask = progress.subtask("checking for an existing operator");
@@ -72,7 +66,7 @@ pub(super) async fn operator_install(
 
     let mut subtask = progress.subtask("checking permissions");
     let apis = cluster::resolve_apis(&client, &manifest, &release_namespace).await?;
-    cluster::dry_run(&manifest, &apis).await?;
+    cluster::dry_run(&manifest, &apis, &context_arg).await?;
     subtask.success(None);
 
     // Asked after the checks, which change nothing, so that an installation that can't succeed
@@ -130,11 +124,12 @@ pub(super) async fn operator_install(
     .await;
 
     let operator = installed.inspect_err(|_| {
-        // Printed rather than put in the error, where the command would be wrapped across lines.
+        // Printed rather than put in the error, where the commands would be wrapped across lines.
         if let Some(trial) = &trial {
             println!(
-                "To retry without starting another trial, reuse its API key: mirrord operator \
-                install{context_arg} --api-key {}",
+                "To retry without starting another trial, remove what was installed, then reuse \
+                the API key of the trial:\n\n  mirrord operator uninstall{context_arg}\n  mirrord \
+                operator install{context_arg} --api-key {}\n",
                 trial.api_key
             );
         }
@@ -151,6 +146,44 @@ pub(super) async fn operator_install(
     );
 
     Ok(())
+}
+
+/// What the operator commands need to reach the cluster and the internet.
+struct Connection {
+    client: Client,
+    http: reqwest::Client,
+    /// The default namespace of the kubecontext, where `helm install` puts its release.
+    release_namespace: String,
+    /// The name of the kubecontext, if it has one.
+    context: Option<String>,
+}
+
+impl Connection {
+    /// Loads the given kubecontext, or the current one, and creates the clients.
+    async fn new(context: Option<String>) -> Result<Self, OperatorInstallError> {
+        let (mut kube_config, context) =
+            create_kube_config_with_context(None, None::<&str>, context)
+                .await
+                .map_err(|error| OperatorInstallError::KubeConfig(Box::new(error)))?;
+        // The default policy retries 503s for minutes, which is exactly how a registered but
+        // unavailable operator API answers, both when checking for an existing operator and while
+        // waiting for the new one to come up.
+        kube_config.default_retry = false;
+        let release_namespace = kube_config.default_namespace.clone();
+        let client = Client::try_from(kube_config)
+            .map_err(|error| OperatorInstallError::KubeClient(Box::new(error)))?;
+        let http = reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .build()
+            .map_err(OperatorInstallError::HttpClient)?;
+
+        Ok(Self {
+            client,
+            http,
+            release_namespace,
+            context,
+        })
+    }
 }
 
 /// Asks the user to confirm a change to the cluster, so that a wrong current kubecontext does not
@@ -215,13 +248,14 @@ fn context_flag(flag: &str, context: Option<&str>) -> String {
 
 /// What the user needs to know after a successful installation, printed once.
 fn summary(version: &semver::Version, manifest: &Manifest, context: Option<&str>) -> String {
-    let mut summary = format!(
-        "mirrord operator {version} is installed in {}.\n\n",
-        location(manifest.operator_namespace(), context)
-    );
-
     let kube_context_arg = context_flag("--kube-context", context);
     let context_arg = context_flag("--context", context);
+
+    let mut summary = format!(
+        "mirrord operator {version} is installed in {}. To remove it, run `mirrord operator \
+        uninstall{context_arg}`.\n\n",
+        location(manifest.operator_namespace(), context)
+    );
     summary.push_str(&format!(
         "This is a default installation. For anything custom (namespace, tolerations, pull \
         secrets, OIDC, ...), manage it with the helm chart, which takes over this installation \
