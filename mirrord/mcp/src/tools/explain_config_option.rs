@@ -912,6 +912,8 @@ mod tests {
             ),
             (ConfigFormat::MirrordJson, "agent.ttl", OptionPlan::Oss),
             (ConfigFormat::MirrordJson, "profile", OptionPlan::Team),
+            (ConfigFormat::MirrordJson, "traceparent", OptionPlan::Team),
+            (ConfigFormat::MirrordJson, "baggage", OptionPlan::Team),
             (
                 ConfigFormat::MirrordJson,
                 "multi_cluster",

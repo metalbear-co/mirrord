@@ -41,7 +41,7 @@
         "string",
         "null"
       ],
-      "x-mirrord-plan": "oss"
+      "x-mirrord-plan": "team"
     },
     "ci": {
       "title": "ci {#root-ci}",
@@ -274,7 +274,7 @@
         "string",
         "null"
       ],
-      "x-mirrord-plan": "oss"
+      "x-mirrord-plan": "team"
     },
     "use_proxy": {
       "title": "use_proxy {#root-use_proxy}",

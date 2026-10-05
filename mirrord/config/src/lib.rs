@@ -610,7 +610,7 @@ pub struct LayerConfig {
     /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     ///
     /// Only relevant for use with the operator. For more details, read the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).
-    #[config(env = "TRACEPARENT", plan = Oss)]
+    #[config(env = "TRACEPARENT", plan = Team)]
     pub traceparent: Option<String>,
 
     /// ## baggage {#root-baggage}
@@ -620,7 +620,7 @@ pub struct LayerConfig {
     /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     ///
     /// Only relevant for use with the operator. For more details, read the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).
-    #[config(env = "BAGGAGE", plan = Oss)]
+    #[config(env = "BAGGAGE", plan = Team)]
     pub baggage: Option<String>,
 }
 
