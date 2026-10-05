@@ -3,6 +3,8 @@
 //! shutdown.
 //!
 //! Reads the semicolon-separated port list from the `APP_PORTS` environment variable.
+//! Reports bind outcomes on stdout so tests can wait for readiness and retry address collisions
+//! without parsing panic messages.
 
 use std::{
     io::Read,
@@ -22,7 +24,12 @@ fn main() {
 
     for port in ports {
         let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
-        let listener = TcpListener::bind(addr).unwrap();
+        let listener = TcpListener::bind(addr);
+        match &listener {
+            Ok(_) => println!("LISTENING PORT {port}"),
+            Err(error) => println!("{:?} PORT {port}", error.kind()),
+        }
+        let listener = listener.unwrap();
 
         let (mut conn, _) = listener.accept().unwrap();
         conn.read_to_string(&mut buf).unwrap();

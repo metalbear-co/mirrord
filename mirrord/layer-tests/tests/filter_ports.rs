@@ -4,7 +4,7 @@
 mod common;
 
 use core::assert_matches;
-use std::{io::Write, ops::Not, time::Duration};
+use std::{io::Write, net::TcpListener, ops::Not, time::Duration};
 
 pub use common::*;
 use mirrord_config::{
@@ -18,7 +18,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 use serde_json::{Value, json};
-use tokio::net::TcpStream;
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 fn build_config(
     incoming_ports: Option<&[u16]>,
@@ -96,80 +96,137 @@ fn expected_behavior(port: u16, incoming: &IncomingConfig) -> BindMode {
     }
 }
 
-/// Verifies that the layer respects `feature.network.incoming.listen_ports` mapping.
+/// Verifies which ports stay local, receive all traffic, or receive filtered HTTP traffic.
 #[rstest]
 #[tokio::test]
 async fn filter_ports(
     // Reusing test app
     #[values(Application::RustListenPorts)] application: Application,
 
-    #[values(rand::random_range(10000..60000))] port: u16,
+    #[values(rand::random_range(10000..60000))] mut port: u16,
 
     #[values(
 		None,
-		Some(&[port][..]),
-		Some(&[port, port + 1][..]),
-		Some(&[port + 1][..])
+		Some(&[0][..]),
+		Some(&[0, 1][..]),
+		Some(&[1][..])
 	)]
-    incoming_ports: Option<&[u16]>,
+    incoming_port_offsets: Option<&[u16]>,
 
     #[values(
 		None,
-		Some(&[port][..]),
-		Some(&[port, port + 1][..]),
-		Some(&[port + 1][..])
+		Some(&[0][..]),
+		Some(&[0, 1][..]),
+		Some(&[1][..])
 	)]
-    http_filter_ports: Option<&[u16]>,
+    http_filter_port_offsets: Option<&[u16]>,
 
     #[values(true, false)] have_filter: bool,
 ) {
-    let config = build_config(incoming_ports, http_filter_ports, have_filter);
-    let mut config_file = tempfile::NamedTempFile::with_suffix(".json").unwrap();
-    config_file
-        .as_file_mut()
-        .write_all(serde_json::to_string(&config).unwrap().as_bytes())
-        .unwrap();
+    for attempt in 1..=5 {
+        // A replacement port must preserve the inclusion/filter case being tested.
+        let incoming_ports = incoming_port_offsets.map(|offsets| {
+            offsets
+                .iter()
+                .map(|offset| port + offset)
+                .collect::<Vec<_>>()
+        });
+        let http_filter_ports = http_filter_port_offsets.map(|offsets| {
+            offsets
+                .iter()
+                .map(|offset| port + offset)
+                .collect::<Vec<_>>()
+        });
+        let config = build_config(
+            incoming_ports.as_deref(),
+            http_filter_ports.as_deref(),
+            have_filter,
+        );
+        let mut config_file = tempfile::NamedTempFile::with_suffix(".json").unwrap();
+        config_file
+            .as_file_mut()
+            .write_all(serde_json::to_string(&config).unwrap().as_bytes())
+            .unwrap();
 
-    let mut ctx = ConfigContext::default();
-    let config_parsed = LayerFileConfig::from_path(&config_file, &mut ctx)
-        .unwrap()
-        .generate_config(&mut ctx)
-        .unwrap();
+        let mut ctx = ConfigContext::default();
+        let config_parsed = LayerFileConfig::from_path(&config_file, &mut ctx)
+            .unwrap()
+            .generate_config(&mut ctx)
+            .unwrap();
 
-    let incoming_config = config_parsed.feature.network.incoming;
+        let incoming_config = config_parsed.feature.network.incoming;
 
-    let (test_process, mut intproxy) = application
-        .start_process(
-            vec![("APP_PORTS", &port.to_string())],
-            Some(config_file.path()),
-        )
-        .await;
+        let (mut test_process, mut intproxy) = application
+            .start_process(
+                vec![("APP_PORTS", &port.to_string())],
+                Some(config_file.path()),
+            )
+            .await;
 
-    match expected_behavior(port, &incoming_config) {
-        BindMode::Local => {
-            // Wait a little for test process
-            tokio::time::sleep(Duration::from_millis(250)).await;
-            let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-            drop(stream);
+        match expected_behavior(port, &incoming_config) {
+            BindMode::Local => {
+                // Include the newline so a partial bind-result line cannot look like readiness.
+                test_process
+                    .wait_for_line_stdout(Duration::from_secs(5), &format!("PORT {port}\n"))
+                    .await;
+                if test_process
+                    .get_stdout()
+                    .await
+                    .contains(&format!("AddrInUse PORT {port}\n"))
+                {
+                    test_process.wait_assert_fail().await;
+                    assert!(
+                        attempt < 5,
+                        "application could not bind port {port} after five attempts (AddrInUse)"
+                    );
+                    port = rand::random_range(10000..60000);
+                    continue;
+                }
+                test_process
+                    .assert_stdout_contains(&format!("LISTENING PORT {port}\n"))
+                    .await;
+                let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+                stream.write_all(b"HELLO").await.unwrap();
+                stream.shutdown().await.unwrap();
+
+                test_process.wait_assert_success().await;
+                test_process.assert_no_error_in_stderr().await;
+                test_process.assert_no_error_in_stdout().await;
+            }
+            BindMode::Unfiltered => {
+                assert_matches!(
+                    intproxy.recv().await,
+                    ClientMessage::TcpSteal(
+                        LayerTcpSteal::PortSubscribe(StealType::All(stolen_port))
+                    ) if stolen_port == port
+                );
+            }
+            BindMode::Filtered => {
+                assert_matches!(
+                    intproxy.recv().await,
+                    ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
+                        stolen_port,
+                        HttpFilter::Path(filter)
+                    ))) if filter == Filter::new("/test".into()).unwrap() && stolen_port == port
+                );
+            }
         }
-        BindMode::Unfiltered => {
-            assert_matches!(
-                intproxy.recv().await,
-                ClientMessage::TcpSteal(
-                    LayerTcpSteal::PortSubscribe(StealType::All(stolen_port))
-                ) if stolen_port == port
-            );
-        }
-        BindMode::Filtered => {
-            assert_matches!(
-                intproxy.recv().await,
-                ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
-                    stolen_port,
-                    HttpFilter::Path(filter)
-                ))) if filter == Filter::new("/test".into()).unwrap() && stolen_port == port
-            );
-        }
+
+        return;
     }
+}
 
-    drop(test_process)
+#[tokio::test]
+async fn retries_occupied_port() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let occupied_port = listener.local_addr().unwrap().port();
+
+    filter_ports(
+        Application::RustListenPorts,
+        occupied_port,
+        Some(&[1]),
+        None,
+        false,
+    )
+    .await;
 }
