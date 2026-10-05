@@ -3,8 +3,9 @@
 # Builds the Slack payload announcing tests that retried for the first time.
 #
 # Reads `<package>\t<test>\t<issue>\t<issue-url>` lines on stdin, where the last two may be empty,
-# and writes the webhook payload to stdout. Each test is named by its trailing segments and linked to
-# the Linear issue filed for it, so the channel needs no trip to the run to see what is flaking.
+# and writes the webhook payload to stdout. Each test is named by its crate and trailing segment and
+# linked to the Linear issue filed for it, so the channel needs no trip to the run to see what is
+# flaking.
 #
 # Usage: flaky-notify.sh <repo> <run-url>
 
@@ -20,7 +21,7 @@ bullets=()
 while IFS=$'\t' read -r package name issue issue_url; do
   [ -n "$name" ] || continue
 
-  bullet="•  \`${package##*::}\`/\`${name##*::}\`"
+  bullet="•  \`${package%%::*}\`/\`${name##*::}\`"
 
   if [ -n "${issue:-}" ]; then
     bullet="$bullet  ·  <$issue_url|$issue>"

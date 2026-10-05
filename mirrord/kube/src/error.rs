@@ -49,6 +49,10 @@ pub enum KubeApiError {
     #[error("Timeout waiting for agent to be ready")]
     AgentReadyTimeout,
 
+    /// The WebSocket upgrade request that opens the port-forward to the agent pod failed.
+    #[error("Agent port-forward WebSocket upgrade failed: {0}")]
+    AgentPortForward(#[source] Box<kube::Error>),
+
     #[error("Port not found in port forward")]
     PortForwardFailed,
 

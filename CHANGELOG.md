@@ -8,6 +8,212 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.270.0](https://github.com/metalbear-co/mirrord/tree/3.270.0) - 2026-10-05
+
+
+### Added
+
+- Added `feature.network.incoming.tls_delivery.client_cert_source`. With
+  `"target"`, a preview session presents the client certificate already inside
+  the target's container (at the `client_cert` and `client_key` paths), read by
+  the operator from a running pod, so mutual TLS previews no longer need the
+  certificate copied to the developer's machine.
+- Added `mirrord operator uninstall`, which removes the operator that `mirrord
+  operator install` installed, also when the installation failed half-way. Like
+  `mirrord operator install`, it does not require the helm CLI, takes
+  `--context`, and on a terminal asks for confirmation first.
+- `mirrord operator install` and `mirrord operator uninstall` send one
+  anonymous usage event for each run, with its outcome. See `TELEMETRY.md` for
+  what the events contain and how to disable them.
+- `mirrord operator install` takes `--context` to install into a different
+  Kubernetes context. On a terminal, it asks for confirmation before it starts
+  a trial or changes the cluster, and `--yes` skips the question.
+
+
+### Fixed
+
+- Fixed `posix_spawn` children missing shared socket configuration after an
+  earlier child on the same thread executed.
+
+## [3.269.0](https://github.com/metalbear-co/mirrord/tree/3.269.0) - 2026-10-05
+
+
+### Changed
+
+- The "operator not found" error explains how to disable the operator
+  remembered in `~/.mirrord/mirrord.json`.
+
+
+### Fixed
+
+- Reused db branches now override the current config's env vars, not the
+  creator's.
+
+## [3.268.0](https://github.com/metalbear-co/mirrord/tree/3.268.0) - 2026-10-02
+
+
+### Added
+
+- Added `mirrord mcp`, an MCP server over stdio for AI agents, with a
+  `validate_config` tool that checks `mirrord.json` and `mirrord-up.yaml`
+  content against the installed mirrord version's schema.
+- Added `mirrord operator install`, which installs the operator from the helm
+  chart without requiring the helm CLI, and starts a claimable trial when no
+  API key is given.
+- Added `mirrord session list --format json` so scripts can select sessions
+  without parsing a table.
+- CLI errors now show the Kubernetes context, cluster, namespace and mirrord
+  config file used for the run.
+- Show a warning when the local application listens on a port that the target
+  container does not declare. The warning suggests setting
+  `feature.network.incoming.port_mapping`.
+- `mirrord up` suggests the closest allowed name when `mirrord-up.yaml` has an
+  unknown field or value, for example "did you mean `target`?".
+
+
+### Changed
+
+- The agent no longer logs an error when the kernel does not support
+  `pidfd_open`. It logs a warning that says the agent won't stop when the
+  target container exits.
+  [#4918](https://github.com/metalbear-co/mirrord/issues/4918)
+
+
+### Fixed
+
+- Fixed `sendfile` on macOS reporting a failed send as fully sent when the
+  socket would block, which made callers like Ruby's
+   `IO.copy_stream` silently drop data.
+- Start the local UI daemon for DB branch port forwarding only when needed, and
+  keep it running when the process that started it receives Ctrl+C.
+- When the port-forward to the agent fails because the WebSocket upgrade is
+  rejected, the error now says that this step failed, and shows the HTTP status
+  and the response body.
+
+## [3.267.0](https://github.com/metalbear-co/mirrord/tree/3.267.0) - 2026-09-30
+
+
+### Added
+
+- PostgreSQL branches can copy several databases from one source server into
+  one branch with `additional_databases`.
+
+
+### Changed
+
+- Two `db_branches` entries that would be the same branch now fail the session
+  instead of one silently using the source database.
+
+
+### Fixed
+
+- Database branches of different types sharing an `id` no longer share, and
+  overwrite, one credential Secret.
+- Database branches of different types that share an `id`, or set none, each
+  get their own branch instead of one reaching the source.
+- `mirrord ci` persists its cleanup state atomically and rejects malformed
+  state instead of silently discarding recorded cleanup targets.
+
+## [3.266.0](https://github.com/metalbear-co/mirrord/tree/3.266.0) - 2026-09-29
+
+
+### Added
+
+- Added a JSON schema, `mirrord-up-schema.json`, for `mirrord-up.yaml`.
+- Preview environments accept a label target covering several workloads.
+
+
+### Changed
+
+- `mirrord up` replace mode no longer automatically adds queue splitting
+  config.
+
+
+### Fixed
+
+- Fixed remote `stat`-family calls in the agent: `fstatat` relative to a
+  directory fd looked up a path with the target root prefixed twice, and in
+  targetless mode paths were resolved relative to the agent's working directory
+  instead of `/`.
+- The internal proxy terminates registered mirrord-injected processes during
+  shutdown, including processes outside the launched application's process
+  group.
+- `mirrord ci stop` lets the internal proxy terminate registered injected
+  processes and retains failed cleanup targets for a later retry.
+- `mirrord ci stop` terminates background application process groups so child
+  processes started by wrappers do not keep running.
+
+## [3.265.0](https://github.com/metalbear-co/mirrord/tree/3.265.0) - 2026-09-27
+
+
+### Added
+
+- Add turbopuffer namespace branching.
+- Added `feature.fs.prefetch`, a list of remote paths that mirrord copies into
+  a local temporary directory before the process starts, so that operations on
+  those paths are served locally instead of going through the agent. Use cases
+  speeding up include HTTP servers that re-read `/etc/ssl` from the filesystem
+  on every request.
+
+
+### Fixed
+
+- Fixed the internal proxy terminating every process in the session when a
+  single layer connection closed before completing its handshake.
+- The agent now correctly resolves chained symlinks and symlinks in paths.
+
+## [3.264.0](https://github.com/metalbear-co/mirrord/tree/3.264.0) - 2026-09-25
+
+
+### Added
+
+- Added `tls_delivery.client_cert` and `client_key` so stolen TLS traffic
+  reaches local and preview apps that require a client certificate.
+- Database branch connection parameters now accept a `url` base that the other
+  parameters override.
+- Queue splitting filters can now be composed with `any_of` / `all_of` and
+  match any message attribute via `metadata` regexes, aligned with the HTTP
+  filter shape.
+
+
+### Fixed
+
+- Fixed debugging Node apps from VS Code hanging when the app uses a fixed
+  inspector port.
+- Reject unsupported preview TLS delivery and incomplete client credentials
+  before replacing an existing preview.
+
+## [3.263.0](https://github.com/metalbear-co/mirrord/tree/3.263.0) - 2026-09-24
+
+
+### Added
+
+- The mirrord UI now shows how many incoming traffic deliveries each active
+  port subscription receives.
+- mirrord now warns when a database branch's image runs a different server
+  version than the source database, naming both versions.
+
+
+### Changed
+
+- Messages that say a run needs the operator, and `mirrord session list`, tell
+  AI coding agents they can install the operator themselves, pointing at
+  `https://metalbear.com/agents.md`.
+- The `guard_std_fds` experimental config is now deprecated and enabled for all
+  users by default.
+- `mirrord up` now starts `mirrord ui` in the background by default.
+
+
+### Fixed
+
+- Fixed a deadlock when a process with an active gRPC channel forks.
+- The mirrord UI now distinguishes a missing operator from lost Kubernetes
+  access, shows the Kubernetes error with re-authentication guidance, and
+  retries with refreshed credentials.
+- `mirrord up` now gracefully stops all managed services when interrupted,
+  instead of reporting user-ended sessions as failures or leaving child
+  processes running.
+
 ## [3.262.0](https://github.com/metalbear-co/mirrord/tree/3.262.0) - 2026-09-20
 
 

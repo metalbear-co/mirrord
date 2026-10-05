@@ -12,7 +12,8 @@ use mirrord_intproxy::{
     agent_conn::{AgentConnectionError, ConnectionTlsError},
     error::ProxyStartupError,
 };
-use mirrord_kube::error::KubeApiError;
+use mirrord_kube::{api::kubernetes::KubeEnvironment, error::KubeApiError};
+use mirrord_mcp::McpError;
 use mirrord_operator::{
     client::error::{HttpError, OperatorApiError, OperatorOperation},
     crd::preview::PreviewPodLogs,
@@ -30,6 +31,9 @@ use crate::{
     data::GlobalConfigError,
     dump::DumpSessionError,
     fix::FixKubeconfigError,
+    kube::{ConfigSource, RunKubeEnvironment, RunNamespace, take_run_kube_environment},
+    login::LoginError,
+    operator::OperatorInstallError,
     port_forward::PortForwardError,
     profile::ProfileError,
     tui::TuiCliError,
@@ -78,7 +82,7 @@ pub(crate) fn format_preview_logs(logs: &[PreviewPodLogs]) -> String {
     format!("\n\nlast output from the preview pods:\n\n{rendered}")
 }
 
-const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or GitHub repository.
+pub(crate) const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Slack or GitHub repository.
 
 >> Please open a new bug report at https://github.com/metalbear-co/mirrord/issues/new/choose
 
@@ -202,6 +206,11 @@ pub(crate) enum InternalProxyError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     ListenerSetup(std::io::Error),
 
+    #[cfg(unix)]
+    #[error("Failed to register CI intproxy SIGTERM handler: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    SignalHandler(std::io::Error),
+
     #[cfg(not(target_os = "windows"))]
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -240,7 +249,7 @@ pub(crate) enum InternalProxyError {
 pub(crate) enum OperatorSetupError {
     #[error("mirrord operator setup was deleted")]
     #[diagnostic(help(
-        "Please use the helm chart instead https://github.com/metalbear-co/charts/"
+        "Please use `mirrord operator install`, or the helm chart https://github.com/metalbear-co/charts/"
     ))]
     Deleted,
 }
@@ -316,6 +325,15 @@ pub(crate) enum CliError {
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(#[from] mirrord_config::config::ConfigError),
 
+    #[cfg(unix)]
+    #[error("Failed to set up the local directory for prefetched files: {0}")]
+    #[diagnostic(help(
+        "The files listed in `feature.fs.prefetch` are copied into a new directory under your \
+        temporary directory (`$TMPDIR`, or `/tmp` when unset). Please check that it exists, is \
+        writable, and has free space.{GENERAL_HELP}"
+    ))]
+    Prefetch(#[from] crate::prefetch::PrefetchError),
+
     #[error("Failed to run command `{command}` due to missing argument `{arg}`")]
     MissingArg { command: String, arg: String },
 
@@ -336,6 +354,10 @@ pub(crate) enum CliError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     OperatorSetupError(#[from] OperatorSetupError),
+
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    OperatorInstall(#[from] OperatorInstallError),
 
     #[error("`mirrord operator status` command failed! Could not retrieve operator status API.")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -409,7 +431,10 @@ pub(crate) enum CliError {
     FeatureRequiresOperatorError(String),
 
     #[error("Feature `{feature}` is not supported in mirrord operator {operator_version}.")]
-    #[diagnostic(help("{GENERAL_HELP}"))]
+    #[diagnostic(help(
+        "Upgrade the mirrord operator to a version that supports it, or remove the setting \
+         that needs it from your mirrord config.{GENERAL_HELP}"
+    ))]
     FeatureNotSupportedInOperatorError {
         feature: String,
         operator_version: String,
@@ -495,7 +520,9 @@ pub(crate) enum CliError {
 
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
-        "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
+        "Either this command requires the mirrord operator, or `\"operator\": true` is set in your configuration.\n\
+        After a successful operator session, mirrord remembers `\"operator\": true` in the global configuration at `~/.mirrord/mirrord.json`. \
+        If the operator is no longer installed, run `mirrord config set operator false` to turn it off or set `\"operator\": false` in your configuration file.\n\
         Read more here: https://metalbear.com/mirrord/docs/getting-started/installing-mirrord/operator\n{AGENT_OPERATOR_HINT}{GENERAL_HELP}"
     ))]
     OperatorNotInstalled,
@@ -504,7 +531,9 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     OperatorReturnedUnknownTargetType(String),
 
-    #[error("Failed to make secondary agent connection: {0}")]
+    #[error(
+        "Failed to make secondary agent connection: Agent port-forward WebSocket upgrade failed: {0}"
+    )]
     #[diagnostic(help(
         "Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"
     ))]
@@ -703,6 +732,20 @@ pub(crate) enum CliError {
     ))]
     PreviewSecretMountFailed(String),
 
+    #[error(
+        "Failed to read the TLS client certificate file `{path}` for preview delivery: {error}"
+    )]
+    #[diagnostic(help(
+        "`feature.network.incoming.tls_delivery.client_cert` and `client_key` must be readable PEM \
+        files on this machine: the CLI stores their contents in the preview session's Secret so \
+        the operator can present them to the preview pod.{GENERAL_HELP}"
+    ))]
+    PreviewTlsClientAuthFile {
+        path: PathBuf,
+        #[source]
+        error: io::Error,
+    },
+
     #[error("Preview session failed: {message}{}", format_preview_logs(logs))]
     #[diagnostic(help(
         "The operator reported a failure while setting up the preview environment. \
@@ -772,6 +815,15 @@ pub(crate) enum CliError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Tui(#[from] TuiCliError),
+
+    /// Errors produced by the `mirrord mcp` command.
+    #[error(transparent)]
+    Mcp(#[from] McpError),
+
+    /// Errors produced by the `mirrord login` command.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Login(#[from] LoginError),
 
     /// Errors produced by the `mirrord ui` and `mirrord chaos` commands.
     #[error(transparent)]
@@ -948,6 +1000,94 @@ impl From<OperatorApiError> for CliError {
 impl From<ProtocolError> for CliError {
     fn from(e: ProtocolError) -> Self {
         Self::InitialAgentCommFailed(e.to_string())
+    }
+}
+
+/// Prints the Kubernetes environment of the run to stderr, right before the final CLI error.
+///
+/// The environment is not part of the miette report, because miette wraps the report to the
+/// terminal width and would split long context names, server URLs and config paths.
+pub(crate) fn print_run_kube_environment(all_namespaces: bool) {
+    if let Some(environment) = take_run_kube_environment(all_namespaces) {
+        eprintln!("{}", kube_environment_block(&environment));
+    }
+}
+
+/// The environment rows under a heading, followed by a blank line before the error.
+fn kube_environment_block(environment: &RunKubeEnvironment) -> String {
+    let mut block = String::from("Kubernetes environment:\n");
+    for row in environment.to_string().lines() {
+        block.push(' ');
+        block.push_str(row);
+        block.push('\n');
+    }
+    block
+}
+
+impl std::fmt::Display for RunKubeEnvironment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { inputs, resolved } = self;
+
+        let (context, cluster, server) = match resolved {
+            Some(environment) => {
+                let cluster = match (&environment.cluster, &environment.context) {
+                    (Some(cluster), _) => cluster.as_str(),
+                    (None, Some(_)) => "(unknown, context not found in kubeconfig)",
+                    (None, None) => "(none)",
+                };
+                (
+                    environment.context.as_deref().unwrap_or("(none)"),
+                    cluster,
+                    environment.server.as_deref(),
+                )
+            }
+            None => (
+                inputs.kube_context.as_deref().unwrap_or("(unknown)"),
+                "(unknown)",
+                None,
+            ),
+        };
+        let mut rows = vec![("context", context), ("cluster", cluster)];
+        if let Some(server) = server {
+            rows.push(("server", server));
+        }
+
+        let namespace = match (&inputs.namespace, resolved) {
+            (RunNamespace::All, _) => "(all)",
+            (RunNamespace::Named(namespace), _) => namespace.as_str(),
+            (
+                RunNamespace::KubeDefault,
+                Some(KubeEnvironment {
+                    cluster: Some(_),
+                    namespace,
+                    ..
+                }),
+            ) => namespace.as_deref().unwrap_or("default"),
+            (RunNamespace::KubeDefault, _) => "(unknown)",
+        };
+        rows.push(("namespace", namespace));
+
+        if let Some(kubeconfig) = &inputs.kubeconfig {
+            rows.push(("kubeconfig", kubeconfig));
+        }
+
+        let config = match &inputs.config_source {
+            ConfigSource::None => "(none)",
+            ConfigSource::File(path) => path.as_str(),
+            ConfigSource::MirrordUp => "(from mirrord up)",
+        };
+        rows.push(("config", config));
+
+        let width = rows
+            .iter()
+            .map(|(label, _)| label.len() + 1)
+            .max()
+            .unwrap_or_default();
+        let lines = rows
+            .iter()
+            .map(|(label, value)| format!(" {:<width$}  {value}", format!("{label}:")))
+            .collect::<Vec<_>>();
+        f.write_str(&lines.join("\n"))
     }
 }
 
@@ -1143,6 +1283,138 @@ mod preview_logs_tests {
         assert!(
             format_preview_logs(&[pod_logs("one", "first\n")])
                 .starts_with("\n\nlast output from the preview pods:\n\n")
+        );
+    }
+}
+
+#[cfg(test)]
+mod kube_environment_tests {
+
+    use super::*;
+    use crate::kube::RunKubeInputs;
+
+    fn staging() -> KubeEnvironment {
+        KubeEnvironment {
+            context: Some("staging-eu".to_owned()),
+            cluster: Some("gke_proj_staging".to_owned()),
+            server: Some("https://34.1.2.3".to_owned()),
+            namespace: Some("team".to_owned()),
+        }
+    }
+
+    fn inputs() -> RunKubeInputs {
+        RunKubeInputs {
+            config_source: ConfigSource::File("./.mirrord/mirrord.json".to_owned()),
+            kube_context: Some("staging-eu".to_owned()),
+            namespace: RunNamespace::Named("payments".to_owned()),
+            ..Default::default()
+        }
+    }
+
+    fn render(inputs: RunKubeInputs, resolved: KubeEnvironment) -> String {
+        RunKubeEnvironment {
+            inputs,
+            resolved: Some(resolved),
+        }
+        .to_string()
+    }
+
+    #[test]
+    fn environment_is_aligned() {
+        assert_eq!(
+            render(inputs(), staging()),
+            [
+                " context:    staging-eu",
+                " cluster:    gke_proj_staging",
+                " server:     https://34.1.2.3",
+                " namespace:  payments",
+                " config:     ./.mirrord/mirrord.json",
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn namespace_defaults_to_kube_context_namespace() {
+        let block = render(RunKubeInputs::default(), staging());
+
+        assert!(block.contains("namespace:  team"), "{block}");
+        assert!(block.contains("config:     (none)"), "{block}");
+    }
+
+    #[test]
+    fn all_namespaces() {
+        let block = render(
+            RunKubeInputs {
+                namespace: RunNamespace::All,
+                ..inputs()
+            },
+            staging(),
+        );
+
+        assert!(block.contains("namespace:  (all)"), "{block}");
+    }
+
+    #[test]
+    fn config_from_mirrord_up() {
+        let block = render(
+            RunKubeInputs {
+                config_source: ConfigSource::MirrordUp,
+                ..inputs()
+            },
+            staging(),
+        );
+
+        assert!(block.contains("config:     (from mirrord up)"), "{block}");
+    }
+
+    #[test]
+    fn missing_context() {
+        let missing = KubeEnvironment {
+            context: Some("staging-eu".to_owned()),
+            ..Default::default()
+        };
+
+        let block = render(RunKubeInputs::default(), missing);
+
+        let cluster = block
+            .lines()
+            .find(|line| line.contains("cluster:"))
+            .unwrap();
+        assert!(
+            cluster.contains("(unknown, context not found in kubeconfig)"),
+            "{block}"
+        );
+        assert!(block.contains("namespace:  (unknown)"), "{block}");
+    }
+
+    /// Long EKS names must stay whole, so they can be copied from the output.
+    #[test]
+    fn block_keeps_long_values_whole() {
+        let eks = "arn:aws:eks:us-east-1:123456789012:cluster/production-cluster";
+        let server = "https://0123456789ABCDEF0123456789ABCDEF.gr7.us-east-1.eks.amazonaws.com";
+        let block = kube_environment_block(&RunKubeEnvironment {
+            inputs: inputs(),
+            resolved: Some(KubeEnvironment {
+                context: Some(eks.to_owned()),
+                cluster: Some(eks.to_owned()),
+                server: Some(server.to_owned()),
+                namespace: None,
+            }),
+        });
+
+        assert_eq!(
+            block,
+            [
+                "Kubernetes environment:".to_owned(),
+                format!("  context:    {eks}"),
+                format!("  cluster:    {eks}"),
+                format!("  server:     {server}"),
+                "  namespace:  payments".to_owned(),
+                "  config:     ./.mirrord/mirrord.json".to_owned(),
+                String::new(),
+            ]
+            .join("\n")
         );
     }
 }

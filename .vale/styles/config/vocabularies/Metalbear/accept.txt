@@ -20,6 +20,7 @@ Istio
 Kuma
 Linkerd
 vcluster
+targetless
 
 # Container / cloud
 OCI
@@ -242,6 +243,7 @@ uvicorn
 Uvicorn
 Vue
 redis
+turbopuffer
 nginx
 OpenAPI
 openapi

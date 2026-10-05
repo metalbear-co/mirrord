@@ -9,8 +9,10 @@
 #    and the benefit seemed little.
 # 3. Please be mindful, we try to target less than 30 minutes for the CI to run. In a perfect world it'd be less than 5m.
 #     If you're adding something, please make sure it doesn't impact too much, and if you're reviewing please have it in mind.
-# 4. Make sure to specify target for cargo invocations, to re-use cache (cargo build --target X while host is X then cargo build will not use cache
-#    since it's different targets from it's perspective - https://doc.rust-lang.org/cargo/guide/build-cache.html
+# 4. Pass `--target` to cargo only when cross-compiling. `cargo build --target X` on an X host and `cargo build`
+#    do not share the cache, because cargo puts the artifacts in different directories:
+#    https://doc.rust-lang.org/cargo/guide/build-cache.html. So all cargo invocations in a job, and in all jobs
+#    with the same rust-cache `shared-key`, must agree on `--target`.
 #
 # - Adding a compiled app to e2e:
 #
@@ -385,11 +387,11 @@ jobs:
         with:
           tool: cargo-nextest
       - name: mirrord-agent UT
-        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-agent
+        run: cargo nextest run -p mirrord-agent
       - name: mirrord-agent-env UT
-        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-agent-env
+        run: cargo nextest run -p mirrord-agent-env
       - name: mirrord-agent-iptables UT
-        run: cargo nextest run --target x86_64-unknown-linux-gnu -p mirrord-agent-iptables
+        run: cargo nextest run -p mirrord-agent-iptables
 
   integration_tests:
     needs: [plan, build-ci-runner]

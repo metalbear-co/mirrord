@@ -21,7 +21,6 @@ use http::{ClientStore, ResponseMode, StreamingBody};
 use http_gateway::HttpGatewayTask;
 use hyper::{HeaderMap, Method, Uri};
 use metadata_store::MetadataStore;
-use mirrord_config::feature::network::incoming::tls_delivery::LocalTlsDelivery;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
     ListeningOn, MessageId, PortSubscription, ProxyToLayerMessage,
@@ -44,7 +43,7 @@ use tls::LocalTlsSetup;
 use tokio::sync::mpsc;
 use tracing::Level;
 
-use self::subscriptions::SubscriptionsManager;
+use self::{port_subscription_ext::PortSubscriptionExt, subscriptions::SubscriptionsManager};
 use crate::{
     ProxyMessage,
     background_tasks::{
@@ -236,12 +235,14 @@ impl IncomingProxy {
     /// Used when registering new tasks in the internal [`BackgroundTasks`] instance.
     const CHANNEL_SIZE: usize = 512;
 
+    /// `tls_setup` is how stolen TLS traffic reaches the local application, `None` meaning plain
+    /// TCP. Built from the user's config with [`LocalTlsSetup::from_config`], or directly by the
+    /// mirrord operator for preview sessions.
     pub fn new(
         idle_local_http_connection_timeout: Duration,
-        https_delivery: LocalTlsDelivery,
+        tls_setup: Option<Arc<LocalTlsSetup>>,
         monitor_tx: MonitorTx,
     ) -> Self {
-        let tls_setup = LocalTlsSetup::from_config(https_delivery);
         Self {
             subscriptions: Default::default(),
             metadata_store: Default::default(),
@@ -323,6 +324,16 @@ impl IncomingProxy {
             version: request.version(),
         };
         let listening_on = subscription.listening_on.clone();
+        let mode = if is_steal { "steal" } else { "mirror" };
+        let hit_count = self
+            .subscriptions
+            .count_hit(request.port)
+            .expect("subscription was checked above");
+        self.monitor_tx.emit(MonitorEvent::PortSubscription {
+            port: request.port,
+            mode: mode.to_owned(),
+            hit_count: Some(hit_count),
+        });
         tracing::info!(%listening_on, "Forwarding HTTP request");
 
         let tx = self.tasks.as_mut().unwrap().register(
@@ -395,9 +406,20 @@ impl IncomingProxy {
             return Ok(());
         };
 
+        let listening_on = subscription.listening_on.clone();
+        let mode = if is_steal { "steal" } else { "mirror" };
+        let hit_count = self
+            .subscriptions
+            .count_hit(destination_port)
+            .expect("subscription was checked above");
+        self.monitor_tx.emit(MonitorEvent::PortSubscription {
+            port: destination_port,
+            mode: mode.to_owned(),
+            hit_count: Some(hit_count),
+        });
+
         // `resolve_addr` already normalizes a wildcard listen address to loopback.
-        let peer_address = subscription
-            .listening_on
+        let peer_address = listening_on
             .resolve_addr()
             .await
             .map_err(IncomingProxyError::SocketSetupFailed)?;
@@ -407,7 +429,7 @@ impl IncomingProxy {
 
         // Hostname subscriptions have no layer making `accept()` calls, so there's nothing to
         // satisfy with a [`ConnMetadataResponse`].
-        if let ListeningOn::Socket(listener_address) = &subscription.listening_on {
+        if let ListeningOn::Socket(listener_address) = &listening_on {
             self.metadata_store.expect(
                 ConnMetadataRequest {
                     listener_address: *listener_address,
@@ -720,12 +742,22 @@ impl IncomingProxy {
         match message {
             IncomingProxyMessage::LayerRequest(message_id, layer_id, req) => match req {
                 IncomingRequest::PortSubscribe(subscribe) => {
+                    let port = subscribe.subscription.port();
+                    let mode = match &subscribe.subscription {
+                        PortSubscription::Steal(..) => "steal",
+                        PortSubscription::Mirror(..) => "mirror",
+                    };
                     let msg = self.subscriptions.layer_subscribed(
                         layer_id,
                         message_id,
                         subscribe,
                         self.protocol_version.as_ref(),
                     );
+                    self.monitor_tx.emit(MonitorEvent::PortSubscription {
+                        port,
+                        mode: mode.to_owned(),
+                        hit_count: self.subscriptions.hit_count(port),
+                    });
                     match msg {
                         Some(Either::Left(m)) => message_bus.send(m).await,
                         Some(Either::Right(m)) => message_bus.send_agent(m).await,

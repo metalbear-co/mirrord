@@ -1,1 +1,0 @@
-Route `accept`, `getsockname`, and `getpeername` syscalls made by a Go runtime into the remote layer, so Go applications go through the same connection handoff as everything else. The Go syscall trampolines now live in a shared `mirrord-layer-go` crate used by both the layer and the remote layer.

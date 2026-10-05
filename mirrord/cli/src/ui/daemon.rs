@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     fs::create_dir_all,
     io::{AsyncBufReadExt, BufReader},
+    process::Command,
     sync::{Mutex, broadcast},
 };
 use tokio_util::sync::CancellationToken;
@@ -321,14 +322,17 @@ pub(super) async fn ui_start(
         env_vars.insert("MIRRORD_LOG".to_owned(), "mirrord=debug".to_owned());
     }
 
-    let mut child = tokio::process::Command::new(mirrord_binary)
-        .args(vec!["ui"])
+    let mut command = Command::new(mirrord_binary);
+    command
+        .arg("ui")
         .envs(env_vars)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(File::create(&std_err_file)?)
-        .kill_on_drop(false)
-        .spawn()?;
+        .stderr(File::create(&std_err_file)?);
+    // The daemon must survive terminal signals sent to the foreground command's process group.
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command.spawn()?;
 
     let mut stdout = BufReader::new(child.stdout.take().expect("was piped")).lines();
 

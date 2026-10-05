@@ -4,9 +4,11 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use which::which;
 
-use super::{layer::Target, signing, sip_binaries};
+use super::{
+    layer::{self, CargoOptions, Target},
+    signing, sip_binaries,
+};
 use crate::relative_to_root;
 
 /// Builds the mirrord CLI for the specified target.
@@ -16,36 +18,14 @@ use crate::relative_to_root;
 /// feature or env var to wire up here.
 pub fn build_cli(
     target: Target,
-    release: bool,
+    options: CargoOptions,
     layer_path: &Path,
     cargo_args: &[String],
 ) -> Result<PathBuf> {
     println!("Building mirrord CLI for {}...", target.triple());
 
-    let is_linux = matches!(target, Target::LinuxX86_64 | Target::LinuxAarch64);
-
-    if is_linux && which("cargo-zigbuild").is_err() {
-        anyhow::bail!("cargo-zigbuild is required for Linux builds.");
-    }
-
-    let mut cmd = Command::new("cargo");
-    if is_linux {
-        cmd.arg("zigbuild");
-    } else {
-        cmd.arg("build");
-    }
+    let mut cmd = layer::cargo_build(target, options);
     cmd.arg("-p").arg("mirrord");
-
-    if release {
-        cmd.arg("--release");
-    }
-
-    let target_triple = if is_linux {
-        format!("{}.2.17", target.triple())
-    } else {
-        target.triple().to_owned()
-    };
-    cmd.arg("--target").arg(&target_triple);
 
     // Set layer file environment variable
     cmd.env(
@@ -68,11 +48,7 @@ pub fn build_cli(
                 .context("Failed to canonicalize SIP utilities bundle path")?,
         );
 
-        let mode = if release { "release" } else { "debug" };
-        let arm_layer = Path::new("target")
-            .join("aarch64-apple-darwin")
-            .join(mode)
-            .join("libmirrord_layer.dylib");
+        let arm_layer = Target::MacosAarch64.layer_file(options);
         cmd.env(
             "MIRRORD_LAYER_FILE_MACOS_ARM64",
             arm_layer
@@ -89,19 +65,13 @@ pub fn build_cli(
         anyhow::bail!("cargo build failed for {}", target.triple());
     }
 
-    let mode = if release { "release" } else { "debug" };
     let binary_name = if matches!(target, Target::Windows) {
         "mirrord.exe"
     } else {
         "mirrord"
     };
 
-    let cli_path = relative_to_root(
-        &Path::new("target")
-            .join(target.triple())
-            .join(mode)
-            .join(binary_name),
-    );
+    let cli_path = relative_to_root(&target.out_dir(options).join(binary_name));
 
     println!("✓ CLI built: {}", cli_path.display());
     Ok(cli_path)
@@ -111,15 +81,14 @@ pub fn build_cli(
 pub fn merge_macos_universal_cli(release: bool) -> Result<PathBuf> {
     println!("Merging macOS universal CLI from pre-built architectures...");
 
-    let mode = if release { "release" } else { "debug" };
+    let options = CargoOptions {
+        release,
+        ..Default::default()
+    };
 
     // Check that CLIs exist
-    let x86_cli = Path::new("target/x86_64-apple-darwin")
-        .join(mode)
-        .join("mirrord");
-    let arm_cli = Path::new("target/aarch64-apple-darwin")
-        .join(mode)
-        .join("mirrord");
+    let x86_cli = Target::MacosX86_64.out_dir(options).join("mirrord");
+    let arm_cli = Target::MacosAarch64.out_dir(options).join("mirrord");
 
     if !x86_cli.exists() {
         anyhow::bail!("x86_64 CLI not found at {}", x86_cli.display());
@@ -129,7 +98,7 @@ pub fn merge_macos_universal_cli(release: bool) -> Result<PathBuf> {
     }
 
     // Create universal directory
-    let universal_dir = Path::new("target/universal-apple-darwin").join(mode);
+    let universal_dir = Target::MacosUniversal.out_dir(options);
     std::fs::create_dir_all(&universal_dir).context("Failed to create universal directory")?;
 
     // Create universal binary with lipo
@@ -157,7 +126,7 @@ pub fn merge_macos_universal_cli(release: bool) -> Result<PathBuf> {
 
 /// Builds the macOS universal CLI (combines x86_64 and aarch64)
 pub fn build_macos_universal_cli(
-    release: bool,
+    options: CargoOptions,
     universal_layer_path: &Path,
     cargo_args: &[String],
 ) -> Result<PathBuf> {
@@ -166,13 +135,13 @@ pub fn build_macos_universal_cli(
     // Build both architectures
     let x86_cli = build_cli(
         Target::MacosX86_64,
-        release,
+        options,
         universal_layer_path,
         cargo_args,
     )?;
     let arm_cli = build_cli(
         Target::MacosAarch64,
-        release,
+        options,
         universal_layer_path,
         cargo_args,
     )?;
@@ -181,8 +150,7 @@ pub fn build_macos_universal_cli(
     signing::sign_binaries(&[x86_cli.clone(), arm_cli.clone()])?;
 
     // Create universal binary
-    let mode = if release { "release" } else { "debug" };
-    let universal_dir = Path::new("target/universal-apple-darwin").join(mode);
+    let universal_dir = Target::MacosUniversal.out_dir(options);
     std::fs::create_dir_all(&universal_dir).context("Failed to create universal directory")?;
 
     let universal_cli = universal_dir.join("mirrord");

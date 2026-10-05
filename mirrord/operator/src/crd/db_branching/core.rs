@@ -15,7 +15,7 @@ use strum_macros::EnumDiscriminants;
 
 use crate::crd::session::SessionOwner;
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ConnectionSource {
     /// One or more complete connection URL sources.
@@ -25,9 +25,11 @@ pub enum ConnectionSource {
 }
 
 /// Individual connection parameters, each resolved from a separate environment variable.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionParamsSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<SingleOrVec<ConnectionSourceKind>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<SingleOrVec<ConnectionSourceKind>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -59,7 +61,7 @@ pub trait ExtraParamSet: Sized {
     fn valid_names() -> &'static [&'static str];
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ConnectionSourceKind {
     /// Environment variable with value defined directly in the pod template.
@@ -138,7 +140,7 @@ pub enum ConnectionSourceKind {
 }
 
 /// Where a `ConfigMap` connection source finds its ConfigMap.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ConfigMapLocator {
     /// The ConfigMap's object name.
@@ -339,6 +341,7 @@ impl From<&ConnectionParamsConfig> for ConnectionParamsSpec {
             })
             .collect();
         Self {
+            url: wrap(&config.params.url),
             host: wrap(&config.params.host),
             port: wrap(&config.params.port),
             user: wrap(&config.params.user),

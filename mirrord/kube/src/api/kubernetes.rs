@@ -230,7 +230,7 @@ impl KubernetesAPI {
         target_config: &TargetConfig,
         network_config: Option<&mut NetworkConfig>,
         container_config: ContainerConfig,
-    ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
+    ) -> Result<CreatedAgent, KubeApiError>
     where
         P: Progress,
     {
@@ -283,7 +283,7 @@ impl KubernetesAPI {
 
         info!(?params, "Spawning new agent");
 
-        let agent_connect_info = match (runtime_data, self.agent.ephemeral) {
+        let agent_connect_info = match (runtime_data.as_ref(), self.agent.ephemeral) {
             (None, false) => {
                 let variant = JobVariant::new(&self.agent, &params);
 
@@ -292,16 +292,16 @@ impl KubernetesAPI {
                     .await?
             }
             (Some(runtime_data), false) => {
-                let variant = JobTargetedVariant::new(&self.agent, &params, &runtime_data);
+                let variant = JobTargetedVariant::new(&self.agent, &params, runtime_data);
 
-                Targeted::new(&self.client, &runtime_data, &variant)
+                Targeted::new(&self.client, runtime_data, &variant)
                     .create_agent(progress)
                     .await?
             }
             (Some(runtime_data), true) => {
-                let variant = EphemeralTargetedVariant::new(&self.agent, &params, &runtime_data);
+                let variant = EphemeralTargetedVariant::new(&self.agent, &params, runtime_data);
 
-                Targeted::new(&self.client, &runtime_data, &variant)
+                Targeted::new(&self.client, runtime_data, &variant)
                     .create_agent(progress)
                     .await?
             }
@@ -310,8 +310,23 @@ impl KubernetesAPI {
 
         info!(?agent_connect_info, "Created agent pod");
 
-        Ok(agent_connect_info)
+        Ok(CreatedAgent {
+            connect_info: agent_connect_info,
+            runtime_data,
+        })
     }
+}
+
+/// Agent created with [`KubernetesAPI::create_agent`].
+#[derive(Debug)]
+pub struct CreatedAgent {
+    /// Information needed to connect to the agent.
+    pub connect_info: AgentKubernetesConnectInfo,
+    /// Data of the target that the agent runs against, so that the caller can check the session
+    /// setup against the target.
+    ///
+    /// [`None`] when the agent is targetless.
+    pub runtime_data: Option<RuntimeData>,
 }
 
 /// Fetches the Kubernetes apiserver version as `(major, minor)`.
@@ -475,15 +490,70 @@ pub fn resolve_kube_context(
         return Ok(Some(context.to_owned()));
     }
 
-    let kubeconfig = match kubeconfig.map(|path| read_custom_kubeconfig(path.as_ref())) {
-        Some(result) => match result? {
-            Some(kubeconfig) => kubeconfig,
-            None => Kubeconfig::read()?,
-        },
-        None => Kubeconfig::read()?,
-    };
+    Ok(read_kubeconfig(kubeconfig)?.current_context)
+}
 
-    Ok(kubeconfig.current_context)
+/// Reads the configured kubeconfig, including merged path lists, or the kubeconfig selected by
+/// `KUBECONFIG` and the standard kubeconfig lookup.
+fn read_kubeconfig(kubeconfig: Option<&str>) -> Result<Kubeconfig> {
+    match kubeconfig.map(|path| read_custom_kubeconfig(path.as_ref())) {
+        Some(result) => match result? {
+            Some(kubeconfig) => Ok(kubeconfig),
+            None => Ok(Kubeconfig::read()?),
+        },
+        None => Ok(Kubeconfig::read()?),
+    }
+}
+
+/// Where the Kubernetes environment of a session points to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KubeEnvironment {
+    /// The selected kubeconfig context.
+    pub context: Option<String>,
+    /// Name of the cluster the selected context points to.
+    pub cluster: Option<String>,
+    /// API server URL of [`Self::cluster`].
+    pub server: Option<String>,
+    /// Default namespace of the selected context.
+    pub namespace: Option<String>,
+}
+
+/// Resolves the context, cluster, API server and default namespace selected by mirrord, reading
+/// only the local kubeconfig.
+pub fn resolve_kube_environment(
+    kubeconfig: Option<&str>,
+    kube_context: Option<&str>,
+) -> Result<KubeEnvironment> {
+    let parsed = read_kubeconfig(kubeconfig)?;
+
+    let context = kube_context
+        .map(ToOwned::to_owned)
+        .or_else(|| parsed.current_context.clone());
+
+    let context_entry = context.as_deref().and_then(|name| {
+        parsed
+            .contexts
+            .iter()
+            .find(|entry| entry.name == name)
+            .and_then(|entry| entry.context.as_ref())
+    });
+
+    let cluster = context_entry.map(|entry| entry.cluster.clone());
+    let server = cluster.as_deref().and_then(|name| {
+        parsed
+            .clusters
+            .iter()
+            .find(|entry| entry.name == name)
+            .and_then(|entry| entry.cluster.as_ref())
+            .and_then(|cluster| cluster.server.clone())
+    });
+
+    Ok(KubeEnvironment {
+        context,
+        cluster,
+        server,
+        namespace: context_entry.and_then(|entry| entry.namespace.clone()),
+    })
 }
 
 /// Parses kubeconfig paths the same way as `KUBECONFIG`, preserving the merge behavior used for
@@ -532,7 +602,10 @@ mod tests {
 
     use tempfile::NamedTempFile;
 
-    use super::{create_kube_config_with_context, read_custom_kubeconfig, resolve_kube_context};
+    use super::{
+        KubeEnvironment, create_kube_config_with_context, read_custom_kubeconfig,
+        resolve_kube_context, resolve_kube_environment,
+    };
 
     fn kubeconfig_with_current_context(context: Option<&str>) -> NamedTempFile {
         let file = NamedTempFile::new().unwrap();
@@ -571,6 +644,7 @@ mod tests {
                     "- name: malbork\n",
                     "  context:\n",
                     "    cluster: jan-sobieski\n",
+                    "    namespace: krzyzacy\n",
                     "users: []\n",
                 ),
                 current_context = current_context,
@@ -621,5 +695,59 @@ mod tests {
             "https://kazimierz-wielki.example.com/"
         );
         assert_eq!(context.as_deref(), Some("wawel"));
+    }
+
+    #[test]
+    fn environment_uses_explicit_context_and_its_namespace() {
+        let kubeconfig = NamedTempFile::new().unwrap();
+        write_usable_kubeconfig(kubeconfig.path(), "wawel");
+
+        let environment =
+            resolve_kube_environment(Some(&kubeconfig.path().to_string_lossy()), Some("malbork"))
+                .unwrap();
+
+        assert_eq!(
+            environment,
+            KubeEnvironment {
+                context: Some("malbork".to_owned()),
+                cluster: Some("jan-sobieski".to_owned()),
+                server: Some("https://jan-sobieski.example.com".to_owned()),
+                namespace: Some("krzyzacy".to_owned()),
+            }
+        );
+    }
+
+    #[test]
+    fn environment_keeps_missing_context_name() {
+        let kubeconfig = NamedTempFile::new().unwrap();
+        write_usable_kubeconfig(kubeconfig.path(), "wawel");
+
+        let environment = resolve_kube_environment(
+            Some(&kubeconfig.path().to_string_lossy()),
+            Some("does-not-exist"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            environment,
+            KubeEnvironment {
+                context: Some("does-not-exist".to_owned()),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn environment_resolves_merged_kubeconfig_paths() {
+        let first = kubeconfig_with_current_context(None);
+        let second = NamedTempFile::new().unwrap();
+        write_usable_kubeconfig(second.path(), "malbork");
+        let paths = join_paths([first.path(), second.path()]).unwrap();
+
+        let environment = resolve_kube_environment(Some(&paths.to_string_lossy()), None).unwrap();
+
+        assert_eq!(environment.context.as_deref(), Some("malbork"));
+        assert_eq!(environment.cluster.as_deref(), Some("jan-sobieski"));
+        assert_eq!(environment.namespace.as_deref(), Some("krzyzacy"));
     }
 }

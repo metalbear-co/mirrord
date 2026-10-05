@@ -69,6 +69,25 @@ use crate::{
 /// Environment variable we use to pass the internal proxy address to the layer.
 pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
 
+/// Environment variable we use to pass the layer the directory holding the files copied from the
+/// target, as requested by `feature.fs.prefetch`.
+///
+/// The directory mirrors the remote layout, so the copy of remote `/etc/ssl/cert.pem` lives at
+/// `$MIRRORD_FS_PREFETCH_DIR/etc/ssl/cert.pem`. Paths that have no copy there were not prefetched,
+/// and are to be read from the remote as usual.
+pub const MIRRORD_FS_PREFETCH_DIR: &str = "MIRRORD_FS_PREFETCH_DIR";
+
+/// Environment variable we use to pass the ports declared by the target container to the layer,
+/// as a comma-separated list.
+///
+/// The layer uses this list to warn the user when their application subscribes to a port that the
+/// target container does not declare. This is often a sign of a missing
+/// `feature.network.incoming.port_mapping`.
+///
+/// An empty list means that we do not know the ports. The CLI sets this variable also in this
+/// case, so that a value inherited from an outer mirrord session does not stay in place.
+pub const MIRRORD_LAYER_TARGET_CONTAINER_PORTS: &str = "MIRRORD_LAYER_TARGET_CONTAINER_PORTS";
+
 /// Environment variable we use to pass an already-running internal proxy address to the layer
 /// during exec-based tests.
 pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
@@ -274,7 +293,8 @@ pub const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
 ///       "mode": "write",
 ///       "read_write": ".+\\.json" ,
 ///       "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ],
-///       "local": [ ".+\\.js", ".+\\.mjs" ]
+///       "local": [ ".+\\.js", ".+\\.mjs" ],
+///       "prefetch": [ "/etc/ssl" ]
 ///     },
 ///     "network": {
 ///       "incoming": {
@@ -1146,6 +1166,39 @@ impl LayerConfig {
             ));
         }
 
+        if let Some(path) = self
+            .feature
+            .fs
+            .prefetch
+            .iter()
+            .flatten()
+            .find(|path| Path::new(path).has_root().not())
+        {
+            return Err(ConfigError::InvalidValue {
+                name: "feature.fs.prefetch".into(),
+                provided: path.clone(),
+                error: "prefetched paths are resolved in the remote pod, \
+                    where the local working directory has no meaning, \
+                    so they must start with `/`."
+                    .into(),
+            });
+        }
+
+        if self.feature.fs.prefetch.is_some() && self.feature.fs.is_active().not() {
+            context.add_warning(
+                "`feature.fs.prefetch` is ignored when `feature.fs.mode` is `local`, \
+                 because no file operation is performed remotely."
+                    .to_owned(),
+            );
+        }
+
+        #[cfg(windows)]
+        if self.feature.fs.prefetch.is_some() {
+            context.add_warning(
+                "`feature.fs.prefetch` is not supported on Windows and will be ignored.".to_owned(),
+            );
+        }
+
         if let (Some(profile), true) = (&self.profile, context.has_warnings()) {
             // It might be that the user config is fine,
             // but the mirrord profile introduced changes that triggered the warnings.
@@ -1184,12 +1237,6 @@ impl LayerConfig {
     /// This is used to notify the user about settings that don't make sense in the context of
     /// preview environments, since it's already running in the cluster.
     pub fn verify_for_preview_env(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
-        if matches!(self.target.path, Some(Target::Label(_))) {
-            return Err(ConfigError::Conflict(
-                "Preview environments are not yet supported with label targets.".to_owned(),
-            ));
-        }
-
         let ignored = |field: &str| {
             format!("`{field}` is ignored in preview environments and will not be used.")
         };
@@ -1379,7 +1426,34 @@ impl CollectAnalytics for &LayerConfig {
 }
 
 impl LayerFileConfig {
-    /// Parses a [`LayerFileConfig`] from a file path, rendering any Tera templates.
+    /// Parses a [`LayerFileConfig`] from a file path, rendering any Tera templates with
+    /// [`LayerFileConfig::render`].
+    pub fn from_path<P>(path: P, context: &mut ConfigContext) -> Result<Self, FromFileError>
+    where
+        P: AsRef<Path>,
+    {
+        let path = path.as_ref();
+        let content = if path == Path::new("-") {
+            let mut content = String::new();
+            std::io::stdin().read_to_string(&mut content)?;
+            content
+        } else {
+            std::fs::read_to_string(path)?
+        };
+
+        let rendered = Self::render(&content, path, context)?;
+
+        match path.extension().and_then(OsStr::to_str) {
+            // No Extension? assume json
+            Some("json") | None => Ok(serde_json::from_str::<Self>(&rendered)?),
+            Some("toml") => Ok(toml::from_str::<Self>(&rendered)?),
+            Some("yaml" | "yml") => Ok(serde_saphyr::from_str::<Self>(&rendered)?),
+            ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
+        }
+    }
+
+    /// Renders the Tera templates in the raw `content` of a config file, returning the text that
+    /// gets deserialized. `path` only selects how the `key` field is extracted from `content`.
     ///
     /// # Key Resolution for Template Rendering
     ///
@@ -1399,21 +1473,13 @@ impl LayerFileConfig {
     ///
     /// The marker prefix on auto-generated keys allows `generate_config` to distinguish them
     /// from user-provided keys (see [`EnvKey::AUTOGENERATED_MARKER`] for details).
-    pub fn from_path<P>(path: P, context: &mut ConfigContext) -> Result<Self, FromFileError>
-    where
-        P: AsRef<Path>,
-    {
-        let path = path.as_ref();
-        let content = if path == Path::new("-") {
-            let mut content = String::new();
-            std::io::stdin().read_to_string(&mut content)?;
-            content
-        } else {
-            std::fs::read_to_string(path)?
-        };
-
+    pub fn render(
+        content: &str,
+        path: &Path,
+        context: &mut ConfigContext,
+    ) -> Result<String, FromFileError> {
         let mut template_engine = Tera::default();
-        template_engine.add_raw_template("main", &content)?;
+        template_engine.add_raw_template("main", content)?;
 
         let mut tera_context = tera::Context::new();
         // Left out of the context entirely when it can't be determined, so that
@@ -1424,7 +1490,7 @@ impl LayerFileConfig {
 
         let key = match context.get_env(env_key::MIRRORD_ENV_KEY) {
             Ok(key) => key,
-            Err(_) => match Self::extract_key_from_content(path, &content) {
+            Err(_) => match Self::extract_key_from_content(path, content) {
                 Some(raw_key) => {
                     // Render the root `key` field first so it can use the same template expansion
                     // support as the rest of the config.
@@ -1445,15 +1511,7 @@ impl LayerFileConfig {
                 .unwrap_or(&key),
         );
 
-        let rendered = template_engine.render("main", &tera_context)?;
-
-        match path.extension().and_then(OsStr::to_str) {
-            // No Extension? assume json
-            Some("json") | None => Ok(serde_json::from_str::<Self>(&rendered)?),
-            Some("toml") => Ok(toml::from_str::<Self>(&rendered)?),
-            Some("yaml" | "yml") => Ok(serde_saphyr::from_str::<Self>(&rendered)?),
-            ext => Err(FromFileError::InvalidExtension(ext.map(String::from))),
-        }
+        Ok(template_engine.render("main", &tera_context)?)
     }
 
     /// The git branch exposed to templates as `{{ git_branch }}`.
@@ -2609,6 +2667,27 @@ mod tests {
             matches!(&error, ConfigError::TargetRequiresOperator),
             "unexpected error: {error}"
         );
+    }
+
+    /// A preview can target a label selector: one session takes traffic from every pod the
+    /// selector matches, so the preview checks must let the label target through.
+    #[test]
+    fn label_target_is_accepted_for_preview_env() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "target": { "path": { "labels": { "app": "checkout" } } },
+                "feature": { "preview": { "image": "checkout:pr-123" } }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+
+        resolved
+            .verify_for_preview_env(&mut context)
+            .expect("a label target should be accepted for preview environments");
     }
 
     /// Serializes the magic.aws tests that mutate the global `HOME` /

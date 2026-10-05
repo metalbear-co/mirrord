@@ -1,12 +1,7 @@
 # Guards the scripts behind `flaky-test-report.yaml`, which files a Linear issue for every test
-# nextest had to retry on `main` and links it to the captured failure output.
+# nextest had to retry on `main` and comments every sighting on it.
 #
-# Those links are anchors of the form `#step:<step>:<line>`, and the line is found by counting
-# lines in the collector job's own log. Nothing in a live run can tell that arithmetic is wrong:
-# a bad anchor still loads the log, just scrolled to the wrong place, so a regression would show
-# up as issues that quietly point at nothing useful. These fixtures are the only check on it.
-#
-# They are offline — pure stdlib, with `gh` and `curl` faked on $PATH — so no toolchain setup and
+# These fixtures are offline — pure stdlib, with `gh` and `curl` faked on $PATH — so no toolchain setup and
 # no network are needed here.
 
 name: Check Flaky Report

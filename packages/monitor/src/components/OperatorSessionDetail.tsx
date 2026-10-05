@@ -237,6 +237,11 @@ function PortChip({ port }: { port: OperatorLockedPort }) {
     >
       <span className="text-muted-foreground text-caps">{port.kind}</span>
       <span className="text-foreground font-medium">:{port.port}</span>
+      {port.hitCount !== undefined && (
+        <span className="text-muted-foreground">
+          {port.hitCount} {port.hitCount === 1 ? 'hit' : 'hits'}
+        </span>
+      )}
       {port.filter && (
         <span className="text-muted-foreground/70 max-w-[120px] truncate">
           {port.filter}

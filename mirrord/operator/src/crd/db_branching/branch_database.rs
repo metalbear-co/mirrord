@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
+    iter,
 };
 
 use k8s_openapi::ByteString;
@@ -10,7 +11,7 @@ use mirrord_config::feature::database_branches::{
     DynamodbBranchCopyConfig, MariadbBranchCopyConfig, MongodbBranchCopyConfig,
     MssqlBranchCopyConfig, MysqlBranchCopyConfig, PgBranchCopyConfig, PgIamAuthConfig,
     RedisBranchCopyConfig, S3BranchCopyConfig, S3Provider as ConfigS3Provider, SingleOrVec,
-    SpannerBranchCopyConfig,
+    SpannerBranchCopyConfig, TurbopufferBranchCopyConfig,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -103,6 +104,9 @@ pub struct BranchDatabaseSpec {
     /// S3-specific options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub s3_options: Option<S3Options>,
+    /// turbopuffer-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turbopuffer_options: Option<TurbopufferOptions>,
     /// Generic (user-supplied image) branch options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generic_options: Option<GenericOptions>,
@@ -232,6 +236,8 @@ pub enum DialectConfig<'a> {
     Cockroachdb(&'a CockroachdbOptions),
     #[strum_discriminants(strum(to_string = "S3"))]
     S3(&'a S3Options),
+    #[strum_discriminants(strum(to_string = "turbopuffer"))]
+    Turbopuffer(&'a TurbopufferOptions),
     #[strum_discriminants(strum(to_string = "Generic"))]
     Generic(&'a GenericOptions),
 }
@@ -254,6 +260,7 @@ impl DatabaseDialect {
             DatabaseDialect::Clickhouse => "clickhouseOptions",
             DatabaseDialect::Cockroachdb => "cockroachdbOptions",
             DatabaseDialect::S3 => "s3Options",
+            DatabaseDialect::Turbopuffer => "turbopufferOptions",
             DatabaseDialect::Generic => "genericOptions",
         }
     }
@@ -306,6 +313,25 @@ pub struct PostgresOptions {
     /// source connection demands.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub query_params: BTreeMap<String, String>,
+    /// More databases from the same source server, copied into the same branch pod. Each is
+    /// dumped with the branch's own source connection, only the database name differs, and
+    /// keeps its name on the branch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional_databases: Vec<PgAdditionalDatabase>,
+}
+
+/// One more database a PostgreSQL branch copies from its source server.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PgAdditionalDatabase {
+    /// Database name on the source server, reused on the branch.
+    pub name: String,
+    /// The app's connection to this database. The operator points it at the branch pod with
+    /// this database's name. When unset, the database is only created and copied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_source: Option<ConnectionSource>,
+    #[serde(default)]
+    pub copy: SqlBranchCopyConfig,
 }
 
 /// MySQL-specific branch options.
@@ -446,6 +472,56 @@ pub enum S3Param {
 }
 
 impl ExtraParamSet for S3Param {
+    fn parse(key: &str) -> Option<Self> {
+        key.parse().ok()
+    }
+
+    fn valid_names() -> &'static [&'static str] {
+        Self::VARIANTS
+    }
+}
+
+/// turbopuffer-specific branch options.
+///
+/// The branch namespace is a copy-on-write clone made through turbopuffer's own API, so -
+/// like an S3 branch - it has no pod, and the spec's `version`/`image` stay unset. The source
+/// namespace, the API key and the endpoint all come in as `connectionSource` `extra` params
+/// (see [`TurbopufferParam`]), resolved from the target like any other connection param; once
+/// the branch exists, the operator points the namespace variable at it and leaves the rest
+/// alone.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TurbopufferOptions {
+    #[serde(default)]
+    pub copy: TurbopufferCopySpec,
+}
+
+/// The extra connection params a turbopuffer branch accepts, keyed into
+/// `ConnectionParamsSpec.extra`.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    strum_macros::Display,
+    strum_macros::EnumString,
+    strum_macros::EnumIter,
+    strum_macros::VariantNames,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum TurbopufferParam {
+    /// The source namespace, rewritten to the branch namespace on the app.
+    Namespace,
+    /// The API key the operator branches and deletes with. Read only.
+    ApiKey,
+    /// The turbopuffer region the namespace lives in. Read only.
+    Region,
+    /// The full API endpoint, for dedicated clusters. Read only.
+    BaseUrl,
+}
+
+impl ExtraParamSet for TurbopufferParam {
     fn parse(key: &str) -> Option<Self> {
         key.parse().ok()
     }
@@ -701,6 +777,9 @@ impl BranchDatabaseSpec {
                 .as_ref()
                 .map(DialectConfig::Cockroachdb),
             self.s3_options.as_ref().map(DialectConfig::S3),
+            self.turbopuffer_options
+                .as_ref()
+                .map(DialectConfig::Turbopuffer),
             self.generic_options.as_ref().map(DialectConfig::Generic),
         ]
         .into_iter()
@@ -710,8 +789,15 @@ impl BranchDatabaseSpec {
         if dialects.next().is_some() {
             return Err(DialectValidationError::MultipleSet);
         }
-        if let ConnectionSource::Params(params) = &self.connection_source {
-            Self::validate_extra_params(&config, &params.extra)?;
+        let additional_sources = self
+            .postgres_options
+            .iter()
+            .flat_map(|options| &options.additional_databases)
+            .filter_map(|database| database.connection_source.as_ref());
+        for source in iter::once(&self.connection_source).chain(additional_sources) {
+            if let ConnectionSource::Params(params) = source {
+                Self::validate_extra_params(&config, &params.extra)?;
+            }
         }
         Ok(config)
     }
@@ -765,6 +851,9 @@ impl BranchDatabaseSpec {
             }
             DialectConfig::Postgres(_) => check::<PgParam>(DatabaseDialect::Postgres, extra),
             DialectConfig::S3(_) => check::<S3Param>(DatabaseDialect::S3, extra),
+            DialectConfig::Turbopuffer(_) => {
+                check::<TurbopufferParam>(DatabaseDialect::Turbopuffer, extra)
+            }
             other => match extra.keys().next() {
                 Some(key) => Err(DialectValidationError::UnknownConnectionParam {
                     dialect: other.discriminant(),
@@ -927,6 +1016,31 @@ impl Default for S3CopySpec {
         Self {
             mode: S3BranchCopyMode::Empty,
             objects: Default::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TurbopufferCopySpec {
+    pub mode: TurbopufferBranchCopyMode,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
+#[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "lowercase")]
+pub enum TurbopufferBranchCopyMode {
+    Empty,
+    All,
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
+}
+
+impl Default for TurbopufferCopySpec {
+    fn default() -> Self {
+        Self {
+            mode: TurbopufferBranchCopyMode::Empty,
         }
     }
 }
@@ -1166,6 +1280,19 @@ impl From<S3BranchCopyConfig> for S3CopySpec {
     }
 }
 
+impl From<TurbopufferBranchCopyConfig> for TurbopufferCopySpec {
+    fn from(config: TurbopufferBranchCopyConfig) -> Self {
+        match config {
+            TurbopufferBranchCopyConfig::Empty => TurbopufferCopySpec {
+                mode: TurbopufferBranchCopyMode::Empty,
+            },
+            TurbopufferBranchCopyConfig::All => TurbopufferCopySpec {
+                mode: TurbopufferBranchCopyMode::All,
+            },
+        }
+    }
+}
+
 impl From<DynamodbBranchCopyConfig> for DynamodbCopySpec {
     fn from(config: DynamodbBranchCopyConfig) -> Self {
         match config {
@@ -1202,6 +1329,7 @@ impl From<BranchItemCopyConfig> for ItemCopyConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crd::db_branching::core::ConnectionParamsSpec;
 
     /// `Unknown` exists for deserialization only; publishing it in the CRD's `flavor` enum
     /// would make it a value users can set.
@@ -1384,6 +1512,7 @@ mod tests {
             iam_auth: None,
             connection_settings: BTreeMap::new(),
             query_params: BTreeMap::new(),
+            additional_databases: Vec::new(),
         };
         let config = DialectConfig::Postgres(&options);
 
@@ -1398,6 +1527,102 @@ mod tests {
                 dialect: DatabaseDialect::Postgres,
                 ..
             }
+        ));
+    }
+
+    /// A branch written before `additionalDatabases` existed still reads, and one that
+    /// carries it reads the camelCase shape the CLI writes.
+    #[test]
+    fn postgres_options_additional_databases_are_optional_and_camel_case() {
+        let old: PostgresOptions =
+            serde_json::from_value(serde_json::json!({ "copy": { "mode": "all" } })).unwrap();
+        assert!(old.additional_databases.is_empty());
+        assert!(
+            serde_json::to_value(&old)
+                .unwrap()
+                .get("additionalDatabases")
+                .is_none(),
+            "an empty list must not be written, older operators see the same spec as before"
+        );
+
+        let new: PostgresOptions = serde_json::from_value(serde_json::json!({
+            "additionalDatabases": [
+                { "name": "analytics", "copy": { "mode": "schema" } },
+                { "name": "audit" }
+            ]
+        }))
+        .unwrap();
+        let [analytics, audit] = new.additional_databases.as_slice() else {
+            panic!("expected two additional databases, got {new:?}");
+        };
+        assert_eq!(analytics.name, "analytics");
+        assert!(matches!(analytics.copy.mode, SqlBranchCopyMode::Schema));
+        assert!(audit.connection_source.is_none());
+        assert!(matches!(audit.copy.mode, SqlBranchCopyMode::Empty));
+    }
+
+    /// The additional databases' app connections go through the same extra-param allowlist
+    /// as the branch's own, so a typo there fails the branch instead of being ignored.
+    #[test]
+    fn dialect_checks_extra_params_of_additional_connections() {
+        let params = |key: &str| {
+            ConnectionSource::Params(Box::new(ConnectionParamsSpec {
+                url: None,
+                host: Some(env_source("ANALYTICS_HOST")),
+                port: None,
+                user: None,
+                password: None,
+                database: None,
+                extra: BTreeMap::from([(key.to_owned(), env_source("X"))]),
+            }))
+        };
+        let spec = |extra_key: &str| BranchDatabaseSpec {
+            id: "id".to_owned(),
+            connection_source: ConnectionSource::Url(env_source("DATABASE_URL")),
+            database_name: None,
+            target: KubeResourceTarget {
+                api_version: "apps/v1".to_owned(),
+                kind: "Deployment".to_owned(),
+                name: "app".to_owned(),
+                container: String::new(),
+            },
+            ttl_secs: 60,
+            version: None,
+            image: None,
+            profile: None,
+            postgres_options: Some(PostgresOptions {
+                copy: SqlBranchCopyConfig::default(),
+                iam_auth: None,
+                connection_settings: BTreeMap::new(),
+                query_params: BTreeMap::new(),
+                additional_databases: vec![PgAdditionalDatabase {
+                    name: "analytics".to_owned(),
+                    connection_source: Some(params(extra_key)),
+                    copy: SqlBranchCopyConfig::default(),
+                }],
+            }),
+            mysql_options: None,
+            mariadb_options: None,
+            mongodb_options: None,
+            mssql_options: None,
+            redis_options: None,
+            dynamodb_options: None,
+            spanner_options: None,
+            clickhouse_options: None,
+            cockroachdb_options: None,
+            s3_options: None,
+            turbopuffer_options: None,
+            generic_options: None,
+            migrations: None,
+        };
+
+        assert!(spec("sslmode").dialect().is_ok());
+        assert!(matches!(
+            spec("sslrootcert").dialect(),
+            Err(DialectValidationError::UnknownConnectionParam {
+                dialect: DatabaseDialect::Postgres,
+                ..
+            })
         ));
     }
 }
