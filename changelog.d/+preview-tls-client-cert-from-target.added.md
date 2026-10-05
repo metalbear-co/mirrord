@@ -1,1 +1,0 @@
-Added `feature.network.incoming.tls_delivery.client_cert_source`. With `"target"`, a preview session presents the client certificate already inside the target's container (at the `client_cert` and `client_key` paths), read by the operator from a running pod, so mutual TLS previews no longer need the certificate copied to the developer's machine.
