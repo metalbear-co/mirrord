@@ -638,3 +638,414 @@ fn take(config: &mut Map<String, Value>, path: &[&str]) -> Option<Value> {
     value
 }
 
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+    use serde_json::json;
+
+    use super::*;
+
+    fn generate(args: Value) -> Result<GenerateConfigOutput, GenerateConfigError> {
+        generate_config(serde_json::from_value(args).unwrap())
+    }
+
+    /// Parses generated `content` back, so tests compare structures rather than formatting.
+    fn content(output: &GenerateConfigOutput) -> Value {
+        match output.format {
+            ConfigFormat::MirrordJson => serde_json::from_str(&output.content).unwrap(),
+            ConfigFormat::MirrordUpYaml => serde_saphyr::from_str(&output.content).unwrap(),
+        }
+    }
+
+    /// Every option the tool takes, at once.
+    fn all_options() -> Value {
+        json!({
+            "target": {
+                "type": "deployment",
+                "name": "api",
+                "container": "main",
+                "namespace": "staging",
+            },
+            "incoming": {
+                "mode": "steal",
+                "http_filter": { "header_filter": "x-user: me" },
+                "ports": [8080],
+            },
+            "outgoing": { "tcp": true, "udp": false, "filter": { "remote": ["db:5432"] } },
+            "dns": { "enabled": true, "filter": { "local": ["localhost"] } },
+            "env": {
+                "include": ["DB_*"],
+                "override": { "REGION": "eu" },
+            },
+            "fs": {
+                "mode": "localwithoverrides",
+                "read_write": ["/tmp/.+"],
+                "read_only": ["/etc/.+"],
+                "local": [".+\\.log$"],
+                "not_found": ["\\.aws/credentials"],
+            },
+            "copy_target": { "scale_down": true },
+            "split_queues": [
+                { "queue_id": "orders", "queue_type": "SQS", "message_filter": { "tenant": "^me$" } },
+                { "queue_id": "events", "queue_type": "Kafka" },
+            ],
+            "agent_namespace": "mirrord",
+            "kube_context": "prod",
+        })
+    }
+
+    /// [`all_options`] as a `mirrord-up.yaml` service takes them: without `incoming.mode`, which
+    /// the service's `mode` sets.
+    fn service_options() -> Value {
+        let mut options = all_options();
+        options
+            .pointer_mut("/incoming")
+            .and_then(Value::as_object_mut)
+            .unwrap()
+            .remove("mode");
+        options
+    }
+
+    #[test]
+    fn empty_config() {
+        let output = generate(json!({})).unwrap();
+        assert_eq!(output.content, "{}\n");
+        assert!(output.requires_operator.is_empty());
+    }
+
+    /// Each option lands on its own path and nothing else is written.
+    #[rstest]
+    #[case::targetless(
+        json!({ "target": { "type": "targetless" } }),
+        json!({ "target": { "path": "targetless" } }),
+    )]
+    #[case::target(
+        json!({ "target": { "type": "pod", "name": "api", "container": "main", "namespace": "dev" } }),
+        json!({ "target": { "path": "pod/api/container/main", "namespace": "dev" } }),
+    )]
+    #[case::incoming(
+        json!({ "incoming": { "mode": "mirror", "http_filter": { "path_filter": "^/api" }, "ports": [80] } }),
+        json!({ "feature": { "network": { "incoming": {
+            "mode": "mirror", "http_filter": { "path_filter": "^/api" }, "ports": [80],
+        } } } }),
+    )]
+    #[case::outgoing(
+        json!({ "outgoing": { "udp": false } }),
+        json!({ "feature": { "network": { "outgoing": { "udp": false } } } }),
+    )]
+    #[case::dns(
+        json!({ "dns": { "enabled": false } }),
+        json!({ "feature": { "network": { "dns": { "enabled": false } } } }),
+    )]
+    #[case::env(
+        json!({ "env": { "override": { "A": "1" } } }),
+        json!({ "feature": { "env": { "override": { "A": "1" } } } }),
+    )]
+    #[case::fs(
+        json!({ "fs": { "mode": "write" } }),
+        json!({ "feature": { "fs": { "mode": "write" } } }),
+    )]
+    #[case::copy_target(
+        json!({ "copy_target": {} }),
+        json!({ "feature": { "copy_target": { "enabled": true } } }),
+    )]
+    #[case::split_queues(
+        json!({ "split_queues": [{ "queue_id": "q", "queue_type": "Kafka" }] }),
+        json!({ "feature": { "split_queues": { "q": { "queue_type": "Kafka" } } } }),
+    )]
+    #[case::agent_namespace(
+        json!({ "agent_namespace": "mirrord" }),
+        json!({ "agent": { "namespace": "mirrord" } }),
+    )]
+    #[case::kube_context(json!({ "kube_context": "prod" }), json!({ "kube_context": "prod" }))]
+    #[case::escaped_template(
+        json!({ "kube_context": "{{ `{{` }}x" }),
+        json!({ "kube_context": "{{ `{{` }}x" }),
+    )]
+    fn single_option(#[case] config: Value, #[case] expected: Value) {
+        let output = generate(json!({ "config": config })).unwrap();
+        assert_eq!(content(&output), expected);
+    }
+
+    #[test]
+    fn all_options_at_once() {
+        let output = generate(json!({ "config": all_options() })).unwrap();
+        assert_eq!(
+            output.requires_operator,
+            ["/feature/copy_target", "/feature/split_queues"]
+        );
+        assert_eq!(
+            content(&output).pointer("/feature/split_queues"),
+            Some(&json!({
+                "events": { "queue_type": "Kafka" },
+                "orders": { "queue_type": "SQS", "message_filter": { "tenant": "^me$" } },
+            }))
+        );
+    }
+
+    /// Every combination of the options with a fixed set of values gives a config, except the
+    /// ones mirrord rejects as conflicting.
+    #[test]
+    fn option_combinations() {
+        let targets = [
+            json!({ "type": "targetless" }),
+            json!({ "type": "pod", "name": "a" }),
+            json!({ "type": "deployment", "name": "a", "container": "c" }),
+            json!({ "type": "rollout", "name": "a" }),
+            json!({ "type": "job", "name": "a" }),
+            json!({ "type": "cronjob", "name": "a" }),
+            json!({ "type": "statefulset", "name": "a" }),
+            json!({ "type": "service", "name": "a" }),
+            json!({ "type": "replicaset", "name": "a", "namespace": "n" }),
+        ];
+        let incoming = [
+            json!(null),
+            json!({ "mode": "mirror" }),
+            json!({ "mode": "steal", "http_filter": { "header_filter": "x: y" } }),
+            json!({ "mode": "off", "ports": [1] }),
+        ];
+        let fs = [
+            json!(null),
+            json!({ "mode": "read" }),
+            json!({ "mode": "write" }),
+            json!({ "mode": "local" }),
+            json!({ "mode": "localwithoverrides", "read_only": ["/a"] }),
+        ];
+        let queues = [
+            json!(null),
+            json!([{ "queue_id": "q", "queue_type": "SQS", "message_filter": { "a": "b" } }]),
+        ];
+        let copy_targets = [json!(null), json!({ "scale_down": true })];
+
+        for target in &targets {
+            for incoming in &incoming {
+                for fs in &fs {
+                    for split_queues in &queues {
+                        for copy_target in &copy_targets {
+                            let config = json!({
+                                "target": target,
+                                "incoming": incoming,
+                                "fs": fs,
+                                "split_queues": split_queues,
+                                "copy_target": copy_target,
+                            });
+                            let json = generate(json!({ "config": config }));
+                            let up = generate(json!({
+                                "format": "mirrord-up.yaml",
+                                "services": [{ "name": "a", "run": { "command": ["true"] }, "config": config }],
+                            }));
+
+                            let targetless = target.pointer("/type") == Some(&json!("targetless"));
+                            let conflicts = (targetless
+                                && incoming.pointer("/mode") == Some(&json!("steal")))
+                                || ((targetless
+                                    || target.pointer("/type") == Some(&json!("service")))
+                                    && copy_target.is_null().not());
+                            assert_eq!(json.is_err(), conflicts, "{config}");
+                            if incoming.pointer("/mode").is_some() {
+                                up.unwrap_err();
+                            } else if conflicts.not() {
+                                up.unwrap();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn deterministic() {
+        let up = json!({
+            "format": "mirrord-up.yaml",
+            "common": { "kube_context": "prod" },
+            "services": [
+                { "name": "b", "run": { "command": ["b"] }, "config": service_options() },
+                { "name": "a", "run": { "command": ["a"] }, "mode": "mirror" },
+            ],
+        });
+        for args in [json!({ "config": all_options() }), up] {
+            assert_eq!(
+                generate(args.clone()).unwrap().content,
+                generate(args).unwrap().content
+            );
+        }
+
+        let reordered = serde_json::from_str::<Value>(
+            r#"{ "config": { "env": { "override": { "B": "2", "A": "1" } }, "kube_context": "x" } }"#,
+        )
+        .unwrap();
+        let ordered = json!({ "config": { "kube_context": "x", "env": { "override": { "A": "1", "B": "2" } } } });
+        assert_eq!(
+            generate(reordered).unwrap().content,
+            generate(ordered).unwrap().content
+        );
+    }
+
+    #[test]
+    fn up_config() {
+        let output = generate(json!({
+            "format": "mirrord-up.yaml",
+            "common": { "kube_context": "prod" },
+            "services": [
+                {
+                    "name": "api",
+                    "run": { "command": ["npm", "run", "dev"], "type": "exec" },
+                    "mode": "mirror",
+                    "config": service_options(),
+                },
+                { "name": "worker", "run": { "command": ["true"] } },
+            ],
+        }))
+        .unwrap();
+
+        let all = service_options();
+        assert_eq!(
+            content(&output),
+            json!({
+                "common": { "context": "prod" },
+                "services": {
+                    "api": {
+                        "target": { "path": "deployment/api/container/main", "namespace": "staging" },
+                        "context": "prod",
+                        "env": all.pointer("/env").unwrap(),
+                        "http_filter": all.pointer("/incoming/http_filter").unwrap(),
+                        "default_mode": "mirror",
+                        "run": { "command": ["npm", "run", "dev"], "type": "exec" },
+                        "config_patch": {
+                            "agent": { "namespace": "mirrord" },
+                            "feature": {
+                                "copy_target": { "enabled": true, "scale_down": true },
+                                "fs": all.pointer("/fs").unwrap(),
+                                "network": {
+                                    "incoming": { "ports": [8080] },
+                                    "outgoing": all.pointer("/outgoing").unwrap(),
+                                    "dns": all.pointer("/dns").unwrap(),
+                                },
+                                "split_queues": {
+                                    "events": { "queue_type": "Kafka" },
+                                    "orders": { "queue_type": "SQS", "message_filter": { "tenant": "^me$" } },
+                                },
+                            },
+                        },
+                    },
+                    "worker": { "run": { "command": ["true"] } },
+                },
+            })
+        );
+        assert_eq!(
+            output.requires_operator,
+            [
+                "/services/api/config_patch/feature/copy_target",
+                "/services/api/config_patch/feature/split_queues",
+            ]
+        );
+    }
+
+    /// A literal `{{` survives rendering when escaped as the tool's description says.
+    #[test]
+    fn escaped_template_in_up() {
+        let output = generate(json!({
+            "format": "mirrord-up.yaml",
+            "services": [{
+                "name": "a",
+                "run": { "command": ["echo", "{{ `{{` }}"] },
+            }],
+        }))
+        .unwrap();
+        assert!(output.content.contains("{{ `{{` }}"), "{}", output.content);
+    }
+
+    #[test]
+    fn operator_targets() {
+        let output = generate(json!({
+            "format": "mirrord-up.yaml",
+            "services": [{
+                "name": "a/b",
+                "run": { "command": ["true"] },
+                "config": { "target": { "type": "statefulset", "name": "db" } },
+            }],
+        }))
+        .unwrap();
+        assert_eq!(output.requires_operator, ["/services/a~1b/target"]);
+
+        let output = generate(json!({
+            "format": "mirrord-up.yaml",
+            "services": [{ "name": "a", "run": { "command": ["true"] }, "mode": "replace" }],
+        }))
+        .unwrap();
+        assert_eq!(output.requires_operator, ["/services/a/default_mode"]);
+    }
+
+    #[rstest]
+    #[case::targetless_with_name(
+        json!({ "config": { "target": { "type": "targetless", "name": "a" } } }),
+    )]
+    #[case::targetless_with_container(
+        json!({ "config": { "target": { "type": "targetless", "container": "a" } } }),
+    )]
+    #[case::target_without_name(json!({ "config": { "target": { "type": "pod" } } }))]
+    #[case::duplicate_queue(json!({ "config": { "split_queues": [
+        { "queue_id": "q", "queue_type": "SQS" },
+        { "queue_id": "q", "queue_type": "Kafka" },
+    ] } }))]
+    #[case::services_for_json(json!({ "services": [] }))]
+    #[case::config_for_up(json!({ "format": "mirrord-up.yaml", "config": {} }))]
+    #[case::no_services(json!({ "format": "mirrord-up.yaml" }))]
+    #[case::duplicate_service(json!({ "format": "mirrord-up.yaml", "services": [
+        { "name": "a", "run": { "command": ["true"] } },
+        { "name": "a", "run": { "command": ["true"] } },
+    ] }))]
+    #[case::env_include_and_exclude(
+        json!({ "config": { "env": { "include": ["A"], "exclude": ["B"] } } }),
+    )]
+    #[case::targetless_copy(json!({ "config": {
+        "target": { "type": "targetless" },
+        "copy_target": {},
+    } }))]
+    #[case::two_http_filters(json!({ "config": { "incoming": { "http_filter": {
+        "header_filter": "a: b",
+        "path_filter": "^/",
+    } } } }))]
+    #[case::empty_name(json!({ "config": { "target": { "type": "pod", "name": "" } } }))]
+    #[case::container_in_name(json!({ "config": { "target": {
+        "type": "deployment",
+        "name": "api/container/x",
+    } } }))]
+    #[case::slash_in_container(json!({ "config": { "target": {
+        "type": "pod",
+        "name": "a",
+        "container": "b/c",
+    } } }))]
+    #[case::empty_namespace(json!({ "config": { "target": {
+        "type": "pod",
+        "name": "a",
+        "namespace": "",
+    } } }))]
+    #[case::both_outgoing_filters(json!({ "config": { "outgoing": { "filter": {
+        "remote": ["a"],
+        "local": ["b"],
+    } } } }))]
+    #[case::no_dns_filter(json!({ "config": { "dns": { "filter": {} } } }))]
+    #[case::empty_service_name(json!({ "format": "mirrord-up.yaml", "services": [
+        { "name": "", "run": { "command": ["true"] } },
+    ] }))]
+    #[case::empty_command(json!({ "format": "mirrord-up.yaml", "services": [
+        { "name": "a", "run": { "command": [] } },
+    ] }))]
+    #[case::incoming_mode_in_service(json!({ "format": "mirrord-up.yaml", "services": [{
+        "name": "a",
+        "run": { "command": ["true"] },
+        "mode": "mirror",
+        "config": { "incoming": { "mode": "steal" } },
+    }] }))]
+    #[case::http_filter_with_replace(json!({ "format": "mirrord-up.yaml", "services": [{
+        "name": "a",
+        "run": { "command": ["true"] },
+        "mode": "replace",
+        "config": { "incoming": { "http_filter": { "header_filter": "a: b" } } },
+    }] }))]
+    fn refuses(#[case] args: Value) {
+        generate(args).unwrap_err();
+    }
+}
