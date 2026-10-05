@@ -25,7 +25,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 /// Which config file the content belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum ConfigFormat {
     /// The configuration of a single mirrord session (`mirrord exec -f mirrord.json`).
     #[serde(rename = "mirrord.json")]
@@ -388,7 +388,7 @@ fn allowed_properties(error: &ValidationError<'_>, raw_schema: &Value) -> Option
 }
 
 /// RFC 6901 escaping for one JSON pointer segment.
-fn escape_pointer_token(token: &str) -> String {
+pub(crate) fn escape_pointer_token(token: &str) -> String {
     token.replace('~', "~0").replace('/', "~1")
 }
 
