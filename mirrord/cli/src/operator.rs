@@ -1,3 +1,5 @@
+use std::{env, ops::Not};
+
 use futures::TryFutureExt;
 use status::StatusCommandHandler;
 
@@ -9,8 +11,12 @@ use crate::{
     error::{CliError, OperatorSetupError},
 };
 
+mod install;
 mod session;
 pub(super) mod status;
+
+pub(crate) use install::OperatorInstallError;
+use install::OperatorTelemetry;
 
 /// Set up the operator into a file or to stdout, with explanation.
 async fn operator_setup() -> CliResult<(), OperatorSetupError> {
@@ -23,8 +29,22 @@ pub(crate) async fn operator_command(
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
+    let telemetry = OperatorTelemetry {
+        enabled: env::var("MIRRORD_TELEMETRY")
+            .is_ok_and(|value| value == "false")
+            .not(),
+        machine_id: user_data.machine_id(),
+        watch: watch.clone(),
+    };
+
     match args.command {
         OperatorCommand::Setup => operator_setup().await.map_err(CliError::from),
+        OperatorCommand::Install(args) => install::operator_install(*args, &telemetry)
+            .await
+            .map_err(CliError::from),
+        OperatorCommand::Uninstall(args) => install::operator_uninstall(args, &telemetry)
+            .await
+            .map_err(CliError::from),
         OperatorCommand::Status { config_file } => {
             StatusCommandHandler::new(config_file, watch, user_data)
                 .and_then(StatusCommandHandler::handle)

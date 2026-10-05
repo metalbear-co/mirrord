@@ -16,7 +16,11 @@ use tracing::Level;
 #[cfg(target_os = "macos")]
 use which::which;
 
-use crate::{data::GlobalConfig, error::CliResult};
+use crate::{
+    data::GlobalConfig,
+    error::CliResult,
+    kube::{ConfigSource, record_run_kube_environment},
+};
 
 /// Address for mirrord-console is listening on.
 pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
@@ -67,12 +71,30 @@ fn resolve_project_or_up_config(
     cfg_context: &mut ConfigContext,
 ) -> CliResult<(Option<String>, LayerConfig)> {
     match std::env::var(mirrord_up::RESOLVED_CONFIG_ENV) {
-        Ok(encoded) => Ok((None, LayerConfig::decode(&encoded)?)),
-        Err(..) => {
-            let path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
-            Ok((path, LayerConfig::resolve(cfg_context)?))
+        Ok(encoded) => {
+            let config = LayerConfig::decode(&encoded)?;
+            record_run_kube_environment(ConfigSource::MirrordUp, &config);
+            Ok((None, config))
         }
+        Err(..) => resolve_and_record(cfg_context),
     }
+}
+
+/// Resolves a [`LayerConfig`], recording the Kubernetes environment it selects for the final CLI
+/// error. Returns the config file path it was resolved from (if any) along with the config.
+fn resolve_and_record(cfg_context: &mut ConfigContext) -> CliResult<(Option<String>, LayerConfig)> {
+    let config_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
+
+    let config = LayerConfig::resolve(cfg_context)?;
+    record_run_kube_environment(
+        config_path
+            .clone()
+            .map(ConfigSource::File)
+            .unwrap_or(ConfigSource::None),
+        &config,
+    );
+
+    Ok((config_path, config))
 }
 
 async fn apply_global_defaults(config: &mut LayerConfig) {
@@ -92,7 +114,7 @@ pub(crate) async fn resolve_config(
 pub(crate) async fn resolve_layer_config(
     cfg_context: &mut ConfigContext,
 ) -> CliResult<LayerConfig> {
-    let mut config = LayerConfig::resolve(cfg_context)?;
+    let (_, mut config) = resolve_and_record(cfg_context)?;
     apply_global_defaults(&mut config).await;
     Ok(config)
 }

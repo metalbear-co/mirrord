@@ -283,13 +283,19 @@ impl<'de> Deserialize<'de> for TargetConfig {
                 E: serde::de::Error,
             {
                 if v == "none" {
-                    Ok(TargetConfig::Targetless)
-                } else {
-                    Err(serde::de::Error::invalid_value(
-                        Unexpected::Str(v),
-                        &EXPECTED,
-                    ))
+                    return Ok(TargetConfig::Targetless);
                 }
+
+                // `invalid_value` has no list of allowed names for the parse error to suggest
+                // from, so the hint goes in the expected text.
+                let expected: Cow<str> = match crate::closest_name(v, &["none"]) {
+                    Some(closest) => format!("{EXPECTED}; did you mean `{closest}`?").into(),
+                    None => EXPECTED.into(),
+                };
+                Err(serde::de::Error::invalid_value(
+                    Unexpected::Str(v),
+                    &expected.as_ref(),
+                ))
             }
 
             fn visit_none<E>(self) -> Result<Self::Value, E>
@@ -546,9 +552,6 @@ impl ServiceConfig {
 
         cfg.feature.env = self.env;
 
-        cfg.feature.split_queues =
-            SplitQueuesConfig::all_wildcard_with_mode(&key, self.default_mode.into());
-
         cfg.feature.network.incoming.mode = self.default_mode.into();
 
         match self.default_mode {
@@ -564,6 +567,9 @@ impl ServiceConfig {
                         ..Default::default()
                     }
                 };
+
+                cfg.feature.split_queues =
+                    SplitQueuesConfig::all_wildcard_with_mode(&key, self.default_mode.into());
             }
 
             ServiceMode::Replace => {
@@ -2086,6 +2092,26 @@ mod tests {
             "#,
         );
         assert!(result.is_err());
+    }
+
+    /// A typo of `target: none` gets `none` added to the message as a hint.
+    #[rstest]
+    #[case::typo("nnoe", "; did you mean `none`?")]
+    #[case::uppercase("NONE", "; did you mean `none`?")]
+    #[case::unrelated("deployment", "")]
+    fn error_invalid_target_string(#[case] target: &str, #[case] hint: &str) {
+        let err = serde_saphyr::from_str::<UpConfig>(&format!(
+            "services:\n  svc:\n    target: {target}\n    run:\n      command: [x]\n"
+        ))
+        .unwrap_err();
+        let expected = format!(
+            "line 3 column 5: invalid value: string \"{target}\", expected `none`, a target \
+             mapping, or nothing at all{hint}\n"
+        );
+        assert!(
+            err.to_string().contains(&expected),
+            "no `{expected}` in: {err}"
+        );
     }
 
     // -- Analytics --

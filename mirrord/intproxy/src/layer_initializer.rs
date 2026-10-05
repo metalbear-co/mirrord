@@ -6,7 +6,11 @@ use mirrord_intproxy_protocol::{
     codec::{AsyncDecoder, AsyncEncoder, CodecError},
 };
 use thiserror::Error;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::oneshot,
+};
+use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
 use crate::{
@@ -23,42 +27,76 @@ pub enum LayerInitializerError {
     Codec(#[from] CodecError),
     #[error("layer did not send any message")]
     NoMessage,
+    #[error("layer registered an invalid process ID: {0}")]
+    InvalidProcessId(i32),
     #[error("layer sent unexpected message: {0:?}")]
     UnexpectedMessage(LayerToProxyMessage),
 }
 
+/// Controls the initializer independently of its bounded task message channel.
+///
+/// Shutdown acknowledgement cannot share the registration channel: registrations already in
+/// flight may fill that channel precisely while the owner needs to wait for quiescence.
+pub(crate) struct LayerInitializerShutdown {
+    pub(crate) cancellation: CancellationToken,
+    pub(crate) quiesced: oneshot::Receiver<()>,
+}
+
+#[derive(Debug)]
+struct InitializedLayer {
+    layer: NewLayer,
+    response_error: Option<CodecError>,
+}
+
 /// Handles logic for accepting new layer connections.
+///
+/// Initializing one connection at a time bounds pending handshakes without spawning a task per
+/// socket. Shutdown cancels an undecoded read so a silent client cannot hold up cleanup.
 /// Run as a [`BackgroundTask`].
 #[derive(Debug)]
 pub struct LayerInitializer {
     listener: TcpListener,
     next_layer_id: LayerId,
+    shutdown: CancellationToken,
+    quiesced: Option<oneshot::Sender<()>>,
 }
 
 impl LayerInitializer {
-    pub fn new(listener: TcpListener) -> Self {
-        Self {
-            listener,
-            next_layer_id: LayerId(0),
-        }
+    pub fn new(listener: TcpListener) -> (Self, LayerInitializerShutdown) {
+        let shutdown = CancellationToken::new();
+        let (quiesced_tx, quiesced_rx) = oneshot::channel();
+        (
+            Self {
+                listener,
+                next_layer_id: LayerId(0),
+                shutdown: shutdown.clone(),
+                quiesced: Some(quiesced_tx),
+            },
+            LayerInitializerShutdown {
+                cancellation: shutdown,
+                quiesced: quiesced_rx,
+            },
+        )
     }
 
-    /// Initialize connection with the new layer, assigning a fresh [`LayerId`].
-    #[tracing::instrument(level = Level::INFO, skip(stream), ret, err)]
+    /// Initializes one accepted connection.
+    ///
+    /// Cancellation discards an undecoded connection. After decoding, the result retains the PID
+    /// even if shutdown interrupts the response, so the owner can account for it before exiting.
+    #[tracing::instrument(level = Level::INFO, skip(stream, shutdown), ret, err)]
     async fn handle_new_stream(
-        &mut self,
         stream: TcpStream,
         layer_address: SocketAddr,
-    ) -> Result<NewLayer, LayerInitializerError> {
+        id: LayerId,
+        shutdown: &CancellationToken,
+    ) -> Result<Option<InitializedLayer>, LayerInitializerError> {
         let mut decoder: AsyncDecoder<LocalMessage<LayerToProxyMessage>, _> =
             AsyncDecoder::new(stream);
-        let msg = decoder
-            .try_next()
-            .await?
-            .ok_or(LayerInitializerError::NoMessage)?;
-
-        let id = self.next_layer_id;
-        self.next_layer_id.0 += 1;
+        let msg = tokio::select! {
+            biased;
+            msg = decoder.try_next() => msg?.ok_or(LayerInitializerError::NoMessage)?,
+            _ = shutdown.cancelled() => return Ok(None),
+        };
 
         let NewSessionRequest {
             parent_layer,
@@ -67,25 +105,31 @@ impl LayerInitializer {
             LayerToProxyMessage::NewSession(request) => request,
             other => return Err(LayerInitializerError::UnexpectedMessage(other)),
         };
+        if process_info.pid <= 0 {
+            return Err(LayerInitializerError::InvalidProcessId(process_info.pid));
+        }
         tracing::info!(?parent_layer, ?process_info, "New layer connected");
 
         let mut encoder: AsyncEncoder<LocalMessage<ProxyToLayerMessage>, _> =
             AsyncEncoder::new(decoder.into_inner());
-        encoder
-            .send(LocalMessage {
+        let response_error = tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => None,
+            result = encoder.send(LocalMessage {
                 message_id: msg.message_id,
                 inner: ProxyToLayerMessage::NewSession(id),
-            })
-            .await?;
+            }) => result.err(),
+        };
 
-        let stream = encoder.into_inner();
-
-        Ok(NewLayer {
-            stream,
-            id,
-            parent_id: parent_layer,
-            process_info,
-        })
+        Ok(Some(InitializedLayer {
+            layer: NewLayer {
+                stream: encoder.into_inner(),
+                id,
+                parent_id: parent_layer,
+                process_info,
+            },
+            response_error,
+        }))
     }
 }
 
@@ -96,32 +140,56 @@ impl BackgroundTask for LayerInitializer {
 
     #[tracing::instrument(level = Level::INFO, name = "layer_initializer_main_loop", skip_all, ret, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        loop {
+        let result = loop {
             tokio::select! {
+                biased;
+                _ = self.shutdown.cancelled() => break Ok(()),
                 None = message_bus.recv() => {
                     tracing::debug!("Message bus closed, exiting");
-                    break Ok(())
+                    self.shutdown.cancel();
+                    break Ok(());
                 },
-
-                res = self.listener.accept() => {
-                    let (stream, layer_address) = res.map_err(LayerInitializerError::Accept)?;
-                    // Layer requests are small and strictly request-response, so Nagle's algorithm
-                    // only adds latency to every hooked libc call.
+                result = self.listener.accept() => {
+                    let (stream, layer_address) = match result {
+                        Ok(accepted) => accepted,
+                        Err(error) => {
+                            self.shutdown.cancel();
+                            break Err(LayerInitializerError::Accept(error));
+                        }
+                    };
+                    // Layer requests are small and strictly request-response, so Nagle's
+                    // algorithm only adds latency to every hooked libc call.
                     if let Err(error) = stream.set_nodelay(true) {
                         tracing::warn!(%error, %layer_address, "Failed to set TCP_NODELAY on a layer connection");
                     }
-                    // A failed handshake only affects the connecting process.
-                    match self.handle_new_stream(stream, layer_address).await {
-                        Ok(new_layer) => message_bus.send(new_layer).await,
+
+                    let id = self.next_layer_id;
+                    self.next_layer_id.0 += 1;
+                    match Self::handle_new_stream(stream, layer_address, id, &self.shutdown).await {
+                        Ok(Some(initialized)) => {
+                            // A decoded PID must cross the output channel before quiescence is
+                            // acknowledged, even if the response failed or shutdown arrived.
+                            message_bus.send(initialized.layer).await;
+                            if let Some(error) = initialized.response_error {
+                                tracing::warn!(%error, %layer_address, "Failed to send the handshake response to a layer connection");
+                            }
+                        }
+                        Ok(None) => {}
                         Err(error) => tracing::warn!(
                             %error,
                             %layer_address,
-                            "Failed to initialize a layer connection, dropping it"
+                            "Failed to initialize a layer connection, dropping it",
                         ),
                     }
                 },
             }
+        };
+
+        if let Some(quiesced) = self.quiesced.take() {
+            let _ = quiesced.send(());
         }
+
+        result
     }
 }
 
@@ -136,6 +204,7 @@ mod test {
     };
     use mirrord_protocol_io::Connection;
     use tokio::net::{TcpListener, TcpStream};
+    use tokio_util::sync::CancellationToken;
 
     use super::LayerInitializer;
     use crate::{
@@ -144,6 +213,75 @@ mod test {
         error::ProxyRuntimeError,
         main_tasks::MainTaskId,
     };
+
+    /// Shutdown must not wait for a client that connected but never supplied its PID.
+    #[tokio::test]
+    async fn cancellation_discards_undecoded_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (stream, address) = listener.accept().await.unwrap();
+        let shutdown = CancellationToken::new();
+        let handler = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move {
+                LayerInitializer::handle_new_stream(stream, address, super::LayerId(0), &shutdown)
+                    .await
+            }
+        });
+        shutdown.cancel();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), handler)
+                .await
+                .expect("undecoded handshake blocked shutdown")
+                .unwrap()
+                .unwrap()
+                .is_none()
+        );
+        drop(client);
+    }
+
+    /// A malformed PID must not be acknowledged or reach the shutdown signalling set.
+    #[tokio::test]
+    async fn rejects_non_positive_process_ids() {
+        for pid in [0, -42] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let client = TcpStream::connect(listener.local_addr().unwrap())
+                .await
+                .unwrap();
+            let (stream, address) = listener.accept().await.unwrap();
+            let shutdown = CancellationToken::new();
+            let handler = tokio::spawn(async move {
+                LayerInitializer::handle_new_stream(stream, address, super::LayerId(0), &shutdown)
+                    .await
+            });
+            let (mut tx, mut rx) = codec::make_async_framed::<
+                LocalMessage<LayerToProxyMessage>,
+                LocalMessage<ProxyToLayerMessage>,
+            >(client);
+            tx.send(LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                    process_info: ProcessInfo {
+                        pid,
+                        parent_pid: 1,
+                        name: "invalid-layer".to_owned(),
+                        cmdline: Vec::new(),
+                        loaded: true,
+                    },
+                    parent_layer: None,
+                }),
+            })
+            .await
+            .unwrap();
+            assert!(matches!(
+                handler.await.unwrap(),
+                Err(super::LayerInitializerError::InvalidProcessId(value)) if value == pid
+            ));
+            assert!(rx.next().await.is_none());
+        }
+    }
 
     /// A connection that closes without sending `NewSession` must not stop the initializer from
     /// accepting other layers.
@@ -155,11 +293,8 @@ mod test {
         let (connection, _, _out) = Connection::dummy();
         let mut tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             BackgroundTasks::new(connection.tx_handle());
-        let _initializer = tasks.register(
-            LayerInitializer::new(listener),
-            MainTaskId::LayerInitializer,
-            32,
-        );
+        let (initializer, _shutdown) = LayerInitializer::new(listener);
+        let _initializer = tasks.register(initializer, MainTaskId::LayerInitializer, 32);
 
         drop(TcpStream::connect(addr).await.unwrap());
 

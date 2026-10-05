@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 
-use super::layer::{self, Target};
+use super::layer::{self, CargoOptions, Target};
 
 #[derive(Clone, Copy)]
 pub enum Suite {
@@ -114,27 +114,27 @@ fn test_layer_target() -> Result<Target> {
 
 fn build_layer_for_tests() -> Result<PathBuf> {
     let target = test_layer_target()?;
-    let layer = layer::build_layer(target, false, &[])?;
+    let layer = layer::build_layer(target, CargoOptions::default(), &[])?;
     canonicalize_built_artifact(&layer, "built mirrord layer")
 }
 
 fn build_binary_for_tests(layer_path: &Path) -> Result<PathBuf> {
     let target = host_cli_target()?;
-    ensure_macos_arm64_layer(target, false)?;
+    ensure_macos_arm64_layer(target)?;
     super::ui::build_ui()?;
-    let binary = super::cli::build_cli(target, false, layer_path, &[])?;
+    let binary = super::cli::build_cli(target, CargoOptions::default(), layer_path, &[])?;
     canonicalize_built_artifact(&binary, "built mirrord binary")
 }
 
-fn ensure_macos_arm64_layer(target: Target, release: bool) -> Result<()> {
+fn ensure_macos_arm64_layer(target: Target) -> Result<()> {
     if !matches!(target, Target::MacosX86_64 | Target::MacosAarch64) {
         return Ok(());
     }
 
-    let arm64_layer = Target::MacosAarch64.layer_file(release);
+    let arm64_layer = Target::MacosAarch64.layer_file(CargoOptions::default());
 
     if !arm64_layer.is_file() {
-        layer::build_layer(Target::MacosAarch64, release, &[])?;
+        layer::build_layer(Target::MacosAarch64, CargoOptions::default(), &[])?;
     }
 
     Ok(())

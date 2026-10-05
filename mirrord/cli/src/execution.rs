@@ -6,6 +6,7 @@ use std::{
     time::Duration,
 };
 
+use itertools::Itertools;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, MIRRORD_KUBE_VERSION_MAJOR_ENV,
     MIRRORD_KUBE_VERSION_MINOR_ENV, MIRRORD_OPERATOR_WALL_ENV, OperatorWall, Reporter,
@@ -13,7 +14,8 @@ use mirrord_analytics::{
 #[cfg(any(windows, test))]
 use mirrord_config::MIRRORD_LAYER_CRASH_REPORTING;
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_TARGET_CONTAINER_PORTS,
+    MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
     external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
     util::GIT_BRANCH,
 };
@@ -447,7 +449,8 @@ impl MirrordExecution {
     /// Returns the proxy handle as well as the external proxy address.
     /// The address should be accessible from the internal proxy sidecar.
     ///
-    /// Returned [`MirrordExecution::environment`] contains *only* remote environment.
+    /// Returned [`MirrordExecution::environment`] contains *only* remote environment and
+    /// [`MIRRORD_LAYER_TARGET_CONTAINER_PORTS`].
     #[tracing::instrument(level = Level::DEBUG, skip_all)]
     pub(crate) async fn start_external(
         config: &mut LayerConfig,
@@ -467,6 +470,7 @@ impl MirrordExecution {
             connect_info,
             connector,
             api_version,
+            target_container_ports,
         } = create_and_connect(
             config,
             progress,
@@ -483,13 +487,17 @@ impl MirrordExecution {
             .await
             .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
+        let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
         } else {
             Self::fetch_env_vars(config, &mut client)
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
         };
+        env_vars.insert(
+            MIRRORD_LAYER_TARGET_CONTAINER_PORTS.to_owned(),
+            target_container_ports.iter().join(","),
+        );
 
         // The copies would live on this machine, where the user process cannot reach them: it runs
         // inside a container, with a filesystem of its own.
@@ -629,6 +637,7 @@ impl MirrordExecution {
             connect_info,
             connector,
             api_version,
+            target_container_ports,
         } = create_and_connect(
             config,
             progress,
@@ -659,6 +668,10 @@ impl MirrordExecution {
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
         };
+        env_vars.insert(
+            MIRRORD_LAYER_TARGET_CONTAINER_PORTS.to_owned(),
+            target_container_ports.iter().join(","),
+        );
 
         // Prefetching happens before the internal proxy and the user process start.
         #[cfg(unix)]

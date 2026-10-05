@@ -9,9 +9,10 @@ use std::{
 
 use background_tasks::{BackgroundTasks, TaskSender, TaskUpdate};
 use error::UnexpectedAgentMessage;
+use futures::FutureExt;
 use layer_conn::LayerConnection;
-use layer_initializer::LayerInitializer;
-use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
+use layer_initializer::{LayerInitializer, LayerInitializerShutdown};
+use main_tasks::{FromLayer, LayerForked, MainTaskId, NewLayer, ProxyMessage, ToLayer};
 use mirrord_config::{
     experimental::ExperimentalConfig, feature::network::incoming::tls_delivery::LocalTlsDelivery,
 };
@@ -35,6 +36,7 @@ use tokio::{
     time,
     time::{Interval, MissedTickBehavior},
 };
+use tokio_util::sync::CancellationToken;
 // Suppressors for `unused_crate_dependencies` on the `lib test` build. These dev-deps are
 // referenced only from the integration test in `tests/session_monitor_round_trip.rs`, which
 // is a separate compilation unit, so the lib-test target sees them as unused without these.
@@ -58,6 +60,7 @@ mod layer_conn;
 mod layer_initializer;
 pub mod main_tasks;
 pub mod ping_pong;
+mod process_termination;
 pub mod proxies;
 mod remote_resources;
 mod request_queue;
@@ -101,9 +104,15 @@ fn file_request_path(req: &FileRequest) -> Option<String> {
 }
 
 /// [`TaskSender`]s for main background tasks. See [`MainTaskId`].
+pub(crate) struct LayerInitializerTask {
+    _sender: TaskSender<LayerInitializer>,
+    shutdown: LayerInitializerShutdown,
+    finished: bool,
+}
+
 struct TaskTxs {
     layers: HashMap<LayerId, TaskSender<LayerConnection>>,
-    _layer_initializer: TaskSender<LayerInitializer>,
+    layer_initializer: LayerInitializerTask,
     agent: TaskSender<RestartableBackgroundTaskWrapper<AgentConnection>>,
     simple: TaskSender<SimpleProxy>,
     ping_pong: TaskSender<RestartableBackgroundTaskWrapper<PingPong>>,
@@ -156,6 +165,113 @@ pub struct IntProxyIntervals {
     pub process_logging: Duration,
 }
 
+pub(crate) struct ShutdownLayers {
+    /// Layer IDs distinguish a new registration from an older layer whose PID was reused.
+    pub(crate) layer_pids: HashMap<LayerId, i32>,
+    pub(crate) error: Option<ProxyStartupError>,
+    _accepted_layers: Vec<NewLayer>,
+}
+
+impl ShutdownLayers {
+    pub(crate) fn pids(&self) -> HashSet<i32> {
+        self.layer_pids.values().copied().collect()
+    }
+}
+
+fn collect_shutdown_update(
+    update: (MainTaskId, TaskUpdate<ProxyMessage, ProxyRuntimeError>),
+    shutdown_layers: &mut ShutdownLayers,
+) -> bool {
+    match update {
+        (_, TaskUpdate::Message(ProxyMessage::NewLayer(layer))) => {
+            shutdown_layers
+                .layer_pids
+                .insert(layer.id, layer.process_info.pid);
+            shutdown_layers._accepted_layers.push(layer);
+            false
+        }
+        (MainTaskId::LayerConnection(layer_id), TaskUpdate::Finished(_)) => {
+            shutdown_layers.layer_pids.remove(&layer_id);
+            false
+        }
+        (MainTaskId::LayerInitializer, TaskUpdate::Finished(result)) => {
+            tracing::trace!(
+                ?result,
+                "Layer initializer finished while acceptance was quiescing"
+            );
+            if let Err(error) = result {
+                shutdown_layers.error = Some(ProxyStartupError::LayerInitializerQuiescing(
+                    Box::new(error),
+                ));
+            }
+            true
+        }
+        (task_id, TaskUpdate::Finished(result)) => {
+            tracing::trace!(%task_id, ?result, "Task finished while layer acceptance was quiescing");
+            false
+        }
+        (_, TaskUpdate::Message(_)) => false,
+    }
+}
+
+/// Stops layer acceptance and returns only after every accepted registration has crossed into the
+/// owner's layer set. Completed connections are removed before their PIDs can be signalled.
+///
+/// The initializer acknowledgement is independent of its bounded output channel, while this
+/// routine keeps draining that channel. Once acknowledged, one final nonblocking drain captures
+/// sends that completed immediately before the acknowledgement.
+pub(crate) async fn quiesce_and_collect_layers(
+    background_tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
+    layer_initializer: &mut LayerInitializerTask,
+    connected_layers: &HashMap<LayerId, ProcessInfo>,
+) -> ShutdownLayers {
+    let mut shutdown_layers = ShutdownLayers {
+        layer_pids: connected_layers
+            .iter()
+            .map(|(id, info)| (*id, info.pid))
+            .collect(),
+        error: None,
+        _accepted_layers: Vec::new(),
+    };
+    let mut tasks_open = true;
+    let mut initializer_finished = layer_initializer.finished;
+    let mut quiesced = None;
+
+    layer_initializer.shutdown.cancellation.cancel();
+    background_tasks.resume_messages(MainTaskId::LayerInitializer);
+
+    while quiesced.is_none() || !initializer_finished {
+        tokio::select! {
+            biased;
+            result = &mut layer_initializer.shutdown.quiesced, if quiesced.is_none() => {
+                quiesced = Some(result);
+            }
+            update = background_tasks.next(), if tasks_open && !initializer_finished => {
+                match update {
+                    Some(update) => {
+                        initializer_finished = collect_shutdown_update(update, &mut shutdown_layers);
+                        layer_initializer.finished |= initializer_finished;
+                    }
+                    None => {
+                        tasks_open = false;
+                        initializer_finished = true;
+                    }
+                }
+            }
+        }
+    }
+
+    while let Some(Some(update)) = background_tasks.next().now_or_never() {
+        layer_initializer.finished |= collect_shutdown_update(update, &mut shutdown_layers);
+    }
+
+    if matches!(quiesced, Some(Err(_))) && shutdown_layers.error.is_none() {
+        shutdown_layers.error = Some(ProxyStartupError::LayerInitializerQuiescenceClosed);
+    }
+
+    shutdown_layers
+}
+
 impl IntProxy {
     /// Size of channels used to communicate with main tasks (see [`MainTaskId`]).
     const CHANNEL_SIZE: usize = 512;
@@ -182,8 +298,9 @@ impl IntProxy {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError> =
             BackgroundTasks::new(agent_conn.connection.tx_handle());
 
+        let (layer_initializer, layer_initializer_shutdown) = LayerInitializer::new(listener);
         let layer_initializer = background_tasks.register(
-            LayerInitializer::new(listener),
+            layer_initializer,
             MainTaskId::LayerInitializer,
             Self::CHANNEL_SIZE,
         );
@@ -258,7 +375,11 @@ impl IntProxy {
             background_tasks,
             task_txs: TaskTxs {
                 layers: Default::default(),
-                _layer_initializer: layer_initializer,
+                layer_initializer: LayerInitializerTask {
+                    _sender: layer_initializer,
+                    shutdown: layer_initializer_shutdown,
+                    finished: false,
+                },
                 agent,
                 simple,
                 outgoing,
@@ -293,10 +414,27 @@ impl IntProxy {
         first_timeout: Duration,
         idle_timeout: Duration,
     ) -> Result<(), ProxyStartupError> {
-        match self.run_inner(first_timeout, idle_timeout).await {
+        self.run_with_shutdown(first_timeout, idle_timeout, CancellationToken::new())
+            .await
+    }
+
+    /// Runs the proxy until its normal exit conditions are met or `shutdown` is cancelled.
+    ///
+    /// Cancellation terminates every process with a currently registered layer before dropping
+    /// the layer connections. This prevents idle injected processes from surviving solely because
+    /// they have not made another hooked call that would observe the closed connection.
+    pub async fn run_with_shutdown(
+        self,
+        first_timeout: Duration,
+        idle_timeout: Duration,
+        shutdown: CancellationToken,
+    ) -> Result<(), ProxyStartupError> {
+        match self.run_inner(first_timeout, idle_timeout, &shutdown).await {
             ControlFlow::Break(result) => result,
             ControlFlow::Continue(failover_strategy) => {
-                failover_strategy.run(idle_timeout, idle_timeout).await
+                failover_strategy
+                    .run(idle_timeout, idle_timeout, &shutdown)
+                    .await
             }
         }
     }
@@ -316,6 +454,7 @@ impl IntProxy {
         self,
         first_timeout: Duration,
         idle_timeout: Duration,
+        shutdown: &CancellationToken,
     ) -> ControlFlow<Result<(), ProxyStartupError>, FailoverStrategy> {
         self.agent_tx
             .send(ClientMessage::SwitchProtocolVersion(
@@ -325,14 +464,24 @@ impl IntProxy {
 
         let mut proxy = self;
 
-        loop {
+        // A natural timeout can race with a decoded registration just as SIGTERM can. Every exit
+        // must stop acceptance and drain that registration before dropping the layer connection.
+        let exit_result: Option<Result<(), ProxyStartupError>> = loop {
             tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => break None,
+
                 Some((task_id, task_update)) = proxy.background_tasks.next() => {
                     tracing::trace!(
                         %task_id,
                         ?task_update,
                         "Received a task update",
                     );
+                    if task_id == MainTaskId::LayerInitializer
+                        && matches!(&task_update, TaskUpdate::Finished(_))
+                    {
+                        proxy.task_txs.layer_initializer.finished = true;
+                    }
                     if let Err(error) = proxy.handle_task_update(task_id, task_update).await {
                         tracing::error!(%error, "Proxy encountered a critical error, and is entering the failover state...");
                         return ControlFlow::Continue(FailoverStrategy::from_failed_proxy(proxy, error));
@@ -354,15 +503,31 @@ impl IntProxy {
                 }
 
                 _ = time::sleep(first_timeout), if !proxy.any_connection_accepted => {
-                    return ControlFlow::Break(Err(ProxyStartupError::ConnectionAcceptTimeout));
+                    break Some(Err(ProxyStartupError::ConnectionAcceptTimeout));
                 },
 
                 _ = time::sleep(idle_timeout), if proxy.any_connection_accepted && !proxy.has_layer_connections() => {
                     tracing::info!("Reached the idle timeout with no active layer connections");
-                    break;
+                    break Some(Ok(()));
                 },
             }
-        }
+        };
+
+        let mut shutdown_layers = quiesce_and_collect_layers(
+            &mut proxy.background_tasks,
+            &mut proxy.task_txs.layer_initializer,
+            &proxy.connected_layers,
+        )
+        .await;
+        tracing::info!(
+            pids = ?shutdown_layers.pids(),
+            "Proxy exiting. Terminating registered processes before closing their layer connections.",
+        );
+        let termination_error = process_termination::terminate_processes(shutdown_layers.pids())
+            .await
+            .err();
+        let shutdown_error = shutdown_layers.error.take();
+        std::mem::drop(shutdown_layers);
 
         std::mem::drop(proxy.task_txs);
 
@@ -377,7 +542,15 @@ impl IntProxy {
             );
         }
 
-        ControlFlow::Break(Ok(()))
+        ControlFlow::Break(match exit_result {
+            Some(Err(error)) => Err(error),
+            _ => match shutdown_error {
+                Some(error) => Err(error),
+                None => termination_error.map_or(Ok(()), |error| {
+                    Err(ProxyStartupError::ProcessTermination(error.0))
+                }),
+            },
+        })
     }
 
     /// Routes a [`ProxyMessage`] to the correct background task.
@@ -820,6 +993,14 @@ impl IntProxy {
 
 #[cfg(test)]
 mod test {
+    #[cfg(unix)]
+    use std::collections::HashMap;
+    #[cfg(unix)]
+    use std::{
+        io::{BufRead, BufReader},
+        os::unix::process::CommandExt,
+        process::{Command, Stdio},
+    };
     use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
     use futures::{SinkExt, StreamExt, TryStreamExt};
@@ -828,6 +1009,8 @@ mod test {
     use mirrord_config::{
         LayerFileConfig, config::MirrordConfig, experimental::ExperimentalFileConfig,
     };
+    #[cfg(unix)]
+    use mirrord_intproxy_protocol::LayerId;
     use mirrord_intproxy_protocol::{
         IncomingRequest, LayerToProxyMessage, LocalMessage, NetProtocol, NewSessionRequest,
         OutgoingConnectRequest, OutgoingConnectRequestMetadata, OutgoingConnectResponse,
@@ -849,6 +1032,10 @@ mod test {
         },
     };
     use mirrord_protocol_io::{Client, Connection, ConnectionOutput};
+    #[cfg(unix)]
+    use nix::unistd::{Pid, getsid, setsid};
+    #[cfg(unix)]
+    use tokio::sync::broadcast;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::{
@@ -857,6 +1044,8 @@ mod test {
         },
         sync::{mpsc, watch},
     };
+    #[cfg(unix)]
+    use tokio_util::sync::CancellationToken;
 
     use crate::{
         IntProxy, IntProxyIntervals,
@@ -865,6 +1054,36 @@ mod test {
         },
         session_monitor::{MonitorTx, chaos::ChaosWatcherRx},
     };
+    #[cfg(unix)]
+    use crate::{main_tasks::MainTaskId, session_monitor::MonitorEvent};
+
+    /// A finished connection must not leave a stale PID in the shutdown set, while another
+    /// registration sharing that PID must remain eligible for termination.
+    #[cfg(unix)]
+    #[test]
+    fn quiescence_discards_finished_layer_registration() {
+        let mut layers = super::ShutdownLayers {
+            layer_pids: HashMap::from([(LayerId(1), 1337), (LayerId(2), 1337)]),
+            error: None,
+            _accepted_layers: Vec::new(),
+        };
+        super::collect_shutdown_update(
+            (
+                MainTaskId::LayerConnection(LayerId(1)),
+                crate::background_tasks::TaskUpdate::Finished(Ok(())),
+            ),
+            &mut layers,
+        );
+        assert_eq!(layers.pids(), std::collections::HashSet::from([1337]));
+        super::collect_shutdown_update(
+            (
+                MainTaskId::LayerConnection(LayerId(2)),
+                crate::background_tasks::TaskUpdate::Finished(Ok(())),
+            ),
+            &mut layers,
+        );
+        assert!(layers.pids().is_empty());
+    }
 
     /// Verifies that [`IntProxy`] waits with processing layers' requests
     /// until [`mirrord_protocol`] version is negotiated.
@@ -1132,6 +1351,245 @@ mod test {
         .await
         .unwrap()
         .unwrap_err();
+    }
+
+    /// Neither natural timeout may drop a decoded layer merely because its registration is still
+    /// queued. The test keeps the socket open so only intproxy's own cleanup can stop the child.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn timeout_terminates_queued_layer_without_cancellation() {
+        for first_timeout in [true, false] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let proxy_addr = listener.local_addr().unwrap();
+            let (connection, _proxy_tx, _proxy_rx) = Connection::dummy();
+            let agent_conn = AgentConnection {
+                connection,
+                reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+            };
+            let (_, chaos_rx) = watch::channel(Default::default());
+            let mut proxy = IntProxy::new_with_connection(
+                agent_conn,
+                listener,
+                4096,
+                Default::default(),
+                IntProxyIntervals {
+                    ping: IntProxy::PING_INTERVAL,
+                    process_logging: Duration::from_secs(60),
+                },
+                &ExperimentalFileConfig::default()
+                    .generate_config(&mut Default::default())
+                    .unwrap(),
+                MonitorTx::disabled(),
+                ChaosWatcherRx::new(chaos_rx),
+            );
+            proxy.any_connection_accepted = !first_timeout;
+            proxy
+                .background_tasks
+                .suspend_messages(MainTaskId::LayerInitializer);
+
+            let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+            let pid = i32::try_from(child.id()).unwrap();
+            let conn = TcpStream::connect(proxy_addr).await.unwrap();
+            let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+                LocalMessage<LayerToProxyMessage>,
+                LocalMessage<ProxyToLayerMessage>,
+            >(conn);
+            encoder
+                .send(LocalMessage {
+                    message_id: 0,
+                    inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                        process_info: ProcessInfo {
+                            pid,
+                            parent_pid: i32::try_from(std::process::id()).unwrap(),
+                            name: "timeout-layer".to_owned(),
+                            cmdline: Vec::new(),
+                            loaded: true,
+                        },
+                        parent_layer: None,
+                    }),
+                })
+                .await
+                .unwrap();
+            assert!(matches!(
+                decoder.next().await.unwrap().unwrap(),
+                LocalMessage {
+                    inner: ProxyToLayerMessage::NewSession(_),
+                    ..
+                }
+            ));
+
+            let result = tokio::time::timeout(
+                Duration::from_secs(5),
+                proxy.run_with_shutdown(
+                    if first_timeout {
+                        Duration::ZERO
+                    } else {
+                        Duration::from_secs(60)
+                    },
+                    if first_timeout {
+                        Duration::from_secs(60)
+                    } else {
+                        Duration::ZERO
+                    },
+                    CancellationToken::new(),
+                ),
+            )
+            .await
+            .expect("proxy timeout did not drain queued registration");
+            if first_timeout {
+                assert!(matches!(
+                    result,
+                    Err(crate::error::ProxyStartupError::ConnectionAcceptTimeout)
+                ));
+            } else {
+                result.unwrap();
+            }
+            let status = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if let Some(status) = child.try_wait().unwrap() {
+                        break status;
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect("queued layer process survived natural timeout");
+            assert!(!status.success());
+            std::mem::drop((encoder, decoder));
+        }
+    }
+
+    /// Cancellation targets registered layer pids directly, including processes that escaped the
+    /// user command's process group by creating a separate session.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shutdown_terminates_registered_layer_outside_process_group() {
+        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+            .await
+            .unwrap();
+        let proxy_addr = listener.local_addr().unwrap();
+
+        let (connection, proxy_tx, proxy_rx) = Connection::dummy();
+        let agent_conn = AgentConnection {
+            connection,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+        };
+        let (_, chaos_rx) = watch::channel(Default::default());
+        let (monitor_events, mut monitor_rx) = broadcast::channel(1);
+        let proxy = IntProxy::new_with_connection(
+            agent_conn,
+            listener,
+            4096,
+            Default::default(),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
+            MonitorTx::from_sender(monitor_events),
+            ChaosWatcherRx::new(chaos_rx),
+        );
+
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "echo ready; exec sleep 30"])
+            .stdout(Stdio::piped());
+        // SAFETY: `pre_exec` only invokes the async-signal-safe `setsid` syscall. The readiness
+        // message below is emitted after this hook, proving the child has entered its new session
+        // before the pid is registered with the intproxy.
+        unsafe {
+            command.pre_exec(|| setsid().map(|_| ()).map_err(std::io::Error::from));
+        }
+        let mut child = command.spawn().unwrap();
+        let child_pid = i32::try_from(child.id()).unwrap();
+        let mut ready = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut ready)
+            .unwrap();
+        assert_eq!(ready.trim(), "ready");
+        assert_eq!(
+            getsid(Some(Pid::from_raw(child_pid))).unwrap().as_raw(),
+            child_pid
+        );
+        assert_ne!(getsid(None).unwrap().as_raw(), child_pid);
+
+        let shutdown = CancellationToken::new();
+        let proxy_handle = tokio::spawn(proxy.run_with_shutdown(
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+            shutdown.clone(),
+        ));
+        assert!(matches!(
+            proxy_rx.next().await.unwrap(),
+            ClientMessage::SwitchProtocolVersion(_)
+        ));
+        proxy_tx
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
+
+        let conn = TcpStream::connect(proxy_addr).await.unwrap();
+        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+            LocalMessage<LayerToProxyMessage>,
+            LocalMessage<ProxyToLayerMessage>,
+        >(conn);
+        encoder
+            .send(LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                    process_info: ProcessInfo {
+                        pid: child_pid,
+                        parent_pid: i32::try_from(std::process::id()).unwrap(),
+                        name: "escaped-layer".to_owned(),
+                        cmdline: vec!["sleep".to_owned(), "30".to_owned()],
+                        loaded: true,
+                    },
+                    parent_layer: None,
+                }),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            decoder.next().await.unwrap().unwrap(),
+            LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::NewSession(_),
+            }
+        ));
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(1), monitor_rx.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+            MonitorEvent::LayerConnected { pid, .. } if pid == child_pid as u32
+        ));
+
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(5), proxy_handle)
+            .await
+            .expect("intproxy did not shut down after cancellation")
+            .unwrap()
+            .unwrap();
+
+        let status = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break status;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("registered layer process survived intproxy shutdown");
+        assert!(!status.success());
+
+        // Keep both layer halves alive until shutdown completes, so socket disconnection cannot be
+        // what caused the registered process to exit.
+        std::mem::drop((encoder, decoder));
     }
 
     struct ReconnectTestSetup {

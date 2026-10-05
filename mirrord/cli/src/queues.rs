@@ -115,8 +115,9 @@ async fn status_command(args: QueuesArgs) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("Queue Splitting Status");
     let mut fetch_progress = progress.subtask("fetching queue splits");
 
-    let mut cfg_context =
-        ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file);
+    let mut cfg_context = ConfigContext::default()
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file)
+        .override_env_opt("MIRRORD_TARGET_NAMESPACE", namespace);
     let layer_config = crate::util::resolve_layer_config(&mut cfg_context).await?;
 
     let client = kube_client_from_layer_config(&layer_config).await?;
@@ -131,7 +132,7 @@ async fn status_command(args: QueuesArgs) -> CliResult<()> {
             return Ok(());
         }
 
-        let namespace = resolve_namespace(namespace, &layer_config, &client);
+        let namespace = resolve_namespace(&layer_config, &client);
         let api: Api<QueueSplit> = Api::namespaced(client, &namespace);
         let split = get_resource_if_defined(&api, &name, &mut fetch_progress).await?;
         fetch_progress.success(None);
@@ -154,7 +155,7 @@ async fn status_command(args: QueuesArgs) -> CliResult<()> {
     let api: Api<QueueSplit> = if all_namespaces {
         Api::all(client)
     } else {
-        let namespace = resolve_namespace(namespace, &layer_config, &client);
+        let namespace = resolve_namespace(&layer_config, &client);
         Api::namespaced(client, &namespace)
     };
     let splits = list_resource_if_defined(&api, &mut fetch_progress)
@@ -166,15 +167,13 @@ async fn status_command(args: QueuesArgs) -> CliResult<()> {
 }
 
 /// Namespace to query when not spanning all namespaces, first match wins:
-/// - `-n` flag
-/// - `target.namespace` from the mirrord config
+/// - `target.namespace` from the mirrord config (set by the `-n` flag)
 /// - kubeconfig default namespace
-fn resolve_namespace(
-    flag: Option<String>,
-    layer_config: &LayerConfig,
-    client: &kube::Client,
-) -> String {
-    flag.or_else(|| layer_config.target.namespace.clone())
+fn resolve_namespace(layer_config: &LayerConfig, client: &kube::Client) -> String {
+    layer_config
+        .target
+        .namespace
+        .clone()
         .unwrap_or_else(|| client.default_namespace().to_owned())
 }
 
