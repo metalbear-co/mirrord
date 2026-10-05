@@ -33,7 +33,7 @@ const HOOK_ANNOTATION: &str = "helm.sh/hook";
 /// it instead of failing because it already exists.
 const RELEASE_NAME_ANNOTATION: &str = "meta.helm.sh/release-name";
 
-const RELEASE_NAMESPACE_ANNOTATION: &str = "meta.helm.sh/release-namespace";
+pub(super) const RELEASE_NAMESPACE_ANNOTATION: &str = "meta.helm.sh/release-namespace";
 
 /// Names the chart and version an object was rendered from, as `<chart>-<version>` with `+`
 /// replaced by `_`.
@@ -166,12 +166,8 @@ impl Manifest {
                     .is_some_and(|types| types.kind == "Deployment")
             })
             .ok_or(OperatorInstallError::NoDeployment)?;
-        let chart_version = deployment
-            .labels()
-            .get(CHART_LABEL)
-            .and_then(|chart| chart.strip_prefix(&format!("{CHART_NAME}-")))
-            .and_then(|version| semver::Version::parse(&version.replace('_', "+")).ok())
-            .ok_or(OperatorInstallError::NoChartVersionLabel)?;
+        let chart_version =
+            chart_version(deployment).ok_or(OperatorInstallError::NoChartVersionLabel)?;
         let operator_deployment = deployment.name_any();
         let operator_namespace = deployment
             .namespace()
@@ -193,6 +189,10 @@ impl Manifest {
         &self.operator_namespace
     }
 
+    pub(super) fn operator_deployment(&self) -> &str {
+        &self.operator_deployment
+    }
+
     pub(super) fn chart_version(&self) -> &semver::Version {
         &self.chart_version
     }
@@ -200,10 +200,11 @@ impl Manifest {
     /// A shell command substitution that reads the installed operator's API key from the cluster.
     ///
     /// Lets users move the installation to helm with the key it already uses, which they may have
-    /// never seen, e.g. when it came from a trial signup.
-    pub(super) fn api_key_lookup(&self) -> String {
+    /// never seen, e.g. when it came from a trial signup. `context_arg` gives kubectl the
+    /// kubecontext of the installation.
+    pub(super) fn api_key_lookup(&self, context_arg: &str) -> String {
         format!(
-            "$(kubectl -n {} get deployment {} -o \
+            "$(kubectl{context_arg} -n {} get deployment {} -o \
             jsonpath='{{.spec.template.spec.containers[*].env[?(@.name==\"{API_KEY_ENV}\")].value}}')",
             self.operator_namespace, self.operator_deployment,
         )
@@ -231,6 +232,24 @@ impl Manifest {
             for_each_placeholder(&mut object.data, &mut |value| api_key.clone_into(value));
         }
     }
+}
+
+/// The version of the chart that an object was rendered from, from its [`CHART_LABEL`].
+pub(super) fn chart_version(object: &impl ResourceExt) -> Option<semver::Version> {
+    object
+        .labels()
+        .get(CHART_LABEL)
+        .and_then(|chart| chart.strip_prefix(&format!("{CHART_NAME}-")))
+        .and_then(|version| semver::Version::parse(&version.replace('_', "+")).ok())
+}
+
+/// Whether an object in the cluster belongs to the [`RELEASE_NAME`] helm release, which is the
+/// case for objects that `mirrord operator install` or the documented `helm install` created.
+pub(super) fn is_attributed_to_release(object: &impl ResourceExt) -> bool {
+    object
+        .annotations()
+        .get(RELEASE_NAME_ANNOTATION)
+        .is_some_and(|release| release == RELEASE_NAME)
 }
 
 fn for_each_placeholder(value: &mut Value, f: &mut impl FnMut(&mut String)) {

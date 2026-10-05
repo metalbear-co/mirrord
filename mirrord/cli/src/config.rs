@@ -979,12 +979,18 @@ pub(super) enum OperatorCommand {
     // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
     #[clap(hide(true))]
     Setup,
-    /// Install the mirrord operator into the cluster of the current kubecontext.
+    /// Install the mirrord operator into the cluster of the current kubecontext, or of the one
+    /// given with `--context`.
     ///
     /// Without `--api-key`, starts an Enterprise trial and opens a link to claim it. Installs the
     /// latest version of the helm chart with default values; use the helm chart directly for a
     /// customized installation.
     Install(Box<OperatorInstallArgs>),
+    /// Remove the mirrord operator that `mirrord operator install` installed from the cluster of
+    /// the current kubecontext, or of the one given with `--context`.
+    ///
+    /// Also removes what a failed `mirrord operator install` left behind.
+    Uninstall(OperatorUninstallArgs),
     /// Print operator status
     Status {
         /// Specify config file to use
@@ -1026,6 +1032,14 @@ pub(super) struct OperatorInstallArgs {
     #[arg(long, conflicts_with = "api_key")]
     pub no_hint: bool,
 
+    /// Kube context to install the operator into, instead of the current one.
+    #[arg(long)]
+    pub context: Option<String>,
+
+    /// Install without asking for confirmation. Without a terminal, the command never asks.
+    #[arg(short, long)]
+    pub yes: bool,
+
     /// Install from a local rendered chart manifest instead of the latest published one.
     #[arg(long, env = "MIRRORD_OPERATOR_INSTALL_MANIFEST", hide = true)]
     pub manifest: Option<PathBuf>,
@@ -1038,6 +1052,21 @@ pub(super) struct OperatorInstallArgs {
         default_value = "https://app.metalbear.com"
     )]
     pub app_url: String,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct OperatorUninstallArgs {
+    /// Kube context to remove the operator from, instead of the current one.
+    #[arg(long)]
+    pub context: Option<String>,
+
+    /// Remove without asking for confirmation. Without a terminal, the command never asks.
+    #[arg(short, long)]
+    pub yes: bool,
+
+    /// Remove the objects of a local rendered chart manifest instead of the published one.
+    #[arg(long, env = "MIRRORD_OPERATOR_INSTALL_MANIFEST", hide = true)]
+    pub manifest: Option<PathBuf>,
 }
 
 /// `mirrord operator session` family of commands.
