@@ -92,6 +92,20 @@ pub enum JsonType {
     Object,
 }
 
+impl JsonType {
+    /// The type of `value`, a number being a `Number` even when it is an integer.
+    fn of(value: &Value) -> Option<Self> {
+        match value {
+            Value::Bool(_) => Some(Self::Boolean),
+            Value::Number(_) => Some(Self::Number),
+            Value::String(_) => Some(Self::String),
+            Value::Array(_) => Some(Self::Array),
+            Value::Object(_) => Some(Self::Object),
+            Value::Null => None,
+        }
+    }
+}
+
 /// The mirrord plans (<https://metalbear.com/mirrord/pricing/>), cheapest first.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
@@ -281,44 +295,35 @@ fn explain(root: &Value, segments: &[&str]) -> Option<ExplainConfigOptionOutput>
     // Types taken without enumerating the values, like the target paths next to `targetless`.
     let mut free_types = Vec::new();
     for Node { schema, .. } in &nodes {
-        if is_alternative(schema) && schema.get("const").is_none() && schema.get("enum").is_none() {
-            free_types.extend(schema.get("type").cloned());
-        }
-
-        let node_types = match schema.get("type") {
-            Some(Value::Array(names)) => names.iter().collect(),
-            name => Vec::from_iter(name),
+        let node_types: Vec<JsonType> = match schema.get("type") {
+            Some(Value::Array(names)) => names
+                .iter()
+                .filter_map(|name| JsonType::deserialize(name).ok())
+                .collect(),
+            name => name
+                .and_then(|name| JsonType::deserialize(name).ok())
+                .into_iter()
+                .collect(),
         };
-        for json_type in node_types
-            .into_iter()
-            .filter_map(|name| JsonType::deserialize(name).ok())
-        {
-            if types.contains(&json_type).not() {
-                types.push(json_type);
-            }
-        }
-
-        let values = schema
+        let values: Vec<&Value> = schema
             .get("enum")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .chain(schema.get("const"));
-        for value in values {
-            // A `const` may come without a `type`, e.g. `target: none` in a `mirrord-up.yaml`.
-            let value_type = match value {
-                Value::Bool(_) => Some(JsonType::Boolean),
-                Value::Number(_) => Some(JsonType::Number),
-                Value::String(_) => Some(JsonType::String),
-                Value::Array(_) => Some(JsonType::Array),
-                Value::Object(_) => Some(JsonType::Object),
-                Value::Null => None,
-            };
-            if let Some(value_type) = value_type
-                && types.contains(&value_type).not()
-            {
-                types.push(value_type);
+            .chain(schema.get("const"))
+            .collect();
+        if is_alternative(schema) && values.is_empty() {
+            free_types.extend(node_types.iter().copied());
+        }
+
+        // A `const` may come without a `type`, e.g. `target: none` in a `mirrord-up.yaml`.
+        let value_types = values.iter().copied().filter_map(JsonType::of);
+        for json_type in node_types.iter().copied().chain(value_types) {
+            if types.contains(&json_type).not() {
+                types.push(json_type);
             }
+        }
+        for value in values {
             if allowed_values.contains(value).not() {
                 allowed_values.push(value.clone());
             }
@@ -327,10 +332,7 @@ fn explain(root: &Value, segments: &[&str]) -> Option<ExplainConfigOptionOutput>
 
     // Values of a type the option also takes freely are examples rather than the allowed values.
     allowed_values.retain(|value| {
-        free_types.iter().all(|free| match free {
-            Value::Array(free) => free.iter().all(|free| type_name_differs(free, value)),
-            free => type_name_differs(free, value),
-        })
+        JsonType::of(value).is_none_or(|json_type| free_types.contains(&json_type).not())
     });
 
     let (plan, plan_by_alternative) = plans(&nodes);
@@ -354,19 +356,6 @@ fn explain(root: &Value, segments: &[&str]) -> Option<ExplainConfigOptionOutput>
         plan_by_alternative,
         ..Default::default()
     })
-}
-
-/// Whether `value` is not of the JSON Schema type named by `type_name`.
-fn type_name_differs(type_name: &Value, value: &Value) -> bool {
-    let name = match value {
-        Value::Bool(_) => "boolean",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-        Value::Null => "null",
-    };
-    type_name.as_str() != Some(name)
 }
 
 /// Whether `schema` is one of the forms an option takes, rather than a choice between forms.
