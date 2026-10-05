@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.269.0](https://github.com/metalbear-co/mirrord/tree/3.269.0) - 2026-10-05
+
+
+### Changed
+
+- The "operator not found" error explains how to disable the operator
+  remembered in `~/.mirrord/mirrord.json`.
+
+
+### Fixed
+
+- Reused db branches now override the current config's env vars, not the
+  creator's.
+
 ## [3.268.0](https://github.com/metalbear-co/mirrord/tree/3.268.0) - 2026-10-02
 
 
