@@ -77,7 +77,7 @@ pub(in crate::operator) async fn operator_uninstall(
 ) -> Result<(), OperatorInstallError> {
     let mut reporter = telemetry.reporter(ReportTarget::OperatorUninstall);
 
-    let mut phase = UninstallPhase::default();
+    let mut phase = UninstallPhase::Connect;
     let result = tokio::select! {
         result = uninstall(args, &mut phase) => result,
         // Otherwise, the process ends before the run is reported.

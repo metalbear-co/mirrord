@@ -46,11 +46,10 @@ pub(super) enum Outcome {
 
 /// The step of `mirrord operator install` that a run is in, reported when the run does not
 /// complete.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 #[repr(u32)]
 pub(super) enum InstallPhase {
     /// Loading the kubeconfig and creating the clients.
-    #[default]
     Connect = 1,
     CheckExistingOperator = 2,
     FetchManifest = 3,
@@ -64,11 +63,10 @@ pub(super) enum InstallPhase {
 
 /// The step of `mirrord operator uninstall` that a run is in, reported when the run does not
 /// complete.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 #[repr(u32)]
 pub(super) enum UninstallPhase {
     /// Loading the kubeconfig and creating the clients.
-    #[default]
     Connect = 1,
     FetchManifest = 2,
     /// Finding the installed objects, and checking that `mirrord operator install` made them.
@@ -80,7 +78,7 @@ pub(super) enum UninstallPhase {
 }
 
 /// What a run of `mirrord operator install` did, filled in as it goes.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct InstallRun {
     pub(super) phase: InstallPhase,
     /// Set when a trial started: how to retry without starting another trial, printed for the

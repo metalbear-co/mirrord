@@ -41,7 +41,10 @@ pub(super) async fn operator_install(
         .get_mut()
         .add("api_key_given", args.api_key.is_some());
 
-    let mut run = InstallRun::default();
+    let mut run = InstallRun {
+        phase: InstallPhase::Connect,
+        retry: None,
+    };
     let result = tokio::select! {
         result = install(args, &mut run) => result,
         // Otherwise, the process ends before the run is reported.
