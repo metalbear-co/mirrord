@@ -150,7 +150,6 @@ where
                     InternalMessage::Request(request, info) => {
                         self.handle_extracted_request(request, info).await;
                     }
-
                 }
             }
         }
@@ -166,25 +165,19 @@ where
     /// If port is no longer stolen/mirrored but there are other
     /// active connections on the same port, the connection is
     /// unconditionally passed through. Otherwise, the connection is
+    /// dropped. We consider this to be an unlikely race condition.
     ///
-    /// # Port Redirection Before Subscription
-    ///
-    /// A redirector that accepts connections without a port subscription
-    /// instead creates empty port state and uses HTTP detection,
-    /// so a subscription arriving while the connection
-    /// remains open can receive later requests.
+    /// With [`RedirectorTaskConfig::handle_unsubscribed_connections`], unsubscribed connections
+    /// are neither dropped nor unconditionally passed through, see the flag's docs.
     #[tracing::instrument(level = Level::TRACE, ret)]
     fn handle_connection(&mut self, conn: Redirected) {
         let source = conn.source;
         let destination = conn.destination;
-        let accepts_connections_without_subscription =
-            self.redirector.accepts_connections_without_subscription();
+        let handle_unsubscribed = self.config.handle_unsubscribed_connections;
 
         let state = match self.ports.entry(destination.port()) {
             Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) if accepts_connections_without_subscription => {
-                entry.insert(PortState::empty())
-            }
+            Entry::Vacant(entry) if handle_unsubscribed => entry.insert(PortState::default()),
             Entry::Vacant(_) => {
                 tracing::warn!(
                     %source,
@@ -195,14 +188,7 @@ where
             }
         };
 
-        // HTTP/1 keep-alive and HTTP/2 reuse the connection for later requests. Keep connections
-        // accepted without a port subscription in the HTTP-aware pipeline so a subscription that
-        // arrives after accept can still receive those requests instead of committing the whole
-        // connection to passthrough.
-        if state.mirror_txs.is_empty().not()
-            || state.steal_tx.is_some()
-            || accepts_connections_without_subscription
-        {
+        if state.mirror_txs.is_empty().not() || state.steal_tx.is_some() || handle_unsubscribed {
             let tx = self.internal_tx.clone();
             let tls_store = self.tls_store.clone();
             let http_detection_timeout = self.config.http_detection_timeout;
@@ -437,39 +423,13 @@ where
     /// and sends [`InternalMessage::MaybeDeadChannel`] back to the [`RedirectorTask`].
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn handle_client_request(&mut self, message: RedirectRequest) -> Result<(), R::Error> {
-        let accepts_connections_without_subscription =
-            self.redirector.accepts_connections_without_subscription();
-
         match message {
             RedirectRequest::Mirror { port, receiver_tx } => {
                 let (conn_tx, conn_rx) = mpsc::channel(32);
-
-                match self.ports.entry(port) {
-                    Entry::Vacant(e) => {
-                        tracing::debug!(
-                            from_port = port,
-                            "Creating a new port redirection for a mirroring client"
-                        );
-                        self.redirector.add_redirection(port).await?;
-                        e.insert_entry(PortState {
-                            steal_tx: None,
-                            mirror_txs: vec![conn_tx.clone()],
-                            shutdown: Default::default(),
-                            connections: Default::default(),
-                            cleanup_sleep: None,
-                        });
-                    }
-                    Entry::Occupied(mut e) => {
-                        if accepts_connections_without_subscription {
-                            // `handle_connection` retained this port for connections accepted
-                            // before their subscription, so record it for later connections and
-                            // later requests on those existing HTTP connections to mirror.
-                            self.redirector.add_redirection(port).await?;
-                        }
-                        e.get_mut().cleanup_sleep = None;
-                        e.get_mut().mirror_txs.push(conn_tx.clone());
-                    }
-                };
+                self.subscribe_port(port)
+                    .await?
+                    .mirror_txs
+                    .push(conn_tx.clone());
 
                 let tx = self.internal_tx.clone();
                 tokio::spawn(async move {
@@ -482,33 +442,10 @@ where
 
             RedirectRequest::Steal { port, receiver_tx } => {
                 let (conn_tx, conn_rx) = mpsc::channel(32);
-
-                match self.ports.entry(port) {
-                    Entry::Vacant(e) => {
-                        tracing::debug!(
-                            from_port = port,
-                            "Creating a new port redirection for a stealing client"
-                        );
-                        self.redirector.add_redirection(port).await?;
-                        e.insert_entry(PortState {
-                            steal_tx: Some(conn_tx.clone()),
-                            mirror_txs: Default::default(),
-                            shutdown: Default::default(),
-                            connections: Default::default(),
-                            cleanup_sleep: None,
-                        });
-                    }
-                    Entry::Occupied(mut e) => {
-                        if accepts_connections_without_subscription {
-                            // `handle_connection` retained this port for connections accepted
-                            // before their subscription, so record it for later connections and
-                            // later requests on those existing HTTP connections to steal.
-                            self.redirector.add_redirection(port).await?;
-                        }
-                        e.get_mut().cleanup_sleep = None;
-                        e.get_mut().steal_tx.replace(conn_tx.clone());
-                    }
-                }
+                self.subscribe_port(port)
+                    .await?
+                    .steal_tx
+                    .replace(conn_tx.clone());
 
                 let tx = self.internal_tx.clone();
                 tokio::spawn(async move {
@@ -523,15 +460,37 @@ where
         Ok(())
     }
 
-    /// Removes the redirection from a no-longer-needed port,
-    /// running the full redirector cleanup if no redirected ports remain.
+    /// Returns the [`PortState`] of a port that is gaining a subscriber, adding the port
+    /// redirection first if it does not exist yet.
+    ///
+    /// The port may already have a [`PortState`] without a redirection, when
+    /// [`RedirectorTaskConfig::handle_unsubscribed_connections`] made [`Self::handle_connection`]
+    /// retain a connection that arrived before any subscription.
+    async fn subscribe_port(&mut self, port: u16) -> Result<&mut PortState, R::Error> {
+        let redirected = self.ports.get(&port).is_some_and(|state| state.redirected);
+        if redirected.not() {
+            tracing::debug!(from_port = port, "Creating a new port redirection");
+            self.redirector.add_redirection(port).await?;
+        }
+
+        let state = self.ports.entry(port).or_default();
+        state.redirected = true;
+        state.cleanup_sleep = None;
+        Ok(state)
+    }
+
+    /// Shuts down a no-longer-needed port's connections and removes its redirection, if it has
+    /// one, running the full redirector cleanup if no redirected ports remain.
     ///
     /// Failures are logged and swallowed: a failed removal usually means the rule is already
     /// gone, e.g. because some external actor flushed our iptables rules. The goal state — no
     /// redirection — holds either way, and killing this task here would needlessly disconnect
     /// all clients.
-    async fn remove_port_redirection(&mut self, port: u16) {
-        if let Err(error) = self.redirector.remove_redirection(port).await {
+    async fn remove_port_redirection(&mut self, port: u16, state: PortState) {
+        let redirected = state.redirected;
+        state.graceful_shutdown().await;
+
+        if redirected && let Err(error) = self.redirector.remove_redirection(port).await {
             tracing::warn!(
                 %error,
                 port,
@@ -579,8 +538,8 @@ where
         // Remove if the [`PortState`] is no longer needed.
         if mirror_txs.is_empty() && steal_tx.is_none() && connections.is_empty() {
             if self.config.unused_port_linger.is_zero() {
-                e.remove().graceful_shutdown().await;
-                self.remove_port_redirection(port).await;
+                let state = e.remove();
+                self.remove_port_redirection(port, state).await;
                 return;
             }
 
@@ -602,8 +561,8 @@ where
                 }
             }
 
-            e.remove().graceful_shutdown().await;
-            self.remove_port_redirection(port).await;
+            let state = e.remove();
+            self.remove_port_redirection(port, state).await;
             return;
         }
 
@@ -643,8 +602,9 @@ where
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn cleanup(&mut self) -> Result<(), R::Error> {
         for (port, state) in std::mem::take(&mut self.ports) {
+            let redirected = state.redirected;
             state.graceful_shutdown().await;
-            if let Err(error) = self.redirector.remove_redirection(port).await {
+            if redirected && let Err(error) = self.redirector.remove_redirection(port).await {
                 tracing::warn!(
                     %error,
                     port,
@@ -703,6 +663,18 @@ pub struct RedirectorTaskConfig {
     ///
     /// See [`ConnectionInfo::pass_through_connect`].
     pub passthrough_original_dst: bool,
+    /// Whether to handle connections to ports with no subscribers instead of dropping them or
+    /// unconditionally passing them through.
+    ///
+    /// For redirectors that can deliver a connection before its port is subscribed, such as one
+    /// fed by connections accepted inside the workload. Not read from the environment.
+    ///
+    /// Such a connection goes through HTTP detection, as if its port were subscribed with nothing
+    /// matching. HTTP connections are handled per request, so requests arriving after a
+    /// subscription are mirrored or stolen. Connections that are not HTTP, or that do not send
+    /// enough data within [`Self::http_detection_timeout`], are handled as raw TCP when detection
+    /// finishes and are never picked up by a later subscription.
+    pub handle_unsubscribed_connections: bool,
 }
 
 impl RedirectorTaskConfig {
@@ -741,6 +713,7 @@ impl RedirectorTaskConfig {
             http_detection_timeout,
             unused_port_linger,
             passthrough_original_dst: envs::EXTERNAL_IP_FIX.from_env_or_default(),
+            handle_unsubscribed_connections: false,
         }
     }
 }
@@ -830,6 +803,7 @@ enum InternalMessage {
 }
 
 /// State of a single port in the [`RedirectorTask`].
+#[derive(Default)]
 struct PortState {
     /// Stealer's traffic channel.
     steal_tx: Option<mpsc::Sender<StolenTraffic>>,
@@ -842,6 +816,11 @@ struct PortState {
     connections: JoinSet<()>,
     /// Timer used to delay removal of an unused redirection.
     cleanup_sleep: Option<Pin<Box<Sleep>>>,
+    /// Whether [`PortRedirector::add_redirection`] was called for this port.
+    ///
+    /// Only `false` while [`RedirectorTaskConfig::handle_unsubscribed_connections`] keeps the
+    /// state for connections that arrived before the port's first subscription.
+    redirected: bool,
 }
 
 impl fmt::Debug for PortState {
@@ -860,16 +839,6 @@ impl fmt::Debug for PortState {
 }
 
 impl PortState {
-    fn empty() -> Self {
-        Self {
-            steal_tx: None,
-            mirror_txs: Vec::new(),
-            shutdown: Default::default(),
-            connections: Default::default(),
-            cleanup_sleep: None,
-        }
-    }
-
     /// Tell and wait for all connections to gracefully shut down.
     /// This function is essentially `AsyncDrop`, and it should always
     /// be called before removing the redirection.
@@ -885,10 +854,11 @@ impl PortState {
 
 #[cfg(test)]
 mod test {
-    use std::{ops::Not, time::Duration};
+    use std::{convert::Infallible, ops::Not, time::Duration};
 
     use bytes::Bytes;
     use http_body_util::Empty;
+    use hyper::{Response, StatusCode, service::service_fn};
     use hyper_util::rt::TokioIo;
     use rstest::rstest;
     use tokio::{
@@ -1085,5 +1055,76 @@ mod test {
         // Redirector task should exit.
         std::mem::drop(handle);
         redirector_task.await.unwrap().unwrap();
+    }
+
+    /// With [`RedirectorTaskConfig::handle_unsubscribed_connections`], requests on a connection
+    /// that arrived before any subscription are passed through, and a later subscription adds the
+    /// port redirection exactly once and receives later requests on the same connection.
+    ///
+    /// [`DummyRedirector`] fails on a repeated `add_redirection`, which would end the task with an
+    /// error.
+    #[tokio::test]
+    async fn unsubscribed_connection_is_stolen_after_subscription() {
+        let (redirector, state, mut conn_tx) = DummyRedirector::new();
+        let (task, mut handle, _) = RedirectorTask::new(
+            redirector,
+            Default::default(),
+            Default::default(),
+            RedirectorTaskConfig {
+                handle_unsubscribed_connections: true,
+                ..RedirectorTaskConfig::from_env()
+            },
+        );
+        let redirector_task = tokio::spawn(task.run());
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let destination = listener.local_addr().unwrap();
+        let client_conn = conn_tx.make_connection(destination).await;
+
+        let passthrough = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            hyper::server::conn::http1::Builder::new()
+                .serve_connection(
+                    TokioIo::new(stream),
+                    service_fn(|_| async {
+                        Ok::<_, Infallible>(Response::new(Empty::<Bytes>::new()))
+                    }),
+                )
+                .await
+                .unwrap();
+        });
+
+        let (mut sender, client_conn) =
+            hyper::client::conn::http1::handshake::<_, Empty<Bytes>>(TokioIo::new(client_conn))
+                .await
+                .unwrap();
+        tokio::spawn(client_conn);
+
+        let response = sender
+            .send_request(hyper::Request::new(Default::default()))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(state.borrow().has_redirections([]));
+
+        handle.steal(destination.port()).await.unwrap();
+        assert!(state.borrow().has_redirections([destination.port()]));
+
+        let http_client_task = tokio::spawn(async move {
+            sender.ready().await.unwrap();
+            sender
+                .send_request(hyper::Request::new(Default::default()))
+                .await
+        });
+        let StolenTraffic::Http(http) = handle.next().await.unwrap().unwrap() else {
+            panic!("expected stolen HTTP traffic");
+        };
+
+        std::mem::drop(http);
+        http_client_task.abort();
+        passthrough.abort();
+        std::mem::drop(handle);
+        redirector_task.await.unwrap().unwrap();
+        assert!(state.borrow().has_redirections([]));
     }
 }
