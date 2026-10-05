@@ -633,9 +633,10 @@ struct AnalyticsReport {
 
 const ANALYTICS_ENDPOINT: &str = "https://analytics.metalbear.com/api/v1/event";
 
-/// Bounds how long a report can hold up the CLI's exit, which waits for pending reports, when the
-/// analytics endpoint is unreachable or slow.
-const ANALYTICS_TIMEOUT: Duration = Duration::from_secs(1);
+/// Bounds how long a report can hold up the CLI's exit when the analytics endpoint is unreachable
+/// or slow. Long enough for DNS, TCP and TLS on a fresh connection, and under the 10s drain cap in
+/// `main`.
+const ANALYTICS_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.com
 #[tracing::instrument(level = Level::TRACE)]
