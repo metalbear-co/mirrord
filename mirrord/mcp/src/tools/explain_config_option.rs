@@ -40,7 +40,6 @@ pub struct ExplainConfigOptionArgs {
     /// `services.api.http_filter.header_filter` in a `mirrord-up.yaml`.
     pub path: String,
     /// Which config file the option is in. Defaults to `mirrord.json`.
-    #[serde(default)]
     pub format: Option<ConfigFormat>,
 }
 
@@ -131,6 +130,36 @@ pub struct AlternativePlan {
     pub plan: Plan,
 }
 
+/// What the schema says about a known option.
+struct OptionDocs {
+    description: Option<String>,
+    types: Vec<JsonType>,
+    allowed_values: Vec<Value>,
+    default: Option<Value>,
+    plan: Plan,
+    plan_by_alternative: Option<Vec<AlternativePlan>>,
+}
+
+impl OptionDocs {
+    fn into_output(self, mirrord_json_path: Option<String>) -> ExplainConfigOptionOutput {
+        ExplainConfigOptionOutput {
+            found: true,
+            description: self.description,
+            types: self.types.is_empty().not().then_some(self.types),
+            allowed_values: self
+                .allowed_values
+                .is_empty()
+                .not()
+                .then_some(self.allowed_values),
+            default: self.default,
+            plan: Some(self.plan),
+            plan_by_alternative: self.plan_by_alternative,
+            mirrord_json_path,
+            suggestions: None,
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ExplainConfigOptionError {
     #[error("the option path is empty")]
@@ -149,44 +178,48 @@ pub fn explain_config_option(
         return Err(ExplainConfigOptionError::EmptyPath);
     }
 
-    let (explained, known) = match format.unwrap_or(ConfigFormat::MirrordJson) {
-        ConfigFormat::MirrordJson => (
-            explain(&LAYER_SCHEMA.raw, &segments),
-            LAYER_PATHS.as_slice(),
-        ),
-        ConfigFormat::MirrordUpYaml => (explain_up(&segments), UP_PATHS.as_slice()),
+    let format = format.unwrap_or(ConfigFormat::MirrordJson);
+    let explained = match format {
+        ConfigFormat::MirrordJson => explain(&LAYER_SCHEMA.raw, &segments).map(|docs| (docs, None)),
+        ConfigFormat::MirrordUpYaml => explain_up(&segments),
+    };
+    if let Some((docs, mirrord_json_path)) = explained {
+        return Ok(docs.into_output(mirrord_json_path));
+    }
+
+    let suggestions = match format {
+        ConfigFormat::MirrordJson => suggestions(&segments, &LAYER_PATHS),
+        ConfigFormat::MirrordUpYaml => {
+            let mut suggestions = suggestions(&segments, &UP_PATHS);
+            // A `mirrord.json` option is set for a service through the `mirrord-up.yaml` setting
+            // that maps onto it, or else through the service's `config_patch`.
+            if explain(&LAYER_SCHEMA.raw, &segments).is_some() {
+                let asked = segments.join(".");
+                let mut up_paths: Vec<String> = LAYER_CONFIG_PATHS
+                    .iter()
+                    .filter(|(up_path, _)| up_path.starts_with("services.*."))
+                    .filter_map(|(up_path, layer_path)| {
+                        let rest = match asked.strip_prefix(layer_path)? {
+                            "" => "",
+                            rest => rest.strip_prefix('.').map(|_| rest)?,
+                        };
+                        (layer_path.is_empty().not())
+                            .then(|| format!("{}{rest}", up_path.replace('*', ANY_KEY)))
+                    })
+                    .collect();
+                up_paths.push(format!("services.{ANY_KEY}.config_patch.{asked}"));
+                suggestions.retain(|suggestion| up_paths.contains(suggestion).not());
+                suggestions.splice(0..0, up_paths);
+                suggestions.truncate(SUGGESTIONS);
+            }
+            suggestions
+        }
     };
 
-    Ok(explained.unwrap_or_else(|| {
-        let mut suggestions = suggestions(&segments, known);
-        // A `mirrord.json` option is set for a service through the `mirrord-up.yaml` setting
-        // that maps onto it, or else through the service's `config_patch`.
-        if format == Some(ConfigFormat::MirrordUpYaml)
-            && explain(&LAYER_SCHEMA.raw, &segments).is_some()
-        {
-            let asked = segments.join(".");
-            let mut up_paths: Vec<String> = LAYER_CONFIG_PATHS
-                .iter()
-                .filter(|(up_path, _)| up_path.starts_with("services.*."))
-                .filter_map(|(up_path, layer_path)| {
-                    let rest = match asked.strip_prefix(layer_path)? {
-                        "" => "",
-                        rest => rest.strip_prefix('.').map(|_| rest)?,
-                    };
-                    (layer_path.is_empty().not())
-                        .then(|| format!("{}{rest}", up_path.replace('*', ANY_KEY)))
-                })
-                .collect();
-            up_paths.push(format!("services.{ANY_KEY}.config_patch.{asked}"));
-            suggestions.retain(|suggestion| up_paths.contains(suggestion).not());
-            suggestions.splice(0..0, up_paths);
-            suggestions.truncate(SUGGESTIONS);
-        }
-        ExplainConfigOptionOutput {
-            suggestions: Some(suggestions),
-            ..Default::default()
-        }
-    }))
+    Ok(ExplainConfigOptionOutput {
+        suggestions: Some(suggestions),
+        ..Default::default()
+    })
 }
 
 /// Explains a `mirrord-up.yaml` option from its own schema, completed with what the
@@ -196,7 +229,7 @@ pub fn explain_config_option(
 /// Outside a `config_patch`, an option the up schema doesn't have doesn't exist, even where the
 /// `mirrord.json` option it would map onto does: up settings can take another shape, e.g. a
 /// service's `target` holds a `path` rather than the target itself.
-fn explain_up(segments: &[&str]) -> Option<ExplainConfigOptionOutput> {
+fn explain_up(segments: &[&str]) -> Option<(OptionDocs, Option<String>)> {
     let mirrord_json_path = layer_config_path(segments);
     let in_config_patch =
         layer_config_mapping(segments).is_some_and(|(layer_path, _)| layer_path.is_empty());
@@ -205,20 +238,25 @@ fn explain_up(segments: &[&str]) -> Option<ExplainConfigOptionOutput> {
         explain(&LAYER_SCHEMA.raw, &segments)
     });
 
-    let output = match (explain(&UP_SCHEMA.raw, segments), layer) {
+    let docs = match (explain(&UP_SCHEMA.raw, segments), layer) {
         (Some(up), Some(layer)) => {
             let (plan, plan_by_alternative) = match up.plan {
-                Some(Plan::Unverified) => (layer.plan, layer.plan_by_alternative),
+                Plan::Unverified => (layer.plan, layer.plan_by_alternative),
                 _ => (up.plan, up.plan_by_alternative),
             };
-            ExplainConfigOptionOutput {
+            OptionDocs {
                 description: up.description.or(layer.description),
-                types: up.types.or(layer.types),
-                allowed_values: up.allowed_values.or(layer.allowed_values),
+                types: match up.types.is_empty() {
+                    true => layer.types,
+                    false => up.types,
+                },
+                allowed_values: match up.allowed_values.is_empty() {
+                    true => layer.allowed_values,
+                    false => up.allowed_values,
+                },
                 default: up.default.or(layer.default),
                 plan,
                 plan_by_alternative,
-                ..up
             }
         }
         (Some(up), None) => up,
@@ -226,10 +264,7 @@ fn explain_up(segments: &[&str]) -> Option<ExplainConfigOptionOutput> {
         (None, _) => return None,
     };
 
-    Some(ExplainConfigOptionOutput {
-        mirrord_json_path,
-        ..output
-    })
+    Some((docs, mirrord_json_path))
 }
 
 /// The entry of [`LAYER_CONFIG_PATHS`] a `mirrord-up.yaml` path falls under: the `mirrord.json`
@@ -264,7 +299,7 @@ fn layer_config_path(segments: &[&str]) -> Option<String> {
 }
 
 /// Describes the option at `segments` in `root`, or `None` when there is no such option.
-fn explain(root: &Value, segments: &[&str]) -> Option<ExplainConfigOptionOutput> {
+fn explain(root: &Value, segments: &[&str]) -> Option<OptionDocs> {
     let mut option = vec![Node::root(root)];
     let mut nodes = expand(root, option.iter().copied()).nodes;
 
@@ -336,14 +371,13 @@ fn explain(root: &Value, segments: &[&str]) -> Option<ExplainConfigOptionOutput>
     });
 
     let (plan, plan_by_alternative) = plans(&nodes);
-    Some(ExplainConfigOptionOutput {
-        found: true,
+    Some(OptionDocs {
         description: option
             .iter()
             .find_map(|node| description(root, node.schema, &mut HashSet::new()))
             .map(str::to_owned),
-        types: types.is_empty().not().then_some(types),
-        allowed_values: allowed_values.is_empty().not().then_some(allowed_values),
+        types,
+        allowed_values,
         default: nodes
             .iter()
             .find_map(|node| {
@@ -352,9 +386,8 @@ fn explain(root: &Value, segments: &[&str]) -> Option<ExplainConfigOptionOutput>
                     .filter(|value| value.is_null().not())
             })
             .cloned(),
-        plan: Some(plan),
+        plan,
         plan_by_alternative,
-        ..Default::default()
     })
 }
 
@@ -992,7 +1025,7 @@ mod tests {
 
         let plan = |path: &str| {
             let segments: Vec<&str> = path.split('.').collect();
-            explain(&schema, &segments).unwrap().plan
+            Some(explain(&schema, &segments).unwrap().plan)
         };
         assert_eq!(plan("copy_target"), Some(Plan::Team));
         assert_eq!(plan("copy_target.scale_down"), Some(Plan::Team));
