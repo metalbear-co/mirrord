@@ -37,6 +37,9 @@ use crate::config::OperatorUninstallArgs;
 ///
 /// Deleting a CRD with objects that still have finalizers blocks until the finalizers are gone,
 /// which only the operator, or [`clear_finalized`] after a timeout, removes.
+///
+/// Keep this list in sync with the hook (`crates/operator-hooks/src/cleanup.rs` in the operator
+/// repository): a new CRD whose objects the operator finalizes must go in both.
 const FINALIZED_CRDS: [&[&str]; 3] = [
     &[
         "mirrordclustersessions.mirrord.metalbear.co",
@@ -55,9 +58,9 @@ const FINALIZED_CRDS: [&[&str]; 3] = [
 /// removed without it. Longer than the 60 seconds that the operator keeps a deleted session.
 const STRIP_FINALIZERS_AFTER: Duration = Duration::from_secs(75);
 
-const CLEAR_TIMEOUT: Duration = Duration::from_secs(2 * 60);
+const CLEAR_TIMEOUT: Duration = Duration::from_mins(2);
 
-const REMOVAL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const REMOVAL_TIMEOUT: Duration = Duration::from_mins(5);
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -283,8 +286,8 @@ async fn find_installed<'a>(
 /// Lets the operator finalize its objects, one group of [`FINALIZED_CRDS`] after the other, as
 /// the chart's `pre-delete` hook does.
 ///
-/// Only the CRDs in `installed_crds` are cleared, since the objects of other CRDs do not belong to
-/// this installation, and their CRDs are not deleted with it.
+/// [`FINALIZED_CRDS`] also has CRDs of optional chart features, which a default installation does
+/// not have. Only the CRDs in `installed_crds`, which uninstall deletes, are cleared.
 async fn finalize_sessions(
     client: &Client,
     installed_crds: &HashSet<String>,

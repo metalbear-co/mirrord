@@ -65,6 +65,13 @@ cargo xtask test-ut -- resolve_url_happy_path -- --nocapture
 cargo fmt
 ```
 
+## Dependencies on the Operator Repository
+
+`mirrord operator uninstall` (`mirrord/cli/src/operator/install/uninstall.rs`) lets the operator finalize its objects
+before it deletes their CRDs, like the `pre-delete` hook of the operator chart (`crates/operator-hooks/src/cleanup.rs`
+in the operator repository). When the operator gets a new CRD whose objects have finalizers, add the CRD to
+`FINALIZED_CRDS` in `uninstall.rs` and to the hook.
+
 ## Simplicity and Reuse
 
 mirrord is actively maintained by dozens of people, it is not a greenfield project. When adding or changing things,
