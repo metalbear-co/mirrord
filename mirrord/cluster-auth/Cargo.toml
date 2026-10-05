@@ -22,7 +22,6 @@ mirrord-nightly-polyfill = { path = "../nightly-polyfill" }
 base64.workspace = true
 hyper-rustls.workspace = true
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "tokio"] }
-k8s-openapi.workspace = true
 kube.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true
