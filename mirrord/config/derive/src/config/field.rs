@@ -106,10 +106,9 @@ impl ConfigField {
             quote! { #[deprecated(note = #note)] }
         });
 
-        let plan = flags
-            .plan
-            .as_ref()
-            .map(|plan| quote! { #[schemars(extend("x-mirrord-plan" = #plan))] });
+        let plan = flags.plan.as_ref().map(
+            |plan| quote! { #[schemars(extend("x-mirrord-plan" = crate::plan::Plan::#plan))] },
+        );
 
         quote! {
             #(#docs)*

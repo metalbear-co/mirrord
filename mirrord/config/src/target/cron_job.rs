@@ -6,7 +6,7 @@ use crate::config::{self, ConfigError};
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(extend("x-mirrord-plan" = "team"))]
+#[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Team))]
 pub struct CronJobTarget {
     pub cron_job: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

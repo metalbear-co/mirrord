@@ -65,7 +65,7 @@ pub enum ServiceMode {
     ///
     /// The service's `http_filter` is ignored, with a warning. The target must support
     /// `copy_target` with `scale_down`.
-    #[schemars(extend("x-mirrord-plan" = "team"))]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Team))]
     Replace,
 
     /// Incoming traffic is mirrored to the local service, leaving traffic to the original service
@@ -486,10 +486,10 @@ pub struct ServiceConfig {
 pub struct UpConfig {
     /// Settings applied to all services.
     #[serde(default)]
-    #[schemars(extend("x-mirrord-plan" = "oss"))]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
     pub common: CommonConfig,
     /// Per-service configurations keyed by service name.
-    #[schemars(extend("x-mirrord-plan" = "oss"))]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
     pub services: HashMap<Arc<str>, ServiceConfig>,
 }
 

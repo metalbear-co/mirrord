@@ -8,12 +8,13 @@
 //! branch at once, and what is reported about an option is gathered from all of its branches.
 //!
 //! The plan an option needs comes from the schema's
-//! [`PLAN_ANNOTATION`](crate::schema::PLAN_ANNOTATION)s, which an option inherits from the options
-//! and types above it. Where the alternatives of an option need different plans, such as the target
-//! kinds of `target.path`, each alternative's plan is reported as well.
+//! [`PLAN_ANNOTATION`](mirrord_config::plan::PLAN_ANNOTATION)s, which an option inherits from the
+//! options and types above it. Where the alternatives of an option need different plans, such as
+//! the target kinds of `target.path`, each alternative's plan is reported as well.
 
 use std::{collections::HashSet, ops::Not, sync::LazyLock};
 
+use mirrord_config::plan::Plan;
 use mirrord_up::LAYER_CONFIG_PATHS;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -60,7 +61,7 @@ pub struct ExplainConfigOptionOutput {
     pub default: Option<Value>,
     /// The cheapest mirrord plan the option can be used with. Always set for a known option.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub plan: Option<Plan>,
+    pub plan: Option<OptionPlan>,
     /// The plan each alternative form of the option needs, when they differ, e.g. the target
     /// kinds `target.path` accepts.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,20 +103,28 @@ impl JsonType {
     }
 }
 
-/// The mirrord plans (<https://metalbear.com/mirrord/pricing/>), cheapest first.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
-)]
+/// The plan an option needs, as reported to the client: one of the [`Plan`]s, or `unverified` when
+/// this mirrord version doesn't record it for the option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
-pub enum Plan {
+pub enum OptionPlan {
     /// Free, open source mirrord.
     Oss,
     /// mirrord for Teams, which comes with the mirrord Operator.
     Team,
     Enterprise,
-    /// This mirrord version doesn't record the plan the option needs.
-    #[serde(skip_deserializing)]
     Unverified,
+}
+
+impl From<Option<Plan>> for OptionPlan {
+    fn from(plan: Option<Plan>) -> Self {
+        match plan {
+            Some(Plan::Oss) => Self::Oss,
+            Some(Plan::Team) => Self::Team,
+            Some(Plan::Enterprise) => Self::Enterprise,
+            None => Self::Unverified,
+        }
+    }
 }
 
 /// The plan one alternative form of an option needs.
@@ -133,7 +142,8 @@ struct OptionDocs {
     types: Vec<JsonType>,
     allowed_values: Vec<Value>,
     default: Option<Value>,
-    plan: Plan,
+    /// `None` when this mirrord version doesn't record the plan.
+    plan: Option<Plan>,
     plan_by_alternative: Option<Vec<AlternativePlan>>,
 }
 
@@ -149,7 +159,7 @@ impl OptionDocs {
                 .not()
                 .then_some(self.allowed_values),
             default: self.default,
-            plan: Some(self.plan),
+            plan: Some(self.plan.into()),
             plan_by_alternative: self.plan_by_alternative,
             mirrord_json_path,
             suggestions: None,
@@ -238,8 +248,8 @@ fn explain_up(segments: &[&str]) -> Option<(OptionDocs, Option<String>)> {
     let docs = match (explain(&UP_SCHEMA.raw, segments), layer) {
         (Some(up), Some(layer)) => {
             let (plan, plan_by_alternative) = match up.plan {
-                Plan::Unverified => (layer.plan, layer.plan_by_alternative),
-                _ => (up.plan, up.plan_by_alternative),
+                None => (layer.plan, layer.plan_by_alternative),
+                Some(_) => (up.plan, up.plan_by_alternative),
             };
             OptionDocs {
                 description: up.description.or(layer.description),
@@ -455,18 +465,19 @@ fn description<'s>(
 
 /// The plan of an option, from the alternatives it accepts (the expanded `nodes` that offer no
 /// further alternatives): the cheapest plan any of them needs, and each alternative's plan when
-/// they differ. An alternative without a plan makes the option's plan [`Plan::Unverified`].
-fn plans(nodes: &[Node]) -> (Plan, Option<Vec<AlternativePlan>>) {
+/// they differ. An alternative without a plan leaves the option's plan unknown.
+fn plans(nodes: &[Node]) -> (Option<Plan>, Option<Vec<AlternativePlan>>) {
     let alternatives: Vec<Node> = nodes
         .iter()
         .filter(|node| is_alternative(node.schema))
         .copied()
         .collect();
 
-    let plan = match alternatives.iter().map(|node| node.plan).min() {
-        Some(Some(plan)) if alternatives.iter().all(|node| node.plan.is_some()) => plan,
-        _ => Plan::Unverified,
-    };
+    let plan = alternatives
+        .iter()
+        .map(|node| node.plan)
+        .collect::<Option<Vec<Plan>>>()
+        .and_then(|plans| plans.into_iter().min());
 
     let mut by_alternative: Vec<AlternativePlan> = Vec::new();
     for node in &alternatives {
@@ -483,7 +494,7 @@ fn plans(nodes: &[Node]) -> (Plan, Option<Vec<AlternativePlan>>) {
     }
     let differ = by_alternative
         .iter()
-        .any(|alternative| alternative.plan != plan);
+        .any(|alternative| Some(alternative.plan) != plan);
 
     (plan, differ.then_some(by_alternative))
 }
@@ -632,10 +643,10 @@ fn suggestions(segments: &[&str], known: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use mirrord_config::plan::PLAN_ANNOTATION;
     use serde_json::json;
 
     use super::*;
-    use crate::schema::PLAN_ANNOTATION;
 
     fn explain_path(format: ConfigFormat, path: &str) -> ExplainConfigOptionOutput {
         explain_config_option(ExplainConfigOptionArgs {
@@ -655,7 +666,7 @@ mod tests {
             output.allowed_values,
             Some(vec![json!("mirror"), json!("steal"), json!("off")])
         );
-        assert_eq!(output.plan, Some(Plan::Oss));
+        assert_eq!(output.plan, Some(OptionPlan::Oss));
         assert!(output.plan_by_alternative.is_none());
         assert!(output.suggestions.is_none());
     }
@@ -864,45 +875,57 @@ mod tests {
     #[test]
     fn plans() {
         for (format, path, plan) in [
-            (ConfigFormat::MirrordJson, "feature.fs.mode", Plan::Oss),
+            (
+                ConfigFormat::MirrordJson,
+                "feature.fs.mode",
+                OptionPlan::Oss,
+            ),
             (
                 ConfigFormat::MirrordJson,
                 "feature.split_queues",
-                Plan::Team,
+                OptionPlan::Team,
             ),
             (
                 ConfigFormat::MirrordJson,
                 "feature.copy_target.scale_down",
-                Plan::Team,
+                OptionPlan::Team,
             ),
             (
                 ConfigFormat::MirrordJson,
                 "feature.network.incoming.tls_delivery.protocol",
-                Plan::Team,
+                OptionPlan::Team,
             ),
             (
                 ConfigFormat::MirrordJson,
                 "feature.preview",
-                Plan::Enterprise,
+                OptionPlan::Enterprise,
             ),
             (
                 ConfigFormat::MirrordJson,
                 "target.path.deployment",
-                Plan::Oss,
+                OptionPlan::Oss,
             ),
-            (ConfigFormat::MirrordJson, "target.path.job", Plan::Team),
-            (ConfigFormat::MirrordJson, "agent.ttl", Plan::Oss),
-            (ConfigFormat::MirrordJson, "profile", Plan::Team),
-            (ConfigFormat::MirrordJson, "multi_cluster", Plan::Enterprise),
+            (
+                ConfigFormat::MirrordJson,
+                "target.path.job",
+                OptionPlan::Team,
+            ),
+            (ConfigFormat::MirrordJson, "agent.ttl", OptionPlan::Oss),
+            (ConfigFormat::MirrordJson, "profile", OptionPlan::Team),
+            (
+                ConfigFormat::MirrordJson,
+                "multi_cluster",
+                OptionPlan::Enterprise,
+            ),
             (
                 ConfigFormat::MirrordUpYaml,
                 "services.api.config_patch.feature.db_branches",
-                Plan::Team,
+                OptionPlan::Team,
             ),
             (
                 ConfigFormat::MirrordUpYaml,
                 "services.api.target.path.stateful_set",
-                Plan::Team,
+                OptionPlan::Team,
             ),
         ] {
             assert_eq!(explain_path(format, path).plan, Some(plan), "{path}");
@@ -913,7 +936,7 @@ mod tests {
     #[test]
     fn target_kinds() {
         let output = explain_path(ConfigFormat::MirrordJson, "target.path");
-        assert_eq!(output.plan, Some(Plan::Oss));
+        assert_eq!(output.plan, Some(OptionPlan::Oss));
 
         let by_alternative = output.plan_by_alternative.unwrap();
         for (alternative, plan) in [
@@ -937,7 +960,7 @@ mod tests {
     #[test]
     fn up_mode_plans() {
         let output = explain_path(ConfigFormat::MirrordUpYaml, "services.api.default_mode");
-        assert_eq!(output.plan, Some(Plan::Oss));
+        assert_eq!(output.plan, Some(OptionPlan::Oss));
         assert_eq!(
             output.plan_by_alternative,
             Some(vec![
@@ -980,22 +1003,23 @@ mod tests {
 
         let plan = |path: &str| {
             let segments: Vec<&str> = path.split('.').collect();
-            Some(explain(&schema, &segments).unwrap().plan)
+            explain(&schema, &segments).unwrap().plan
         };
         assert_eq!(plan("copy_target"), Some(Plan::Team));
         assert_eq!(plan("copy_target.scale_down"), Some(Plan::Team));
         assert_eq!(plan("copy_target.preview"), Some(Plan::Enterprise));
-        assert_eq!(plan("fs"), Some(Plan::Unverified));
+        assert_eq!(plan("fs"), None);
     }
 
-    /// Every option needs a plan, its own or its parent's: `#[config(plan = "...")]` on fields
-    /// generated by `MirrordConfig`, `#[schemars(extend("x-mirrord-plan" = "..."))]` elsewhere.
+    /// Every option needs a plan, its own or its parent's: `#[config(plan = Team)]` on fields
+    /// generated by `MirrordConfig`, `#[schemars(extend("x-mirrord-plan" = Plan::Team))]`
+    /// elsewhere.
     #[test]
     fn every_option_has_a_plan() {
         let missing: Vec<&String> = LAYER_PATHS
             .iter()
             .filter(|path| {
-                explain_path(ConfigFormat::MirrordJson, path).plan == Some(Plan::Unverified)
+                explain_path(ConfigFormat::MirrordJson, path).plan == Some(OptionPlan::Unverified)
             })
             .collect();
         assert!(missing.is_empty(), "options without a plan: {missing:#?}");
@@ -1049,7 +1073,7 @@ mod tests {
         let missing: Vec<&String> = UP_PATHS
             .iter()
             .filter(|path| {
-                explain_path(ConfigFormat::MirrordUpYaml, path).plan == Some(Plan::Unverified)
+                explain_path(ConfigFormat::MirrordUpYaml, path).plan == Some(OptionPlan::Unverified)
             })
             .collect();
         assert!(missing.is_empty(), "options without a plan: {missing:#?}");

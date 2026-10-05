@@ -441,7 +441,7 @@ impl JsonSchema for Target {
             schema_gen
                 .subschema_for::<serverless::ServerlessTarget>()
                 .to_value(),
-            serde_json::json!({ "enum": ["targetless"], "x-mirrord-plan": "oss" }),
+            serde_json::json!({ "enum": ["targetless"], "x-mirrord-plan": crate::plan::Plan::Oss }),
         ];
 
         let mut schema = schemars::json_schema!({});

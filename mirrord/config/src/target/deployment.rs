@@ -8,7 +8,7 @@ use crate::config::{ConfigError, Result};
 /// Mirror the deployment specified by [`DeploymentTarget::deployment`].
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(extend("x-mirrord-plan" = "oss"))]
+#[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Oss))]
 pub struct DeploymentTarget {
     /// <!--${internal}-->
     /// Deployment to mirror.

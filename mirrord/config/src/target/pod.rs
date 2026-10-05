@@ -8,7 +8,7 @@ use crate::config::{self, ConfigError};
 /// Mirror the pod specified by [`PodTarget::pod`].
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(extend("x-mirrord-plan" = "oss"))]
+#[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Oss))]
 pub struct PodTarget {
     /// <!--${internal}-->
     /// Pod to mirror.

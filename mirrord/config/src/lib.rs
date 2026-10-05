@@ -17,6 +17,7 @@ pub mod external_proxy;
 pub mod feature;
 pub mod internal_proxy;
 pub mod logfile_path;
+pub mod plan;
 pub mod retry;
 pub mod target;
 pub mod util;
@@ -345,7 +346,7 @@ pub struct LayerConfig {
     /// certificates).
     ///
     /// If not provided, mirrord will use value from the kubeconfig.
-    #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", plan = "oss")]
+    #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", plan = Oss)]
     pub accept_invalid_certificates: Option<bool>,
 
     /// ## skip_processes {#root-skip_processes}
@@ -361,7 +362,7 @@ pub struct LayerConfig {
     ///  "skip_processes": ["bash", "node"]
     /// }
     /// ```
-    #[config(env = "MIRRORD_SKIP_PROCESSES", plan = "oss")]
+    #[config(env = "MIRRORD_SKIP_PROCESSES", plan = Oss)]
     pub skip_processes: Option<VecOrSingle<String>>,
 
     /// ## skip_build_tools {#root-skip_build_tools}
@@ -374,7 +375,7 @@ pub struct LayerConfig {
     /// Build-Tools: `["as", "cc", "ld", "go", "air", "asm", "cc1", "cgo", "dlv", "gcc", "git",
     /// "link", "math", "cargo", "hpack", "rustc", "compile", "collect2", "cargo-watch",
     /// "debugserver"]`
-    #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true, plan = "oss")]
+    #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true, plan = Oss)]
     pub skip_build_tools: bool,
 
     /// ## skip_extra_build_tools {#root-skip_build_tools}
@@ -394,7 +395,7 @@ pub struct LayerConfig {
     ///  "skip_extra_build_tools": ["bash", "node"]
     /// }
     /// ```
-    #[config(env = "MIRRORD_SKIP_EXTRA_BUILD_TOOLS", plan = "oss")]
+    #[config(env = "MIRRORD_SKIP_EXTRA_BUILD_TOOLS", plan = Oss)]
     pub skip_extra_build_tools: Option<VecOrSingle<String>>,
 
     /// ## operator {#root-operator}
@@ -402,7 +403,7 @@ pub struct LayerConfig {
     /// Whether mirrord should use the operator.
     /// If not set, mirrord will first attempt to use the operator, but continue without it in case
     /// of failure.
-    #[config(env = "MIRRORD_OPERATOR_ENABLE", plan = "oss")]
+    #[config(env = "MIRRORD_OPERATOR_ENABLE", plan = Oss)]
     pub operator: Option<bool>,
 
     /// ## multi_cluster {#root-multi_cluster}
@@ -411,7 +412,7 @@ pub struct LayerConfig {
     /// operator. When set to `false`, forces a single-cluster session on the Primary cluster
     /// instead of creating a multi-cluster session that spans all workload clusters.
     /// When `true` or unset, multi-cluster sessions are used when the operator supports them.
-    #[config(env = "MIRRORD_MULTI_CLUSTER", plan = "enterprise")]
+    #[config(env = "MIRRORD_MULTI_CLUSTER", plan = Enterprise)]
     pub multi_cluster: Option<bool>,
 
     /// ## api {#root-api}
@@ -422,7 +423,7 @@ pub struct LayerConfig {
     /// with HTTP endpoints for observing session activity in real time.
     ///
     /// Defaults to `true`.
-    #[config(default = true, env = "MIRRORD_API", plan = "oss")]
+    #[config(default = true, env = "MIRRORD_API", plan = Oss)]
     pub api: bool,
 
     /// ## profile {#root-profile}
@@ -444,7 +445,7 @@ pub struct LayerConfig {
     ///   "profile": "my-namespace/my-profile-name"
     /// }
     /// ```
-    #[config(plan = "team")]
+    #[config(plan = Team)]
     pub profile: Option<String>,
 
     /// ## kubeconfig {#root-kubeconfig}
@@ -457,7 +458,7 @@ pub struct LayerConfig {
     ///   "kubeconfig": "~/bear/kube-config"
     /// }
     /// ```
-    #[config(env = "MIRRORD_KUBECONFIG", plan = "oss")]
+    #[config(env = "MIRRORD_KUBECONFIG", plan = Oss)]
     pub kubeconfig: Option<String>,
 
     /// ## sip_binaries {#root-sip_binaries}
@@ -475,23 +476,23 @@ pub struct LayerConfig {
     ///   "sip_binaries": ["bash", "python"]
     /// }
     /// ```
-    #[config(plan = "oss")]
+    #[config(plan = Oss)]
     pub sip_binaries: Option<VecOrSingle<String>>,
 
     /// ## target {#root-target}
-    #[config(nested, plan = "oss")]
+    #[config(nested, plan = Oss)]
     pub target: TargetConfig,
 
     /// ## agent {#root-agent}
-    #[config(nested, plan = "oss")]
+    #[config(nested, plan = Oss)]
     pub agent: AgentConfig,
 
     /// ## container {#root-container}
-    #[config(nested, unstable, plan = "oss")]
+    #[config(nested, unstable, plan = Oss)]
     pub container: ContainerConfig,
 
     /// ## feature {#root-feature}
-    #[config(nested, plan = "oss")]
+    #[config(nested, plan = Oss)]
     pub feature: FeatureConfig,
 
     /// ## telemetry {#root-telemetry}
@@ -499,7 +500,7 @@ pub struct LayerConfig {
     /// Telemetry sent doesn't contain personal identifiers or any data that
     /// should be considered sensitive. It is used to improve the product.
     /// [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)
-    #[config(env = "MIRRORD_TELEMETRY", default = true, plan = "oss")]
+    #[config(env = "MIRRORD_TELEMETRY", default = true, plan = Oss)]
     pub telemetry: bool,
 
     /// ## kube_context {#root-kube_context}
@@ -512,15 +513,15 @@ pub struct LayerConfig {
     ///   "kube_context": "mycluster"
     /// }
     /// ```
-    #[config(env = "MIRRORD_KUBE_CONTEXT", plan = "oss")]
+    #[config(env = "MIRRORD_KUBE_CONTEXT", plan = Oss)]
     pub kube_context: Option<String>,
 
     /// ## internal_proxy {#root-internal_proxy}
-    #[config(nested, plan = "oss")]
+    #[config(nested, plan = Oss)]
     pub internal_proxy: InternalProxyConfig,
 
     /// ## external_proxy {#root-external_proxy}
-    #[config(nested, plan = "oss")]
+    #[config(nested, plan = Oss)]
     pub external_proxy: ExternalProxyConfig,
 
     /// ## use_proxy {#root-use_proxy}
@@ -530,11 +531,11 @@ pub struct LayerConfig {
     /// but you don't want mirrord to use it.
     /// This also applies to the mirrord process (as it just removes the env).
     /// If the remote pod sets this env, the mirrord process will still use it.
-    #[config(env = "MIRRORD_PROXY", default = true, plan = "oss")]
+    #[config(env = "MIRRORD_PROXY", default = true, plan = Oss)]
     pub use_proxy: bool,
 
     /// ## experimental {#root-experimental}
-    #[config(nested, plan = "oss")]
+    #[config(nested, plan = Oss)]
     pub experimental: ExperimentalConfig,
 
     /// ## skip_sip {#root-skip_sip}
@@ -548,15 +549,15 @@ pub struct LayerConfig {
     ///
     /// When specified, the given value will replace the default list rather than
     /// being added to.
-    #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_owned()), plan = "oss")]
+    #[config(env = "MIRRORD_SKIP_SIP", default = VecOrSingle::Single("git".to_owned()), plan = Oss)]
     pub skip_sip: VecOrSingle<String>,
 
     /// ## startup_retry {#root-startup_retry}
-    #[config(nested, plan = "oss")]
+    #[config(nested, plan = Oss)]
     pub startup_retry: StartupRetryConfig,
 
     /// ## ci {#root-ci}
-    #[config(nested, plan = "oss")]
+    #[config(nested, plan = Oss)]
     pub ci: CiConfig,
 
     /// ## key {#root-key}
@@ -598,7 +599,7 @@ pub struct LayerConfig {
     /// 2. Environment variable: `MIRRORD_KEY`
     /// 3. Config file: `{ "key": "my-key" }`
     /// 4. Fallback: A unique key is randomly generated if no other option is provided
-    #[config(nested, plan = "oss")]
+    #[config(nested, plan = Oss)]
     pub key: EnvKey,
 
     /// ## traceparent {#root-traceparent}
@@ -609,7 +610,7 @@ pub struct LayerConfig {
     /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     ///
     /// Only relevant for use with the operator. For more details, read the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).
-    #[config(env = "TRACEPARENT", plan = "oss")]
+    #[config(env = "TRACEPARENT", plan = Oss)]
     pub traceparent: Option<String>,
 
     /// ## baggage {#root-baggage}
@@ -619,7 +620,7 @@ pub struct LayerConfig {
     /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     ///
     /// Only relevant for use with the operator. For more details, read the [docs on monitoring](https://metalbear.com/mirrord/docs/managing-mirrord/monitoring).
-    #[config(env = "BAGGAGE", plan = "oss")]
+    #[config(env = "BAGGAGE", plan = Oss)]
     pub baggage: Option<String>,
 }
 

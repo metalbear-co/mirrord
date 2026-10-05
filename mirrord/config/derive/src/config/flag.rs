@@ -40,9 +40,10 @@ pub struct ConfigFlags {
     pub unstable: bool,
     pub deprecated: Option<Lit>,
 
-    /// The mirrord plan the option needs, e.g. `#[config(plan = "team")]`. Recorded in the
-    /// schema as `x-mirrord-plan`, where `mirrord mcp` reads it.
-    pub plan: Option<Lit>,
+    /// The mirrord plan the option needs, a variant of `crate::plan::Plan`, e.g.
+    /// `#[config(plan = Team)]`. Recorded in the schema as `x-mirrord-plan`, where `mirrord mcp`
+    /// reads it.
+    pub plan: Option<Ident>,
 }
 
 /// Retrieves the [`enum@Lit`] that is inside a [`MetaNameValue`].
@@ -139,7 +140,13 @@ impl ConfigFlags {
                     Meta::NameValue(meta)
                         if mode == ConfigFlagsType::Field && meta.path.is_ident("plan") =>
                     {
-                        flags.plan = lit_in_meta_name_value(&meta);
+                        let Expr::Path(plan) = &meta.value else {
+                            return Err(meta
+                                .value
+                                .span()
+                                .error("plan should be a variant of `Plan`, e.g. `plan = Team`"));
+                        };
+                        flags.plan = plan.path.get_ident().cloned();
                     }
                     Meta::NameValue(meta)
                         if mode == ConfigFlagsType::Field && meta.path.is_ident("deprecated") =>

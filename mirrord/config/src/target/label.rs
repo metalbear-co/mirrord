@@ -9,7 +9,7 @@ use crate::config::{ConfigError, Result};
 /// Selects every pod in the target namespace that has all configured labels.
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(extend("x-mirrord-plan" = "team"))]
+#[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Team))]
 pub struct LabelTarget {
     /// Exact-match labels used to select pods. All entries must match.
     pub labels: BTreeMap<String, String>,

@@ -7,13 +7,14 @@ use std::{
 };
 
 use jsonschema::{ValidationError, Validator};
-use mirrord_config::LayerFileConfig;
+use mirrord_config::{
+    LayerFileConfig,
+    plan::{PLAN_ANNOTATION, Plan},
+};
 use mirrord_up::UpConfig;
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use serde_json::Value;
-
-use crate::tools::explain_config_option::Plan;
 
 /// A config schema, and the validator compiled from it.
 pub(crate) struct Schema {
@@ -41,10 +42,6 @@ impl Schema {
 pub(crate) static LAYER_SCHEMA: LazyLock<Schema> = LazyLock::new(Schema::new::<LayerFileConfig>);
 /// The schema of `mirrord-up.yaml`.
 pub(crate) static UP_SCHEMA: LazyLock<Schema> = LazyLock::new(Schema::new::<UpConfig>);
-
-/// Schema annotation naming the [`Plan`] an option needs. Options without it inherit it from the
-/// closest annotated option above them.
-pub(crate) const PLAN_ANNOTATION: &str = "x-mirrord-plan";
 
 /// A schema reached while resolving a path.
 #[derive(Debug, Clone, Copy)]
