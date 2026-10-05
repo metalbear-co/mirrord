@@ -49,7 +49,12 @@ impl WorkloadCompanionIngress {
             redirector,
             tls_handler_store,
             Default::default(),
-            RedirectorTaskConfig::from_env(),
+            // The remote layer hands off every accepted connection, including ones on ports that
+            // no client has subscribed to yet.
+            RedirectorTaskConfig {
+                handle_unsubscribed_connections: true,
+                ..RedirectorTaskConfig::from_env()
+            },
         );
         let handoff_server = ConnectionHandoffServer::bind(sender)?;
 
