@@ -95,12 +95,6 @@ impl PortRedirector for RemoteLayerPortRedirector {
         Ok(())
     }
 
-    /// Reports that every remote-layer connection is fed into the incoming pipeline before a port
-    /// subscription is considered, allowing a later subscription to steal its subsequent requests.
-    fn accepts_connections_without_subscription(&self) -> bool {
-        true
-    }
-
     async fn next_connection(&mut self) -> Result<Redirected, Self::Error> {
         self.connections_rx.recv().await.ok_or_else(|| {
             io::Error::new(io::ErrorKind::BrokenPipe, "remote ingress channel closed").into()
@@ -132,7 +126,7 @@ mod test {
 
     /// A connection accepted before any subscription that stays idle past
     /// `http_detection_timeout` is a documented limitation of
-    /// [`crate::incoming::PortRedirector::accepts_connections_without_subscription`]: detection
+    /// [`RedirectorTaskConfig::handle_unsubscribed_connections`]: detection
     /// gives up, the connection is committed to raw TCP passthrough for its lifetime, and a
     /// subscription arriving afterwards cannot steal its requests, even though the client only
     /// sends its HTTP request after that point.
@@ -143,8 +137,11 @@ mod test {
     #[tokio::test]
     async fn idle_connection_before_subscription_is_passed_through_not_stolen() {
         let RemoteLayerIncoming { redirector, sender } = RemoteLayerIncoming::new();
-        let mut config = RedirectorTaskConfig::from_env();
-        config.http_detection_timeout = Duration::from_millis(20);
+        let config = RedirectorTaskConfig {
+            http_detection_timeout: Duration::from_millis(20),
+            handle_unsubscribed_connections: true,
+            ..RedirectorTaskConfig::from_env()
+        };
         let (task, mut steal_handle, _) =
             RedirectorTask::new(redirector, Default::default(), Default::default(), config);
         let task = tokio::spawn(task.run());
@@ -218,7 +215,10 @@ mod test {
             redirector,
             Default::default(),
             Default::default(),
-            RedirectorTaskConfig::from_env(),
+            RedirectorTaskConfig {
+                handle_unsubscribed_connections: true,
+                ..RedirectorTaskConfig::from_env()
+            },
         );
         let task = tokio::spawn(task.run());
 
