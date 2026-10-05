@@ -101,7 +101,7 @@ async fn eks_connection_sends_and_refreshes_an_eks_token() {
         .request_text(Request::get("/version").body(Vec::new()).unwrap())
         .await
         .unwrap();
-    let authorization = seen.lock().unwrap()[0].clone().unwrap();
+    let authorization = seen.lock().unwrap().first().unwrap().clone().unwrap();
     assert!(authorization.starts_with("Bearer k8s-aws-v1."));
 
     let token_file_path = connection.token_file_path.clone().unwrap();

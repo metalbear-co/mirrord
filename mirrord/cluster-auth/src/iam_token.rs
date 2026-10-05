@@ -322,18 +322,24 @@ mod tests {
         );
         assert_eq!(url.host_str(), Some("sts.us-east-1.amazonaws.com"));
         let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
-        assert_eq!(query["Action"], "GetCallerIdentity");
-        assert_eq!(query["Version"], "2011-06-15");
+        assert_eq!(query.get("Action").unwrap(), "GetCallerIdentity");
+        assert_eq!(query.get("Version").unwrap(), "2011-06-15");
         assert_eq!(
-            query["X-Amz-Credential"],
+            query.get("X-Amz-Credential").unwrap(),
             "AKIDEXAMPLE/20260102/us-east-1/sts/aws4_request"
         );
-        assert_eq!(query["X-Amz-Date"], "20260102T030405Z");
-        assert_eq!(query["X-Amz-Expires"], "900");
-        assert_eq!(query["X-Amz-SignedHeaders"], "host;x-k8s-aws-id");
-        assert_eq!(query["X-Amz-Security-Token"], "session/token+with=reserved");
+        assert_eq!(query.get("X-Amz-Date").unwrap(), "20260102T030405Z");
+        assert_eq!(query.get("X-Amz-Expires").unwrap(), "900");
         assert_eq!(
-            query["X-Amz-Signature"],
+            query.get("X-Amz-SignedHeaders").unwrap(),
+            "host;x-k8s-aws-id"
+        );
+        assert_eq!(
+            query.get("X-Amz-Security-Token").unwrap(),
+            "session/token+with=reserved"
+        );
+        assert_eq!(
+            query.get("X-Amz-Signature").unwrap(),
             "cf9e1cfb488e56c0bbd982c8d675c2f728b91b09f6d8aaccc5a0dbfde46e96ec"
         );
         assert!(!token.token.contains('='));
@@ -363,10 +369,13 @@ mod tests {
             );
             let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
             assert_eq!(
-                query["X-Amz-Credential"],
-                format!("AKIDEXAMPLE/20260102/{region}/sts/aws4_request")
+                query.get("X-Amz-Credential").unwrap(),
+                &format!("AKIDEXAMPLE/20260102/{region}/sts/aws4_request")
             );
-            assert_eq!(query["X-Amz-SignedHeaders"], "host;x-k8s-aws-id");
+            assert_eq!(
+                query.get("X-Amz-SignedHeaders").unwrap(),
+                "host;x-k8s-aws-id"
+            );
         }
     }
 
