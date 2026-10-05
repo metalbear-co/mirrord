@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api } from '../api'
+import { api, requestContext } from '../api'
 import { emitUserBlocked } from '../analytics'
 import type {
   ChaosEffectKind,
@@ -132,6 +132,7 @@ export function useChaosRules(sessionId: string): UseChaosRules {
           'chaos_rules_load_failed',
           {
             session_id: sessionId,
+            ...requestContext(err),
             error: err instanceof Error ? err.message : String(err),
           },
           err,
