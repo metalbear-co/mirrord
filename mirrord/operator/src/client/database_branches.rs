@@ -1223,6 +1223,34 @@ fn classify_existing_branches(
     existing
 }
 
+/// The connection mapping this session sends along for the branches it reuses, keyed by branch
+/// resource name.
+///
+/// The operator rewrites a session's env vars using a branch's `spec.connectionSource`, which
+/// names the vars of the workload that CREATED the branch. A workload reusing the branch under
+/// the same `id` may read its connection from other vars (`AUDIT_DB_HOST` where the creator has
+/// `DB_HOST`), so for those the session's own mapping (`requested`, from this config) has to
+/// reach the operator. A reused branch whose spec already equals what this session declares is
+/// left out, so the common same-config reuse sends nothing extra and behaves as before.
+///
+/// Both inputs are keyed by the branch resource name, the same key the lookup and create
+/// paths use.
+pub fn reused_branch_connection_sources<'a>(
+    requested: &HashMap<String, CrdConnectionSource>,
+    reused: impl IntoIterator<Item = (&'a String, &'a BranchDatabase)>,
+) -> BTreeMap<String, CrdConnectionSource> {
+    reused
+        .into_iter()
+        .filter_map(|(name, branch)| {
+            let source = requested.get(name)?;
+            if branch.spec.connection_source == *source {
+                return None;
+            }
+            Some((name.clone(), source.clone()))
+        })
+        .collect()
+}
+
 /// Look up the branch databases that already exist under the resource names in `params`.
 ///
 /// The lookup goes by the same deterministic resource name that [`create_branches`] uses,
@@ -2474,18 +2502,19 @@ mod test {
     use kube::ResourceExt;
     use mirrord_config::{
         feature::database_branches::{
-            S3BranchConfig, SqlBranchMigrationsConfig, TurbopufferBranchConfig,
+            S3BranchConfig, SingleOrVec, SqlBranchMigrationsConfig, TurbopufferBranchConfig,
         },
         target::Target,
     };
     use mirrord_progress::NullProgress;
 
     use super::{
-        BranchDatabase, BranchDatabaseId, ConfigConnectionSource, CrdConnectionSource,
-        DatabaseBranchesConfig, MigrationsSpec, ObjectMeta, OperatorApiError, UnifiedBranchParams,
-        UnifiedDatabaseBranchParams, build_migration_archive, classify_existing_branches,
-        convert_connection_source, extract_literal_values, read_migrations,
-        replace_spec_values_with_secret_refs, replace_values_with_secret_refs, resolve_branch_id,
+        BranchDatabase, BranchDatabaseId, ConfigConnectionSource, ConnectionParamsSpec,
+        CrdConnectionSource, DatabaseBranchesConfig, MigrationsSpec, ObjectMeta, OperatorApiError,
+        UnifiedBranchParams, UnifiedDatabaseBranchParams, build_migration_archive,
+        classify_existing_branches, convert_connection_source, extract_literal_values,
+        read_migrations, replace_spec_values_with_secret_refs, replace_values_with_secret_refs,
+        resolve_branch_id, reused_branch_connection_sources,
     };
     use crate::crd::{
         db_branching::{
@@ -2600,6 +2629,47 @@ mod test {
         let (key, branch) = found_branch("shared-id", Some(BranchDatabasePhase::Ready));
         let existing = classify_existing_branches([(key.clone(), branch)]);
         assert!(existing.ready.contains_key(&key));
+    }
+
+    /// A `users` workload reusing the branch an `orders` workload created under the same `id`
+    /// declared `AUDIT_DB_*` vars, but the branch spec still says `DB_*`. Building the session
+    /// env from the branch spec then appended the creator's `DB_*` vars to the `users` pod and
+    /// left `AUDIT_DB_*` pointing at the source database. The session has to ship its own
+    /// mapping for that branch - and only for that one: a reused branch whose spec already
+    /// matches, or a branch this session did not ask for, sends nothing.
+    #[test]
+    fn reused_branch_ships_the_sessions_mapping_only_when_it_differs() {
+        let (same_id, same_branch) = found_branch("same", Some(BranchDatabasePhase::Ready));
+        let (other_id, other_branch) = found_branch("other", Some(BranchDatabasePhase::Ready));
+        let (unrequested_id, unrequested_branch) =
+            found_branch("unrequested", Some(BranchDatabasePhase::Ready));
+
+        let audit_source = CrdConnectionSource::Params(Box::new(ConnectionParamsSpec {
+            host: Some(SingleOrVec::from(ConnectionSourceKind::Env {
+                container: None,
+                variable: "AUDIT_DB_HOST".to_owned(),
+            })),
+            ..Default::default()
+        }));
+        let requested = HashMap::from([
+            (same_id.clone(), same_branch.spec.connection_source.clone()),
+            (other_id.clone(), audit_source.clone()),
+        ]);
+
+        let shipped = reused_branch_connection_sources(
+            &requested,
+            [
+                (&same_id, &same_branch),
+                (&other_id, &other_branch),
+                (&unrequested_id, &unrequested_branch),
+            ],
+        );
+
+        assert_eq!(
+            shipped,
+            BTreeMap::from([(other_branch.name_any(), audit_source)]),
+            "only the branch whose spec names other vars carries the session's mapping"
+        );
     }
 
     /// An S3 branch is cloned in the provider's cloud, so its spec carries none of the pod
