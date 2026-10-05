@@ -573,7 +573,7 @@ impl MirrordExecution {
                 .clone()
                 .map(|unset| unset.to_vec())
                 .unwrap_or_default(),
-            uses_operator: matches!(connect_info, AgentConnectInfo::Operator(..)),
+            uses_operator: connect_info.is_operator(),
         };
 
         Ok((execution, proxy_addr))
@@ -784,11 +784,7 @@ impl MirrordExecution {
             intproxy_address.to_string(),
         );
 
-        Ok((
-            env_vars,
-            Some(proxy_process),
-            matches!(connect_info, AgentConnectInfo::Operator(..)),
-        ))
+        Ok((env_vars, Some(proxy_process), connect_info.is_operator()))
     }
 
     /// Construct filter and retrieve remote environment from the connected agent using

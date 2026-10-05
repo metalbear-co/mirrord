@@ -81,7 +81,7 @@ where
         .await?
         .ok_or(CliError::OperatorNotInstalled)?;
     api.check_license_validity(&subtask)?;
-    api.check_serverless_sessions_manager_served().await?;
+    api.check_serverless_sessions_manager_served()?;
     subtask.success(Some("operator sessions-manager available"));
 
     Ok(api.client().clone())

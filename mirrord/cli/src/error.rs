@@ -451,7 +451,7 @@ pub(crate) enum CliError {
     #[diagnostic(help(
         "Serverless targets with `operator: true` connect through the sessions-manager hosted by \
         the mirrord operator. Ask your cluster administrator to enable it with \
-        `sessionsManager.enabled=true` in the operator Helm chart, or set `operator: false` to \
+        `operator.sessionsManager=true` in the operator Helm chart, or set `operator: false` to \
         use a standalone sessions-manager.{GENERAL_HELP}"
     ))]
     ServerlessSessionsManagerNotServed,

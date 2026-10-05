@@ -608,13 +608,11 @@ where
 
     /// Fails with [`OperatorApiError::ServerlessSessionsManagerNotServed`] unless this operator
     /// serves the operator-hosted sessions-manager routes.
-    pub async fn check_serverless_sessions_manager_served(&self) -> OperatorApiResult<()> {
-        discovery::serverless_sessions_manager_served(&self.client)
-            .await
-            .map_err(|error| OperatorApiError::KubeError {
-                error,
-                operation: OperatorOperation::ServerlessSessionsManagerDiscovery,
-            })?
+    pub fn check_serverless_sessions_manager_served(&self) -> OperatorApiResult<()> {
+        self.operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::ServerlessSessionsManager)
             .then_some(())
             .ok_or(OperatorApiError::ServerlessSessionsManagerNotServed)
     }
@@ -2841,13 +2839,45 @@ mod test {
     use rstest::rstest;
 
     use super::{
-        BAGGAGE_HEADER, NewOperatorFeature, OperatorApi, add_baggage_header,
+        BAGGAGE_HEADER, NewOperatorFeature, NoClientCert, OperatorApi, add_baggage_header,
         disable_unsupported_auto_splits,
     };
     use crate::{
         client::connect_params::{BranchDbNames, ConnectParams},
         crd::session::SessionCiInfo,
     };
+
+    #[tokio::test]
+    async fn sessions_manager_requires_advertised_support() {
+        for supported_features in [
+            serde_json::json!(["ServerlessSessionsManager"]),
+            serde_json::json!([]),
+            serde_json::Value::Null,
+        ] {
+            let enabled = supported_features == serde_json::json!(["ServerlessSessionsManager"]);
+            let config = Config::new("http://127.0.0.1:9669".parse().unwrap());
+            let api = OperatorApi {
+                client: kube::Client::try_from(config.clone()).unwrap(),
+                client_cert: NoClientCert { base_config: config },
+                operator: serde_json::from_value(serde_json::json!({
+                    "apiVersion": "operator.metalbear.co/v1",
+                    "kind": "MirrordOperator",
+                    "metadata": {"name": "operator"},
+                    "spec": {
+                        "operator_version": "3.214.0",
+                        "default_namespace": "default",
+                        "supported_features": supported_features,
+                        "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
+                    }
+                })).unwrap(),
+                kube_context: None,
+            };
+            assert_eq!(
+                api.check_serverless_sessions_manager_served().is_ok(),
+                enabled
+            );
+        }
+    }
 
     #[test]
     fn baggage_is_added_to_base_operator_client() {

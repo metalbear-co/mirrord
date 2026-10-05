@@ -5931,6 +5931,7 @@ dependencies = [
  "tokio-retry",
  "tokio-tungstenite",
  "tokio-util",
+ "tower",
  "tracing",
  "url",
  "uuid",

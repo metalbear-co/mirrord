@@ -367,7 +367,7 @@ pub(crate) async fn proxy(
     // **before** this happens to ensure that the agent does not prematurely exit.
     // We also perform initial ping pong round to ensure that k8s runtime actually made connection
     // with the agent (it's a must, because port forwarding may be done lazily).
-    let is_operator = matches!(&agent_connect_info, AgentConnectInfo::Operator(_));
+    let is_operator = agent_connect_info.is_operator();
     let mut agent_conn =
         connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await?;
     let local_session_id =
