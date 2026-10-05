@@ -505,34 +505,29 @@ pub enum WindowsSupportError {
     Ci,
 }
 
-/// Where `mirrord-up.yaml` settings end up in the mirrord config generated for each service, as
-/// pairs of dotted paths (`*` standing for any service name). The settings below them map the same
-/// way, e.g. `services.*.http_filter.header_filter` sets
-/// `feature.network.incoming.http_filter.header_filter`; a `config_patch` maps onto the root of the
-/// mirrord config. Settings missing here, like `run`, only steer `mirrord up` itself.
-///
-/// Mirrors [`ServiceConfig::assemble`], and must be changed along with it.
-pub const LAYER_CONFIG_PATHS: &[(&str, &str)] = &[
-    (
-        "common.accept_invalid_certificates",
-        "accept_invalid_certificates",
-    ),
-    ("common.operator", "operator"),
-    ("common.telemetry", "telemetry"),
-    ("common.context", "kube_context"),
-    ("services.*.context", "kube_context"),
-    ("services.*.target", "target"),
-    ("services.*.env", "feature.env"),
-    ("services.*.default_mode", "feature.network.incoming.mode"),
-    (
-        "services.*.http_filter",
-        "feature.network.incoming.http_filter",
-    ),
-    (
-        "services.*.ignore_ports",
-        "feature.network.incoming.ignore_ports",
-    ),
-    ("services.*.config_patch", ""),
+/// The settings of `common` in a `mirrord-up.yaml` that end up in the mirrord config generated
+/// for each service, with the `mirrord.json` option each one sets. Their own settings map onto the
+/// same names below that option. `context` is applied through the kube context `mirrord up`
+/// picks, the others by [`ServiceConfig::assemble`], which this must be changed along with.
+pub const COMMON_LAYER_PATHS: &[(&str, &str)] = &[
+    ("accept_invalid_certificates", "accept_invalid_certificates"),
+    ("operator", "operator"),
+    ("telemetry", "telemetry"),
+    ("context", "kube_context"),
+];
+
+/// The settings of a service in a `mirrord-up.yaml` that [`ServiceConfig::assemble`] copies into
+/// the mirrord config it generates for the service, with the `mirrord.json` option each one sets,
+/// and must be changed along with it. Their own settings map onto the same names below that
+/// option (e.g. `http_filter.header_filter`); a service's `config_patch` is a mirrord config
+/// itself. Settings missing here, like `run`, only steer `mirrord up`.
+pub const SERVICE_LAYER_PATHS: &[(&str, &str)] = &[
+    ("context", "kube_context"),
+    ("target", "target"),
+    ("env", "feature.env"),
+    ("default_mode", "feature.network.incoming.mode"),
+    ("http_filter", "feature.network.incoming.http_filter"),
+    ("ignore_ports", "feature.network.incoming.ignore_ports"),
 ];
 
 impl ServiceConfig {
@@ -1071,6 +1066,70 @@ mod tests {
     /// Helper: parse YAML into UpConfig via the two-layer config system.
     fn parse(yaml: &str) -> UpConfig {
         serde_saphyr::from_str(yaml).unwrap()
+    }
+
+    /// The value at the `mirrord.json` path `layer_path` of the config `mirrord up` generates for
+    /// the one service of `yaml`.
+    fn layer_value(yaml: &str, layer_path: &str) -> serde_json::Value {
+        let config = parse(yaml);
+        let up_context = UpKubeContext {
+            command_arg: None,
+            common_context: config.common.context.clone(),
+        };
+        let mut configs = config
+            .service_configs(
+                &EnvKey::Provided("key".to_owned()),
+                &mut HashMap::new(),
+                up_context,
+            )
+            .unwrap();
+        let config = serde_json::to_value(configs.remove(0).config).unwrap();
+        let pointer: String = layer_path
+            .split('.')
+            .map(|segment| format!("/{segment}"))
+            .collect();
+        config.pointer(&pointer).cloned().unwrap_or_default()
+    }
+
+    /// Each setting of [`COMMON_LAYER_PATHS`] and [`SERVICE_LAYER_PATHS`] changes the
+    /// `mirrord.json` option it's listed with, so the tables can't drift from what `mirrord up`
+    /// does.
+    #[test]
+    fn layer_paths_match_the_generated_config() {
+        let value = |setting: &str| match setting {
+            "accept_invalid_certificates" => "true",
+            "operator" | "telemetry" => "false",
+            "context" => "my-context",
+            "target" => "{ path: deployment/api }",
+            "env" => "{ include: A }",
+            "default_mode" => "mirror",
+            "http_filter" => "{ header_filter: x }",
+            "ignore_ports" => "[80]",
+            other => panic!("no value to set `{other}` to"),
+        };
+        let service =
+            |extra: &str| format!("services:\n  api:\n{extra}    run:\n      command: [x]\n");
+        let base = service("    target: none\n");
+
+        for (setting, layer_path) in COMMON_LAYER_PATHS {
+            let changed = format!("common:\n  {setting}: {}\n{base}", value(setting));
+            assert_ne!(
+                layer_value(&base, layer_path),
+                layer_value(&changed, layer_path),
+                "common.{setting} -> {layer_path}"
+            );
+        }
+        for (setting, layer_path) in SERVICE_LAYER_PATHS {
+            let mut extra = format!("    {setting}: {}\n", value(setting));
+            if *setting != "target" {
+                extra.push_str("    target: none\n");
+            }
+            assert_ne!(
+                layer_value(&base, layer_path),
+                layer_value(&service(&extra), layer_path),
+                "services.*.{setting} -> {layer_path}"
+            );
+        }
     }
 
     fn windows_validation_fixture() -> UpConfig {

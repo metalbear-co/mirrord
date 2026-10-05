@@ -24,7 +24,7 @@ use mirrord_config::{
     env_key::{EnvKey, MIRRORD_ENV_KEY},
     target::{TARGET_PATH_FORMATS, Target},
 };
-use mirrord_up::{LAYER_CONFIG_PATHS, ServiceMode, UpConfig, UpError};
+use mirrord_up::{SERVICE_LAYER_PATHS, ServiceMode, UpConfig, UpError};
 use schemars::JsonSchema;
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -397,7 +397,7 @@ fn file_issue(message: String) -> ConfigIssue {
 
 /// Runs the checks of a mirrord config on the settings of every service in a `mirrord-up.yaml` that
 /// `mirrord up` copies into the mirrord config it generates for the service (per
-/// [`LAYER_CONFIG_PATHS`]), such as the regexes of an `http_filter`.
+/// [`SERVICE_LAYER_PATHS`]), such as the regexes of an `http_filter`.
 ///
 /// `default_mode` is left out, as `mirrord up` translates its values, and so are the settings that
 /// need the cluster to resolve, like `target`. So is the `http_filter` of a service in `replace`
@@ -417,10 +417,7 @@ fn check_service_settings(up_config: &Value) -> Result<Vec<ConfigIssue>, Validat
             == Some(ServiceMode::Replace);
         let mut layer_config = Value::Object(Default::default());
         let mut copied = Vec::new();
-        for (up_path, layer_path) in LAYER_CONFIG_PATHS {
-            let Some(setting) = up_path.strip_prefix("services.*.") else {
-                continue;
-            };
+        for &(setting, layer_path) in SERVICE_LAYER_PATHS {
             if layer_path.starts_with("feature.").not()
                 || setting == "default_mode"
                 || (setting == "http_filter" && replace_mode)

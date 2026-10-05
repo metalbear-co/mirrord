@@ -15,7 +15,7 @@
 use std::{collections::HashSet, ops::Not, sync::LazyLock};
 
 use mirrord_config::plan::Plan;
-use mirrord_up::LAYER_CONFIG_PATHS;
+use mirrord_up::{COMMON_LAYER_PATHS, SERVICE_LAYER_PATHS};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -202,16 +202,14 @@ pub fn explain_config_option(
             // that maps onto it, or else through the service's `config_patch`.
             if explain(&LAYER_SCHEMA.raw, &segments).is_some() {
                 let asked = segments.join(".");
-                let mut up_paths: Vec<String> = LAYER_CONFIG_PATHS
+                let mut up_paths: Vec<String> = SERVICE_LAYER_PATHS
                     .iter()
-                    .filter(|(up_path, _)| up_path.starts_with("services.*."))
-                    .filter_map(|(up_path, layer_path)| {
+                    .filter_map(|(setting, layer_path)| {
                         let rest = match asked.strip_prefix(layer_path)? {
                             "" => "",
                             rest => rest.strip_prefix('.').map(|_| rest)?,
                         };
-                        (layer_path.is_empty().not())
-                            .then(|| format!("{}{rest}", up_path.replace('*', ANY_KEY)))
+                        Some(format!("services.{ANY_KEY}.{setting}{rest}"))
                     })
                     .collect();
                 up_paths.push(format!("services.{ANY_KEY}.config_patch.{asked}"));
@@ -274,26 +272,21 @@ fn explain_up(segments: &[&str]) -> Option<(OptionDocs, Option<String>)> {
     Some((docs, mirrord_json_path))
 }
 
-/// The entry of [`LAYER_CONFIG_PATHS`] a `mirrord-up.yaml` path falls under: the `mirrord.json`
-/// path it maps onto, and the rest of the up path below it.
+/// The `mirrord.json` option a `mirrord-up.yaml` path falls under, per [`COMMON_LAYER_PATHS`] and
+/// [`SERVICE_LAYER_PATHS`], and the rest of the up path below it. The option of a `config_patch` is
+/// the root of the mirrord config, `""`.
 fn layer_config_mapping<'a, 'p>(segments: &'a [&'p str]) -> Option<(&'static str, &'a [&'p str])> {
-    LAYER_CONFIG_PATHS.iter().find_map(|(up_path, layer_path)| {
-        let up_segments: Vec<&str> = up_path.split('.').collect();
-        let matches = segments.len() >= up_segments.len()
-            && up_segments
-                .iter()
-                .zip(segments)
-                .all(|(expected, segment)| *expected == "*" || expected == segment);
-        matches.then(|| {
-            (
-                *layer_path,
-                segments.get(up_segments.len()..).unwrap_or_default(),
-            )
-        })
-    })
+    let (paths, setting, rest) = match segments {
+        ["services", _, "config_patch", rest @ ..] => return Some(("", rest)),
+        ["services", _, setting, rest @ ..] => (SERVICE_LAYER_PATHS, setting, rest),
+        ["common", setting, rest @ ..] => (COMMON_LAYER_PATHS, setting, rest),
+        _ => return None,
+    };
+    let (_, layer_path) = paths.iter().find(|(name, _)| name == setting)?;
+    Some((layer_path, rest))
 }
 
-/// The `mirrord.json` path a `mirrord-up.yaml` path maps onto, per [`LAYER_CONFIG_PATHS`].
+/// The `mirrord.json` path a `mirrord-up.yaml` path maps onto, per [`layer_config_mapping`].
 fn layer_config_path(segments: &[&str]) -> Option<String> {
     let (layer_path, rest) = layer_config_mapping(segments)?;
     let path = layer_path
@@ -1079,20 +1072,5 @@ mod tests {
             })
             .collect();
         assert!(missing.is_empty(), "options without a plan: {missing:#?}");
-    }
-
-    #[test]
-    fn layer_config_paths_resolve() {
-        for (up_path, layer_path) in LAYER_CONFIG_PATHS {
-            let up_segments: Vec<&str> = up_path.split('.').collect();
-            assert!(explain(&UP_SCHEMA.raw, &up_segments).is_some(), "{up_path}");
-            if layer_path.is_empty().not() {
-                let layer_segments: Vec<&str> = layer_path.split('.').collect();
-                assert!(
-                    explain(&LAYER_SCHEMA.raw, &layer_segments).is_some(),
-                    "{layer_path}"
-                );
-            }
-        }
     }
 }
