@@ -347,3 +347,185 @@ fn describe(issues: &[ConfigIssue]) -> String {
         .collect::<Vec<_>>()
         .join("; ")
 }
+
+pub fn generate_config(
+    GenerateConfigArgs {
+        format,
+        config,
+        common,
+        services,
+    }: GenerateConfigArgs,
+) -> Result<GenerateConfigOutput, GenerateConfigError> {
+    let format = format.unwrap_or(ConfigFormat::MirrordJson);
+    let (content, requires_operator) = match format {
+        ConfigFormat::MirrordJson => {
+            if common.is_some() || services.is_some() {
+                return Err(GenerateConfigError::ServicesForJson);
+            }
+            let (config, requires_operator) = layer_config(config.unwrap_or_default())?;
+            let content = serde_json::to_string_pretty(&config)
+                .map_err(|error| GenerateConfigError::Serialize(error.to_string()))?;
+            (content + "\n", requires_operator)
+        }
+        ConfigFormat::MirrordUpYaml => {
+            if config.is_some() {
+                return Err(GenerateConfigError::ConfigForUp);
+            }
+            let (config, requires_operator) = up_config(common, services.unwrap_or_default())?;
+            let content = serde_saphyr::to_string(&config)
+                .map_err(|error| GenerateConfigError::Serialize(error.to_string()))?;
+            (content, requires_operator)
+        }
+    };
+
+    let validation = validate_config(ValidateConfigArgs {
+        format,
+        content: content.clone(),
+        key: None,
+    })?;
+    if validation.valid.not() {
+        return Err(GenerateConfigError::Invalid(validation.issues));
+    }
+
+    Ok(GenerateConfigOutput {
+        format,
+        content,
+        requires_operator,
+    })
+}
+
+/// Builds a `mirrord.json` from `options`, along with pointers to the options in it that need the
+/// operator.
+fn layer_config(
+    options: ConfigOptions,
+) -> Result<(Map<String, Value>, Vec<String>), GenerateConfigError> {
+    let ConfigOptions {
+        target,
+        incoming,
+        outgoing,
+        dns,
+        env,
+        fs,
+        copy_target,
+        split_queues,
+        agent_namespace,
+        kube_context,
+    } = options;
+
+    let mut config = Map::new();
+    let mut requires_operator = Vec::new();
+
+    if let Some(target) = target {
+        if target.r#type.needs_operator() {
+            requires_operator.push("/target".to_owned());
+        }
+        config.insert("target".to_owned(), target_value(target)?);
+    }
+    set(&mut config, &["feature", "network", "incoming"], incoming);
+    check_filter(
+        "outgoing",
+        outgoing
+            .as_ref()
+            .and_then(|outgoing| outgoing.filter.as_ref()),
+    )?;
+    set(&mut config, &["feature", "network", "outgoing"], outgoing);
+    check_filter("dns", dns.as_ref().and_then(|dns| dns.filter.as_ref()))?;
+    set(&mut config, &["feature", "network", "dns"], dns);
+    set(&mut config, &["feature", "env"], env);
+    set(&mut config, &["feature", "fs"], fs);
+    if let Some(CopyTargetOptions { scale_down }) = copy_target {
+        let mut copy_target = Map::from_iter([("enabled".to_owned(), true.into())]);
+        set(&mut copy_target, &["scale_down"], scale_down);
+        set(&mut config, &["feature", "copy_target"], Some(copy_target));
+        requires_operator.push("/feature/copy_target".to_owned());
+    }
+    if let Some(split_queues) = split_queues {
+        let mut queues = Map::new();
+        for QueueSplitOptions {
+            queue_id,
+            queue_type,
+            message_filter,
+        } in split_queues
+        {
+            let mut queue = Map::from_iter([("queue_type".to_owned(), json!(queue_type))]);
+            set(&mut queue, &["message_filter"], message_filter);
+            if queues.insert(queue_id.clone(), queue.into()).is_some() {
+                return Err(GenerateConfigError::DuplicateQueue(queue_id));
+            }
+        }
+        set(&mut config, &["feature", "split_queues"], Some(queues));
+        requires_operator.push("/feature/split_queues".to_owned());
+    }
+    set(&mut config, &["agent", "namespace"], agent_namespace);
+    set(&mut config, &["kube_context"], kube_context);
+
+    Ok((config, requires_operator))
+}
+
+fn target_value(
+    TargetOptions {
+        r#type,
+        name,
+        container,
+        namespace,
+    }: TargetOptions,
+) -> Result<Value, GenerateConfigError> {
+    for (field, value) in [("name", &name), ("container", &container)] {
+        match value.as_deref() {
+            Some("") => return Err(GenerateConfigError::EmptyTargetField(field)),
+            Some(value) if value.contains('/') => {
+                return Err(GenerateConfigError::SlashInTargetField(field));
+            }
+            _ => {}
+        }
+    }
+    if namespace.as_deref() == Some("") {
+        return Err(GenerateConfigError::EmptyTargetField("namespace"));
+    }
+
+    let type_name: &'static str = r#type.into();
+    let path = match (r#type, name) {
+        (TargetType::Targetless, None) if container.is_none() => type_name.to_owned(),
+        (TargetType::Targetless, _) => return Err(GenerateConfigError::TargetlessWithName),
+        (_, None) => return Err(GenerateConfigError::MissingTargetName(type_name)),
+        (_, Some(name)) => match container {
+            Some(container) => format!("{type_name}/{name}/container/{container}"),
+            None => format!("{type_name}/{name}"),
+        },
+    };
+
+    let mut target = Map::from_iter([("path".to_owned(), path.into())]);
+    set(&mut target, &["namespace"], namespace);
+    Ok(target.into())
+}
+
+fn check_filter(
+    section: &'static str,
+    filter: Option<&AddressFilter>,
+) -> Result<(), GenerateConfigError> {
+    match filter {
+        Some(AddressFilter { remote, local }) if remote.is_some() == local.is_some() => {
+            Err(GenerateConfigError::AddressFilter(section))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Sets `value` at `path` in `config`, creating the objects on the way, unless it is `None`.
+fn set(config: &mut Map<String, Value>, path: &[&str], value: Option<impl Serialize>) {
+    let Some(value) = value else {
+        return;
+    };
+    let Some((last, parents)) = path.split_last() else {
+        return;
+    };
+    let mut object = config;
+    for parent in parents {
+        object = match object.entry(*parent).or_insert_with(|| Map::new().into()) {
+            Value::Object(object) => object,
+            _ => unreachable!("only objects are set on the way to an option"),
+        };
+    }
+    object.insert((*last).to_owned(), json!(value));
+}
+
