@@ -107,6 +107,8 @@ async-pidfd = "0.1.5"
 async-stream = "0.3"
 async-trait = "0.1"
 aws-config = { version = "1.5", default-features = false }
+aws-credential-types = "1.2"
+aws-sigv4 = { version = "1.2", default-features = false }
 aws-sdk-sqs = { version = "1.39", default-features = false }
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }
@@ -195,6 +197,7 @@ minhook-detours-rs = { git = "https://github.com/metalbear-co/minhook-detours-rs
 mirrord-session-monitor-client = { path = "mirrord/session-monitor-client" }
 mirrord-session-monitor-protocol = { path = "mirrord/session-monitor-protocol" }
 mirrord-sessions-manager-client = { path = "mirrord/sessions-manager/client" }
+mirrord-cluster-auth = { path = "mirrord/cluster-auth" }
 mirrord-sessions-manager-protocol = { path = "mirrord/sessions-manager/protocol" }
 mirrord-remote-layer-protocol = { path = "mirrord/remote-layer-protocol" }
 mirrord-test-macros = { path = "mirrord/test-macros" }
@@ -300,6 +303,7 @@ url = "2.5.8"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 vt100 = "0.16"
 walkdir = "2"
+webpki-roots = "1"
 which = "7"
 wildmatch = "2"
 rust-yaml = { version = "1.1.0", features = ["serde"] }
