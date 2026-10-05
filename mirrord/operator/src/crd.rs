@@ -810,6 +810,11 @@ pub enum NewOperatorFeature {
     /// CLI fails fast: an older operator cannot read a `PreviewSession` whose target is a label
     /// selector, and one such resource stops it from listing every other preview session too.
     PreviewLabelTarget,
+    /// This operator reads a preview's TLS client certificate from the target's own pod when
+    /// `tls_delivery.client_cert_source` is `target`. Gated so the CLI fails fast: an older
+    /// operator's CRD schema prunes `clientAuthFromTarget`, and the preview pod would reject
+    /// every stolen request with a TLS alert instead of anything pointing at the config.
+    PreviewTlsClientAuthFromTarget,
 
     /// The interception event stream serves every session at once when given no key, honors
     /// `include_session_key` and `include_unmatched`, and carries the ids pairing an HTTP request
@@ -907,6 +912,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
             NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
             NewOperatorFeature::PreviewLabelTarget => "label preview targets",
+            NewOperatorFeature::PreviewTlsClientAuthFromTarget => {
+                "TLS client certificate read from the target for previews"
+            }
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
             NewOperatorFeature::QueueSplittingWithComposedFilters => {
                 "queue splitting with composable message filters"
