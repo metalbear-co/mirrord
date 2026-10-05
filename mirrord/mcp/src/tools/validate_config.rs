@@ -1364,26 +1364,27 @@ services:
         );
     }
 
-    /// An index-less `[]` stands for any entry, so the path stops at the list.
+    /// Errors that name the setting they're about point at it. An index-less `[]` in the name
+    /// (meaning "any entry") points at the list.
     #[rstest]
-    #[case::field("startup_retry.max_ms", "/startup_retry/max_ms")]
+    #[case::field(
+        r#"{ "startup_retry": { "min_ms": 10, "max_ms": 5 } }"#,
+        "/startup_retry/min_ms"
+    )]
     #[case::leading_dot(
-        ".feature.network.incoming.tls_delivery.server_name",
+        r#"{ "feature": { "network": { "incoming": { "mode": "steal", "tls_delivery": { "protocol": "tls", "server_name": "not a name!" } } } } }"#,
         "/feature/network/incoming/tls_delivery/server_name"
     )]
     #[case::indexed(
-        "feature.preview.config_mounts[0].payload",
+        r#"{ "feature": { "preview": { "config_mounts": [{ "payload": "!!!", "type": "binary", "mount_at": "/x" }] } } }"#,
         "/feature/preview/config_mounts/0/payload"
     )]
-    #[case::any_entry("feature.db_branches[].copy.image", "/feature/db_branches")]
-    #[case::env_var("MIRRORD_AGENT_TTL", "")]
-    fn config_error_location(#[case] name: &'static str, #[case] path: &str) {
-        let error = ConfigError::InvalidValue {
-            name: name.into(),
-            provided: String::new(),
-            error: "invalid".into(),
-        };
-        assert_eq!(config_error_path(&error), path);
+    #[case::any_entry(
+        r#"{ "feature": { "db_branches": [{ "type": "redis", "name": "abc", "connection": { "url": { "type": "env", "variable": "X" } } }] } }"#,
+        "/feature/db_branches"
+    )]
+    fn config_error_location(#[case] content: &str, #[case] path: &str) {
+        assert_eq!(single_issue(ConfigFormat::MirrordJson, content).path, path);
     }
 
     /// `mirrord up` ignores the `http_filter` of a service in `replace` mode.
