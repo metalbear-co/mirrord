@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-09-30T00:00:00.000Z
+lastmod: 2026-10-05T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -3396,12 +3396,43 @@ Secret and presented by the operator. `server_name` is used the same way. The ot
 do not apply to previews: the operator always delivers over TLS and does not verify the
 preview pod's certificate.
 
+When the target's own process already holds a client certificate the preview pod accepts,
+a preview can use it in place without copying it out of the cluster. Point `client_cert`
+and `client_key` at the paths inside the target's container and set
+`client_cert_source` to `target`; the operator reads the files from a running pod of the
+target:
+```json
+{
+  "protocol": "tls",
+  "client_cert_source": "target",
+  "client_cert": "/etc/tls/client.crt",
+  "client_key": "/etc/tls/client.key"
+}
+```
+
 ##### feature.network.incoming.tls_delivery.client_cert {#feature-network-incoming-tls_delivery-client_cert}
 
 Path to a PEM file containing the certificate chain mirrord presents to the local
 application's TLS server, for applications that require a client certificate.
 
 This file must contain at least one certificate. Must be set together with `client_key`.
+
+##### feature.network.incoming.tls_delivery.client_cert_source {#feature-network-incoming-tls_delivery-client_cert_source}
+
+Where `client_cert` and `client_key` are read from. Defaults to `local`.
+
+- `local`: files on the machine running mirrord.
+- `target`: files inside the target's container, at the paths the target's own process
+  uses. Only preview sessions (`mirrord preview start`) support this: the mirrord operator
+  reads the files from a running pod of the target. `mirrord exec` has no access to the
+  target's files and connects without a client certificate.
+
+Where the `client_cert` and `client_key` files of [`LocalTlsDelivery`] live.
+
+On the machine running mirrord.
+
+Inside the target's container. Preview sessions only: the mirrord operator reads the
+files from a running pod of the target.
 
 ##### feature.network.incoming.tls_delivery.client_key {#feature-network-incoming-tls_delivery-client_key}
 
@@ -3589,12 +3620,43 @@ Secret and presented by the operator. `server_name` is used the same way. The ot
 do not apply to previews: the operator always delivers over TLS and does not verify the
 preview pod's certificate.
 
+When the target's own process already holds a client certificate the preview pod accepts,
+a preview can use it in place without copying it out of the cluster. Point `client_cert`
+and `client_key` at the paths inside the target's container and set
+`client_cert_source` to `target`; the operator reads the files from a running pod of the
+target:
+```json
+{
+  "protocol": "tls",
+  "client_cert_source": "target",
+  "client_cert": "/etc/tls/client.crt",
+  "client_key": "/etc/tls/client.key"
+}
+```
+
 ##### feature.network.incoming.tls_delivery.client_cert {#feature-network-incoming-tls_delivery-client_cert}
 
 Path to a PEM file containing the certificate chain mirrord presents to the local
 application's TLS server, for applications that require a client certificate.
 
 This file must contain at least one certificate. Must be set together with `client_key`.
+
+##### feature.network.incoming.tls_delivery.client_cert_source {#feature-network-incoming-tls_delivery-client_cert_source}
+
+Where `client_cert` and `client_key` are read from. Defaults to `local`.
+
+- `local`: files on the machine running mirrord.
+- `target`: files inside the target's container, at the paths the target's own process
+  uses. Only preview sessions (`mirrord preview start`) support this: the mirrord operator
+  reads the files from a running pod of the target. `mirrord exec` has no access to the
+  target's files and connects without a client certificate.
+
+Where the `client_cert` and `client_key` files of [`LocalTlsDelivery`] live.
+
+On the machine running mirrord.
+
+Inside the target's container. Preview sessions only: the mirrord operator reads the
+files from a running pod of the target.
 
 ##### feature.network.incoming.tls_delivery.client_key {#feature-network-incoming-tls_delivery-client_key}
 
