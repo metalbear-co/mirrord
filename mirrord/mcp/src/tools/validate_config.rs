@@ -22,7 +22,7 @@ use mirrord_config::{
     LayerFileConfig,
     config::{ConfigContext, ConfigError, MirrordConfig},
     env_key::{EnvKey, MIRRORD_ENV_KEY},
-    target::{FAIL_PARSE_DEPLOYMENT_OR_POD, TARGET_PATH_FORMATS, Target},
+    target::{TARGET_PATH_FORMATS, Target},
 };
 use mirrord_up::{LAYER_CONFIG_PATHS, ServiceMode, UpConfig, UpError};
 use schemars::JsonSchema;
@@ -264,9 +264,7 @@ fn target_path_issue(issue: ConfigIssue, config: &Value) -> ConfigIssue {
     };
 
     let message = match error {
-        ConfigError::InvalidTarget(reason) if reason.contains(FAIL_PARSE_DEPLOYMENT_OR_POD) => {
-            format!("`{target_path}` is not a valid target path")
-        }
+        ConfigError::InvalidTargetPath(_) => format!("`{target_path}` is not a valid target path"),
         ConfigError::InvalidTarget(reason) => {
             format!("`{target_path}` is not a valid target path: {reason}")
         }
@@ -1330,6 +1328,12 @@ services:
         assert_eq!(issue.path, path);
         assert_eq!(issue.message, "`banana/api` is not a valid target path");
         let formats = issue.allowed_values.unwrap();
+        assert!(
+            formats.contains(&json!(
+                "deploy/{deployment-name}[/container/{container-name}]"
+            )),
+            "{formats:?}"
+        );
         assert!(
             formats.contains(&json!(
                 "deployment/{deployment-name}[/container/{container-name}]"

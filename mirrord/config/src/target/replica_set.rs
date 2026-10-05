@@ -17,9 +17,9 @@ pub struct ReplicaSetTarget {
 
 impl FromSplit for ReplicaSetTarget {
     fn from_split(split: &mut Split<char>) -> Result<Self> {
-        let replica_set = split
-            .next()
-            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned()))?;
+        let replica_set = split.next().ok_or_else(|| {
+            ConfigError::InvalidTargetPath(FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned())
+        })?;
         match (split.next(), split.next()) {
             (Some("container"), Some(container)) => Ok(Self {
                 replica_set: replica_set.to_owned(),
@@ -29,7 +29,7 @@ impl FromSplit for ReplicaSetTarget {
                 replica_set: replica_set.to_owned(),
                 container: None,
             }),
-            _ => Err(ConfigError::InvalidTarget(
+            _ => Err(ConfigError::InvalidTargetPath(
                 FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned(),
             )),
         }

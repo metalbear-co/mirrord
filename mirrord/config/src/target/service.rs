@@ -17,9 +17,9 @@ pub struct ServiceTarget {
 
 impl FromSplit for ServiceTarget {
     fn from_split(split: &mut Split<char>) -> Result<Self> {
-        let service = split
-            .next()
-            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned()))?;
+        let service = split.next().ok_or_else(|| {
+            ConfigError::InvalidTargetPath(FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned())
+        })?;
 
         match (split.next(), split.next()) {
             (Some("container"), Some(container)) => Ok(Self {
@@ -30,7 +30,7 @@ impl FromSplit for ServiceTarget {
                 service: service.to_owned(),
                 container: None,
             }),
-            _ => Err(ConfigError::InvalidTarget(
+            _ => Err(ConfigError::InvalidTargetPath(
                 FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned(),
             )),
         }

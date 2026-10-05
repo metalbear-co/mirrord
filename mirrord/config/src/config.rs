@@ -19,6 +19,11 @@ pub enum ConfigError {
     #[error("invalid target provided `{0}`!")]
     InvalidTarget(String),
 
+    /// A target path that has none of the forms in
+    /// [`TARGET_PATH_FORMATS`](crate::target::TARGET_PATH_FORMATS).
+    #[error("invalid target provided `{0}`!")]
+    InvalidTargetPath(String),
+
     #[error("value for {1:?} not provided in {0:?} (env override {2:?})")]
     ValueNotProvided(&'static str, &'static str, Option<&'static str>),
 

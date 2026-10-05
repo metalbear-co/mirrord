@@ -19,9 +19,9 @@ pub struct PodTarget {
 
 impl FromSplit for PodTarget {
     fn from_split(split: &mut std::str::Split<char>) -> config::Result<Self> {
-        let pod = split
-            .next()
-            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned()))?;
+        let pod = split.next().ok_or_else(|| {
+            ConfigError::InvalidTargetPath(FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned())
+        })?;
         match (split.next(), split.next()) {
             (Some("container"), Some(container)) => Ok(Self {
                 pod: pod.to_owned(),
@@ -31,7 +31,7 @@ impl FromSplit for PodTarget {
                 pod: pod.to_owned(),
                 container: None,
             }),
-            _ => Err(ConfigError::InvalidTarget(
+            _ => Err(ConfigError::InvalidTargetPath(
                 FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned(),
             )),
         }

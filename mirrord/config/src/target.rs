@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fmt, str::FromStr};
+use std::{borrow::Cow, fmt, str::FromStr, sync::LazyLock};
 
 use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
@@ -290,12 +290,13 @@ trait FromSplit {
         Self: Sized;
 }
 
-/// The forms a target path can take, as listed in [`FAIL_PARSE_DEPLOYMENT_OR_POD`], for tools
-/// that explain an invalid one without the rest of that runtime guide.
+/// The forms a target path can take, listed in [`FAIL_PARSE_DEPLOYMENT_OR_POD`] and by tools that
+/// explain an invalid one without the rest of that guide.
 pub const TARGET_PATH_FORMATS: &[&str] = &[
     "targetless",
     "pod/{pod-name}[/container/{container-name}]",
     "deployment/{deployment-name}[/container/{container-name}]",
+    "deploy/{deployment-name}[/container/{container-name}]",
     "rollout/{rollout-name}[/container/{container-name}]",
     "job/{job-name}[/container/{container-name}]",
     "cronjob/{cronjob-name}[/container/{container-name}]",
@@ -308,22 +309,17 @@ pub const TARGET_PATH_FORMATS: &[&str] = &[
 
 /// The error message for a target path that doesn't parse, which tells the user how to fix the
 /// target they gave to `mirrord exec` and friends.
-pub const FAIL_PARSE_DEPLOYMENT_OR_POD: &str = r#"
+pub static FAIL_PARSE_DEPLOYMENT_OR_POD: LazyLock<String> = LazyLock::new(|| {
+    let formats: String = TARGET_PATH_FORMATS
+        .iter()
+        .map(|format| format!("    >> `{format}`;\n"))
+        .collect();
+    format!(
+        r#"
 mirrord-layer failed to parse the provided target!
 
 - Valid format:
-    >> `targetless`
-    >> `pod/{pod-name}[/container/{container-name}]`;
-    >> `deployment/{deployment-name}[/container/{container-name}]`;
-    >> `rollout/{rollout-name}[/container/{container-name}]`;
-    >> `job/{job-name}[/container/{container-name}]`;
-    >> `cronjob/{cronjob-name}[/container/{container-name}]`;
-    >> `statefulset/{statefulset-name}[/container/{container-name}]`;
-    >> `service/{service-name}[/container/{container-name}]`;
-    >> `replicaset/{replicaset-name}[/container/{container-name}]`;
-    >> `label/{key}={value}[,{key}={value}...][/container/{container-name}]`;
-    >> `serverless/{service-name}[/container/{container-name}]`;
-
+{formats}
 - Note:
     >> specifying container name is optional, defaults to a container chosen by mirrord
     >> targeting a workload without the mirrord Operator results in a session targeting a random pod replica
@@ -332,7 +328,9 @@ mirrord-layer failed to parse the provided target!
     >> check for typos in the provided target.
     >> check if the provided target exists in the cluster using `kubectl get/describe` commands.
     >> check if the provided target is in the correct namespace.
-"#;
+"#
+    )
+});
 
 /// <!--${internal}-->
 /// ## path
@@ -477,8 +475,9 @@ impl FromStr for Target {
             Some("serverless") => {
                 serverless::ServerlessTarget::from_split(&mut split).map(Target::Serverless)
             }
-            _ => Err(ConfigError::InvalidTarget(format!(
-                "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
+            _ => Err(ConfigError::InvalidTargetPath(format!(
+                "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{}",
+                *FAIL_PARSE_DEPLOYMENT_OR_POD
             ))),
         }
     }
@@ -976,18 +975,6 @@ mod tests {
             .generate_config(&mut cfg_context)
             .unwrap();
         assert_eq!(target_config, expected_target_config);
-    }
-
-    /// [`TARGET_PATH_FORMATS`] lists the formats the parse error lists.
-    #[test]
-    fn target_path_formats_match_parse_error() {
-        let listed = FAIL_PARSE_DEPLOYMENT_OR_POD
-            .lines()
-            .filter_map(|line| line.trim().strip_prefix(">> `"))
-            .filter_map(|line| line.split_once('`'))
-            .map(|(format, _)| format)
-            .collect::<Vec<_>>();
-        assert_eq!(listed, TARGET_PATH_FORMATS);
     }
 
     #[test]
