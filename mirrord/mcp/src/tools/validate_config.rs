@@ -546,7 +546,7 @@ fn check<T: DeserializeOwned>(
     };
 
     let validator = schema
-        .validator
+        .validator()
         .as_ref()
         .map_err(ValidateConfigError::InvalidSchema)?;
     let issues: Vec<_> = validator
@@ -928,8 +928,8 @@ mod tests {
 
     #[test]
     fn schemas_compile() {
-        assert!(LAYER_SCHEMA.validator.is_ok());
-        assert!(UP_SCHEMA.validator.is_ok());
+        assert!(LAYER_SCHEMA.validator().is_ok());
+        assert!(UP_SCHEMA.validator().is_ok());
     }
 
     #[test]

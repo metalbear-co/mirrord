@@ -1,6 +1,6 @@
 //! The config schemas compiled into this binary, which every tool answers from.
 
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 
 use jsonschema::{ValidationError, Validator};
 use mirrord_config::LayerFileConfig;
@@ -8,17 +8,25 @@ use mirrord_up::UpConfig;
 use schemars::{JsonSchema, schema_for};
 use serde_json::Value;
 
-/// A compiled schema, with the raw schema kept around to look things up in it.
+/// A config schema, and the validator compiled from it.
 pub(crate) struct Schema {
     pub(crate) raw: Value,
-    pub(crate) validator: Result<Validator, ValidationError<'static>>,
+    /// Compiled on first use: `explain_config_option` only reads `raw`, and `validate_config` only
+    /// needs the validator for a config that doesn't deserialize.
+    validator: OnceLock<Result<Validator, ValidationError<'static>>>,
 }
 
 impl Schema {
     fn new<T: JsonSchema>() -> Self {
-        let raw = schema_for!(T).to_value();
-        let validator = jsonschema::validator_for(&raw);
-        Self { raw, validator }
+        Self {
+            raw: schema_for!(T).to_value(),
+            validator: OnceLock::new(),
+        }
+    }
+
+    pub(crate) fn validator(&self) -> &Result<Validator, ValidationError<'static>> {
+        self.validator
+            .get_or_init(|| jsonschema::validator_for(&self.raw))
     }
 }
 
