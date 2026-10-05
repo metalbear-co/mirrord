@@ -24,7 +24,6 @@ pub enum OperatorOperation {
     MysqlBranching,
     MongodbBranching,
     PreparingClientCertificate,
-    ServerlessSessionsManagerDiscovery,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -42,9 +41,6 @@ impl fmt::Display for OperatorOperation {
             Self::MysqlBranching => "MySQL branching",
             Self::MongodbBranching => "MongoDB branching",
             Self::PreparingClientCertificate => "preparing client certificate",
-            Self::ServerlessSessionsManagerDiscovery => {
-                "discovering the operator-hosted sessions-manager"
-            }
         };
 
         f.write_str(as_str)
