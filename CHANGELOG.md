@@ -8,6 +8,33 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.270.0](https://github.com/metalbear-co/mirrord/tree/3.270.0) - 2026-10-05
+
+
+### Added
+
+- Added `feature.network.incoming.tls_delivery.client_cert_source`. With
+  `"target"`, a preview session presents the client certificate already inside
+  the target's container (at the `client_cert` and `client_key` paths), read by
+  the operator from a running pod, so mutual TLS previews no longer need the
+  certificate copied to the developer's machine.
+- Added `mirrord operator uninstall`, which removes the operator that `mirrord
+  operator install` installed, also when the installation failed half-way. Like
+  `mirrord operator install`, it does not require the helm CLI, takes
+  `--context`, and on a terminal asks for confirmation first.
+- `mirrord operator install` and `mirrord operator uninstall` send one
+  anonymous usage event for each run, with its outcome. See `TELEMETRY.md` for
+  what the events contain and how to disable them.
+- `mirrord operator install` takes `--context` to install into a different
+  Kubernetes context. On a terminal, it asks for confirmation before it starts
+  a trial or changes the cluster, and `--yes` skips the question.
+
+
+### Fixed
+
+- Fixed `posix_spawn` children missing shared socket configuration after an
+  earlier child on the same thread executed.
+
 ## [3.269.0](https://github.com/metalbear-co/mirrord/tree/3.269.0) - 2026-10-05
 
 

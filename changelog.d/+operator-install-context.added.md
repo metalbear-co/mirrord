@@ -1,1 +1,0 @@
-`mirrord operator install` takes `--context` to install into a different Kubernetes context. On a terminal, it asks for confirmation before it starts a trial or changes the cluster, and `--yes` skips the question.
