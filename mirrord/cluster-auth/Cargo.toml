@@ -28,6 +28,7 @@ rustls.workspace = true
 rustls-pemfile.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["time"] }
 tokio-retry.workspace = true
@@ -42,11 +43,12 @@ aws-config = { workspace = true, optional = true, features = [
 ] }
 aws-credential-types = { workspace = true, optional = true }
 aws-sigv4 = { workspace = true, optional = true, features = ["sign-http", "http1"] }
+http = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 
 [features]
 # EKS IAM authentication: `iam_token` and the connections that refresh it.
-eks = ["dep:aws-config", "dep:aws-credential-types", "dep:aws-sigv4", "dep:url"]
+eks = ["dep:aws-config", "dep:aws-credential-types", "dep:aws-sigv4", "dep:http", "dep:url"]
 
 [dev-dependencies]
 mirrord-operator-websocket = { path = "../operator-websocket" }

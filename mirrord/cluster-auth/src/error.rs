@@ -65,6 +65,9 @@ pub fn chain<'a>(
 
 #[derive(Debug, Error)]
 pub enum ClusterAuthError {
+    #[error("AWS credentials are temporarily unavailable")]
+    CredentialsUnavailable(#[source] BoxError),
+
     #[error("Failed to connect to remote cluster {cluster}")]
     RemoteClusterConnection { cluster: String, source: BoxError },
 
