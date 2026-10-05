@@ -66,7 +66,7 @@ pub struct ConfigOptions {
     #[serde(default)]
     pub copy_target: Option<CopyTargetOptions>,
     /// Queues whose messages are split between the local process and the target. Needs the
-    /// mirrord Operator.
+    /// mirrord Operator. In a `mirrord-up.yaml` service, the queues follow the service's `mode`.
     #[serde(default)]
     pub split_queues: Option<Vec<QueueSplitOptions>>,
     /// The namespace the mirrord agent is created in.
@@ -578,6 +578,20 @@ fn up_config(
 
         let service_pointer = format!("/services/{}", escape_pointer_token(&name));
         let (mut patch, patch_requires_operator) = layer_config(config)?;
+        // `assemble` gives the queues it splits the service's mode, but queues from `config_patch`
+        // are merged in as they are, where an omitted `queue_mode` means stealing.
+        if mode == Some(ServiceMode::Mirror)
+            && let Some(Value::Object(queues)) = patch
+                .get_mut("feature")
+                .and_then(|feature| feature.get_mut("split_queues"))
+        {
+            for queue in queues.values_mut() {
+                if let Value::Object(queue) = queue {
+                    queue.insert("queue_mode".to_owned(), "mirror".into());
+                }
+            }
+        }
+
         let mut service = Map::new();
         for (field, layer_path) in SERVICE_FIELDS {
             if let Some(value) = take(&mut patch, layer_path) {
@@ -933,9 +947,10 @@ mod tests {
                                     "dns": all.pointer("/dns").unwrap(),
                                 },
                                 "split_queues": {
-                                    "events": { "queue_type": "Kafka" },
+                                    "events": { "queue_type": "Kafka", "queue_mode": "mirror" },
                                     "orders": {
                                         "queue_type": "SQS",
+                                        "queue_mode": "mirror",
                                         "message_filter": { "tenant": "^me$" },
                                     },
                                 },
