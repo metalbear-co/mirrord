@@ -7,7 +7,7 @@
 //! The EKS API server validates the token by calling STS with the presigned URL,
 //! then maps the IAM identity to a Kubernetes user/group via an EKS Access Entry.
 //!
-//! Token lifetime is **15 minutes** (AWS maximum for STS presigned URLs).
+//! Tokens are valid for at most 15 minutes, bounded by the signing credentials' expiration.
 //!
 //! # How it works
 //!
@@ -36,12 +36,42 @@ use url::Url;
 
 use crate::error::{ClusterAuthError, Result, context};
 
+/// AWS region EKS tokens are signed for: the cluster's region, read from an EKS API server
+/// hostname such as `ABC123.gr7.us-east-1.eks.amazonaws.com`, then `AWS_REGION`, then
+/// `AWS_DEFAULT_REGION`.
+///
+/// The hostname comes first because the token is validated by the cluster, and the task may run
+/// in another region. The variables cover an API server reached under another name, e.g. through
+/// a proxy.
+pub fn eks_region(api_url: &str) -> Option<String> {
+    api_url
+        .parse::<http::Uri>()
+        .ok()
+        .and_then(|uri| region_from_eks_host(uri.host()?))
+        .or_else(|| {
+            ["AWS_REGION", "AWS_DEFAULT_REGION"]
+                .into_iter()
+                .find_map(|name| std::env::var(name).ok().filter(|region| !region.is_empty()))
+        })
+}
+
+/// The region of an EKS API server hostname: the label right before `eks.amazonaws.com`, or
+/// `eks.amazonaws.com.cn` in China.
+fn region_from_eks_host(host: &str) -> Option<String> {
+    let host = host.to_ascii_lowercase();
+    let prefix = [".eks.amazonaws.com", ".eks.amazonaws.com.cn"]
+        .into_iter()
+        .find_map(|suffix| host.strip_suffix(suffix))?;
+    let (_, region) = prefix.rsplit_once('.')?;
+    (!region.is_empty()).then(|| region.to_owned())
+}
+
 /// Token prefix required by the EKS authenticator webhook.
 const TOKEN_PREFIX: &str = "k8s-aws-v1.";
 
 /// Presigned URL expiration in seconds.
 /// The AWS CLI uses 60s (`URL_TIMEOUT`), but since we write tokens to files and the
-/// kube client reads them on each request, we use the maximum (15 minutes) to ensure
+/// kube client periodically reloads them, we use 15 minutes to ensure
 /// the presigned URL remains valid across the entire refresh interval.
 const PRESIGNED_URL_EXPIRATION_SECS: u64 = 900;
 
@@ -53,6 +83,12 @@ pub const TOKEN_EXPIRATION_SECS: u64 = PRESIGNED_URL_EXPIRATION_SECS;
 /// We refresh at ~10 minutes (with 5 minutes of buffer before the 15-min expiry).
 pub const REFRESH_BUFFER_SECS: u64 = 300;
 
+/// A signed token and the deadline after which its backing credentials cannot authenticate it.
+pub struct EksToken {
+    pub token: String,
+    pub expires_at: SystemTime,
+}
+
 /// Generate an EKS authentication token using IAM credentials.
 ///
 /// This creates a presigned STS `GetCallerIdentity` URL with the `x-k8s-aws-id`
@@ -63,9 +99,10 @@ pub const REFRESH_BUFFER_SECS: u64 = 300;
 /// * `cluster_name` - EKS cluster name (used in the `x-k8s-aws-id` signed header)
 ///
 /// # Returns
-/// A bearer token string prefixed with `k8s-aws-v1.` that can be used to
-/// authenticate to the EKS API server.
-pub async fn generate_eks_token(region: &str, cluster_name: &str) -> Result<String> {
+/// A bearer token prefixed with `k8s-aws-v1.` and its effective expiration. Credentials that
+/// cannot cover the refresh buffer are retryable failures, allowing their provider to rotate
+/// them before a token is installed in the client.
+pub async fn generate_eks_token(region: &str, cluster_name: &str) -> Result<EksToken> {
     tracing::debug!(
         region = %region,
         cluster_name = %cluster_name,
@@ -88,9 +125,12 @@ pub async fn generate_eks_token(region: &str, cluster_name: &str) -> Result<Stri
     let credentials = credentials_provider
         .provide_credentials()
         .await
-        // Not a `ConfigError`: the provider exists, and resolving through it can fail
-        // transiently (e.g. the ECS container credentials endpoint), so a refresh retries it.
-        .map_err(|e| ClusterAuthError::Internal(context("Failed to resolve AWS credentials", e)))?;
+        .map_err(|e| {
+            ClusterAuthError::CredentialsUnavailable(context(
+                "Failed to resolve AWS credentials",
+                e,
+            ))
+        })?;
 
     sign_eks_token(credentials, region, cluster_name, SystemTime::now())
 }
@@ -103,10 +143,24 @@ fn sign_eks_token(
     region: &str,
     cluster_name: &str,
     time: SystemTime,
-) -> Result<String> {
-    // Build the STS GetCallerIdentity URL
-    // This matches the AWS CLI: GET https://sts.{region}.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15
-    let sts_url = format!("https://sts.{region}.amazonaws.com/");
+) -> Result<EksToken> {
+    let expires_at = credentials
+        .expiry()
+        .map(|expiry| expiry.min(time + Duration::from_secs(TOKEN_EXPIRATION_SECS)))
+        .unwrap_or(time + Duration::from_secs(TOKEN_EXPIRATION_SECS));
+    if expires_at <= time + Duration::from_secs(REFRESH_BUFFER_SECS) {
+        return Err(ClusterAuthError::CredentialsUnavailable(
+            "AWS credentials expire within the token refresh buffer; waiting for credential rotation"
+                .into(),
+        ));
+    }
+
+    let suffix = if region.starts_with("cn-") {
+        "amazonaws.com.cn"
+    } else {
+        "amazonaws.com"
+    };
+    let sts_url = format!("https://sts.{region}.{suffix}/");
     let mut url = Url::parse(&sts_url).map_err(|e| {
         ClusterAuthError::ConfigError(context(
             format!("Failed to parse STS URL for region {region}"),
@@ -175,14 +229,7 @@ fn sign_eks_token(
         "EKS IAM token generated successfully"
     );
 
-    Ok(token)
-}
-
-/// Calculate the expiry time for a freshly generated EKS IAM token.
-///
-/// Returns `now + TOKEN_EXPIRATION_SECS`.
-pub fn token_expiry() -> SystemTime {
-    SystemTime::now() + Duration::from_secs(TOKEN_EXPIRATION_SECS)
+    Ok(EksToken { token, expires_at })
 }
 
 /// Check if an IAM token needs refresh based on its expiry time.
@@ -218,6 +265,26 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn region_is_read_from_eks_api_server_hostnames() {
+        assert_eq!(
+            region_from_eks_host("ABC123.gr7.us-east-1.eks.amazonaws.com").as_deref(),
+            Some("us-east-1")
+        );
+        assert_eq!(
+            region_from_eks_host("ABC123.yl4.cn-north-1.eks.amazonaws.com.cn").as_deref(),
+            Some("cn-north-1")
+        );
+        assert_eq!(
+            region_from_eks_host("E1F2A3B4C5.GR7.EU-WEST-2.EKS.AMAZONAWS.COM").as_deref(),
+            Some("eu-west-2")
+        );
+        assert_eq!(region_from_eks_host("kubernetes.example.com"), None);
+        assert_eq!(region_from_eks_host("api.eks.example.com"), None);
+        assert_eq!(region_from_eks_host("us-east-1.eks.amazonaws.com"), None);
+        assert_eq!(region_from_eks_host("eks.amazonaws.com"), None);
+    }
+
     /// 2026-01-02T03:04:05Z.
     const SIGNING_TIME: Duration = Duration::from_secs(1_767_323_045);
 
@@ -248,7 +315,11 @@ mod tests {
         )
         .unwrap();
 
-        let url = presigned_url(&token);
+        let url = presigned_url(&token.token);
+        assert_eq!(
+            token.expires_at,
+            SystemTime::UNIX_EPOCH + SIGNING_TIME + Duration::from_secs(TOKEN_EXPIRATION_SECS)
+        );
         assert_eq!(url.host_str(), Some("sts.us-east-1.amazonaws.com"));
         let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
         assert_eq!(query["Action"], "GetCallerIdentity");
@@ -265,7 +336,7 @@ mod tests {
             query["X-Amz-Signature"],
             "cf9e1cfb488e56c0bbd982c8d675c2f728b91b09f6d8aaccc5a0dbfde46e96ec"
         );
-        assert!(!token.contains('='));
+        assert!(!token.token.contains('='));
     }
 
     #[test]
@@ -276,7 +347,58 @@ mod tests {
         let token_a = sign_eks_token(credentials.clone(), "eu-west-1", "cluster-a", time).unwrap();
         let token_b = sign_eks_token(credentials, "eu-west-1", "cluster-b", time).unwrap();
 
-        assert_ne!(token_a, token_b);
+        assert_ne!(token_a.token, token_b.token);
+    }
+
+    #[test]
+    fn china_tokens_use_the_china_sts_endpoint() {
+        let time = SystemTime::UNIX_EPOCH + SIGNING_TIME;
+        for region in ["cn-north-1", "cn-northwest-1"] {
+            let credentials = Credentials::new("AKIDEXAMPLE", "secret", None, None, "test");
+            let token = sign_eks_token(credentials, region, "my-cluster", time).unwrap();
+            let url = presigned_url(&token.token);
+            assert_eq!(
+                url.host_str().unwrap(),
+                format!("sts.{region}.amazonaws.com.cn")
+            );
+            let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
+            assert_eq!(
+                query["X-Amz-Credential"],
+                format!("AKIDEXAMPLE/20260102/{region}/sts/aws4_request")
+            );
+            assert_eq!(query["X-Amz-SignedHeaders"], "host;x-k8s-aws-id");
+        }
+    }
+
+    #[test]
+    fn token_expiration_is_bounded_by_the_signing_credentials() {
+        let time = SystemTime::UNIX_EPOCH + SIGNING_TIME;
+        for (credential_lifetime, token_lifetime) in [(600, 600), (3600, 900)] {
+            let credentials = Credentials::new(
+                "AKIDEXAMPLE",
+                "secret",
+                Some("session-token".to_owned()),
+                Some(time + Duration::from_secs(credential_lifetime)),
+                "test",
+            );
+            let token = sign_eks_token(credentials, "us-east-1", "my-cluster", time).unwrap();
+            assert_eq!(token.expires_at, time + Duration::from_secs(token_lifetime));
+        }
+    }
+
+    #[test]
+    fn credentials_near_expiration_are_retried_instead_of_minting_short_lived_tokens() {
+        let time = SystemTime::UNIX_EPOCH + SIGNING_TIME;
+        for expiry in [
+            time - Duration::from_secs(1),
+            time + Duration::from_secs(REFRESH_BUFFER_SECS),
+        ] {
+            let credentials = Credentials::new("AKIDEXAMPLE", "secret", None, Some(expiry), "test");
+            assert!(matches!(
+                sign_eks_token(credentials, "us-east-1", "my-cluster", time),
+                Err(ClusterAuthError::CredentialsUnavailable(..))
+            ));
+        }
     }
 
     #[test]

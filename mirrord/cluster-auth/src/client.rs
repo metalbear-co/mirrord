@@ -2,7 +2,10 @@
 //!
 //! Only the HTTP/1.1 client is built: it serves both regular requests and WebSocket upgrades.
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
+    io::Write,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -16,7 +19,7 @@ use kube::{
         NamedContext,
     },
 };
-use mirrord_nightly_polyfill::error::Report;
+use tempfile::{NamedTempFile, TempDir};
 use tower::{BoxError, ServiceBuilder};
 
 use crate::{
@@ -25,19 +28,45 @@ use crate::{
     tls::{DefaultTlsBuilder, TlsConfigBuilder},
 };
 
-/// Builds clients for remote clusters, with bearer tokens kept in token files the clients
-/// re-read, so long-running connections survive token refresh.
+/// Builds clients with private token files that kube reloads at least once per minute.
+/// The clients retain the temporary directory even after the factory is dropped.
 pub struct ClusterClientFactory {
     /// Directory for token files (kube::Client reads from these)
-    token_files_dir: PathBuf,
+    token_files_dir: Arc<TempDir>,
 
     /// TLS configuration builder
     tls_builder: Arc<dyn TlsConfigBuilder>,
 }
 
-impl Default for ClusterClientFactory {
-    fn default() -> Self {
-        Self::new()
+#[cfg(all(test, unix))]
+mod tests {
+    use std::os::unix::fs::symlink;
+
+    use super::*;
+
+    #[test]
+    fn token_replacement_does_not_follow_existing_symlinks() {
+        let factory = ClusterClientFactory::new().unwrap();
+        let other_factory = ClusterClientFactory::new().unwrap();
+        assert_ne!(factory.token_files_dir(), other_factory.token_files_dir());
+        let mut target = NamedTempFile::new().unwrap();
+        target.write_all(b"untouched").unwrap();
+        let token_path = factory.token_files_dir().join("token");
+        symlink(target.path(), &token_path).unwrap();
+
+        factory
+            .write_token_file(&token_path, "first-token")
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(target.path()).unwrap(), "untouched");
+        assert!(!std::fs::symlink_metadata(&token_path).unwrap().is_symlink());
+        factory
+            .write_token_file(&token_path, "replacement")
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&token_path).unwrap(), "replacement");
+        assert_eq!(
+            std::fs::metadata(&token_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 }
 
@@ -45,31 +74,35 @@ impl ClusterClientFactory {
     /// Create a new client factory.
     ///
     /// Creates a temporary directory for token files.
-    pub fn new() -> Self {
-        // Create temp directory for token files
-        let token_files_dir = std::env::temp_dir().join("mirrord-cluster-tokens");
-        if let Err(e) = std::fs::create_dir_all(&token_files_dir) {
-            tracing::warn!(
-                dir = %token_files_dir.display(),
-                error = %Report::new(&e),
-                "Failed to create token files directory"
-            );
-        }
+    pub fn new() -> Result<Self> {
+        let mut builder = tempfile::Builder::new();
+        builder.prefix("mirrord-cluster-tokens-");
+        #[cfg(unix)]
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
+        let token_files_dir = builder.tempdir().map_err(|error| {
+            ClusterAuthError::Internal(context("Failed to create private token directory", error))
+        })?;
 
-        Self {
-            token_files_dir,
+        Ok(Self {
+            token_files_dir: Arc::new(token_files_dir),
             tls_builder: Arc::new(DefaultTlsBuilder),
-        }
+        })
     }
 
     /// Directory the token files of built clients are written to.
     pub fn token_files_dir(&self) -> &Path {
-        &self.token_files_dir
+        self.token_files_dir.path()
     }
 
-    /// Write token to file for kube::Client to read.
-    pub fn write_token_file(&self, path: &PathBuf, token: &str) -> Result<()> {
-        std::fs::write(path, token).map_err(|e| {
+    /// Atomically replaces a token so a concurrent kube reload cannot read a partial write.
+    pub(crate) fn write_token_file(&self, path: &Path, token: &str) -> Result<()> {
+        let write = || -> std::io::Result<()> {
+            let mut file = NamedTempFile::new_in(self.token_files_dir())?;
+            file.write_all(token.as_bytes())?;
+            file.persist(path).map_err(|error| error.error)?;
+            Ok(())
+        };
+        write().map_err(|e| {
             ClusterAuthError::Internal(context(
                 format!("Failed to write token file {}", path.display()),
                 e,
@@ -82,18 +115,30 @@ impl ClusterClientFactory {
     /// If using bearer token, writes token to file and configures client to read from it.
     /// This allows long-running connections to survive token refresh.
     pub async fn build_client(&self, creds: &ClusterCredentials) -> Result<Client> {
+        self.build_client_with_token_file(creds)
+            .await
+            .map(|(client, _)| client)
+    }
+
+    pub(crate) async fn build_client_with_token_file(
+        &self,
+        creds: &ClusterCredentials,
+    ) -> Result<(Client, Option<PathBuf>)> {
         tracing::debug!(
             cluster = %creds.name,
             server = %creds.server,
             "Building client"
         );
 
-        // Write token to file if using bearer token
-        // kube::Client will re-read from file on each request
-        let token_file = if let Some(ref token) = creds.token {
-            let path = self.token_files_dir.join(format!("{}.token", creds.name));
+        let token_file_path = if let Some(ref token) = creds.token {
+            let file = NamedTempFile::new_in(self.token_files_dir()).map_err(|error| {
+                ClusterAuthError::Internal(context("Failed to create private token file", error))
+            })?;
+            let path = file.into_temp_path().keep().map_err(|error| {
+                ClusterAuthError::Internal(context("Failed to retain token file", error))
+            })?;
             self.write_token_file(&path, token)?;
-            Some(path.to_string_lossy().into_owned())
+            Some(path)
         } else {
             None
         };
@@ -111,8 +156,9 @@ impl ClusterClientFactory {
             auth_infos: vec![NamedAuthInfo {
                 name: creds.name.clone(),
                 auth_info: Some(AuthInfo {
-                    // Use token_file so client re-reads on each request (survives refresh)
-                    token_file,
+                    token_file: token_file_path
+                        .as_ref()
+                        .map(|path| path.to_string_lossy().into_owned()),
                     ..Default::default()
                 }),
                 other: Default::default(),
@@ -150,7 +196,12 @@ impl ClusterClientFactory {
             .enable_http1()
             .build();
 
+        let token_files_dir = self.token_files_dir.clone();
         let http1_service = ServiceBuilder::new()
+            .map_request(move |request| {
+                let _keep_alive = &token_files_dir;
+                request
+            })
             .layer(config.base_uri_layer())
             .option_layer(config.auth_layer().map_err(|e| {
                 ClusterAuthError::RemoteClusterConnection {
@@ -166,6 +217,6 @@ impl ClusterClientFactory {
 
         let http1_client = Client::new(http1_service, config.default_namespace);
 
-        Ok(http1_client)
+        Ok((http1_client, token_file_path))
     }
 }

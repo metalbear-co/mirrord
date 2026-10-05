@@ -94,6 +94,7 @@ pub const REMOTE_ENVIRONMENT: CheckedEnv<String> = CheckedEnv::new("MIRRORD_REMO
 /// `AWS_DEFAULT_REGION` must name the cluster's region.
 ///
 /// Requires [`OPERATOR_EKS_CLUSTER_NAME`] and [`OPERATOR_API_CA_DATA`].
+/// The operator deployment must support these routes and enable `operator.sessionsManager`.
 pub const OPERATOR_API_URL: CheckedEnv<String> = CheckedEnv::new("MIRRORD_OPERATOR_API_URL");
 
 /// Name of the EKS cluster at [`OPERATOR_API_URL`]. It's signed into the bearer token, and EKS

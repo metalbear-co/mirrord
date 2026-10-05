@@ -4,8 +4,9 @@
 //!
 //! [`ClusterClientFactory`] builds a `kube::Client` from [`ClusterCredentials`]: the API server,
 //! its CA, and the [`AuthMethod`]. Bearer tokens are kept in token files that the client
-//! re-reads, so a refreshed token reaches long-running connections without rebuilding the
-//! client. With the `eks` feature, [`ClusterClientFactory::connect_eks`] authenticates as the
+//! reloads at least once per minute, so new requests use refreshed tokens without rebuilding
+//! the client. Existing streams remain authenticated for their lifetime. With the `eks`
+//! feature, [`ClusterClientFactory::connect_eks`] authenticates as the
 //! workload's AWS IAM identity and [`ClusterClientFactory::run_token_refresh`] keeps its token
 //! fresh.
 //!
@@ -27,4 +28,6 @@ pub use client::ClusterClientFactory;
 pub use connection::ClusterConnection;
 pub use credentials::{AuthMethod, ClusterCredentials};
 pub use error::{ClusterAuthError, Result};
+#[cfg(feature = "eks")]
+pub use iam_token::eks_region;
 pub use tls::{DefaultTlsBuilder, TlsConfigBuilder};

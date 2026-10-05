@@ -10,7 +10,7 @@ use crate::{
     client::ClusterClientFactory,
     credentials::{AuthMethod, ClusterCredentials},
     error::{ClusterAuthError, Result},
-    iam_token, jwt,
+    iam_token,
 };
 
 /// Active connection to a remote cluster.
@@ -36,7 +36,8 @@ impl ClusterClientFactory {
     ///
     /// Generates an initial EKS token using IAM credentials (no Secret needed).
     /// `credentials` must use [`AuthMethod::AwsIam`], whose `cluster_name` is signed into the
-    /// token.
+    /// token. Unavailable credentials get up to five retries with exponential backoff; dropping
+    /// the future cancels both credential resolution and retry sleeps.
     pub async fn connect_eks(
         &self,
         mut credentials: ClusterCredentials,
@@ -56,31 +57,43 @@ impl ClusterClientFactory {
         };
         let region = region.clone();
 
-        // Generate initial EKS token
-        let token = iam_token::generate_eks_token(&region, cluster_name).await?;
-        let token_expiry = Some(iam_token::token_expiry());
+        let mut retries = ExponentialBackoff::from_millis(2)
+            .factor(500)
+            .max_delay(Duration::from_secs(30))
+            .take(5);
+        let token = loop {
+            match iam_token::generate_eks_token(&region, cluster_name).await {
+                Ok(token) => break token,
+                Err(error @ ClusterAuthError::CredentialsUnavailable(..)) => {
+                    let Some(delay) = retries.next() else {
+                        return Err(error);
+                    };
+                    tracing::warn!(
+                        error = %Report::new(&error),
+                        retry_in_secs = delay.as_secs(),
+                        "Initial AWS credential resolution failed, will retry"
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+                Err(error) => return Err(error),
+            }
+        };
+        let token_expiry = Some(token.expires_at);
+        credentials.token = Some(token.token);
 
-        // Write token to file for kube::Client to read
-        let token_file_path = self
-            .token_files_dir()
-            .join(format!("{}.token", credentials.name));
-        self.write_token_file(&token_file_path, &token)?;
-
-        credentials.token = Some(token);
-
-        let client = self.build_client(&credentials).await?;
+        let (client, token_file_path) = self.build_client_with_token_file(&credentials).await?;
 
         tracing::debug!(
             cluster = %credentials.name,
             region = %region,
-            "Initial EKS IAM token generated, expires in 15 min"
+            "Initial EKS IAM token generated"
         );
 
         Ok(ClusterConnection {
             credentials,
             client,
             token_expiry,
-            token_file_path: Some(token_file_path),
+            token_file_path,
         })
     }
 
@@ -105,13 +118,12 @@ impl ClusterClientFactory {
                 );
 
                 let new_token = iam_token::generate_eks_token(region, eks_cluster_name).await?;
-                let new_expiry = Some(iam_token::token_expiry());
+                let new_expiry = Some(new_token.expires_at);
 
-                // Update token file — client will re-read on next request
                 if let Some(token_file_path) = &connection.token_file_path {
-                    self.write_token_file(token_file_path, &new_token)?;
+                    self.write_token_file(token_file_path, &new_token.token)?;
                 }
-                connection.credentials.token = Some(new_token);
+                connection.credentials.token = Some(new_token.token);
                 connection.token_expiry = new_expiry;
 
                 tracing::info!(cluster = %cluster_name, "IAM token refreshed");
@@ -133,9 +145,9 @@ impl ClusterClientFactory {
     /// Keep the token of `connection` fresh, for as long as the returned future runs.
     ///
     /// Refreshes the token before it expires, and retries a failed refresh with exponential
-    /// backoff. Returns when the connection has no token to refresh, or a refresh fails with
-    /// a permanent error ([`ClusterAuthError::ConfigError`]).
-    pub async fn run_token_refresh(&self, mut connection: ClusterConnection) {
+    /// backoff for unavailable AWS credentials. Other errors reach the caller so it can stop
+    /// serving work instead of silently allowing authentication to expire.
+    pub async fn run_token_refresh(&self, mut connection: ClusterConnection) -> Result<()> {
         let cluster_name = connection.credentials.name.clone();
         let mut backoff: Option<ExponentialBackoff> = None;
 
@@ -151,12 +163,11 @@ impl ClusterClientFactory {
                         None
                     } else {
                         iam_token::time_until_refresh(expiry)
-                            .map(|time_until| time_until.min(jwt::MAX_REFRESH_INTERVAL))
                     }
                 }
                 _ => {
                     tracing::debug!(cluster = %cluster_name, "No token to refresh");
-                    return;
+                    return Ok(());
                 }
             };
 
@@ -173,23 +184,13 @@ impl ClusterClientFactory {
 
             match self.refresh_token(&mut connection).await {
                 Ok(()) => backoff = None,
-                Err(e @ ClusterAuthError::ConfigError(..)) => {
-                    // ConfigError means a permanent setup problem, so stop retrying.
-                    tracing::error!(
-                        cluster = %cluster_name,
-                        error = %Report::new(&e),
-                        "Token refresh got a permanent error. \
-                         Restart after fixing credentials."
-                    );
-                    return;
-                }
-                Err(e) => {
+                Err(e @ ClusterAuthError::CredentialsUnavailable(..)) => {
                     let backoff = backoff.get_or_insert_with(|| {
                         ExponentialBackoff::from_millis(2)
                             .factor(500)
-                            .max_delay(Duration::from_secs(900))
+                            .max_delay(Duration::from_secs(30))
                     });
-                    let delay = backoff.next().unwrap_or(Duration::from_secs(900));
+                    let delay = backoff.next().unwrap_or(Duration::from_secs(30));
 
                     tracing::warn!(
                         cluster = %cluster_name,
@@ -200,6 +201,7 @@ impl ClusterClientFactory {
 
                     tokio::time::sleep(delay).await;
                 }
+                Err(error) => return Err(error),
             }
         }
     }
