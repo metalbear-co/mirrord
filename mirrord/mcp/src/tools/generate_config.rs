@@ -61,7 +61,8 @@ pub struct ConfigOptions {
     /// File operations of the local process.
     #[serde(default)]
     pub fs: Option<FsOptions>,
-    /// Run in a copy of the target instead of the target itself. Needs the mirrord Operator.
+    /// Run in a copy of the target instead of the target itself. Needs the mirrord Operator. Not
+    /// for `mirrord-up.yaml` services, which copy their target with `mode: replace`.
     #[serde(default)]
     pub copy_target: Option<CopyTargetOptions>,
     /// Queues whose messages are split between the local process and the target. Needs the
@@ -327,6 +328,11 @@ pub enum GenerateConfigError {
         traffic and ignores the filter; use `split` or `mirror` to filter"
     )]
     HttpFilterWithReplace(String),
+    #[error(
+        "service `{0}` sets `config.copy_target`; a service runs in a copy of its target with \
+        `mode: replace`"
+    )]
+    CopyTargetInService(String),
     #[error("queue `{0}` is given more than once in `split_queues`")]
     DuplicateQueue(String),
     #[error("the options give an invalid config: {}", describe(.0))]
@@ -564,10 +570,14 @@ fn up_config(
         {
             return Err(GenerateConfigError::HttpFilterWithReplace(name));
         }
+        // `assemble` sets copy_target from the mode, and `config_patch` would override it, e.g.
+        // turning off the scale down `replace` relies on.
+        if config.copy_target.is_some() {
+            return Err(GenerateConfigError::CopyTargetInService(name));
+        }
 
         let service_pointer = format!("/services/{}", escape_pointer_token(&name));
         let (mut patch, patch_requires_operator) = layer_config(config)?;
-
         let mut service = Map::new();
         for (field, layer_path) in SERVICE_FIELDS {
             if let Some(value) = take(&mut patch, layer_path) {
@@ -694,8 +704,8 @@ mod tests {
         })
     }
 
-    /// [`all_options`] as a `mirrord-up.yaml` service takes them: without `incoming.mode`, which
-    /// the service's `mode` sets.
+    /// [`all_options`] as a `mirrord-up.yaml` service takes them: without `incoming.mode` and
+    /// `copy_target`, which the service's `mode` sets.
     fn service_options() -> Value {
         let mut options = all_options();
         options
@@ -703,6 +713,7 @@ mod tests {
             .and_then(Value::as_object_mut)
             .unwrap()
             .remove("mode");
+        options.as_object_mut().unwrap().remove("copy_target");
         options
     }
 
@@ -842,7 +853,7 @@ mod tests {
                                     || target.pointer("/type") == Some(&json!("service")))
                                     && copy_target.is_null().not());
                             assert_eq!(json.is_err(), conflicts, "{config}");
-                            if incoming.pointer("/mode").is_some() {
+                            if incoming.pointer("/mode").is_some() || copy_target.is_null().not() {
                                 up.unwrap_err();
                             } else if conflicts.not() {
                                 up.unwrap();
@@ -915,7 +926,6 @@ mod tests {
                         "config_patch": {
                             "agent": { "namespace": "mirrord" },
                             "feature": {
-                                "copy_target": { "enabled": true, "scale_down": true },
                                 "fs": all.pointer("/fs").unwrap(),
                                 "network": {
                                     "incoming": { "ports": [8080] },
@@ -924,7 +934,10 @@ mod tests {
                                 },
                                 "split_queues": {
                                     "events": { "queue_type": "Kafka" },
-                                    "orders": { "queue_type": "SQS", "message_filter": { "tenant": "^me$" } },
+                                    "orders": {
+                                        "queue_type": "SQS",
+                                        "message_filter": { "tenant": "^me$" },
+                                    },
                                 },
                             },
                         },
@@ -935,10 +948,7 @@ mod tests {
         );
         assert_eq!(
             output.requires_operator,
-            [
-                "/services/api/config_patch/feature/copy_target",
-                "/services/api/config_patch/feature/split_queues",
-            ]
+            ["/services/api/config_patch/feature/split_queues",]
         );
     }
 
@@ -1044,6 +1054,12 @@ mod tests {
         "run": { "command": ["true"] },
         "mode": "replace",
         "config": { "incoming": { "http_filter": { "header_filter": "a: b" } } },
+    }] }))]
+    #[case::copy_target_in_service(json!({ "format": "mirrord-up.yaml", "services": [{
+        "name": "a",
+        "run": { "command": ["true"] },
+        "mode": "replace",
+        "config": { "copy_target": { "scale_down": false } },
     }] }))]
     fn refuses(#[case] args: Value) {
         generate(args).unwrap_err();

@@ -131,7 +131,7 @@ async fn serves_generate_config() {
                     "services": [{
                         "name": "api",
                         "run": { "command": ["npm", "run", "dev"] },
-                        "config": { "copy_target": { "scale_down": true } },
+                        "config": { "split_queues": [{ "queue_id": "q", "queue_type": "SQS" }] },
                     }],
                 })
                 .as_object()
@@ -145,7 +145,7 @@ async fn serves_generate_config() {
     let output = result.structured_content.unwrap();
     assert_eq!(
         output["requires_operator"],
-        json!(["/services/api/config_patch/feature/copy_target"])
+        json!(["/services/api/config_patch/feature/split_queues"])
     );
 
     let result = client
