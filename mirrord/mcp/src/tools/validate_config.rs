@@ -667,6 +667,7 @@ fn intended_branch<'e>(
     let fields = error.instance().as_object()?.len();
     let mut ranked: Vec<(usize, &Vec<ValidationError>)> = plausible
         .into_iter()
+        .filter(|branch| mismatches_tag(branch, path).not())
         .map(|branch| (known_fields(branch, path, fields), branch))
         .collect();
     ranked.sort_by_key(|(known, _)| std::cmp::Reverse(*known));
@@ -676,6 +677,26 @@ fn intended_branch<'e>(
         }
         _ => None,
     }
+}
+
+/// Whether an alternative rejects the value of one of the object's fields at `path` for not being
+/// one it enumerates, like the `type` of a database branch: such a field tells the alternatives
+/// apart, and the object was meant for another one.
+fn mismatches_tag(branch: &[ValidationError<'_>], path: &Location) -> bool {
+    branch.iter().any(|error| match error.kind() {
+        ValidationErrorKind::Constant { .. } | ValidationErrorKind::Enum { .. } => error
+            .instance_path()
+            .as_str()
+            .strip_prefix(path.as_str())
+            .and_then(|field| field.strip_prefix('/'))
+            .is_some_and(|field| field.contains('/').not()),
+        ValidationErrorKind::AnyOf { context } | ValidationErrorKind::OneOfNotValid { context } => {
+            context
+                .iter()
+                .all(|alternative| mismatches_tag(alternative, path))
+        }
+        _ => false,
+    })
 }
 
 /// How many of the `fields` of the object at `path` an alternative knows: all of them unless its
@@ -1396,6 +1417,37 @@ services:
     fn top_level_array() {
         let issue = single_issue(ConfigFormat::MirrordJson, "[]");
         assert_eq!(issue.path, "");
+    }
+
+    /// A database branch with a typo is reported for the typo, not as the one kind of branch that
+    /// takes any field (Redis), whose `type` it doesn't have.
+    #[rstest]
+    #[case::missing_field(
+        r#"{ "feature": { "db_branches": [{ "type": "pg", "conection": { "url": { "type": "env", "variable": "X" } } }] } }"#,
+        "/feature/db_branches/0/conection"
+    )]
+    #[case::complete(
+        r#"{ "feature": { "db_branches": [{ "type": "pg", "version": "16", "connection": { "url": { "type": "env", "variable": "X" } }, "ttl_sec": 5 }] } }"#,
+        "/feature/db_branches/0/ttl_sec"
+    )]
+    fn tagged_alternative_typo(#[case] content: &str, #[case] path: &str) {
+        let output = validate(ConfigFormat::MirrordJson, content);
+        assert!(
+            output
+                .issues
+                .iter()
+                .any(|issue| issue.path == path && issue.message.starts_with("unknown field")),
+            "{:?}",
+            output.issues
+        );
+        assert!(
+            output
+                .issues
+                .iter()
+                .all(|issue| issue.path.ends_with("/type").not()),
+            "{:?}",
+            output.issues
+        );
     }
 
     #[test]
