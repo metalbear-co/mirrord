@@ -601,8 +601,13 @@ fn known_paths(root: &Value) -> Vec<String> {
 ///
 /// Map keys in `known` take the asked path's own key at that position when the paths agree up to
 /// there, so the suggestions for `services.api.htp_filter` are under `services.api`.
+///
+/// The distance is the optimal string alignment one, as in `mirrord up`'s suggestions for an
+/// unknown service, but over whole paths and with no limit: this always offers the closest
+/// options, where those suggest a name only when it's a likely typo.
 fn suggestions(segments: &[&str], known: &[String]) -> Vec<String> {
     let asked = segments.join(".");
+    let asked_suffix = format!(".{asked}");
     let mut ranked: Vec<(bool, f64, String)> = known
         .iter()
         .map(|path| {
@@ -616,22 +621,26 @@ fn suggestions(segments: &[&str], known: &[String]) -> Vec<String> {
                 });
             }
             let candidate = candidate.join(".");
-            let is_suffix = candidate.ends_with(&format!(".{asked}"));
-            let similarity = strsim::normalized_damerau_levenshtein(&asked, &candidate);
+            let is_suffix = candidate.ends_with(&asked_suffix);
+            let length = asked.chars().count().max(candidate.chars().count()).max(1);
+            let similarity = 1.0 - strsim::osa_distance(&asked, &candidate) as f64 / length as f64;
             (is_suffix, similarity, candidate)
         })
         .collect();
 
-    ranked.sort_by(|(suffix_a, similarity_a, _), (suffix_b, similarity_b, _)| {
-        suffix_b
-            .cmp(suffix_a)
-            .then(similarity_b.total_cmp(similarity_a))
-    });
-    ranked
-        .into_iter()
-        .map(|(_, _, path)| path)
-        .take(SUGGESTIONS)
-        .collect()
+    let closest_first =
+        |(suffix_a, similarity_a, _): &(bool, f64, String),
+         (suffix_b, similarity_b, _): &(bool, f64, String)| {
+            suffix_b
+                .cmp(suffix_a)
+                .then(similarity_b.total_cmp(similarity_a))
+        };
+    if ranked.len() > SUGGESTIONS {
+        ranked.select_nth_unstable_by(SUGGESTIONS, closest_first);
+        ranked.truncate(SUGGESTIONS);
+    }
+    ranked.sort_by(closest_first);
+    ranked.into_iter().map(|(_, _, path)| path).collect()
 }
 
 #[cfg(test)]
