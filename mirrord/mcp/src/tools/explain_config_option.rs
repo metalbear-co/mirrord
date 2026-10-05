@@ -368,24 +368,37 @@ fn explain(root: &Value, segments: &[&str]) -> Option<OptionDocs> {
     });
 
     let (plan, plan_by_alternative) = plans(&nodes);
-    Some(OptionDocs {
-        description: option
+    // An option found in several alternatives (like `connection` in each kind of database branch)
+    // is described by each of them; their docs and defaults hold for the option only when all of
+    // them give the same one. One that gives none (like the `url` of a SQL database, next to the
+    // documented one of Redis) is a disagreement too.
+    let description = agreed(
+        option
             .iter()
-            .find_map(|node| description(root, node.schema, &mut HashSet::new()))
-            .map(str::to_owned),
+            .map(|node| description(root, node.schema, &mut HashSet::new())),
+    );
+    let default = agreed(option.iter().map(|node| {
+        expand(root, [*node]).nodes.into_iter().find_map(|node| {
+            node.schema
+                .get("default")
+                .filter(|value| value.is_null().not())
+        })
+    }));
+    Some(OptionDocs {
+        description: description.flatten().map(str::to_owned),
         types,
         allowed_values,
-        default: nodes
-            .iter()
-            .find_map(|node| {
-                node.schema
-                    .get("default")
-                    .filter(|value| value.is_null().not())
-            })
-            .cloned(),
+        default: default.flatten().cloned(),
         plan,
         plan_by_alternative,
     })
+}
+
+/// The value all of `values` share, if they're all the same.
+fn agreed<T: PartialEq>(values: impl IntoIterator<Item = T>) -> Option<T> {
+    let mut values = values.into_iter();
+    let first = values.next()?;
+    values.all(|value| value == first).then_some(first)
 }
 
 /// Whether `schema` is one of the forms an option takes, rather than a choice between forms.
@@ -675,6 +688,20 @@ mod tests {
             "feature.network.incoming.tls_delivery.protocol",
         );
         assert_eq!(output.default, Some(json!("tls")));
+    }
+
+    /// Each kind of database branch has a `connection` and a `copy`, documented for that kind: one
+    /// kind's docs or default would be wrong for the others.
+    #[test]
+    fn option_of_several_alternatives() {
+        let output = explain_path(
+            ConfigFormat::MirrordJson,
+            "feature.db_branches.connection.url",
+        );
+        assert!(output.description.is_none(), "{:?}", output.description);
+        let output = explain_path(ConfigFormat::MirrordJson, "feature.db_branches.copy");
+        assert!(output.description.is_none(), "{:?}", output.description);
+        assert!(output.default.is_none(), "{:?}", output.default);
     }
 
     #[test]
