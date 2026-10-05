@@ -10,7 +10,7 @@
 //! that failed to deserialize, because it reports every problem at once, each with its location
 //! and, where the schema lists them, the allowed values, where serde stops at the first error.
 
-use std::{fmt, ops::Not, path::Path, str::FromStr};
+use std::{ops::Not, path::Path, str::FromStr};
 
 use jsonschema::{
     ValidationError,
@@ -26,12 +26,8 @@ use mirrord_config::{
 };
 use mirrord_up::{LAYER_CONFIG_PATHS, ServiceMode, UpConfig, UpError};
 use schemars::JsonSchema;
-use serde::{
-    Deserialize, Deserializer, Serialize,
-    de::{DeserializeOwned, MapAccess, SeqAccess, Visitor},
-};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
-use serde_saphyr::{DuplicateKeyPolicy, Spanned};
 use thiserror::Error;
 
 use crate::schema::{LAYER_SCHEMA, Node, Schema, UP_SCHEMA, expand};
@@ -148,8 +144,21 @@ pub fn validate_config(
             let rendered = mirrord_up::render_template(&content, &key)
                 .map_err(|error| file_issue(error.to_string()));
             let parsed = rendered.and_then(|rendered| {
-                serde_saphyr::from_str(&rendered).map_err(|error| ConfigIssue {
-                    path: duplicate_key_pointer(&error, &rendered).unwrap_or_default(),
+                let mut path = String::new();
+                serde_saphyr::with_deserializer_from_str(&rendered, |deserializer| {
+                    serde_path_to_error::deserialize(deserializer).map_err(|error| {
+                        path = pointer_from_serde_path(error.path());
+                        error.into_inner()
+                    })
+                })
+                .map_err(|error| ConfigIssue {
+                    // The parser reports a key given twice at the mapping that holds it.
+                    path: match error.without_snippet() {
+                        serde_saphyr::Error::DuplicateMappingKey { key: Some(key), .. } => {
+                            format!("{path}/{}", escape_pointer_token(key))
+                        }
+                        _ => String::new(),
+                    },
                     // The default rendering is meant for the program calling the parser, e.g. it
                     // suggests a `DuplicateKeyPolicy` for a key given twice.
                     message: error
@@ -297,113 +306,6 @@ fn up_issue(error: UpError) -> ConfigIssue {
         message: error.to_string(),
         allowed_values: None,
     }
-}
-
-/// The keys of a YAML document, each with the place it's written, to find the path of a key that
-/// the parser reports only by its line and column.
-enum YamlKeys {
-    Mapping(Vec<(Spanned<Value>, YamlKeys)>),
-    Sequence(Vec<YamlKeys>),
-    Scalar,
-}
-
-impl<'de> Deserialize<'de> for YamlKeys {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct KeysVisitor;
-
-        impl<'de> Visitor<'de> for KeysVisitor {
-            type Value = YamlKeys;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("any YAML value")
-            }
-
-            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<YamlKeys, A::Error> {
-                let mut entries = Vec::new();
-                while let Some(entry) = map.next_entry()? {
-                    entries.push(entry);
-                }
-                Ok(YamlKeys::Mapping(entries))
-            }
-
-            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<YamlKeys, A::Error> {
-                let mut items = Vec::new();
-                while let Some(item) = seq.next_element()? {
-                    items.push(item);
-                }
-                Ok(YamlKeys::Sequence(items))
-            }
-
-            fn visit_bool<E>(self, _: bool) -> Result<YamlKeys, E> {
-                Ok(YamlKeys::Scalar)
-            }
-
-            fn visit_i64<E>(self, _: i64) -> Result<YamlKeys, E> {
-                Ok(YamlKeys::Scalar)
-            }
-
-            fn visit_u64<E>(self, _: u64) -> Result<YamlKeys, E> {
-                Ok(YamlKeys::Scalar)
-            }
-
-            fn visit_f64<E>(self, _: f64) -> Result<YamlKeys, E> {
-                Ok(YamlKeys::Scalar)
-            }
-
-            fn visit_str<E>(self, _: &str) -> Result<YamlKeys, E> {
-                Ok(YamlKeys::Scalar)
-            }
-
-            fn visit_unit<E>(self) -> Result<YamlKeys, E> {
-                Ok(YamlKeys::Scalar)
-            }
-
-            fn visit_none<E>(self) -> Result<YamlKeys, E> {
-                Ok(YamlKeys::Scalar)
-            }
-        }
-
-        deserializer.deserialize_any(KeysVisitor)
-    }
-}
-
-impl YamlKeys {
-    /// The JSON pointer of the key written at `location`.
-    fn pointer_at(&self, location: &serde_saphyr::Location) -> Option<String> {
-        match self {
-            Self::Mapping(entries) => entries.iter().find_map(|(key, value)| {
-                let segment = match &key.value {
-                    Value::String(key) => escape_pointer_token(key),
-                    key => escape_pointer_token(&key.to_string()),
-                };
-                if key.referenced.line() == location.line()
-                    && key.referenced.column() == location.column()
-                {
-                    return Some(format!("/{segment}"));
-                }
-                value
-                    .pointer_at(location)
-                    .map(|rest| format!("/{segment}{rest}"))
-            }),
-            Self::Sequence(items) => items.iter().enumerate().find_map(|(index, item)| {
-                item.pointer_at(location)
-                    .map(|rest| format!("/{index}{rest}"))
-            }),
-            Self::Scalar => None,
-        }
-    }
-}
-
-/// The JSON pointer of the key a duplicate-key error is about, found by reading the document
-/// again with duplicates allowed.
-fn duplicate_key_pointer(error: &serde_saphyr::Error, content: &str) -> Option<String> {
-    let serde_saphyr::Error::DuplicateMappingKey { location, .. } = error.without_snippet() else {
-        return None;
-    };
-    let options = serde_saphyr::options! { duplicate_keys: DuplicateKeyPolicy::LastWins };
-    serde_saphyr::from_str_with_options::<YamlKeys>(content, options)
-        .ok()?
-        .pointer_at(location)
 }
 
 /// An issue with the file as a whole: a template or syntax error that prevented reading it.
