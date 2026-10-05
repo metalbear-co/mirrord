@@ -157,10 +157,8 @@ pub fn validate_config(
                         Ok(config) => config.verify().err().map(up_issue).into_iter().collect(),
                         Err(issues) => issues,
                     };
-                    if issues.is_empty() {
-                        issues.extend(check_service_settings(&value)?);
-                    }
-                    issues.extend(check_config_patches(&value)?);
+                    let service_issues = check_services(&value, &issues)?;
+                    issues.extend(service_issues);
                     issues
                 }
                 Err(issue) => vec![issue],
@@ -395,20 +393,27 @@ fn file_issue(message: String) -> ConfigIssue {
     }
 }
 
-/// Runs the checks of a mirrord config on the settings of every service in a `mirrord-up.yaml` that
-/// `mirrord up` copies into the mirrord config it generates for the service (per
-/// [`SERVICE_LAYER_PATHS`]), such as the regexes of an `http_filter`.
+/// Runs the checks of a mirrord config on what `mirrord up` generates for every service of a
+/// `mirrord-up.yaml`: the settings it copies into the mirrord config (per [`SERVICE_LAYER_PATHS`]),
+/// such as the regexes of an `http_filter`, with the service's `config_patch` merged over them as
+/// `mirrord up` merges it, since only the result has to be valid. The full generated config
+/// depends on resolving targets in the cluster, so it can't be reproduced here; nearly every
+/// mirrord config field is optional, so the settings and the patch are a valid fragment of it.
 ///
-/// `default_mode` is left out, as `mirrord up` translates its values, and so are the settings that
-/// need the cluster to resolve, like `target`. So is the `http_filter` of a service in `replace`
-/// mode, which `mirrord up` ignores (unless `mirrord up --mode` overrides the mode, which a file
-/// can't tell).
-fn check_service_settings(up_config: &Value) -> Result<Vec<ConfigIssue>, ValidateConfigError> {
+/// An issue in what the patch sets is reported in the patch, any other at the setting it comes
+/// from. Left out are `default_mode`, as `mirrord up` translates its values, the settings that
+/// need the cluster to resolve, like `target`, the `http_filter` of a service in `replace` mode,
+/// which `mirrord up` ignores (unless `mirrord up --mode` overrides the mode, which a file can't
+/// tell), and settings with an issue of their own in `issues` already.
+fn check_services(
+    up_config: &Value,
+    issues: &[ConfigIssue],
+) -> Result<Vec<ConfigIssue>, ValidateConfigError> {
     let Some(services) = up_config.get("services").and_then(Value::as_object) else {
         return Ok(Vec::new());
     };
 
-    let mut issues = Vec::new();
+    let mut service_issues = Vec::new();
     for (service, settings) in services {
         let service_pointer = format!("/services/{}", escape_pointer_token(service));
         let replace_mode = settings
@@ -427,32 +432,52 @@ fn check_service_settings(up_config: &Value) -> Result<Vec<ConfigIssue>, Validat
             let Some(value) = settings.get(setting) else {
                 continue;
             };
+            let up_pointer = format!("{service_pointer}/{setting}");
+            if issues
+                .iter()
+                .any(|issue| issue.path.starts_with(&up_pointer))
+            {
+                continue;
+            }
             let layer_pointer = dotted_to_pointer(layer_path);
             insert_at(&mut layer_config, &layer_pointer, value.clone());
-            copied.push((layer_pointer, format!("{service_pointer}/{setting}")));
+            copied.push((layer_pointer, up_pointer));
         }
-        if copied.is_empty() {
+        let patch = settings.get("config_patch");
+        if let Some(patch) = patch {
+            json_patch::merge(&mut layer_config, patch);
+        } else if copied.is_empty() {
             continue;
         }
 
+        let patch_pointer = format!("{service_pointer}/config_patch");
+        // Isolated from the environment like the merged config in `mirrord up`, whose
+        // environment-derived settings come from the generated config rather than the patch.
         let context = ConfigContext::default().strict_env(true);
-        issues.extend(
-            check_layer_config(&layer_config, context)?
-                .into_iter()
-                .map(|issue| {
-                    let path = copied
+        service_issues.extend(check_layer_config(&layer_config, context)?.into_iter().map(
+            |issue| {
+                // An issue about the whole config is the patch's when nothing else is in it.
+                let in_patch = patch.is_some_and(|patch| match issue.path.as_str() {
+                    "" => patch.is_object().not() || copied.is_empty(),
+                    path => patch.pointer(path).is_some(),
+                });
+                let path = if in_patch {
+                    format!("{patch_pointer}{}", issue.path)
+                } else {
+                    copied
                         .iter()
                         .find_map(|(layer_pointer, up_pointer)| {
                             let rest = issue.path.strip_prefix(layer_pointer.as_str())?;
                             Some(format!("{up_pointer}{rest}"))
                         })
-                        .unwrap_or_else(|| service_pointer.clone());
-                    ConfigIssue { path, ..issue }
-                }),
-        );
+                        .unwrap_or_else(|| service_pointer.clone())
+                };
+                ConfigIssue { path, ..issue }
+            },
+        ));
     }
 
-    Ok(issues)
+    Ok(service_issues)
 }
 
 /// Sets `value` at `pointer` in `root`, creating the objects on the way.
@@ -467,42 +492,6 @@ fn insert_at(root: &mut Value, pointer: &str, value: Value) {
             .or_insert_with(|| Value::Object(Default::default()));
     }
     *target = value;
-}
-
-/// Validates the `config_patch` of every service in a `mirrord-up.yaml`.
-///
-/// `UpConfig` types the patch as arbitrary JSON, so its own schema accepts anything there, while
-/// `mirrord up` merges it into the mirrord config it generates for the service and fails on a
-/// result that isn't a valid mirrord config. The generated config depends on resolving targets in
-/// the cluster, so the merge can't be reproduced here; instead the patch is checked on its own as
-/// a mirrord config, including the semantic checks `mirrord up` runs on the merged result (such as
-/// the jq filters of split queues). Nearly every mirrord config field is optional, so any valid
-/// patch is also a valid config fragment.
-fn check_config_patches(up_config: &Value) -> Result<Vec<ConfigIssue>, ValidateConfigError> {
-    let Some(services) = up_config.get("services").and_then(Value::as_object) else {
-        return Ok(Vec::new());
-    };
-
-    let mut issues = Vec::new();
-    for (service, config) in services {
-        let Some(patch) = config.get("config_patch") else {
-            continue;
-        };
-        let prefix = format!("/services/{}/config_patch", escape_pointer_token(service));
-        // Isolated from the environment like the merged config in `mirrord up`, whose
-        // environment-derived settings come from the generated config rather than the patch.
-        let context = ConfigContext::default().strict_env(true);
-        issues.extend(
-            check_layer_config(patch, context)?
-                .into_iter()
-                .map(|issue| ConfigIssue {
-                    path: format!("{prefix}{}", issue.path),
-                    ..issue
-                }),
-        );
-    }
-
-    Ok(issues)
 }
 
 /// Deserializes `value` into `T`. When that fails, the issues come from `schema` if it rejects the
@@ -1447,6 +1436,50 @@ services:
                 .issues
                 .iter()
                 .all(|issue| issue.path.ends_with("/type").not()),
+            "{:?}",
+            output.issues
+        );
+    }
+
+    /// A service's settings and its `config_patch` are checked together, as `mirrord up` checks
+    /// the generated config with the patch merged over it.
+    #[rstest]
+    #[case::patch_replaces_setting(
+        "services:\n  api:\n    http_filter:\n      header_filter: \"(\"\n    config_patch:\n      feature:\n        network:\n          incoming:\n            http_filter:\n              header_filter: ok\n    run:\n      command: [\"true\"]\n",
+        None
+    )]
+    #[case::patch_conflicts_with_setting(
+        "services:\n  api:\n    ignore_ports: [80]\n    config_patch:\n      feature:\n        network:\n          incoming:\n            ports: [81]\n    run:\n      command: [\"true\"]\n",
+        Some("/services/api/config_patch/feature/network/incoming/ports")
+    )]
+    fn up_yaml_settings_with_config_patch(#[case] content: &str, #[case] path: Option<&str>) {
+        let output = validate(ConfigFormat::MirrordUpYaml, content);
+        match path {
+            None => assert!(output.valid, "{:?}", output.issues),
+            Some(path) => {
+                let [issue] = output.issues.as_slice() else {
+                    panic!("{:?}", output.issues);
+                };
+                assert_eq!(issue.path, path);
+            }
+        }
+    }
+
+    /// The settings of a service are checked next to other issues of the file.
+    #[test]
+    fn up_yaml_service_settings_next_to_other_issues() {
+        let output = validate(
+            ConfigFormat::MirrordUpYaml,
+            "common:\n  bogus: 1\nservices:\n  api:\n    http_filter:\n      header_filter: \"([\"\n    run:\n      command: [x]\n",
+        );
+        let paths: Vec<&str> = output
+            .issues
+            .iter()
+            .map(|issue| issue.path.as_str())
+            .collect();
+        assert!(paths.contains(&"/common/bogus"), "{:?}", output.issues);
+        assert!(
+            paths.contains(&"/services/api/http_filter/header_filter"),
             "{:?}",
             output.issues
         );

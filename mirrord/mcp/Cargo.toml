@@ -22,6 +22,7 @@ mirrord-config = { path = "../config" }
 mirrord-up = { path = "../up" }
 
 drain.workspace = true
+json-patch.workspace = true
 jsonschema.workspace = true
 rmcp.workspace = true
 schemars.workspace = true
