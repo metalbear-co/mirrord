@@ -5306,7 +5306,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-cluster-auth"
-version = "3.269.0"
+version = "3.271.0"
 dependencies = [
  "aws-config",
  "aws-credential-types",
@@ -5326,6 +5326,7 @@ dependencies = [
  "rustls-pemfile",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tokio-retry",

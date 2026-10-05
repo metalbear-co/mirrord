@@ -3,7 +3,7 @@
 
 mod common;
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use common::{SeenAuthorizations, start_server};
@@ -31,10 +31,15 @@ async fn client_trusts_the_cluster_ca_and_sends_the_token() {
     let seen = SeenAuthorizations::default();
     let (address, certificate_pem) = start_server(seen.clone()).await;
 
-    let client = ClusterClientFactory::new()
+    let factory = ClusterClientFactory::new().unwrap();
+    let token_directory = factory.token_files_dir().to_owned();
+    let client = factory
         .build_client(&credentials(address, &certificate_pem, "token-1"))
         .await
         .unwrap();
+    let clone = client.clone();
+    drop(factory);
+    assert!(token_directory.exists());
     client
         .request_text(Request::get("/version").body(Vec::new()).unwrap())
         .await
@@ -44,6 +49,16 @@ async fn client_trusts_the_cluster_ca_and_sends_the_token() {
         seen.lock().unwrap().as_slice(),
         [Some("Bearer token-1".to_owned())]
     );
+    drop(client);
+    assert!(token_directory.exists());
+    drop(clone);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while token_directory.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -53,6 +68,7 @@ async fn client_upgrades_to_a_websocket() {
     let (address, certificate_pem) = start_server(seen.clone()).await;
 
     let client = ClusterClientFactory::new()
+        .unwrap()
         .build_client(&credentials(address, &certificate_pem, "token-1"))
         .await
         .unwrap();
@@ -81,6 +97,7 @@ async fn client_rejects_a_server_outside_the_cluster_ca() {
         .pem();
 
     let client = ClusterClientFactory::new()
+        .unwrap()
         .build_client(&credentials(address, &other_ca, "token-1"))
         .await
         .unwrap();
