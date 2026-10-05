@@ -111,6 +111,56 @@ async fn serves_validate_config(#[case] protocol_version: ProtocolVersion) {
     );
 }
 
+/// A generated config comes back as structured content that `validate_config` accepts.
+#[tokio::test]
+async fn serves_generate_config() {
+    let (client, _signal) = connect(ProtocolVersion::V_2025_11_25).await;
+
+    let tools = client.list_all_tools().await.unwrap();
+    let tool = tools
+        .iter()
+        .find(|tool| tool.name == "generate_config")
+        .unwrap();
+    assert!(tool.output_schema.is_some());
+
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("generate_config").with_arguments(
+                json!({
+                    "format": "mirrord-up.yaml",
+                    "services": [{
+                        "name": "api",
+                        "run": { "command": ["npm", "run", "dev"] },
+                        "config": { "copy_target": { "scale_down": true } },
+                    }],
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_ne!(result.is_error, Some(true));
+    let output = result.structured_content.unwrap();
+    assert_eq!(
+        output["requires_operator"],
+        json!(["/services/api/config_patch/feature/copy_target"])
+    );
+
+    let result = client
+        .call_tool(validate_config_call(json!({
+            "format": output["format"],
+            "content": output["content"],
+        })))
+        .await
+        .unwrap();
+    assert_eq!(
+        result.structured_content.unwrap(),
+        json!({ "valid": true, "issues": [] })
+    );
+}
+
 /// Bad calls come back as error results, and the server keeps serving afterwards.
 #[tokio::test]
 async fn survives_bad_calls() {
