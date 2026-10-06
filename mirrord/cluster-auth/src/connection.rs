@@ -1,6 +1,9 @@
 //! A connection to one remote cluster, and the refresh of its bearer token.
 
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::PathBuf,
+    time::{Duration, SystemTime},
+};
 
 use kube::Client;
 use mirrord_nightly_polyfill::error::Report;
@@ -144,9 +147,11 @@ impl ClusterClientFactory {
 
     /// Keep the token of `connection` fresh, for as long as the returned future runs.
     ///
-    /// Refreshes the token before it expires, and retries a failed refresh with exponential
-    /// backoff for unavailable AWS credentials. Other errors reach the caller so it can stop
-    /// serving work instead of silently allowing authentication to expire.
+    /// Refreshes the token before it expires. A refresh that fails on unavailable AWS credentials
+    /// is retried with exponential backoff only while the installed token is still valid; once it
+    /// expires, the error reaches the caller, since the API server would reject every new request.
+    /// Other errors reach the caller immediately, so it can stop serving work instead of silently
+    /// allowing authentication to expire.
     pub async fn run_token_refresh(&self, mut connection: ClusterConnection) -> Result<()> {
         let cluster_name = connection.credentials.name.clone();
         let mut backoff: Option<ExponentialBackoff> = None;
@@ -185,12 +190,24 @@ impl ClusterClientFactory {
             match self.refresh_token(&mut connection).await {
                 Ok(()) => backoff = None,
                 Err(e @ ClusterAuthError::CredentialsUnavailable(..)) => {
+                    let Some(remaining) = connection
+                        .token_expiry
+                        .and_then(|expiry| expiry.duration_since(SystemTime::now()).ok())
+                        .filter(|remaining| !remaining.is_zero())
+                    else {
+                        return Err(e);
+                    };
+
                     let backoff = backoff.get_or_insert_with(|| {
                         ExponentialBackoff::from_millis(2)
                             .factor(500)
                             .max_delay(Duration::from_secs(30))
                     });
-                    let delay = backoff.next().unwrap_or(Duration::from_secs(30));
+                    // Capped so the last attempt lands at expiry rather than up to 30s after it.
+                    let delay = backoff
+                        .next()
+                        .unwrap_or(Duration::from_secs(30))
+                        .min(remaining);
 
                     tracing::warn!(
                         cluster = %cluster_name,

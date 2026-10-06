@@ -169,6 +169,7 @@ async fn eks_connection_sends_and_refreshes_an_eks_token() {
         Err(ClusterAuthError::Internal(..))
     ));
 
+    let mut expired_connection = connection.clone();
     let valid_credentials = connection.credentials.clone();
     connection.token_expiry = Some(SystemTime::now());
     connection.credentials.auth_method = AuthMethod::AwsIam {
@@ -195,4 +196,17 @@ async fn eks_connection_sends_and_refreshes_an_eks_token() {
         credential_requests.load(Ordering::SeqCst),
         requests_after_cancellation
     );
+
+    // Credentials stay unavailable past the token's expiry, so refresh gives up instead of
+    // retrying with a token the API server rejects.
+    expired_connection.token_expiry = Some(SystemTime::now() - Duration::from_secs(1));
+    assert!(matches!(
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            factory.run_token_refresh(expired_connection),
+        )
+        .await
+        .expect("refresh must give up once the token has expired"),
+        Err(ClusterAuthError::CredentialsUnavailable(..))
+    ));
 }
