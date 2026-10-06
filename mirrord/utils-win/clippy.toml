@@ -1,0 +1,13 @@
+# utils-win runs inside the target process as part of the Windows layer (the crash handler, the
+# internal-thread marker) as well as in the CLI. The print macros can end a process the layer is
+# loaded into. See the warning in `layer-lib::logging`.
+#
+# Write to the standard error handle with raw `WriteFile` (as the crash handler does) or log
+# through `tracing`.
+disallowed-macros = [
+    { path = "std::println", reason = "writes through std::io::stdout, which can abort a process the layer is loaded into. Log through tracing." },
+    { path = "std::print", reason = "writes through std::io::stdout, which can abort a process the layer is loaded into. Log through tracing." },
+    { path = "std::eprintln", reason = "writes through std::io::stderr, which can abort a process the layer is loaded into. Log through tracing." },
+    { path = "std::eprint", reason = "writes through std::io::stderr, which can abort a process the layer is loaded into. Log through tracing." },
+    { path = "std::dbg", reason = "writes through std::io::stderr, which can abort a process the layer is loaded into. Log through tracing." },
+]

@@ -54,6 +54,8 @@ tracing-subscriber = { workspace = true, optional = true }
 drain = { workspace = true, optional = true }
 tokio-util = { workspace = true, optional = true }
 
+[target.'cfg(windows)'.dependencies]
+winapi.workspace = true
+
 [lib]
-test = false
 doctest = false

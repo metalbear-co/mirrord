@@ -3,9 +3,14 @@
 //! The registry/counter/locking machinery lives in [`crate::managed`];
 //! this file picks the file-domain newtype ([`MirrordFileHandle`]), the
 //! per-handle context struct ([`HandleContext`]), and the singleton
-//! [`MANAGED_FILES`].
+//! [`MANAGED_FILES`]. The hook bodies reach the registry only through the functions here, so
+//! every lookup takes the cheap range check of [`managed_file`] first.
 
-use std::{borrow::Borrow, ops::Deref};
+use std::{
+    borrow::Borrow,
+    ops::Deref,
+    sync::{Arc, RwLock},
+};
 
 use once_cell::sync::Lazy;
 use str_win::path_to_unix_path;
@@ -75,18 +80,11 @@ impl CounterAllocated for MirrordFileHandle {
     }
 }
 
-/// Singleton registry of every file handle the layer is currently
-/// tracking. Inserts go through [`insert_handle`]; lookups are
-/// `MANAGED_FILES.get(..)` calls scattered through the file hooks.
-pub(in crate::hooks::files) static MANAGED_FILES: Lazy<
-    ManagedRegistry<MirrordFileHandle, HandleContext>,
-> = Lazy::new(|| ManagedRegistry::new("MANAGED_FILES"));
+type FileRegistry = ManagedRegistry<MirrordFileHandle, HandleContext>;
 
-/// Alias used by every [`hooks::files::ops`](crate::hooks::files::ops)
-/// module. `MANAGED_FILES` is the canonical name; `MANAGED_HANDLES`
-/// is the historical spelling the hook bodies were written against.
-/// Both resolve to the same `static`.
-pub(in crate::hooks::files) use self::MANAGED_FILES as MANAGED_HANDLES;
+/// Singleton registry of every file handle the layer is currently tracking. Inserts go through
+/// [`insert_handle`], lookups through [`managed_file`] and removals through [`remove_handle`].
+static MANAGED_FILES: Lazy<FileRegistry> = Lazy::new(|| ManagedRegistry::new("MANAGED_FILES"));
 
 /// The data behind a [`MirrordFileHandle`].
 pub(in crate::hooks::files) struct HandleContext {
@@ -162,7 +160,7 @@ impl HandleContext {
             return STATUS_INVALID_PARAMETER;
         }
         self.iocp_binding = Some(IocpBinding { port, key });
-        tracing::info!(?port, key, "HandleContext::bind_iocp: bound file -> port");
+        tracing::debug!(?port, key, "HandleContext::bind_iocp: bound file -> port");
         STATUS_SUCCESS
     }
 
@@ -175,9 +173,40 @@ impl HandleContext {
     /// `FileReplaceCompletionInformation(Port = NULL)`.
     pub(in crate::hooks::files) fn unbind_iocp(&mut self) {
         if self.iocp_binding.take().is_some() {
-            tracing::info!("HandleContext::unbind_iocp: removed binding");
+            tracing::debug!("HandleContext::unbind_iocp: removed binding");
         }
     }
+}
+
+/// Whether `handle` can be a file handle this layer handed out, without a lookup.
+///
+/// Managed handles count up from [`MIRRORD_FIRST_FILE_HANDLE`], and kernel handles are small,
+/// so this turns away nearly every handle a hook sees. A `true` still needs the lookup:
+/// pseudo-handles such as `GetCurrentProcess()` are large too.
+#[inline]
+fn may_be_managed_handle(handle: HANDLE) -> bool {
+    handle as usize >= MIRRORD_FIRST_FILE_HANDLE
+}
+
+/// The context of `handle`, if it is a file handle this layer handed out.
+///
+/// The file hooks see every handle in the process, sockets included (`NtDeviceIoControlFile`
+/// carries all Winsock I/O), and almost none of them are managed. A registry lookup hashes the
+/// handle twice and takes a shard's read lock that every thread using the same handle shares, so
+/// [`may_be_managed_handle`] turns the handle away before the registry is touched at all.
+pub(in crate::hooks::files) fn managed_file(handle: HANDLE) -> Option<Arc<RwLock<HandleContext>>> {
+    if !may_be_managed_handle(handle) {
+        return None;
+    }
+    MANAGED_FILES.get(&handle)
+}
+
+/// Whether `handle` is a file handle this layer handed out.
+///
+/// The hooks that act on a handle ask this when `internal_bypass` would otherwise bypass,
+/// because the kernel answers a managed handle with `STATUS_INVALID_HANDLE`.
+pub(in crate::hooks::files) fn is_managed_handle(handle: HANDLE) -> bool {
+    managed_file(handle).is_some()
 }
 
 /// The IOCP `(port, key)` binding for a file handle, by value.
@@ -188,7 +217,7 @@ impl HandleContext {
 ///
 /// The `(port, key)`, or `None` for an unmanaged file or one with no binding.
 pub(in crate::hooks::files) fn iocp_binding_for_file(file: HANDLE) -> Option<(HANDLE, usize)> {
-    let context = MANAGED_FILES.get(&file)?;
+    let context = managed_file(file)?;
     let context = context.try_read().ok()?;
     context.iocp_binding()
 }
@@ -221,11 +250,16 @@ pub(in crate::hooks::files) fn insert_handle(handle_context: HandleContext) -> M
     let path = handle_context.path.clone();
     let fd = handle_context.fd;
     let handle = MANAGED_FILES.insert(handle_context);
-    tracing::info!(
+    tracing::debug!(
         handle = ?handle.0, fd, path,
         "managed_handle::insert_handle: registered file handle"
     );
     handle
+}
+
+/// Forget a managed file handle, together with its IOCP binding.
+pub(in crate::hooks::files) fn remove_handle(handle: HANDLE) {
+    MANAGED_FILES.remove(&handle);
 }
 
 /// Run `fun` closure over each handle whose path matches the `object_attributes`.
@@ -254,4 +288,45 @@ pub(in crate::hooks::files) fn for_each_handle_with_path(
     }
 
     any
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn context() -> HandleContext {
+        let time = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        HandleContext {
+            path: "/app/config.json".to_owned(),
+            fd: 3,
+            desired_access: 0,
+            file_attributes: 0,
+            share_access: 0,
+            create_disposition: 0,
+            create_options: 0,
+            creation_time: time,
+            access_time: time,
+            write_time: time,
+            change_time: time,
+            skip_on_success: false,
+            iocp_binding: None,
+        }
+    }
+
+    /// Insert, get and remove on the registry: a handle from [`insert_handle`] is found through
+    /// [`managed_file`] with its context until [`remove_handle`] drops it.
+    #[test]
+    fn registry_round_trip() {
+        let handle = insert_handle(context()).raw();
+        assert_eq!(
+            managed_file(handle).map(|context| context.read().unwrap().fd),
+            Some(3)
+        );
+
+        remove_handle(handle);
+        assert!(managed_file(handle).is_none());
+    }
 }
