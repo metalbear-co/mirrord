@@ -5705,6 +5705,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tower",
+ "tower-test",
  "tracing",
  "uuid",
  "walkdir",
