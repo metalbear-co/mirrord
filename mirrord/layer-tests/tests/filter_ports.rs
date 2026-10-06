@@ -18,7 +18,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 use serde_json::{Value, json};
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use tokio::{io::AsyncWriteExt, net::TcpStream, time::timeout};
 
 fn build_config(
     incoming_ports: Option<&[u16]>,
@@ -122,6 +122,7 @@ async fn filter_ports(
     http_filter_port_offsets: Option<&[u16]>,
 
     #[values(true, false)] have_filter: bool,
+    #[values(false)] expect_collision: bool,
 ) {
     for attempt in 1..=5 {
         // A replacement port must preserve the inclusion/filter case being tested.
@@ -174,7 +175,9 @@ async fn filter_ports(
                     .await
                     .contains(&format!("AddrInUse PORT {port}\n"))
                 {
-                    test_process.wait_assert_fail().await;
+                    timeout(Duration::from_secs(5), test_process.wait_assert_fail())
+                        .await
+                        .expect("application did not exit after AddrInUse");
                     assert!(
                         attempt < 5,
                         "application could not bind port {port} after five attempts (AddrInUse)"
@@ -185,11 +188,18 @@ async fn filter_ports(
                 test_process
                     .assert_stdout_contains(&format!("LISTENING PORT {port}\n"))
                     .await;
+                // Connecting to the held listener would hide an incorrect bind redirection.
+                assert!(
+                    expect_collision.not() || attempt > 1,
+                    "occupied starting port did not produce AddrInUse"
+                );
                 let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
                 stream.write_all(b"HELLO").await.unwrap();
                 stream.shutdown().await.unwrap();
 
-                test_process.wait_assert_success().await;
+                timeout(Duration::from_secs(5), test_process.wait_assert_success())
+                    .await
+                    .expect("application did not exit after HELLO");
                 test_process.assert_no_error_in_stderr().await;
                 test_process.assert_no_error_in_stdout().await;
             }
@@ -224,9 +234,11 @@ async fn retries_occupied_port() {
     filter_ports(
         Application::RustListenPorts,
         occupied_port,
-        Some(&[1]),
+        // An empty whitelist excludes any port, including u16::MAX, without adding an offset.
+        Some(&[]),
         None,
         false,
+        true,
     )
     .await;
 }
