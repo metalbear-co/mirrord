@@ -8,6 +8,19 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.270.1](https://github.com/metalbear-co/mirrord/tree/3.270.1) - 2026-10-06
+
+
+### Fixed
+
+- The `feature` and `feature.env` config examples in the docs no longer set
+  both `include` and `exclude`. mirrord does not allow them together, so
+  `mirrord verify-config` rejected these examples.
+- The complete config example in the docs is now a valid config. It had the
+  removed `connect_tcp` field, a trailing comma, and both `include` and
+  `exclude` in `feature.env`, so `mirrord verify-config` rejected it.
+- `mirrord operator install` refuses to install an operator older than 3.197.0.
+
 ## [3.270.0](https://github.com/metalbear-co/mirrord/tree/3.270.0) - 2026-10-05
 
 
