@@ -2095,11 +2095,13 @@ unsafe extern "system" fn closesocket_detour(s: SOCKET) -> INT {
     // after this returns. Unsubscribing below talks to the proxy, which sets the error itself.
     let _last_error = LastErrorGuard::save();
 
-    // Remove from sockets in a separate statement, so that the `SOCKETS` guard is dropped before
-    // `UserSocket::close` sends a request to the intproxy. A guard in the `if let` scrutinee stays
-    // alive until the end of the `if` block.
-    let removed = SOCKETS.lock().expect("SOCKETS lock failed").remove(&s);
-    if let Some(socket) = removed
+    // The `SOCKETS` guard in the `if let` scrutinee stays alive until the end of the `if` block, so
+    // the `CreateProcessInternalW` hook, which locks `SOCKETS` to give the sockets to the child,
+    // waits until `PortUnsubscribe` is sent. When the child connects, the intproxy copies the port
+    // subscriptions of the parent to it. If the child started between the removal and the
+    // request, it would get a copy of the subscription without the socket, and nothing would
+    // remove that copy until the child exits.
+    if let Some(socket) = SOCKETS.lock().expect("SOCKETS lock failed").remove(&s)
         && matches!(socket.state, SocketState::Listening(_))
     {
         // Call close() method to send PortUnsubscribe if socket was listening
