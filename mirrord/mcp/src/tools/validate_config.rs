@@ -136,20 +136,20 @@ pub fn validate_config(
                         Ok(config) => {
                             let mut issues: Vec<_> =
                                 config.verify().err().map(up_issue).into_iter().collect();
-                            // A `config_patch` with issues of its own also fails to assemble;
-                            // its issues already point into the patch.
-                            issues.extend(
-                                config
-                                    .verify_services(&key)
-                                    .into_iter()
-                                    .map(service_issue)
-                                    .filter(|issue| {
+                            match config.verify_services(&key) {
+                                // A `config_patch` with issues of its own also fails to assemble;
+                                // its issues already point into the patch.
+                                Ok(errors) => issues.extend(
+                                    errors.into_iter().map(service_issue).filter(|issue| {
+                                        let patch_path = format!("{}/config_patch", issue.path);
                                         patch_issues
                                             .iter()
-                                            .any(|patch| patch.path.starts_with(&issue.path))
+                                            .any(|patch| patch.path.starts_with(&patch_path))
                                             .not()
                                     }),
-                            );
+                                ),
+                                Err(error) => issues.push(file_issue(error.to_string())),
+                            }
                             issues
                         }
                         Err(issues) => issues,
@@ -692,6 +692,36 @@ services:
         );
         assert_eq!(issue.path, "/services/worker/config_patch/feature/netwrk");
         assert!(issue.allowed_values.unwrap().contains(&json!("network")));
+    }
+
+    /// A service's issue isn't mistaken for a duplicate of the patch issue of another service
+    /// whose name it prefixes.
+    #[test]
+    fn up_yaml_patch_issue_of_prefixed_service() {
+        let output = validate(
+            ConfigFormat::MirrordUpYaml,
+            r#"
+services:
+  app:
+    target: none
+    run:
+      command: ["echo"]
+  app-v2:
+    config_patch:
+      feature:
+        netwrk: {}
+    run:
+      command: ["echo"]
+"#,
+        );
+        let paths: Vec<_> = output.issues.iter().map(|issue| &issue.path).collect();
+        assert_eq!(
+            paths,
+            [
+                "/services/app",
+                "/services/app-v2/config_patch/feature/netwrk"
+            ],
+        );
     }
 
     /// Deserializes, but `mirrord up` only supports `run.directory` for `exec` services.
