@@ -14,6 +14,7 @@ use mirrord_config::{
 use serde::Serialize;
 
 use crate::crd::{
+    db_branching::core::ConnectionSource,
     queue_filter::{MessageFilter, QueueType},
     session::{SessionCiInfo, UpSessionInfo},
 };
@@ -195,6 +196,12 @@ pub struct ConnectParams<'a> {
     #[serde(with = "force_json_ser", skip_serializing_if = "Vec::is_empty")]
     pub branch_db_names: Vec<String>,
 
+    /// This session's own connection mapping for the branches in `branch_db_names` that it
+    /// reuses rather than created, keyed by branch resource name. See
+    /// [`BranchDbNames::connection_sources`].
+    #[serde(with = "force_json_ser", skip_serializing_if = "BTreeMap::is_empty")]
+    pub branch_connection_sources: BTreeMap<String, ConnectionSource>,
+
     #[serde(with = "force_json_ser", skip_serializing_if = "Option::is_none")]
     pub session_ci_info: Option<SessionCiInfo>,
 
@@ -321,6 +328,15 @@ pub struct BranchDbNames {
     pub generic: Vec<String>,
     pub s3: Vec<String>,
     pub turbopuffer: Vec<String>,
+    /// This session's connection mapping for the branches above that already existed when the
+    /// session started, keyed by branch resource name.
+    ///
+    /// A reused branch's `spec.connectionSource` names the env vars of the workload that created
+    /// it. When this session's config maps the same branch `id` to other vars (`AUDIT_DB_HOST`
+    /// where the creator has `DB_HOST`), the operator has to rewrite THIS session's vars, so the
+    /// mapping travels with the session. Branches this session created are left out: their spec
+    /// already is this mapping.
+    pub connection_sources: BTreeMap<String, ConnectionSource>,
 }
 
 impl BranchDbNames {
@@ -438,6 +454,7 @@ impl<'a> ConnectParams<'a> {
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
             branch_db_names: unified_branch_db_names,
+            branch_connection_sources: branch_db_names.connection_sources,
             session_ci_info,
             up_session_info,
             is_default_cluster: None,

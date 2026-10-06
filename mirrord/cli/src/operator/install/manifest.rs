@@ -33,11 +33,20 @@ const HOOK_ANNOTATION: &str = "helm.sh/hook";
 /// it instead of failing because it already exists.
 const RELEASE_NAME_ANNOTATION: &str = "meta.helm.sh/release-name";
 
-const RELEASE_NAMESPACE_ANNOTATION: &str = "meta.helm.sh/release-namespace";
+pub(super) const RELEASE_NAMESPACE_ANNOTATION: &str = "meta.helm.sh/release-namespace";
 
 /// Names the chart and version an object was rendered from, as `<chart>-<version>` with `+`
 /// replaced by `_`.
 const CHART_LABEL: &str = "helm.sh/chart";
+
+/// The chart's `appVersion`, which is the version of the operator it installs.
+const APP_VERSION_LABEL: &str = "app.kubernetes.io/version";
+
+/// The oldest operator `mirrord operator install` installs.
+///
+/// Older operators do not fall back to the Free license when a trial expires, so a trial started
+/// for them would leave them unlicensed.
+const MIN_OPERATOR_VERSION: semver::Version = semver::Version::new(3, 197, 0);
 
 /// Required by helm to adopt an object. Most chart templates already set it, but not all of them
 /// (e.g. the CRDs).
@@ -139,8 +148,8 @@ pub(super) struct Manifest {
 impl Manifest {
     /// Parses a rendered manifest, leaving out helm hooks.
     ///
-    /// Also validates that the API key can be set, so a broken manifest fails before a trial is
-    /// started for it.
+    /// Also validates that the operator is at least [`MIN_OPERATOR_VERSION`] and that the API key
+    /// can be set, so an unsupported or broken manifest fails before a trial is started for it.
     pub(super) fn parse(manifest: &str) -> Result<Self, OperatorInstallError> {
         let mut objects = serde_saphyr::from_multiple::<Option<DynamicObject>>(manifest)
             .map_err(OperatorInstallError::ParseManifest)?
@@ -148,14 +157,6 @@ impl Manifest {
             .flatten()
             .filter(|object| object.annotations().contains_key(HOOK_ANNOTATION).not())
             .collect::<Vec<_>>();
-
-        let mut placeholders = 0;
-        for object in &mut objects {
-            for_each_placeholder(&mut object.data, &mut |_| placeholders += 1);
-        }
-        if placeholders != 1 {
-            return Err(OperatorInstallError::ApiKeyPlaceholder(placeholders));
-        }
 
         let deployment = objects
             .iter()
@@ -166,16 +167,31 @@ impl Manifest {
                     .is_some_and(|types| types.kind == "Deployment")
             })
             .ok_or(OperatorInstallError::NoDeployment)?;
-        let chart_version = deployment
+        let chart_version =
+            chart_version(deployment).ok_or(OperatorInstallError::NoChartVersionLabel)?;
+        let operator_version = deployment
             .labels()
-            .get(CHART_LABEL)
-            .and_then(|chart| chart.strip_prefix(&format!("{CHART_NAME}-")))
-            .and_then(|version| semver::Version::parse(&version.replace('_', "+")).ok())
-            .ok_or(OperatorInstallError::NoChartVersionLabel)?;
+            .get(APP_VERSION_LABEL)
+            .and_then(|version| semver::Version::parse(version).ok())
+            .ok_or(OperatorInstallError::NoOperatorVersionLabel)?;
+        if operator_version < MIN_OPERATOR_VERSION {
+            return Err(OperatorInstallError::UnsupportedOperatorVersion {
+                version: operator_version,
+                minimum: MIN_OPERATOR_VERSION,
+            });
+        }
         let operator_deployment = deployment.name_any();
         let operator_namespace = deployment
             .namespace()
             .ok_or(OperatorInstallError::NoDeployment)?;
+
+        let mut placeholders = 0;
+        for object in &mut objects {
+            for_each_placeholder(&mut object.data, &mut |_| placeholders += 1);
+        }
+        if placeholders != 1 {
+            return Err(OperatorInstallError::ApiKeyPlaceholder(placeholders));
+        }
 
         Ok(Self {
             objects,
@@ -193,6 +209,10 @@ impl Manifest {
         &self.operator_namespace
     }
 
+    pub(super) fn operator_deployment(&self) -> &str {
+        &self.operator_deployment
+    }
+
     pub(super) fn chart_version(&self) -> &semver::Version {
         &self.chart_version
     }
@@ -200,10 +220,11 @@ impl Manifest {
     /// A shell command substitution that reads the installed operator's API key from the cluster.
     ///
     /// Lets users move the installation to helm with the key it already uses, which they may have
-    /// never seen, e.g. when it came from a trial signup.
-    pub(super) fn api_key_lookup(&self) -> String {
+    /// never seen, e.g. when it came from a trial signup. `context_arg` gives kubectl the
+    /// kubecontext of the installation.
+    pub(super) fn api_key_lookup(&self, context_arg: &str) -> String {
         format!(
-            "$(kubectl -n {} get deployment {} -o \
+            "$(kubectl{context_arg} -n {} get deployment {} -o \
             jsonpath='{{.spec.template.spec.containers[*].env[?(@.name==\"{API_KEY_ENV}\")].value}}')",
             self.operator_namespace, self.operator_deployment,
         )
@@ -231,6 +252,24 @@ impl Manifest {
             for_each_placeholder(&mut object.data, &mut |value| api_key.clone_into(value));
         }
     }
+}
+
+/// The version of the chart that an object was rendered from, from its [`CHART_LABEL`].
+pub(super) fn chart_version(object: &impl ResourceExt) -> Option<semver::Version> {
+    object
+        .labels()
+        .get(CHART_LABEL)
+        .and_then(|chart| chart.strip_prefix(&format!("{CHART_NAME}-")))
+        .and_then(|version| semver::Version::parse(&version.replace('_', "+")).ok())
+}
+
+/// Whether an object in the cluster belongs to the [`RELEASE_NAME`] helm release, which is the
+/// case for objects that `mirrord operator install` or the documented `helm install` created.
+pub(super) fn is_attributed_to_release(object: &impl ResourceExt) -> bool {
+    object
+        .annotations()
+        .get(RELEASE_NAME_ANNOTATION)
+        .is_some_and(|release| release == RELEASE_NAME)
 }
 
 fn for_each_placeholder(value: &mut Value, f: &mut impl FnMut(&mut String)) {
@@ -265,6 +304,7 @@ metadata:
   namespace: mirrord
   labels:
     helm.sh/chart: mirrord-operator-1.35.0
+    app.kubernetes.io/version: "3.197.0"
 spec:
   template:
     spec:

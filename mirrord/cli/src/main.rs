@@ -983,7 +983,7 @@ async fn port_forward(
     .connector;
 
     let friendly = |err| match err {
-        connector::ConnectionError::Kube(error) => {
+        connector::ConnectionError::AgentPortForward(error) => {
             CliError::friendlier_error_or_else(error.into(), CliError::PortForwardingSetupError)
         }
         _ => CliError::PortForwardingError(err.into()),
@@ -1115,7 +1115,7 @@ fn main() -> miette::Result<()> {
                 list::print_targets(*args, rich_output).await?
             }
             Commands::Operator(args) => {
-                operator_command(*args).await?;
+                operator_command(*args, watch, &user_data).await?;
             }
             Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch, &user_data).await?;

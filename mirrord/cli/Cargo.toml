@@ -44,6 +44,7 @@ clap.workspace = true
 dotenvy.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
+serde-saphyr.workspace = true
 serde.workspace = true
 tracing-subscriber.workspace = true
 futures.workspace = true
@@ -51,7 +52,6 @@ glob.workspace = true
 which.workspace = true
 schemars.workspace = true
 semver.workspace = true
-serde-saphyr.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 reqwest = { workspace = true, features = ["stream"] }
 const-random.workspace = true
@@ -63,6 +63,8 @@ http.workspace = true
 miette = { workspace = true, features = ["fancy"] }
 thiserror.workspace = true
 humantime.workspace = true
+inquire.workspace = true
+shlex.workspace = true
 tokio-util.workspace = true
 socket2.workspace = true
 drain.workspace = true
@@ -125,6 +127,7 @@ http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
+tower-test.workspace = true
 
 [features]
 windows_build = []

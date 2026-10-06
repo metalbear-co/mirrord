@@ -53,7 +53,8 @@ use crate::{
         create_mongodb_branches, create_mysql_branches, create_pg_branches,
         ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
         list_reusable_mysql_branches, list_reusable_pg_branches,
-        relay_source_compatibility_warnings, wait_for_pending_branches,
+        relay_source_compatibility_warnings, reused_branch_connection_sources,
+        wait_for_pending_branches,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -1013,6 +1014,13 @@ where
                 })
                 .collect();
 
+            // The connection mapping this session's config declares per branch, kept so reused
+            // branches can carry it to the operator (see `reused_branch_connection_sources`).
+            let requested_connection_sources: std::collections::HashMap<_, _> = create_params
+                .iter()
+                .map(|(id, params)| (id.clone(), params.spec.connection_source.clone()))
+                .collect();
+
             // A reused branch that already has migrations, joined by a session that specified none,
             // silently inherits whatever schema the previous session applied. Flag it so the
             // mismatch is visible.
@@ -1086,7 +1094,17 @@ where
 
             subtask.success(None);
 
-            let mut names = BranchDbNames::default();
+            let mut names = BranchDbNames {
+                connection_sources: reused_branch_connection_sources(
+                    &requested_connection_sources,
+                    existing
+                        .ready
+                        .iter()
+                        .chain(waited_branches.iter())
+                        .chain(conflict_reused_branches.iter()),
+                ),
+                ..Default::default()
+            };
             for branch in existing
                 .ready
                 .values()
@@ -1227,6 +1245,7 @@ where
                 generic: Vec::new(),
                 s3: Vec::new(),
                 turbopuffer: Vec::new(),
+                connection_sources: BTreeMap::new(),
             })
         }
     }
@@ -2421,6 +2440,7 @@ impl OperatorApi<PreparedClientCert> {
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
             branch_db_names: unified_branch_db_names,
+            branch_connection_sources: branch_db_names.connection_sources,
             session_ci_info,
             up_session_info: None,
             is_default_cluster: None,
@@ -3030,6 +3050,7 @@ mod test {
                 generic: vec![],
                 s3: vec![],
                 turbopuffer: vec![],
+                connection_sources: BTreeMap::new(),
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\
@@ -3125,6 +3146,7 @@ mod test {
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
             branch_db_names: Vec::new(),
+            branch_connection_sources: Default::default(),
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
@@ -3269,6 +3291,7 @@ mod test {
             mysql_branch_names: Default::default(),
             mongodb_branch_names: Default::default(),
             branch_db_names: Default::default(),
+            branch_connection_sources: Default::default(),
             session_ci_info: None,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
