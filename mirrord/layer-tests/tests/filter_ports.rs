@@ -20,6 +20,8 @@ use rstest::rstest;
 use serde_json::{Value, json};
 use tokio::{io::AsyncWriteExt, net::TcpStream, time::timeout};
 
+const BIND_ATTEMPTS: usize = 5;
+
 fn build_config(
     incoming_ports: Option<&[u16]>,
     filter_ports: Option<&[u16]>,
@@ -103,8 +105,6 @@ async fn filter_ports(
     // Reusing test app
     #[values(Application::RustListenPorts)] application: Application,
 
-    #[values(rand::random_range(10000..60000))] mut port: u16,
-
     #[values(
 		None,
 		Some(&[0][..]),
@@ -122,25 +122,23 @@ async fn filter_ports(
     http_filter_port_offsets: Option<&[u16]>,
 
     #[values(true, false)] have_filter: bool,
-    #[values(false)] expect_collision: bool,
 ) {
-    for attempt in 1..=5 {
+    let mut attempt = 0;
+    let (mut test_process, mut intproxy, port, behavior, _config_file) = loop {
+        attempt += 1;
+        let port = rand::random_range(10000..60000);
         // A replacement port must preserve the inclusion/filter case being tested.
-        let incoming_ports = incoming_port_offsets.map(|offsets| {
-            offsets
-                .iter()
-                .map(|offset| port + offset)
-                .collect::<Vec<_>>()
-        });
-        let http_filter_ports = http_filter_port_offsets.map(|offsets| {
-            offsets
-                .iter()
-                .map(|offset| port + offset)
-                .collect::<Vec<_>>()
-        });
+        let ports_at = |offsets: Option<&[u16]>| {
+            offsets.map(|offsets| {
+                offsets
+                    .iter()
+                    .map(|offset| port + offset)
+                    .collect::<Vec<_>>()
+            })
+        };
         let config = build_config(
-            incoming_ports.as_deref(),
-            http_filter_ports.as_deref(),
+            ports_at(incoming_port_offsets).as_deref(),
+            ports_at(http_filter_port_offsets).as_deref(),
             have_filter,
         );
         let mut config_file = tempfile::NamedTempFile::with_suffix(".json").unwrap();
@@ -156,89 +154,97 @@ async fn filter_ports(
             .unwrap();
 
         let incoming_config = config_parsed.feature.network.incoming;
+        let behavior = expected_behavior(port, &incoming_config);
 
-        let (mut test_process, mut intproxy) = application
+        let (mut test_process, intproxy) = application
             .start_process(
                 vec![("APP_PORTS", &port.to_string())],
                 Some(config_file.path()),
             )
             .await;
 
-        match expected_behavior(port, &incoming_config) {
-            BindMode::Local => {
-                // Include the newline so a partial bind-result line cannot look like readiness.
-                test_process
-                    .wait_for_line_stdout(Duration::from_secs(5), &format!("PORT {port}\n"))
-                    .await;
-                if test_process
-                    .get_stdout()
+        if matches!(behavior, BindMode::Local) {
+            // A partial line for port 12345 must not match port 1234.
+            test_process
+                .wait_for_line_stdout(Duration::from_secs(5), &format!("PORT {port}\n"))
+                .await;
+            if test_process
+                .get_stdout()
+                .await
+                .contains(&format!("AddrInUse PORT {port}\n"))
+            {
+                timeout(Duration::from_secs(5), test_process.wait_assert_fail())
                     .await
-                    .contains(&format!("AddrInUse PORT {port}\n"))
-                {
-                    timeout(Duration::from_secs(5), test_process.wait_assert_fail())
-                        .await
-                        .expect("application did not exit after AddrInUse");
-                    assert!(
-                        attempt < 5,
-                        "application could not bind port {port} after five attempts (AddrInUse)"
-                    );
-                    port = rand::random_range(10000..60000);
-                    continue;
-                }
-                test_process
-                    .assert_stdout_contains(&format!("LISTENING PORT {port}\n"))
-                    .await;
-                // Connecting to the held listener would hide an incorrect bind redirection.
+                    .expect("application did not exit after AddrInUse");
                 assert!(
-                    expect_collision.not() || attempt > 1,
-                    "occupied starting port did not produce AddrInUse"
+                    attempt < BIND_ATTEMPTS,
+                    "application could not bind port {port} after {BIND_ATTEMPTS} attempts (AddrInUse)"
                 );
-                let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-                stream.write_all(b"HELLO").await.unwrap();
-                stream.shutdown().await.unwrap();
-
-                timeout(Duration::from_secs(5), test_process.wait_assert_success())
-                    .await
-                    .expect("application did not exit after HELLO");
-                test_process.assert_no_error_in_stderr().await;
-                test_process.assert_no_error_in_stdout().await;
-            }
-            BindMode::Unfiltered => {
-                assert_matches!(
-                    intproxy.recv().await,
-                    ClientMessage::TcpSteal(
-                        LayerTcpSteal::PortSubscribe(StealType::All(stolen_port))
-                    ) if stolen_port == port
-                );
-            }
-            BindMode::Filtered => {
-                assert_matches!(
-                    intproxy.recv().await,
-                    ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
-                        stolen_port,
-                        HttpFilter::Path(filter)
-                    ))) if filter == Filter::new("/test".into()).unwrap() && stolen_port == port
-                );
+                continue;
             }
         }
 
-        return;
+        break (test_process, intproxy, port, behavior, config_file);
+    };
+
+    match behavior {
+        BindMode::Local => {
+            test_process
+                .assert_stdout_contains(&format!("LISTENING PORT {port}\n"))
+                .await;
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            stream.write_all(b"HELLO").await.unwrap();
+            stream.shutdown().await.unwrap();
+
+            timeout(Duration::from_secs(5), test_process.wait_assert_success())
+                .await
+                .expect("application did not exit after HELLO");
+            test_process.assert_no_error_in_stderr().await;
+            test_process.assert_no_error_in_stdout().await;
+        }
+        BindMode::Unfiltered => {
+            assert_matches!(
+                intproxy.recv().await,
+                ClientMessage::TcpSteal(
+                    LayerTcpSteal::PortSubscribe(StealType::All(stolen_port))
+                ) if stolen_port == port
+            );
+        }
+        BindMode::Filtered => {
+            assert_matches!(
+                intproxy.recv().await,
+                ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
+                    stolen_port,
+                    HttpFilter::Path(filter)
+                ))) if filter == Filter::new("/test".into()).unwrap() && stolen_port == port
+            );
+        }
     }
 }
 
+/// Excluded ports use real local binds, so an occupied port must not fall back to another address.
 #[tokio::test]
-async fn retries_occupied_port() {
+async fn excluded_port_in_use_fails_bind() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let occupied_port = listener.local_addr().unwrap().port();
+    let port = listener.local_addr().unwrap().port();
+    // An empty whitelist excludes any port, including u16::MAX, without adding an offset.
+    let config = build_config(Some(&[]), None, false);
+    let mut config_file = tempfile::NamedTempFile::with_suffix(".json").unwrap();
+    config_file
+        .as_file_mut()
+        .write_all(serde_json::to_string(&config).unwrap().as_bytes())
+        .unwrap();
 
-    filter_ports(
-        Application::RustListenPorts,
-        occupied_port,
-        // An empty whitelist excludes any port, including u16::MAX, without adding an offset.
-        Some(&[]),
-        None,
-        false,
-        true,
-    )
-    .await;
+    let (mut test_process, _intproxy) = Application::RustListenPorts
+        .start_process(
+            vec![("APP_PORTS", &port.to_string())],
+            Some(config_file.path()),
+        )
+        .await;
+    test_process
+        .wait_for_line_stdout(Duration::from_secs(5), &format!("AddrInUse PORT {port}\n"))
+        .await;
+    timeout(Duration::from_secs(5), test_process.wait_assert_fail())
+        .await
+        .expect("application did not exit after AddrInUse");
 }
