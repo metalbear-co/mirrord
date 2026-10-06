@@ -33,7 +33,7 @@ use strum::VariantArray;
 use strum_macros::{Display, IntoStaticStr, VariantArray};
 use thiserror::Error;
 
-use crate::kube_context::UpKubeContext;
+use crate::{UpError, kube_context::UpKubeContext};
 
 /// Incoming traffic mode for a service. Also used as the mode for splitting the service's queues.
 #[derive(
@@ -184,6 +184,20 @@ pub struct CommonConfig {
     /// A service's own `context` takes precedence, and `mirrord up --context` takes precedence
     /// over both.
     pub(crate) context: Option<Arc<str>>,
+}
+
+impl CommonConfig {
+    /// The mirrord config every service is assembled from: these settings plus whatever
+    /// `context` takes from the environment.
+    fn base_config(&self, context: &mut ConfigContext) -> Result<LayerConfig, ConfigError> {
+        LayerFileConfig {
+            accept_invalid_certificates: self.accept_invalid_certificates,
+            operator: self.operator,
+            telemetry: self.telemetry,
+            ..Default::default()
+        }
+        .generate_config(context)
+    }
 }
 
 /// The target workload of a service.
@@ -509,24 +523,16 @@ pub enum WindowsSupportError {
 }
 
 impl ServiceConfig {
-    /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service.
+    /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `cfg` from
+    /// [`CommonConfig::base_config`].
     fn assemble(
         self,
         service_name: &Arc<str>,
-        defaults: &CommonConfig,
+        mut cfg: LayerConfig,
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
     ) -> Result<(LayerConfig, RunConfig), ConfigPatchErrorKind> {
-        let mut cfg = LayerFileConfig {
-            accept_invalid_certificates: defaults.accept_invalid_certificates,
-            operator: defaults.operator,
-            telemetry: defaults.telemetry,
-            ..Default::default()
-        }
-        .generate_config(&mut ConfigContext::default())
-        .unwrap();
-
         let kube_context = up_context.get_context(self.context);
         cfg.kube_context = kube_context.as_deref().map(Into::into);
 
@@ -802,7 +808,13 @@ impl UpConfig {
     /// Doesn't reach the cluster: a service without a target path, which `mirrord up` looks up in
     /// the cluster, stands in for a deployment named after the service. Every mode supports a
     /// deployment, so such a service only gets the checks that don't depend on its target.
-    pub fn verify_services(&self, key: &EnvKey) -> Vec<ServiceError> {
+    ///
+    /// Ignores `MIRRORD_*` environment variables, which `mirrord up` would read from its own
+    /// environment rather than this process's.
+    pub fn verify_services(&self, key: &EnvKey) -> Result<Vec<ServiceError>, ConfigError> {
+        let base = self
+            .common
+            .base_config(&mut ConfigContext::default().strict_env(true))?;
         let up_context = UpKubeContext {
             command_arg: None,
             common_context: self.common.context.clone(),
@@ -829,7 +841,7 @@ impl UpConfig {
             let mode = service.default_mode;
             let (config, run) = match service.clone().assemble(
                 service_name,
-                &self.common,
+                base.clone(),
                 key.clone(),
                 &mut resolved_targets,
                 up_context.clone(),
@@ -872,7 +884,7 @@ impl UpConfig {
             );
         }
 
-        errors
+        Ok(errors)
     }
 
     /// True unless the user opted out of telemetry.
@@ -950,20 +962,17 @@ impl UpConfig {
         key: &EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
-    ) -> Result<Vec<SubprocessCfg>, ConfigPatchError> {
-        let Self {
-            common: defaults,
-            services,
-        } = self;
+    ) -> Result<Vec<SubprocessCfg>, UpError> {
+        let base = self.common.base_config(&mut ConfigContext::default())?;
 
-        services
+        self.services
             .into_iter()
             .map(|(service_name, svc)| {
                 let mode = svc.default_mode;
                 let (config, run) = svc
                     .assemble(
                         &service_name,
-                        &defaults,
+                        base.clone(),
                         key.clone(),
                         resolved_targets,
                         up_context.clone(),
