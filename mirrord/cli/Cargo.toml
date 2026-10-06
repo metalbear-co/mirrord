@@ -63,6 +63,8 @@ http.workspace = true
 miette = { workspace = true, features = ["fancy"] }
 thiserror.workspace = true
 humantime.workspace = true
+inquire.workspace = true
+shlex.workspace = true
 tokio-util.workspace = true
 socket2.workspace = true
 drain.workspace = true

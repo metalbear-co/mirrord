@@ -520,7 +520,9 @@ pub(crate) enum CliError {
 
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
-        "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
+        "Either this command requires the mirrord operator, or `\"operator\": true` is set in your configuration.\n\
+        After a successful operator session, mirrord remembers `\"operator\": true` in the global configuration at `~/.mirrord/mirrord.json`. \
+        If the operator is no longer installed, run `mirrord config set operator false` to turn it off or set `\"operator\": false` in your configuration file.\n\
         Read more here: https://metalbear.com/mirrord/docs/overview/quick-start/#operator.\n{AGENT_OPERATOR_HINT}{GENERAL_HELP}"
     ))]
     OperatorNotInstalled,

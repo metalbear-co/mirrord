@@ -1115,7 +1115,7 @@ fn main() -> miette::Result<()> {
                 list::print_targets(*args, rich_output).await?
             }
             Commands::Operator(args) => {
-                operator_command(*args).await?;
+                operator_command(*args, watch, &user_data).await?;
             }
             Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch, &user_data).await?;
