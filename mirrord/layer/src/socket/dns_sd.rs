@@ -18,7 +18,8 @@
 //! 2. The caller calls `DNSServiceProcessResult`, which runs our callback with the decoy's reply.
 //!    We ignore that reply. Instead, we ask the agent to resolve the real name, and call the
 //!    caller's callback with the answer, formatted like a reply from the daemon. If more decoy
-//!    replies come in later, we ignore them too.
+//!    replies come in later, we ignore them too. So the callers, including long-lived ones, get one
+//!    answer only.
 //! 3. When the caller deallocates the query (or the connection it was started on), we free its
 //!    [`RemoteQuery`].
 //!
@@ -249,11 +250,13 @@ impl RemoteQuery {
         }
 
         let name = unsafe { CStr::from_ptr(hostname) }.to_str().ok()?;
-        // DNS-SD queries carry no port, so like `gethostbyname` (and `getaddrinfo` without a
-        // service), only the DNS filters without a port apply.
-        if name.parse::<IpAddr>().is_ok()
+        // DNS-SD callers may pass fully qualified names, while DNS filters are written without
+        // the trailing dot. DNS-SD queries carry no port, so like `gethostbyname` (and
+        // `getaddrinfo` without a service), only the DNS filters without a port apply.
+        let unqualified = name.strip_suffix('.').unwrap_or(name);
+        if unqualified.parse::<IpAddr>().is_ok()
             || !matches!(
-                crate::setup().dns_selector().check_query(name, 0),
+                crate::setup().dns_selector().check_query(unqualified, 0),
                 Detour::Success(())
             )
         {
@@ -537,7 +540,8 @@ unsafe extern "C" fn query_record_decoy_reply(
     unsafe { RemoteQuery::deliver(context.cast(), sd_ref) }
 }
 
-/// Hook for `DNSServiceGetAddrInfo`: takes over address lookups for names we resolve remotely.
+/// Hook for `DNSServiceGetAddrInfo`, the public DNS-SD address lookup. Clients that use it never
+/// reach our `getaddrinfo` hook.
 #[allow(non_snake_case)]
 #[hook_guard_fn]
 unsafe extern "C" fn DNSServiceGetAddrInfo_detour(
@@ -639,7 +643,8 @@ unsafe extern "C" fn DNSServiceGetAddrInfoEx_detour(
     }
 }
 
-/// Hook for `DNSServiceQueryRecord`: takes over A and AAAA queries for names we resolve remotely.
+/// Hook for `DNSServiceQueryRecord`, which Bun falls back to where
+/// `DNSServiceQueryRecordWithAttribute` is missing (macOS 12).
 #[allow(non_snake_case)]
 #[hook_guard_fn]
 unsafe extern "C" fn DNSServiceQueryRecord_detour(

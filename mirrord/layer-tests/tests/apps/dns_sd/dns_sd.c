@@ -181,21 +181,26 @@ int main(int argc, char *argv[]) {
   // Queries the agent doesn't answer go to the daemon untouched. These run first, so a wrongly
   // taken over one is the first (unexpected) name the test sees.
   DNSServiceRef ref;
+  DNSServiceErrorType error;
   Lookup ignored = {0};
-  expect_passed_through(
-      "local DNS filter",
-      DNSServiceGetAddrInfo(&ref, 0, 0, both, "local.test", address_reply, &ignored), ref);
-  expect_passed_through("TXT record",
-                        DNSServiceQueryRecord(&ref, 0, 0, "remote.test", kDNSServiceType_TXT,
-                                              kDNSServiceClass_IN, record_reply, &ignored),
-                        ref);
-  expect_passed_through("interface index",
-                        DNSServiceGetAddrInfo(&ref, 0, kDNSServiceInterfaceIndexLocalOnly, both,
-                                              "remote.test", address_reply, &ignored),
-                        ref);
-  expect_passed_through(
-      "IP literal",
-      DNSServiceGetAddrInfo(&ref, 0, 0, both, "10.1.1.1", address_reply, &ignored), ref);
+
+  error = DNSServiceGetAddrInfo(&ref, 0, 0, both, "local.test", address_reply, &ignored);
+  expect_passed_through("local DNS filter", error, ref);
+
+  error = DNSServiceGetAddrInfo(&ref, 0, 0, both, "local.test.", address_reply, &ignored);
+  expect_passed_through("local DNS filter, fully qualified", error, ref);
+
+  error = DNSServiceQueryRecord(&ref, 0, 0, "remote.test", kDNSServiceType_TXT,
+                                kDNSServiceClass_IN, record_reply, &ignored);
+  expect_passed_through("TXT record", error, ref);
+
+  error = DNSServiceGetAddrInfo(&ref, 0, kDNSServiceInterfaceIndexLocalOnly, both, "remote.test",
+                                address_reply, &ignored);
+  expect_passed_through("interface index", error, ref);
+
+  error = DNSServiceGetAddrInfo(&ref, 0, 0, both, "10.1.1.1", address_reply, &ignored);
+  expect_passed_through("IP literal", error, ref);
+
   DNSServiceRef connection;
   DNSServiceCreateConnection(&connection);
 
