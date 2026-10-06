@@ -1232,7 +1232,7 @@ mod test {
             prefetch_timeout: PREFETCH_TIMEOUT_DEFAULT,
         };
 
-        let file_filter = FileFilter::new(fs_config);
+        let file_filter = FileFilter::try_new(fs_config).unwrap();
 
         let res = ensure_remote(&file_filter, Path::new(path), write);
         println!("filter result: {res:?}");
@@ -1270,7 +1270,7 @@ mod test {
             ..Default::default()
         };
 
-        let file_filter = FileFilter::new(fs_config);
+        let file_filter = FileFilter::try_new(fs_config).unwrap();
 
         let res = ensure_remote(&file_filter, Path::new(path), write);
         println!("filter result: {res:?}");
@@ -1295,7 +1295,7 @@ mod test {
     #[case("/nowhere/.config/gcloud/some_file", DetourKind::Success)]
     #[case("/nowhere/.nuget/packages/microsoft.azure.amqp", DetourKind::Success)]
     fn not_found_set(#[case] path: &str, #[case] expected: DetourKind) {
-        let filter = FileFilter::new(Default::default());
+        let filter = FileFilter::try_new(Default::default()).unwrap();
         let res = ensure_remote(&filter, Path::new(path), false);
         println!("filter result: {res:?}");
 

@@ -262,7 +262,7 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
-use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, time::Duration};
 #[cfg(not(target_os = "windows"))]
 use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
@@ -350,6 +350,7 @@ mod operator;
 #[cfg(windows)]
 mod pitm;
 mod port_forward;
+mod process_env;
 // Prefetched files exist for the layer to serve in place of remote ones, and the layer is unix
 // only, so copying them anywhere else would be work nothing can use.
 #[cfg(unix)]
@@ -373,6 +374,7 @@ pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
 use mirrord_layer_lib::process::windows::{
     command_line::build_command_line, console, execution::LayerManagedProcess,
+    injection::InjectionMethod,
 };
 use verify_config::verify_config;
 
@@ -452,12 +454,11 @@ async fn exec_process(
     #[cfg(not(target_os = "macos"))]
     let (_did_sip_patch, binary) = (false, args.binary.clone());
 
-    let mut env_vars: HashMap<String, String> = vars().collect();
-    env_vars.extend(execution_info.environment.clone());
-    env_vars.insert(mirrord_progress::MIRRORD_PROGRESS_ENV.into(), "off".into());
-    for key in &execution_info.env_to_unset {
-        env_vars.remove(key);
-    }
+    let env_vars = compose_exec_environment(
+        process_env::inherited(),
+        &execution_info.environment,
+        &execution_info.env_to_unset,
+    );
 
     // Put original executable in argv[0] even if actually running patched version.
     let binary_args = std::iter::once(&args.binary)
@@ -502,6 +503,8 @@ async fn exec_process(
         binary,
         binary_args,
         env_vars,
+        #[cfg(target_os = "windows")]
+        args.injection_method,
         _did_sip_patch,
         sub_progress,
         analytics,
@@ -510,6 +513,30 @@ async fn exec_process(
         mirrord_for_ci,
     )
     .await
+}
+
+/// Environment the user's process is launched with: `inherited`, then the execution's
+/// `overrides` and progress output switched off, minus the variables in `unset`.
+///
+/// Names are matched the way the platform matches them (see [`process_env`]), so on Windows an
+/// override or unset of `PATH` also applies to an inherited `Path`.
+fn compose_exec_environment(
+    mut env: process_env::ProcessEnv,
+    overrides: &HashMap<String, String>,
+    unset: &[String],
+) -> process_env::ProcessEnv {
+    for (name, value) in overrides {
+        process_env::set(&mut env, name, value.clone());
+    }
+    process_env::set(
+        &mut env,
+        mirrord_progress::MIRRORD_PROGRESS_ENV,
+        "off".to_owned(),
+    );
+    for name in unset {
+        env.remove(name);
+    }
+    env
 }
 
 fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
@@ -589,11 +616,13 @@ async fn run_process_with_mirrord<P: Progress>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[cfg(target_os = "windows")]
 async fn run_process_with_mirrord<P>(
     binary: String,
     binary_args: Vec<String>,
-    env_vars: HashMap<String, String>,
+    env_vars: process_env::ProcessEnv,
+    injection_method: InjectionMethod,
     _did_sip_patch: bool,
     progress: P,
     analytics: &mut AnalyticsReporter,
@@ -628,6 +657,7 @@ where
         // current_directory (inherit from parent)
         None,
         env_vars,
+        injection_method,
         // `mirrord exec` runs-and-waits; bind the child tree to this process so an
         // abrupt kill can't leave the layer-loaded child (and thus the agent) alive.
         true,
@@ -637,7 +667,7 @@ where
     .map_err(|e| {
         error!("Failed to create process: {:?}", e);
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
-        CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
+        CliError::WindowsBinaryExecuteFailed(binary.clone(), Box::new(e))
     })?;
 
     // Exit with the same code as the child process
@@ -1115,7 +1145,7 @@ fn main() -> miette::Result<()> {
                 list::print_targets(*args, rich_output).await?
             }
             Commands::Operator(args) => {
-                operator_command(*args).await?;
+                operator_command(*args, watch, &user_data).await?;
             }
             Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch, &user_data).await?;
@@ -1329,10 +1359,38 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    use std::collections::HashMap;
+
     use clap::Parser;
+    #[cfg(windows)]
+    use mirrord_layer_lib::process::windows::environment::WindowsEnv;
+    #[cfg(windows)]
+    use mirrord_progress::MIRRORD_PROGRESS_ENV;
     use rstest::rstest;
 
+    #[cfg(windows)]
+    use crate::compose_exec_environment;
     use crate::{Cli, Commands};
+
+    /// On Windows an override or unset reaches an inherited variable spelled in another casing,
+    /// so the child gets one `PATH`, holding the override.
+    #[cfg(windows)]
+    #[test]
+    fn exec_environment_matches_names_case_insensitively() {
+        let env = compose_exec_environment(
+            WindowsEnv::from_ordered_entries([
+                ("Path".to_owned(), "C:\\inherited".to_owned()),
+                ("Temp".to_owned(), "C:\\temp".to_owned()),
+            ]),
+            &HashMap::from([("PATH".to_owned(), "C:\\override".to_owned())]),
+            &["TEMP".to_owned()],
+        );
+        assert_eq!(
+            env.iter().collect::<Vec<_>>(),
+            [(MIRRORD_PROGRESS_ENV, "off"), ("PATH", "C:\\override")]
+        );
+    }
 
     /// Verifies that
     /// [`ExecParams::accept_invalid_certificates`](crate::config::ExecParams::accept_invalid_certificates)

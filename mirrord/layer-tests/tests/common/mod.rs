@@ -192,6 +192,8 @@ pub enum Application {
     Connectx,
     /// Rust app that closes a clone socket.
     DupListen,
+    /// Rust app that spawns children which must inherit socket metadata.
+    PosixSpawnSharedSockets,
     /// Rust app that listens on a socket twice
     DoubleListen,
     /// C app that calls `connect(2)` on a unix socket with a too-large `addrlen`
@@ -398,6 +400,13 @@ impl Application {
                     "../../target/debug/dup-listen"
                 )
             }
+            Application::PosixSpawnSharedSockets => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/posix-spawn-shared-sockets"
+                )
+            }
             Application::DoubleListen => {
                 format!(
                     "{}/{}",
@@ -583,6 +592,7 @@ impl Application {
                     format!("exec 0<&- ; exec node {}", app_path.to_string_lossy()),
                 ]
             }
+            Application::PosixSpawnSharedSockets => vec![],
         }
     }
 
@@ -648,6 +658,7 @@ impl Application {
             | Application::GoIssue2988(..)
             | Application::NodeMakeConnections
             | Application::DoubleListen
+            | Application::PosixSpawnSharedSockets
             | Application::PythonSocketPair
             | Application::PythonCor1401Seqpacket
             | Application::UnixConnectAddrlen

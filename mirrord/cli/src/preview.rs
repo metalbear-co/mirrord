@@ -9,7 +9,7 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
     ffi::OsStr,
-    path::Path,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
@@ -34,7 +34,9 @@ use mirrord_config::{
     LayerConfig,
     config::{ConfigContext, ConfigError, EnvKey},
     feature::{
-        network::incoming::tls_delivery::{LocalTlsDelivery, TlsDeliveryProtocol},
+        network::incoming::tls_delivery::{
+            LocalTlsDelivery, TlsClientCertSource, TlsDeliveryProtocol,
+        },
         preview::{ConfigMount, ConfigMountType},
     },
     target::{Target, TargetDisplay, label::LabelTarget},
@@ -48,10 +50,11 @@ use mirrord_operator::{
             PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvVarsConfig,
             PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs,
             PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
-            PreviewSessionPhase, PreviewSessionSpec, PreviewTlsClientAuth, PreviewTlsDelivery,
+            PreviewSessionPhase, PreviewSessionSpec, PreviewTlsClientAuth,
+            PreviewTlsClientAuthFromTarget, PreviewTlsDelivery,
             view::{PreviewEnv, PreviewMessageKind},
         },
-        session::{PodSetTarget, SessionTarget},
+        session::{KubeResourceTarget, PodSetTarget, SessionTarget},
     },
     types::OPERATOR_OWNERSHIP_LABEL,
 };
@@ -61,14 +64,15 @@ use tracing::Level;
 
 use crate::{
     config::{
-        PreviewArgs, PreviewCommand, PreviewCommonArgs, PreviewLogsArgs, PreviewStartArgs,
-        PreviewStatusArgs, PreviewStopArgs,
+        PreviewArgs, PreviewCommand, PreviewCommonArgs, PreviewDiffArgs, PreviewLogsArgs,
+        PreviewStartArgs, PreviewStatusArgs, PreviewStopArgs,
     },
     data::UserData,
     error::{CliError, CliResult, format_preview_logs},
 };
 
 mod multicluster;
+pub(crate) mod resources;
 
 /// Handle commands related to preview environments: `mirrord preview ...`
 pub(crate) async fn preview_command(
@@ -87,6 +91,7 @@ pub(crate) async fn preview_command(
         }
         PreviewCommand::Stop(stop_args) => preview_stop(&common, stop_args, watch, user_data).await,
         PreviewCommand::Logs(logs_args) => preview_logs(&common, logs_args, watch, user_data).await,
+        PreviewCommand::Diff(diff_args) => preview_diff(&common, diff_args, watch, user_data).await,
     }
 }
 
@@ -113,6 +118,14 @@ async fn preview_start(
 
     let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
 
+    // Read before contacting the cluster, so a broken manifest fails without side effects.
+    let resource_paths = resource_paths(args.resources, &mut layer_config);
+    let mut supplied_objects = if resource_paths.is_empty() {
+        None
+    } else {
+        Some(load_manifests(&resource_paths, &progress)?)
+    };
+
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
         ExecutionKind::Preview,
@@ -124,6 +137,10 @@ async fn preview_start(
     let (operator_api, api) =
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
     operator_api.check_feature_support(&layer_config, false)?;
+
+    if supplied_objects.is_some() {
+        require_spec_resources_support(&operator_api.operator().spec)?;
+    }
 
     let is_cronjob_target = matches!(layer_config.target.path, Some(Target::CronJob(_)));
     if is_cronjob_target {
@@ -222,6 +239,46 @@ async fn preview_start(
     )
     .await
     .inspect_err(|_| subtask.failure(None))?;
+
+    // Planned before an existing session is replaced. `plan` dry-runs the manifests and rejects
+    // a template that would widen the preview's access, so either failure leaves the running
+    // preview alone.
+    if let Some(objects) = supplied_objects.as_mut() {
+        resources::resolve_workload_refs(
+            operator_api.client(),
+            objects,
+            resources_target(&session_target).inspect_err(|_| subtask.failure(None))?,
+            target_namespace(&operator_api, &layer_config),
+        )
+        .await
+        .inspect_err(|_| subtask.failure(None))?;
+    }
+    let resource_plan = match &supplied_objects {
+        Some(objects) => {
+            let plan = resources::plan(
+                operator_api.client(),
+                objects,
+                resources::sources_label(&resource_paths),
+                resources_target(&session_target)?,
+                target_namespace(&operator_api, &layer_config),
+            )
+            .await
+            .inspect_err(|_| subtask.failure(None))?;
+            for message in resources::summary(&plan) {
+                subtask.info(&message);
+            }
+            for note in &plan.notes {
+                subtask.warning(note);
+            }
+            Some(plan)
+        }
+        None => None,
+    };
+    let spec_resources = resource_plan
+        .as_ref()
+        .map(|plan| plan.spec_resources(&mut secret_values))
+        .transpose()?
+        .flatten();
 
     // Check for an existing session with the same key+target.
     let key = layer_config.key.as_str();
@@ -345,6 +402,7 @@ async fn preview_start(
         secret_mounts,
         idle,
         cronjob,
+        spec_resources,
     };
 
     let annotations = operator_api
@@ -1064,6 +1122,158 @@ async fn preview_stop(
     Ok(())
 }
 
+/// Handle `mirrord preview diff` command.
+///
+/// Runs the `--resource` checks of `preview start` (scope, comparison with the live cluster,
+/// server-side dry runs) and prints how each object in scope differs. Creates nothing.
+#[tracing::instrument(level = Level::TRACE, ret, skip_all)]
+async fn preview_diff(
+    common: &PreviewCommonArgs,
+    args: PreviewDiffArgs,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
+    let mut progress = ProgressTracker::from_env("mirrord preview diff");
+
+    let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
+
+    let resource_paths = resource_paths(args.resources, &mut layer_config);
+    if resource_paths.is_empty() {
+        return Err(CliError::PreviewResourcesRequired);
+    }
+    let mut objects = load_manifests(&resource_paths, &progress)?;
+
+    let mut analytics = AnalyticsReporter::only_error(
+        layer_config.telemetry,
+        ExecutionKind::Preview,
+        watch,
+        user_data.machine_id(),
+        Some(layer_config.key.as_str().to_owned()),
+    );
+
+    let (operator_api, _) =
+        create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
+    // Nothing is sent to the operator, so an operator without `PreviewSpecResources` can still
+    // show what would change.
+    reject_management_only(&operator_api.operator().spec)?;
+
+    let mut subtask = progress.subtask("comparing manifests with the cluster");
+
+    let config_target = layer_config.target.path.as_ref().ok_or_else(|| {
+        subtask.failure(None);
+        CliError::PreviewTargetRequired
+    })?;
+
+    let session_target = resolve_config_target(
+        config_target,
+        operator_api.client(),
+        layer_config.target.namespace.as_deref(),
+    )
+    .await
+    .inspect_err(|_| subtask.failure(None))?;
+    let session_target =
+        resources_target(&session_target).inspect_err(|_| subtask.failure(None))?;
+
+    resources::resolve_workload_refs(
+        operator_api.client(),
+        &mut objects,
+        session_target,
+        target_namespace(&operator_api, &layer_config),
+    )
+    .await
+    .inspect_err(|_| subtask.failure(None))?;
+
+    let plan = resources::plan(
+        operator_api.client(),
+        &objects,
+        resources::sources_label(&resource_paths),
+        session_target,
+        target_namespace(&operator_api, &layer_config),
+    )
+    .await
+    .inspect_err(|_| subtask.failure(None))?;
+
+    for note in &plan.notes {
+        subtask.warning(note);
+    }
+    subtask.success(Some(
+        "compared manifests with the cluster, nothing was created",
+    ));
+    progress.success(None);
+
+    print!("{}", resources::render_diff(&plan));
+
+    Ok(())
+}
+
+/// The manifest paths for `--resource`. Paths on the command line replace the config's list
+/// instead of adding to it, so a CI job can point one shared config at the manifests of the
+/// change it is previewing.
+fn resource_paths(from_args: Vec<PathBuf>, config: &mut LayerConfig) -> Vec<PathBuf> {
+    let from_config = std::mem::take(&mut config.feature.preview.spec_resources);
+    if from_args.is_empty() {
+        from_config
+    } else {
+        from_args
+    }
+}
+
+fn load_manifests(
+    paths: &[PathBuf],
+    progress: &ProgressTracker,
+) -> CliResult<Vec<resources::SuppliedObject>> {
+    let mut subtask = progress.subtask("reading manifests");
+    let objects = resources::load(paths).inspect_err(|_| subtask.failure(None))?;
+    subtask.success(Some(&format!(
+        "read {} object{} from {}",
+        objects.len(),
+        if objects.len() == 1 { "" } else { "s" },
+        resources::sources_label(paths),
+    )));
+    Ok(objects)
+}
+
+/// `--resource` compares against and builds from objects in the target's cluster, which the
+/// CLI reaches with the user's own credentials. A management-only operator lives in a cluster
+/// without the target, and an operator without `PreviewSpecResources` would drop the field
+/// the files travel in and silently run the live spec: both are refused up front.
+fn require_spec_resources_support(spec: &MirrordOperatorSpec) -> CliResult<()> {
+    spec.require_feature(NewOperatorFeature::PreviewSpecResources)?;
+    reject_management_only(spec)
+}
+
+fn reject_management_only(spec: &MirrordOperatorSpec) -> CliResult<()> {
+    if spec.operator_namespace.is_some() {
+        return Err(CliError::PreviewResourcesManagementOnly);
+    }
+    Ok(())
+}
+
+/// `--resource` compares the files with one workload's live pod template, and a label target
+/// matches pods of any number of workloads.
+fn resources_target(target: &SessionTarget) -> CliResult<&KubeResourceTarget> {
+    match target {
+        SessionTarget::KubeResource(target) => Ok(target),
+        SessionTarget::PodSet(_) => Err(CliError::UnsupportedTargetConfig(format!(
+            "`--resource` does not support label target `{}`; target a single workload, or leave \
+             out `--resource`",
+            target.display_name()
+        ))),
+    }
+}
+
+/// The target's namespace: the configured one, or the kubeconfig default.
+fn target_namespace<'a>(
+    operator_api: &'a OperatorApi<NoClientCert>,
+    config: &'a LayerConfig,
+) -> &'a str {
+    config
+        .target
+        .namespace
+        .as_deref()
+        .unwrap_or(operator_api.client().default_namespace())
+}
+
 /// Resolves a [`Target`] to a [`SessionTarget`] by fetching the target from the operator's
 /// GET TargetCrd API. The operator validates the target exists and resolves the container if
 /// not specified. Works for both single-cluster and multi-cluster.
@@ -1251,9 +1461,11 @@ fn resolve_secret_mounts(
 }
 
 /// Resolves the TLS delivery settings a preview honors. The operator makes the TLS connection
-/// to the preview pod, so the client certificate and its key are read here and stored in
-/// `secret_values` for the session's Secret; the CR only names their keys. Also returns a
-/// warning for every configured setting a preview cannot honor.
+/// to the preview pod, so a local client certificate and its key are read here and stored in
+/// `secret_values` for the session's Secret; the CR only names their keys. With
+/// `client_cert_source: target` the files stay in the cluster and the CR carries their
+/// in-container paths for the operator to read. Also returns a warning for every configured
+/// setting a preview cannot honor.
 fn resolve_tls_delivery(
     config: Option<&LocalTlsDelivery>,
     secret_values: &mut BTreeMap<String, ByteString>,
@@ -1272,8 +1484,23 @@ fn resolve_tls_delivery(
         )
         .into());
     }
+    // Exec skips a target source with no files under `protocol: tcp`, because it
+    // never opens TLS. A preview still does, and would otherwise start with no
+    // client certificate for the operator to present.
+    if config.client_cert_source == TlsClientCertSource::Target && config.client_cert.is_none() {
+        return Err(ConfigError::Conflict(
+            ".feature.network.incoming.tls_delivery.client_cert_source is `target` \
+             but .feature.network.incoming.tls_delivery.client_cert and \
+             .feature.network.incoming.tls_delivery.client_key are not set"
+                .to_owned(),
+        )
+        .into());
+    }
     if config.client_cert.is_some() || config.server_name.is_some() {
         operator.require_feature(NewOperatorFeature::PreviewTlsDelivery)?;
+    }
+    if config.client_cert_source == TlsClientCertSource::Target {
+        operator.require_feature(NewOperatorFeature::PreviewTlsClientAuthFromTarget)?;
     }
 
     let mut warnings = Vec::new();
@@ -1292,8 +1519,14 @@ fn resolve_tls_delivery(
         );
     }
 
-    let client_auth = match (config.client_cert.as_deref(), config.client_key.as_deref()) {
-        (Some(cert), Some(key)) => {
+    let mut client_auth = None;
+    let mut client_auth_from_target = None;
+    match (
+        config.client_cert.as_deref(),
+        config.client_key.as_deref(),
+        config.client_cert_source,
+    ) {
+        (Some(cert), Some(key), TlsClientCertSource::Local) => {
             secret_values.insert(
                 PreviewTlsClientAuth::CERT_SECRET_KEY.to_owned(),
                 ByteString(read_tls_client_auth_file(cert)?),
@@ -1302,18 +1535,26 @@ fn resolve_tls_delivery(
                 PreviewTlsClientAuth::KEY_SECRET_KEY.to_owned(),
                 ByteString(read_tls_client_auth_file(key)?),
             );
-            Some(PreviewTlsClientAuth {
+            client_auth = Some(PreviewTlsClientAuth {
                 cert_secret_key: PreviewTlsClientAuth::CERT_SECRET_KEY.to_owned(),
                 key_secret_key: PreviewTlsClientAuth::KEY_SECRET_KEY.to_owned(),
-            })
+            });
+        }
+        // Config paths come from JSON, so they are UTF-8 and the lossy conversion is exact.
+        (Some(cert), Some(key), TlsClientCertSource::Target) => {
+            client_auth_from_target = Some(PreviewTlsClientAuthFromTarget {
+                cert_path: cert.to_string_lossy().into_owned(),
+                key_path: key.to_string_lossy().into_owned(),
+            });
         }
         // Pairing was checked above, including for TCP configuration.
-        _ => None,
-    };
+        _ => {}
+    }
 
     let tls_delivery = PreviewTlsDelivery {
         server_name: config.server_name.clone(),
         client_auth,
+        client_auth_from_target,
     };
     // Nothing to honor: leave the CR identical to what older CLIs send.
     let tls_delivery = (tls_delivery != PreviewTlsDelivery::default()).then_some(tls_delivery);
@@ -1444,10 +1685,17 @@ mod tests {
     }
 
     fn operator(supports_tls: bool) -> MirrordOperatorSpec {
-        let mut features = vec![NewOperatorFeature::PreviewEnv];
         if supports_tls {
-            features.push(NewOperatorFeature::PreviewTlsDelivery);
+            operator_with(&[NewOperatorFeature::PreviewTlsDelivery])
+        } else {
+            operator_with(&[])
         }
+    }
+
+    /// An operator supporting previews plus the given features.
+    fn operator_with(extra_features: &[NewOperatorFeature]) -> MirrordOperatorSpec {
+        let mut features = vec![NewOperatorFeature::PreviewEnv];
+        features.extend_from_slice(extra_features);
         serde_json::from_value(serde_json::json!({
             "operator_version": "3.211.0",
             "default_namespace": "default",
@@ -1455,6 +1703,33 @@ mod tests {
             "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
         }))
         .unwrap()
+    }
+
+    /// An operator without `PreviewSpecResources` would have the API server prune
+    /// `spec.specResources` from the session and run the live spec, silently ignoring the
+    /// user's files. The CLI refuses instead.
+    #[test]
+    fn old_operator_refuses_resource_instead_of_ignoring_it() {
+        let error = require_spec_resources_support(&operator(false)).unwrap_err();
+        assert!(
+            matches!(&error, CliError::FeatureNotSupportedInOperatorError { feature, .. } if *feature == NewOperatorFeature::PreviewSpecResources.to_string()),
+            "{error}"
+        );
+
+        let mut supported: MirrordOperatorSpec = serde_json::from_value(serde_json::json!({
+            "operator_version": "3.213.0",
+            "default_namespace": "default",
+            "supported_features": [NewOperatorFeature::PreviewEnv, NewOperatorFeature::PreviewSpecResources],
+            "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
+        }))
+        .unwrap();
+        assert!(require_spec_resources_support(&supported).is_ok());
+
+        supported.operator_namespace = Some("mirrord".to_owned());
+        assert!(matches!(
+            require_spec_resources_support(&supported),
+            Err(CliError::PreviewResourcesManagementOnly)
+        ));
     }
 
     #[test]
@@ -1518,6 +1793,28 @@ mod tests {
         }
     }
 
+    /// `protocol: tcp` makes exec ignore TLS settings, but a preview still delivers over TLS.
+    /// `client_cert_source: target` with no paths must be rejected here, otherwise the preview
+    /// starts and the pod rejects every stolen request for lack of a client certificate.
+    #[test]
+    fn preview_rejects_target_source_without_paths_even_with_tcp() {
+        for protocol in [TlsDeliveryProtocol::Tcp, TlsDeliveryProtocol::Tls] {
+            let config = LocalTlsDelivery {
+                protocol,
+                client_cert_source: TlsClientCertSource::Target,
+                ..Default::default()
+            };
+            let mut values = BTreeMap::new();
+            let error = resolve_tls_delivery(Some(&config), &mut values, &operator(true))
+                .expect_err("target source without files must be rejected");
+            assert!(
+                matches!(error, CliError::ConfigError(ConfigError::Conflict(ref message)) if message.contains("client_cert_source")),
+                "{error}",
+            );
+            assert!(values.is_empty());
+        }
+    }
+
     /// A preview delivers stolen TLS requests from the operator, which has no access to the
     /// user's files. The client certificate configured in `tls_delivery` must therefore be
     /// read by the CLI into the session's Secret, with the CR naming only the keys.
@@ -1548,6 +1845,7 @@ mod tests {
                     cert_secret_key: "tls-client-cert".to_owned(),
                     key_secret_key: "tls-client-key".to_owned(),
                 }),
+                client_auth_from_target: None,
             })
         );
         assert_eq!(
@@ -1558,6 +1856,63 @@ mod tests {
             secret_values.get("tls-client-key"),
             Some(&ByteString(b"KEY PEM".to_vec()))
         );
+    }
+
+    /// With `client_cert_source: target` the paths name files in the target's container, so
+    /// the CLI must not try to read them (they do not exist locally) and nothing goes into the
+    /// Secret; the CR carries the paths for the operator.
+    #[test]
+    fn target_source_puts_paths_on_the_cr_and_reads_nothing() {
+        let config = LocalTlsDelivery {
+            client_cert_source: TlsClientCertSource::Target,
+            client_cert: Some(PathBuf::from("/etc/tls/client.crt")),
+            client_key: Some(PathBuf::from("/etc/tls/client.key")),
+            ..Default::default()
+        };
+        let mut secret_values = BTreeMap::new();
+        let (tls_delivery, warnings) = resolve_tls_delivery(
+            Some(&config),
+            &mut secret_values,
+            &operator_with(&[
+                NewOperatorFeature::PreviewTlsDelivery,
+                NewOperatorFeature::PreviewTlsClientAuthFromTarget,
+            ]),
+        )
+        .unwrap();
+
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            tls_delivery,
+            Some(PreviewTlsDelivery {
+                server_name: None,
+                client_auth: None,
+                client_auth_from_target: Some(PreviewTlsClientAuthFromTarget {
+                    cert_path: "/etc/tls/client.crt".to_owned(),
+                    key_path: "/etc/tls/client.key".to_owned(),
+                }),
+            })
+        );
+        assert!(secret_values.is_empty());
+    }
+
+    /// An operator without the feature prunes `clientAuthFromTarget` from the CR and the
+    /// preview pod rejects every stolen request with a TLS alert, so the CLI refuses up front.
+    #[test]
+    fn operator_without_target_source_support_is_rejected() {
+        let config = LocalTlsDelivery {
+            client_cert_source: TlsClientCertSource::Target,
+            client_cert: Some(PathBuf::from("/etc/tls/client.crt")),
+            client_key: Some(PathBuf::from("/etc/tls/client.key")),
+            ..Default::default()
+        };
+        let mut secret_values = BTreeMap::new();
+        let error =
+            resolve_tls_delivery(Some(&config), &mut secret_values, &operator(true)).unwrap_err();
+
+        assert!(
+            matches!(error, CliError::FeatureNotSupportedInOperatorError { feature, .. } if feature == NewOperatorFeature::PreviewTlsClientAuthFromTarget.to_string())
+        );
+        assert!(secret_values.is_empty());
     }
 
     /// Settings a preview cannot honor are reported instead of silently ignored, and a config

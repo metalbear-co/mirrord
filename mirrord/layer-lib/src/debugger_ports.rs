@@ -580,7 +580,10 @@ impl DebuggerPorts {
                     .ok()
             }) {
             Some(debugger) => {
-                let mut args = std::env::args().collect::<Vec<_>>();
+                // Not `args`, which panics on an argument that is not valid Unicode.
+                let mut args = std::env::args_os()
+                    .map(|argument| argument.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>();
                 // Only the Java launcher hides its args behind an `@argfile`; expanding
                 // for the other debugger types would shift their positional parsing.
                 if matches!(debugger, DebuggerType::JavaAgent) {

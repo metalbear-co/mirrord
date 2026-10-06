@@ -28,7 +28,7 @@ use winapi::{
 };
 
 use crate::hooks::files::{
-    managed_handle::MANAGED_HANDLES, types::NT_WAIT_FOR_SINGLE_OBJECT_ORIGINAL,
+    managed_handle::is_managed_handle, types::NT_WAIT_FOR_SINGLE_OBJECT_ORIGINAL,
 };
 
 /// Body of `nt_wait_for_single_object_hook`.
@@ -38,7 +38,7 @@ pub(in crate::hooks::files) unsafe fn handle(
     timeout: PLARGE_INTEGER,
 ) -> NTSTATUS {
     unsafe {
-        if MANAGED_HANDLES.get(&handle).is_some() {
+        if is_managed_handle(handle) {
             tracing::debug!(
                 handle = ?handle,
                 "nt_wait_for_single_object_hook: managed file handle, returning STATUS_WAIT_0 (data is already in the caller's buffer)"

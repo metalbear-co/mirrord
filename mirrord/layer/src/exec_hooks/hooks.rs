@@ -1,5 +1,7 @@
 use base64::prelude::*;
 use libc::{c_char, c_int};
+#[cfg(not(target_os = "macos"))]
+use mirrord_layer_core::hooks::ProbedCall;
 use mirrord_layer_lib::detour::{Bypass, Detour};
 #[cfg(not(target_os = "macos"))]
 use mirrord_layer_macro::hook_fn;
@@ -40,12 +42,18 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
         other => Detour::Bypass(other),
     })?;
 
+    env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded_shared_sockets()?)?;
+
+    Detour::Success(env_vars)
+}
+
+/// Encodes [`SOCKETS`] as the value of [`SHARED_SOCKETS_ENV_VAR`], which the layer in the new
+/// image reads to rebuild them.
+fn encoded_shared_sockets() -> Detour<String> {
     let encoded = bincode::encode_to_vec(shared_sockets()?, bincode::config::standard())
         .map(|bytes| BASE64_URL_SAFE.encode(bytes))?;
 
-    env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded)?;
-
-    Detour::Success(env_vars)
+    Detour::Success(encoded)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -59,37 +67,44 @@ unsafe fn environ() -> *const *const c_char {
     }
 }
 
-/// Hook for `libc::execv` for linux only.
+/// Hook for `libc::execv` on Linux, installed only when the `execve` probe can't be.
 ///
-/// On macos this just calls `execve(path, argv, _environ)`, so we'll be handling it in our
-/// [`execve_detour`].
+/// With the probe installed, `execv` reaches it through `execve` and needs no hook. Without it,
+/// this detour prepares the environment itself so `execv` children still receive socket metadata.
 #[cfg(not(target_os = "macos"))]
 #[hook_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
     unsafe {
         let envp = environ();
         match prepare_execve_envp(envp.checked_into()) {
-            Detour::Success(envp) => FN_EXECVE(path, argv, envp.leak()),
-            _ => FN_EXECVE(path, argv, envp),
+            Detour::Success(envp) => libc::execve(path, argv, envp.leak()),
+            _ => libc::execve(path, argv, envp),
         }
     }
 }
 
-/// Hook for `libc::execve`.
+/// Adds socket metadata for the new image to Linux `execve`'s environment.
 ///
-/// We can't change the pointers, to get around that we create our own and **leak** them.
+/// In glibc's `posix_spawn`, this runs on the small stack of the `vfork` child (about 36 KiB), so
+/// keep large values off the stack.
 #[cfg(not(target_os = "macos"))]
-#[hook_fn]
-pub(crate) unsafe extern "C" fn execve_detour(
-    path: *const c_char,
-    argv: *const *const c_char,
-    envp: *const *const c_char,
-) -> c_int {
-    unsafe {
-        match prepare_execve_envp(envp.checked_into()) {
-            Detour::Success(envp) => FN_EXECVE(path, argv, envp.leak()),
-            _ => FN_EXECVE(path, argv, envp),
-        }
+fn on_execve(call: &ProbedCall<'_>) {
+    const ENVP: u32 = 2;
+
+    let Detour::Success(encoded) = encoded_shared_sockets() else {
+        return;
+    };
+
+    // SAFETY: `execve` requires `envp` to be null or a null-terminated array of C strings.
+    let envp = unsafe {
+        with_env(
+            call.arg(ENVP) as *const *const c_char,
+            SHARED_SOCKETS_ENV_VAR,
+            &encoded,
+        )
+    };
+    if let Some(envp) = envp {
+        call.set_arg(ENVP, envp as usize);
     }
 }
 
@@ -140,10 +155,22 @@ pub(crate) unsafe extern "C" fn execve_detour(
 
 /// Enables `exec` hooks.
 pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {
-    unsafe {
-        #[cfg(not(target_os = "macos"))]
-        replace!(hook_manager, "execv", execv_detour, FnExecv, FN_EXECV);
+    // A replacement hook leaves frida's per-thread state behind when the function never returns,
+    // as after a successful `exec` in a `vfork` child, so `execv` is replaced only as a fallback.
+    #[cfg(not(target_os = "macos"))]
+    if let Err(error) = hook_manager.probe_export_or_any("execve", on_execve) {
+        tracing::warn!(
+            ?error,
+            "failed to install execve probe; processes started through execve or posix_spawn will not get shared socket metadata"
+        );
 
+        unsafe {
+            replace!(hook_manager, "execv", execv_detour, FnExecv, FN_EXECV);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    unsafe {
         replace!(hook_manager, "execve", execve_detour, FnExecve, FN_EXECVE);
     }
 }

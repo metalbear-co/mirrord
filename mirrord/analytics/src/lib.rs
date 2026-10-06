@@ -320,6 +320,10 @@ pub enum ReportTarget {
     McpServerStarted,
     /// One tool call handled by `mirrord mcp`.
     McpToolCalled,
+    /// One run of `mirrord operator install`.
+    OperatorInstall,
+    /// One run of `mirrord operator uninstall`.
+    OperatorUninstall,
 }
 
 /// Header the client sets to tell the analytics-server which event a report is.
@@ -338,6 +342,8 @@ impl ReportTarget {
             ReportTarget::TuiEvent => "tui-event",
             ReportTarget::McpServerStarted => "mcp-server-started",
             ReportTarget::McpToolCalled => "mcp-tool-called",
+            ReportTarget::OperatorInstall => "operator-install",
+            ReportTarget::OperatorUninstall => "operator-uninstall",
         }
     }
 }
@@ -446,7 +452,7 @@ impl AnalyticsReporter {
 
     /// A reporter for `target` that carries the properties shared by every standalone event:
     /// `machine_id`, `is_ci`, and the AI agent detection.
-    fn for_event(
+    pub fn for_event(
         target: ReportTarget,
         enabled: bool,
         watch: drain::Watch,
@@ -708,5 +714,18 @@ mod tests {
             "mcp-server-started"
         );
         assert_eq!(ReportTarget::McpToolCalled.event_kind(), "mcp-tool-called");
+    }
+
+    /// These values are registered on the analytics server, which rejects unknown ones.
+    #[test]
+    fn operator_event_kinds() {
+        assert_eq!(
+            ReportTarget::OperatorInstall.event_kind(),
+            "operator-install"
+        );
+        assert_eq!(
+            ReportTarget::OperatorUninstall.event_kind(),
+            "operator-uninstall"
+        );
     }
 }
