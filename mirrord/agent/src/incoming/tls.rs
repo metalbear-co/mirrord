@@ -9,7 +9,7 @@ use std::{
 use error::{StealTlsSetupError, StealTlsSetupErrorInner};
 use handler::{IdentityClientConfigs, StealTlsHandler};
 use mirrord_agent_env::steal_tls::{
-    AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication,
+    AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication, TlsClientIdentity,
     TlsClientVerification, TlsServerVerification,
 };
 use mirrord_tls_util::{
@@ -255,11 +255,12 @@ impl StealTlsHandlerStore {
 
         let mut identity_client_configs: IdentityClientConfigs =
             Vec::with_capacity(config.identities.len());
-        for path in config.identities {
+        for TlsClientIdentity { cert, key } in config.identities {
+            let path = cert.clone();
             let (cert_chain, key_der) = self
                 .read_authentication(TlsAuthentication {
-                    cert_pem: path.clone(),
-                    key_pem: path.clone(),
+                    cert_pem: cert,
+                    key_pem: key,
                 })
                 .await?;
             let Some(identity) = cert_chain

@@ -1,10 +1,10 @@
-use std::{fmt, io, net::IpAddr, sync::Arc};
+use std::{fmt, io, net::IpAddr, ops::Not, sync::Arc};
 
 use http::Uri;
 use mirrord_protocol::tcp::{
     IncomingTrafficTransportType, TLS_CLIENT_IDENTITY_VERSION, TlsClientIdentity,
 };
-use mirrord_tls_util::{CertIdentity, UriExt};
+use mirrord_tls_util::{CertIdentity, CertNames, UriExt};
 use rustls::{ClientConfig, ServerConfig, ServerConnection, pki_types::ServerName};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
@@ -59,20 +59,24 @@ impl StealTlsHandler {
             .into_iter()
             .map(Vec::from)
             .collect::<Vec<_>>();
-        let client_identity = original_connection
+        let client_names = original_connection
             .peer_certificates()
             .filter(|_| self.verifies_clients)
             .and_then(|certs| certs.first())
-            .and_then(|cert| CertIdentity::from_der(cert));
+            .and_then(|cert| CertNames::from_der(cert));
 
-        let identity_config = client_identity.as_ref().and_then(|identity| {
-            self.identity_client_configs
-                .iter()
-                .enumerate()
-                .find(|(_, (candidate, _))| candidate == identity)
-        });
+        let identity_config = client_names
+            .as_ref()
+            .filter(|_| self.identity_client_configs.is_empty().not())
+            .and_then(|names| CertIdentity::new(&names.subject, &names.subject_alternative_names))
+            .and_then(|identity| {
+                self.identity_client_configs
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (candidate, _))| *candidate == identity)
+            });
         tracing::debug!(
-            has_client_identity = client_identity.is_some(),
+            has_client_cert = client_names.is_some(),
             identity_index = ?identity_config.map(|(index, _)| index),
             "Selected the client certificate for the passthrough connection \
             (index in `agentAsClient.identities`, or `authentication` if none)",
@@ -86,7 +90,7 @@ impl StealTlsHandler {
         PassThroughTlsConnector {
             client_config: Arc::new(client_config),
             server_name,
-            client_identity,
+            client_names,
         }
     }
 }
@@ -105,8 +109,8 @@ pub struct PassThroughTlsConnector {
     /// From the SNI extension received in the stolen connection, or else configured in the steal
     /// config.
     server_name: Option<ServerName<'static>>,
-    /// Identity from the certificate presented in the stolen connection.
-    client_identity: Option<CertIdentity>,
+    /// Names from the verified certificate presented in the stolen connection.
+    client_names: Option<CertNames>,
 }
 
 impl PassThroughTlsConnector {
@@ -179,8 +183,8 @@ impl PassThroughTlsConnector {
             IncomingTrafficTransportType::TlsV2 {
                 alpn_protocol,
                 server_name,
-                client_identity: self.client_identity.clone().map(
-                    |CertIdentity {
+                client_identity: self.client_names.clone().map(
+                    |CertNames {
                          subject,
                          subject_alternative_names,
                      }| TlsClientIdentity {
@@ -210,7 +214,7 @@ impl fmt::Debug for PassThroughTlsConnector {
                     .map(|proto| String::from_utf8_lossy(proto)),
             )
             .field("server_name", &self.server_name)
-            .field("client_identity", &self.client_identity)
+            .field("client_names", &self.client_names)
             .finish()
     }
 }

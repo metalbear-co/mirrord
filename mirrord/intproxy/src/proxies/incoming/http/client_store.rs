@@ -282,27 +282,13 @@ impl ClientStore {
         let connector_and_name = match (transport, self.tls_setup.as_ref()) {
             (IncomingTrafficTransportType::Tcp, ..) => None,
             (.., None) => None,
-            (
-                IncomingTrafficTransportType::Tls {
-                    alpn_protocol,
-                    server_name: original_server_name,
-                }
-                | IncomingTrafficTransportType::TlsV2 {
-                    alpn_protocol,
-                    server_name: original_server_name,
-                    ..
-                },
-                Some(setup),
-            ) => {
-                let alpn_protocol = alpn_protocol.clone();
+            (.., Some(setup)) => {
+                let alpn_protocol = transport.alpn_protocol().map(Vec::from);
                 let client_identity = setup.select_identity(transport.client_identity()).await?;
                 let (connector, server_name) = setup.get(alpn_protocol, client_identity).await?;
 
                 let server_name = server_name
-                    .or_else(|| {
-                        let name = original_server_name.clone()?;
-                        ServerName::try_from(name).ok()
-                    })
+                    .or_else(|| ServerName::try_from(transport.server_name()?.to_owned()).ok())
                     .or_else(|| request_uri.get_server_name()?.to_owned().into())
                     .unwrap_or_else(|| {
                         ServerName::try_from("localhost").expect("'localhost' is a valid DNS name")
@@ -418,7 +404,7 @@ mod test {
     use mirrord_protocol::tcp::{
         HttpRequest, IncomingTrafficTransportType, InternalHttpRequest, TlsClientIdentity,
     };
-    use mirrord_tls_util::CertIdentity;
+    use mirrord_tls_util::CertNames;
     use rcgen::{
         BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, IsCa, Issuer, KeyPair,
         KeyUsagePurpose,
@@ -540,16 +526,15 @@ mod test {
         let transport = |name: &str| IncomingTrafficTransportType::TlsV2 {
             alpn_protocol: None,
             server_name: None,
-            client_identity: CertIdentity::from_der(generate_cert(name, None, false).cert.der())
-                .map(
-                    |CertIdentity {
-                         subject,
-                         subject_alternative_names,
-                     }| TlsClientIdentity {
-                        subject,
-                        subject_alternative_names,
-                    },
-                ),
+            client_identity: CertNames::from_der(generate_cert(name, None, false).cert.der()).map(
+                |CertNames {
+                     subject,
+                     subject_alternative_names,
+                 }| TlsClientIdentity {
+                    subject,
+                    subject_alternative_names,
+                },
+            ),
         };
         let client_a = transport("client-a");
         let uri = "https://localhost".parse().unwrap();

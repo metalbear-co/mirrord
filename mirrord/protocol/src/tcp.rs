@@ -181,6 +181,26 @@ pub enum IncomingTrafficTransportType {
 }
 
 impl IncomingTrafficTransportType {
+    /// ALPN protocol negotiated with the original client.
+    pub fn alpn_protocol(&self) -> Option<&[u8]> {
+        match self {
+            Self::Tls { alpn_protocol, .. } | Self::TlsV2 { alpn_protocol, .. } => {
+                alpn_protocol.as_deref()
+            }
+            Self::Tcp => None,
+        }
+    }
+
+    /// Server name sent by the original client in the SNI extension.
+    pub fn server_name(&self) -> Option<&str> {
+        match self {
+            Self::Tls { server_name, .. } | Self::TlsV2 { server_name, .. } => {
+                server_name.as_deref()
+            }
+            Self::Tcp => None,
+        }
+    }
+
     pub fn client_identity(&self) -> Option<&TlsClientIdentity> {
         match self {
             Self::TlsV2 {
@@ -195,12 +215,14 @@ impl IncomingTrafficTransportType {
 ///
 /// Allows the client to present a certificate with the same identity when delivering the traffic
 /// to a local server that authorizes requests based on the client's identity.
+///
+/// The names are exactly as found in the certificate, without any normalization.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct TlsClientIdentity {
     /// DER encoding of the certificate subject's distinguished name.
     pub subject: Vec<u8>,
-    /// DER encodings of the certificate's subject alternative names (including their tags),
-    /// sorted and deduplicated. DNS names are lowercased and stripped of a trailing dot.
+    /// DER encodings of the certificate's subject alternative names (including their tags), in
+    /// the order they appear in the certificate.
     pub subject_alternative_names: Vec<Vec<u8>>,
 }
 

@@ -11,12 +11,63 @@ use tracing::Level;
 use x509_parser::{
     asn1_rs::{Any, Sequence},
     oid_registry::OID_X509_EXT_SUBJECT_ALT_NAME,
-    prelude::{FromDer, X509Certificate},
+    prelude::{FromDer, X509Certificate, X509Name},
 };
 
 /// Tag of a `dNSName` [GeneralName](https://www.rfc-editor.org/rfc/rfc5280#section-4.2.1.6):
 /// context-specific, primitive, number 2.
 const DNS_NAME_TAG: u8 = 0x82;
+
+/// Names found in an X509 certificate, exactly as they are encoded in it.
+///
+/// This is what the agent sends over mirrord-protocol. It is turned into a [`CertIdentity`] only
+/// where identities are compared, so that the comparison rules can change without an agent
+/// upgrade.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CertNames {
+    /// DER encoding of the subject's distinguished name.
+    pub subject: Vec<u8>,
+    /// DER encodings of the subject alternative names (including their tags), in the order they
+    /// appear in the certificate.
+    pub subject_alternative_names: Vec<Vec<u8>>,
+}
+
+impl CertNames {
+    /// Extracts the names from the given DER-encoded X509 certificate.
+    ///
+    /// Returns [`None`] when the certificate or its SAN extension cannot be parsed.
+    #[tracing::instrument(level = Level::DEBUG, skip_all, ret)]
+    pub fn from_der(cert: &[u8]) -> Option<Self> {
+        let (_, cert) = X509Certificate::from_der(cert)
+            .inspect_err(|error| tracing::warn!(%error, "Failed to parse an X509 certificate"))
+            .ok()?;
+
+        let mut subject_alternative_names = Vec::new();
+        let san_extension = cert
+            .get_extension_unique(&OID_X509_EXT_SUBJECT_ALT_NAME)
+            .inspect_err(|error| tracing::warn!(%error, "Invalid X509 SAN extension"))
+            .ok()?;
+        if let Some(extension) = san_extension {
+            let (_, names) = Sequence::from_der(extension.value)
+                .inspect_err(|error| tracing::warn!(%error, "Invalid X509 SAN extension"))
+                .ok()?;
+            let mut remaining = names.content.as_ref();
+            while remaining.is_empty().not() {
+                let (rest, _) = Any::from_der(remaining)
+                    .inspect_err(|error| tracing::warn!(%error, "Invalid X509 SAN extension"))
+                    .ok()?;
+                let (encoded, _) = remaining.split_at(remaining.len() - rest.len());
+                subject_alternative_names.push(encoded.to_vec());
+                remaining = rest;
+            }
+        }
+
+        Some(Self {
+            subject: cert.subject().as_raw().to_vec(),
+            subject_alternative_names,
+        })
+    }
+}
 
 /// Identity of a TLS client, as seen by a server that authorizes requests based on the client's
 /// certificate.
@@ -28,18 +79,16 @@ const DNS_NAME_TAG: u8 = 0x82;
 /// workload still matches, even if its issuer, validity period or subject differ (some issuers
 /// put a per-certificate unique identifier in the subject).
 ///
-/// Names are kept DER-encoded, so that the identity can be sent over mirrord-protocol and
-/// compared on the other side. DNS names are normalized (ASCII lowercase, no trailing dot), and
+/// SANs are compared as a set. DNS names are normalized (ASCII lowercase, no trailing dot), and
 /// all other names are compared byte by byte. In particular, there is no RFC 5280 normalization
 /// of distinguished names, so subjects with the same attributes stored with different string
 /// types (e.g. `PrintableString` and `UTF8String`) do not match.
 #[derive(Debug, Clone, Eq)]
 pub struct CertIdentity {
     /// DER encoding of the subject's distinguished name.
-    pub subject: Vec<u8>,
-    /// DER encodings of the subject alternative names (including their tags), sorted and
-    /// deduplicated.
-    pub subject_alternative_names: Vec<Vec<u8>>,
+    subject: Vec<u8>,
+    /// Normalized DER encodings of the subject alternative names (including their tags).
+    subject_alternative_names: BTreeSet<Vec<u8>>,
 }
 
 impl PartialEq for CertIdentity {
@@ -50,50 +99,51 @@ impl PartialEq for CertIdentity {
 }
 
 impl CertIdentity {
-    /// Extracts the identity from the given DER-encoded X509 certificate.
+    /// Builds the identity from names found in a certificate (see [`CertNames`]).
     ///
-    /// Returns [`None`] when the certificate cannot be parsed, or carries no identity (empty
-    /// subject and no subject alternative names). Certificates without an identity are not
-    /// distinguishable from each other, so they must never match.
+    /// Returns [`None`] when the names are not valid DER, or carry no identity (empty subject and
+    /// no subject alternative names). Certificates without an identity are not distinguishable
+    /// from each other, so they must never match.
     #[tracing::instrument(level = Level::DEBUG, skip_all, ret)]
-    pub fn from_der(cert: &[u8]) -> Option<Self> {
-        let (_, cert) = X509Certificate::from_der(cert)
-            .inspect_err(|error| tracing::warn!(%error, "Failed to parse an X509 certificate"))
-            .ok()?;
-
-        let mut subject_alternative_names = BTreeSet::new();
-        let san_extension = cert
-            .get_extension_unique(&OID_X509_EXT_SUBJECT_ALT_NAME)
-            .inspect_err(|error| tracing::warn!(%error, "Invalid X509 SAN extension"))
-            .ok()?;
-        if let Some(extension) = san_extension {
-            let (_, names) = Sequence::from_der(extension.value)
-                .inspect_err(|error| tracing::warn!(%error, "Invalid X509 SAN extension"))
-                .ok()?;
-            let mut remaining = names.content.as_ref();
-            while remaining.is_empty().not() {
-                let (rest, name) = Any::from_der(remaining)
-                    .inspect_err(|error| tracing::warn!(%error, "Invalid X509 SAN extension"))
+    pub fn new(subject: &[u8], subject_alternative_names: &[Vec<u8>]) -> Option<Self> {
+        let subject_alternative_names = subject_alternative_names
+            .iter()
+            .map(|encoded| {
+                let (rest, name) = Any::from_der(encoded)
+                    .inspect_err(|error| tracing::warn!(%error, "Invalid subject alternative name"))
                     .ok()?;
-                let (encoded, _) = remaining.split_at(remaining.len() - rest.len());
-                let encoded = if encoded.first() == Some(&DNS_NAME_TAG) {
-                    normalized_dns_name(name.as_bytes())
-                } else {
-                    encoded.to_vec()
-                };
-                subject_alternative_names.insert(encoded);
-                remaining = rest;
-            }
-        }
+                if rest.is_empty().not() {
+                    tracing::warn!("Subject alternative name has trailing data");
+                    return None;
+                }
 
-        if cert.subject().iter_rdn().next().is_none() && subject_alternative_names.is_empty() {
+                if encoded.first() == Some(&DNS_NAME_TAG) {
+                    Some(normalized_dns_name(name.as_bytes()))
+                } else {
+                    Some(encoded.clone())
+                }
+            })
+            .collect::<Option<BTreeSet<_>>>()?;
+
+        let (_, subject_name) = X509Name::from_der(subject)
+            .inspect_err(|error| tracing::warn!(%error, "Invalid subject"))
+            .ok()?;
+        if subject_name.iter_rdn().next().is_none() && subject_alternative_names.is_empty() {
             return None;
         }
 
         Some(Self {
-            subject: cert.subject().as_raw().to_vec(),
-            subject_alternative_names: subject_alternative_names.into_iter().collect(),
+            subject: subject.to_vec(),
+            subject_alternative_names,
         })
+    }
+
+    /// Extracts the identity from the given DER-encoded X509 certificate.
+    ///
+    /// Returns [`None`] when the certificate cannot be parsed, or carries no identity.
+    pub fn from_der(cert: &[u8]) -> Option<Self> {
+        let names = CertNames::from_der(cert)?;
+        Self::new(&names.subject, &names.subject_alternative_names)
     }
 }
 
@@ -277,6 +327,68 @@ mod test {
         assert!(rest.is_empty());
         assert_eq!(encoded.first(), Some(&DNS_NAME_TAG));
         assert_eq!(name.as_bytes(), value.as_bytes());
+    }
+
+    /// Names sent over mirrord-protocol are not normalized, so that the comparison rules can
+    /// change without an agent upgrade.
+    #[test]
+    fn names_are_not_normalized() {
+        let mut params = CertificateParams::default();
+        params.distinguished_name = DistinguishedName::new();
+        params.subject_alt_names = vec![
+            SanType::DnsName("Second.Example.com.".try_into().unwrap()),
+            SanType::DnsName("first.example.com".try_into().unwrap()),
+            SanType::DnsName("Second.Example.com.".try_into().unwrap()),
+        ];
+        let cert = params.self_signed(&KeyPair::generate().unwrap()).unwrap();
+
+        let names = CertNames::from_der(cert.der()).unwrap();
+        let values = names
+            .subject_alternative_names
+            .iter()
+            .map(|encoded| Any::from_der(encoded).unwrap().1.as_bytes().to_vec())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            values,
+            [
+                b"Second.Example.com.".to_vec(),
+                b"first.example.com".to_vec(),
+                b"Second.Example.com.".to_vec(),
+            ],
+        );
+
+        let normalized = CertificateParams::new(vec![
+            "first.example.com".to_owned(),
+            "second.example.com".to_owned(),
+        ])
+        .unwrap()
+        .self_signed(&KeyPair::generate().unwrap())
+        .unwrap();
+        assert_eq!(
+            CertIdentity::new(&names.subject, &names.subject_alternative_names),
+            CertIdentity::from_der(normalized.der()),
+        );
+    }
+
+    #[test]
+    fn invalid_names_have_no_identity() {
+        let names = CertNames::from_der(
+            generate_cert("client.example.com", None, false)
+                .unwrap()
+                .cert
+                .der(),
+        )
+        .unwrap();
+
+        assert!(CertIdentity::new(&names.subject, &names.subject_alternative_names).is_some());
+        assert_eq!(
+            CertIdentity::new(b"not a name", &names.subject_alternative_names),
+            None
+        );
+        assert_eq!(
+            CertIdentity::new(&names.subject, &[b"not a name".to_vec()]),
+            None
+        );
     }
 
     #[test]

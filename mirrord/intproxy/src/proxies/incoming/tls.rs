@@ -1,7 +1,7 @@
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use mirrord_config::feature::network::incoming::tls_delivery::{
-    LocalTlsDelivery, TlsDeliveryProtocol,
+    LocalClientIdentity, LocalTlsDelivery, TlsDeliveryProtocol,
 };
 use mirrord_protocol::tcp::TlsClientIdentity;
 use mirrord_tls_util::{
@@ -152,10 +152,7 @@ impl LocalTlsSetup {
                 let client_identities = config
                     .client_identities
                     .into_iter()
-                    .map(|path| LocalClientAuth::Files {
-                        cert: path.clone(),
-                        key: path,
-                    })
+                    .map(|LocalClientIdentity { cert, key }| LocalClientAuth::Files { cert, key })
                     .collect();
 
                 Some(Arc::new(Self::new(
@@ -184,9 +181,11 @@ impl LocalTlsSetup {
         let Some(original_client) = original_client else {
             return Ok(None);
         };
-        let original_client = CertIdentity {
-            subject: original_client.subject.clone(),
-            subject_alternative_names: original_client.subject_alternative_names.clone(),
+        let Some(original_client) = CertIdentity::new(
+            &original_client.subject,
+            &original_client.subject_alternative_names,
+        ) else {
+            return Ok(None);
         };
 
         Ok(resolved
@@ -325,7 +324,8 @@ impl fmt::Debug for LocalTlsSetup {
 mod tests {
     use std::sync::Arc;
 
-    use mirrord_tls_util::generate_cert;
+    use mirrord_tls_util::{CertNames, generate_cert};
+    use rcgen::{CertificateParams, KeyPair};
     use rustls::{RootCertStore, ServerConfig, server::WebPkiClientVerifier};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
@@ -474,11 +474,10 @@ mod tests {
             vec![client_auth("client-a"), client_auth("client-b")],
         );
         let original_client = original_client.map(|name| {
-            let CertIdentity {
+            let CertNames {
                 subject,
                 subject_alternative_names,
-            } = CertIdentity::from_der(generate_cert(name, None, false).unwrap().cert.der())
-                .unwrap();
+            } = CertNames::from_der(generate_cert(name, None, false).unwrap().cert.der()).unwrap();
             TlsClientIdentity {
                 subject,
                 subject_alternative_names,
@@ -492,5 +491,58 @@ mod tests {
             CertIdentity::from_der(&presented),
             CertIdentity::from_der(expected.cert.der()),
         );
+    }
+
+    /// Self-signed certificate with the given DNS SANs, as configured client auth and as the names
+    /// the agent sends for an original client presenting it.
+    fn cert_with_sans(sans: &[&str]) -> (LocalClientAuth, TlsClientIdentity) {
+        let key = KeyPair::generate().unwrap();
+        let sans = sans.iter().map(|san| san.to_string()).collect::<Vec<_>>();
+        let cert = CertificateParams::new(sans)
+            .unwrap()
+            .self_signed(&key)
+            .unwrap();
+        let CertNames {
+            subject,
+            subject_alternative_names,
+        } = CertNames::from_der(cert.der()).unwrap();
+
+        (
+            LocalClientAuth::Pem {
+                cert: cert.pem().into_bytes(),
+                key: key.serialize_pem().into_bytes(),
+            },
+            TlsClientIdentity {
+                subject,
+                subject_alternative_names,
+            },
+        )
+    }
+
+    /// The agent sends the original client's names exactly as found in its certificate, so the
+    /// intproxy is the one to normalize them before comparing with the configured identities.
+    #[rstest::rstest]
+    #[case::dns_case_and_trailing_dot(&["Client-B.Example.COM."], Some(1))]
+    #[case::san_order(&["second.example.com", "client-b.example.com"], Some(2))]
+    #[case::no_match(&["client-c.example.com"], None)]
+    #[tokio::test]
+    async fn original_client_names_are_normalized(
+        #[case] original_client_sans: &[&str],
+        #[case] expected: Option<usize>,
+    ) {
+        let client_identities = [
+            &["client-a.example.com"][..],
+            &["client-b.example.com"],
+            &["client-b.example.com", "second.example.com"],
+        ]
+        .into_iter()
+        .map(|sans| cert_with_sans(sans).0)
+        .collect();
+        let setup = LocalTlsSetup::new(None, None, None, None, client_identities);
+
+        let (_, original_client) = cert_with_sans(original_client_sans);
+        let selected = setup.select_identity(Some(&original_client)).await.unwrap();
+
+        assert_eq!(selected, expected);
     }
 }

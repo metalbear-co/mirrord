@@ -1433,6 +1433,8 @@ async fn fetch_preview_logs_best_effort(
 mod tests {
     use std::path::PathBuf;
 
+    use mirrord_config::feature::network::incoming::tls_delivery::LocalClientIdentity;
+
     use super::*;
 
     /// The operator rebuilds the config target from the session target. A label target with no
@@ -1575,7 +1577,10 @@ mod tests {
         let config = LocalTlsDelivery {
             protocol: TlsDeliveryProtocol::Tcp,
             trust_roots: Some(vec![PathBuf::from("/roots")]),
-            client_identities: vec![PathBuf::from("/client.pem")],
+            client_identities: vec![LocalClientIdentity {
+                cert: PathBuf::from("/client.pem"),
+                key: PathBuf::from("/client.key"),
+            }],
             ..Default::default()
         };
         let mut secret_values = BTreeMap::new();

@@ -1,11 +1,11 @@
 use std::{fs, path::Path, sync::Arc};
 
 use mirrord_agent_env::steal_tls::{
-    AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication,
+    AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication, TlsClientIdentity,
     TlsClientVerification, TlsServerVerification,
 };
 use mirrord_protocol::tcp::IncomingTrafficTransportType;
-use mirrord_tls_util::{CertIdentity, DangerousNoVerifierServer, generate_cert};
+use mirrord_tls_util::{CertIdentity, CertNames, DangerousNoVerifierServer, generate_cert};
 use pem::{EncodeConfig, LineEnding, Pem};
 use rcgen::{CertifiedKey, KeyPair};
 use rustls::{
@@ -28,6 +28,15 @@ use crate::{
     },
     util::path_resolver::InTargetPathResolver,
 };
+
+/// Identity backed by a file written with [`CertChainWithKey::to_file`], which holds both the
+/// certificate chain and the key.
+fn client_identity(name: &str) -> TlsClientIdentity {
+    TlsClientIdentity {
+        cert: format!("/{name}.pem").into(),
+        key: format!("/{name}.pem").into(),
+    }
+}
 
 pub struct CertChainWithKey {
     pub key: PrivateKeyDer<'static>,
@@ -612,7 +621,7 @@ async fn agent_presents_matching_identity(
             },
             agent_as_client: AgentClientConfig {
                 authentication: Some(authentication("mirrord-agent")),
-                identities: vec!["/client-a.pem".into(), "/client-b.pem".into()],
+                identities: vec![client_identity("client-a"), client_identity("client-b")],
                 verification: TlsServerVerification {
                     server_name: None,
                     accept_any_cert: true,
@@ -678,7 +687,7 @@ async fn agent_presents_matching_identity(
     assert_eq!(
         client_identity.map(|identity| identity.subject),
         original_client.map(|name| {
-            CertIdentity::from_der(generate_cert(name, None, false).unwrap().cert.der())
+            CertNames::from_der(generate_cert(name, None, false).unwrap().cert.der())
                 .unwrap()
                 .subject
         }),
@@ -737,7 +746,7 @@ async fn identities_require_client_verification(
             },
             agent_as_client: AgentClientConfig {
                 authentication: None,
-                identities: vec!["/client-a.pem".into()],
+                identities: vec![client_identity("client-a")],
                 verification: TlsServerVerification {
                     server_name: None,
                     accept_any_cert: true,
@@ -826,6 +835,48 @@ async fn unverified_client_identity_is_not_reported() {
         panic!("expected TlsV2 transport");
     };
     assert_eq!(client_identity, None);
+}
+
+/// Clients older than [`mirrord_protocol::tcp::TLS_CLIENT_IDENTITY_VERSION`] cannot decode
+/// [`IncomingTrafficTransportType::TlsV2`], so they get the original client's identity only when
+/// their version allows it.
+#[rstest::rstest]
+#[case::old_client("1.29.1", false)]
+#[case::new_client("1.30.0", true)]
+#[tokio::test]
+async fn transport_type_depends_on_protocol_version(
+    #[case] protocol_version: &str,
+    #[case] expect_client_identity: bool,
+) {
+    let setup = SimpleStore::new(443, &["h2"]).await;
+    let client_connector = setup.connector(Some("h2"));
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let _client_handle = tokio::spawn(async move {
+        let client_agent = TcpStream::connect(addr).await.unwrap();
+        client_connector
+            .connect(ServerName::try_from("server").unwrap(), client_agent)
+            .await
+    });
+
+    let handler = setup.store.get(443).await.unwrap().unwrap();
+    let agent_client = listener.accept().await.unwrap().0;
+    let agent_client = handler.acceptor().accept(agent_client).await.unwrap();
+    let connector = handler.connector(agent_client.get_ref().1);
+
+    let transport = connector.transport_type(&protocol_version.parse().unwrap());
+    assert_eq!(
+        matches!(transport, IncomingTrafficTransportType::TlsV2 { .. }),
+        expect_client_identity,
+        "{transport:?}",
+    );
+    assert_eq!(transport.alpn_protocol(), Some(b"h2".as_slice()));
+    assert_eq!(transport.server_name(), Some("server"));
+    assert_eq!(
+        transport.client_identity().is_some(),
+        expect_client_identity
+    );
 }
 
 pub struct SimpleStore {

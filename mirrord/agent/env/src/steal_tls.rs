@@ -26,6 +26,24 @@ pub struct TlsAuthentication {
     pub key_pem: PathBuf,
 }
 
+/// A client certificate with its private key, see [`AgentClientConfig::identities`].
+#[derive(Deserialize, Serialize, Clone, Debug)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct TlsClientIdentity {
+    /// Path to a PEM file containing the certificate chain.
+    ///
+    /// This file must contain at least one certificate.
+    /// It can contain entries of other types, e.g private keys, which are ignored.
+    pub cert: PathBuf,
+    /// Path to a PEM file containing the private key matching the certificate chain found in
+    /// `cert`.
+    ///
+    /// This file must contain exactly one private key.
+    /// It can contain entries of other types, e.g certificates, which are ignored.
+    pub key: PathBuf,
+}
+
 /// Configures how a TLS client should be verified.
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -126,8 +144,6 @@ pub struct AgentClientConfig {
     /// Additional client certificates, for servers that authorize requests based on the
     /// client's identity.
     ///
-    /// Each entry is a path to a PEM file containing the certificate chain and its private key.
-    ///
     /// When passing through a connection from a client that presented a certificate,
     /// mirrord-agent uses the first of these with the same identity as the client's certificate.
     /// The identity is the set of subject alternative names, or the subject if the certificate
@@ -139,7 +155,7 @@ pub struct AgentClientConfig {
     ///
     /// Optional. Defaults to an empty list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub identities: Vec<PathBuf>,
+    pub identities: Vec<TlsClientIdentity>,
     /// Configures how mirrord-agent verifies the server's certificate.
     pub verification: TlsServerVerification,
 }
