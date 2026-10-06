@@ -163,9 +163,9 @@ fn normalized_dns_name(value: &[u8]) -> Vec<u8> {
         encoded.push(len);
     } else {
         let len = value.len().to_be_bytes();
-        let len = &len[len.iter().take_while(|byte| **byte == 0).count()..];
-        encoded.push(0x80 | len.len() as u8);
-        encoded.extend_from_slice(len);
+        let len = len.iter().skip_while(|byte| **byte == 0);
+        encoded.push(0x80 | len.clone().count() as u8);
+        encoded.extend(len);
     }
     encoded.extend_from_slice(&value);
 
