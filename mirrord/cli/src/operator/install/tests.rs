@@ -10,6 +10,7 @@ metadata:
   namespace: mirrord
   labels:
     helm.sh/chart: mirrord-operator-1.35.0
+    app.kubernetes.io/version: "3.197.0"
 spec:
   template:
     spec:
