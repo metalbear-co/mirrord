@@ -701,6 +701,10 @@ fn enable_hooks(state: &LayerSetup) {
 /// remote files and remote directories of the parent to the child. The child does not have the fd,
 /// so nothing closes its copy until the child exits.
 ///
+/// `listen` takes it for a moment before it sends `PortSubscribe`, so that the subscription of a
+/// new listener does not reach the intproxy before the `PortUnsubscribe` of an earlier listener on
+/// the same address.
+///
 /// This lock is separate from [`SOCKETS`] and [`OPEN_FILES`], so that the close code can release
 /// these locks before its I/O, and other hooks do not wait for that I/O. Also, [`close_layer_fd`]
 /// takes it only for an fd that is in one of these maps, so a close of another fd does not wait.

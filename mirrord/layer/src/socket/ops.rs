@@ -360,6 +360,17 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                 .copied()
                 .unwrap_or_else(|| requested_address.port());
 
+            // A close on another thread can still be sending the `PortUnsubscribe` of an earlier
+            // listener on the same address. The intproxy must get that request first, or it loses
+            // track of the subscription and never removes it. That close holds `CLOSE_FORK_LOCK`
+            // until it has sent its request, so wait for it here. Do not hold the lock during the
+            // request: `fork` and the closes would then wait for the agent.
+            drop(
+                CLOSE_FORK_LOCK
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner),
+            );
+
             make_proxy_request_with_response(PortSubscribe {
                 listening_on: address.into(),
                 subscription: setup.incoming_mode().subscription(mapped_port),
