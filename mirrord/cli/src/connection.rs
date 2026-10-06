@@ -65,8 +65,13 @@ fn send_upgrade_ide_message<P: Progress>(
     Ok(())
 }
 
-/// Verifies that the operator is installed, licensed, and serves its hosted sessions-manager, and
-/// returns the Kubernetes client to reach it with.
+/// Kubernetes client for a serverless session that `operator: true` routes through the
+/// operator-hosted sessions-manager.
+///
+/// Unlike [`try_connect_using_operator`], a missing operator, an invalid license, or an operator
+/// without sessions-manager support is an error rather than a fallback, since the user asked for
+/// the operator explicitly. The client carries only the user's kubeconfig credentials, with no
+/// operator session certificate: the hosted routes are authorized by Kubernetes RBAC.
 async fn operator_sessions_manager_client<P, R>(
     layer_config: &LayerConfig,
     progress: &P,
