@@ -27,6 +27,10 @@ use mirrord_config::{
     },
     target::TargetType,
 };
+#[cfg(windows)]
+use mirrord_layer_lib::process::windows::injection::{
+    InjectionMethod, MIRRORD_INJECTION_METHOD_ENV,
+};
 use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
@@ -405,7 +409,7 @@ impl Commands {
                 PreviewCommand::Status(args) => args.all_namespaces,
                 PreviewCommand::Stop(args) => args.all_namespaces,
                 PreviewCommand::Logs(args) => args.all_namespaces,
-                PreviewCommand::Start(_) => false,
+                PreviewCommand::Start(_) | PreviewCommand::Diff(_) => false,
             },
             Self::Session(args) => args.common.all_namespaces,
             Self::Kill(args) => args.common.all_namespaces,
@@ -638,6 +642,21 @@ impl ExecParams {
 // `mirrord exec` command
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
+    /// Windows DLL injection method.
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`. The env fallback lets setups that cannot change
+    /// the CLI invocation (launchers, IDEs) still select the method.
+    #[cfg(windows)]
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library",
+        value_parser = InjectionMethod::parse
+    )]
+    pub injection_method: InjectionMethod,
+
     #[clap(flatten)]
     pub params: Box<ExecParams>,
 
@@ -1545,6 +1564,12 @@ pub(super) enum PreviewCommand {
     Stop(PreviewStopArgs),
     /// Print the output of preview environments' pods.
     Logs(PreviewLogsArgs),
+    /// Show how the manifests passed with `--resource` differ from the live cluster.
+    ///
+    /// Runs the same checks as `mirrord preview start --resource` (which objects the target's
+    /// pod uses, how each compares with the live one, and whether the cluster accepts the
+    /// changed ones) and prints a diff per object. Creates nothing.
+    Diff(PreviewDiffArgs),
 }
 
 /// Arguments shared across all `mirrord preview` subcommands.
@@ -1647,6 +1672,15 @@ pub(super) struct PreviewStartArgs {
     /// nothing.
     #[arg(long)]
     pub force: bool,
+
+    /// Kubernetes manifest file or directory to build the preview from, instead of the
+    /// target's live spec. Repeat it to pass several.
+    ///
+    /// Only the target and the ConfigMaps and Secrets its pod uses are taken from the files,
+    /// and only where they differ from what is live. Live objects are never changed: the
+    /// preview gets its own copies. Replaces `feature.preview.spec_resources` from the config.
+    #[arg(long = "resource", value_name = "PATH", value_hint = ValueHint::AnyPath)]
+    pub resources: Vec<PathBuf>,
 }
 
 impl PreviewStartArgs {
@@ -1690,6 +1724,49 @@ impl PreviewStartArgs {
             envs.insert(
                 "MIRRORD_PREVIEW_CREATION_TIMEOUT_SECS".as_ref(),
                 Cow::Owned(timeout),
+            );
+        }
+
+        envs
+    }
+}
+
+/// Arguments for `mirrord preview diff` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewDiffArgs {
+    /// Target whose live spec the manifests are compared with. Same formats as
+    /// `mirrord preview start --target`.
+    #[arg(short = 't', long)]
+    pub target: Option<String>,
+
+    /// Namespace of the target.
+    #[arg(short = 'n', long)]
+    pub target_namespace: Option<String>,
+
+    /// Kubernetes manifest file or directory to compare. Repeat it to pass several. Replaces
+    /// `feature.preview.spec_resources` from the config.
+    #[arg(long = "resource", value_name = "PATH", value_hint = ValueHint::AnyPath)]
+    pub resources: Vec<PathBuf>,
+}
+
+impl PreviewDiffArgs {
+    /// Convert CLI arguments to environment variable overrides for config resolution.
+    pub fn as_env_vars<'a>(
+        &'a self,
+        common: &'a PreviewCommonArgs,
+    ) -> HashMap<&'static OsStr, Cow<'a, OsStr>> {
+        let mut envs = common.as_env_vars();
+
+        if let Some(target) = &self.target {
+            envs.insert(
+                "MIRRORD_IMPERSONATED_TARGET".as_ref(),
+                Cow::Borrowed(target.as_ref()),
+            );
+        }
+        if let Some(namespace) = &self.target_namespace {
+            envs.insert(
+                "MIRRORD_TARGET_NAMESPACE".as_ref(),
+                Cow::Borrowed(namespace.as_ref()),
             );
         }
 
@@ -1907,6 +1984,20 @@ pub(super) enum UpSubcommand {
 #[cfg(windows)]
 #[derive(Args, Debug)]
 pub(super) struct AttachArgs {
+    /// APC selection attests a debugger stop before application execution.
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`. `attach` is invoked by the IDE extension, which is
+    /// exactly the case the env fallback exists for.
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library",
+        value_parser = InjectionMethod::parse_attach
+    )]
+    pub injection_method: InjectionMethod,
+
     /// PID of the target process to attach to.
     pub pid: u32,
 }
@@ -1915,6 +2006,15 @@ pub(super) struct AttachArgs {
 #[cfg(windows)]
 #[derive(Args, Debug)]
 pub(super) struct PitmArgs {
+    /// Windows DLL injection method.
+    ///
+    /// When the flag is absent, `pitm` takes `MIRRORD_INJECTION_METHOD` from the child's
+    /// environment, then falls back to `load-library` (see `pitm::child_environment`).
+    /// The flag carries no clap `env` fallback so that an explicit choice can be told apart
+    /// from the plugin's per-run value.
+    #[arg(long, hide = true, value_parser = InjectionMethod::parse)]
+    pub injection_method: Option<InjectionMethod>,
+
     /// Target executable followed by its arguments. Everything after `--`
     /// is forwarded verbatim to the child process.
     #[arg(
@@ -2210,6 +2310,40 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    /// `attach` cannot use IAT, an unknown method names the ones that exist, and the flag stays
+    /// out of the help.
+    #[cfg(windows)]
+    #[test]
+    fn windows_injection_methods_are_hidden_and_validated() {
+        let error = Cli::try_parse_from(["mirrord", "attach", "--injection-method", "iat", "123"])
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("iat requires a newly created process"),
+            "{error}"
+        );
+        for command in ["exec", "pitm", "attach"] {
+            let error =
+                Cli::try_parse_from(["mirrord", command, "--injection-method", "unknown", "123"])
+                    .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("expected load-library, apc or iat"),
+                "{command}: {error}"
+            );
+            let mut definition = Cli::command();
+            let subcommand = definition.find_subcommand_mut(command).unwrap();
+            assert!(
+                !subcommand
+                    .render_long_help()
+                    .to_string()
+                    .contains("injection-method")
+            );
+        }
+    }
 
     /// Guards the clap definition, in particular the coexistence of `up`'s
     /// positional `services` list with the `init` subcommand.

@@ -1,8 +1,11 @@
-use std::ffi::OsString;
+use std::os::windows::io::BorrowedHandle;
 
-use dll_syringe::{Syringe, process::OwnedProcess};
-use mirrord_layer_lib::process::windows::sync::LayerInitEvent;
+use mirrord_layer_lib::process::windows::{
+    injection::InjectionMethod,
+    sync::{InitWaitOutcome, ParentInitEvents},
+};
 use mirrord_progress::Progress;
+use stork::{LoaderState, OwnedTarget};
 
 use crate::{CliResult, config::AttachArgs, error::CliError, extract::extract_library};
 
@@ -18,7 +21,7 @@ const ATTACH_SIGNAL_TIMEOUT_MS: u32 = 30_000;
 ///    ID, resolved config, etc.).
 /// 3. Injected those environment variables into the target process (through editing the debug
 ///    launch configuration).
-/// 4. Invoked `mirrord attach --pid <pid>` (this function).
+/// 4. Invoked `mirrord attach <pid>` (this function). The pid is positional.
 ///
 /// Because of this, `attach_command` does **not** spawn an intproxy, resolve a k8s
 /// target, or set up any environment variables itself — all of that state already
@@ -42,33 +45,82 @@ where
 
     unsafe { std::env::set_var("MIRRORD_LAYER_FILE", &lib_path) };
 
-    let process = OwnedProcess::from_pid(args.pid)
-        .map_err(|e| CliError::AttachProcessOpenFailed(args.pid, e))?;
+    // The value parser rejects iat, so only the two attach methods reach here.
+    let (process, loader_state, keep_events_alive) = match args.injection_method {
+        // Selecting APC attests the IDE's pre-application primary-thread stop. The attach then
+        // returns to the debugger so it can release that stop, so a reference in the target
+        // keeps the named events alive for the layer.
+        InjectionMethod::Apc => (
+            OwnedTarget::open_with_main_thread(args.pid),
+            LoaderState::EarlyApc,
+            true,
+        ),
+        InjectionMethod::LoadLibrary => (
+            OwnedTarget::open_process(args.pid),
+            LoaderState::Unknown,
+            false,
+        ),
+        InjectionMethod::Iat => unreachable!("parse_attach rejects iat"),
+    };
+    let process = process.map_err(|e| CliError::AttachProcessOpenFailed(args.pid, e))?;
     sub_progress.info(&format!("obtained handle to process {}", args.pid));
 
-    // Create the event before injection. The layer opens it by deriving the same
-    // name from its own PID and signals it when initialization is complete.
-    let init_event = LayerInitEvent::for_parent(args.pid)
+    // Create the events before injection. The layer opens them by deriving the same
+    // names from its own PID, and signals one when initialization is complete.
+    let init_events = ParentInitEvents::create(args.pid)
         .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?;
 
-    let syringe = Syringe::for_process(process);
-    syringe
-        .inject(OsString::from(&lib_path))
+    let remote_events = keep_events_alive
+        .then(|| {
+            init_events.keep_alive_in_process(unsafe {
+                BorrowedHandle::borrow_raw(process.target().process)
+            })
+        })
+        .transpose()
         .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?;
+    let target = process.borrowed().with_loader_state(loader_state);
+    let result = unsafe { args.injection_method.injector().inject(&target, &lib_path) };
+    if let Some(events) = remote_events
+        && (result.is_ok() || result.as_ref().is_err_and(|e| e.is_pending()))
+    {
+        events.retain();
+    }
+    let injected = result.map_err(|e| CliError::AttachStorkFailed(args.pid, e))?;
+    if injected.timing == stork::LoadTiming::OnResume {
+        sub_progress.success(Some(
+            "layer loading queued; resume the target to initialize",
+        ));
+        return Ok(());
+    }
 
     sub_progress.info("waiting for layer to signal injection complete");
 
-    match init_event
-        .wait_for_signal(Some(ATTACH_SIGNAL_TIMEOUT_MS))
+    // Watch the failure event and the target itself, not only readiness. A layer that gives up
+    // inside `DllMain` signals failure, and a target that dies will never signal anything; waiting
+    // out the timeout in either case would report a timeout, which names the symptom instead of
+    // the cause.
+    match init_events
+        .wait(
+            unsafe { BorrowedHandle::borrow_raw(process.target().process) },
+            Some(ATTACH_SIGNAL_TIMEOUT_MS),
+        )
         .map_err(|e| CliError::AttachInjectionFailed(args.pid, e.to_string()))?
     {
-        true => {
+        InitWaitOutcome::Signaled => {
             sub_progress.success(Some(&format!(
                 "layer successfully initialized in process {}",
                 args.pid
             )));
             Ok(())
         }
-        false => Err(CliError::AttachLayerTimeout(args.pid)),
+        InitWaitOutcome::Failed => Err(CliError::AttachInjectionFailed(
+            args.pid,
+            "the layer failed to initialize; its own log names the cause".to_owned(),
+        )),
+        InitWaitOutcome::ProcessExited => Err(CliError::AttachInjectionFailed(
+            args.pid,
+            "the target exited before the layer reported ready".to_owned(),
+        )),
+        InitWaitOutcome::TimedOut => Err(CliError::AttachLayerTimeout(args.pid)),
     }
 }

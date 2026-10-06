@@ -7,8 +7,8 @@
 //! It is shown by the monitor, never by a crashing process. The logo is the metalbear mark, an
 //! embedded bitmap resource (`logo.rc`, compiled by `build.rs`).
 //!
-//! The pieces split across submodules: [`theme`] holds the look (geometry, palette, fonts),
-//! [`state`] the per-window data, and [`build`] the control construction. This file owns the
+//! The pieces split across submodules: `theme` holds the look (geometry, palette, fonts),
+//! `state` the per-window data, and `build` the control construction. This file owns the
 //! window: its message loop, painting, and the button actions.
 
 mod build;
