@@ -12,7 +12,7 @@ use miette::Diagnostic;
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_config::{
     LayerConfig, LayerFileConfig,
-    config::{ConfigContext, EnvKey, MirrordConfig},
+    config::{ConfigContext, ConfigError, EnvKey, MirrordConfig},
     feature::{
         copy_target::CopyTargetConfig,
         env::{EnvConfig, EnvFileConfig},
@@ -22,7 +22,7 @@ use mirrord_config::{
         },
         split_queues::{QueueMode, SplitQueuesConfig},
     },
-    target::{Target, TargetType},
+    target::{Target, TargetType, deployment::DeploymentTarget},
 };
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{
@@ -760,7 +760,121 @@ pub enum ModeError {
     IncompatibleTargets(Vec<IncompatibleTarget>),
 }
 
+/// A service that `mirrord up` would refuse to run, found by [`UpConfig::verify_services`].
+#[derive(Debug, Error)]
+pub enum ServiceError {
+    /// The service's `config_patch` doesn't merge into a valid config.
+    #[error(transparent)]
+    ConfigPatch(#[from] ConfigPatchError),
+
+    /// The service's assembled config fails the checks its `mirrord exec` session runs at
+    /// startup.
+    #[error("invalid mirrord config for service `{service}`: {source}")]
+    Validation {
+        /// Name of the offending service.
+        service: Arc<str>,
+        /// What the checks rejected.
+        #[source]
+        source: ConfigError,
+    },
+
+    /// The service's mode needs features its target doesn't support.
+    #[error("incompatible mode and target: {0}")]
+    IncompatibleTarget(IncompatibleTarget),
+}
+
+impl ServiceError {
+    /// The name of the offending service.
+    pub fn service(&self) -> &Arc<str> {
+        match self {
+            Self::ConfigPatch(error) => &error.service,
+            Self::Validation { service, .. } => service,
+            Self::IncompatibleTarget(target) => &target.service,
+        }
+    }
+}
+
 impl UpConfig {
+    /// Assembles every service's mirrord config the way `mirrord up` does and runs the checks it
+    /// gets when `mirrord up` runs, so that a config can be validated without running it (e.g. in
+    /// `mirrord mcp`).
+    ///
+    /// Doesn't reach the cluster: a service without a target path, which `mirrord up` looks up in
+    /// the cluster, stands in for a deployment named after the service. Every mode supports a
+    /// deployment, so such a service only gets the checks that don't depend on its target.
+    pub fn verify_services(&self, key: &EnvKey) -> Vec<ServiceError> {
+        let up_context = UpKubeContext {
+            command_arg: None,
+            common_context: self.common.context.clone(),
+        };
+        let mut resolved_targets = self
+            .unresolved_targets(up_context.clone())
+            .map(|unresolved| {
+                let resolved = ResolvedTarget {
+                    resolved: SpecifiedTarget {
+                        path: Some(Target::Deployment(DeploymentTarget {
+                            deployment: unresolved.workload_name.to_string(),
+                            container: None,
+                        })),
+                        namespace: unresolved.namespace.clone(),
+                    },
+                };
+                (unresolved, resolved)
+            })
+            .collect();
+
+        let mut errors = Vec::new();
+        let mut assembled = Vec::new();
+        for (service_name, service) in self.services.iter().sorted_by_key(|(name, _)| *name) {
+            let mode = service.default_mode;
+            let (config, run) = match service.clone().assemble(
+                service_name,
+                &self.common,
+                key.clone(),
+                &mut resolved_targets,
+                up_context.clone(),
+            ) {
+                Ok(assembled) => assembled,
+                Err(source) => {
+                    errors.push(ServiceError::ConfigPatch(ConfigPatchError {
+                        service: service_name.clone(),
+                        source,
+                    }));
+                    continue;
+                }
+            };
+
+            // As in the service's `mirrord exec` session, where a missing target means targetless.
+            let mut context = ConfigContext::default()
+                .strict_env(true)
+                .empty_target_final(true);
+            if let Err(source) = config.verify(&mut context) {
+                errors.push(ServiceError::Validation {
+                    service: service_name.clone(),
+                    source,
+                });
+                continue;
+            }
+
+            assembled.push(SubprocessCfg {
+                config,
+                service_name: service_name.clone(),
+                run,
+                mode,
+            });
+        }
+
+        if let Err(ModeError::IncompatibleTargets(incompatible)) = validate_targets(&assembled) {
+            errors.extend(
+                incompatible
+                    .into_iter()
+                    .map(ServiceError::IncompatibleTarget),
+            );
+        }
+
+        errors
+    }
+
     /// True unless the user opted out of telemetry.
     pub fn telemetry_enabled(&self) -> bool {
         self.common.telemetry.unwrap_or(true)
