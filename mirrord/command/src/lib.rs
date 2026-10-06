@@ -19,8 +19,11 @@ use std::{ffi::OsStr, process::Command};
 ///
 /// The lookup uses this process's `PATH`, not one set later on the returned [`Command`].
 ///
-/// `.ps1` scripts are not resolved: they are not in the default `PATHEXT`, and [`Command`] can't
-/// run them without going through PowerShell explicitly.
+/// Only matches that [`Command`] can spawn are used: `.exe` and `.com` files, and `.bat`/`.cmd`
+/// scripts, which it runs through `cmd.exe`. Other `PATHEXT` entries (`.js`, `.vbs`, or a
+/// user-added `.ps1`) need a script host, so spawning them fails with "not a valid Win32
+/// application". They are skipped, which keeps `npm` resolving to `npm.cmd` even when `PATHEXT`
+/// lists `.PS1` first.
 #[allow(clippy::disallowed_methods, reason = "this is the sanctioned wrapper")]
 pub fn resolve_command<S: AsRef<OsStr>>(program: S) -> Command {
     #[cfg(windows)]
@@ -48,6 +51,9 @@ mod windows {
     ///
     /// Returns [`None`] for anything that is not a bare program name, so explicit paths keep
     /// [`std::process::Command`]'s own handling.
+    ///
+    /// `which` yields every match in `PATH`-then-`PATHEXT` order, including extensionless binaries
+    /// and scripts `Command` can't spawn, so this takes the first match it can spawn.
     pub(super) fn resolve(program: &OsStr, path: Option<OsString>) -> Option<PathBuf> {
         let mut components = Path::new(program).components();
         let is_bare_name = matches!(
@@ -58,7 +64,13 @@ mod windows {
             return None;
         }
 
-        which::which_in_global(program, path).ok()?.next()
+        which::which_in_global(program, path).ok()?.find(|found| {
+            found.extension().is_some_and(|extension| {
+                ["exe", "com", "bat", "cmd"]
+                    .iter()
+                    .any(|spawnable| extension.eq_ignore_ascii_case(spawnable))
+            })
+        })
     }
 
     #[cfg(test)]
@@ -140,6 +152,38 @@ mod windows {
             let dir = dir_with(&["tool.cmd", "tool.exe"]);
 
             let resolved = resolve(OsStr::new("tool.cmd"), path_of(&[dir.path()])).unwrap();
+            assert_eq!(resolved, dir.path().join("tool.cmd"));
+        }
+
+        #[test]
+        fn skips_scripts_command_cant_spawn() {
+            // `.js`, `.vbs`, ... are in the default `PATHEXT` (`.ps1` is when a user adds it), so
+            // `which` finds them, but spawning them fails with "not a valid Win32 application".
+            let scripts = dir_with(&["tool.js", "tool.vbs", "tool.wsf", "tool.msc", "tool.ps1"]);
+            let shim = dir_with(&["tool.cmd"]);
+
+            let resolved =
+                resolve(OsStr::new("tool"), path_of(&[scripts.path(), shim.path()])).unwrap();
+            assert_eq!(resolved, shim.path().join("tool.cmd"));
+
+            assert_eq!(
+                resolve(OsStr::new("tool"), path_of(&[scripts.path()])),
+                None
+            );
+            assert_eq!(
+                resolve(OsStr::new("tool.ps1"), path_of(&[scripts.path()])),
+                None
+            );
+        }
+
+        #[test]
+        fn skips_extensionless_file() {
+            // `which` returns an extensionless file ahead of `tool.cmd` when it is a binary, but
+            // std's own `PATH` search never picks extensionless names (it appends `.exe`).
+            let dir = dir_with(&["tool.cmd"]);
+            fs::copy(env::current_exe().unwrap(), dir.path().join("tool")).unwrap();
+
+            let resolved = resolve(OsStr::new("tool"), path_of(&[dir.path()])).unwrap();
             assert_eq!(resolved, dir.path().join("tool.cmd"));
         }
 
