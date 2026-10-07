@@ -551,18 +551,18 @@ pub const SERVICE_LAYER_PATHS: &[(&str, &str)] = &[
 ];
 
 impl ServiceConfig {
-    /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `cfg` from
+    /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `base` from
     /// [`CommonConfig::base_config`].
     fn assemble(
         self,
         service_name: &Arc<str>,
-        mut cfg: LayerConfig,
+        base: LayerConfig,
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
     ) -> Result<(LayerConfig, RunConfig), ConfigPatchErrorKind> {
-        let kube_context = up_context.get_context(self.context);
-        cfg.kube_context = kube_context.as_deref().map(Into::into);
+        let kube_context = up_context.get_context(self.context.clone());
+        let mut cfg = self.unpatched_config(base, &key, kube_context.clone());
 
         cfg.target = match self.target.as_resolved(service_name, kube_context) {
             Ok(resolved) => resolved,
@@ -584,14 +584,58 @@ impl ServiceConfig {
             },
         };
 
-        cfg.feature.env = self.env;
+        if let Some(patch) = self.config_patch {
+            cfg = apply_config_patch(cfg, patch, &key)?;
+        }
 
+        Ok((cfg, self.run))
+    }
+
+    /// The mirrord config `mirrord up` merges this service's `config_patch` into, as JSON, but
+    /// without the target, which needs the cluster to resolve. Lets a patch be checked against
+    /// what it is merged into without running it (e.g. in `mirrord mcp`), where an issue can be
+    /// told apart as the patch's or a setting's. Takes the service on its own, so the rest of a
+    /// `mirrord-up.yaml` doesn't have to be valid.
+    ///
+    /// Like [`UpConfig::verify_services`], ignores `MIRRORD_*` environment variables.
+    pub fn unpatched_config_json(
+        &self,
+        service_name: &Arc<str>,
+        common: &CommonConfig,
+        key: &EnvKey,
+    ) -> Result<serde_json::Value, UpError> {
+        let base = common.base_config(&mut ConfigContext::default().strict_env(true))?;
+        let kube_context = UpKubeContext {
+            command_arg: None,
+            common_context: common.context.clone(),
+        }
+        .get_context(self.context.clone());
+        let config = self.unpatched_config(base, key, kube_context);
+        patchable(config, key).map_err(|source| {
+            ConfigPatchError {
+                service: service_name.clone(),
+                source: ConfigPatchErrorKind::Serialize(source),
+            }
+            .into()
+        })
+    }
+
+    /// The mirrord config of this service before its target is set and its `config_patch` is
+    /// merged in: `base` with the service's own settings and what its mode implies.
+    fn unpatched_config(
+        &self,
+        mut cfg: LayerConfig,
+        key: &EnvKey,
+        kube_context: Option<Arc<str>>,
+    ) -> LayerConfig {
+        cfg.kube_context = kube_context.as_deref().map(Into::into);
+        cfg.feature.env = self.env.clone();
         cfg.feature.network.incoming.mode = self.default_mode.into();
 
         match self.default_mode {
             ServiceMode::Split | ServiceMode::Mirror => {
                 cfg.feature.network.incoming.http_filter = if self.http_filter.is_filter_set() {
-                    self.http_filter
+                    self.http_filter.clone()
                 } else {
                     HttpFilterConfig {
                         header_filter: Some(format!(
@@ -603,18 +647,12 @@ impl ServiceConfig {
                 };
 
                 cfg.feature.split_queues =
-                    SplitQueuesConfig::all_wildcard_with_mode(&key, self.default_mode.into());
+                    SplitQueuesConfig::all_wildcard_with_mode(key, self.default_mode.into());
             }
 
+            // `Replace` mode should steal all traffic from the copied target, so `http_filter` is
+            // ignored; `service_configs` tells the user.
             ServiceMode::Replace => {
-                // `Replace` mode should steal all traffic from the copied target. Log and ignore
-                // the filter.
-                if self.http_filter.is_filter_set() {
-                    eprintln!(
-                        "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
-                    );
-                }
-
                 cfg.feature.copy_target = CopyTargetConfig {
                     enabled: true,
                     scale_down: true,
@@ -624,14 +662,9 @@ impl ServiceConfig {
             }
         }
 
-        cfg.feature.network.incoming.ignore_ports = self.ignore_ports.into_iter().collect();
+        cfg.feature.network.incoming.ignore_ports = self.ignore_ports.iter().copied().collect();
         cfg.key = key.clone();
-
-        if let Some(patch) = self.config_patch {
-            cfg = apply_config_patch(cfg, patch, &key)?;
-        }
-
-        Ok((cfg, self.run))
+        cfg
     }
 
     fn resolve_target(
@@ -688,18 +721,7 @@ fn apply_config_patch(
     patch: serde_json::Value,
     key: &EnvKey,
 ) -> Result<LayerConfig, ConfigPatchErrorKind> {
-    let mut layer_config_json =
-        serde_json::to_value(config).map_err(ConfigPatchErrorKind::Serialize)?;
-
-    // `LayerConfig` preserves whether a key was provided or generated in its serialized form,
-    // while a user-facing mirrord config represents it as a string.
-    if let Some(object) = layer_config_json.as_object_mut() {
-        object.insert(
-            "key".to_owned(),
-            serde_json::Value::String(key.as_str().to_owned()),
-        );
-    }
-
+    let mut layer_config_json = patchable(config, key).map_err(ConfigPatchErrorKind::Serialize)?;
     json_patch::merge(&mut layer_config_json, &patch);
 
     let file_config: LayerFileConfig =
@@ -713,6 +735,22 @@ fn apply_config_patch(
     config.verify(&mut context)?;
 
     Ok(config)
+}
+
+/// `config` as the JSON a `config_patch` is merged into.
+fn patchable(config: LayerConfig, key: &EnvKey) -> Result<serde_json::Value, serde_json::Error> {
+    let mut json = serde_json::to_value(config)?;
+
+    // `LayerConfig` preserves whether a key was provided or generated in its serialized form,
+    // while a user-facing mirrord config represents it as a string.
+    if let Some(object) = json.as_object_mut() {
+        object.insert(
+            "key".to_owned(),
+            serde_json::Value::String(key.as_str().to_owned()),
+        );
+    }
+
+    Ok(json)
 }
 
 /// All the information necessary to start and manage one of the child
@@ -989,6 +1027,11 @@ impl UpConfig {
             .into_iter()
             .map(|(service_name, svc)| {
                 let mode = svc.default_mode;
+                if mode == ServiceMode::Replace && svc.http_filter.is_filter_set() {
+                    eprintln!(
+                        "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
+                    );
+                }
                 let (config, run) = svc
                     .assemble(
                         &service_name,

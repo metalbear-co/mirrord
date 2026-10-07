@@ -18,8 +18,9 @@ use std::{
 };
 
 pub use config::{
-    COMMON_LAYER_PATHS, ConfigPatchError, IncompatibleTarget, ModeError, SERVICE_LAYER_PATHS,
-    SelectError, ServiceError, ServiceMode, SubprocessCfg, UpConfig, WindowsSupportError,
+    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, ModeError,
+    SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SubprocessCfg,
+    UpConfig, WindowsSupportError,
 };
 use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;

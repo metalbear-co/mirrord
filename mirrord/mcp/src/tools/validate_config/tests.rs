@@ -238,6 +238,34 @@ services:
     assert!(issue.message.contains("jq"), "{}", issue.message);
 }
 
+/// A patch is merged into the config `mirrord up` generates, not only into the service's own
+/// settings, so it conflicts with what `mirrord up` sets by itself.
+#[rstest]
+#[case::default_header_filter(
+    "config_patch: { feature: { network: { incoming: { http_filter: { path_filter: /api } } } } }",
+    "/services/api/config_patch/feature/network/incoming/http_filter",
+    "multiple types of HTTP filter"
+)]
+#[case::common_operator(
+    "config_patch: { feature: { copy_target: true } }",
+    "/services/api/config_patch/feature/copy_target",
+    "requires a mirrord operator"
+)]
+fn up_yaml_config_patch_conflicts_with_generated(
+    #[case] service: &str,
+    #[case] path: &str,
+    #[case] message: &str,
+) {
+    let issue = single_issue(
+        ConfigFormat::MirrordUpYaml,
+        &format!(
+            "common:\n  operator: false\nservices:\n  api:\n    {service}\n    run:\n      command: [x]\n"
+        ),
+    );
+    assert_eq!(issue.path, path);
+    assert!(issue.message.contains(message), "{}", issue.message);
+}
+
 #[test]
 fn up_yaml_config_patch_unknown_field() {
     let issue = single_issue(
