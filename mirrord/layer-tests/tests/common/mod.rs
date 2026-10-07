@@ -150,6 +150,7 @@ pub enum Application {
     RustRecvFrom,
     RustListenPorts,
     Fork,
+    Vfork,
     ReadLink,
     StatfsFstatfs,
     MkdirRmdir,
@@ -236,6 +237,7 @@ impl Application {
             | Application::PythonListen => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP | Application::PythonIssue864 => String::from("uvicorn"),
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
+            Application::Vfork => String::from("tests/apps/vfork/out.c_test_app"),
             Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
             Application::StatfsFstatfs => String::from("tests/apps/statfs_fstatfs/out.c_test_app"),
             Application::MkdirRmdir => String::from("tests/apps/mkdir_rmdir/out.c_test_app"),
@@ -504,6 +506,7 @@ impl Application {
             | Application::GoLSeek(..)
             | Application::GoFAccessAt(..)
             | Application::Fork
+            | Application::Vfork
             | Application::ReadLink
             | Application::StatfsFstatfs
             | Application::MkdirRmdir
@@ -604,6 +607,7 @@ impl Application {
             | Application::NodeIssue3456
             | Application::BashShebang
             | Application::Fork
+            | Application::Vfork
             | Application::ReadLink
             | Application::StatfsFstatfs
             | Application::MkdirRmdir
