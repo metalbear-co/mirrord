@@ -9,6 +9,10 @@
 
 /// Kills the process and prints a helpful error message to the user.
 ///
+/// The message goes through [`report_to_stderr`](crate::logging::report_to_stderr), because on
+/// Windows this runs inside hooks, where `eprintln!` is not safe to call. See the warning at the
+/// top of [`logging`](crate::logging).
+///
 /// ## Parameters
 ///
 /// - `$arg`: messages to print, supports [`println!`] style arguments.
@@ -28,7 +32,7 @@
 #[macro_export]
 macro_rules! graceful_exit {
     ($($arg:tt)+) => {{
-        eprintln!($($arg)+);
+        $crate::logging::report_to_stderr(format_args!($($arg)+));
         graceful_exit!();
     }};
     () => {{

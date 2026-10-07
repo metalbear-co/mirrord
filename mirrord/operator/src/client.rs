@@ -53,7 +53,8 @@ use crate::{
         create_mongodb_branches, create_mysql_branches, create_pg_branches,
         ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
         list_reusable_mysql_branches, list_reusable_pg_branches,
-        relay_source_compatibility_warnings, wait_for_pending_branches,
+        relay_source_compatibility_warnings, reused_branch_connection_sources,
+        wait_for_pending_branches,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -218,6 +219,12 @@ impl fmt::Debug for OperatorSession {
 pub struct OperatorSessionConnection {
     pub session: Box<OperatorSession>,
     pub conn: OperatorConnection,
+    /// Ports declared by the target container, see
+    /// [`RuntimeData::container_ports`](mirrord_kube::api::runtime::RuntimeData::container_ports).
+    ///
+    /// Empty when we do not know them: the session is targetless, uses a copy target or spans
+    /// multiple clusters, or this is a connection to an existing session.
+    pub target_container_ports: Vec<u16>,
 }
 
 impl fmt::Debug for OperatorSessionConnection {
@@ -240,6 +247,8 @@ pub struct PreparedSession {
     /// Database branches prepared for this session, kept for rebuilding the connect URL in case
     /// the reused copy target has to be recreated.
     branch_db_names: BranchDbNames,
+    /// See [`OperatorSessionConnection::target_container_ports`].
+    target_container_ports: Vec<u16>,
 }
 
 /// Wrapper over mirrord operator API.
@@ -615,19 +624,19 @@ where
     }
 
     /// Ask the operator to create a K8s Secret with the given credential values
-    /// in the target namespace. The Secret name is derived from `branch_id` so
-    /// branches sharing the same ID reuse the same Secret.
+    /// in the target namespace. The Secret name is derived from `branch_name`, so each
+    /// branch gets its own Secret.
     async fn create_credential_secret(
         &self,
         namespace: &str,
-        branch_id: &str,
+        branch_name: &str,
         values: std::collections::HashMap<String, String>,
     ) -> OperatorApiResult<String> {
         use crate::crd::{CreateCredentialSecretRequest, CreateCredentialSecretResponse};
 
         let request_body = CreateCredentialSecretRequest {
             namespace: namespace.to_owned(),
-            branch_id: branch_id.to_owned(),
+            branch_id: branch_name.to_owned(),
             values,
         };
 
@@ -850,6 +859,20 @@ where
                 .require_feature(NewOperatorFeature::PgBranchQueryParams)?;
         }
 
+        // Same fail-fast for pg `additional_databases`: an older operator's CRD schema prunes the
+        // field, so the branch would come up with only its own database while the app's other
+        // connections keep pointing at the source.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| !branch_config.pg_additional_databases().is_empty())
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::PgBranchAdditionalDatabases)?;
+        }
+
         // A `configmap` connection param source needs an operator that resolves it: the branch
         // CRD schema lets the source kind through, and an older operator then fails to
         // deserialize the branch and never reconciles it, which would surface only as a
@@ -915,19 +938,19 @@ where
             // create a K8s Secret and replace the CRD connection entries with
             // Secret references. Values were already extracted from the config
             // inside `new()` before CRD conversion.
-            for (branch_id, params) in create_params.iter_mut() {
+            for (branch_name, params) in create_params.iter_mut() {
                 if params.literal_values.is_empty() {
                     continue;
                 }
                 let secret_name = self
                     .create_credential_secret(
                         target_namespace,
-                        branch_id.as_ref(),
+                        branch_name,
                         params.literal_values.clone(),
                     )
                     .await?;
-                database_branches::replace_values_with_secret_refs(
-                    &mut params.spec.connection_source,
+                database_branches::replace_spec_values_with_secret_refs(
+                    &mut params.spec,
                     &secret_name,
                     &params.literal_values,
                 );
@@ -959,8 +982,9 @@ where
 
             // A failed branch still holds the resource name a fresh one would take, so creating
             // over it only collides and inherits the failure. Report it with the way out.
-            if let Some((id, branch)) = existing.failed.iter().next() {
+            if let Some(branch) = existing.failed.values().next() {
                 let name = branch.meta().name.clone().unwrap_or_default();
+                let id = &branch.spec.id;
                 let reason = branch
                     .status
                     .as_ref()
@@ -981,28 +1005,36 @@ where
             // whose archive is already on the spec).
             let desired_migrations: std::collections::HashMap<_, _> = create_params
                 .iter()
-                .filter_map(|(id, params)| {
+                .filter_map(|(name, params)| {
                     params
                         .spec
                         .migrations
                         .clone()
-                        .map(|spec| (id.clone(), spec))
+                        .map(|spec| (name.clone(), spec))
                 })
+                .collect();
+
+            // The connection mapping this session's config declares per branch, kept so reused
+            // branches can carry it to the operator (see `reused_branch_connection_sources`).
+            let requested_connection_sources: std::collections::HashMap<_, _> = create_params
+                .iter()
+                .map(|(id, params)| (id.clone(), params.spec.connection_source.clone()))
                 .collect();
 
             // A reused branch that already has migrations, joined by a session that specified none,
             // silently inherits whatever schema the previous session applied. Flag it so the
             // mismatch is visible.
-            for (id, branch) in &existing.ready {
-                if !desired_migrations.contains_key(id) && branch.spec.migrations.is_some() {
+            for (name, branch) in &existing.ready {
+                if !desired_migrations.contains_key(name) && branch.spec.migrations.is_some() {
                     subtask.warning(&format!(
-                        "Reusing database branch {id}, which has migrations applied, but this session didn't specify any."
+                        "Reusing database branch {name} for id {}, which has migrations applied, but this session didn't specify any.",
+                        branch.spec.id
                     ));
                 }
             }
 
-            create_params.retain(|id, _| {
-                !existing.ready.contains_key(id) && !existing.pending.contains_key(id)
+            create_params.retain(|name, _| {
+                !existing.ready.contains_key(name) && !existing.pending.contains_key(name)
             });
 
             let waited_branches =
@@ -1017,14 +1049,14 @@ where
             // Bring each branch's migrations up to what this session asked for. Reused branches
             // re-run the tool (which no-ops, applies the delta, or fails on a conflict); an
             // unchanged archive is a no-op patch and returns at once.
-            for (id, branch) in existing
+            for (name, branch) in existing
                 .ready
                 .iter()
                 .chain(waited_branches.iter())
                 .chain(created_branches.iter())
                 .chain(conflict_reused_branches.iter())
             {
-                if let Some(migrations) = desired_migrations.get(id) {
+                if let Some(migrations) = desired_migrations.get(name) {
                     ensure_branch_migrations(&branch_api, branch, migrations, timeout, &subtask)
                         .await?;
                 }
@@ -1034,32 +1066,45 @@ where
             // which branch databases it runs against and whether they are shared.
             let origins = existing
                 .ready
-                .iter()
-                .map(|(id, branch)| (id, branch, "reused"))
+                .values()
+                .map(|branch| (branch, "reused"))
                 .chain(
                     waited_branches
-                        .iter()
-                        .map(|(id, branch)| (id, branch, "reused once it finished initializing")),
+                        .values()
+                        .map(|branch| (branch, "reused once it finished initializing")),
                 )
                 .chain(
                     created_branches
-                        .iter()
-                        .map(|(id, branch)| (id, branch, "created by this session")),
+                        .values()
+                        .map(|branch| (branch, "created by this session")),
                 )
-                .chain(conflict_reused_branches.iter().map(|(id, branch)| {
-                    (id, branch, "created by another session meanwhile, reused")
-                }));
-            for (id, branch, origin) in origins {
+                .chain(
+                    conflict_reused_branches
+                        .values()
+                        .map(|branch| (branch, "created by another session meanwhile, reused")),
+                );
+            for (branch, origin) in origins {
                 subtask.info(&format!(
-                    "using branch database {} for id {id}: {origin}",
-                    branch.name_any()
+                    "using branch database {} for id {}: {origin}",
+                    branch.name_any(),
+                    branch.spec.id
                 ));
                 relay_source_compatibility_warnings(branch, &subtask);
             }
 
             subtask.success(None);
 
-            let mut names = BranchDbNames::default();
+            let mut names = BranchDbNames {
+                connection_sources: reused_branch_connection_sources(
+                    &requested_connection_sources,
+                    existing
+                        .ready
+                        .iter()
+                        .chain(waited_branches.iter())
+                        .chain(conflict_reused_branches.iter()),
+                ),
+                ..Default::default()
+            };
             for branch in existing
                 .ready
                 .values()
@@ -1200,6 +1245,7 @@ where
                 generic: Vec::new(),
                 s3: Vec::new(),
                 turbopuffer: Vec::new(),
+                connection_sources: BTreeMap::new(),
             })
         }
     }
@@ -1558,7 +1604,7 @@ impl OperatorApi<PreparedClientCert> {
             BranchDbNames::default()
         };
 
-        let (session, reused_copy) = if do_copy_target {
+        let (session, reused_copy, target_container_ports) = if do_copy_target {
             let mut copy_subtask = progress.subtask("preparing target copy");
             if let Some(reason) = reason {
                 copy_subtask.info(&format!(
@@ -1609,12 +1655,12 @@ impl OperatorApi<PreparedClientCert> {
                 layer_config.baggage.clone(),
             )?;
 
-            (session, reused)
+            (session, reused, Vec::new())
         } else {
             let target = target.assert_valid_mirrord_target(self.client()).await?;
 
             // `targetless` has no `RuntimeData`!
-            if matches!(target, ResolvedTarget::Targetless(_)).not() {
+            let target_container_ports = if matches!(target, ResolvedTarget::Targetless(_)).not() {
                 let runtime_data = target
                     .runtime_data(self.client(), target.namespace())
                     .await?;
@@ -1651,7 +1697,11 @@ impl OperatorApi<PreparedClientCert> {
                         stolen_probes.join(", "),
                     ));
                 }
-            }
+
+                runtime_data.container_ports
+            } else {
+                Vec::new()
+            };
 
             let params = ConnectParams::new(
                 layer_config,
@@ -1670,13 +1720,14 @@ impl OperatorApi<PreparedClientCert> {
                 layer_config.baggage.clone(),
             )?;
 
-            (session, false)
+            (session, false, target_container_ports)
         };
 
         Ok(PreparedSession {
             session,
             reused_copy,
             branch_db_names,
+            target_container_ports,
         })
     }
 
@@ -1716,6 +1767,7 @@ impl OperatorApi<PreparedClientCert> {
             session,
             reused_copy,
             branch_db_names,
+            target_container_ports,
         } = self
             .prepare_session(
                 target,
@@ -1754,6 +1806,7 @@ impl OperatorApi<PreparedClientCert> {
         Ok(OperatorSessionConnection {
             session: Box::new(session),
             conn,
+            target_container_ports,
         })
     }
 
@@ -1987,6 +2040,7 @@ impl OperatorApi<PreparedClientCert> {
         Ok(OperatorSessionConnection {
             session: Box::new(session),
             conn,
+            target_container_ports: Vec::new(),
         })
     }
 
@@ -2386,6 +2440,7 @@ impl OperatorApi<PreparedClientCert> {
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
             branch_db_names: unified_branch_db_names,
+            branch_connection_sources: branch_db_names.connection_sources,
             session_ci_info,
             up_session_info: None,
             is_default_cluster: None,
@@ -2648,7 +2703,11 @@ impl OperatorApi<PreparedClientCert> {
 
         let conn = Self::connect_target(&client, &session).await?;
 
-        Ok(OperatorSessionConnection { conn, session })
+        Ok(OperatorSessionConnection {
+            conn,
+            session,
+            target_container_ports: Vec::new(),
+        })
     }
 
     /// Makes a websocket connection to the target of the given [`OperatorSession`], reusing this
@@ -2991,6 +3050,7 @@ mod test {
                 generic: vec![],
                 s3: vec![],
                 turbopuffer: vec![],
+                connection_sources: BTreeMap::new(),
             },
             expected: "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
             ?connect=true&on_concurrent_steal=abort\
@@ -3086,6 +3146,7 @@ mod test {
             mysql_branch_names: branch_db_names.mysql,
             mongodb_branch_names: branch_db_names.mongodb,
             branch_db_names: Vec::new(),
+            branch_connection_sources: Default::default(),
             session_ci_info,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),
@@ -3230,6 +3291,7 @@ mod test {
             mysql_branch_names: Default::default(),
             mongodb_branch_names: Default::default(),
             branch_db_names: Default::default(),
+            branch_connection_sources: Default::default(),
             session_ci_info: None,
             is_default_cluster: None,
             sqs_output_queues: Default::default(),

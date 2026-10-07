@@ -47,6 +47,26 @@ cargo xtask build-cli --release --no-ui
 - `linux-aarch64` (or `linux-arm64`) - Linux ARM64
 - `windows` (or `win`) - Windows x86_64
 
+**Cross-compilation and output paths:**
+
+xtask passes `--target` to cargo only when `--platform` is given, or when the target is not the host
+platform (the other architecture in a macOS universal build). Without `--target`, the build shares its
+cache with a plain `cargo build`, and the artifacts go to `target/debug` or `target/release`. With
+`--target`, they go to `target/<triple>/debug` or `target/<triple>/release`.
+
+On macOS, only the architecture that is not the host gets `--target`, even with `--platform`. So on
+Apple Silicon, x86_64 artifacts go to `target/x86_64-apple-darwin/` and aarch64 artifacts go to
+`target/debug` or `target/release`. On Intel Macs, it is the opposite.
+
+**Old glibc versions:**
+
+With `--zigbuild`, Linux builds use `cargo zigbuild` to link against glibc 2.17, so the binaries also
+run on old Linux distributions. It requires `--platform` and `cargo-zigbuild`. Release builds in CI use it.
+
+```bash
+cargo xtask build-cli --release --platform linux-x86_64 --zigbuild
+```
+
 ### `build-ui`
 
 Builds the merged UI frontend (`packages/ui`, which composes the session monitor and the config
@@ -85,10 +105,10 @@ cargo xtask build-cli --release
 
 ```bash
 # Linux x86_64
-cargo xtask build-cli --release --platform linux-x86_64
+cargo xtask build-cli --release --platform linux-x86_64 --zigbuild
 
 # Linux ARM64 (requires cross-compilation setup)
-cargo xtask build-cli --release --platform linux-aarch64
+cargo xtask build-cli --release --platform linux-aarch64 --zigbuild
 ```
 
 ### Building Components Separately

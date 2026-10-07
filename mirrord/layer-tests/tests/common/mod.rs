@@ -155,6 +155,7 @@ pub enum Application {
     StatfsFstatfs,
     MkdirRmdir,
     Cor1734FileMode,
+    SendfileEagain,
     OpenFile,
     CIssue2055,
     CIssue2178,
@@ -192,6 +193,8 @@ pub enum Application {
     Connectx,
     /// Rust app that closes a clone socket.
     DupListen,
+    /// Rust app that spawns children which must inherit socket metadata.
+    PosixSpawnSharedSockets,
     /// Rust app that listens on a socket twice
     DoubleListen,
     /// C app that calls `connect(2)` on a unix socket with a too-large `addrlen`
@@ -243,6 +246,9 @@ impl Application {
             Application::MkdirRmdir => String::from("tests/apps/mkdir_rmdir/out.c_test_app"),
             Application::Cor1734FileMode => {
                 String::from("tests/apps/cor_1734_file_mode/out.c_test_app")
+            }
+            Application::SendfileEagain => {
+                String::from("tests/apps/sendfile_eagain/out.c_test_app")
             }
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
             Application::NodeHTTP
@@ -396,6 +402,13 @@ impl Application {
                     "../../target/debug/dup-listen"
                 )
             }
+            Application::PosixSpawnSharedSockets => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/posix-spawn-shared-sockets"
+                )
+            }
             Application::DoubleListen => {
                 format!(
                     "{}/{}",
@@ -511,6 +524,7 @@ impl Application {
             | Application::StatfsFstatfs
             | Application::MkdirRmdir
             | Application::Cor1734FileMode
+            | Application::SendfileEagain
             | Application::Realpath
             | Application::RustFileOps
             | Application::RustIssue1123
@@ -581,6 +595,7 @@ impl Application {
                     format!("exec 0<&- ; exec node {}", app_path.to_string_lossy()),
                 ]
             }
+            Application::PosixSpawnSharedSockets => vec![],
         }
     }
 
@@ -612,6 +627,7 @@ impl Application {
             | Application::StatfsFstatfs
             | Application::MkdirRmdir
             | Application::Cor1734FileMode
+            | Application::SendfileEagain
             | Application::Realpath
             | Application::GoIssue834(..)
             | Application::GoRead(..)
@@ -646,6 +662,7 @@ impl Application {
             | Application::GoIssue2988(..)
             | Application::NodeMakeConnections
             | Application::DoubleListen
+            | Application::PosixSpawnSharedSockets
             | Application::PythonSocketPair
             | Application::PythonCor1401Seqpacket
             | Application::UnixConnectAddrlen

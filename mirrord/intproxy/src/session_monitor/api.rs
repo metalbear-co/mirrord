@@ -46,9 +46,6 @@ mod transport;
 #[cfg(windows)]
 #[path = "transport_windows.rs"]
 mod transport;
-#[cfg(windows)]
-#[path = "win_security.rs"]
-mod win_security;
 
 use transport::bind_session_transport;
 

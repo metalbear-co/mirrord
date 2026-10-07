@@ -12,7 +12,7 @@ use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
     api::{
         container::ContainerConfig,
-        kubernetes::{KubernetesAPI, apiserver_version},
+        kubernetes::{CreatedAgent, KubernetesAPI, apiserver_version},
     },
     error::KubeApiError,
     resolved::ResolvedTarget,
@@ -66,8 +66,8 @@ fn send_upgrade_ide_message<P: Progress>(
 }
 
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], prepares an operator
-///    session, connects to it, and returns [`Some`] [`OperatorConnector`] holding that connection
-///    along with the Kubernetes apiserver version.
+///    session, connects to it, and returns [`Some`] [`ConnectData`] with an [`OperatorConnector`]
+///    holding that connection.
 /// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], returns [`None`] so
 ///    the caller falls back to the OSS flow.
 /// 3. Otherwise, attempts to use the mirrord-operator and returns [`None`] in case mirrord-operator
@@ -79,7 +79,7 @@ async fn try_connect_using_operator<P, R>(
     branch_name: Option<String>,
     mirrord_for_ci: Option<&MirrordCi>,
     mirrord_up: Option<&MirrordUp>,
-) -> CliResult<Option<(OperatorConnector, (u16, u16))>>
+) -> CliResult<Option<ConnectData>>
 where
     P: Progress,
     R: Reporter,
@@ -205,7 +205,11 @@ where
     let up_info = mirrord_up.map(MirrordUp::info);
     let ci_info = mirrord_for_ci.map(MirrordCi::info);
 
-    let OperatorSessionConnection { session, conn } = if is_multi_cluster {
+    let OperatorSessionConnection {
+        session,
+        conn,
+        target_container_ports,
+    } = if is_multi_cluster {
         // Multi-cluster: CLI connects to the Primary, which routes to the workload cluster where
         // the target is resolved and the session is created.
         if layer_config.feature.magic.auto_mount {
@@ -264,15 +268,17 @@ where
         ));
     }
 
-    Ok(Some((
-        OperatorConnector {
+    Ok(Some(ConnectData {
+        connect_info: AgentConnectInfo::Operator(session.clone()),
+        connector: AgentConnector::Operator(OperatorConnector {
             api: Box::new(api),
             session,
             first_conn: Some(Box::new(conn)),
             failed: false,
-        },
+        }),
         api_version,
-    )))
+        target_container_ports,
+    }))
 }
 
 pub(crate) struct ConnectData {
@@ -280,6 +286,11 @@ pub(crate) struct ConnectData {
     pub(crate) connector: AgentConnector,
     /// Kube apiserver version (major, minor).
     pub(crate) api_version: (u16, u16),
+    /// Ports declared by the target container, see
+    /// [`RuntimeData::container_ports`](mirrord_kube::api::runtime::RuntimeData::container_ports).
+    ///
+    /// Empty when we do not know them.
+    pub(crate) target_container_ports: Vec<u16>,
 }
 
 /// 1. if [`LayerConfig`] targets Serverless, makes a connection to an existing agent through
@@ -327,10 +338,11 @@ pub(crate) async fn create_and_connect<R: Reporter>(
             connector,
             // Implement - see MBE-1981
             api_version: (0, 0),
+            target_container_ports: Vec::new(),
         });
     }
 
-    if let Some((connector, api_version)) = try_connect_using_operator(
+    if let Some(connect_data) = try_connect_using_operator(
         config,
         progress,
         analytics,
@@ -340,14 +352,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
     )
     .await?
     {
-        let connect_info = AgentConnectInfo::Operator(connector.session.clone());
-        let connector = AgentConnector::Operator(connector);
-
-        return Ok(ConnectData {
-            connect_info,
-            connector,
-            api_version,
-        });
+        return Ok(connect_data);
     }
 
     process_config_oss(config, progress)?;
@@ -394,7 +399,10 @@ pub(crate) async fn create_and_connect<R: Reporter>(
 
     let agent_container_config = ContainerConfig::default();
 
-    let agent_connect_info = tokio::time::timeout(
+    let CreatedAgent {
+        connect_info: agent_connect_info,
+        runtime_data,
+    } = tokio::time::timeout(
         Duration::from_secs(config.agent.startup_timeout),
         k8s_api.create_agent(
             progress,
@@ -418,6 +426,9 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         connect_info: AgentConnectInfo::DirectKubernetes(agent_connect_info),
         connector,
         api_version,
+        target_container_ports: runtime_data
+            .map(|runtime_data| runtime_data.container_ports)
+            .unwrap_or_default(),
     })
 }
 

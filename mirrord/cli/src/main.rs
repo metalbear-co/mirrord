@@ -262,7 +262,7 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
-use std::{collections::HashMap, env::vars, net::SocketAddr, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, time::Duration};
 #[cfg(not(target_os = "windows"))]
 use std::{ffi::CString, os::unix::ffi::OsStrExt};
 #[cfg(target_os = "macos")]
@@ -343,11 +343,14 @@ mod kube;
 mod list;
 mod local_redis;
 mod logging;
+mod login;
+mod mcp;
 mod newsletter;
 mod operator;
 #[cfg(windows)]
 mod pitm;
 mod port_forward;
+mod process_env;
 // Prefetched files exist for the layer to serve in place of remote ones, and the layer is unix
 // only, so copying them anywhere else would be work nothing can use.
 #[cfg(unix)]
@@ -371,6 +374,7 @@ pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
 use mirrord_layer_lib::process::windows::{
     command_line::build_command_line, console, execution::LayerManagedProcess,
+    injection::InjectionMethod,
 };
 use verify_config::verify_config;
 
@@ -450,12 +454,11 @@ async fn exec_process(
     #[cfg(not(target_os = "macos"))]
     let (_did_sip_patch, binary) = (false, args.binary.clone());
 
-    let mut env_vars: HashMap<String, String> = vars().collect();
-    env_vars.extend(execution_info.environment.clone());
-    env_vars.insert(mirrord_progress::MIRRORD_PROGRESS_ENV.into(), "off".into());
-    for key in &execution_info.env_to_unset {
-        env_vars.remove(key);
-    }
+    let env_vars = compose_exec_environment(
+        process_env::inherited(),
+        &execution_info.environment,
+        &execution_info.env_to_unset,
+    );
 
     // Put original executable in argv[0] even if actually running patched version.
     let binary_args = std::iter::once(&args.binary)
@@ -500,6 +503,8 @@ async fn exec_process(
         binary,
         binary_args,
         env_vars,
+        #[cfg(target_os = "windows")]
+        args.injection_method,
         _did_sip_patch,
         sub_progress,
         analytics,
@@ -508,6 +513,30 @@ async fn exec_process(
         mirrord_for_ci,
     )
     .await
+}
+
+/// Environment the user's process is launched with: `inherited`, then the execution's
+/// `overrides` and progress output switched off, minus the variables in `unset`.
+///
+/// Names are matched the way the platform matches them (see [`process_env`]), so on Windows an
+/// override or unset of `PATH` also applies to an inherited `Path`.
+fn compose_exec_environment(
+    mut env: process_env::ProcessEnv,
+    overrides: &HashMap<String, String>,
+    unset: &[String],
+) -> process_env::ProcessEnv {
+    for (name, value) in overrides {
+        process_env::set(&mut env, name, value.clone());
+    }
+    process_env::set(
+        &mut env,
+        mirrord_progress::MIRRORD_PROGRESS_ENV,
+        "off".to_owned(),
+    );
+    for name in unset {
+        env.remove(name);
+    }
+    env
 }
 
 fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
@@ -587,11 +616,13 @@ async fn run_process_with_mirrord<P: Progress>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[cfg(target_os = "windows")]
 async fn run_process_with_mirrord<P>(
     binary: String,
     binary_args: Vec<String>,
-    env_vars: HashMap<String, String>,
+    env_vars: process_env::ProcessEnv,
+    injection_method: InjectionMethod,
     _did_sip_patch: bool,
     progress: P,
     analytics: &mut AnalyticsReporter,
@@ -626,6 +657,7 @@ where
         // current_directory (inherit from parent)
         None,
         env_vars,
+        injection_method,
         // `mirrord exec` runs-and-waits; bind the child tree to this process so an
         // abrupt kill can't leave the layer-loaded child (and thus the agent) alive.
         true,
@@ -635,7 +667,7 @@ where
     .map_err(|e| {
         error!("Failed to create process: {:?}", e);
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
-        CliError::BinaryExecuteFailed(binary.clone(), binary_args.clone())
+        CliError::WindowsBinaryExecuteFailed(binary.clone(), Box::new(e))
     })?;
 
     // Exit with the same code as the child process
@@ -981,7 +1013,7 @@ async fn port_forward(
     .connector;
 
     let friendly = |err| match err {
-        connector::ConnectionError::Kube(error) => {
+        connector::ConnectionError::AgentPortForward(error) => {
             CliError::friendlier_error_or_else(error.into(), CliError::PortForwardingSetupError)
         }
         _ => CliError::PortForwardingError(err.into()),
@@ -1050,6 +1082,10 @@ fn main() -> miette::Result<()> {
 
     let (signal, watch) = drain::channel();
 
+    // The IDE plugins parse the JSON error from stderr, so they must not get the environment.
+    let print_kube_environment = !logging::reports_json_errors(&cli.commands);
+    let all_namespaces = cli.commands.all_namespaces();
+
     let res: CliResult<(), CliError> = rt.block_on(async move {
         logging::init_tracing_registry(&cli.commands, watch.clone()).await?;
 
@@ -1109,7 +1145,7 @@ fn main() -> miette::Result<()> {
                 list::print_targets(*args, rich_output).await?
             }
             Commands::Operator(args) => {
-                operator_command(*args).await?;
+                operator_command(*args, watch, &user_data).await?;
             }
             Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch, &user_data).await?;
@@ -1120,13 +1156,14 @@ fn main() -> miette::Result<()> {
                 ..
             } => {
                 let config = mirrord_config::util::read_resolved_config()?;
+                let shutdown_handler = internal_proxy::install_ci_shutdown_handler(mirrord_for_ci)?;
 
                 if mirrord_for_ci {
-                    MirrordCi::prepare_intproxy().await?;
+                    MirrordCi::prepare_intproxy(&shutdown_handler).await?;
                 }
 
                 logging::init_intproxy_tracing_registry(&config).await?;
-                internal_proxy::proxy(config, port, watch, &user_data).await?
+                internal_proxy::proxy(config, port, watch, &user_data, shutdown_handler).await?
             }
             #[cfg(windows)]
             Commands::CrashMonitor { port, root_pid, .. } => {
@@ -1195,6 +1232,7 @@ fn main() -> miette::Result<()> {
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             Commands::Queues(args) => queues::queues_command(*args).await?,
             Commands::Fix(args) => fix::fix_command(args).await?,
+            Commands::Login(args) => login::login_command(*args).await?,
             #[cfg(windows)]
             Commands::Attach(args) => {
                 let progress = ProgressTracker::from_env("mirrord attach");
@@ -1205,6 +1243,7 @@ fn main() -> miette::Result<()> {
             Commands::Tui => windows_unsupported!((), "tui", {
                 tui::tui_command(watch.clone(), &user_data).await?
             }),
+            Commands::Mcp => mcp::mcp_command(watch.clone(), &user_data).await?,
             Commands::Ui { args, command } => ui::ui_command(*args, command, "/").await?,
             Commands::Wizard { args, no_telemetry } => {
                 ui::wizard_command(args, no_telemetry, watch, &user_data).await?
@@ -1243,6 +1282,10 @@ fn main() -> miette::Result<()> {
                 warn!("Failed to drain in a timely manner, ongoing tasks dropped.");
             });
     });
+
+    if res.is_err() && print_kube_environment {
+        error::print_run_kube_environment(all_namespaces);
+    }
 
     res.map_err(Into::into)
 }
@@ -1316,10 +1359,38 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    use std::collections::HashMap;
+
     use clap::Parser;
+    #[cfg(windows)]
+    use mirrord_layer_lib::process::windows::environment::WindowsEnv;
+    #[cfg(windows)]
+    use mirrord_progress::MIRRORD_PROGRESS_ENV;
     use rstest::rstest;
 
+    #[cfg(windows)]
+    use crate::compose_exec_environment;
     use crate::{Cli, Commands};
+
+    /// On Windows an override or unset reaches an inherited variable spelled in another casing,
+    /// so the child gets one `PATH`, holding the override.
+    #[cfg(windows)]
+    #[test]
+    fn exec_environment_matches_names_case_insensitively() {
+        let env = compose_exec_environment(
+            WindowsEnv::from_ordered_entries([
+                ("Path".to_owned(), "C:\\inherited".to_owned()),
+                ("Temp".to_owned(), "C:\\temp".to_owned()),
+            ]),
+            &HashMap::from([("PATH".to_owned(), "C:\\override".to_owned())]),
+            &["TEMP".to_owned()],
+        );
+        assert_eq!(
+            env.iter().collect::<Vec<_>>(),
+            [(MIRRORD_PROGRESS_ENV, "off"), ("PATH", "C:\\override")]
+        );
+    }
 
     /// Verifies that
     /// [`ExecParams::accept_invalid_certificates`](crate::config::ExecParams::accept_invalid_certificates)

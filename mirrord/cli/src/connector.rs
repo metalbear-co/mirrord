@@ -35,8 +35,13 @@ pub enum ConnectionError {
     #[error(transparent)]
     Direct(std::io::Error),
 
-    #[error(transparent)]
-    Kube(#[from] kube::Error),
+    /// The WebSocket upgrade request that opens the port-forward to the agent pod failed.
+    ///
+    /// Some callers keep only the message (`to_string`), so the message includes the
+    /// [`kube::Error`], which has the HTTP status and the response body. The error is not also a
+    /// `#[source]`, because then miette would show it two times.
+    #[error("agent port-forward WebSocket upgrade failed: {0}")]
+    AgentPortForward(kube::Error),
 
     #[error(transparent)]
     OperatorApi(#[from] OperatorApiError),
@@ -303,7 +308,8 @@ impl ProtocolConnector for AgentConnector {
                 let stream = direct
                     .api
                     .portforward(&direct.info.pod_name, &[direct.info.agent_port])
-                    .await?
+                    .await
+                    .map_err(ConnectionError::AgentPortForward)?
                     .take_stream(direct.info.agent_port)
                     .expect("agent port should've been portforwarded");
 
@@ -325,5 +331,51 @@ impl ProtocolConnector for AgentConnector {
             AgentConnector::Direct(_) => false,
             AgentConnector::SessionsManager(_) => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use http::{Request, Response, StatusCode};
+    use kube::{Client, client::Body};
+
+    use super::*;
+
+    /// A proxy between mirrord and the API server can reject the port-forward upgrade with a
+    /// response that is not a Kubernetes `Status`. The error message must name the failed step, and
+    /// keep the HTTP status and the response body, because they are the only hints about what
+    /// rejected it.
+    #[tokio::test]
+    async fn rejected_direct_upgrade_reports_status_and_body() {
+        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let mut connector = AgentConnector::Direct(DirectConnector {
+            api: Api::namespaced(Client::new(service, "default"), "default"),
+            info: AgentKubernetesConnectInfo {
+                pod_name: "mirrord-agent".to_owned(),
+                pod_namespace: "default".to_owned(),
+                agent_port: 44128,
+            },
+        });
+
+        let (result, ()) = tokio::join!(connector.connect(), async {
+            let (_, send) = handle.next_request().await.unwrap();
+            send.send_response(
+                Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from(b"proxy rejected the upgrade".to_vec()))
+                    .unwrap(),
+            );
+        });
+
+        let Err(error) = result else {
+            panic!("connect must fail when the upgrade is rejected");
+        };
+        let message = error.to_string();
+        assert!(
+            message.starts_with("agent port-forward WebSocket upgrade failed"),
+            "{message}"
+        );
+        assert!(message.contains("500"), "{message}");
+        assert!(message.contains("proxy rejected the upgrade"), "{message}");
     }
 }

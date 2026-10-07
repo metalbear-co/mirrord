@@ -4,7 +4,7 @@
 //! don't observe a transient `ERROR_PIPE_NOT_FOUND`.
 //!
 //! Pipes are created with a DACL restricting access to the current user (see
-//! [`super::win_security::PipeSecurity`]), matching the `0o600` restriction on the unix
+//! [`CurrentUserSecurityAttributes`]), matching the `0o600` restriction on the unix
 //! socket. A zero-byte sentinel file at `{sessions_dir}/{session_id}.pipe` lets the
 //! filesystem-watcher-based discovery on the consumer side work the same way as on unix.
 
@@ -20,8 +20,7 @@ use std::{
 use axum::serve::Listener;
 use mirrord_session_monitor_protocol::pipe_name_for_session;
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
-
-use super::win_security::PipeSecurity;
+use utils_win::security::CurrentUserSecurityAttributes;
 
 /// Writes the session sentinel marker file and binds the named pipe with a current-user-only
 /// DACL. Returns the listener and a [`SessionTransportCleanup`] guard that removes the
@@ -65,12 +64,12 @@ impl Drop for SessionTransportCleanup {
 pub struct NamedPipeListener {
     pipe_name: String,
     next: Option<NamedPipeServer>,
-    security_attributes: PipeSecurity,
+    security_attributes: CurrentUserSecurityAttributes,
 }
 
 impl NamedPipeListener {
     pub fn bind(pipe_name: String) -> io::Result<Self> {
-        let security_attributes = PipeSecurity::for_current_user()?;
+        let security_attributes = CurrentUserSecurityAttributes::new()?;
         let next = create_instance(&pipe_name, &security_attributes, true)?;
         Ok(Self {
             pipe_name,
@@ -127,7 +126,7 @@ impl Listener for NamedPipeListener {
 
 fn create_instance(
     pipe_name: &str,
-    security_attributes: &PipeSecurity,
+    security_attributes: &CurrentUserSecurityAttributes,
     first_instance: bool,
 ) -> io::Result<NamedPipeServer> {
     let mut opts = ServerOptions::new();

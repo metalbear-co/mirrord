@@ -27,9 +27,14 @@ use mirrord_config::{
     },
     target::TargetType,
 };
+#[cfg(windows)]
+use mirrord_layer_lib::process::windows::injection::{
+    InjectionMethod, MIRRORD_INJECTION_METHOD_ENV,
+};
 use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
+use url::Url;
 
 use crate::{
     config::{ci::CiArgs, global_config::GlobalConfigArgs},
@@ -274,6 +279,12 @@ pub(super) enum Commands {
     /// Fix issues related to mirrord.
     Fix(FixArgs),
 
+    /// Log in to mirrord Cloud.
+    ///
+    /// Opens the browser to approve the login, and stores the auth token locally.
+    #[command(hide = true)] // the flow is not released yet
+    Login(Box<LoginArgs>),
+
     /// Attach mirrord layer to an already-running process by PID.
     ///
     /// Used by IDE extensions that spawn a process with mirrord env vars
@@ -305,6 +316,12 @@ pub(super) enum Commands {
     /// Browse the targets, sessions, queue splits, branch databases and preview environments on the
     /// cluster the current kubecontext points at, and open a shell alongside them.
     Tui,
+
+    /// Serve the mirrord MCP server over stdio, for AI agents.
+    ///
+    /// Register it in an MCP client (Claude Code, Cursor, VS Code, ...) as the command
+    /// `mirrord mcp`.
+    Mcp,
 
     /// Launch the mirrord local UI. Respects the `$BROWSER` env var.
     ///
@@ -374,6 +391,31 @@ pub(super) enum Commands {
     /// Used by IDE plugins. IDEs can use the schema to improve config editing experience.
     #[command(hide = true)]
     PrintSchema,
+}
+
+impl Commands {
+    /// Whether the command spans every namespace (`-A`).
+    pub(super) fn all_namespaces(&self) -> bool {
+        match self {
+            Self::DbBranches(args) => args.all_namespaces,
+            Self::Queues(args) => matches!(
+                args.command,
+                QueuesCommand::Status {
+                    all_namespaces: true,
+                    ..
+                }
+            ),
+            Self::Preview(args) => match &args.command {
+                PreviewCommand::Status(args) => args.all_namespaces,
+                PreviewCommand::Stop(args) => args.all_namespaces,
+                PreviewCommand::Logs(args) => args.all_namespaces,
+                PreviewCommand::Start(_) | PreviewCommand::Diff(_) => false,
+            },
+            Self::Session(args) => args.common.all_namespaces,
+            Self::Kill(args) => args.common.all_namespaces,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -600,6 +642,21 @@ impl ExecParams {
 // `mirrord exec` command
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
+    /// Windows DLL injection method.
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`. The env fallback lets setups that cannot change
+    /// the CLI invocation (launchers, IDEs) still select the method.
+    #[cfg(windows)]
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library",
+        value_parser = InjectionMethod::parse
+    )]
+    pub injection_method: InjectionMethod,
+
     #[clap(flatten)]
     pub params: Box<ExecParams>,
 
@@ -941,6 +998,18 @@ pub(super) enum OperatorCommand {
     // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
     #[clap(hide(true))]
     Setup,
+    /// Install the mirrord operator into the cluster of the current kubecontext, or of the one
+    /// given with `--context`.
+    ///
+    /// Without `--api-key`, starts an Enterprise trial and opens a link to claim it. Installs the
+    /// latest version of the helm chart with default values; use the helm chart directly for a
+    /// customized installation.
+    Install(Box<OperatorInstallArgs>),
+    /// Remove the mirrord operator that `mirrord operator install` installed from the cluster of
+    /// the current kubecontext, or of the one given with `--context`.
+    ///
+    /// Also removes what a failed `mirrord operator install` left behind.
+    Uninstall(OperatorUninstallArgs),
     /// Print operator status
     Status {
         /// Specify config file to use
@@ -958,6 +1027,65 @@ pub(super) enum OperatorCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1, global = true)]
         config_file: Option<PathBuf>,
     },
+}
+
+#[derive(Args, Debug)]
+pub(super) struct OperatorInstallArgs {
+    /// Operator API key, the same key the helm chart takes as `cloud.apiKey.key`.
+    ///
+    /// Registers the operator under the key's organization instead of starting a trial.
+    #[arg(long, env = "MIRRORD_OPERATOR_API_KEY", hide_env_values = true)]
+    pub api_key: Option<String>,
+
+    /// Print the trial claim URL instead of opening it in the browser.
+    #[arg(long)]
+    pub no_browser: bool,
+
+    /// Name shown on the trial claim page to identify this cluster.
+    ///
+    /// Defaults to the cluster's ID, the UID of its `default` namespace.
+    #[arg(long, conflicts_with_all = ["api_key", "no_hint"])]
+    pub cluster_hint: Option<String>,
+
+    /// Do not send a cluster hint to the trial claim page.
+    #[arg(long, conflicts_with = "api_key")]
+    pub no_hint: bool,
+
+    /// Kube context to install the operator into, instead of the current one.
+    #[arg(long)]
+    pub context: Option<String>,
+
+    /// Install without asking for confirmation. Without a terminal, the command never asks.
+    #[arg(short, long)]
+    pub yes: bool,
+
+    /// Install from a local rendered chart manifest instead of the latest published one.
+    #[arg(long, env = "MIRRORD_OPERATOR_INSTALL_MANIFEST", hide = true)]
+    pub manifest: Option<PathBuf>,
+
+    /// Base URL of the MetalBear app, used for the trial signup.
+    #[arg(
+        long,
+        env = "MIRRORD_OPERATOR_INSTALL_APP_URL",
+        hide = true,
+        default_value = "https://app.metalbear.com"
+    )]
+    pub app_url: String,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct OperatorUninstallArgs {
+    /// Kube context to remove the operator from, instead of the current one.
+    #[arg(long)]
+    pub context: Option<String>,
+
+    /// Remove without asking for confirmation. Without a terminal, the command never asks.
+    #[arg(short, long)]
+    pub yes: bool,
+
+    /// Remove the objects of a local rendered chart manifest instead of the published one.
+    #[arg(long, env = "MIRRORD_OPERATOR_INSTALL_MANIFEST", hide = true)]
+    pub manifest: Option<PathBuf>,
 }
 
 /// `mirrord operator session` family of commands.
@@ -1370,6 +1498,14 @@ pub(super) struct PreviewArgs {
     pub command: PreviewCommand,
 }
 
+/// Arguments for the `mirrord login` command.
+#[derive(Args, Debug)]
+pub(super) struct LoginArgs {
+    /// URL of the authentication backend.
+    #[arg(long, hide = true, default_value = "https://app.metalbear.com")]
+    pub url: Url,
+}
+
 /// Arguments for the `mirrord subscribe` command.
 #[derive(Args, Debug)]
 pub(super) struct SubscribeArgs {
@@ -1428,6 +1564,12 @@ pub(super) enum PreviewCommand {
     Stop(PreviewStopArgs),
     /// Print the output of preview environments' pods.
     Logs(PreviewLogsArgs),
+    /// Show how the manifests passed with `--resource` differ from the live cluster.
+    ///
+    /// Runs the same checks as `mirrord preview start --resource` (which objects the target's
+    /// pod uses, how each compares with the live one, and whether the cluster accepts the
+    /// changed ones) and prints a diff per object. Creates nothing.
+    Diff(PreviewDiffArgs),
 }
 
 /// Arguments shared across all `mirrord preview` subcommands.
@@ -1530,6 +1672,15 @@ pub(super) struct PreviewStartArgs {
     /// nothing.
     #[arg(long)]
     pub force: bool,
+
+    /// Kubernetes manifest file or directory to build the preview from, instead of the
+    /// target's live spec. Repeat it to pass several.
+    ///
+    /// Only the target and the ConfigMaps and Secrets its pod uses are taken from the files,
+    /// and only where they differ from what is live. Live objects are never changed: the
+    /// preview gets its own copies. Replaces `feature.preview.spec_resources` from the config.
+    #[arg(long = "resource", value_name = "PATH", value_hint = ValueHint::AnyPath)]
+    pub resources: Vec<PathBuf>,
 }
 
 impl PreviewStartArgs {
@@ -1573,6 +1724,49 @@ impl PreviewStartArgs {
             envs.insert(
                 "MIRRORD_PREVIEW_CREATION_TIMEOUT_SECS".as_ref(),
                 Cow::Owned(timeout),
+            );
+        }
+
+        envs
+    }
+}
+
+/// Arguments for `mirrord preview diff` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewDiffArgs {
+    /// Target whose live spec the manifests are compared with. Same formats as
+    /// `mirrord preview start --target`.
+    #[arg(short = 't', long)]
+    pub target: Option<String>,
+
+    /// Namespace of the target.
+    #[arg(short = 'n', long)]
+    pub target_namespace: Option<String>,
+
+    /// Kubernetes manifest file or directory to compare. Repeat it to pass several. Replaces
+    /// `feature.preview.spec_resources` from the config.
+    #[arg(long = "resource", value_name = "PATH", value_hint = ValueHint::AnyPath)]
+    pub resources: Vec<PathBuf>,
+}
+
+impl PreviewDiffArgs {
+    /// Convert CLI arguments to environment variable overrides for config resolution.
+    pub fn as_env_vars<'a>(
+        &'a self,
+        common: &'a PreviewCommonArgs,
+    ) -> HashMap<&'static OsStr, Cow<'a, OsStr>> {
+        let mut envs = common.as_env_vars();
+
+        if let Some(target) = &self.target {
+            envs.insert(
+                "MIRRORD_IMPERSONATED_TARGET".as_ref(),
+                Cow::Borrowed(target.as_ref()),
+            );
+        }
+        if let Some(namespace) = &self.target_namespace {
+            envs.insert(
+                "MIRRORD_TARGET_NAMESPACE".as_ref(),
+                Cow::Borrowed(namespace.as_ref()),
             );
         }
 
@@ -1790,6 +1984,20 @@ pub(super) enum UpSubcommand {
 #[cfg(windows)]
 #[derive(Args, Debug)]
 pub(super) struct AttachArgs {
+    /// APC selection attests a debugger stop before application execution.
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`. `attach` is invoked by the IDE extension, which is
+    /// exactly the case the env fallback exists for.
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library",
+        value_parser = InjectionMethod::parse_attach
+    )]
+    pub injection_method: InjectionMethod,
+
     /// PID of the target process to attach to.
     pub pid: u32,
 }
@@ -1798,6 +2006,15 @@ pub(super) struct AttachArgs {
 #[cfg(windows)]
 #[derive(Args, Debug)]
 pub(super) struct PitmArgs {
+    /// Windows DLL injection method.
+    ///
+    /// When the flag is absent, `pitm` takes `MIRRORD_INJECTION_METHOD` from the child's
+    /// environment, then falls back to `load-library` (see `pitm::child_environment`).
+    /// The flag carries no clap `env` fallback so that an explicit choice can be told apart
+    /// from the plugin's per-run value.
+    #[arg(long, hide = true, value_parser = InjectionMethod::parse)]
+    pub injection_method: Option<InjectionMethod>,
+
     /// Target executable followed by its arguments. Everything after `--`
     /// is forwarded verbatim to the child process.
     #[arg(
@@ -2040,6 +2257,10 @@ impl Default for LocalSessionCommand {
 /// Arguments for listing local and in-cluster mirrord sessions.
 #[derive(Args, Debug, Default)]
 pub struct SessionListArgs {
+    /// Format output for terminal display or scripting.
+    #[arg(long, default_value_t)]
+    pub format: SessionListFormat,
+
     /// Only list sessions started with this `key`.
     ///
     /// `key` is the session identifier set via `mirrord exec --key`, `MIRRORD_KEY`, or the
@@ -2048,6 +2269,14 @@ pub struct SessionListArgs {
     /// `spec.session.key` field selector. When omitted, all sessions are listed.
     #[arg(long)]
     pub key: Option<String>,
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum, Display)]
+#[strum(serialize_all = "lowercase")]
+pub enum SessionListFormat {
+    #[default]
+    Pretty,
+    Json,
 }
 
 /// Arguments for deleting local mirrord sessions.
@@ -2081,6 +2310,40 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    /// `attach` cannot use IAT, an unknown method names the ones that exist, and the flag stays
+    /// out of the help.
+    #[cfg(windows)]
+    #[test]
+    fn windows_injection_methods_are_hidden_and_validated() {
+        let error = Cli::try_parse_from(["mirrord", "attach", "--injection-method", "iat", "123"])
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("iat requires a newly created process"),
+            "{error}"
+        );
+        for command in ["exec", "pitm", "attach"] {
+            let error =
+                Cli::try_parse_from(["mirrord", command, "--injection-method", "unknown", "123"])
+                    .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("expected load-library, apc or iat"),
+                "{command}: {error}"
+            );
+            let mut definition = Cli::command();
+            let subcommand = definition.find_subcommand_mut(command).unwrap();
+            assert!(
+                !subcommand
+                    .render_long_help()
+                    .to_string()
+                    .contains("injection-method")
+            );
+        }
+    }
 
     /// Guards the clap definition, in particular the coexistence of `up`'s
     /// positional `services` list with the `init` subcommand.

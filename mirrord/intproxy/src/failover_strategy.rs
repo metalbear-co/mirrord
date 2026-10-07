@@ -1,4 +1,8 @@
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+    time::Duration,
+};
 
 use mirrord_intproxy_protocol::{
     IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
@@ -12,25 +16,67 @@ use nix::{
     unistd::Pid,
 };
 use tokio::time;
-#[cfg(windows)]
-use winapi::{
-    shared::minwindef::FALSE,
-    um::{
-        errhandlingapi::GetLastError,
-        handleapi::CloseHandle,
-        processthreadsapi::{OpenProcess, TerminateProcess},
-        winnt::PROCESS_TERMINATE,
-    },
-};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
-    IntProxy,
+    IntProxy, LayerInitializerTask,
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     error::{ProxyRuntimeError, ProxyStartupError},
     layer_conn::LayerConnection,
-    layer_initializer::LayerInitializer,
     main_tasks::{FromLayer, MainTaskId, ProxyMessage},
+    process_termination, quiesce_and_collect_layers,
 };
+
+/// Agent failure retains its pre-existing graceful policy; CI shutdown terminates a registered
+/// PID once so stop never escalates using an ID that may have been reused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TerminationPolicy {
+    AgentFailure,
+    CiShutdown,
+}
+
+// Terminal agent failure preserves the grace given to ordinary exec processes. Escalation uses
+// saved PIDs and can hit a reused ID; CI stop uses the separate single-shot policy instead.
+#[cfg(all(unix, not(test)))]
+const AGENT_FAILURE_GRACE: Duration = Duration::from_secs(1);
+#[cfg(all(unix, test))]
+const AGENT_FAILURE_GRACE: Duration = Duration::from_millis(100);
+
+#[cfg(unix)]
+async fn terminate_after_agent_failure(pids: HashSet<i32>) {
+    if pids.is_empty() {
+        return;
+    }
+
+    for pid in &pids {
+        send_agent_failure_signal(*pid, Signal::SIGTERM);
+    }
+    time::sleep(AGENT_FAILURE_GRACE).await;
+    for pid in pids {
+        send_agent_failure_signal(pid, Signal::SIGKILL);
+    }
+}
+
+#[cfg(unix)]
+fn send_agent_failure_signal(pid: i32, signal: Signal) {
+    if pid <= 0 {
+        tracing::warn!(pid, ?signal, "Refusing to signal a process group");
+        return;
+    }
+    match kill(Pid::from_raw(pid), signal) {
+        Ok(()) | Err(Errno::ESRCH) => {}
+        Err(error) => {
+            tracing::warn!(pid, ?signal, %error, "Failed to signal process after agent failure")
+        }
+    }
+}
+
+#[cfg(windows)]
+async fn terminate_after_agent_failure(pids: HashSet<i32>) {
+    if let Err(error) = process_termination::terminate_processes(pids).await {
+        tracing::warn!(%error, "Failed to terminate processes after agent failure");
+    }
+}
 
 /// This struct is a strategy that handle failover logic for [`IntProxy`].
 ///
@@ -42,28 +88,21 @@ use crate::{
 /// All while continues to accept new connections from layers
 pub(super) struct FailoverStrategy {
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
-    layer_initializer: TaskSender<LayerInitializer>,
+    layer_initializer: LayerInitializerTask,
     layers: HashMap<LayerId, TaskSender<LayerConnection>>,
     pending_layers: Vec<(LayerId, MessageId)>,
     any_connection_accepted: bool,
     fail_cause: ProxyRuntimeError,
-    /// Processes of the layers still connected when the proxy failed.
+    /// Processes of the layers currently connected while the proxy is in failover.
     ///
     /// Only a terminal, non-recoverable agent failure reaches failover (a reconnectable session
     /// reconnects inside [`AgentConnection`](crate::agent_conn::AgentConnection) instead). Once
-    /// here, the failure has broken every mirrord-hooked path in these processes. We tear them
-    /// down instead of leaving silent zombies that keep holding their ports. See
-    /// [`Self::terminate_connected_processes`].
+    /// here, the failure has broken every mirrord-hooked path in these processes. Tracking both
+    /// the layers inherited from the failed proxy and layers accepted during failover lets every
+    /// shutdown path tear them down instead of leaving silent processes that keep holding their
+    /// ports.
     connected_layers: HashMap<LayerId, ProcessInfo>,
 }
-
-/// Grace period between the `SIGTERM` and the `SIGKILL` we send to the injected processes on a
-/// terminal failure, giving them a chance to run their own shutdown before we force the issue.
-/// Shortened under test so tests can exercise the real termination path without a slow wait.
-#[cfg(all(unix, not(test)))]
-const TERMINATION_GRACE: Duration = Duration::from_secs(2);
-#[cfg(all(unix, test))]
-const TERMINATION_GRACE: Duration = Duration::from_millis(50);
 
 impl FailoverStrategy {
     fn has_layer_connections(&self) -> bool {
@@ -73,7 +112,7 @@ impl FailoverStrategy {
     pub fn from_failed_proxy(failed_proxy: IntProxy, error: ProxyRuntimeError) -> Self {
         FailoverStrategy {
             background_tasks: failed_proxy.background_tasks,
-            layer_initializer: failed_proxy.task_txs._layer_initializer,
+            layer_initializer: failed_proxy.task_txs.layer_initializer,
             layers: failed_proxy.task_txs.layers,
             pending_layers: failed_proxy.pending_layers.into_iter().collect(),
             any_connection_accepted: failed_proxy.any_connection_accepted,
@@ -82,7 +121,7 @@ impl FailoverStrategy {
         }
     }
 
-    /// Tears down every process mirrord is loaded into.
+    /// Collects every process mirrord is loaded into for failover-entry termination.
     ///
     /// `mirrord exec` replaces the CLI with the user binary via `execv`, so once a session is
     /// running the intproxy is the only mirrord-controlled process left that observes the agent
@@ -91,10 +130,11 @@ impl FailoverStrategy {
     /// it hangs forever as a zombie holding its ports. Rather than fail silently, we terminate
     /// every connected process so the failure is loud and nothing lingers.
     ///
-    /// See [`Self::signal_processes`] for the per-platform termination.
-    async fn terminate_connected_processes(&self) {
+    /// On Unix the agent-failure policy gives processes one second to shut down on SIGTERM;
+    /// unlike CI stop, it intentionally retains the earlier delayed SIGKILL behavior.
+    fn connected_processes(&self) -> HashSet<i32> {
         if self.connected_layers.is_empty() {
-            return;
+            return HashSet::new();
         }
 
         let processes = self
@@ -110,89 +150,72 @@ impl FailoverStrategy {
              process, as every mirrord-hooked path in them is now broken.",
         );
 
-        let pids = processes.into_iter().map(|(pid, _)| pid).collect();
-        Self::signal_processes(pids).await;
-    }
-
-    /// On unix, sends `SIGTERM` to the given processes, then `SIGKILL` to any survivors after
-    /// [`TERMINATION_GRACE`], so well-behaved processes get to run their shutdown first.
-    #[cfg(unix)]
-    async fn signal_processes(pids: Vec<i32>) {
-        if pids.is_empty() {
-            return;
-        }
-
-        for pid in &pids {
-            Self::send_signal(*pid, Signal::SIGTERM);
-        }
-
-        time::sleep(TERMINATION_GRACE).await;
-
-        for pid in pids {
-            Self::send_signal(pid, Signal::SIGKILL);
-        }
-    }
-
-    #[cfg(unix)]
-    fn send_signal(pid: i32, signal: Signal) {
-        match kill(Pid::from_raw(pid), signal) {
-            // `ESRCH` just means the process already exited, which is the outcome we want.
-            Ok(()) | Err(Errno::ESRCH) => {}
-            Err(error) => tracing::warn!(
-                pid,
-                ?signal,
-                %error,
-                "Failed to signal an injected process while tearing down a failed session",
-            ),
-        }
-    }
-
-    /// On Windows, calls `TerminateProcess` on each pid. No reliable graceful signal exists for an
-    /// arbitrary process here, so this matches the unix `SIGKILL` with no grace phase.
-    #[cfg(windows)]
-    async fn signal_processes(pids: Vec<i32>) {
-        for pid in pids {
-            // SAFETY: FFI. Every opened handle is closed. `GetLastError` is read immediately after
-            // the failing call, before anything else can clobber the thread-local error.
-            unsafe {
-                let handle = OpenProcess(PROCESS_TERMINATE, FALSE, pid as u32);
-                if handle.is_null() {
-                    // Most likely the process already exited (the `ESRCH` equivalent), but log the
-                    // error code so that case can be told apart from a real failure.
-                    tracing::warn!(
-                        pid,
-                        error = GetLastError(),
-                        "Failed to open an injected process while tearing down a failed session",
-                    );
-                    continue;
-                }
-                if TerminateProcess(handle, 1) == 0 {
-                    tracing::warn!(
-                        pid,
-                        error = GetLastError(),
-                        "Failed to terminate an injected process while tearing down a failed session",
-                    );
-                }
-                CloseHandle(handle);
-            }
-        }
+        processes.into_iter().map(|(pid, _)| pid).collect()
     }
 
     pub async fn run(
         self,
         first_timeout: Duration,
         idle_timeout: Duration,
+        shutdown: &CancellationToken,
     ) -> Result<(), ProxyStartupError> {
+        self.run_with_termination(
+            first_timeout,
+            idle_timeout,
+            shutdown,
+            |pids, policy| async move {
+                match policy {
+                    TerminationPolicy::AgentFailure => {
+                        terminate_after_agent_failure(pids).await;
+                        Ok(())
+                    }
+                    TerminationPolicy::CiShutdown => {
+                        process_termination::terminate_processes(pids).await
+                    }
+                }
+            },
+        )
+        .await
+    }
+
+    async fn run_with_termination<Terminate, Termination>(
+        self,
+        first_timeout: Duration,
+        idle_timeout: Duration,
+        shutdown: &CancellationToken,
+        mut terminate_processes: Terminate,
+    ) -> Result<(), ProxyStartupError>
+    where
+        Terminate: FnMut(HashSet<i32>, TerminationPolicy) -> Termination,
+        Termination: Future<Output = Result<(), process_termination::ProcessTerminationError>>,
+    {
         let mut failover = self;
 
         while let Some((layer_id, message_id)) = failover.pending_layers.pop() {
             failover.send_error_to_layer(layer_id, message_id).await;
         }
 
-        failover.terminate_connected_processes().await;
+        // The inherited registrations are already handled on entry. A later registration can
+        // reuse their PID, but has a different layer ID and must still be terminated on shutdown.
+        let mut terminated_layers = HashSet::new();
+        let mut termination_error = None;
+        if !shutdown.is_cancelled() {
+            let inherited_pids = failover.connected_processes();
+            if !inherited_pids.is_empty() {
+                terminated_layers.extend(failover.connected_layers.keys().copied());
+                termination_error =
+                    terminate_processes(inherited_pids, TerminationPolicy::AgentFailure)
+                        .await
+                        .err();
+            }
+        }
 
-        loop {
+        // A timeout must drain decoded registrations too; otherwise an acknowledged layer could
+        // survive just because its message had not yet reached the owner.
+        let exit_result: Option<Result<(), ProxyStartupError>> = loop {
             tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => break None,
                 Some((task_id, task_update)) = failover.background_tasks.next() => {
                     tracing::trace!(
                         %task_id,
@@ -202,14 +225,37 @@ impl FailoverStrategy {
                     failover.handle_task_update(task_id, task_update).await;
                 }
                 _ = time::sleep(first_timeout), if !failover.any_connection_accepted => {
-                    Err(ProxyStartupError::ConnectionAcceptTimeout)?;
+                    break Some(Err(ProxyStartupError::ConnectionAcceptTimeout));
                 },
                 _ = time::sleep(idle_timeout), if failover.any_connection_accepted && !failover.has_layer_connections() => {
                     tracing::info!("Reached the idle timeout with no active layer connections");
-                    break;
+                    break Some(Ok(()));
                 },
             }
+        };
+
+        let mut shutdown_layers = quiesce_and_collect_layers(
+            &mut failover.background_tasks,
+            &mut failover.layer_initializer,
+            &failover.connected_layers,
+        )
+        .await;
+        shutdown_layers
+            .layer_pids
+            .retain(|layer_id, _| !terminated_layers.contains(layer_id));
+        let pids = shutdown_layers.pids();
+        if !pids.is_empty() {
+            let policy = if shutdown.is_cancelled() {
+                TerminationPolicy::CiShutdown
+            } else {
+                TerminationPolicy::AgentFailure
+            };
+            if let Err(error) = terminate_processes(pids, policy).await {
+                termination_error.get_or_insert(error);
+            }
         }
+        let shutdown_error = shutdown_layers.error.take();
+        std::mem::drop(shutdown_layers);
 
         std::mem::drop(failover.layer_initializer);
         std::mem::drop(failover.layers);
@@ -225,7 +271,15 @@ impl FailoverStrategy {
             );
         }
 
-        Ok(())
+        match exit_result {
+            Some(Err(error)) => Err(error),
+            _ => match shutdown_error {
+                Some(error) => Err(error),
+                None => termination_error.map_or(Ok(()), |error| {
+                    Err(ProxyStartupError::ProcessTermination(error.0))
+                }),
+            },
+        }
     }
 
     async fn handle_task_update(
@@ -233,6 +287,10 @@ impl FailoverStrategy {
         task_id: MainTaskId,
         update: TaskUpdate<ProxyMessage, ProxyRuntimeError>,
     ) {
+        if task_id == MainTaskId::LayerInitializer && matches!(&update, TaskUpdate::Finished(_)) {
+            self.layer_initializer.finished = true;
+        }
+
         match (task_id, update) {
             (MainTaskId::LayerConnection(LayerId(id)), TaskUpdate::Finished(result)) => {
                 match result {
@@ -244,6 +302,7 @@ impl FailoverStrategy {
                     }
                 }
                 self.layers.remove(&LayerId(id));
+                self.connected_layers.remove(&LayerId(id));
             }
             (task_id, TaskUpdate::Finished(res)) => match res {
                 Ok(()) => {
@@ -265,12 +324,15 @@ impl FailoverStrategy {
         match msg {
             ProxyMessage::NewLayer(new_layer) => {
                 self.any_connection_accepted = true;
+                let layer_id = new_layer.id;
+                self.connected_layers
+                    .insert(layer_id, new_layer.process_info);
                 let tx = self.background_tasks.register(
-                    LayerConnection::new(new_layer.stream, new_layer.id),
-                    MainTaskId::LayerConnection(new_layer.id),
+                    LayerConnection::new(new_layer.stream, layer_id),
+                    MainTaskId::LayerConnection(layer_id),
                     IntProxy::CHANNEL_SIZE,
                 );
-                self.layers.insert(new_layer.id, tx);
+                self.layers.insert(layer_id, tx);
             }
             ProxyMessage::FromLayer(message) => {
                 self.update_layer_on_error(message).await;
@@ -321,50 +383,487 @@ impl FailoverStrategy {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
-    use std::{process::Command, time::Duration};
+    use std::{
+        collections::HashSet,
+        net::SocketAddr,
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+    #[cfg(unix)]
+    use std::{
+        io::{BufRead, BufReader},
+        os::unix::process::ExitStatusExt,
+        process::{Command, Stdio},
+    };
 
-    use super::FailoverStrategy;
+    use futures::{SinkExt, StreamExt};
+    use mirrord_config::{config::MirrordConfig, experimental::ExperimentalFileConfig};
+    use mirrord_intproxy_protocol::{
+        LayerId, LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo,
+        ProxyToLayerMessage,
+    };
+    use mirrord_protocol_io::Connection;
+    use nix::sys::signal::Signal;
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        sync::{Notify, watch},
+    };
+    use tokio_util::sync::CancellationToken;
 
-    /// Spawns a real, long-lived child process for the current platform.
-    fn spawn_blocking_child() -> std::process::Child {
-        #[cfg(unix)]
-        {
-            Command::new("sleep").arg("30").spawn().unwrap()
+    use super::{FailoverStrategy, TerminationPolicy};
+    use crate::{
+        IntProxy, IntProxyIntervals,
+        agent_conn::{AgentConnectInfoDiscriminants, AgentConnection, ReconnectFlow},
+        error::{ProxyRuntimeError, ProxyStartupError},
+        main_tasks::MainTaskId,
+        session_monitor::{MonitorTx, chaos::ChaosWatcherRx},
+    };
+
+    const INHERITED_PID: i32 = 101;
+    const QUEUED_PID: i32 = 202;
+
+    async fn make_failover(
+        inherited_pids: impl IntoIterator<Item = i32>,
+    ) -> (FailoverStrategy, SocketAddr) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_addr = listener.local_addr().unwrap();
+        let (connection, _proxy_tx, _proxy_rx) = Connection::dummy();
+        let agent_conn = AgentConnection {
+            connection,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+        };
+        let (_, chaos_rx) = watch::channel(Default::default());
+        let mut proxy = IntProxy::new_with_connection(
+            agent_conn,
+            listener,
+            4096,
+            Default::default(),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
+            MonitorTx::disabled(),
+            ChaosWatcherRx::new(chaos_rx),
+        );
+
+        for (index, pid) in inherited_pids.into_iter().enumerate() {
+            proxy.connected_layers.insert(
+                LayerId(1_000 + index as u64),
+                ProcessInfo {
+                    pid,
+                    parent_pid: 1,
+                    name: format!("inherited-{pid}"),
+                    cmdline: Vec::new(),
+                    loaded: true,
+                },
+            );
         }
-        #[cfg(windows)]
-        {
-            Command::new("cmd")
-                .args(["/C", "ping", "-n", "30", "127.0.0.1"])
-                .spawn()
-                .unwrap()
+
+        let failover = FailoverStrategy::from_failed_proxy(
+            proxy,
+            ProxyRuntimeError::AgentFailed("test failure".to_owned()),
+        );
+
+        (failover, proxy_addr)
+    }
+
+    fn record_signals(pids: &HashSet<i32>, signal: Signal, signals: &Mutex<Vec<(i32, Signal)>>) {
+        signals
+            .lock()
+            .unwrap()
+            .extend(pids.iter().map(|pid| (*pid, signal)));
+    }
+
+    /// The agent-failure path retains the grace period even though CI shutdown kills once.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn agent_failure_allows_term_handler_before_kill() {
+        let mut child = Command::new("sh")
+            .args([
+                "-c",
+                "trap 'echo term' TERM; echo ready; while :; do :; done",
+            ])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        let mut ready = String::new();
+        stdout.read_line(&mut ready).unwrap();
+        assert_eq!(ready, "ready\n");
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            super::terminate_after_agent_failure(HashSet::from([child.id() as i32])),
+        )
+        .await
+        .expect("agent-failure grace did not finish");
+        let mut marker = String::new();
+        stdout.read_line(&mut marker).unwrap();
+        assert_eq!(marker, "term\n");
+        assert_eq!(child.wait().unwrap().signal(), Some(Signal::SIGKILL as i32));
+    }
+
+    fn assert_one_kill(signals: &[(i32, Signal)], pid: i32) {
+        assert_eq!(
+            signals
+                .iter()
+                .filter(|event| **event == (pid, Signal::SIGKILL))
+                .count(),
+            1,
+        );
+    }
+
+    /// Cancellation already visible at failover entry uses the quiesced shutdown path once rather
+    /// than first terminating the inherited set and then targeting it again.
+    #[tokio::test]
+    async fn shutdown_terminates_registered_layer_outside_process_group_failover_pre_cancelled_once()
+     {
+        let (failover, _proxy_addr) = make_failover([INHERITED_PID]).await;
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        let invocations = Arc::new(Mutex::new(Vec::new()));
+        let signals = Arc::new(Mutex::new(Vec::new()));
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            failover.run_with_termination(
+                Duration::from_secs(60),
+                Duration::from_secs(60),
+                &shutdown,
+                {
+                    let invocations = invocations.clone();
+                    let signals = signals.clone();
+                    move |pids, policy| {
+                        let invocations = invocations.clone();
+                        let signals = signals.clone();
+                        async move {
+                            assert_eq!(policy, TerminationPolicy::CiShutdown);
+                            invocations.lock().unwrap().push(pids.clone());
+                            record_signals(&pids, Signal::SIGKILL, &signals);
+                            Ok(())
+                        }
+                    }
+                },
+            ),
+        )
+        .await
+        .expect("pre-cancelled failover did not shut down")
+        .unwrap();
+
+        let invocations = invocations.lock().unwrap();
+        assert_eq!(&*invocations, &[HashSet::from([INHERITED_PID])]);
+        assert!(invocations.iter().all(|pids| !pids.is_empty()));
+        let signals = signals.lock().unwrap();
+        assert_one_kill(&signals, INHERITED_PID);
+        assert_eq!(signals.len(), 1);
+    }
+
+    /// A failed CI shutdown signal must surface even though the proxy still drains its tasks.
+    #[tokio::test]
+    async fn ci_shutdown_reports_process_termination_failure() {
+        let (failover, _proxy_addr) = make_failover([INHERITED_PID]).await;
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+
+        let result = failover
+            .run_with_termination(
+                Duration::from_secs(60),
+                Duration::from_secs(60),
+                &shutdown,
+                |pids, policy| async move {
+                    assert_eq!(policy, TerminationPolicy::CiShutdown);
+                    assert_eq!(pids, HashSet::from([INHERITED_PID]));
+                    Err(crate::process_termination::ProcessTerminationError(1))
+                },
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(ProxyStartupError::ProcessTermination(1))
+        ));
+    }
+
+    /// Natural timeout exits must collect a registration that the layer has already seen, even
+    /// when its output message has not reached the failover owner.
+    #[tokio::test]
+    async fn timeout_drains_queued_registration_in_failover() {
+        for first_timeout in [true, false] {
+            let (mut failover, proxy_addr) = make_failover([]).await;
+            if !first_timeout {
+                failover.any_connection_accepted = true;
+            }
+            failover
+                .background_tasks
+                .suspend_messages(MainTaskId::LayerInitializer);
+
+            let conn = TcpStream::connect(proxy_addr).await.unwrap();
+            let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+                LocalMessage<LayerToProxyMessage>,
+                LocalMessage<ProxyToLayerMessage>,
+            >(conn);
+            encoder
+                .send(LocalMessage {
+                    message_id: 0,
+                    inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                        process_info: ProcessInfo {
+                            pid: QUEUED_PID,
+                            parent_pid: 1,
+                            name: "timeout-layer".to_owned(),
+                            cmdline: Vec::new(),
+                            loaded: true,
+                        },
+                        parent_layer: None,
+                    }),
+                })
+                .await
+                .unwrap();
+            assert!(matches!(
+                decoder.next().await.unwrap().unwrap(),
+                LocalMessage {
+                    inner: ProxyToLayerMessage::NewSession(_),
+                    ..
+                }
+            ));
+
+            let invocations = Arc::new(Mutex::new(Vec::new()));
+            let result = tokio::time::timeout(
+                Duration::from_secs(5),
+                failover.run_with_termination(
+                    if first_timeout {
+                        Duration::ZERO
+                    } else {
+                        Duration::from_secs(60)
+                    },
+                    if first_timeout {
+                        Duration::from_secs(60)
+                    } else {
+                        Duration::ZERO
+                    },
+                    &CancellationToken::new(),
+                    {
+                        let invocations = invocations.clone();
+                        move |pids, policy| {
+                            let invocations = invocations.clone();
+                            async move {
+                                assert_eq!(policy, TerminationPolicy::AgentFailure);
+                                invocations.lock().unwrap().push(pids);
+                                Ok(())
+                            }
+                        }
+                    },
+                ),
+            )
+            .await
+            .expect("failover timeout did not drain queued registration");
+            if first_timeout {
+                assert!(matches!(
+                    result,
+                    Err(ProxyStartupError::ConnectionAcceptTimeout)
+                ));
+            } else {
+                result.unwrap();
+            }
+            assert_eq!(
+                invocations.lock().unwrap().as_slice(),
+                &[HashSet::from([QUEUED_PID])]
+            );
+            std::mem::drop((encoder, decoder));
         }
     }
 
-    /// [`FailoverStrategy::signal_processes`] must actually terminate the given processes on the
-    /// platforms we support, not silently do nothing. Exercises the real (per-platform) kill path.
+    /// Cancellation wins over an already-ready failover timeout and drains a registration
+    /// acknowledged before failover begins.
     #[tokio::test]
-    async fn signal_processes_terminates_the_given_pids() {
-        let mut child = spawn_blocking_child();
-        let pid = child.id() as i32;
-
-        FailoverStrategy::signal_processes(vec![pid]).await;
-
-        let terminated = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if let Some(status) = child.try_wait().unwrap() {
-                    break status;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
+    async fn shutdown_terminates_registered_layer_outside_process_group_failover_ready_timeout_registration_race()
+     {
+        let (failover, proxy_addr) = make_failover([]).await;
+        let conn = TcpStream::connect(proxy_addr).await.unwrap();
+        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+            LocalMessage<LayerToProxyMessage>,
+            LocalMessage<ProxyToLayerMessage>,
+        >(conn);
+        encoder
+            .send(LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                    process_info: ProcessInfo {
+                        pid: QUEUED_PID,
+                        parent_pid: 1,
+                        name: "ready-timeout-layer".to_owned(),
+                        cmdline: Vec::new(),
+                        loaded: true,
+                    },
+                    parent_layer: None,
+                }),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            decoder.next().await.unwrap().unwrap(),
+            LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::NewSession(_),
             }
-        })
-        .await
-        .expect("child process was not terminated by signal_processes");
-
-        assert!(
-            !terminated.success(),
-            "child should have been killed, but it exited cleanly"
+        ));
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        let invocations = Arc::new(Mutex::new(Vec::new()));
+        let failover_handle = tokio::spawn({
+            let invocations = invocations.clone();
+            async move {
+                failover
+                    .run_with_termination(
+                        Duration::ZERO,
+                        Duration::ZERO,
+                        &shutdown,
+                        move |pids, policy| {
+                            let invocations = invocations.clone();
+                            async move {
+                                assert_eq!(policy, TerminationPolicy::CiShutdown);
+                                invocations.lock().unwrap().push(pids);
+                                Ok(())
+                            }
+                        },
+                    )
+                    .await
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(5), failover_handle)
+            .await
+            .expect("ready timeout bypassed failover quiescing")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            invocations.lock().unwrap().as_slice(),
+            &[HashSet::from([QUEUED_PID])]
         );
+
+        std::mem::drop((encoder, decoder));
+    }
+
+    /// A registration queued after failover-entry termination needs its own signal even if it
+    /// reuses the inherited layer's PID; distinct registrations must also each be signalled.
+    #[tokio::test]
+    async fn shutdown_terminates_registered_layer_outside_process_group_failover_queued_registration_once()
+     {
+        for queued_pid in [QUEUED_PID, INHERITED_PID] {
+            let (failover, proxy_addr) = make_failover([INHERITED_PID]).await;
+            let shutdown = CancellationToken::new();
+            let invocations = Arc::new(Mutex::new(Vec::new()));
+            let signals = Arc::new(Mutex::new(Vec::new()));
+            let inherited_signal_sent = Arc::new(Notify::new());
+            let finish_inherited_termination = Arc::new(Notify::new());
+
+            let failover_handle = tokio::spawn({
+                let shutdown = shutdown.clone();
+                let invocations = invocations.clone();
+                let signals = signals.clone();
+                let inherited_signal_sent = inherited_signal_sent.clone();
+                let finish_inherited_termination = finish_inherited_termination.clone();
+                async move {
+                    failover
+                        .run_with_termination(
+                            Duration::from_secs(60),
+                            Duration::from_secs(60),
+                            &shutdown,
+                            move |pids, policy| {
+                                let invocations = invocations.clone();
+                                let signals = signals.clone();
+                                let inherited_signal_sent = inherited_signal_sent.clone();
+                                let finish_inherited_termination =
+                                    finish_inherited_termination.clone();
+                                async move {
+                                    invocations.lock().unwrap().push(pids.clone());
+                                    match policy {
+                                        TerminationPolicy::AgentFailure => {
+                                            assert!(pids.contains(&INHERITED_PID));
+                                            record_signals(&pids, Signal::SIGTERM, &signals);
+                                            inherited_signal_sent.notify_one();
+                                            finish_inherited_termination.notified().await;
+                                            record_signals(&pids, Signal::SIGKILL, &signals);
+                                        }
+                                        TerminationPolicy::CiShutdown => {
+                                            record_signals(&pids, Signal::SIGKILL, &signals);
+                                        }
+                                    }
+                                    Ok(())
+                                }
+                            },
+                        )
+                        .await
+                }
+            });
+
+            inherited_signal_sent.notified().await;
+            let conn = TcpStream::connect(proxy_addr).await.unwrap();
+            let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+                LocalMessage<LayerToProxyMessage>,
+                LocalMessage<ProxyToLayerMessage>,
+            >(conn);
+            encoder
+                .send(LocalMessage {
+                    message_id: 0,
+                    inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                        process_info: ProcessInfo {
+                            pid: queued_pid,
+                            parent_pid: 1,
+                            name: "queued-layer".to_owned(),
+                            cmdline: Vec::new(),
+                            loaded: true,
+                        },
+                        parent_layer: None,
+                    }),
+                })
+                .await
+                .unwrap();
+            assert!(matches!(
+                decoder.next().await.unwrap().unwrap(),
+                LocalMessage {
+                    message_id: 0,
+                    inner: ProxyToLayerMessage::NewSession(_),
+                }
+            ));
+            shutdown.cancel();
+            finish_inherited_termination.notify_one();
+
+            tokio::time::timeout(Duration::from_secs(5), failover_handle)
+                .await
+                .expect("failover did not finish after draining the queued registration")
+                .unwrap()
+                .unwrap();
+
+            let invocations = invocations.lock().unwrap();
+            assert_eq!(
+                invocations.as_slice(),
+                &[HashSet::from([INHERITED_PID]), HashSet::from([queued_pid]),]
+            );
+            assert!(invocations.iter().all(|pids| !pids.is_empty()));
+            let signals = signals.lock().unwrap();
+            assert_eq!(
+                signals
+                    .iter()
+                    .filter(|event| **event == (INHERITED_PID, Signal::SIGKILL))
+                    .count(),
+                if queued_pid == INHERITED_PID { 2 } else { 1 },
+            );
+            if queued_pid != INHERITED_PID {
+                assert_one_kill(&signals, queued_pid);
+            }
+            assert_eq!(
+                signals
+                    .iter()
+                    .filter(|event| **event == (INHERITED_PID, Signal::SIGTERM))
+                    .count(),
+                1
+            );
+            assert_eq!(signals.len(), 3);
+
+            std::mem::drop((encoder, decoder));
+        }
     }
 }
