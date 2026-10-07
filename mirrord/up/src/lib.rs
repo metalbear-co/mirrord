@@ -30,7 +30,7 @@ use k8s_openapi::api::core::v1::Namespace;
 use miette::Diagnostic;
 use mirrord_analytics::MIRRORD_UP_CORRELATION_ID_ENV;
 use mirrord_config::{
-    config::{ConfigError, EnvKey},
+    config::{ConfigContext, ConfigError, EnvKey},
     target::{Target, TargetType},
     util::GIT_BRANCH,
 };
@@ -617,7 +617,12 @@ pub async fn run(
     let mut resolved_targets =
         resolve_unresolved_workloads(&up_config, config_path, up_context.clone()).await?;
 
-    let service_configs = up_config.service_configs(&key, &mut resolved_targets, up_context)?;
+    let service_configs = up_config.service_configs(
+        &key,
+        &mut resolved_targets,
+        up_context,
+        &mut ConfigContext::default(),
+    )?;
 
     validate_targets(&service_configs)?;
 

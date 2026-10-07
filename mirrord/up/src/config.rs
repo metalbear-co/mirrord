@@ -1015,13 +1015,17 @@ impl UpConfig {
     /// [`Self::unresolved_targets`] -- this method will panic
     /// otherwise. Entries that are used to resolve a target will be
     /// removed from the `resolved_targets`.
+    ///
+    /// `context` is what the configs are generated with, which reads `MIRRORD_*` environment
+    /// variables unless it's [`ConfigContext::strict_env`].
     pub(crate) fn service_configs(
         self,
         key: &EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
+        context: &mut ConfigContext,
     ) -> Result<Vec<SubprocessCfg>, UpError> {
-        let base_config = self.common.base_config(&mut ConfigContext::default())?;
+        let base_config = self.common.base_config(context)?;
 
         self.services
             .into_iter()
@@ -1245,6 +1249,7 @@ mod tests {
                 &EnvKey::Provided("key".to_owned()),
                 &mut HashMap::new(),
                 up_context,
+                &mut ConfigContext::default().strict_env(true),
             )
             .unwrap();
         value_at(
@@ -1261,21 +1266,9 @@ mod tests {
         config.pointer(&pointer).cloned().unwrap_or_default()
     }
 
-    /// Whether the environment sets the `mirrord.json` option at `layer_path` (e.g.
-    /// `MIRRORD_TELEMETRY` does in CI), which overrides what `mirrord up` takes from the file.
-    fn set_by_environment(layer_path: &str) -> bool {
-        let generate = |context: &mut ConfigContext| {
-            serde_json::to_value(LayerFileConfig::default().generate_config(context).unwrap())
-                .unwrap()
-        };
-        let from_environment = generate(&mut ConfigContext::default());
-        let isolated = generate(&mut ConfigContext::default().strict_env(true));
-        value_at(&from_environment, layer_path) != value_at(&isolated, layer_path)
-    }
-
     /// Each setting of [`COMMON_LAYER_PATHS`] and [`SERVICE_LAYER_PATHS`] changes the
     /// `mirrord.json` option it's listed with, so the tables can't drift from what `mirrord up`
-    /// does. An option the environment sets can't be changed from the file, so it's left out.
+    /// does.
     #[test]
     fn layer_paths_match_the_generated_config() {
         let value = |setting: &str| match setting {
@@ -1294,9 +1287,6 @@ mod tests {
         let base = service("    target: none\n");
 
         for (setting, layer_path) in COMMON_LAYER_PATHS {
-            if set_by_environment(layer_path) {
-                continue;
-            }
             let changed = format!("common:\n  {setting}: {}\n{base}", value(setting));
             assert_ne!(
                 layer_value(&base, layer_path),
@@ -1305,9 +1295,6 @@ mod tests {
             );
         }
         for (setting, layer_path) in SERVICE_LAYER_PATHS {
-            if set_by_environment(layer_path) {
-                continue;
-            }
             let mut extra = format!("    {setting}: {}\n", value(setting));
             if *setting != "target" {
                 extra.push_str("    target: none\n");
@@ -1538,6 +1525,7 @@ mod tests {
                 &EnvKey::Provided("sqs-session".to_owned()),
                 &mut HashMap::new(),
                 UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
             )
             .unwrap();
         assert_eq!(services.len(), 1);
@@ -1574,6 +1562,7 @@ mod tests {
                 &EnvKey::Provided("sqs-mirror".to_owned()),
                 &mut HashMap::new(),
                 UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
             )
             .unwrap();
         assert_eq!(services.len(), 1);
@@ -1613,7 +1602,12 @@ mod tests {
             &key,
         )
         .unwrap()
-        .service_configs(&key, &mut HashMap::new(), UpKubeContext::default())
+        .service_configs(
+            &key,
+            &mut HashMap::new(),
+            UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
+        )
         .unwrap();
 
         let service = services.pop().unwrap();
@@ -1650,6 +1644,7 @@ mod tests {
             &EnvKey::Provided("jagiellon".to_owned()),
             &mut HashMap::new(),
             UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
         )
         .err()
         .expect("invalid split queue shape should fail schema validation");
@@ -1683,6 +1678,7 @@ mod tests {
             &EnvKey::Provided("jadwiga".to_owned()),
             &mut HashMap::new(),
             UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
         )
         .err()
         .expect("invalid jq should fail config validation");
@@ -1726,6 +1722,7 @@ mod tests {
             &EnvKey::Provided("a-session".to_owned()),
             &mut HashMap::new(),
             UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
         )
         .unwrap();
         assert_eq!(services.len(), 1);
@@ -1765,6 +1762,7 @@ mod tests {
             &EnvKey::Provided("a-session".to_owned()),
             &mut HashMap::new(),
             UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
         )
         .unwrap();
         assert_eq!(services.len(), 1);
@@ -1844,6 +1842,7 @@ mod tests {
                 &EnvKey::Provided("a-session".to_owned()),
                 &mut HashMap::new(),
                 UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
             )
             .unwrap();
 
@@ -1879,6 +1878,7 @@ mod tests {
             &EnvKey::Provided("a-session".to_owned()),
             &mut HashMap::new(),
             UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
         )
         .unwrap();
 
@@ -2136,7 +2136,12 @@ mod tests {
         ]);
 
         let subprocesses: HashMap<String, SubprocessCfg> = config
-            .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
+            .service_configs(
+                &key,
+                &mut resolved_targets,
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
             .unwrap()
             .into_iter()
             .map(|cfg| (cfg.service_name.to_string(), cfg))
@@ -2197,7 +2202,12 @@ mod tests {
         let mut resolved_targets = HashMap::new();
 
         config
-            .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
+            .service_configs(
+                &key,
+                &mut resolved_targets,
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
             .unwrap();
     }
 
@@ -2224,7 +2234,12 @@ mod tests {
         )]);
 
         config
-            .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
+            .service_configs(
+                &key,
+                &mut resolved_targets,
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
             .unwrap();
     }
 
@@ -2251,7 +2266,12 @@ mod tests {
         )]);
 
         config
-            .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
+            .service_configs(
+                &key,
+                &mut resolved_targets,
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
             .unwrap();
     }
 
