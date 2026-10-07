@@ -293,7 +293,8 @@ fn up_yaml_patch_issue_of_prefixed_service() {
         r#"
 services:
   app:
-    target: none
+    target: { path: pod/app }
+    default_mode: replace
     run:
       command: ["echo"]
   app-v2:
@@ -682,15 +683,10 @@ fn up_yaml_missing_services() {
 /// Services `mirrord up` refuses once it assembles their config, though every setting is
 /// valid on its own.
 #[rstest]
-#[case::targetless_split("target: none", "Steal mode")]
-#[case::targetless_patched_steal(
-    "target: none\n    default_mode: mirror\n    config_patch: { feature: { network: { incoming: steal } } }",
-    "Steal mode"
-)]
-#[case::targetless_replace("target: none\n    default_mode: replace", "targetless agent")]
+#[case::targetless_replace("target: none\n    default_mode: replace", "targetless target")]
 #[case::targetless_patched_copy(
     "target: none\n    default_mode: mirror\n    config_patch: { feature: { copy_target: true } }",
-    "copy target"
+    "targetless target"
 )]
 #[case::service_patched_copy(
     "target: { path: service/app }\n    config_patch: { feature: { copy_target: true } }",
@@ -726,9 +722,14 @@ fn up_yaml_unrunnable_service_setting() {
     );
 }
 
-/// The same settings with a target or mode that supports them.
+/// The same settings with a target or mode that supports them. A targetless service may steal:
+/// its `mirrord exec` session doesn't take the missing target for targetless when verifying.
 #[rstest]
 #[case::targetless_mirror("target: none\n    default_mode: mirror")]
+#[case::targetless_split("target: none")]
+#[case::targetless_patched_steal(
+    "target: none\n    default_mode: mirror\n    config_patch: { feature: { network: { incoming: steal } } }"
+)]
 #[case::deployment_replace("target: { path: deployment/app }\n    default_mode: replace")]
 #[case::inferred_target_replace("default_mode: replace")]
 fn up_yaml_runnable_service(#[case] service: &str) {

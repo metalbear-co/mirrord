@@ -914,10 +914,9 @@ impl UpConfig {
                 }
             };
 
-            // As in the service's `mirrord exec` session, where a missing target means targetless.
-            let mut context = ConfigContext::default()
-                .strict_env(true)
-                .empty_target_final(true);
+            // As in the service's `mirrord exec` session, which doesn't take a missing target for
+            // targetless when verifying; `validate_targets` checks the mode against it below.
+            let mut context = ConfigContext::default().strict_env(true);
             if let Err(source) = config.verify(&mut context) {
                 errors.push(ServiceError::Validation {
                     service: service_name.clone(),
