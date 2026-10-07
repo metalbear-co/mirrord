@@ -801,16 +801,8 @@ impl ServiceError {
 }
 
 impl UpConfig {
-    /// Assembles every service's mirrord config the way `mirrord up` does and runs the checks it
-    /// gets when `mirrord up` runs, so that a config can be validated without running it (e.g. in
-    /// `mirrord mcp`).
-    ///
-    /// Doesn't reach the cluster: a service without a target path, which `mirrord up` looks up in
-    /// the cluster, stands in for a deployment named after the service. Every mode supports a
-    /// deployment, so such a service only gets the checks that don't depend on its target.
-    ///
-    /// Ignores `MIRRORD_*` environment variables, which `mirrord up` would read from its own
-    /// environment rather than this process's.
+    /// Verifies the config without touching the cluster, similar to
+    /// what `verify_config` does for [`LayerConfig`].
     pub fn verify_services(&self, key: &EnvKey) -> Result<Vec<ServiceError>, ConfigError> {
         let base = self
             .common
@@ -963,7 +955,7 @@ impl UpConfig {
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
     ) -> Result<Vec<SubprocessCfg>, UpError> {
-        let base = self.common.base_config(&mut ConfigContext::default())?;
+        let base_config = self.common.base_config(&mut ConfigContext::default())?;
 
         self.services
             .into_iter()
@@ -972,7 +964,7 @@ impl UpConfig {
                 let (config, run) = svc
                     .assemble(
                         &service_name,
-                        base.clone(),
+                        base_config.clone(),
                         key.clone(),
                         resolved_targets,
                         up_context.clone(),
