@@ -90,6 +90,7 @@ walkdir = { workspace = true, optional = true }
 rstest.workspace = true
 serde-saphyr.workspace = true
 tempfile.workspace = true
+tower-test.workspace = true
 
 [lib]
 doctest = false
