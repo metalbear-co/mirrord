@@ -40,10 +40,8 @@ pub struct MysqlBranchConfig {
 
 /// Users can choose from the following copy mode to bootstrap their MySQL branch database.
 ///
-/// All copy modes accept `dump_args`. When this field is set, it replaces the default
-/// `mysqldump` arguments. The defaults are `--single-transaction` and `--no-tablespaces`;
-/// include them explicitly when overriding if you want to preserve the default behavior. An
-/// empty list means no dump args.
+/// All copy modes accept `dump_args`, passed to `mysqldump` as-is, which can leave out what the
+/// copy mode copies, such as stored routines with `--skip-routines`.
 ///
 /// - Empty
 ///

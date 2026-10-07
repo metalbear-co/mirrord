@@ -8,6 +8,45 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.271.0](https://github.com/metalbear-co/mirrord/tree/3.271.0) - 2026-10-07
+
+
+### Added
+
+- Added `mirrord preview diff` to compare manifest files with the live cluster.
+- Added `mirrord preview start --resource` to build previews from your manifest
+  files.
+- Experimental Windows support: the layer is injected with stork and installs
+  its
+  hooks before a launched program reaches its entry point. The injection method
+  can be chosen with `MIRRORD_INJECTION_METHOD` (`load-library`, `apc` or
+  `iat`).
+  `mirrord attach` reports why the layer failed to initialize instead of
+  waiting
+  out a timeout, the layer log file records `info` events without
+  `MIRRORD_LOG`,
+  and crash reports explain fast-fail and heap-corruption exits.
+
+
+### Fixed
+
+- An unreachable `mirrord-console` no longer aborts the target: the layer
+  reports it
+  on stderr and logs to its usual file and stderr sinks instead. On Windows,
+  console
+  logging works again, and a console that stops responding is reported once
+  instead of stalling the process.
+- Fixed the internal proxy ending the whole session when accepting a new layer
+  connection failed transiently, for example when a process exited while its
+  connection was still waiting to be accepted.
+- The `feature` and `feature.env` config examples in the docs no longer set
+  both `include` and `exclude`. mirrord does not allow them together, so
+  `mirrord verify-config` rejected these examples.
+- The complete config example in the docs is now a valid config. It had the
+  removed `connect_tcp` field, a trailing comma, and both `include` and
+  `exclude` in `feature.env`, so `mirrord verify-config` rejected it.
+- `mirrord operator install` refuses to install an operator older than 3.197.0.
+
 ## [3.270.0](https://github.com/metalbear-co/mirrord/tree/3.270.0) - 2026-10-05
 
 

@@ -190,6 +190,8 @@ pub enum Application {
     DlopenCgo,
     /// C app that calls BSD connectx(2).
     Connectx,
+    /// C app that resolves names through macOS DNS-SD, like Bun does.
+    DnsSd,
     /// Rust app that closes a clone socket.
     DupListen,
     /// Rust app that spawns children which must inherit socket metadata.
@@ -393,6 +395,7 @@ impl Application {
             }
             Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
             Application::Connectx => String::from("tests/apps/connectx/out.c_test_app"),
+            Application::DnsSd => String::from("tests/apps/dns_sd/out.c_test_app"),
             Application::DupListen => {
                 format!(
                     "{}/{}",
@@ -550,6 +553,7 @@ impl Application {
             | Application::GoIssue2988(..)
             | Application::DlopenCgo
             | Application::Connectx
+            | Application::DnsSd
             | Application::DoubleListen
             | Application::DupListen
             | Application::UnixConnectAddrlen => vec![],
@@ -662,7 +666,8 @@ impl Application {
             | Application::PythonSocketPair
             | Application::PythonCor1401Seqpacket
             | Application::UnixConnectAddrlen
-            | Application::Connectx => unimplemented!("shouldn't get here"),
+            | Application::Connectx
+            | Application::DnsSd => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
             Application::DlopenCgo => 23333,

@@ -993,7 +993,7 @@ fn sessions_section(branch: &BranchDatabase) -> Vec<Line<'static>> {
     if sessions.is_empty() {
         lines.push(Line::styled("  none", theme::muted()));
     }
-    for SessionInfo { id, owner } in sessions {
+    for SessionInfo { id, owner, .. } in sessions {
         lines.push(Line::from_iter([
             Span::raw(format!("  {:<width$} ", id, width = LABEL_WIDTH - 2)),
             Span::styled(owner.to_string(), Style::default()),

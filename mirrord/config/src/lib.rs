@@ -2771,8 +2771,9 @@ mod tests {
         out
     }
 
-    /// Regression for the original Windows layer panic at
-    /// `mirrord-layer-lib::file::mapper::FileRemapper::new`.
+    /// Regression for a Windows layer that failed to start because a mapping
+    /// pattern did not compile in
+    /// `mirrord-layer-lib::file::mapper::FileRemapper::try_new`.
     ///
     /// Pre-fix `apply_magic` interpolated `$HOME` straight into the `.aws`
     /// mapping regex. On Windows with `HOME=C:\Users\foo` (e.g. set by Git

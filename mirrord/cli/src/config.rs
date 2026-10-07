@@ -27,6 +27,10 @@ use mirrord_config::{
     },
     target::TargetType,
 };
+#[cfg(windows)]
+use mirrord_layer_lib::process::windows::injection::{
+    InjectionMethod, MIRRORD_INJECTION_METHOD_ENV,
+};
 use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
@@ -638,6 +642,21 @@ impl ExecParams {
 // `mirrord exec` command
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
+    /// Windows DLL injection method.
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`. The env fallback lets setups that cannot change
+    /// the CLI invocation (launchers, IDEs) still select the method.
+    #[cfg(windows)]
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library",
+        value_parser = InjectionMethod::parse
+    )]
+    pub injection_method: InjectionMethod,
+
     #[clap(flatten)]
     pub params: Box<ExecParams>,
 
@@ -1965,6 +1984,20 @@ pub(super) enum UpSubcommand {
 #[cfg(windows)]
 #[derive(Args, Debug)]
 pub(super) struct AttachArgs {
+    /// APC selection attests a debugger stop before application execution.
+    ///
+    /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
+    /// variable, then to `load-library`. `attach` is invoked by the IDE extension, which is
+    /// exactly the case the env fallback exists for.
+    #[arg(
+        long,
+        hide = true,
+        env = MIRRORD_INJECTION_METHOD_ENV,
+        default_value = "load-library",
+        value_parser = InjectionMethod::parse_attach
+    )]
+    pub injection_method: InjectionMethod,
+
     /// PID of the target process to attach to.
     pub pid: u32,
 }
@@ -1973,6 +2006,15 @@ pub(super) struct AttachArgs {
 #[cfg(windows)]
 #[derive(Args, Debug)]
 pub(super) struct PitmArgs {
+    /// Windows DLL injection method.
+    ///
+    /// When the flag is absent, `pitm` takes `MIRRORD_INJECTION_METHOD` from the child's
+    /// environment, then falls back to `load-library` (see `pitm::child_environment`).
+    /// The flag carries no clap `env` fallback so that an explicit choice can be told apart
+    /// from the plugin's per-run value.
+    #[arg(long, hide = true, value_parser = InjectionMethod::parse)]
+    pub injection_method: Option<InjectionMethod>,
+
     /// Target executable followed by its arguments. Everything after `--`
     /// is forwarded verbatim to the child process.
     #[arg(
@@ -2268,6 +2310,40 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    /// `attach` cannot use IAT, an unknown method names the ones that exist, and the flag stays
+    /// out of the help.
+    #[cfg(windows)]
+    #[test]
+    fn windows_injection_methods_are_hidden_and_validated() {
+        let error = Cli::try_parse_from(["mirrord", "attach", "--injection-method", "iat", "123"])
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("iat requires a newly created process"),
+            "{error}"
+        );
+        for command in ["exec", "pitm", "attach"] {
+            let error =
+                Cli::try_parse_from(["mirrord", command, "--injection-method", "unknown", "123"])
+                    .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("expected load-library, apc or iat"),
+                "{command}: {error}"
+            );
+            let mut definition = Cli::command();
+            let subcommand = definition.find_subcommand_mut(command).unwrap();
+            assert!(
+                !subcommand
+                    .render_long_help()
+                    .to_string()
+                    .contains("injection-method")
+            );
+        }
+    }
 
     /// Guards the clap definition, in particular the coexistence of `up`'s
     /// positional `services` list with the `init` subcommand.
