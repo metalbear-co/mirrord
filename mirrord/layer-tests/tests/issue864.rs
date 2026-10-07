@@ -2,8 +2,13 @@
 #![warn(clippy::indexing_slicing)]
 #![allow(non_snake_case)]
 
-use std::{path::Path, time::Duration};
+use std::{
+    panic::{AssertUnwindSafe, resume_unwind},
+    path::Path,
+    time::Duration,
+};
 
+use futures::FutureExt;
 use nix::{
     sys::{signal, signal::Signal},
     unistd::Pid,
@@ -25,7 +30,7 @@ async fn test_issue864(
     #[values(Application::PythonIssue864)] application: Application,
     config_dir: &Path,
 ) {
-    let (test_process, mut intproxy) = application
+    let (mut test_process, mut intproxy) = application
         .start_process_with_port(
             vec![
                 ("MIRRORD_LOG", "mirrord=info"),
@@ -55,13 +60,66 @@ async fn test_issue864(
         .send_connection_then_data(&prepare_request_body("GET", ""), application.get_app_port())
         .await;
 
-    tokio::time::sleep(Duration::from_secs(10)).await;
+    let request = AssertUnwindSafe(tokio::time::timeout(
+        Duration::from_secs(60),
+        test_process.wait_for_line_stdout(Duration::from_secs(40), "GET: Request completed"),
+    ))
+    .catch_unwind()
+    .await;
 
-    signal::kill(
-        Pid::from_raw(test_process.child.id().expect("Child must have pid!") as i32),
-        Signal::SIGTERM,
-    )
-    .expect("Process has been `SIGTERM`!");
+    let signal_result = match test_process.child.id() {
+        Some(pid) => signal::kill(Pid::from_raw(pid as i32), Signal::SIGTERM)
+            .map_err(|error| format!("SIGTERM failed: {error}")),
+        None => Err("reload parent has no PID for SIGTERM".to_owned()),
+    };
+
+    // A failed signal must not skip the sole wait/drain attempt.
+    let cleanup = AssertUnwindSafe(tokio::time::timeout(
+        Duration::from_secs(15),
+        test_process.wait(),
+    ))
+    .catch_unwind()
+    .await;
+
+    eprintln!("reload-parent signal outcome: {signal_result:?}");
+    match &cleanup {
+        Ok(Ok(status)) => {
+            eprintln!("parent wait and both-reader drain completed: {status}");
+        }
+        Ok(Err(error)) => {
+            eprintln!("INCOMPLETE cleanup: 15-second wait/drain timeout: {error}");
+        }
+        Err(payload) => {
+            let text = payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("non-string cleanup panic payload");
+            eprintln!("INCOMPLETE cleanup: wait/drain panic: {text}");
+        }
+    }
+
+    // Report signal/cleanup evidence before restoring the original request failure.
+    match request {
+        Err(payload) => resume_unwind(payload),
+        Ok(Err(error)) => {
+            panic!("request completion exceeded 60 seconds: {error}; cleanup outcome above");
+        }
+        Ok(Ok(())) => {}
+    }
+
+    let status = match cleanup {
+        Err(payload) => resume_unwind(payload),
+        Ok(Err(error)) => panic!("parent wait/drain exceeded 15 seconds: {error}"),
+        Ok(Ok(status)) => status,
+    };
+    if let Err(error) = signal_result {
+        panic!("{error}; parent wait/drain outcome above");
+    }
+    assert!(
+        status.success(),
+        "reload parent exited unsuccessfully: {status}"
+    );
 
     test_process
         .assert_stdout_contains("GET: Request completed")
