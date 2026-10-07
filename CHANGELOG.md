@@ -8,6 +8,16 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.271.1](https://github.com/metalbear-co/mirrord/tree/3.271.1) - 2026-10-07
+
+
+### Fixed
+
+- The configuration reference describes what MySQL and MariaDB `copy.dump_args`
+  can leave out of a branch.
+- Warnings about a database branch, such as a server version mismatch, show in
+  the session that creates the branch, not only in sessions that reuse it.
+
 ## [3.271.0](https://github.com/metalbear-co/mirrord/tree/3.271.0) - 2026-10-07
 
 
