@@ -1,8 +1,6 @@
 // NOTE(gabriela): prevent compiling lib.rs so layer acts as empty
 // library to allow layer-lib as optional dependency for unix.
 #![cfg(unix)]
-#![cfg_attr(target_os = "linux", feature(c_size_t))]
-#![feature(once_cell_try)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
@@ -187,11 +185,11 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         panic!("{FAILSAFE_ENV} environment variable found, stopping execution.")
     }
 
-    let given_process = EXECUTABLE_ARGS.get_or_try_init(ExecuteArgs::from_env)?;
+    let given_process = ExecuteArgs::from_env()?;
+    let given_process = EXECUTABLE_ARGS.get_or_init(|| given_process);
 
-    EXECUTABLE_PATH.get_or_try_init(|| {
-        std::env::current_exe().map(|arg| arg.to_string_lossy().into_owned())
-    })?;
+    let executable_path = std::env::current_exe()?.to_string_lossy().into_owned();
+    EXECUTABLE_PATH.get_or_init(|| executable_path);
 
     let mut config = mirrord_config::util::read_resolved_config()?;
 

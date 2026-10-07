@@ -72,6 +72,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
+rust-version = "1.99"
 version = "3.270.0"
 license = "MIT"
 readme = "README.md"

@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 publish.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [lib]
 doctest = false
