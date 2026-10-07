@@ -35,8 +35,8 @@ use std::{
 use futures::{SinkExt, StreamExt};
 use local_ip_address::local_ip;
 use mirrord_analytics::{
-    AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
-    read_kube_version_from_env,
+    AnalyticsReporter, CollectAnalytics, Reporter, read_cluster_id_from_env,
+    read_correlation_id_from_env, read_kube_version_from_env,
 };
 use mirrord_config::{LayerConfig, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM};
 use mirrord_intproxy::agent_conn::{AgentConnectInfo, AgentConnection};
@@ -111,6 +111,10 @@ pub async fn proxy(
     if let Some((major, minor)) = read_kube_version_from_env() {
         analytics.get_mut().add("kube_version_major", major);
         analytics.get_mut().add("kube_version_minor", minor);
+    }
+
+    if let Some(cluster_id) = read_cluster_id_from_env() {
+        analytics.get_mut().add("cluster_id", cluster_id);
     }
 
     // This connection is just to keep the agent alive as long as the client side is running.

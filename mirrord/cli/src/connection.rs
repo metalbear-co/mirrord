@@ -12,7 +12,7 @@ use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
     api::{
         container::ContainerConfig,
-        kubernetes::{CreatedAgent, KubernetesAPI, apiserver_version},
+        kubernetes::{CreatedAgent, KubernetesAPI, apiserver_version, cluster_uid},
     },
     error::KubeApiError,
     resolved::ResolvedTarget,
@@ -28,6 +28,7 @@ use mirrord_progress::{
 };
 use mirrord_sessions_manager_client::{ServiceScope, SessionsManagerConnectInfo};
 use tracing::Level;
+use uuid::Uuid;
 
 use crate::{
     CliError, CliResult, MirrordCi,
@@ -262,6 +263,9 @@ where
         .await
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
+    let cluster_id = resolve_cluster_id(api.client()).await;
+    report_cluster_id(analytics, cluster_id);
+
     if let Err(error) = GlobalConfig::remember_operator().await {
         progress.warning(&format!(
             "Failed to remember operator availability for future mirrord sessions: {error}"
@@ -277,8 +281,70 @@ where
             failed: false,
         }),
         api_version,
+        cluster_id,
         target_container_ports,
     }))
+}
+
+/// How long to wait for the cluster's identity before continuing without it.
+///
+/// The identifier is optional analytics data, so it must never hold up session setup. This
+/// bound is deliberately short and separate from the `agent.startup_timeout` config, which
+/// covers a later stage of the connection.
+const CLUSTER_ID_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Resolves the identity of the cluster this client connected to, for session analytics.
+///
+/// The value is the UID of the cluster's `default` namespace, which is what the operator
+/// reports as its own cluster identity, so events originating from the same cluster carry the
+/// same identifier whether a client or the operator sent them.
+///
+/// Under multi-cluster this identifies the cluster the client connected to, which is the
+/// primary and not necessarily the one a session ran on. Attributing an individual session to
+/// a workload cluster has to come from the operator, which reads the identity of the cluster
+/// it runs in.
+///
+/// Returns [`None`] whenever the identity is unavailable: a role without `get` on
+/// `namespaces`, an apiserver that omits the UID, a value that is not a UUID, or a read that
+/// outlives [`CLUSTER_ID_TIMEOUT`]. An absent identifier is expected and never interrupts the
+/// session, so every failure is logged and discarded.
+async fn resolve_cluster_id(client: &kube::Client) -> Option<Uuid> {
+    match tokio::time::timeout(CLUSTER_ID_TIMEOUT, cluster_uid(client)).await {
+        Ok(Ok(Some(uid))) => match uid.parse() {
+            Ok(uid) => Some(uid),
+            Err(error) => {
+                tracing::debug!(%error, uid, "Cluster identity is not a valid UUID");
+                None
+            }
+        },
+        Ok(Ok(None)) => {
+            tracing::debug!("Cluster identity is unavailable: the apiserver omitted the UID");
+            None
+        }
+        Ok(Err(error)) => {
+            tracing::debug!(%error, "Failed to read the cluster identity");
+            None
+        }
+        Err(..) => {
+            tracing::debug!(
+                timeout_secs = CLUSTER_ID_TIMEOUT.as_secs(),
+                "Timed out reading the cluster identity"
+            );
+            None
+        }
+    }
+}
+
+/// Records the cluster identity on the reporter owned by the calling command.
+///
+/// Commands that spawn a proxy hand the identity down through the environment, but
+/// `port-forward`, `dump`, `vpn` and `diagnose` keep their own reporter in this process and
+/// take only the connector from [`create_and_connect`], so they would otherwise report
+/// sessions with no cluster attached.
+fn report_cluster_id<R: Reporter>(analytics: &mut R, cluster_id: Option<Uuid>) {
+    if let Some(cluster_id) = cluster_id {
+        analytics.get_mut().add("cluster_id", cluster_id);
+    }
 }
 
 pub(crate) struct ConnectData {
@@ -286,6 +352,11 @@ pub(crate) struct ConnectData {
     pub(crate) connector: AgentConnector,
     /// Kube apiserver version (major, minor).
     pub(crate) api_version: (u16, u16),
+    /// Identifies the cluster this client connected to, shared by every client and by the
+    /// operator in that same cluster. See [`resolve_cluster_id`].
+    ///
+    /// [`None`] when the cluster identity could not be read.
+    pub(crate) cluster_id: Option<Uuid>,
     /// Ports declared by the target container, see
     /// [`RuntimeData::container_ports`](mirrord_kube::api::runtime::RuntimeData::container_ports).
     ///
@@ -338,6 +409,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
             connector,
             // Implement - see MBE-1981
             api_version: (0, 0),
+            cluster_id: None,
             target_container_ports: Vec::new(),
         });
     }
@@ -364,6 +436,9 @@ pub(crate) async fn create_and_connect<R: Reporter>(
     let api_version = apiserver_version(k8s_api.client())
         .await
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
+
+    let cluster_id = resolve_cluster_id(k8s_api.client()).await;
+    report_cluster_id(analytics, cluster_id);
 
     k8s_api
         .detect_openshift(progress)
@@ -426,6 +501,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         connect_info: AgentConnectInfo::DirectKubernetes(agent_connect_info),
         connector,
         api_version,
+        cluster_id,
         target_container_ports: runtime_data
             .map(|runtime_data| runtime_data.container_ports)
             .unwrap_or_default(),
