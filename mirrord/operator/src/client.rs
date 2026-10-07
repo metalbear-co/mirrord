@@ -48,13 +48,16 @@ use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
 use crate::{
-    client::database_branches::{
-        CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
-        create_mongodb_branches, create_mysql_branches, create_pg_branches,
-        ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
-        list_reusable_mysql_branches, list_reusable_pg_branches,
-        relay_source_compatibility_warnings, reused_branch_connection_sources,
-        wait_for_pending_branches,
+    client::{
+        database_branches::{
+            CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
+            create_mongodb_branches, create_mysql_branches, create_pg_branches,
+            ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
+            list_reusable_mysql_branches, list_reusable_pg_branches,
+            relay_source_compatibility_warnings, reused_branch_connection_sources,
+            wait_for_pending_branches,
+        },
+        queue_split_progress::QueueSplitProgress,
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
@@ -77,6 +80,7 @@ mod credentials;
 pub mod database_branches;
 mod discovery;
 pub mod error;
+mod queue_split_progress;
 
 pub use discovery::operator_installed;
 
@@ -1780,7 +1784,10 @@ impl OperatorApi<PreparedClientCert> {
             .await?;
 
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let (conn, session) = match self.connect_to_session(&session).await {
+        let connection = self
+            .connect_reporting_split(&session, layer_config, &connection_subtask)
+            .await;
+        let (conn, session) = match connection {
             Ok(conn) => {
                 connection_subtask.success(Some("connected to the target"));
                 (conn, session)
@@ -2034,7 +2041,9 @@ impl OperatorApi<PreparedClientCert> {
             .await?;
 
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let conn = self.connect_to_session(&session).await?;
+        let conn = self
+            .connect_reporting_split(&session, layer_config, &connection_subtask)
+            .await?;
         connection_subtask.success(Some("connected to the target"));
 
         Ok(OperatorSessionConnection {
@@ -2626,6 +2635,16 @@ impl OperatorApi<PreparedClientCert> {
             .ok_or_else(|| KubeApiError::invalid_state(&copied, "no name"))?;
         let api = Api::<CopyTargetCrd>::namespaced(self.client.clone(), namespace);
         let mut wait_subtask: Option<P> = None;
+        let mut split_progress = copied
+            .spec
+            .split_queues
+            .as_ref()
+            .is_some_and(SplitQueuesConfig::is_set)
+            .then(|| copied.status.as_ref()?.creator_session().id.clone())
+            .flatten()
+            .map(|session| {
+                QueueSplitProgress::new(self.client.clone(), namespace, session, progress)
+            });
 
         loop {
             let phase = copied.status.as_ref().and_then(|status| status.phase());
@@ -2636,6 +2655,9 @@ impl OperatorApi<PreparedClientCert> {
                     }
                 }
                 Some(CopyTargetPhase::Ready) | None => {
+                    if let Some(split_progress) = split_progress {
+                        split_progress.finish();
+                    }
                     if let Some(mut subtask) = wait_subtask {
                         subtask.success(None);
                     }
@@ -2655,7 +2677,13 @@ impl OperatorApi<PreparedClientCert> {
                 }
             }
 
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            let wait = tokio::time::sleep(Duration::from_secs(5));
+            match &mut split_progress {
+                Some(split_progress) => {
+                    tokio::join!(wait, split_progress.poll());
+                }
+                None => wait.await,
+            }
             copied = api
                 .get(&name)
                 .await
@@ -2722,6 +2750,34 @@ impl OperatorApi<PreparedClientCert> {
         session: &OperatorSession,
     ) -> OperatorApiResult<OperatorConnection> {
         Self::connect_target(&self.client, session).await
+    }
+
+    /// [`OperatorApi::connect_to_session`], reporting what the session's queue split waits on
+    /// while the operator starts it.
+    async fn connect_reporting_split<P: Progress>(
+        &self,
+        session: &OperatorSession,
+        layer_config: &LayerConfig,
+        progress: &P,
+    ) -> OperatorApiResult<OperatorConnection> {
+        if layer_config.feature.split_queues.is_set().not() {
+            return self.connect_to_session(session).await;
+        }
+
+        let namespace = layer_config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(self.client.default_namespace());
+
+        QueueSplitProgress::new(
+            self.client.clone(),
+            namespace,
+            format!("{:X}", session.id),
+            progress,
+        )
+        .run(self.connect_to_session(session))
+        .await
     }
 
     /// Creates websocket connection to the operator target.
