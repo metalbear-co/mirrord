@@ -1,1 +1,0 @@
-The complete config example in the docs is now a valid config. It had the removed `connect_tcp` field, a trailing comma, and both `include` and `exclude` in `feature.env`, so `mirrord verify-config` rejected it.
