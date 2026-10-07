@@ -232,10 +232,7 @@ impl TcpStealerApi {
                     transport: info
                         .tls_connector
                         .as_ref()
-                        .map(|tls| IncomingTrafficTransportType::Tls {
-                            server_name: tls.server_name().map(|s| s.to_str().into_owned()),
-                            alpn_protocol: tls.alpn_protocol().map(Vec::from),
-                        })
+                        .map(|tls| tls.transport_type(&self.protocol_version))
                         .unwrap_or(IncomingTrafficTransportType::Tcp),
                 }),
             ));
@@ -340,10 +337,7 @@ impl TcpStealerApi {
                 connection: new_connection,
                 transport: info
                     .tls_connector
-                    .map(|tls| IncomingTrafficTransportType::Tls {
-                        server_name: tls.server_name().map(|s| s.to_str().into_owned()),
-                        alpn_protocol: tls.alpn_protocol().map(Vec::from),
-                    })
+                    .map(|tls| tls.transport_type(&self.protocol_version))
                     .unwrap_or(IncomingTrafficTransportType::Tcp),
             })
         } else {
