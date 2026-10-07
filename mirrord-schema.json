@@ -4268,7 +4268,7 @@
       "additionalProperties": false
     },
     "MariadbBranchCopyConfig": {
-      "description": "Users can choose from the following copy mode to bootstrap their MariaDB branch database.\n\nAll copy modes accept `dump_args`. When this field is set, it replaces the default\n`mariadb-dump` arguments. The defaults are `--single-transaction` and `--no-tablespaces`;\ninclude them explicitly when overriding if you want to preserve the default behavior. An\nempty list means no dump args.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.",
+      "description": "Users can choose from the following copy mode to bootstrap their MariaDB branch database.\n\nAll copy modes accept `dump_args`, passed to `mariadb-dump` as-is, which can leave out what the\ncopy mode copies, such as stored routines with `--skip-routines`.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.",
       "oneOf": [
         {
           "type": "object",
@@ -4522,7 +4522,7 @@
       ]
     },
     "MysqlBranchCopyConfig": {
-      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database.\n\nAll copy modes accept `dump_args`. When this field is set, it replaces the default\n`mysqldump` arguments. The defaults are `--single-transaction` and `--no-tablespaces`;\ninclude them explicitly when overriding if you want to preserve the default behavior. An\nempty list means no dump args.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.",
+      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database.\n\nAll copy modes accept `dump_args`, passed to `mysqldump` as-is, which can leave out what the\ncopy mode copies, such as stored routines with `--skip-routines`.\n\n- Empty\n\n  Creates an empty database. If the source DB connection options are found from the chosen\n  target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord\n  operator looks for the `name` field from the branch DB config object. This option is useful\n  for users that run DB migrations themselves before starting the application.\n\n- Schema\n\n  Creates an empty database and copies schema of all tables.\n\n- All\n\n  Copies both schema and data of all tables. This option shall only be used when the data volume\n  of the source database is minimal.",
       "oneOf": [
         {
           "type": "object",
@@ -4996,6 +4996,17 @@
           ],
           "items": {
             "$ref": "#/$defs/ConfigMount"
+          }
+        },
+        "spec_resources": {
+          "title": "feature.preview.spec_resources {#feature-preview-spec_resources}",
+          "description": "Kubernetes manifest files (or directories of them) to build the preview from, instead of\nthe target's live spec. Same as `mirrord preview start --resource <path>`, which\nreplaces this list when given.\n\nPoint it at the manifests you already keep for the service (the desired state, for\nexample the files your pull request changes). From every `*.yaml` / `*.yml` document,\nmirrord keeps only the target itself and the ConfigMaps and Secrets its pod uses\n(through `env`, `envFrom`, or volumes). Everything else in the files, such as an Ingress\nor another Deployment, is skipped. Of what is left, objects identical to what is live\nare skipped too.\n\n- The target's pod template from the files becomes the preview pod's spec (with your\n  `image`). When the files do not define the target, the live one is used.\n- Changed or new ConfigMaps and Secrets are created as copies that belong to the preview,\n  and the preview pod uses those copies. The live ones, which the real app uses, are never\n  changed. The copies are deleted when the preview ends.\n\nNothing is created when a file fails to parse or the cluster rejects a changed object.\nRun `mirrord preview diff` to see what would change without creating anything.\n\n```json\n{\n  \"target\": \"deployment/app\",\n  \"feature\": {\n    \"preview\": {\n      \"image\": \"my-registry/app:pr-318\",\n      \"spec_resources\": [\"./k8s/app-deployment.yaml\", \"./k8s/configmap.yaml\"]\n    }\n  }\n}\n```",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
           }
         },
         "ttl_mins": {

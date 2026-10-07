@@ -44,6 +44,7 @@ clap.workspace = true
 dotenvy.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
+serde-saphyr.workspace = true
 serde.workspace = true
 tracing-subscriber.workspace = true
 futures.workspace = true
@@ -51,7 +52,6 @@ glob.workspace = true
 which.workspace = true
 schemars.workspace = true
 semver.workspace = true
-serde-saphyr.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 reqwest = { workspace = true, features = ["stream"] }
 const-random.workspace = true
@@ -108,7 +108,7 @@ sha2.workspace = true
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
 utils-win = { path = "../utils-win" }
-dll-syringe = { workspace = true }
+stork = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { workspace = true, features = ["process", "resource", "signal"] }

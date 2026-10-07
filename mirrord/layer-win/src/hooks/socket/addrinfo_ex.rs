@@ -41,7 +41,7 @@ use std::{
 };
 
 use mirrord_layer_lib::{
-    detour::Detour,
+    detour::{ApplicationCallback, Detour},
     error::HookError,
     socket::dns::windows::{
         MANAGED_ADDRINFO, resolve_to_managed,
@@ -145,6 +145,14 @@ impl AsyncQuery {
                 };
             }
         }
+
+        // From here on the target's own code runs, so it must see the hooks that the rest of the
+        // process sees: a `connect` or a remote file read from the routine has to reach its hook.
+        //
+        // On the task-pool worker there is no mark to leave, so this costs one thread-local
+        // write. `cancel` delivers on the caller's thread, which holds the mark only when the
+        // cancel runs inside another detour, as an APC during that detour's alertable wait does.
+        let _application = ApplicationCallback::enter();
 
         if self.routine != 0 {
             // SAFETY: `routine` was produced from a valid CompletionRoutineFn
@@ -459,6 +467,8 @@ mod tests {
         ov: OVERLAPPED,
         called: AtomicU32,
         last_err: AtomicU32,
+        /// Whether the detour mark was set while the routine ran. `u32::MAX` until it runs.
+        mark_seen: AtomicU32,
     }
 
     impl TestCtx {
@@ -468,6 +478,7 @@ mod tests {
                 ov: unsafe { std::mem::zeroed() },
                 called: AtomicU32::new(0),
                 last_err: AtomicU32::new(u32::MAX),
+                mark_seen: AtomicU32::new(u32::MAX),
             }
         }
     }
@@ -480,9 +491,11 @@ mod tests {
         // `overlapped` points at `TestCtx.ov`, the first field, so it is also a
         // `*mut TestCtx`.
         let ctx = overlapped as *mut TestCtx;
+        let mark = u32::from(mirrord_layer_lib::detour::DetourGuard::is_held());
         unsafe {
             (*ctx).called.fetch_add(1, Ordering::SeqCst);
             (*ctx).last_err.store(error, Ordering::SeqCst);
+            (*ctx).mark_seen.store(mark, Ordering::SeqCst);
         }
     }
 
@@ -526,6 +539,36 @@ mod tests {
         // OVERLAPPED.Pointer (the contract field) round-trips the result head.
         let pointer = unsafe { *ctx.ov.u.Pointer_mut() } as usize;
         assert_eq!(pointer, SENTINEL_HEAD, "OVERLAPPED.Pointer = *ppResult");
+    }
+
+    /// Application code that `deliver` calls must see the hooks the rest of the process sees,
+    /// even when `deliver` runs with the mark set.
+    ///
+    /// That happens when `cancel` is itself called inside another detour, as a user APC during
+    /// that detour's alertable wait is. The guard below stands in for that detour.
+    #[test]
+    fn the_completion_routine_runs_without_the_detour_mark() {
+        let mut ctx = TestCtx::new();
+        let mut slot: PADDRINFOEXW = ptr::null_mut();
+        let query = query_with(&mut ctx, true, &mut slot);
+        let head = SENTINEL_HEAD as PADDRINFOEXW;
+
+        let guard = mirrord_layer_lib::detour::DetourGuard::new().expect("this call owns it");
+        assert!(query.claim(), "first claim must win");
+        unsafe { query.deliver(0, head) };
+
+        assert!(
+            mirrord_layer_lib::detour::DetourGuard::is_held(),
+            "the layer's own work is marked again after the callback"
+        );
+        drop(guard);
+
+        assert_eq!(ctx.called.load(Ordering::SeqCst), 1, "routine called once");
+        assert_eq!(
+            ctx.mark_seen.load(Ordering::SeqCst),
+            0,
+            "application code must run with no detour mark"
+        );
     }
 
     /// With no routine, deliver() signals the OVERLAPPED's event instead.

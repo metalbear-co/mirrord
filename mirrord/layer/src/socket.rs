@@ -10,6 +10,8 @@ pub use mirrord_layer_lib::{
 };
 use socket2::SockAddr;
 
+#[cfg(target_os = "macos")]
+mod dns_sd;
 pub(super) mod hooks;
 pub(crate) mod ops;
 

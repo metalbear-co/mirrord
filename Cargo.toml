@@ -72,7 +72,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.270.0"
+version = "3.271.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -128,7 +128,6 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 ctor = "0.2"
 derive_more = "2.0.1"
 dirs = "6"
-dll-syringe = "0.17.1"
 dns-lookup = "3"
 dotenvy = "0.15"
 drain = "0.1"
@@ -267,6 +266,7 @@ sha2 = "0.10"
 shellexpand = "3"
 shlex = "1.3"
 socket2 = { version = "0.5", features = ["all"] }
+stork = { git = "https://github.com/metalbear-co/stork.git", rev = "a88686e764145be5d1d8f81d4be5bfb4ed217d89" }
 strsim = "0.11"
 strum = "0.27.1"
 strum_macros = "0.27.1"
@@ -323,6 +323,7 @@ winapi = { version = "0.3.9", features = [
     "processthreadsapi",
     "errhandlingapi",
     "sysinfoapi",
+    "stringapiset",
     "synchapi",
     "handleapi",
     "jobapi2",

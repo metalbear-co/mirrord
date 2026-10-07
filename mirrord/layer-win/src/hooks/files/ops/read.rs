@@ -93,7 +93,7 @@ use winapi::shared::{
 use crate::{
     hooks::files::{
         iosb::{check_io_pointers, write_iosb, write_iosb_eof, write_iosb_success},
-        managed_handle::{HandleContext, MANAGED_HANDLES},
+        managed_handle::{HandleContext, managed_file},
         types::NT_READ_FILE_ORIGINAL,
         util::{WindowsTime, try_seek},
     },
@@ -227,7 +227,7 @@ pub(in crate::hooks::files) unsafe fn handle(
     key: PULONG,
 ) -> NTSTATUS {
     unsafe {
-        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+        if let Some(managed_handle) = managed_file(file)
             && let Ok(mut handle_context) = managed_handle.try_write()
         {
             if let Err(status) = check_io_pointers(buffer, io_status_block) {

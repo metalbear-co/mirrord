@@ -9,22 +9,19 @@ pub struct FileRemapper {
 }
 
 impl FileRemapper {
-    pub fn new(mapping: HashMap<String, String>) -> Self {
+    /// # Errors
+    ///
+    /// A mapping pattern that is not a valid regex.
+    pub fn try_new(mapping: HashMap<String, String>) -> Result<Self, regex::Error> {
         let filter = RegexSetBuilder::new(mapping.keys())
             .case_insensitive(true)
-            .build()
-            .expect("Building path mapping regex set failed");
+            .build()?;
         let mapping = mapping
             .into_iter()
-            .map(|(pattern, value)| {
-                (
-                    Regex::new(&pattern).expect("Building path mapping regex failed"),
-                    value,
-                )
-            })
-            .collect();
+            .map(|(pattern, value)| Ok((Regex::new(&pattern)?, value)))
+            .collect::<Result<_, regex::Error>>()?;
 
-        FileRemapper { filter, mapping }
+        Ok(FileRemapper { filter, mapping })
     }
 
     #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]
@@ -87,7 +84,7 @@ mod tests {
         "/Users/john-doe/Library/Caches/JetBrains/IntelliJIdea2023.3/tomcat/6902e44a-a069-433d-ab49-5b46477acb97/static/index.html"
     )]
     fn simple_mapping(#[case] input: PathBuf, #[case] expect: PathBuf) {
-        let remapper = FileRemapper::new(test_mapping());
+        let remapper = FileRemapper::try_new(test_mapping()).unwrap();
 
         assert_eq!(remapper.change_path(input), expect);
     }

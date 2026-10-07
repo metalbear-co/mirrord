@@ -128,7 +128,11 @@ fn create_process_info(pid: u32, parent_pid: u32) -> mirrord_intproxy_protocol::
         pid: pid as _,
         parent_pid: parent_pid as _,
         name: get_current_process_name(),
-        cmdline: std::env::args().collect(),
+        // `args` panics on an argument that is not valid Unicode, such as a file name with an
+        // unpaired surrogate; the proxy only needs a readable rendering.
+        cmdline: std::env::args_os()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect(),
         loaded: true,
     }
 }
