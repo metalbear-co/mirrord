@@ -191,8 +191,12 @@ pub enum Application {
     DlopenCgo,
     /// C app that calls BSD connectx(2).
     Connectx,
+    /// C app that resolves names through macOS DNS-SD, like Bun does.
+    DnsSd,
     /// Rust app that closes a clone socket.
     DupListen,
+    /// Rust app that spawns children which must inherit socket metadata.
+    PosixSpawnSharedSockets,
     /// Rust app that listens on a socket twice
     DoubleListen,
     /// C app that calls `connect(2)` on a unix socket with a too-large `addrlen`
@@ -392,11 +396,19 @@ impl Application {
             }
             Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
             Application::Connectx => String::from("tests/apps/connectx/out.c_test_app"),
+            Application::DnsSd => String::from("tests/apps/dns_sd/out.c_test_app"),
             Application::DupListen => {
                 format!(
                     "{}/{}",
                     env!("CARGO_MANIFEST_DIR"),
                     "../../target/debug/dup-listen"
+                )
+            }
+            Application::PosixSpawnSharedSockets => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/posix-spawn-shared-sockets"
                 )
             }
             Application::DoubleListen => {
@@ -542,6 +554,7 @@ impl Application {
             | Application::GoIssue2988(..)
             | Application::DlopenCgo
             | Application::Connectx
+            | Application::DnsSd
             | Application::DoubleListen
             | Application::DupListen
             | Application::UnixConnectAddrlen => vec![],
@@ -584,6 +597,7 @@ impl Application {
                     format!("exec 0<&- ; exec node {}", app_path.to_string_lossy()),
                 ]
             }
+            Application::PosixSpawnSharedSockets => vec![],
         }
     }
 
@@ -649,10 +663,12 @@ impl Application {
             | Application::GoIssue2988(..)
             | Application::NodeMakeConnections
             | Application::DoubleListen
+            | Application::PosixSpawnSharedSockets
             | Application::PythonSocketPair
             | Application::PythonCor1401Seqpacket
             | Application::UnixConnectAddrlen
-            | Application::Connectx => unimplemented!("shouldn't get here"),
+            | Application::Connectx
+            | Application::DnsSd => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
             Application::DlopenCgo => 23333,

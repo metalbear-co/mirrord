@@ -1,3 +1,5 @@
+#[cfg(windows)]
+use std::ffi::OsStr;
 #[cfg(target_os = "macos")]
 use std::ffi::OsString;
 use std::{
@@ -391,7 +393,8 @@ impl MirrordExecution {
     ///
     /// This is best-effort. Any failure leaves the monitor endpoint unset, and the layers fall back
     /// to their in-process dump. The monitor process inherits this process's environment, so it
-    /// reads the log path and the full-memory-dump flag from there.
+    /// reads the full-memory-dump flag from there. It and the layers get the log path from
+    /// [`session_log_directory`].
     #[cfg(windows)]
     async fn spawn_crash_monitor(env_vars: &mut HashMap<String, String>) -> Option<Child> {
         let mut command = resolve_tokio_command(std::env::current_exe().ok()?);
@@ -406,23 +409,15 @@ impl MirrordExecution {
             .stderr(std::process::Stdio::inherit())
             .stdin(std::process::Stdio::null());
 
-        // When the user set no log path, make a per-session temp dir so layer logs always exist to
-        // bundle on a crash. The monitor removes it on a clean exit; a crash keeps the bundle.
         let log_path_var = mirrord_layer_lib::logging::MIRRORD_LAYER_LOG_PATH;
-        if std::env::var_os(log_path_var).is_none() {
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|elapsed| elapsed.as_nanos())
-                .unwrap_or(0);
-            let dir = std::env::temp_dir()
-                .join(format!("mirrord/session-{}-{nanos}", std::process::id()));
-
-            if std::fs::create_dir_all(&dir).is_ok() {
-                let dir = dir.to_string_lossy().into_owned();
-                command.env(log_path_var, &dir);
+        if let Some((dir, ephemeral)) =
+            session_log_directory(std::env::var_os(log_path_var).as_deref())
+        {
+            command.env(log_path_var, &dir);
+            if ephemeral {
                 command.env(MIRRORD_CRASH_EPHEMERAL_DIR, "1");
-                env_vars.insert(log_path_var.to_owned(), dir);
             }
+            env_vars.insert(log_path_var.to_owned(), dir);
         }
 
         let mut child = command
@@ -897,11 +892,73 @@ impl MirrordExecution {
     }
 }
 
+/// The session's log directory, as the crash monitor and every layer of the session get it, and
+/// whether mirrord made it for this session.
+///
+/// The monitor bundles a layer's log by its name inside this directory, so both have to mean the
+/// same directory. A relative path does not: each process resolves it against its own working
+/// directory, and a process the session launches may run in another one than the monitor's. So
+/// the user's setting is made absolute here, against the CLI's working directory, and every
+/// process inherits that one value.
+///
+/// When the user set no log path, it is a fresh directory under the system temp directory, so
+/// layer logs always exist to bundle on a crash. The monitor removes it on a clean exit; a crash
+/// keeps the bundle.
+///
+/// # Arguments
+///
+/// * `configured` - the user's `MIRRORD_LAYER_LOG_PATH`, when set.
+///
+/// # Returns
+///
+/// The directory and whether it is ephemeral, or `None` when the setting cannot be made absolute
+/// or the directory cannot be created. The setting, if any, is then left as the user gave it.
+#[cfg(windows)]
+fn session_log_directory(configured: Option<&OsStr>) -> Option<(String, bool)> {
+    if let Some(configured) = configured {
+        let absolute = std::path::absolute(configured).ok()?;
+        return absolute
+            .into_os_string()
+            .into_string()
+            .ok()
+            .map(|dir| (dir, false));
+    }
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir()
+        .join("mirrord")
+        .join(format!("session-{}-{nanos}", std::process::id()));
+    std::fs::create_dir_all(&dir).ok()?;
+    Some((dir.to_string_lossy().into_owned(), true))
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use super::{CrashReporting, MIRRORD_LAYER_CRASH_REPORTING};
+
+    /// A relative log path names a different directory in every working directory, so the
+    /// session's processes get it made absolute against the CLI's, and an absolute one as is.
+    #[cfg(windows)]
+    #[test]
+    fn a_relative_log_path_is_made_absolute_for_the_session() {
+        let (relative, ephemeral) =
+            super::session_log_directory(Some("logs".as_ref())).expect("a directory");
+        assert_eq!(
+            std::path::PathBuf::from(relative),
+            std::env::current_dir().expect("cwd").join("logs")
+        );
+        assert!(!ephemeral, "the user's directory is never removed");
+
+        let given = std::env::temp_dir().join("mirrord-logs");
+        let (absolute, _) =
+            super::session_log_directory(Some(given.as_os_str())).expect("a directory");
+        assert_eq!(std::path::PathBuf::from(absolute), given);
+    }
 
     #[test]
     fn crash_reporting_configures_layer_environment() {

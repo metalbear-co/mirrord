@@ -12,8 +12,8 @@
 //!
 //! [`WORKER_COUNT`] is a small fixed number consuming jobs from a shared
 //! `std::sync::mpsc::Receiver` under a `Mutex` (the receiver isn't `Sync`, so
-//! workers serialize on `rx.lock()`; the mutex is held only for the `recv()`
-//! call, not while the job runs).
+//! workers serialize on `rx.lock()`; one idle worker holds the mutex while it
+//! blocks in `recv()`, and releases it before the job runs).
 //!
 //! - **`PROXY_CONNECTION` serializes** at the layer-lib level: only one worker can talk to the
 //!   agent at a time, so a large pool wouldn't increase agent throughput.
@@ -25,13 +25,18 @@
 //!
 //! ## Initialization
 //!
-//! The pool is created on first use, but [`initialize`] is called eagerly at
-//! layer boot so the worker threads are spawned from a normal layer thread —
-//! never lazily from inside a hook that might be running under the loader
-//! lock (e.g. a DNS resolution during another DLL's `DllMain`), where
-//! `thread::spawn` would deadlock on `DLL_THREAD_ATTACH`. Workers run for the
-//! layer's lifetime; we don't join them on `DLL_PROCESS_DETACH` (the process
-//! is dying, John.).
+//! Two steps, and neither is left to the first [`submit`].
+//!
+//! - [`prepare`] creates the queue. `DllMain` calls it before it enables the hooks, so a hook
+//!   always has somewhere to put a job. It only allocates.
+//! - [`start_workers`] spawns the workers, from the layer's startup worker thread. Never from
+//!   `DllMain`: a thread spawned there cannot start until the loader lock is released, and if the
+//!   layer's startup fails there, nothing of it may run afterwards.
+//!
+//! [`submit`] never spawns a thread, because a hook can run under the loader lock (a DNS
+//! resolution during another DLL's `DllMain`), where a spawn deadlocks on `DLL_THREAD_ATTACH`. A
+//! job submitted before the workers exist waits in the queue. Workers run for the layer's
+//! lifetime; we don't join them on `DLL_PROCESS_DETACH` (the process is dying, John.).
 //!
 //! ## Re-entrancy / deadlock note
 //!
@@ -41,6 +46,7 @@
 //! completion mechanism and return), so a worker never waits on the pool.
 
 use std::{
+    io,
     sync::{
         Arc, Mutex,
         mpsc::{self, Receiver, Sender},
@@ -58,33 +64,84 @@ const WORKER_COUNT: usize = 4;
 /// state (raw pointers cast to usize, agent fd, completion context, etc.).
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
-/// Lazily-initialized sender; the receiver is shared across all worker threads
-/// via `Arc<Mutex<Receiver<Job>>>` so the first worker to wake up grabs the
-/// next job. (Stock `mpsc::Receiver` isn't `Sync`, hence the mutex; the mutex
-/// is held only for the few nanoseconds of `recv`, not while the job runs.)
-static POOL: Lazy<Sender<Job>> = Lazy::new(|| {
-    let (tx, rx) = mpsc::channel::<Job>();
-    let rx = Arc::new(Mutex::new(rx));
-    for id in 0..WORKER_COUNT {
-        let rx = Arc::clone(&rx);
-        thread::Builder::new()
-            .name(format!("mirrord-task-worker-{id}"))
-            .spawn(move || worker_loop(rx))
-            .expect("failed to spawn task-pool worker thread");
-    }
-    tracing::info!("task-pool worker pool started ({} threads)", WORKER_COUNT);
-    tx
-});
+/// A job queue and the workers that drain it.
+///
+/// The receiver is shared across all worker threads via `Arc<Mutex<Receiver<Job>>>` so the first
+/// worker to wake up grabs the next job. (Stock `mpsc::Receiver` isn't `Sync`, hence the mutex.
+/// The worker that holds it blocks in `recv` while the queue is empty; the others wait for the
+/// mutex. No worker holds it while a job runs.)
+struct TaskPool {
+    sender: Sender<Job>,
+    receiver: Arc<Mutex<Receiver<Job>>>,
+}
 
-/// Eagerly spawn the worker threads from a safe context (layer boot), so the
-/// first [`submit`] from inside a hook never has to `thread::spawn` under the
-/// loader lock. Idempotent.
-pub(crate) fn initialize() {
+impl TaskPool {
+    /// Creates the queue, with no workers yet.
+    fn new() -> Self {
+        let (sender, receiver) = mpsc::channel::<Job>();
+        Self {
+            sender,
+            receiver: Arc::new(Mutex::new(receiver)),
+        }
+    }
+
+    /// Spawns the workers. Called once, by the layer's startup worker.
+    ///
+    /// # Errors
+    ///
+    /// When a worker could not be spawned. The workers spawned before it keep running.
+    fn start_workers(&self) -> io::Result<()> {
+        // See the warning in `layer-lib::logging`.
+        for id in 0..WORKER_COUNT {
+            let receiver = Arc::clone(&self.receiver);
+            thread::Builder::new()
+                .name(format!("mirrord-task-worker-{id}"))
+                .spawn(move || worker_loop(receiver))?;
+        }
+        tracing::info!("task-pool worker pool started ({} threads)", WORKER_COUNT);
+        Ok(())
+    }
+
+    /// Queues `job` for a worker. Never spawns a thread.
+    fn submit(&self, job: Job) {
+        // The pool owns the receiver, so the channel stays open and the send cannot fail.
+        let _ = self.sender.send(job);
+        tracing::trace!("task_pool::submit: queued job");
+    }
+}
+
+/// The layer's one pool. See the module doc for when each step runs.
+static POOL: Lazy<TaskPool> = Lazy::new(TaskPool::new);
+
+/// Creates the job queue, without spawning anything. Safe under the loader lock. Idempotent.
+pub(crate) fn prepare() {
     Lazy::force(&POOL);
 }
 
+/// Spawns the worker threads. Must not run under the loader lock. Called once.
+///
+/// # Errors
+///
+/// When a worker could not be spawned.
+pub(crate) fn start_workers() -> io::Result<()> {
+    POOL.start_workers()
+}
+
 fn worker_loop(rx: Arc<Mutex<Receiver<Job>>>) {
+    // Deliberately NOT marked internal. A job here can call back into application code -
+    // `addrinfo_ex`'s `deliver` runs the caller's completion routine on this thread, and .NET
+    // calls `FreeAddrInfoExW` from it. A marked thread bypasses that hook, so `ws2_32` frees a
+    // chain this layer allocated and leaves a stale `MANAGED_ADDRINFO` entry, which the next
+    // chain on that reused address turns into a double free (`0xC0000374`).
+    //
+    // Marking buys nothing anyway: the agent round-trip uses `send`/`recv`, which this layer
+    // does not hook, on a socket created before any job runs.
+
     // are you a named thread or just another thread Andy?
+    //
+    // Safe here, unlike in a hook: this is a Rust-spawned thread. See the warning in
+    // `layer-lib::logging`.
+    #[allow(clippy::disallowed_methods)]
     let tid = std::thread::current()
         .name()
         .map(str::to_owned)
@@ -128,18 +185,9 @@ fn worker_loop(rx: Arc<Mutex<Receiver<Job>>>) {
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)) {
             Ok(()) => tracing::trace!(worker = %tid, "task-pool worker: job done"),
             Err(panic) => {
-                // Best-effort downcast to extract a useful message.
-                // NOTE(gabriela): this is all claude's credit, i would've
-                // never even thought of implementing this because i'd have
-                // no idea how
-                let msg = panic
-                    .downcast_ref::<&'static str>()
-                    .copied()
-                    .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
-                    .unwrap_or("<non-string panic>");
                 tracing::error!(
                     worker = %tid,
-                    panic = msg,
+                    panic = crate::panic_message(&*panic),
                     "task-pool worker: job panicked; any completion the job was responsible for signaling may be lost unless the job installed a fire-on-drop guard"
                 );
             }
@@ -161,17 +209,39 @@ fn worker_loop(rx: Arc<Mutex<Receiver<Job>>>) {
 /// Keeping those pointers valid until the job runs is the caller's
 /// responsibility — the same contract the OS places on the originator of the
 /// async operation.
+///
+/// Never spawns a thread. A job submitted before [`start_workers`] waits in the queue.
 pub(crate) fn submit<F>(f: F)
 where
     F: FnOnce() + Send + 'static,
 {
-    if let Err(e) = POOL.send(Box::new(f)) {
-        // Channel send only fails when every worker has died, which is a bug.
-        tracing::error!(
-            error = ?e,
-            "task_pool::submit: pool send failed; whatever completion this job would have signaled will never fire"
+    POOL.submit(Box::new(f));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::mpsc::RecvTimeoutError, time::Duration};
+
+    use super::*;
+
+    /// Submitting spawns nothing: a job waits for the workers, and runs once they start.
+    #[test]
+    fn a_job_waits_for_the_workers() {
+        let pool = TaskPool::new();
+        let (done, finished) = mpsc::channel();
+
+        pool.submit(Box::new(move || {
+            let _ = done.send(());
+        }));
+        assert_eq!(
+            finished.recv_timeout(Duration::from_millis(200)),
+            Err(RecvTimeoutError::Timeout),
+            "no worker exists to run it yet"
         );
-    } else {
-        tracing::trace!("task_pool::submit: queued job");
+
+        pool.start_workers().expect("start the workers");
+        finished
+            .recv_timeout(Duration::from_secs(10))
+            .expect("a worker runs the queued job");
     }
 }

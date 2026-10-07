@@ -1,4 +1,4 @@
-use std::{io, net::SocketAddr};
+use std::{io, net::SocketAddr, time::Duration};
 
 use futures::{SinkExt, TryStreamExt};
 use mirrord_intproxy_protocol::{
@@ -18,6 +18,9 @@ use crate::{
     background_tasks::{BackgroundTask, MessageBus},
     main_tasks::NewLayer,
 };
+
+/// How long [`LayerInitializer`] waits before accepting again when it ran out of descriptors.
+const DESCRIPTOR_EXHAUSTION_BACKOFF: Duration = Duration::from_millis(100);
 
 #[derive(Error, Debug)]
 pub enum LayerInitializerError {
@@ -83,7 +86,9 @@ impl LayerInitializer {
     ///
     /// Cancellation discards an undecoded connection. After decoding, the result retains the PID
     /// even if shutdown interrupts the response, so the owner can account for it before exiting.
-    #[tracing::instrument(level = Level::INFO, skip(stream, shutdown), ret, err)]
+    ///
+    /// Errors are not recorded on the span: the accept loop logs each failed handshake once.
+    #[tracing::instrument(level = Level::INFO, skip(stream, shutdown), ret)]
     async fn handle_new_stream(
         stream: TcpStream,
         layer_address: SocketAddr,
@@ -140,6 +145,10 @@ impl BackgroundTask for LayerInitializer {
 
     #[tracing::instrument(level = Level::INFO, name = "layer_initializer_main_loop", skip_all, ret, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        // Set while `accept` keeps running out of descriptors, so the warning is written once per
+        // period of exhaustion rather than once per retry.
+        let mut out_of_descriptors = false;
+
         let result = loop {
             tokio::select! {
                 biased;
@@ -151,11 +160,35 @@ impl BackgroundTask for LayerInitializer {
                 },
                 result = self.listener.accept() => {
                     let (stream, layer_address) = match result {
-                        Ok(accepted) => accepted,
-                        Err(error) => {
-                            self.shutdown.cancel();
-                            break Err(LayerInitializerError::Accept(error));
+                        Ok(accepted) => {
+                            if std::mem::take(&mut out_of_descriptors) {
+                                tracing::info!("Descriptors are available again, accepting layer connections");
+                            }
+                            accepted
                         }
+                        Err(error) => match AcceptFailure::classify(&error) {
+                            AcceptFailure::Connection => {
+                                tracing::warn!(%error, "Failed to accept a layer connection, skipping it");
+                                continue;
+                            }
+                            AcceptFailure::DescriptorExhaustion => {
+                                if !std::mem::replace(&mut out_of_descriptors, true) {
+                                    tracing::warn!(
+                                        %error,
+                                        backoff = ?DESCRIPTOR_EXHAUSTION_BACKOFF,
+                                        "Out of descriptors while accepting a layer connection, backing off until one is free",
+                                    );
+                                }
+                                tokio::select! {
+                                    _ = self.shutdown.cancelled() => break Ok(()),
+                                    _ = tokio::time::sleep(DESCRIPTOR_EXHAUSTION_BACKOFF) => continue,
+                                }
+                            }
+                            AcceptFailure::Fatal => {
+                                self.shutdown.cancel();
+                                break Err(LayerInitializerError::Accept(error));
+                            }
+                        },
                     };
                     // Layer requests are small and strictly request-response, so Nagle's
                     // algorithm only adds latency to every hooked libc call.
@@ -191,6 +224,44 @@ impl BackgroundTask for LayerInitializer {
 
         result
     }
+}
+
+/// How [`LayerInitializer`] reacts to a failed `accept`.
+#[derive(Debug, PartialEq, Eq)]
+enum AcceptFailure {
+    /// A single pending connection failed, for example because the layer's process exited while
+    /// its connection sat in the backlog. The listener is fine, so the loop moves on.
+    Connection,
+    /// The process or system is out of descriptors. The pending connection stays in the backlog
+    /// and `accept` would fail again immediately, so the loop waits before retrying.
+    DescriptorExhaustion,
+    /// Anything else means the listener itself can no longer be relied on.
+    Fatal,
+}
+
+impl AcceptFailure {
+    fn classify(error: &io::Error) -> Self {
+        match error.kind() {
+            io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::Interrupted => Self::Connection,
+            _ if is_descriptor_exhaustion(error) => Self::DescriptorExhaustion,
+            _ => Self::Fatal,
+        }
+    }
+}
+
+#[cfg(unix)]
+fn is_descriptor_exhaustion(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(nix::libc::EMFILE | nix::libc::ENFILE)
+    )
+}
+
+#[cfg(windows)]
+fn is_descriptor_exhaustion(error: &io::Error) -> bool {
+    error.raw_os_error() == Some(winapi::um::winsock2::WSAEMFILE)
 }
 
 #[cfg(test)]
@@ -338,5 +409,40 @@ mod test {
             } => {}
             other => panic!("unexpected response: {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod accept {
+    use super::*;
+
+    #[test]
+    fn accept_failures_are_classified() {
+        for kind in [
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::Interrupted,
+        ] {
+            assert_eq!(
+                AcceptFailure::classify(&io::Error::from(kind)),
+                AcceptFailure::Connection
+            );
+        }
+
+        #[cfg(unix)]
+        let exhaustion = [nix::libc::EMFILE, nix::libc::ENFILE];
+        #[cfg(windows)]
+        let exhaustion = [winapi::um::winsock2::WSAEMFILE];
+        for code in exhaustion {
+            assert_eq!(
+                AcceptFailure::classify(&io::Error::from_raw_os_error(code)),
+                AcceptFailure::DescriptorExhaustion
+            );
+        }
+
+        assert_eq!(
+            AcceptFailure::classify(&io::Error::from(io::ErrorKind::InvalidInput)),
+            AcceptFailure::Fatal
+        );
     }
 }

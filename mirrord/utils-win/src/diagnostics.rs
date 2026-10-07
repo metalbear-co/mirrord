@@ -47,8 +47,10 @@ fn crash_reporting_enabled_for(value: Option<&str>) -> bool {
 ///
 /// Crash output is grouped with the layer logs when `MIRRORD_LAYER_LOG_PATH` is set, so one place
 /// holds both. When it is unset, a `mirrord` subdirectory of the system temp directory is used so
-/// artifacts are always written and always findable. Both the layer ([`crash::install`]) and the
-/// CLI monitor call this, so the two sides always agree on the location.
+/// artifacts are always written and always findable. Both the layer ([`crash::register_monitor`])
+/// and the CLI monitor call this. They agree on the location because the CLI gives every process
+/// of a session the same absolute path: a relative one would name a different directory in each
+/// process's working directory.
 pub fn crash_dir() -> PathBuf {
     std::env::var_os(MIRRORD_LAYER_LOG_PATH)
         .map(PathBuf::from)

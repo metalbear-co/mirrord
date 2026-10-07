@@ -21,7 +21,9 @@ pub use libc::{
     AF_INET, AF_INET6, AF_UNIX, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_STREAM, sockaddr, socklen_t,
 };
 use mirrord_config::feature::network::{
-    filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
+    filter::{
+        AddressFilter, ProtocolAndAddressFilter, ProtocolAndAddressFilterError, ProtocolFilter,
+    },
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
 };
 use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnCloseRequest, PortUnsubscribe};
@@ -51,6 +53,7 @@ pub use winapi::{
 use crate::detour::{Detour, DetourGuard, OptionExt};
 #[cfg(windows)]
 use crate::error::windows::{WindowsError, WindowsResult};
+use crate::setup::SetupError;
 pub use crate::{
     ConnectError, HookError, HookResult, detour::Bypass,
     proxy_connection::make_proxy_request_no_response, setup::setup,
@@ -492,6 +495,19 @@ pub enum ConnectionThrough {
     Remote(SocketAddr),
 }
 
+/// Why `feature.network.outgoing.filter` cannot be used.
+#[derive(Debug, thiserror::Error)]
+pub enum OutgoingFilterError {
+    #[error("the filter list is empty")]
+    Empty,
+    #[error("{filter:?}: {source}")]
+    Invalid {
+        filter: String,
+        #[source]
+        source: ProtocolAndAddressFilterError,
+    },
+}
+
 /// Holds the [`ProtocolAndAddressFilter`]s set up by the user in the [`OutgoingFilterConfig`].
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum OutgoingSelector {
@@ -509,19 +525,26 @@ impl OutgoingSelector {
         filters: I,
         tcp_enabled: bool,
         udp_enabled: bool,
-    ) -> HashSet<ProtocolAndAddressFilter> {
-        filters
+    ) -> Result<HashSet<ProtocolAndAddressFilter>, OutgoingFilterError> {
+        let filters = filters
             .map(|filter| {
-                ProtocolAndAddressFilter::from_str(filter).expect("invalid outgoing filter")
+                ProtocolAndAddressFilter::from_str(filter).map_err(|source| {
+                    OutgoingFilterError::Invalid {
+                        filter: filter.to_owned(),
+                        source,
+                    }
+                })
             })
-            .collect::<HashSet<_>>()
+            .collect::<Result<HashSet<_>, _>>()?;
+
+        Ok(filters
             .into_iter()
             .filter(|ProtocolAndAddressFilter { protocol, .. }| match protocol {
                 ProtocolFilter::Any => tcp_enabled || udp_enabled,
                 ProtocolFilter::Tcp => tcp_enabled,
                 ProtocolFilter::Udp => udp_enabled,
             })
-            .collect::<HashSet<_>>()
+            .collect::<HashSet<_>>())
     }
 
     /// Builds a new instance from the user config, removing filters
@@ -529,25 +552,30 @@ impl OutgoingSelector {
     /// traffic, and thus we avoid making this check on every `connect` call.
     ///
     /// It also removes duplicated filters, by putting them into a [`HashSet`].
-    pub fn new(config: &OutgoingConfig) -> Self {
-        match &config.filter {
+    ///
+    /// # Errors
+    ///
+    /// [`SetupError::OutgoingFilter`] with an [`OutgoingFilterError`]: an empty filter list, or a
+    /// filter that does not parse.
+    pub fn new(config: &OutgoingConfig) -> Result<Self, SetupError> {
+        Ok(match &config.filter {
             None => Self::Unfiltered,
             Some(OutgoingFilterConfig::Remote(list)) | Some(OutgoingFilterConfig::Local(list))
                 if list.is_empty() =>
             {
-                panic!("outgoing traffic filter cannot be empty");
+                return Err(OutgoingFilterError::Empty.into());
             }
             Some(OutgoingFilterConfig::Remote(list)) => Self::Remote(Self::build_selector(
                 list.iter().map(String::as_str),
                 config.tcp,
                 config.udp,
-            )),
+            )?),
             Some(OutgoingFilterConfig::Local(list)) => Self::Local(Self::build_selector(
                 list.iter().map(String::as_str),
                 config.tcp,
                 config.udp,
-            )),
-        }
+            )?),
+        })
     }
 
     /// Checks if the `address` matches the specified outgoing filter.
@@ -769,5 +797,52 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
             AddressFilter::Subnet(net, _) => Ok(net.contains(&address.ip())),
             AddressFilter::Port(..) => Ok(true),
         }
+    }
+}
+
+#[cfg(test)]
+mod outgoing_selector_tests {
+    use mirrord_config::util::VecOrSingle;
+
+    use super::*;
+
+    fn remote(filters: VecOrSingle<String>) -> OutgoingConfig {
+        OutgoingConfig {
+            tcp: true,
+            udp: true,
+            filter: Some(OutgoingFilterConfig::Remote(filters)),
+            ..Default::default()
+        }
+    }
+
+    /// The setup error names the filter that does not parse.
+    #[test]
+    fn an_invalid_filter_is_named_in_the_setup_error() {
+        let filter = "tcp://google.com/24:7777";
+        let error = OutgoingSelector::new(&remote(VecOrSingle::Single(filter.to_owned())))
+            .expect_err("a hostname with a subnet does not parse");
+
+        assert!(
+            matches!(
+                &error,
+                SetupError::OutgoingFilter(OutgoingFilterError::Invalid { filter: named, .. })
+                    if named == filter
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn an_empty_filter_list_is_its_own_error() {
+        let error = OutgoingSelector::new(&remote(VecOrSingle::Multiple(Vec::new())))
+            .expect_err("an empty list is rejected");
+
+        assert!(
+            matches!(
+                error,
+                SetupError::OutgoingFilter(OutgoingFilterError::Empty)
+            ),
+            "{error:?}"
+        );
     }
 }

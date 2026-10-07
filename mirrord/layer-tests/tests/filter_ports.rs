@@ -4,7 +4,7 @@
 mod common;
 
 use core::assert_matches;
-use std::{io::Write, ops::Not, time::Duration};
+use std::{io::Write, net::TcpListener, ops::Not, time::Duration};
 
 pub use common::*;
 use mirrord_config::{
@@ -18,7 +18,9 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 use serde_json::{Value, json};
-use tokio::net::TcpStream;
+use tokio::{io::AsyncWriteExt, net::TcpStream, time::timeout};
+
+const BIND_ATTEMPTS: usize = 5;
 
 fn build_config(
     incoming_ports: Option<&[u16]>,
@@ -96,61 +98,109 @@ fn expected_behavior(port: u16, incoming: &IncomingConfig) -> BindMode {
     }
 }
 
-/// Verifies that the layer respects `feature.network.incoming.listen_ports` mapping.
+/// Verifies which ports stay local, receive all traffic, or receive filtered HTTP traffic.
 #[rstest]
 #[tokio::test]
 async fn filter_ports(
     // Reusing test app
     #[values(Application::RustListenPorts)] application: Application,
 
-    #[values(rand::random_range(10000..60000))] port: u16,
+    #[values(
+		None,
+		Some(&[0][..]),
+		Some(&[0, 1][..]),
+		Some(&[1][..])
+	)]
+    incoming_port_offsets: Option<&[u16]>,
 
     #[values(
 		None,
-		Some(&[port][..]),
-		Some(&[port, port + 1][..]),
-		Some(&[port + 1][..])
+		Some(&[0][..]),
+		Some(&[0, 1][..]),
+		Some(&[1][..])
 	)]
-    incoming_ports: Option<&[u16]>,
-
-    #[values(
-		None,
-		Some(&[port][..]),
-		Some(&[port, port + 1][..]),
-		Some(&[port + 1][..])
-	)]
-    http_filter_ports: Option<&[u16]>,
+    http_filter_port_offsets: Option<&[u16]>,
 
     #[values(true, false)] have_filter: bool,
 ) {
-    let config = build_config(incoming_ports, http_filter_ports, have_filter);
-    let mut config_file = tempfile::NamedTempFile::with_suffix(".json").unwrap();
-    config_file
-        .as_file_mut()
-        .write_all(serde_json::to_string(&config).unwrap().as_bytes())
-        .unwrap();
+    let mut attempt = 0;
+    let (mut test_process, mut intproxy, port, behavior, _config_file) = loop {
+        attempt += 1;
+        let port = rand::random_range(10000..60000);
+        // A replacement port must preserve the inclusion/filter case being tested.
+        let ports_at = |offsets: Option<&[u16]>| {
+            offsets.map(|offsets| {
+                offsets
+                    .iter()
+                    .map(|offset| port + offset)
+                    .collect::<Vec<_>>()
+            })
+        };
+        let config = build_config(
+            ports_at(incoming_port_offsets).as_deref(),
+            ports_at(http_filter_port_offsets).as_deref(),
+            have_filter,
+        );
+        let mut config_file = tempfile::NamedTempFile::with_suffix(".json").unwrap();
+        config_file
+            .as_file_mut()
+            .write_all(serde_json::to_string(&config).unwrap().as_bytes())
+            .unwrap();
 
-    let mut ctx = ConfigContext::default();
-    let config_parsed = LayerFileConfig::from_path(&config_file, &mut ctx)
-        .unwrap()
-        .generate_config(&mut ctx)
-        .unwrap();
+        let mut ctx = ConfigContext::default();
+        let config_parsed = LayerFileConfig::from_path(&config_file, &mut ctx)
+            .unwrap()
+            .generate_config(&mut ctx)
+            .unwrap();
 
-    let incoming_config = config_parsed.feature.network.incoming;
+        let incoming_config = config_parsed.feature.network.incoming;
+        let behavior = expected_behavior(port, &incoming_config);
 
-    let (test_process, mut intproxy) = application
-        .start_process(
-            vec![("APP_PORTS", &port.to_string())],
-            Some(config_file.path()),
-        )
-        .await;
+        let (mut test_process, intproxy) = application
+            .start_process(
+                vec![("APP_PORTS", &port.to_string())],
+                Some(config_file.path()),
+            )
+            .await;
 
-    match expected_behavior(port, &incoming_config) {
+        if matches!(behavior, BindMode::Local) {
+            // A partial line for port 12345 must not match port 1234.
+            test_process
+                .wait_for_line_stdout(Duration::from_secs(5), &format!("PORT {port}\n"))
+                .await;
+            if test_process
+                .get_stdout()
+                .await
+                .contains(&format!("AddrInUse PORT {port}\n"))
+            {
+                timeout(Duration::from_secs(5), test_process.wait_assert_fail())
+                    .await
+                    .expect("application did not exit after AddrInUse");
+                assert!(
+                    attempt < BIND_ATTEMPTS,
+                    "application could not bind port {port} after {BIND_ATTEMPTS} attempts (AddrInUse)"
+                );
+                continue;
+            }
+        }
+
+        break (test_process, intproxy, port, behavior, config_file);
+    };
+
+    match behavior {
         BindMode::Local => {
-            // Wait a little for test process
-            tokio::time::sleep(Duration::from_millis(250)).await;
-            let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-            drop(stream);
+            test_process
+                .assert_stdout_contains(&format!("LISTENING PORT {port}\n"))
+                .await;
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            stream.write_all(b"HELLO").await.unwrap();
+            stream.shutdown().await.unwrap();
+
+            timeout(Duration::from_secs(5), test_process.wait_assert_success())
+                .await
+                .expect("application did not exit after HELLO");
+            test_process.assert_no_error_in_stderr().await;
+            test_process.assert_no_error_in_stdout().await;
         }
         BindMode::Unfiltered => {
             assert_matches!(
@@ -170,6 +220,31 @@ async fn filter_ports(
             );
         }
     }
+}
 
-    drop(test_process)
+/// Excluded ports use real local binds, so an occupied port must not fall back to another address.
+#[tokio::test]
+async fn excluded_port_in_use_fails_bind() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    // An empty whitelist excludes any port, including u16::MAX, without adding an offset.
+    let config = build_config(Some(&[]), None, false);
+    let mut config_file = tempfile::NamedTempFile::with_suffix(".json").unwrap();
+    config_file
+        .as_file_mut()
+        .write_all(serde_json::to_string(&config).unwrap().as_bytes())
+        .unwrap();
+
+    let (mut test_process, _intproxy) = Application::RustListenPorts
+        .start_process(
+            vec![("APP_PORTS", &port.to_string())],
+            Some(config_file.path()),
+        )
+        .await;
+    test_process
+        .wait_for_line_stdout(Duration::from_secs(5), &format!("AddrInUse PORT {port}\n"))
+        .await;
+    timeout(Duration::from_secs(5), test_process.wait_assert_fail())
+        .await
+        .expect("application did not exit after AddrInUse");
 }
