@@ -62,7 +62,7 @@ async fn test_issue864(
 
     let request = AssertUnwindSafe(tokio::time::timeout(
         Duration::from_secs(60),
-        test_process.wait_for_line_stdout(Duration::from_secs(40), "GET: Request completed"),
+        test_process.wait_for_line_stdout(Duration::from_secs(20), "GET: Request completed"),
     ))
     .catch_unwind()
     .await;
