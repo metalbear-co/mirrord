@@ -1,7 +1,7 @@
 ---
 title: Configuration Examples
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-10-05T00:00:00.000Z
+lastmod: 2026-10-07T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -155,7 +155,6 @@ configuration file containing all fields.
     "path": "pod/bear-pod",
     "namespace": "default"
   },
-  "connect_tcp": null,
   "agent": {
     "log_level": "info",
     "json_log": false,
@@ -170,12 +169,11 @@ configuration file containing all fields.
     "communication_timeout": 30,
     "startup_timeout": 360,
     "flush_connections": true,
-    "metrics": "0.0.0.0:9000",
+    "metrics": "0.0.0.0:9000"
   },
   "feature": {
     "env": {
       "include": "DATABASE_USER;PUBLIC_ENV",
-      "exclude": "DATABASE_PASSWORD;SECRET_ENV",
       "override": {
         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
         "LOCAL_BEAR": "panda"

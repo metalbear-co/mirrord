@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-10-05T00:00:00.000Z
+lastmod: 2026-10-07T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -836,7 +836,6 @@ have support for a shortened version, that you can see [here](#root-shortened).
   "feature": {
     "env": {
       "include": "DATABASE_USER;PUBLIC_ENV",
-      "exclude": "DATABASE_PASSWORD;SECRET_ENV",
       "override": {
         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
         "LOCAL_BEAR": "panda"
@@ -2392,7 +2391,6 @@ See the environment variables [reference](https://metalbear.com/mirrord/docs/ref
   "feature": {
     "env": {
       "include": "DATABASE_USER;PUBLIC_ENV;MY_APP_*",
-      "exclude": "DATABASE_PASSWORD;SECRET_ENV",
       "override": {
         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
         "LOCAL_BEAR": "panda"
@@ -4120,6 +4118,40 @@ JSON string.
 `payload` is written to the file verbatim. Used for
 human-readable config files (YAML, TOML, JSON, env files,
 shell scripts, ...).
+
+#### feature.preview.spec_resources {#feature-preview-spec_resources}
+
+Kubernetes manifest files (or directories of them) to build the preview from, instead of
+the target's live spec. Same as `mirrord preview start --resource <path>`, which
+replaces this list when given.
+
+Point it at the manifests you already keep for the service (the desired state, for
+example the files your pull request changes). From every `*.yaml` / `*.yml` document,
+mirrord keeps only the target itself and the ConfigMaps and Secrets its pod uses
+(through `env`, `envFrom`, or volumes). Everything else in the files, such as an Ingress
+or another Deployment, is skipped. Of what is left, objects identical to what is live
+are skipped too.
+
+- The target's pod template from the files becomes the preview pod's spec (with your
+  `image`). When the files do not define the target, the live one is used.
+- Changed or new ConfigMaps and Secrets are created as copies that belong to the preview,
+  and the preview pod uses those copies. The live ones, which the real app uses, are never
+  changed. The copies are deleted when the preview ends.
+
+Nothing is created when a file fails to parse or the cluster rejects a changed object.
+Run `mirrord preview diff` to see what would change without creating anything.
+
+```json
+{
+  "target": "deployment/app",
+  "feature": {
+    "preview": {
+      "image": "my-registry/app:pr-318",
+      "spec_resources": ["./k8s/app-deployment.yaml", "./k8s/configmap.yaml"]
+    }
+  }
+}
+```
 
 #### feature.preview.ttl_mins {#feature-preview-ttl_mins}
 
