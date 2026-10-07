@@ -694,10 +694,10 @@ impl ClientConnectionHandler {
                 Some(mirror_api) => mirror_api.handle_client_message(message).await?,
                 _ => {
                     self.respond(DaemonMessage::Close(
-                        "component responsible for mirroring incoming traffic is not running, \
-                        which might be due to Kubernetes node kernel version <4.20. \
-                        Check agent logs for errors and please report a bug if kernel version >=4.20".into(),
-                    )).await?;
+                        "incoming traffic mirroring is not available in the targetless mode"
+                            .to_owned(),
+                    ))
+                    .await?;
                 }
             },
             ClientMessage::TcpSteal(message) => {
