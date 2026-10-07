@@ -37,11 +37,13 @@ pub mod tools;
 
 /// Handed to the model by the client, to steer it towards the tools.
 pub const INSTRUCTIONS: &str = "mirrord runs local processes in the context of a Kubernetes \
-cluster. Before writing or changing a mirrord config file (`mirrord.json` or `mirrord-up.yaml`), \
-call `validate_config` with the complete file content and fix every issue it reports; never write \
-a config that has not validated with an empty `issues` list. To learn what an option does, which \
-values it takes or which mirrord plan it needs, call `explain_config_option` with its path instead \
-of guessing. The `mirrord://info` resource gives the installed mirrord version.";
+cluster. Every mirrord config you generate or change, whether a `mirrord.json` or a \
+`mirrord-up.yaml`, must be checked with `validate_config` before it is written: pass the complete \
+file content, fix every issue it reports and validate again, until `issues` is empty. Never write \
+a config that has not validated, and don't rely on your own knowledge of the config format, which \
+may not match the installed mirrord version. To learn what an option does, which values it takes \
+or which mirrord plan it needs, call `explain_config_option` with its path instead of guessing. \
+The `mirrord://info` resource gives the installed mirrord version.";
 
 /// URI of the resource describing this mirrord installation.
 const INFO_RESOURCE_URI: &str = "mirrord://info";

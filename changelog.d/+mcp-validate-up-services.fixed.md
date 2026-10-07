@@ -1,0 +1,1 @@
+The `validate_config` tool of `mirrord mcp` checks each `mirrord-up.yaml` service the way `mirrord up` assembles it, so it reports services that `mirrord up` would refuse to run, such as a targetless service in `split` mode or a `replace` service with a pod target.

@@ -1,15 +1,21 @@
-use std::{fmt, path::PathBuf, sync::Arc};
+use std::{
+    fmt,
+    path::PathBuf,
+    sync::{Arc, PoisonError, RwLock},
+};
 
 use mirrord_config::feature::network::incoming::tls_delivery::{
-    LocalTlsDelivery, TlsDeliveryProtocol,
+    LocalTlsDelivery, TlsClientCertSource, TlsDeliveryProtocol,
 };
 use mirrord_tls_util::{
     DangerousNoVerifierServer, FromPemError, HasSubjectAlternateNames, ParsePemError,
     best_effort_root_store, parse_cert_chain, parse_key_der, read_cert_chain, read_key_der,
 };
 use rustls::{
-    ClientConfig, RootCertStore,
+    ClientConfig, RootCertStore, SignatureScheme,
+    client::ResolvesClientCert,
     pki_types::{CertificateDer, PrivateKeyDer, ServerName},
+    sign::CertifiedKey,
 };
 use thiserror::Error;
 use tokio::{sync::OnceCell, task::JoinError};
@@ -43,21 +49,83 @@ pub enum LocalClientAuth {
     Files { cert: PathBuf, key: PathBuf },
     /// PEM data already in memory, e.g. read from a Kubernetes Secret by the mirrord operator.
     Pem { cert: Vec<u8>, key: Vec<u8> },
+    /// A certificate its owner replaces while connections are being made, see
+    /// [`RenewableClientCert`].
+    Renewable(Arc<RenewableClientCert>),
+}
+
+/// Client certificate that can be replaced after the [`LocalTlsSetup`] is resolved, for
+/// certificates that are renewed in place (e.g. by a sidecar rewriting the files every few
+/// days). Every new connection presents the latest certificate; established connections keep
+/// the one they started with.
+pub struct RenewableClientCert(RwLock<Arc<CertifiedKey>>);
+
+impl RenewableClientCert {
+    pub fn from_pem(cert: &[u8], key: &[u8]) -> Result<Self, LocalTlsSetupError> {
+        Self::certified_key(cert, key).map(|key| Self(RwLock::new(key)))
+    }
+
+    /// Replaces the certificate and its key. On error the previous pair stays in use, so a
+    /// read that caught the files mid-rewrite does not break new connections.
+    pub fn renew(&self, cert: &[u8], key: &[u8]) -> Result<(), LocalTlsSetupError> {
+        let key = Self::certified_key(cert, key)?;
+        *self.0.write().unwrap_or_else(PoisonError::into_inner) = key;
+        Ok(())
+    }
+
+    /// Fails when the key does not match the certificate.
+    fn certified_key(cert: &[u8], key: &[u8]) -> Result<Arc<CertifiedKey>, LocalTlsSetupError> {
+        // The same provider `LocalTlsSetup::resolve` builds its config with.
+        let provider = ClientConfig::builder().crypto_provider().clone();
+        let key = CertifiedKey::from_der(parse_cert_chain(cert)?, parse_key_der(key)?, &provider)?;
+        Ok(Arc::new(key))
+    }
+}
+
+impl ResolvesClientCert for RenewableClientCert {
+    fn resolve(
+        &self,
+        _root_hint_subjects: &[&[u8]],
+        _sigschemes: &[SignatureScheme],
+    ) -> Option<Arc<CertifiedKey>> {
+        Some(
+            self.0
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone(),
+        )
+    }
+
+    fn has_certs(&self) -> bool {
+        true
+    }
+}
+
+impl fmt::Debug for RenewableClientCert {
+    /// Never prints the key material: this ends up in logs.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("RenewableClientCert")
+    }
+}
+
+/// A [`LocalClientAuth`] ready to be put into a [`ClientConfig`].
+enum LoadedClientAuth {
+    Fixed(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>),
+    Renewable(Arc<RenewableClientCert>),
 }
 
 impl LocalClientAuth {
-    async fn load(
-        &self,
-    ) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), LocalTlsSetupError> {
+    async fn load(&self) -> Result<LoadedClientAuth, LocalTlsSetupError> {
         match self {
-            Self::Files { cert, key } => Ok((
+            Self::Files { cert, key } => Ok(LoadedClientAuth::Fixed(
                 read_cert_chain(cert.clone()).await?,
                 read_key_der(key.clone()).await?,
             )),
-            Self::Pem { cert, key } => Ok((
+            Self::Pem { cert, key } => Ok(LoadedClientAuth::Fixed(
                 parse_cert_chain(cert.as_slice())?,
                 parse_key_der(key.as_slice())?,
             )),
+            Self::Renewable(cert) => Ok(LoadedClientAuth::Renewable(cert.clone())),
         }
     }
 }
@@ -76,6 +144,7 @@ impl fmt::Debug for LocalClientAuth {
                 .field("cert_bytes", &cert.len())
                 .field("key_bytes", &key.len())
                 .finish(),
+            Self::Renewable(cert) => cert.fmt(f),
         }
     }
 }
@@ -124,10 +193,23 @@ impl LocalTlsSetup {
                 });
 
                 // Config verification guarantees the cert and the key come together.
-                let client_auth = config
-                    .client_cert
-                    .zip(config.client_key)
-                    .map(|(cert, key)| LocalClientAuth::Files { cert, key });
+                let client_auth = match config.client_cert_source {
+                    TlsClientCertSource::Local => config
+                        .client_cert
+                        .zip(config.client_key)
+                        .map(|(cert, key)| LocalClientAuth::Files { cert, key }),
+                    // In-target paths are only readable by the operator, which builds its
+                    // setup with `LocalTlsSetup::new` instead. Here the paths are on the
+                    // user's machine, where they most likely do not exist.
+                    TlsClientCertSource::Target => {
+                        tracing::warn!(
+                            "`tls_delivery.client_cert_source: target` only applies to preview \
+                             sessions, connecting to the local application without a client \
+                             certificate"
+                        );
+                        None
+                    }
+                };
 
                 Some(Arc::new(Self::new(
                     config.trust_roots,
@@ -203,11 +285,15 @@ impl LocalTlsSetup {
                 .with_custom_certificate_verifier(Arc::new(DangerousNoVerifierServer))
         };
 
-        let config = match self.client_auth.as_ref() {
-            Some(client_auth) => {
-                let (cert_chain, key) = client_auth.load().await?;
+        let client_auth = match self.client_auth.as_ref() {
+            Some(client_auth) => Some(client_auth.load().await?),
+            None => None,
+        };
+        let config = match client_auth {
+            Some(LoadedClientAuth::Fixed(cert_chain, key)) => {
                 builder.with_client_auth_cert(cert_chain, key)?
             }
+            Some(LoadedClientAuth::Renewable(cert)) => builder.with_client_cert_resolver(cert),
             None => builder.with_no_client_auth(),
         };
 
@@ -278,7 +364,7 @@ mod tests {
         (addr, root, task)
     }
 
-    async fn connect(setup: LocalTlsSetup, addr: std::net::SocketAddr) {
+    async fn connect(setup: &LocalTlsSetup, addr: std::net::SocketAddr) {
         let (connector, server_name) = setup.get(None).await.unwrap();
         let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
         let mut stream = connector
@@ -308,7 +394,7 @@ mod tests {
                 key: client.signing_key.serialize_pem().into_bytes(),
             }),
         );
-        connect(setup, addr).await;
+        connect(&setup, addr).await;
 
         server
             .await
@@ -326,11 +412,87 @@ mod tests {
             Some(ServerName::try_from("localhost").unwrap()),
             None,
         );
-        connect(setup, addr).await;
+        connect(&setup, addr).await;
 
         server
             .await
             .unwrap()
             .expect_err("the server should reject a client without a certificate");
+    }
+
+    /// A certificate read once stayed in the resolved config for the whole session, so after
+    /// its owner renewed it every new connection still presented the old one. A renewable
+    /// certificate is looked up per connection: the same resolved setup presents the first
+    /// certificate to the first server and the renewed one to a server that only trusts that.
+    #[tokio::test]
+    async fn renewed_client_cert_is_presented_on_new_connections() {
+        let (first_addr, first_root, first_server) = mtls_server().await;
+        let (second_addr, second_root, second_server) = mtls_server().await;
+        let first = generate_cert("client", Some(&first_root), false).unwrap();
+        let second = generate_cert("client", Some(&second_root), false).unwrap();
+
+        let cert = Arc::new(
+            RenewableClientCert::from_pem(
+                first.cert.pem().as_bytes(),
+                first.signing_key.serialize_pem().as_bytes(),
+            )
+            .unwrap(),
+        );
+        let setup = LocalTlsSetup::new(
+            None,
+            None,
+            Some(ServerName::try_from("localhost").unwrap()),
+            Some(LocalClientAuth::Renewable(cert.clone())),
+        );
+        connect(&setup, first_addr).await;
+        first_server
+            .await
+            .unwrap()
+            .expect("the first server should accept the first certificate");
+
+        cert.renew(
+            second.cert.pem().as_bytes(),
+            second.signing_key.serialize_pem().as_bytes(),
+        )
+        .unwrap();
+        connect(&setup, second_addr).await;
+        second_server
+            .await
+            .unwrap()
+            .expect("the second server should accept the renewed certificate");
+    }
+
+    /// A read that catches the files mid-rewrite can pair a new certificate with the old key.
+    /// Such a pair is refused and the previous one stays in use.
+    #[tokio::test]
+    async fn mismatched_renewal_keeps_the_previous_cert() {
+        let (addr, root, server) = mtls_server().await;
+        let client = generate_cert("client", Some(&root), false).unwrap();
+        let other = generate_cert("other", Some(&root), false).unwrap();
+
+        let cert = Arc::new(
+            RenewableClientCert::from_pem(
+                client.cert.pem().as_bytes(),
+                client.signing_key.serialize_pem().as_bytes(),
+            )
+            .unwrap(),
+        );
+        cert.renew(
+            other.cert.pem().as_bytes(),
+            client.signing_key.serialize_pem().as_bytes(),
+        )
+        .expect_err("a key that does not match the certificate should be refused");
+
+        let setup = LocalTlsSetup::new(
+            None,
+            None,
+            Some(ServerName::try_from("localhost").unwrap()),
+            Some(LocalClientAuth::Renewable(cert)),
+        );
+        connect(&setup, addr).await;
+        server
+            .await
+            .unwrap()
+            .expect("the server should accept the certificate from before the bad renewal");
     }
 }

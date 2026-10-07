@@ -8,6 +8,127 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.271.0](https://github.com/metalbear-co/mirrord/tree/3.271.0) - 2026-10-07
+
+
+### Added
+
+- Added `mirrord preview diff` to compare manifest files with the live cluster.
+- Added `mirrord preview start --resource` to build previews from your manifest
+  files.
+- Experimental Windows support: the layer is injected with stork and installs
+  its
+  hooks before a launched program reaches its entry point. The injection method
+  can be chosen with `MIRRORD_INJECTION_METHOD` (`load-library`, `apc` or
+  `iat`).
+  `mirrord attach` reports why the layer failed to initialize instead of
+  waiting
+  out a timeout, the layer log file records `info` events without
+  `MIRRORD_LOG`,
+  and crash reports explain fast-fail and heap-corruption exits.
+
+
+### Fixed
+
+- An unreachable `mirrord-console` no longer aborts the target: the layer
+  reports it
+  on stderr and logs to its usual file and stderr sinks instead. On Windows,
+  console
+  logging works again, and a console that stops responding is reported once
+  instead of stalling the process.
+- Fixed the internal proxy ending the whole session when accepting a new layer
+  connection failed transiently, for example when a process exited while its
+  connection was still waiting to be accepted.
+- The `feature` and `feature.env` config examples in the docs no longer set
+  both `include` and `exclude`. mirrord does not allow them together, so
+  `mirrord verify-config` rejected these examples.
+- The complete config example in the docs is now a valid config. It had the
+  removed `connect_tcp` field, a trailing comma, and both `include` and
+  `exclude` in `feature.env`, so `mirrord verify-config` rejected it.
+- `mirrord operator install` refuses to install an operator older than 3.197.0.
+
+## [3.270.0](https://github.com/metalbear-co/mirrord/tree/3.270.0) - 2026-10-05
+
+
+### Added
+
+- Added `feature.network.incoming.tls_delivery.client_cert_source`. With
+  `"target"`, a preview session presents the client certificate already inside
+  the target's container (at the `client_cert` and `client_key` paths), read by
+  the operator from a running pod, so mutual TLS previews no longer need the
+  certificate copied to the developer's machine.
+- Added `mirrord operator uninstall`, which removes the operator that `mirrord
+  operator install` installed, also when the installation failed half-way. Like
+  `mirrord operator install`, it does not require the helm CLI, takes
+  `--context`, and on a terminal asks for confirmation first.
+- `mirrord operator install` and `mirrord operator uninstall` send one
+  anonymous usage event for each run, with its outcome. See `TELEMETRY.md` for
+  what the events contain and how to disable them.
+- `mirrord operator install` takes `--context` to install into a different
+  Kubernetes context. On a terminal, it asks for confirmation before it starts
+  a trial or changes the cluster, and `--yes` skips the question.
+
+
+### Fixed
+
+- Fixed `posix_spawn` children missing shared socket configuration after an
+  earlier child on the same thread executed.
+
+## [3.269.0](https://github.com/metalbear-co/mirrord/tree/3.269.0) - 2026-10-05
+
+
+### Changed
+
+- The "operator not found" error explains how to disable the operator
+  remembered in `~/.mirrord/mirrord.json`.
+
+
+### Fixed
+
+- Reused db branches now override the current config's env vars, not the
+  creator's.
+
+## [3.268.0](https://github.com/metalbear-co/mirrord/tree/3.268.0) - 2026-10-02
+
+
+### Added
+
+- Added `mirrord mcp`, an MCP server over stdio for AI agents, with a
+  `validate_config` tool that checks `mirrord.json` and `mirrord-up.yaml`
+  content against the installed mirrord version's schema.
+- Added `mirrord operator install`, which installs the operator from the helm
+  chart without requiring the helm CLI, and starts a claimable trial when no
+  API key is given.
+- Added `mirrord session list --format json` so scripts can select sessions
+  without parsing a table.
+- CLI errors now show the Kubernetes context, cluster, namespace and mirrord
+  config file used for the run.
+- Show a warning when the local application listens on a port that the target
+  container does not declare. The warning suggests setting
+  `feature.network.incoming.port_mapping`.
+- `mirrord up` suggests the closest allowed name when `mirrord-up.yaml` has an
+  unknown field or value, for example "did you mean `target`?".
+
+
+### Changed
+
+- The agent no longer logs an error when the kernel does not support
+  `pidfd_open`. It logs a warning that says the agent won't stop when the
+  target container exits.
+  [#4918](https://github.com/metalbear-co/mirrord/issues/4918)
+
+
+### Fixed
+
+- Fixed `sendfile` on macOS reporting a failed send as fully sent when the
+  socket would block, which made callers like Ruby's
+   `IO.copy_stream` silently drop data.
+- Start the local UI daemon for DB branch port forwarding only when needed, and
+  keep it running when the process that started it receives Ctrl+C.
+- When the port-forward to the agent fails because the WebSocket upgrade is
+  rejected, the error now says that this step failed, and shows the HTTP status
+  and the response body.
+
 ## [3.267.0](https://github.com/metalbear-co/mirrord/tree/3.267.0) - 2026-09-30
 
 

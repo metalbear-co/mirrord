@@ -14,6 +14,8 @@
 //! forwarding.
 
 pub use kube;
+#[cfg(test)]
+use {http as _, tower_test as _};
 
 pub mod api;
 pub mod error;

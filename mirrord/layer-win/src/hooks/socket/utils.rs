@@ -8,6 +8,7 @@ use std::{
 };
 
 use mirrord_layer_lib::{
+    detour::LastErrorGuard,
     error::{HookError, HookResult},
     socket::{SocketAddrExt, dns::windows::utils::IpAddrBytes},
 };
@@ -53,14 +54,18 @@ impl AutoCloseSocket {
 impl Drop for AutoCloseSocket {
     fn drop(&mut self) {
         if self.should_close && self.socket != INVALID_SOCKET {
+            // A detour sets the thread's error and then returns, and this drop runs after that
+            // return value is computed. The close sets the error itself, so keep what the detour
+            // left for its caller to read.
+            let _last_error = LastErrorGuard::save();
+
             // Use WinAPI directly to close the socket to avoid circular dependencies
-            unsafe {
-                closesocket(self.socket);
-                tracing::debug!(
-                    "AutoCloseSocket -> automatically closed socket {}",
-                    self.socket
-                );
-            }
+            unsafe { closesocket(self.socket) };
+
+            tracing::debug!(
+                "AutoCloseSocket -> automatically closed socket {}",
+                self.socket
+            );
         }
     }
 }
@@ -156,7 +161,7 @@ impl TryFrom<(String, IpAddr)> for ManagedHostent {
 ///
 /// # Returns
 /// * `Ok(*mut HOSTENT)` - Raw pointer to thread-local HOSTENT structure
-/// * `Err(HookError)` - If allocation fails
+/// * `Err(HookError)` - If allocation fails, or the thread's storage is already being torn down
 ///
 /// # Safety
 /// The returned pointer is valid until:
@@ -165,20 +170,29 @@ impl TryFrom<(String, IpAddr)> for ManagedHostent {
 ///
 /// This matches the documented behavior of WinSock's gethostbyname function.
 pub fn create_thread_local_hostent(hostname: String, ip: IpAddr) -> HookResult<*mut HOSTENT> {
-    THREAD_HOSTENT.with(|cell| {
-        let mut hostent_ref = cell.borrow_mut();
+    // `THREAD_HOSTENT` has a destructor, so a `gethostbyname` made during thread teardown finds it
+    // gone. `with` would panic inside the detour, which ends the process; the caller falls back to
+    // the original instead.
+    THREAD_HOSTENT
+        .try_with(|cell| {
+            let mut hostent_ref = cell.borrow_mut();
 
-        // Create new ManagedHostent (this will replace any existing one, mimicking WinSock
-        // behavior)
-        let new_hostent = ManagedHostent::try_from((hostname, ip))?;
-        let ptr = new_hostent.as_ptr();
+            // Create new ManagedHostent (this will replace any existing one, mimicking WinSock
+            // behavior)
+            let new_hostent = ManagedHostent::try_from((hostname, ip))?;
+            let ptr = new_hostent.as_ptr();
 
-        // Store in thread-local storage, replacing any previous value
-        // The old ManagedHostent will be dropped automatically, cleaning up its memory
-        *hostent_ref = Some(new_hostent);
+            // Store in thread-local storage, replacing any previous value
+            // The old ManagedHostent will be dropped automatically, cleaning up its memory
+            *hostent_ref = Some(new_hostent);
 
-        Ok(ptr)
-    })
+            Ok(ptr)
+        })
+        .map_err(|gone| {
+            HookError::IO(std::io::Error::other(format!(
+                "thread-local HOSTENT storage is unavailable: {gone}"
+            )))
+        })?
 }
 
 /// Get the peer address from a connected socket

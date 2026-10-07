@@ -24,7 +24,7 @@ use mirrord_config::{
     env_key::{EnvKey, MIRRORD_ENV_KEY},
     target::{TARGET_PATH_FORMATS, Target},
 };
-use mirrord_up::{SERVICE_LAYER_PATHS, ServiceMode, UpConfig, UpError};
+use mirrord_up::{SERVICE_LAYER_PATHS, ServiceError, ServiceMode, UpConfig, UpError};
 use schemars::JsonSchema;
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -153,12 +153,30 @@ pub fn validate_config(
             });
             match parsed {
                 Ok(value) => {
-                    let mut issues = match check::<UpConfig>(&value, &UP_SCHEMA)? {
-                        Ok(config) => config.verify().err().map(up_issue).into_iter().collect(),
-                        Err(issues) => issues,
+                    let (mut issues, config) = match check::<UpConfig>(&value, &UP_SCHEMA)? {
+                        Ok(config) => {
+                            let issues = config.verify().err().map(up_issue).into_iter().collect();
+                            (issues, Some(config))
+                        }
+                        Err(issues) => (issues, None),
                     };
-                    let service_issues = check_services(&value, &issues)?;
-                    issues.extend(service_issues);
+                    let setting_issues = check_services(&value, &issues)?;
+                    match config.map(|config| config.verify_services(&key)) {
+                        // A service whose settings or `config_patch` have issues of their own
+                        // also fails to assemble; those issues already point at the culprit.
+                        Some(Ok(errors)) => {
+                            issues.extend(errors.into_iter().map(service_issue).filter(|issue| {
+                                let service = format!("{}/", issue.path);
+                                setting_issues
+                                    .iter()
+                                    .any(|setting| setting.path.starts_with(&service))
+                                    .not()
+                            }))
+                        }
+                        Some(Err(error)) => issues.push(file_issue(error.to_string())),
+                        None => {}
+                    }
+                    issues.extend(setting_issues);
                     issues
                 }
                 Err(issue) => vec![issue],
@@ -382,6 +400,16 @@ fn duplicate_keys(json: &str) -> Vec<ConfigIssue> {
     }
     .deserialize(&mut serde_json::Deserializer::from_str(json));
     issues
+}
+
+/// An issue with a service as `mirrord up` assembles it, which comes from several of its settings
+/// together, so it points at the service as a whole.
+fn service_issue(error: ServiceError) -> ConfigIssue {
+    ConfigIssue {
+        path: format!("/services/{}", escape_pointer_token(error.service())),
+        message: error.to_string(),
+        allowed_values: None,
+    }
 }
 
 /// An issue with the file as a whole: a template or syntax error that prevented reading it.
@@ -1124,6 +1152,36 @@ services:
         assert!(issue.allowed_values.unwrap().contains(&json!("network")));
     }
 
+    /// A service's issue isn't mistaken for a duplicate of the patch issue of another service
+    /// whose name it prefixes.
+    #[test]
+    fn up_yaml_patch_issue_of_prefixed_service() {
+        let output = validate(
+            ConfigFormat::MirrordUpYaml,
+            r#"
+services:
+  app:
+    target: none
+    run:
+      command: ["echo"]
+  app-v2:
+    config_patch:
+      feature:
+        netwrk: {}
+    run:
+      command: ["echo"]
+"#,
+        );
+        let paths: Vec<_> = output.issues.iter().map(|issue| &issue.path).collect();
+        assert_eq!(
+            paths,
+            [
+                "/services/app",
+                "/services/app-v2/config_patch/feature/netwrk"
+            ],
+        );
+    }
+
     /// Deserializes, but `mirrord up` only supports `run.directory` for `exec` services.
     #[test]
     fn up_yaml_container_run_directory() {
@@ -1491,5 +1549,65 @@ services:
         let issue = single_issue(ConfigFormat::MirrordUpYaml, "common: {}\n");
         assert_eq!(issue.path, "");
         assert!(issue.message.contains("services"), "{}", issue.message);
+    }
+
+    /// Services `mirrord up` refuses once it assembles their config, though every setting is
+    /// valid on its own.
+    #[rstest]
+    #[case::targetless_split("target: none", "Steal mode")]
+    #[case::targetless_patched_steal(
+        "target: none\n    default_mode: mirror\n    config_patch: { feature: { network: { incoming: steal } } }",
+        "Steal mode"
+    )]
+    #[case::targetless_replace("target: none\n    default_mode: replace", "targetless agent")]
+    #[case::targetless_patched_copy(
+        "target: none\n    default_mode: mirror\n    config_patch: { feature: { copy_target: true } }",
+        "copy target"
+    )]
+    #[case::service_patched_copy(
+        "target: { path: service/app }\n    config_patch: { feature: { copy_target: true } }",
+        "service targets"
+    )]
+    #[case::pod_replace("target: { path: pod/app }\n    default_mode: replace", "pod target")]
+    #[case::rollout_replace(
+        "target: { path: rollout/app }\n    default_mode: replace",
+        "rollout target"
+    )]
+    fn up_yaml_unrunnable_service(#[case] service: &str, #[case] message: &str) {
+        let issue = single_issue(
+            ConfigFormat::MirrordUpYaml,
+            &format!("services:\n  app:\n    {service}\n    run:\n      command: [\"true\"]\n"),
+        );
+        assert_eq!(issue.path, "/services/app");
+        assert!(issue.message.contains(message), "{}", issue.message);
+    }
+
+    /// A service that fails to assemble because of one of its settings is reported once, at that
+    /// setting.
+    #[test]
+    fn up_yaml_unrunnable_service_setting() {
+        let issue = single_issue(
+            ConfigFormat::MirrordUpYaml,
+            "services:\n  app:\n    env: { include: [A], exclude: [B] }\n    run:\n      command: [\"true\"]\n",
+        );
+        assert_eq!(issue.path, "/services/app/env");
+        assert!(
+            issue.message.contains("`include` and `exclude`"),
+            "{}",
+            issue.message
+        );
+    }
+
+    /// The same settings with a target or mode that supports them.
+    #[rstest]
+    #[case::targetless_mirror("target: none\n    default_mode: mirror")]
+    #[case::deployment_replace("target: { path: deployment/app }\n    default_mode: replace")]
+    #[case::inferred_target_replace("default_mode: replace")]
+    fn up_yaml_runnable_service(#[case] service: &str) {
+        let output = validate(
+            ConfigFormat::MirrordUpYaml,
+            &format!("services:\n  app:\n    {service}\n    run:\n      command: [\"true\"]\n"),
+        );
+        assert!(output.valid, "{:?}", output.issues);
     }
 }

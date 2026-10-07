@@ -6,7 +6,9 @@
 #![deny(missing_docs)]
 
 use std::{
+    borrow::Cow,
     collections::{HashMap, hash_map::Entry},
+    fmt::Write,
     ops::Not,
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
@@ -17,7 +19,7 @@ use std::{
 
 pub use config::{
     COMMON_LAYER_PATHS, ConfigPatchError, IncompatibleTarget, ModeError, SERVICE_LAYER_PATHS,
-    SelectError, ServiceMode, SubprocessCfg, UpConfig, WindowsSupportError,
+    SelectError, ServiceError, ServiceMode, SubprocessCfg, UpConfig, WindowsSupportError,
 };
 use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
@@ -36,6 +38,7 @@ use mirrord_kube::{
     error::KubeApiError,
 };
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
+use serde_saphyr::{DefaultMessageFormatter, MessageFormatter};
 use tera::Tera;
 use thiserror::Error;
 use tokio::{process::Command, task::JoinError};
@@ -79,7 +82,10 @@ pub enum UpError {
     Io(#[from] std::io::Error),
 
     /// Failed to parse the mirrord-up YAML configuration.
-    #[error("failed to parse mirrord-up config: {0}")]
+    #[error(
+        "failed to parse mirrord-up config: {}",
+        .0.render_with_formatter(&SuggestingFormatter)
+    )]
     #[diagnostic(help("Check the YAML syntax and field names in your mirrord-up.yaml."))]
     Parse(#[from] serde_saphyr::Error),
 
@@ -176,6 +182,57 @@ impl UpError {
                 )
         )
     }
+}
+
+/// Formats [`serde_saphyr::Error`]s like [`DefaultMessageFormatter`], but adds the closest allowed
+/// name to unknown field and unknown value errors, so that a typo in `mirrord-up.yaml` points to
+/// its fix.
+struct SuggestingFormatter;
+
+impl MessageFormatter for SuggestingFormatter {
+    fn format_message<'a>(&self, error: &'a serde_saphyr::Error) -> Cow<'a, str> {
+        let message = DefaultMessageFormatter.format_message(error);
+
+        let closest = match error.without_snippet() {
+            serde_saphyr::Error::SerdeUnknownField {
+                field: unknown,
+                expected,
+                ..
+            }
+            | serde_saphyr::Error::SerdeUnknownVariant {
+                variant: unknown,
+                expected,
+                ..
+            } => closest_name(unknown, expected),
+            _ => None,
+        };
+
+        let Some(closest) = closest else {
+            return message;
+        };
+
+        let mut message = message.into_owned();
+        let _ = write!(message, "; did you mean `{closest}`?");
+        message.into()
+    }
+}
+
+/// The name in `candidates` that `unknown` is most likely a typo of, if one is close enough.
+///
+/// Used for the "did you mean" hints in `mirrord-up.yaml` parse errors.
+fn closest_name<'a>(unknown: &str, candidates: &[&'a str]) -> Option<&'a str> {
+    // The allowed names are lowercase. Without this, a value in uppercase like `MIRROR` is too
+    // many edits away from `mirror` to get a hint.
+    let unknown = unknown.to_lowercase();
+    // The same limit as rustc: one edit for each three characters, and at least one.
+    let max_distance = unknown.chars().count().max(3) / 3;
+
+    candidates
+        .iter()
+        .map(|&candidate| (candidate, strsim::osa_distance(&unknown, candidate)))
+        .min_by_key(|&(_, distance)| distance)
+        .filter(|&(_, distance)| distance <= max_distance)
+        .map(|(candidate, _)| candidate)
 }
 
 /// Renders the Tera templates (`{{ key }}`, `{{ git_branch }}`) in the raw content of a
@@ -621,6 +678,45 @@ mod tests {
                 .is_user_cancelled()
                 .not()
         );
+    }
+
+    /// A typo in a field or a value gets the closest allowed name added to the message. The rest
+    /// of the message (allowed names, line, column and snippet) is the same as without it.
+    #[rstest::rstest]
+    #[case::field_typo(
+        "services:\n  api:\n    tagret: none\n    run:\n      command: [x]\n",
+        Some("target")
+    )]
+    #[case::value_typo(
+        "services:\n  api:\n    default_mode: splt\n    run:\n      command: [x]\n",
+        Some("split")
+    )]
+    #[case::value_in_uppercase(
+        "services:\n  api:\n    default_mode: MIRROR\n    run:\n      command: [x]\n",
+        Some("mirror")
+    )]
+    #[case::unrelated_value(
+        "services:\n  api:\n    default_mode: zzzzzz\n    run:\n      command: [x]\n",
+        None
+    )]
+    #[case::other_error("services:\n  api:\n    default_mode: split\n", None)]
+    fn parse_error_suggests_closest_name(#[case] yaml: &str, #[case] suggestion: Option<&str>) {
+        let UpError::Parse(parse_error) =
+            template(yaml, &EnvKey::Provided("key".to_owned())).unwrap_err()
+        else {
+            panic!("expected a parse error");
+        };
+        let default_message = format!("failed to parse mirrord-up config: {parse_error}");
+        let message = UpError::Parse(parse_error).to_string();
+
+        match suggestion {
+            Some(suggestion) => {
+                let hint = format!("; did you mean `{suggestion}`?");
+                assert!(message.contains(&hint), "no `{hint}` in: {message}");
+                assert_eq!(message.replace(&hint, ""), default_message);
+            }
+            None => assert_eq!(message, default_message),
+        }
     }
 
     #[test]

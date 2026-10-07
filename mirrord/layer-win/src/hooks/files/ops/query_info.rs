@@ -67,7 +67,7 @@ use winapi::{
 
 use crate::hooks::files::{
     iosb::{check_io_pointers, write_iosb_success},
-    managed_handle::MANAGED_HANDLES,
+    managed_handle::managed_file,
     types::{NT_QUERY_INFORMATION_FILE_ORIGINAL, NT_QUERY_VOLUME_INFORMATION_FILE_ORIGINAL},
     util::{WindowsTime, try_seek, try_xstat},
 };
@@ -81,7 +81,7 @@ pub(in crate::hooks::files) unsafe fn info(
     file_information_class: FILE_INFORMATION_CLASS,
 ) -> NTSTATUS {
     unsafe {
-        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+        if let Some(managed_handle) = managed_file(file)
             && let Ok(handle_context) = managed_handle.try_read()
         {
             if let Err(status) = check_io_pointers(file_information, io_status_block) {
@@ -351,7 +351,7 @@ pub(in crate::hooks::files) unsafe fn info(
                     // clients fall back to defaults; .NET in particular
                     // tolerates this for the classes it queries
                     // opportunistically.
-                    tracing::warn!(
+                    tracing::debug!(
                         path = handle_context.path,
                         "nt_query_information_file_hook: file_information_class: {:?} not implemented; reporting STATUS_INVALID_INFO_CLASS",
                         file_information_class
@@ -381,7 +381,7 @@ pub(in crate::hooks::files) unsafe fn volume_info(
     fs_info_class: FSINFOCLASS,
 ) -> NTSTATUS {
     unsafe {
-        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+        if let Some(managed_handle) = managed_file(file)
             && let Ok(handle_context) = managed_handle.try_read()
         {
             if let Err(status) = check_io_pointers(file_information, io_status_block) {
@@ -459,7 +459,7 @@ pub(in crate::hooks::files) unsafe fn volume_info(
                     return STATUS_SUCCESS;
                 }
                 _ => {
-                    tracing::warn!(
+                    tracing::debug!(
                         path = handle_context.path,
                         "nt_query_volume_information_file_hook: Trying to query for FSINFOCLASS: {:?}, but it is not implemented!",
                         fs_info_class

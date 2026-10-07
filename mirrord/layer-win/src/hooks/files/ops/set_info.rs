@@ -58,7 +58,7 @@ use winapi::{
 
 use crate::hooks::files::{
     iosb::{check_io_pointers, write_iosb_success},
-    managed_handle::MANAGED_HANDLES,
+    managed_handle::managed_file,
     types::NT_SET_INFORMATION_FILE_ORIGINAL,
     util::try_seek,
 };
@@ -72,7 +72,7 @@ pub(in crate::hooks::files) unsafe fn handle(
     file_information_class: FILE_INFORMATION_CLASS,
 ) -> NTSTATUS {
     unsafe {
-        if let Some(managed_handle) = MANAGED_HANDLES.get(&file)
+        if let Some(managed_handle) = managed_file(file)
             && let Ok(mut handle_context) = managed_handle.try_write()
         {
             if let Err(status) = check_io_pointers(file_information, io_status_block) {
@@ -215,7 +215,7 @@ pub(in crate::hooks::files) unsafe fn handle(
                     // for metadata we don't model. The caller asked us
                     // to set state we don't track; we pretend the set
                     // took so the caller can move on.
-                    tracing::warn!(
+                    tracing::debug!(
                         path = handle_context.path,
                         "nt_set_information_file_hook: file_information_class: {:?} not implemented; reporting STATUS_SUCCESS",
                         file_information_class,

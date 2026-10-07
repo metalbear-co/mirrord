@@ -38,7 +38,6 @@ pub mod split_queues;
 ///   "feature": {
 ///     "env": {
 ///       "include": "DATABASE_USER;PUBLIC_ENV",
-///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
 ///       "override": {
 ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
 ///         "LOCAL_BEAR": "panda"

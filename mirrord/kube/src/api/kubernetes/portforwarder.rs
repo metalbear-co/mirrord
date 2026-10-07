@@ -92,7 +92,8 @@ pub async fn create_portforward_streams(
         tracing::trace!("port-forward to pod {:?}", &connect_info);
         pod_api.portforward(&connect_info.pod_name, ports)
     })
-    .await?;
+    .await
+    .map_err(|error| KubeApiError::AgentPortForward(Box::new(error)))?;
 
     let stream = Box::new(
         port_forwarder
@@ -221,4 +222,56 @@ pub async fn retry_portforward(
     let port_forwarder = SinglePortForwarder::connect(client, connect_info, Box::new(rhs)).await?;
 
     Ok((Box::new(lhs), port_forwarder))
+}
+
+#[cfg(test)]
+mod test {
+    use http::{Request, Response, StatusCode};
+    use kube::client::Body;
+    use rstest::rstest;
+
+    use super::*;
+
+    /// A proxy between mirrord and the API server can reject the port-forward upgrade with a
+    /// response that is not a Kubernetes `Status`, as text or as JSON. The HTTP status and the
+    /// response body are the only hints about what rejected it, so the error must keep both.
+    #[rstest]
+    #[case::text("proxy rejected the upgrade")]
+    #[case::json_without_code(r#"{"error":"no healthy upstream"}"#)]
+    #[tokio::test]
+    async fn rejected_upgrade_keeps_status_and_body(#[case] body: &'static str) {
+        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let pod_api = Api::<Pod>::namespaced(Client::new(service, "default"), "default");
+        let connect_info = AgentKubernetesConnectInfo {
+            pod_name: "mirrord-agent".to_owned(),
+            pod_namespace: "default".to_owned(),
+            agent_port: 44128,
+        };
+
+        let mut no_retries = std::iter::empty();
+
+        let (result, ()) = tokio::join!(
+            create_portforward_streams(&pod_api, &connect_info, &mut no_retries),
+            async {
+                let (_, send) = handle.next_request().await.unwrap();
+                send.send_response(
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from(body.as_bytes().to_vec()))
+                        .unwrap(),
+                );
+            },
+        );
+
+        let Err(error) = result else {
+            panic!("port-forward must fail when the upgrade is rejected");
+        };
+        let message = error.to_string();
+        assert!(
+            message.starts_with("Agent port-forward WebSocket upgrade failed"),
+            "{message}"
+        );
+        assert!(message.contains("500"), "{message}");
+        assert!(message.contains(body), "{message}");
+    }
 }
