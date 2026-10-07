@@ -553,7 +553,7 @@ impl DatabaseBranchParams {
         let mut mongodb = HashMap::new();
         let mut mysql = HashMap::new();
         let mut pg = HashMap::new();
-        for branch_db_config in config.0.iter() {
+        for branch_db_config in config.iter() {
             match branch_db_config {
                 DatabaseBranchConfig::Mongodb(mongodb_config) => {
                     let id = if let Some(id) = mongodb_config.base.id.clone() {
@@ -1428,7 +1428,13 @@ impl UnifiedDatabaseBranchParams {
         let mut branches = HashMap::new();
         // Where each branch was configured, and whether that entry set an `id`.
         let mut entries = HashMap::new();
-        for (position, branch_db_config) in config.0.iter_mut().enumerate() {
+        // An unresolved `"*"` / ids request never gets here: `prepare_branch_dbs` resolves it
+        // into inline entries first.
+        let inline = config
+            .inline_mut()
+            .map(Vec::as_mut_slice)
+            .unwrap_or_default();
+        for (position, branch_db_config) in inline.iter_mut().enumerate() {
             // Local Redis branches are run by the CLI itself and never reach the operator,
             // and they are the only branches without the shared base.
             let Some(base) = branch_db_config.base() else {
@@ -2577,6 +2583,7 @@ mod test {
             migrations: None,
             copy: None,
             conditions: Vec::new(),
+            source: None,
         });
         let branch = BranchDatabase {
             metadata: ObjectMeta {

@@ -1,4 +1,9 @@
-use std::{borrow::Cow, collections::BTreeMap, ops::Deref, path::PathBuf};
+use std::{
+    borrow::Cow,
+    collections::BTreeMap,
+    ops::{Deref, Not},
+    path::PathBuf,
+};
 
 use fancy_regex::Regex;
 use mirrord_analytics::{Analytics, CollectAnalytics};
@@ -360,9 +365,11 @@ pub enum IamAuthConfig {
     },
 }
 
-/// A list of configurations for database branches.
+/// The branch databases a session runs with. Either defined here, or taken from the
+/// `dbBranches` entries a cluster admin put on the target's `MirrordSplitConfig`, so `mirrord
+/// exec` and `mirrord up` use one definition that does not drift.
 ///
-/// Using a connection URL:
+/// Inline, using a connection URL:
 /// ```json
 /// {
 ///   "feature": {
@@ -378,7 +385,7 @@ pub enum IamAuthConfig {
 /// }
 /// ```
 ///
-/// Using individual connection params:
+/// Inline, using individual connection params:
 /// ```json
 /// {
 ///   "feature": {
@@ -394,29 +401,199 @@ pub enum IamAuthConfig {
 ///   }
 /// }
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
-pub struct DatabaseBranchesConfig(pub Vec<DatabaseBranchConfig>);
+///
+/// Every `dbBranches` entry of the target's `MirrordSplitConfig`:
+/// ```json
+/// {
+///   "feature": {
+///     "db_branches": "*"
+///   }
+/// }
+/// ```
+///
+/// Only the entries with these ids:
+/// ```json
+/// {
+///   "feature": {
+///     "db_branches": ["orders-pg", "sessions-redis"]
+///   }
+/// }
+/// ```
+///
+/// With `"*"` or a list of ids the operator resolves the entries, and sessions started under
+/// the same key that point at the same entry share one branch (its id is the entry id plus the
+/// key). An id that matches no entry fails the session, naming the ids the workload has; a
+/// workload with no `dbBranches` gives no branches and the session continues. An operator
+/// that cannot resolve entries fails the session before it starts. Inline definitions always
+/// win: with them, any `dbBranches` on the workload are ignored with a warning.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize)]
+#[serde(untagged)]
+pub enum DatabaseBranchesConfig {
+    /// Branches defined in this config.
+    Inline(Vec<DatabaseBranchConfig>),
+    /// `"*"` or a list of entry ids, resolved by the operator against the target's
+    /// `MirrordSplitConfig`.
+    FromSplitConfig(SplitConfigDbBranches),
+}
 
-impl Deref for DatabaseBranchesConfig {
-    type Target = Vec<DatabaseBranchConfig>;
+/// Dispatches on the value's shape by hand instead of `#[serde(untagged)]`: an untagged enum
+/// reports a typo inside an inline entry as "data did not match any variant", losing serde's
+/// "unknown field `foo`, expected one of ..." that tells the user what to fix. Here a list
+/// holding anything but strings is parsed as inline entries directly, so that message
+/// survives. An empty list is an empty inline list, never an empty id list.
+impl<'de> Deserialize<'de> for DatabaseBranchesConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value {
+            serde_json::Value::String(star) if star == "*" => Ok(Self::FromSplitConfig(
+                SplitConfigDbBranches::All(AllSplitConfigDbBranches::All),
+            )),
+            serde_json::Value::Array(items)
+                if items.is_empty().not() && items.iter().all(serde_json::Value::is_string) =>
+            {
+                let ids = items
+                    .into_iter()
+                    .filter_map(|item| item.as_str().map(str::to_owned))
+                    .collect();
+                Ok(Self::FromSplitConfig(SplitConfigDbBranches::Ids(ids)))
+            }
+            value @ serde_json::Value::Array(_) => serde_json::from_value(value)
+                .map(Self::Inline)
+                .map_err(D::Error::custom),
+            other => Err(D::Error::custom(format!(
+                "expected `\"*\"`, a list of MirrordSplitConfig entry ids, or a list of branch \
+                 definitions, got {other}"
+            ))),
+        }
+    }
+}
+
+/// <!--${internal}-->
+/// Which `dbBranches` entries of the target's `MirrordSplitConfig` a session asks for:
+/// `"*"` for all of them, or a list of entry ids.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SplitConfigDbBranches {
+    /// Every entry.
+    All(AllSplitConfigDbBranches),
+    /// The entries with these ids.
+    Ids(Vec<String>),
+}
+
+/// <!--${internal}-->
+/// The literal `"*"`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
+pub enum AllSplitConfigDbBranches {
+    #[serde(rename = "*")]
+    #[default]
+    All,
+}
+
+impl Default for DatabaseBranchesConfig {
+    fn default() -> Self {
+        Self::Inline(Vec::new())
+    }
+}
+
+impl SplitConfigDbBranches {
+    /// Entry ids a list form asks for; empty for `"*"`.
+    pub fn ids(&self) -> &[String] {
+        match self {
+            Self::All(_) => &[],
+            Self::Ids(ids) => ids,
+        }
+    }
+
+    /// `"*"`: every entry.
+    pub fn is_all(&self) -> bool {
+        matches!(self, Self::All(_))
     }
 }
 
 impl DatabaseBranchesConfig {
+    /// The branches defined inline. Empty until a `"*"` / ids request has been resolved
+    /// through the operator and written back with [`Self::set_inline`].
+    pub fn inline(&self) -> &[DatabaseBranchConfig] {
+        match self {
+            Self::Inline(branches) => branches,
+            Self::FromSplitConfig(_) => &[],
+        }
+    }
+
+    /// The inline branches, for in-place edits. `None` for an unresolved request.
+    pub fn inline_mut(&mut self) -> Option<&mut Vec<DatabaseBranchConfig>> {
+        match self {
+            Self::Inline(branches) => Some(branches),
+            Self::FromSplitConfig(_) => None,
+        }
+    }
+
+    /// Iterates the inline branches.
+    pub fn iter(&self) -> std::slice::Iter<'_, DatabaseBranchConfig> {
+        self.inline().iter()
+    }
+
+    /// The request to resolve against the target's `MirrordSplitConfig`, if this config asks
+    /// for one instead of defining branches inline.
+    pub fn split_config_request(&self) -> Option<&SplitConfigDbBranches> {
+        match self {
+            Self::FromSplitConfig(request) => Some(request),
+            Self::Inline(_) => None,
+        }
+    }
+
+    /// Replaces whatever this config holds with resolved inline branches, so every later
+    /// reader (branch creation, portforwards, the internal proxy) sees concrete entries.
+    pub fn set_inline(&mut self, branches: Vec<DatabaseBranchConfig>) {
+        *self = Self::Inline(branches);
+    }
+
+    /// `true` when the session asks for no branches at all: no inline entries and no entry
+    /// ids. `"*"` is never empty, since only the operator knows what it expands to.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Inline(branches) => branches.is_empty(),
+            Self::FromSplitConfig(SplitConfigDbBranches::Ids(ids)) => ids.is_empty(),
+            Self::FromSplitConfig(SplitConfigDbBranches::All(_)) => false,
+        }
+    }
+
     /// Counts branches matching a predicate. The building block for the usage
     /// analytics counters in [`CollectAnalytics`], so each new counter is one
     /// `count_branches` call instead of its own iteration method.
     fn count_branches(&self, matcher: impl Fn(&DatabaseBranchConfig) -> bool) -> usize {
-        self.0.iter().filter(|db| matcher(db)).count()
+        self.iter().filter(|db| matcher(db)).count()
     }
 
     /// Verifies invariants that span individual branch configs (e.g. `ttl_secs`/`ttl_mins`
     /// mutual exclusion).
     pub fn verify(&self, context: &mut config::ConfigContext) -> Result<(), ConfigError> {
-        for branch in &self.0 {
+        if let Some(SplitConfigDbBranches::Ids(ids)) = self.split_config_request() {
+            let mut seen = std::collections::BTreeSet::new();
+            for id in ids {
+                if id.is_empty() {
+                    return Err(ConfigError::InvalidValue {
+                        name: "feature.db_branches".into(),
+                        provided: String::new(),
+                        error: "an entry id must not be empty; use `\"*\"` for every entry".into(),
+                    });
+                }
+                if !seen.insert(id) {
+                    return Err(ConfigError::InvalidValue {
+                        name: "feature.db_branches".into(),
+                        provided: id.clone(),
+                        error: "the same entry id is listed twice".into(),
+                    });
+                }
+            }
+        }
+
+        for branch in self.iter() {
             // Param sources are shared by every engine, so they are checked here rather than
             // in each engine's own verify.
             for params in branch.connection_params().into_iter().chain(
@@ -2103,7 +2280,7 @@ mod tests {
         assert_eq!(database.name.as_deref(), Some(name));
         assert_eq!(database.connection, expected_connection);
 
-        DatabaseBranchesConfig(vec![branch.clone()])
+        DatabaseBranchesConfig::Inline(vec![branch.clone()])
             .verify(&mut config::ConfigContext::default())
             .expect("config should verify");
 
@@ -2191,7 +2368,7 @@ mod tests {
             }
         );
 
-        DatabaseBranchesConfig(vec![branch.clone()])
+        DatabaseBranchesConfig::Inline(vec![branch.clone()])
             .verify(&mut config::ConfigContext::default())
             .expect("config should verify");
 
@@ -2224,7 +2401,7 @@ mod tests {
         );
         assert_eq!(branch.copy_mode(), Some(BranchCopyMode::Empty));
 
-        DatabaseBranchesConfig(vec![branch])
+        DatabaseBranchesConfig::Inline(vec![branch])
             .verify(&mut config::ConfigContext::default())
             .expect("config should verify");
     }
@@ -2243,7 +2420,7 @@ mod tests {
         }))
         .expect("params are only checked by `verify`");
 
-        DatabaseBranchesConfig(vec![branch])
+        DatabaseBranchesConfig::Inline(vec![branch])
             .verify(&mut config::ConfigContext::default())
             .expect_err("only `bucket` is a valid S3 param");
     }
@@ -2270,7 +2447,7 @@ mod tests {
         assert!(s3.source.params.uses_secret());
         assert_eq!(branch.connection_env_keys(), vec!["MY_BUCKET_ENV_VAR"]);
 
-        DatabaseBranchesConfig(vec![branch])
+        DatabaseBranchesConfig::Inline(vec![branch])
             .verify(&mut config::ConfigContext::default())
             .expect("config should verify");
     }
@@ -2329,7 +2506,7 @@ mod tests {
         );
         assert_eq!(turbopuffer.copy, TurbopufferBranchCopyConfig::All);
 
-        DatabaseBranchesConfig(vec![branch.clone()])
+        DatabaseBranchesConfig::Inline(vec![branch.clone()])
             .verify(&mut config::ConfigContext::default())
             .expect("config should verify");
 
@@ -2368,7 +2545,7 @@ mod tests {
         );
         assert_eq!(branch.copy_mode(), Some(BranchCopyMode::Empty));
 
-        DatabaseBranchesConfig(vec![branch])
+        DatabaseBranchesConfig::Inline(vec![branch])
             .verify(&mut config::ConfigContext::default())
             .expect("config should verify");
     }
@@ -2397,7 +2574,7 @@ mod tests {
         }))
         .expect("params are only checked by `verify`");
 
-        DatabaseBranchesConfig(vec![branch])
+        DatabaseBranchesConfig::Inline(vec![branch])
             .verify(&mut config::ConfigContext::default())
             .expect_err("the params must be rejected");
     }
@@ -2906,7 +3083,7 @@ mod tests {
         }))
         .unwrap();
         let mut context = config::ConfigContext::default();
-        let error = DatabaseBranchesConfig(vec![gcp])
+        let error = DatabaseBranchesConfig::Inline(vec![gcp])
             .verify(&mut context)
             .unwrap_err();
         assert!(error.to_string().contains("gcp_cloud_sql"), "{error}");
@@ -3221,7 +3398,7 @@ mod tests {
             ]"#,
         )
         .unwrap();
-        let config = DatabaseBranchesConfig(branches);
+        let config = DatabaseBranchesConfig::Inline(branches);
 
         let mut analytics = Analytics::default();
         (&config).collect_analytics(&mut analytics);

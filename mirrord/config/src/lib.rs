@@ -1124,7 +1124,6 @@ impl LayerConfig {
             let mut conflicts: Vec<&str> = self
                 .feature
                 .db_branches
-                .0
                 .iter()
                 .flat_map(DatabaseBranchConfig::connection_env_keys)
                 .filter(|key| overrides.contains_key(*key))

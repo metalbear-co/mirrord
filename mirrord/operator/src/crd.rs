@@ -840,6 +840,13 @@ pub enum NewOperatorFeature {
     /// the first database while the app keeps talking to the source for the others.
     PgBranchAdditionalDatabases,
 
+    /// This operator resolves `feature.db_branches: "*"` (or a list of entry ids) against the
+    /// `dbBranches` entries on the target's `MirrordSplitConfig`, through
+    /// `POST /splitconfigdbbranches`, and records each branch's resolved source in its status.
+    /// Gated so the CLI fails fast: an older operator has no such endpoint, and the session
+    /// would otherwise start without the branches the config asked for.
+    DbBranchesFromSplitConfig,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -928,6 +935,9 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::PgBranchAdditionalDatabases => {
                 "PostgreSQL branches with additional databases"
+            }
+            NewOperatorFeature::DbBranchesFromSplitConfig => {
+                "db_branches resolved from the target's MirrordSplitConfig"
             }
             NewOperatorFeature::Unknown => "unknown feature",
         };

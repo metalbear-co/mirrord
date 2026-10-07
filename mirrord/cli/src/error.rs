@@ -463,6 +463,28 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorBranchCreationFailed(OperatorOperation, String),
 
+    #[error(
+        "branch `{branch_id}` exists with copy mode \"{existing_mode}\", this service asked for \
+         \"{requested_mode}\""
+    )]
+    #[diagnostic(help(
+        "`{creator}` created it. Put both services on modes with the same copy mode."
+    ))]
+    BranchCopyModeMismatch {
+        branch_id: String,
+        existing_mode: String,
+        requested_mode: String,
+        creator: String,
+    },
+
+    #[error("{0}")]
+    #[diagnostic(help(
+        "The operator resolves `feature.db_branches: \"*\"` or a list of ids against the \
+         `dbBranches` on the target's MirrordSplitConfig. Check the ids the workload has, or \
+         define the branches inline in `feature.db_branches`."
+    ))]
+    SplitConfigDbBranches(String),
+
     #[error("mirrord operator API failed: {0} failed with {1}")]
     #[diagnostic(help(
     "Please check the following:
@@ -1034,6 +1056,21 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
+            OperatorApiError::SplitConfigDbBranches(msg) => Self::SplitConfigDbBranches(msg),
+            error @ OperatorApiError::SplitConfigDbBranchEntry { .. } => {
+                Self::SplitConfigDbBranches(error.to_string())
+            }
+            OperatorApiError::BranchCopyModeMismatch {
+                branch_id,
+                existing_mode,
+                requested_mode,
+                creator,
+            } => Self::BranchCopyModeMismatch {
+                branch_id,
+                existing_mode,
+                requested_mode,
+                creator,
+            },
             OperatorApiError::PreviewSecretMountCreation(msg) => {
                 Self::PreviewSecretMountFailed(msg)
             }

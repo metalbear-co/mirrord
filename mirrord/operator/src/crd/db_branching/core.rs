@@ -415,6 +415,37 @@ pub struct BranchDatabaseStatus {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(extend("x-kubernetes-list-type" = "map", "x-kubernetes-list-map-keys" = ["type"]))]
     pub conditions: Vec<Condition>,
+    /// The source database this branch was copied from, once the operator has resolved the
+    /// branch's connection source. Lets two branches that point at the same database be told
+    /// apart from two that only share an entry id, without re-reading the target's env.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<BranchSourceInfo>,
+}
+
+/// Where a branch's data came from: the host, port, and database name of the source the
+/// operator resolved from the branch's connection source. Credentials are never recorded.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchSourceInfo {
+    pub host: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database: Option<String>,
+}
+
+impl std::fmt::Display for BranchSourceInfo {
+    /// `host:port/database`, leaving out the parts that are not known.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.host)?;
+        if let Some(port) = self.port {
+            write!(f, ":{port}")?;
+        }
+        if let Some(database) = &self.database {
+            write!(f, "/{database}")?;
+        }
+        Ok(())
+    }
 }
 
 /// Outcome of running a branch's migrations.

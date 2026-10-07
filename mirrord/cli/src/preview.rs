@@ -177,7 +177,8 @@ async fn preview_start(
         CliError::PreviewTargetRequired
     })?;
 
-    let image = layer_config.feature.preview.image.as_ref().ok_or_else(|| {
+    // Owned: branch preparation below edits the config while the image is still needed.
+    let image = layer_config.feature.preview.image.clone().ok_or_else(|| {
         subtask.failure(None);
         CliError::PreviewImageRequired
     })?;
@@ -294,7 +295,7 @@ async fn preview_start(
         let name = session.name_any();
 
         subtask.warning(&format!("replacing existing session '{name}'"));
-        if &session.spec.image == image {
+        if session.spec.image == image {
             subtask.warning(&format!("configured image and existing session's image are the same ('{image}'), this command will only restart the existing deployment"));
         }
 
@@ -346,7 +347,7 @@ async fn preview_start(
         BranchDbNames::default()
     } else {
         operator_api
-            .prepare_branch_dbs(&layer_config, &progress)
+            .prepare_branch_dbs(&mut layer_config, &progress)
             .await?
     };
 
