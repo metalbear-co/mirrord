@@ -27,7 +27,7 @@ use kube::{
     },
 };
 use mirrord_analytics::{
-    AnalyticsReporter, ExecutionKind,
+    AnalyticsError, AnalyticsReporter, ExecutionKind, OperatorWall, Reporter,
     preview::{PreviewEvent, PreviewEventKind},
 };
 use mirrord_config::{
@@ -1581,10 +1581,21 @@ async fn create_preview_api(
         .await?
         .ok_or_else(|| {
             subtask.failure(None);
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::PreviewCommand);
+            analytics.set_error(AnalyticsError::Unknown);
             CliError::OperatorNotInstalled
         })?;
 
-    operator_api.check_license_validity(progress)?;
+    operator_api
+        .check_license_validity(progress)
+        .inspect_err(|_| {
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::LicenseExpired);
+            analytics.set_error(AnalyticsError::Unknown);
+        })?;
 
     operator_api
         .operator()

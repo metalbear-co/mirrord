@@ -34,7 +34,7 @@ pub(crate) async fn operator_command(
             .is_ok_and(|value| value == "false")
             .not(),
         machine_id: user_data.machine_id(),
-        watch,
+        watch: watch.clone(),
     };
 
     match args.command {
@@ -46,7 +46,7 @@ pub(crate) async fn operator_command(
             .await
             .map_err(CliError::from),
         OperatorCommand::Status { config_file } => {
-            StatusCommandHandler::new(config_file)
+            StatusCommandHandler::new(config_file, watch, user_data)
                 .and_then(StatusCommandHandler::handle)
                 .await
         }
@@ -54,7 +54,7 @@ pub(crate) async fn operator_command(
             command,
             config_file,
         } => {
-            SessionCommandHandler::new(command, config_file)
+            SessionCommandHandler::new(command, config_file, watch, user_data)
                 .and_then(SessionCommandHandler::handle)
                 .await
         }

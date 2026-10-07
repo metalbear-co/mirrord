@@ -25,6 +25,7 @@ use crate::{
     CliError, MirrordCi,
     ci::MirrordCiManagedContainer,
     config::{ContainerRuntime, ExecParams, RuntimeArgs},
+    connection::record_config_wall,
     container::{command_builder::RuntimeCommandBuilder, sidecar::IntproxySidecar},
     data::UserData,
     ensure_not_nested,
@@ -114,7 +115,7 @@ async fn create_config_and_analytics(
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
     // Initialize only error analytics, extproxy will be the full AnalyticsReporter.
-    let analytics = AnalyticsReporter::only_error(
+    let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
         ExecutionKind::Container,
         watch,
@@ -125,6 +126,9 @@ async fn create_config_and_analytics(
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
+    }
+    if let Err(error) = &result {
+        record_config_wall(error, &mut analytics);
     }
     result?;
 

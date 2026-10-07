@@ -271,7 +271,7 @@ use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 use clap::Parser;
 use clap_complete::generate;
 use config::*;
-use connection::create_and_connect;
+use connection::{create_and_connect, record_config_wall};
 use container::{container_command, container_ext_command};
 use db_branches::db_branches_command;
 use diagnose::diagnose_command;
@@ -893,6 +893,9 @@ async fn exec(
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
     }
+    if let Err(error) = &result {
+        record_config_wall(error, &mut analytics);
+    }
     result?;
 
     let res = exec_process(
@@ -996,6 +999,9 @@ async fn port_forward(
     let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
+    }
+    if let Err(error) = &result {
+        record_config_wall(error, &mut analytics);
     }
     result?;
 
@@ -1142,7 +1148,7 @@ fn main() -> miette::Result<()> {
                     .and_then(|value| value.parse::<bool>().ok())
                     .unwrap_or_default();
 
-                list::print_targets(*args, rich_output).await?
+                list::print_targets(*args, rich_output, watch, &user_data).await?
             }
             Commands::Operator(args) => {
                 operator_command(*args, watch, &user_data).await?;

@@ -45,6 +45,11 @@ fn detect_queue_kinds(env: &HashMap<String, String>) -> BTreeSet<QueueKind> {
         .collect()
 }
 
+/// Whether [`suggest_queue_splitting`] has any queue to suggest splitting for this run.
+pub fn detects_splittable_queues(config: &LayerConfig, env: &HashMap<String, String>) -> bool {
+    !config.feature.split_queues.is_set() && !detect_queue_kinds(env).is_empty()
+}
+
 /// Whether `token` appears in `haystack` as a whole word, case-insensitively.
 ///
 /// Words are maximal runs of ASCII alphanumerics.

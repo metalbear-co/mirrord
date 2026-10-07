@@ -1,11 +1,15 @@
 use std::{collections::HashSet, ops::Not, time::Duration};
 
 use kube::Api;
-use mirrord_analytics::Reporter;
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, ExecutionKind, OperatorWall, Reporter};
 use mirrord_config::{
     LayerConfig,
     agent::AgentFileConfig,
-    config::MirrordConfig,
+    config::{ConfigError, MirrordConfig},
+    feature::{
+        database_branches::{DatabaseBranchConfig, RedisBranchConfig},
+        network::incoming::ConcurrentSteal,
+    },
     target::{Target, TargetDisplay},
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
@@ -33,7 +37,7 @@ use crate::{
     CliError, CliResult, MirrordCi,
     ci::error::CiError,
     connector::{AgentConnector, DirectConnector, OperatorConnector, SessionsManagerConnector},
-    data::GlobalConfig,
+    data::{GlobalConfig, UserData},
     up::MirrordUp,
 };
 
@@ -93,6 +97,10 @@ where
     let api = match OperatorApi::try_new(layer_config, analytics, progress).await? {
         Some(api) => api,
         None if layer_config.operator == Some(true) => {
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::OperatorRequested);
+            analytics.set_error(AnalyticsError::Unknown);
             send_upgrade_ide_message(
                 progress,
                 "mirrord operator was not found in the cluster.",
@@ -111,8 +119,12 @@ where
         Ok(()) => license_subtask.success(Some("operator license valid")),
         Err(error) => {
             license_subtask.failure(Some("operator license expired"));
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::LicenseExpired);
 
             if layer_config.operator == Some(true) {
+                analytics.set_error(AnalyticsError::Unknown);
                 send_upgrade_ide_message(
                     progress,
                     "mirrord operator license expired.",
@@ -355,7 +367,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         return Ok(connect_data);
     }
 
-    process_config_oss(config, progress)?;
+    process_config_oss(config, progress, analytics)?;
 
     let k8s_api = KubernetesAPI::create(config, progress)
         .await
@@ -413,7 +425,15 @@ pub(crate) async fn create_and_connect<R: Reporter>(
     )
     .await
     .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
-    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
+    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))
+    .inspect_err(|error| {
+        if matches!(error, CliError::AgentPodDeleted) {
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::AgentPodDeleted);
+            analytics.set_error(AnalyticsError::AgentConnection);
+        }
+    })?;
 
     let api = Api::namespaced(k8s_api.client().clone(), &agent_connect_info.pod_namespace);
 
@@ -453,13 +473,52 @@ async fn apply_auto_mount_for_target<P: Progress>(
     }
 }
 
+/// Records the wall behind a config verification error. These are rejected before a run
+/// reaches [`process_config_oss`], which only happens with `operator: false`.
+pub(crate) fn record_config_wall<R: Reporter>(error: &ConfigError, analytics: &mut R) {
+    let wall = match error {
+        ConfigError::TargetRequiresOperator => OperatorWall::TargetType,
+        ConfigError::CopyTargetRequiresOperator => OperatorWall::CopyTarget,
+        _ => return,
+    };
+
+    analytics.get_mut().add_operator_wall(wall);
+    analytics.set_error(AnalyticsError::Unknown);
+}
+
+/// Sends a report for a command that stopped because it needs the operator.
+pub(crate) fn report_command_wall(
+    config: &LayerConfig,
+    execution_kind: ExecutionKind,
+    wall: OperatorWall,
+    watch: drain::Watch,
+    user_data: &UserData,
+) {
+    let mut analytics = AnalyticsReporter::only_error(
+        config.telemetry,
+        execution_kind,
+        watch,
+        user_data.machine_id(),
+        Some(config.key.as_str().to_owned()),
+    );
+    analytics.get_mut().add_operator_wall(wall);
+    analytics.set_error(AnalyticsError::Unknown);
+}
+
 /// Verifies and adjusts the [`LayerConfig`] after we've determined that this run does not use the
 /// operator.
-fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -> CliResult<()> {
+fn process_config_oss<P: Progress, R: Reporter>(
+    config: &mut LayerConfig,
+    progress: &mut P,
+    analytics: &mut R,
+) -> CliResult<()> {
     // operator is disabled, but target requires it.
     if let Some(target) = config.target.path.as_ref()
         && Target::requires_operator(target)
     {
+        analytics
+            .get_mut()
+            .add_operator_wall(OperatorWall::TargetType);
         send_upgrade_ide_message(
             progress,
             &format!(
@@ -468,6 +527,7 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
             ),
             "requiresoperator",
         )?;
+        analytics.set_error(AnalyticsError::Unknown);
         return Err(CliError::FeatureRequiresOperatorError(format!(
             "target type {}",
             target.type_()
@@ -475,11 +535,15 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
     }
 
     if config.feature.copy_target.enabled {
+        analytics
+            .get_mut()
+            .add_operator_wall(OperatorWall::CopyTarget);
         send_upgrade_ide_message(
             progress,
             "copy_target requires the mirrord operator, which is part of mirrord for Teams.",
             "requiresoperator",
         )?;
+        analytics.set_error(AnalyticsError::Unknown);
         return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
     }
 
@@ -501,15 +565,62 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
         (true, true) => {
             // only show user one of the two msgs - each user should always be shown same msg
             if user_persistent_random_message_select() {
+                analytics
+                    .get_mut()
+                    .add_operator_wall(OperatorWall::MultiPod);
                 show_multipod_warning(progress)?
             } else {
+                analytics
+                    .get_mut()
+                    .add_operator_wall(OperatorWall::HttpFilter);
                 show_http_filter_warning(progress)?
             }
         }
-        (true, false) => show_multipod_warning(progress)?,
-        (false, true) => show_http_filter_warning(progress)?,
+        (true, false) => {
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::MultiPod);
+            show_multipod_warning(progress)?
+        }
+        (false, true) => {
+            analytics
+                .get_mut()
+                .add_operator_wall(OperatorWall::HttpFilter);
+            show_http_filter_warning(progress)?
+        }
         _ => (),
     };
+
+    if config.feature.split_queues.is_set() {
+        analytics
+            .get_mut()
+            .add_operator_wall(OperatorWall::SplitQueues);
+    }
+
+    if config.feature.db_branches.iter().any(|branch| {
+        !matches!(branch, DatabaseBranchConfig::Redis(redis) if matches!(**redis, RedisBranchConfig::Local(_)))
+    }) {
+        analytics.get_mut().add_operator_wall(OperatorWall::DbBranches);
+    }
+
+    let incoming = &config.feature.network.incoming;
+    if incoming.tls_delivery.is_some() || incoming.https_delivery.is_some() {
+        analytics
+            .get_mut()
+            .add_operator_wall(OperatorWall::TlsDelivery);
+    }
+
+    if incoming.on_concurrent_steal != ConcurrentSteal::default() {
+        analytics
+            .get_mut()
+            .add_operator_wall(OperatorWall::ConcurrentSteal);
+    }
+
+    if config.multi_cluster == Some(true) {
+        analytics
+            .get_mut()
+            .add_operator_wall(OperatorWall::MultiCluster);
+    }
 
     config.experimental.disable_reuseaddr = config.experimental.disable_reuseaddr.or(Some(true));
     config.experimental.go_asmcgocall = config.experimental.go_asmcgocall.or(Some(true));
@@ -589,15 +700,47 @@ where
 
 #[cfg(test)]
 mod tests {
+    use mirrord_analytics::{NullReporter, OperatorWall, Reporter};
     use mirrord_config::{
         LayerFileConfig,
         config::{ConfigContext, MirrordConfig},
-        target::{Target, TargetFileConfig, pod::PodTarget, service::ServiceTarget},
+        target::{
+            Target, TargetFileConfig, deployment::DeploymentTarget, pod::PodTarget,
+            service::ServiceTarget,
+        },
     };
     use mirrord_progress::NullProgress;
     use rstest::rstest;
 
     use crate::connection::process_config_oss;
+
+    /// A wall that only warns still leaves its record, on a run that goes on.
+    #[test]
+    fn soft_walls_are_recorded_without_stopping_the_run() {
+        let mut cfg_context = ConfigContext::default().strict_env(true);
+        let mut config = LayerFileConfig {
+            target: Some(TargetFileConfig::Simple(Some(Target::Deployment(
+                DeploymentTarget {
+                    deployment: "my-deployment".into(),
+                    container: None,
+                },
+            )))),
+            ..Default::default()
+        }
+        .generate_config(&mut cfg_context)
+        .unwrap();
+        let mut progress = NullProgress {};
+        let mut analytics = NullReporter::default();
+
+        assert!(process_config_oss(&mut config, &mut progress, &mut analytics).is_ok());
+        assert_eq!(
+            serde_json::to_value(analytics.get_mut())
+                .unwrap()
+                .get("operator_wall")
+                .and_then(serde_json::Value::as_u64),
+            Some(OperatorWall::MultiPod as u64),
+        );
+    }
 
     /// Ensure that when `process_config_oss` is called, operator-only target types are disallowed.
     /// This occurs when `create_and_connect` fails to establish a connection with the operator.
@@ -617,10 +760,20 @@ mod tests {
         .generate_config(&mut cfg_context)
         .unwrap();
         let mut progress = NullProgress {};
+        let mut analytics = NullReporter::default();
 
         assert_eq!(
-            process_config_oss(&mut config, &mut progress).is_ok(),
+            process_config_oss(&mut config, &mut progress, &mut analytics).is_ok(),
             allowed
+        );
+
+        assert_eq!(
+            serde_json::to_value(analytics.get_mut())
+                .unwrap()
+                .get("operator_wall")
+                .is_some(),
+            !allowed,
+            "a target that needs the operator should leave a record of the wall it hit"
         )
     }
 }
