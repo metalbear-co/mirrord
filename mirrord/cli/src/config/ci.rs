@@ -17,18 +17,20 @@ pub(crate) enum CiCommand {
 
     /// Starts mirrord for ci. Takes the same arguments as `mirrord exec` plus ci specific options.
     ///
-    /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
+    /// - When using the operator, set `MIRRORD_CI_API_KEY` to a key from `mirrord ci api-key`.
+    /// - Without the operator, no API key is required.
     Start(Box<CiStartArgs>),
 
     /// Stops mirrord for ci.
     ///
-    /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
+    /// Uses locally saved process state; no API key is required.
     Stop,
 
     /// Starts mirrord for ci inside a container. Takes the same arguments as `mirrord container`,
     /// plus ci specific options.
     ///
-    /// - The environment variable `MIRRORD_CI_API_KEY` must be set for this command to work.
+    /// - When using the operator, set `MIRRORD_CI_API_KEY` to a key from `mirrord ci api-key`.
+    /// - Without the operator, no API key is required.
     Container(Box<CiContainerArgs>),
 }
 
@@ -82,4 +84,23 @@ pub(crate) struct CiContainerArgs {
     /// mirrord for ci args.
     #[clap(flatten)]
     pub ci_common_args: CiCommonArgs,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ops::Not;
+
+    use clap::{Parser, error::ErrorKind};
+
+    use crate::config::Cli;
+
+    #[test]
+    fn ci_stop_help_does_not_require_a_key() {
+        let error = Cli::try_parse_from(["mirrord", "ci", "stop", "--help"]).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+        let help = error.to_string();
+
+        assert!(help.contains("no API key is required"));
+        assert!(help.contains("MIRRORD_CI_API_KEY").not());
+    }
 }
