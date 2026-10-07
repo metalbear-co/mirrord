@@ -14,7 +14,7 @@ mod common;
 pub use common::*;
 
 /// Verify that macOS DNS-SD address queries (what Bun uses) are resolved through the agent, for
-/// every DNS-SD client style, and that the queries we don't answer go to the daemon.
+/// every DNS-SD client style, and that the queries we don't answer go to `mDNSResponder`.
 ///
 /// The app checks what each query receives. Here we check that only the expected names reach the
 /// agent, each exactly once: queries we don't answer, and queries deallocated before their reply

@@ -143,11 +143,11 @@ static void expect(const char *what, Lookup *lookup, const char *expected) {
 }
 
 // Processes a query the agent must not answer for a moment. If it was taken over anyway, its
-// reply makes us ask the agent for the name, which fails the test. What the daemon answers, if
+// reply makes us ask the agent for the name, which fails the test. What mDNSResponder answers, if
 // anything, doesn't matter.
 static void expect_passed_through(const char *what, DNSServiceErrorType error, DNSServiceRef ref) {
   if (error) {
-    printf("FAIL %s: not passed to the daemon (%d)\n", what, error);
+    printf("FAIL %s: not passed to mDNSResponder (%d)\n", what, error);
     failures++;
     return;
   }
@@ -159,7 +159,7 @@ static void expect_passed_through(const char *what, DNSServiceErrorType error, D
     }
   }
 
-  printf("ok %s: passed to the daemon\n", what);
+  printf("ok %s: passed to mDNSResponder\n", what);
   DNSServiceRefDeallocate(ref);
 }
 
@@ -178,7 +178,7 @@ int main(int argc, char *argv[]) {
   DNSServiceFlags shared = kDNSServiceFlagsShareConnection | kDNSServiceFlagsTimeout;
   DNSServiceProtocol both = kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6;
 
-  // Queries the agent doesn't answer go to the daemon untouched. These run first, so a wrongly
+  // Queries the agent doesn't answer go to mDNSResponder untouched. These run first, so a wrongly
   // taken over one is the first (unexpected) name the test sees.
   DNSServiceRef ref;
   DNSServiceErrorType error;

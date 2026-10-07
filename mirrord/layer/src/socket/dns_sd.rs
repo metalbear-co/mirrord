@@ -3,27 +3,58 @@
 //! On macOS, Bun talks to `mDNSResponder` directly through the DNS-SD API. Without these hooks,
 //! those lookups are answered by the local machine, so cluster names fail to resolve.
 //!
-//! DNS-SD is asynchronous. Starting a query gives the caller a `DNSServiceRef`. The caller then
-//! watches the socket behind that ref (or behind the shared connection it was started on) in its
-//! own event loop, and calls `DNSServiceProcessResult` once the socket is readable. That call is
-//! what runs the query's callback. The socket belongs to `mDNSResponder`, so we have no way of
-//! making it readable when our answer is ready.
+//! DNS-SD is asynchronous. The caller's event loop watches the socket behind the query's ref (or
+//! behind the shared connection it was started on), and the callback runs from
+//! `DNSServiceProcessResult` once that socket is readable:
 //!
-//! Instead, we get the daemon to wake the caller up for us:
 //!
-//! 1. When a query comes in for a name we resolve remotely, we still start a real query on the
-//!    caller's ref or connection, but for [`DECOY_HOSTNAME`], with our own callback and a
-//!    [`RemoteQuery`] as its context. The daemon answers that right away, so the caller's socket
-//!    becomes readable.
-//! 2. The caller calls `DNSServiceProcessResult`, which runs our callback with the decoy's reply.
-//!    We ignore that reply. Instead, we ask the agent to resolve the real name, and call the
-//!    caller's callback with the answer, formatted like a reply from the daemon. If more decoy
-//!    replies come in later, we ignore them too. So the callers, including long-lived ones, get one
-//!    answer only.
-//! 3. When the caller deallocates the query (or the connection it was started on), we free its
-//!    [`RemoteQuery`].
+//! caller                                      DNS-SD (library + mDNSResponder)
+//!   |                                                |
+//!   |-- DNSServiceGetAddrInfo("py-serv", cb, ctx) -->|
+//!   |<-------------------------------------- ref ----|
+//!   |                                                |
+//!   |   (event loop waits on the ref's socket)       |
+//!   |<-------------------------- socket readable ----|  the answer arrived
+//!   |                                                |
+//!   |-- DNSServiceProcessResult(ref) --------------->|
+//!   |<-------------------------- cb(10.0.0.1, ctx) --|
+//!   |                                                |
+//!   |-- DNSServiceRefDeallocate(ref) --------------->|
 //!
-//! In Step 2, the agent lookup round trip blocks the call's thread - Bun's event loop :(
+//!
+//! The socket belongs to `mDNSResponder`, so we can't make it readable when our answer is ready.
+//! Instead, we start a decoy query for [`DECOY_HOSTNAME`] in place of the caller's, which the
+//! `mDNSResponder` answers right away, and answer the real query from the decoy's callback:
+//!
+//!
+//!    caller                 mirrord layer                  DNS-SD                    agent
+//!      |                          |                           |                        |
+//! 1    |-- GetAddrInfo ---------->|                           |                        |
+//!      |   ("py-serv", cb, ctx)   |-- GetAddrInfo ----------->|                        |
+//!      |                          |   ("localhost",           |                        |
+//!      |                          |    decoy_reply,           |                        |
+//!      |                          |    RemoteQuery)           |                        |
+//!      |<-- ref ------------------|<-- ref -------------------|                        |
+//!      |                          |                           |                        |
+//!      |<-------------------------------- socket readable ----|  localhost answered    |
+//!      |                          |                           |                        |
+//! 2    |-- ProcessResult(ref) ------------------------------->|                        |
+//!      |                          |<-- decoy_reply -----------|                        |
+//!      |                          |    (RemoteQuery)          |                        |
+//!      |                          |-- resolve "py-serv" ------------------------------>|
+//!      |                          |<------------------------------------ 10.0.0.1 -----|
+//!      |<-- cb(10.0.0.1, ctx) ----|                           |                        |
+//!      |                          |                           |                        |
+//! 3    |-- RefDeallocate(ref) --->|  frees RemoteQuery        |                        |
+//!      |                          |-- RefDeallocate(ref) ---->|                        |
+//!
+//!
+//! 1. The decoy runs on the caller's ref or shared connection, so it wakes the caller's socket.
+//! 2. We reply like `mDNSResponder` would. Only the first decoy reply counts, so callers (including
+//!    long-lived ones) get one answer, and later changes aren't pushed.
+//! 3. Deallocating the shared connection a query was started on frees its [`RemoteQuery`] too.
+//!
+//! In Step 2, the agent lookup round trip blocks the caller's thread - Bun's event loop :(
 //! This is a tradeoff we make for simplicity.
 //!
 //! We rely on the DNS-SD rule that a ref is only used from one thread at a time. That means a
@@ -43,6 +74,7 @@ use mirrord_layer_lib::{
     detour::{Detour, DetourGuard},
     error::{HookError, getaddrinfo_error_code},
     mutex::Mutex,
+    setup::setup,
     socket::dns::remote_getaddrinfo,
 };
 use mirrord_layer_macro::hook_guard_fn;
@@ -122,15 +154,29 @@ enum Query {
 /// A query we took over, the context of its decoy query.
 struct RemoteQuery {
     query: Query,
-    /// The name as the daemon reports it, fully qualified.
+    /// The name we pass to the caller's callback (`hostname` / `fullname`). `mDNSResponder`
+    /// reports the queried name with a trailing dot (`py-serv` comes back as `py-serv.`), so we
+    /// do the same.
     fullname: CString,
     context: *mut c_void,
     /// The shared connection the query was started on, if any.
     connection: usize,
     resolution: Arc<Resolution>,
-    delivered: Cell<bool>,
-    delivering: Cell<bool>,
-    cancelled: Cell<bool>,
+    state: Cell<State>,
+}
+
+/// Where a [`RemoteQuery`] is in answering the caller.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum State {
+    /// No decoy reply yet.
+    Waiting,
+    /// We're calling the caller's callback with the agent's answer.
+    Delivering,
+    /// The caller deallocated the query from inside its callback, while we were delivering. We
+    /// stop, and free the [`RemoteQuery`] once the callback returns.
+    Cancelled,
+    /// The answer was delivered, later decoy replies are ignored.
+    Delivered,
 }
 
 /// The agent's answer for a name, shared by the queries of one lookup (Bun asks for A and AAAA
@@ -145,9 +191,9 @@ struct Resolution {
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct ResolutionKey {
     name: String,
-    /// The caller's callback, as an address.
+    /// The function the caller wants its replies delivered to.
     callback: usize,
-    /// The caller's context, as an address.
+    /// The caller's opaque pointer, passed back to `callback` with every reply.
     context: usize,
 }
 
@@ -164,7 +210,8 @@ struct Registry {
     /// Both are stored as `usize` because raw pointers aren't [`Send`], and this lives in a
     /// static.
     queries: HashMap<usize, usize>,
-    /// Resolutions not started yet, that new queries of the same lookup join.
+    /// Resolutions not started yet, that new queries of the same lookup share, see
+    /// [`Resolution::get_or_create`].
     unresolved: HashMap<ResolutionKey, Weak<Resolution>>,
 }
 
@@ -177,7 +224,11 @@ fn registry() -> std::sync::MutexGuard<'static, Registry> {
 }
 
 impl Resolution {
-    fn join(key: ResolutionKey) -> Arc<Self> {
+    /// The resolution to share with the other queries of the same lookup, or a new one.
+    /// Bun asks for A and AAAA with two queries that share a callback and context, so they
+    /// get one agent request instead of two. Once the agent is asked, the key leaves
+    /// `unresolved`, so a later lookup of the same name gets a fresh resolution.
+    fn get_or_create(key: ResolutionKey) -> Arc<Self> {
         let mut registry = registry();
 
         if let Some(resolution) = registry.unresolved.get(&key).and_then(Weak::upgrade) {
@@ -192,6 +243,8 @@ impl Resolution {
         resolution
     }
 
+    /// The agent's answer for this lookup. The first query to need it asks the agent and
+    /// blocks until it replies, the other queries of the lookup reuse the answer.
     fn addresses(&self) -> &Result<Vec<IpAddr>, DNSServiceErrorType> {
         self.addresses.get_or_init(|| {
             registry().unresolved.remove(&self.key);
@@ -232,7 +285,7 @@ fn dns_sd_error(error: HookError) -> DNSServiceErrorType {
 }
 
 impl RemoteQuery {
-    /// Returns [`None`] when the query should go to the daemon untouched.
+    /// Returns [`None`] when the query should go to `mDNSResponder` untouched.
     unsafe fn new(
         sd_ref: *mut DNSServiceRef,
         flags: u32,
@@ -241,6 +294,11 @@ impl RemoteQuery {
         query: Query,
         context: *mut c_void,
     ) -> Option<Box<Self>> {
+        // Cases we are passing through here:
+        // 1. Null pointers are a caller bug.
+        // 2. A non-zero interface index scopes the query to one local interface (like `LocalOnly`
+        //    or a specific NIC), which the agent knows nothing about.
+        // 3. See `FLAGS_PASS_THROUGH`.
         if sd_ref.is_null()
             || hostname.is_null()
             || interface_index != 0
@@ -256,7 +314,7 @@ impl RemoteQuery {
         let unqualified = name.strip_suffix('.').unwrap_or(name);
         if unqualified.parse::<IpAddr>().is_ok()
             || !matches!(
-                crate::setup().dns_selector().check_query(unqualified, 0),
+                setup().dns_selector().check_query(unqualified, 0),
                 Detour::Success(())
             )
         {
@@ -283,14 +341,12 @@ impl RemoteQuery {
             fullname: CString::new(fullname).ok()?,
             context,
             connection,
-            resolution: Resolution::join(ResolutionKey {
+            resolution: Resolution::get_or_create(ResolutionKey {
                 name: name.to_owned(),
                 callback,
                 context: context as usize,
             }),
-            delivered: Cell::new(false),
-            delivering: Cell::new(false),
-            cancelled: Cell::new(false),
+            state: Cell::new(State::Waiting),
         }))
     }
 
@@ -300,6 +356,10 @@ impl RemoteQuery {
         sd_ref: *mut DNSServiceRef,
         start_decoy: impl FnOnce(*mut c_void) -> DNSServiceErrorType,
     ) -> DNSServiceErrorType {
+        // The DNS-SD library holds on to the decoy's context and hands it back on every reply,
+        // so it needs a fixed address that nothing on our side owns. The registry only keeps
+        // the address to find it again: an owned value there would be dropped on
+        // `DNSServiceRefDeallocate`, even when that's called from inside `deliver`.
         let remote_query = Box::into_raw(self);
         let result = start_decoy(remote_query.cast());
 
@@ -317,14 +377,14 @@ impl RemoteQuery {
     /// Hands the agent's answer to the caller, on the first decoy reply.
     unsafe fn deliver(remote_query: *mut Self, sd_ref: DNSServiceRef) {
         let this = unsafe { &*remote_query };
-        if this.delivered.replace(true) {
+        if this.state.get() != State::Waiting {
             return;
         }
 
+        this.state.set(State::Delivering);
         let replies = this.replies();
-        this.delivering.set(true);
         for (index, reply) in replies.iter().enumerate() {
-            if this.cancelled.get() {
+            if this.state.get() == State::Cancelled {
                 break;
             }
 
@@ -336,17 +396,17 @@ impl RemoteQuery {
                 };
             unsafe { this.call(sd_ref, flags, reply) };
         }
-        this.delivering.set(false);
 
-        if this.cancelled.get() {
+        if this.state.replace(State::Delivered) == State::Cancelled {
             drop(unsafe { Box::from_raw(remote_query) });
         }
     }
 
     /// The caller's query was deallocated.
     unsafe fn release(remote_query: *mut Self) {
-        if unsafe { &*remote_query }.delivering.get() {
-            unsafe { &*remote_query }.cancelled.set(true);
+        let this = unsafe { &*remote_query };
+        if this.state.get() == State::Delivering {
+            this.state.set(State::Cancelled);
         } else {
             drop(unsafe { Box::from_raw(remote_query) });
         }
@@ -476,7 +536,7 @@ struct Reply {
     address: Option<IpAddr>,
 }
 
-/// A `sockaddr` of the reply's family, zeroed for errors, like the daemon's.
+/// A `sockaddr` of the reply's family, zeroed for errors, like `mDNSResponder`'s.
 enum SockaddrStorage {
     V4(sockaddr_in),
     V6(sockaddr_in6),
@@ -511,6 +571,10 @@ impl SockaddrStorage {
     }
 }
 
+/// The callback of a decoy query started for `DNSServiceGetAddrInfo(Ex)`. The DNS-SD library
+/// runs it from the caller's `DNSServiceProcessResult` once the decoy's reply arrives, which is
+/// our chance to answer the real query (step 2 in the module docs). The decoy's own reply is
+/// ignored.
 unsafe extern "C" fn get_addr_info_decoy_reply(
     sd_ref: DNSServiceRef,
     _flags: u32,
@@ -524,6 +588,9 @@ unsafe extern "C" fn get_addr_info_decoy_reply(
     unsafe { RemoteQuery::deliver(context.cast(), sd_ref) }
 }
 
+/// Same as [`get_addr_info_decoy_reply`], for decoys started for
+/// `DNSServiceQueryRecord(WithAttribute)`. The decoy uses the same kind of call as the caller's
+/// query, so this has the record callback's signature.
 unsafe extern "C" fn query_record_decoy_reply(
     sd_ref: DNSServiceRef,
     _flags: u32,
@@ -762,8 +829,7 @@ unsafe extern "C" fn DNSServiceQueryRecordWithAttribute_detour(
 #[hook_guard_fn]
 unsafe extern "C" fn DNSServiceRefDeallocate_detour(sd_ref: DNSServiceRef) {
     unsafe {
-        FN_DNSSERVICEREFDEALLOCATE(sd_ref);
-
+        // Clean up before the original frees `sd_ref`.
         let released = {
             let mut registry = registry();
             let sd_ref = sd_ref as usize;
@@ -783,6 +849,8 @@ unsafe extern "C" fn DNSServiceRefDeallocate_detour(sd_ref: DNSServiceRef) {
         for remote_query in released {
             RemoteQuery::release(remote_query as *mut RemoteQuery);
         }
+
+        FN_DNSSERVICEREFDEALLOCATE(sd_ref);
     }
 }
 
