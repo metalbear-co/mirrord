@@ -14,5 +14,8 @@ pub mod client;
 #[cfg(feature = "crd")]
 pub mod crd;
 
+#[cfg(feature = "crd")]
+pub mod preview_template;
+
 /// Types used in the operator that don't require any special dependencies
 pub mod types;

@@ -46,7 +46,8 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
 /// Request body for `POST /branchcredentials` - asks the operator to create a K8s
 /// Secret with the given values in the target namespace. The Secret name is derived
-/// from `branch_id` so the same branch always reuses the same Secret.
+/// from `branch_id`, which carries the branch's resource name, so the same branch always
+/// reuses the same Secret.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateCredentialSecretRequest {
     pub namespace: String,
@@ -804,6 +805,22 @@ pub enum NewOperatorFeature {
     /// Deployment. Gated so the CLI fails fast on older operators, which reject CronJob
     /// targets at resolution time and would only report it as a failed session.
     PreviewCronJobTarget,
+    /// This operator accepts `label/<selector>` preview targets: one preview session takes
+    /// traffic from every pod matching the selector, whichever workloads own them. Gated so the
+    /// CLI fails fast: an older operator cannot read a `PreviewSession` whose target is a label
+    /// selector, and one such resource stops it from listing every other preview session too.
+    PreviewLabelTarget,
+    /// This operator reads a preview's TLS client certificate from the target's own pod when
+    /// `tls_delivery.client_cert_source` is `target`. Gated so the CLI fails fast: an older
+    /// operator's CRD schema prunes `clientAuthFromTarget`, and the preview pod would reject
+    /// every stolen request with a TLS alert instead of anything pointing at the config.
+    PreviewTlsClientAuthFromTarget,
+
+    /// This operator builds the preview pod from the pod template and ConfigMaps/Secrets the CLI
+    /// sends in `spec.specResources` (`mirrord preview start --resource`). Gated so the CLI fails
+    /// fast: an older operator's CRD schema prunes the unknown field, so the preview would
+    /// silently run the target's live spec instead of the user's files.
+    PreviewSpecResources,
 
     /// The interception event stream serves every session at once when given no key, honors
     /// `include_session_key` and `include_unmatched`, and carries the ids pairing an HTTP request
@@ -816,6 +833,12 @@ pub enum NewOperatorFeature {
     /// ignores the param it does not know, and a copy target carrying the new field fails to
     /// deserialize there.
     QueueSplittingWithComposedFilters,
+
+    /// This operator copies `additionalDatabases` of `postgresOptions` into the same PostgreSQL
+    /// branch pod and points each one's app connection at it. Gated so the CLI fails fast: an
+    /// older operator's CRD schema prunes the field, and the branch would come up with only
+    /// the first database while the app keeps talking to the source for the others.
+    PgBranchAdditionalDatabases,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -894,9 +917,17 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchUrlParam => "DB branching url connection param",
             NewOperatorFeature::LiquibaseMigrations => "DB branching Liquibase migrations",
             NewOperatorFeature::PreviewCronJobTarget => "CronJob preview targets",
+            NewOperatorFeature::PreviewLabelTarget => "label preview targets",
+            NewOperatorFeature::PreviewSpecResources => "preview specs from manifest files",
+            NewOperatorFeature::PreviewTlsClientAuthFromTarget => {
+                "TLS client certificate read from the target for previews"
+            }
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
             NewOperatorFeature::QueueSplittingWithComposedFilters => {
                 "queue splitting with composable message filters"
+            }
+            NewOperatorFeature::PgBranchAdditionalDatabases => {
+                "PostgreSQL branches with additional databases"
             }
             NewOperatorFeature::Unknown => "unknown feature",
         };

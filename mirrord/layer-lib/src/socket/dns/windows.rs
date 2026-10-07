@@ -56,7 +56,7 @@ pub fn getaddrinfo<T: WindowsAddrInfo>(
     //   be a port number.
     let port = raw_service.and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
 
-    tracing::warn!(
+    tracing::debug!(
         "windows_getaddrinfo called for hostname: {} port: {}",
         node,
         port
@@ -93,7 +93,7 @@ pub fn resolve_to_managed<T: WindowsAddrInfo>(
     ai_protocol: i32,
 ) -> Detour<ManagedAddrInfo<T>> {
     let ipv6_enabled = setup().layer_config().feature.network.ipv6;
-    tracing::warn!("Using remote DNS resolution for {}", node);
+    tracing::debug!("Using remote DNS resolution for {}", node);
 
     // Some apps (gRPC on Python) use `::` to listen on all interfaces, and usually that just means
     // resolve on unspecified. So we just return that in IPv4, if IPv6 support is disabled.

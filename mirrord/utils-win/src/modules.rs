@@ -533,8 +533,8 @@ pub fn flagged_security_modules() -> Vec<FlaggedModule> {
 /// Scans a captured [`ModuleTable`] for known security products.
 ///
 /// Each module's file name and `CompanyName` are matched against [`SECURITY_VENDORS`]. A hit on
-/// either is enough. Reading the company name touches the file. So this is not safe for a crash
-/// handler.
+/// either is enough. Reading the company name touches the file, and `GetFileVersionInfoW` maps it
+/// through the loader. So this is safe neither in a crash handler nor under the loader lock.
 ///
 /// # Arguments
 ///

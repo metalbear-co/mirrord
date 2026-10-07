@@ -274,7 +274,7 @@ cargo check -p mirrord-layer-tests
 
 # Test clippy
 print_step "Testing clippy..."
-cargo clippy -p mirrord-layer-tests -- -D warnings
+CARGO_BUILD_WARNINGS=deny cargo clippy -p mirrord-layer-tests
 
 # Test basic Go compilation
 print_step "Testing Go compilation..."

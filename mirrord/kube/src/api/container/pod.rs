@@ -330,6 +330,7 @@ mod test {
                 guessed_container: false,
                 share_process_namespace: false,
                 containers_probe_ports: vec![],
+                container_ports: vec![],
             },
         )
         .as_update();
@@ -372,6 +373,7 @@ mod test {
                 guessed_container: false,
                 share_process_namespace: false,
                 containers_probe_ports: vec![],
+                container_ports: vec![],
             },
         )
         .as_update();

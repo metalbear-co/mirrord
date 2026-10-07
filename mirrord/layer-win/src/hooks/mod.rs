@@ -2,9 +2,15 @@
 
 pub(crate) mod exception;
 pub(crate) mod files;
+// Re-exported from `utils-win`, where the crash handler can reach it too. This path is what
+// the `internal_bypass` macro expands to, so it must keep this name.
+pub(crate) use utils_win::internal_thread;
 pub(crate) mod macros;
 pub(crate) mod process;
 pub(crate) mod socket;
+
+#[cfg(test)]
+mod bypass_contract;
 
 use minhook_detours_rs::guard::DetourGuard;
 use mirrord_layer_lib::{
@@ -12,13 +18,17 @@ use mirrord_layer_lib::{
     setup::setup,
 };
 
+/// Creates every hook family, then enables them all at once. Runs inside `DllMain`.
+///
+/// Every `apply_hook!` only creates a disabled hook, and `enable_all_hooks` patches all of them in
+/// one transaction that either applies completely or not at all. So an error anywhere here leaves
+/// no function patched, and the caller can report the failure with the target untouched.
+///
+/// mirrord's crash filter goes into the OS slot just before the hooks are enabled, because once
+/// the `SetUnhandledExceptionFilter` hook is live, no call through the public API reaches that
+/// slot any more (see [`exception`]). It is taken back out if enabling fails.
 pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
     let setup = setup();
-
-    // Eagerly spawn the shared background thread pool from this safe layer
-    // thread, so a later `task_pool::submit` from inside a hook (async file
-    // read, async DNS) never has to spawn a thread under the loader lock.
-    crate::task_pool::initialize();
 
     // Initialize IOCP module prerequisites. Pre-step: must run before
     // any FS hook is initialized so the async-read worker can post
@@ -33,7 +43,8 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
 
     // Keep mirrord's crash filter from being overridden by the target's runtime. Extension-managed
     // runs do not install that filter, so the target must retain normal ownership of this API.
-    if utils_win::diagnostics::crash_reporting_enabled() {
+    let crash_reporting = utils_win::diagnostics::crash_reporting_enabled();
+    if crash_reporting {
         exception::initialize_hooks(guard)?;
     }
 
@@ -57,8 +68,12 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
         tracing::info!("Socket hooks disabled by configuration (no network features enabled)");
     }
 
-    guard
-        .enable_all_hooks()
-        .map_err(|err| LayerError::DetourGuard(err.to_string()))?;
-    Ok(())
+    if crash_reporting {
+        utils_win::diagnostics::crash::install_filter();
+    }
+
+    guard.enable_all_hooks().map_err(|err| {
+        utils_win::diagnostics::crash::restore_filter();
+        LayerError::DetourGuard(err.to_string())
+    })
 }

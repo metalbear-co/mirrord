@@ -1,14 +1,23 @@
-use std::{collections::HashSet, net::SocketAddr, ops::Not, sync::OnceLock};
+use std::{
+    collections::{BTreeSet, HashSet},
+    net::{AddrParseError, SocketAddr},
+    ops::Not,
+    sync::OnceLock,
+};
 
+use itertools::Itertools;
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_TARGET_CONTAINER_PORTS,
     experimental::ExperimentalConfig,
     feature::{
         env::EnvConfig,
         fs::{FsConfig, FsModeConfig, PREFETCH_TIMEOUT_DEFAULT, READONLY_FILE_BUFFER_DEFAULT},
         network::{
             NetworkConfig,
-            incoming::{IncomingConfig, IncomingMode as ConfigIncomingMode},
+            incoming::{
+                IncomingConfig, IncomingMode as ConfigIncomingMode,
+                http_filter::HttpFilterParseError,
+            },
             outgoing::OutgoingConfig,
         },
     },
@@ -23,7 +32,10 @@ use regex::RegexSet;
 
 use crate::{
     debugger_ports::DebuggerPorts,
-    file::{filter::FileFilter, mapper::FileRemapper},
+    file::{
+        filter::{FileFilter, InvalidPatterns},
+        mapper::FileRemapper,
+    },
     socket::{OutgoingSelector, dns_selector::DnsSelector},
     trace_only::{is_trace_only_mode, modify_config_for_trace_only},
 };
@@ -35,8 +47,52 @@ pub fn setup() -> &'static LayerSetup {
     SETUP.get().expect("layer is not initialized")
 }
 
-/// Initialized LayerSetup from LayerConfig
-pub fn init_layer_setup(mut config: LayerConfig, sip_only: bool) {
+/// Why [`LayerSetup`] could not be built from the resolved configuration.
+///
+/// The CLI does not check every part of the configuration (the file and unix stream patterns,
+/// for one), so a typo can reach the layer. Each message names the setting and the reason, because
+/// a layer that fails here often has nothing but this one line to show for it.
+#[derive(Debug, thiserror::Error)]
+pub enum SetupError {
+    #[error("invalid `feature.network.outgoing.unix_streams` regex set: {0}")]
+    UnixStreams(#[source] regex::Error),
+    #[error("invalid file filter regex set in {0}")]
+    FileFilter(#[source] InvalidPatterns),
+    #[error("invalid `feature.fs.mapping` pattern: {0}")]
+    FileMapping(#[source] regex::Error),
+    #[error("invalid `feature.network.outgoing.filter`: {0}")]
+    OutgoingFilter(#[from] crate::socket::OutgoingFilterError),
+    #[error("invalid `feature.network.dns.filter`: {0}")]
+    DnsFilter(#[from] crate::socket::dns_selector::DnsFilterError),
+    #[error("missing internal proxy address in {MIRRORD_LAYER_INTPROXY_ADDR}")]
+    MissingProxyAddress,
+    #[error("malformed internal proxy address {address:?}")]
+    MalformedProxyAddress {
+        address: String,
+        #[source]
+        source: AddrParseError,
+    },
+    #[error("invalid `feature.network.incoming.http_filter`: {0}")]
+    HttpFilter(#[source] HttpFilterParseError),
+    #[error("the layer setup is already initialized")]
+    AlreadyInitialized,
+}
+
+/// Initialized LayerSetup from LayerConfig.
+///
+/// # Panics
+///
+/// When [`try_init_layer_setup`] fails. For a layer that has nowhere to report the failure; the
+/// Windows layer calls [`try_init_layer_setup`] instead, because a panic inside `DllMain` ends the
+/// target process.
+pub fn init_layer_setup(config: LayerConfig, sip_only: bool) {
+    if let Err(error) = try_init_layer_setup(config, sip_only) {
+        panic!("layer setup failed: {error}");
+    }
+}
+
+/// Initialized LayerSetup from LayerConfig, reporting what went wrong instead of panicking.
+pub fn try_init_layer_setup(mut config: LayerConfig, sip_only: bool) -> Result<(), SetupError> {
     // Check if we're in trace only mode (no agent)
     let trace_only = is_trace_only_mode();
 
@@ -69,8 +125,8 @@ pub fn init_layer_setup(mut config: LayerConfig, sip_only: bool) {
     // init setup
     let debugger_ports = DebuggerPorts::from_env();
     let local_hostname = sip_only || trace_only || !config.feature.hostname;
-    let state = LayerSetup::new(config, debugger_ports, local_hostname);
-    SETUP.set(state).unwrap();
+    let state = LayerSetup::new(config, debugger_ports, local_hostname)?;
+    SETUP.set(state).map_err(|_| SetupError::AlreadyInitialized)
 }
 /// Complete layer setup.
 /// Contains [`LayerConfig`] and derived from it structs, which are used in multiple places across
@@ -89,6 +145,10 @@ pub struct LayerSetup {
     dns_selector: DnsSelector,
     proxy_address: SocketAddr,
     incoming_mode: IncomingMode,
+    /// Ports declared by the target container, see [`MIRRORD_LAYER_TARGET_CONTAINER_PORTS`].
+    ///
+    /// Empty when we do not know them.
+    target_container_ports: BTreeSet<Port>,
     local_hostname: bool,
     // to be used on macOS to restore env on execv
     #[cfg(target_os = "macos")]
@@ -100,10 +160,12 @@ impl LayerSetup {
         mut config: LayerConfig,
         debugger_ports: DebuggerPorts,
         local_hostname: bool,
-    ) -> Self {
-        let file_filter = FileFilter::new(config.feature.fs.clone());
+    ) -> Result<Self, SetupError> {
+        let file_filter =
+            FileFilter::try_new(config.feature.fs.clone()).map_err(SetupError::FileFilter)?;
         let file_remapper =
-            FileRemapper::new(config.feature.fs.mapping.clone().unwrap_or_default());
+            FileRemapper::try_new(config.feature.fs.mapping.clone().unwrap_or_default())
+                .map_err(SetupError::FileMapping)?;
         #[cfg(unix)]
         let prefetched_files = crate::file::prefetched::PrefetchedFiles::new(
             std::env::var_os(mirrord_config::MIRRORD_FS_PREFETCH_DIR).map(std::path::PathBuf::from),
@@ -118,26 +180,40 @@ impl LayerSetup {
             .as_deref()
             .map(RegexSet::new)
             .transpose()
-            .expect("invalid unix stream regex set")
+            .map_err(SetupError::UnixStreams)?
             .unwrap_or_default();
 
-        let outgoing_selector = OutgoingSelector::new(&config.feature.network.outgoing);
+        let outgoing_selector = OutgoingSelector::new(&config.feature.network.outgoing)?;
 
-        let dns_selector = DnsSelector::from(&config.feature.network.dns);
+        let dns_selector = DnsSelector::try_from(&config.feature.network.dns)?;
 
         let proxy_address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
-            .expect("missing internal proxy address")
-            .parse::<SocketAddr>()
-            .expect("malformed internal proxy address");
+            .map_err(|_| SetupError::MissingProxyAddress)?;
+        let proxy_address = proxy_address.parse::<SocketAddr>().map_err(|source| {
+            SetupError::MalformedProxyAddress {
+                address: proxy_address,
+                source,
+            }
+        })?;
 
-        let incoming_mode = IncomingMode::new(&mut config.feature.network.incoming);
-        tracing::info!(?incoming_mode, ?config, "incoming has changed");
+        let incoming_mode = IncomingMode::new(&mut config.feature.network.incoming)?;
+        // The configuration holds the values of `feature.env.override`, which can be secrets, and
+        // the layer's log file goes into crash bundles, so it is only logged at trace.
+        tracing::info!(?incoming_mode, "incoming has changed");
+        tracing::trace!(?config, "layer configuration");
+
+        let target_container_ports = std::env::var(MIRRORD_LAYER_TARGET_CONTAINER_PORTS)
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|port| port.trim().parse().ok())
+            .collect();
+
         #[cfg(target_os = "macos")]
         let env_backup = std::env::vars()
             .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")
             .collect();
 
-        Self {
+        Ok(Self {
             config,
             file_filter,
             file_remapper,
@@ -149,10 +225,11 @@ impl LayerSetup {
             dns_selector,
             proxy_address,
             incoming_mode,
+            target_container_ports,
             local_hostname,
             #[cfg(target_os = "macos")]
             env_backup,
-        }
+        })
     }
 
     pub fn layer_config(&self) -> &LayerConfig {
@@ -247,6 +324,30 @@ impl LayerSetup {
         &self.incoming_mode
     }
 
+    /// Prints to stderr, not `tracing`: the layer logs nothing unless `MIRRORD_LOG` is set.
+    pub fn warn_if_port_not_in_target(&self, local_port: Port, remote_port: Port) {
+        let Some(example_port) = self.target_container_ports.first() else {
+            return;
+        };
+        // The Windows layer subscribes also sockets bound to port 0. For these, the OS picks the
+        // local port, so we cannot suggest a correct `port_mapping`.
+        if local_port == 0 || self.target_container_ports.contains(&remote_port) {
+            return;
+        }
+
+        let declared_ports = self.target_container_ports.iter().join(", ");
+
+        // Reached from the `listen` hook, so this must not touch Rust's thread state on Windows.
+        crate::logging::report_to_stderr(format_args!(
+            "mirrord: your application listens on port {local_port}, so mirrord subscribed to \
+            port {remote_port} of the target. The target container does not declare port \
+            {remote_port}, it declares only these ports: {declared_ports}. Traffic may not reach \
+            your application. If the target container uses a different port than your \
+            application, set `feature.network.incoming.port_mapping` in the mirrord config, for \
+            example: `[[{local_port}, {example_port}]]`."
+        ));
+    }
+
     pub fn local_hostname(&self) -> bool {
         self.local_hostname
     }
@@ -303,27 +404,31 @@ impl IncomingMode {
     /// # Params
     ///
     /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
-    pub fn new(config: &mut IncomingConfig) -> Self {
-        let http_settings = config.http_filter.is_filter_set().then(|| {
-            let ports = config
-                .http_filter
-                .ports
-                .as_ref()
-                .cloned()
-                .map(HashSet::from);
+    pub fn new(config: &mut IncomingConfig) -> Result<Self, SetupError> {
+        let http_settings = config
+            .http_filter
+            .is_filter_set()
+            .then(|| {
+                let ports = config
+                    .http_filter
+                    .ports
+                    .as_ref()
+                    .cloned()
+                    .map(HashSet::from);
 
-            let filter = config
-                .http_filter
-                .as_protocol_http_filter()
-                .expect("invalid HTTP filter expression");
+                let filter = config
+                    .http_filter
+                    .as_protocol_http_filter()
+                    .map_err(SetupError::HttpFilter)?;
 
-            HttpSettings { filter, ports }
-        });
+                Ok::<_, SetupError>(HttpSettings { filter, ports })
+            })
+            .transpose()?;
 
-        Self {
+        Ok(Self {
             steal: config.is_steal(),
             http_settings,
-        }
+        })
     }
 
     /// Returns [`PortSubscription`] request to be used for the given port.
@@ -389,5 +494,50 @@ impl NetworkHookConfig for NetworkConfig {
 
     fn requires_udp_hooks(&self) -> bool {
         self.outgoing.udp
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use mirrord_config::{config::ConfigContext, util::VecOrSingle};
+
+    use super::*;
+
+    fn default_config() -> LayerConfig {
+        LayerConfig::resolve(&mut ConfigContext::default()).expect("the default config resolves")
+    }
+
+    /// The Windows layer builds its setup inside `DllMain`, where a panic cannot be recovered
+    /// from cleanly, so a bad pattern in an inherited configuration has to come back as an error.
+    #[test]
+    fn an_invalid_pattern_is_an_error_not_a_panic() {
+        let mut config = default_config();
+        config.feature.fs.read_write = Some(VecOrSingle::Single("(unclosed".to_owned()));
+        let result = LayerSetup::new(config, DebuggerPorts::from_env(), false);
+        assert!(
+            matches!(result, Err(SetupError::FileFilter(_))),
+            "{result:?}"
+        );
+        let message = result.err().unwrap().to_string();
+        assert!(
+            message.contains("feature.fs.read_write") && message.contains("unclosed group"),
+            "the message names the list and the reason: {message}"
+        );
+
+        let mut config = default_config();
+        config.feature.fs.mapping =
+            Some(HashMap::from([("(unclosed".to_owned(), "/tmp".to_owned())]));
+        let result = LayerSetup::new(config, DebuggerPorts::from_env(), false);
+        assert!(
+            matches!(result, Err(SetupError::FileMapping(_))),
+            "{result:?}"
+        );
+        let message = result.err().unwrap().to_string();
+        assert!(
+            message.contains("feature.fs.mapping") && message.contains("unclosed group"),
+            "the message names the list and the reason: {message}"
+        );
     }
 }

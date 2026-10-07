@@ -45,6 +45,24 @@ impl InTargetPathResolver {
             .map(|p| self.root.join(&p))
     }
 
+    /// Turns a path returned by [`Self::resolve`] back into the path as seen in the target
+    /// container, by replacing the [`Self::root`] prefix with `/`.
+    ///
+    /// Needed when a resolved path is combined with further user-provided components (e.g. the
+    /// `pathname` of `fstatat` relative to a `dirfd`), since the result has to go through
+    /// resolution again.
+    pub fn unresolve(&self, resolved: &Path) -> io::Result<PathBuf> {
+        resolved
+            .strip_prefix(&self.root)
+            .map(|path| Path::new("/").join(path))
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "path is not under the target root",
+                )
+            })
+    }
+
     /// Main (bounded) recursive implementation function for resolving paths.
     /// Returns paths *without* the [`Self::root`] prefix, so these paths are
     /// *relative* to [`Self::root`]. Use [`Self::resolve`] to get real paths.

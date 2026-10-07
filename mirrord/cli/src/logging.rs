@@ -11,6 +11,14 @@ use crate::{
     error::{CliError, ExternalProxyError, InternalProxyError},
 };
 
+/// Commands usually called from the IDE plugins, which parse the final error as JSON.
+pub(crate) fn reports_json_errors(command: &Commands) -> bool {
+    matches!(
+        command,
+        Commands::ListTargets(_) | Commands::ExtensionExec(_) | Commands::ExtensionContainer(_)
+    )
+}
+
 /// Tries to initialize tracing in the current process.
 pub async fn init_tracing_registry(
     command: &Commands,
@@ -27,7 +35,7 @@ pub async fn init_tracing_registry(
         // These commands are usually called from the plugins.
         //
         // They should log only when explicitly instructed.
-        Commands::ListTargets(_) | Commands::ExtensionExec(_) | Commands::ExtensionContainer(_) => {
+        command if reports_json_errors(command) => {
             // The final error has to be in the JSON format.
             let _ = miette::set_hook(Box::new(|_| Box::new(miette::JSONReportHandler::new())));
 
