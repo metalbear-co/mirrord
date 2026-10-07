@@ -132,8 +132,11 @@ impl ClientStore {
         transport: &IncomingTrafficTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let uses_tls = matches!(transport, IncomingTrafficTransportType::Tcp).not()
-            && self.tls_setup.is_some();
+        let uses_tls = match transport {
+            IncomingTrafficTransportType::Tcp => false,
+            IncomingTrafficTransportType::Tls { .. }
+            | IncomingTrafficTransportType::TlsV2 { .. } => self.tls_setup.is_some(),
+        };
         let client_identity = match self.tls_setup.as_ref() {
             Some(setup) if uses_tls => setup.select_identity(transport.client_identity()).await?,
             _ => None,
