@@ -4,7 +4,9 @@ use bytes::Bytes;
 use hyper::HeaderMap;
 use mirrord_protocol::{
     LogMessage,
-    tcp::{IncomingTrafficTransportType, InternalHttpBodyFrame, InternalHttpBodyNew},
+    tcp::{
+        IncomingTrafficTransportType, InternalHttpBodyFrame, InternalHttpBodyNew, TlsClientIdentity,
+    },
 };
 
 use crate::traffic::{
@@ -69,7 +71,18 @@ impl HeapSize for IncomingTrafficTransportType {
                 alpn_protocol,
                 server_name,
             } => alpn_protocol.heap_size() + server_name.heap_size(),
+            Self::TlsV2 {
+                alpn_protocol,
+                server_name,
+                client_identity,
+            } => alpn_protocol.heap_size() + server_name.heap_size() + client_identity.heap_size(),
         }
+    }
+}
+
+impl HeapSize for TlsClientIdentity {
+    fn heap_size(&self) -> usize {
+        self.subject.heap_size() + self.subject_alternative_names.heap_size()
     }
 }
 
