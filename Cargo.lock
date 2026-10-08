@@ -5744,7 +5744,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.29.1"
+version = "1.30.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -5962,6 +5962,7 @@ dependencies = [
  "http 1.5.0",
  "pem 3.0.6",
  "rcgen",
+ "rstest",
  "rustls",
  "rustls-pemfile",
  "tempfile",
