@@ -14,6 +14,7 @@ use nix::{
     unistd::Pid,
 };
 use rstest::rstest;
+use tokio::net::TcpListener;
 
 mod common;
 
@@ -24,24 +25,27 @@ pub use common::*;
 /// Share sockets between `execve` and `execv` with python's uvicorn.
 ///
 /// We run the `shared_sockets.py` app with the `--reload` flag to trigger the issue.
+/// The worker completion line verifies request handling. A successful parent exit checks
+/// parent shutdown, but does not establish the worker's exit status.
 #[rstest]
 #[tokio::test]
 async fn test_issue864(
     #[values(Application::PythonIssue864)] application: Application,
     config_dir: &Path,
 ) {
-    let (mut test_process, mut intproxy) = application
-        .start_process_with_port(
-            vec![
-                ("MIRRORD_LOG", "mirrord=info"),
-                ("MIRRORD_FILE_MODE", "local"),
-                ("MIRRORD_UDP_OUTGOING", "false"),
-            ],
-            Some(&config_dir.join("port_mapping_shared_sockets.json")),
-        )
-        .await;
-
-    println!("Application subscribed to port, sending HTTP requests.");
+    let config = config_dir.join("port_mapping_shared_sockets.toml");
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let env = get_env(
+        listener.local_addr().unwrap(),
+        vec![
+            ("MIRRORD_LOG", "mirrord=info"),
+            ("MIRRORD_FILE_MODE", "local"),
+            ("MIRRORD_UDP_OUTGOING", "false"),
+        ],
+    );
+    let mut test_process = application.get_test_process(env, Some(&config)).await;
+    let pid = Pid::from_raw(test_process.child.id().unwrap() as i32);
+    let mut intproxy = None;
 
     fn prepare_request_body(method: &str, content: &str) -> String {
         let content_headers = if content.is_empty() {
@@ -56,74 +60,62 @@ async fn test_issue864(
         format!("{method} / HTTP/1.1\r\nhost: localhost\r\n{content_headers}\r\n{content}",)
     }
 
-    intproxy
-        .send_connection_then_data(&prepare_request_body("GET", ""), application.get_app_port())
-        .await;
-
-    let request = AssertUnwindSafe(tokio::time::timeout(
-        Duration::from_secs(60),
-        test_process.wait_for_line_stdout(Duration::from_secs(20), "GET: Request completed"),
-    ))
+    // A startup or request failure must still let the parent stop and join its worker.
+    let operation = AssertUnwindSafe(async {
+        let proxy = intproxy.insert(
+            tokio::time::timeout(
+                Duration::from_secs(30),
+                TestIntProxy::new_with_app_port(
+                    listener,
+                    application.get_app_port(),
+                    Some(&config),
+                ),
+            )
+            .await
+            .expect("uvicorn did not subscribe to its port within 30 seconds"),
+        );
+        println!("Application subscribed to port, sending HTTP requests.");
+        tokio::time::timeout(Duration::from_secs(60), async {
+            proxy
+                .send_connection_then_data(
+                    &prepare_request_body("GET", ""),
+                    application.get_app_port(),
+                )
+                .await;
+            test_process
+                .wait_for_line_stdout(Duration::from_secs(20), "GET: Request completed")
+                .await;
+        })
+        .await
+        .expect("uvicorn did not print GET: Request completed within 60 seconds");
+    })
     .catch_unwind()
     .await;
 
-    let signal_result = match test_process.child.id() {
-        Some(pid) => signal::kill(Pid::from_raw(pid as i32), Signal::SIGTERM)
-            .map_err(|error| format!("SIGTERM failed: {error}")),
-        None => Err("reload parent has no PID for SIGTERM".to_owned()),
-    };
-
-    // A failed signal must not skip the sole wait/drain attempt.
-    let cleanup = AssertUnwindSafe(tokio::time::timeout(
-        Duration::from_secs(15),
-        test_process.wait(),
-    ))
+    let signal_result = signal::kill(pid, Signal::SIGTERM);
+    let exit = AssertUnwindSafe(async {
+        tokio::time::timeout(Duration::from_secs(15), test_process.wait_assert_success())
+            .await
+            .expect(
+                "uvicorn did not exit and finish reading output within 15 seconds after SIGTERM",
+            );
+    })
     .catch_unwind()
     .await;
 
-    eprintln!("reload-parent signal outcome: {signal_result:?}");
-    match &cleanup {
-        Ok(Ok(status)) => {
-            eprintln!("parent wait and both-reader drain completed: {status}");
-        }
-        Ok(Err(error)) => {
-            eprintln!("INCOMPLETE cleanup: 15-second wait/drain timeout: {error}");
-        }
-        Err(payload) => {
-            let text = payload
-                .downcast_ref::<String>()
-                .map(String::as_str)
-                .or_else(|| payload.downcast_ref::<&str>().copied())
-                .unwrap_or("non-string cleanup panic payload");
-            eprintln!("INCOMPLETE cleanup: wait/drain panic: {text}");
-        }
+    if let Err(error) = &signal_result {
+        eprintln!("failed to send SIGTERM to uvicorn: {error}");
     }
-
-    // Report signal/cleanup evidence before restoring the original request failure.
-    match request {
-        Err(payload) => resume_unwind(payload),
-        Ok(Err(error)) => {
-            panic!("request completion exceeded 60 seconds: {error}; cleanup outcome above");
-        }
-        Ok(Ok(())) => {}
+    if operation.is_err() && exit.is_err() {
+        eprintln!("uvicorn exit check also failed; returning the earlier failure");
     }
-
-    let status = match cleanup {
-        Err(payload) => resume_unwind(payload),
-        Ok(Err(error)) => panic!("parent wait/drain exceeded 15 seconds: {error}"),
-        Ok(Ok(status)) => status,
-    };
-    if let Err(error) = signal_result {
-        panic!("{error}; parent wait/drain outcome above");
+    if let Err(payload) = operation {
+        resume_unwind(payload);
     }
-    assert!(
-        status.success(),
-        "reload parent exited unsuccessfully: {status}"
-    );
-
-    test_process
-        .assert_stdout_contains("GET: Request completed")
-        .await;
+    if let Err(payload) = exit {
+        resume_unwind(payload);
+    }
+    signal_result.expect("failed to send SIGTERM to uvicorn");
     test_process.assert_no_error_in_stdout().await;
     test_process.assert_no_error_in_stderr().await;
 }

@@ -1,0 +1,6 @@
+[feature.network.incoming]
+mode = "mirror"
+port_mapping = [[18064, 1234]]
+
+[experimental]
+enable_exec_hooks_linux = true
