@@ -187,5 +187,13 @@ async fn serves_info_resource() {
         panic!("unexpected contents: {:?}", result.contents);
     };
     let info: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(info, json!({ "version": env!("CARGO_PKG_VERSION") }));
+    assert_eq!(info["version"], json!(env!("CARGO_PKG_VERSION")));
+    for (corpus, repo) in [
+        ("docs", "metalbear-co/docs"),
+        ("skills", "metalbear-co/skills"),
+    ] {
+        assert_eq!(info[corpus]["repo"], json!(repo));
+        assert_eq!(info[corpus]["commit"].as_str().unwrap().len(), 40);
+        assert!(info[corpus]["synced_at"].is_string());
+    }
 }
