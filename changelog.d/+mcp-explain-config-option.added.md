@@ -1,0 +1,1 @@
+Added the `explain_config_option` tool to `mirrord mcp`, which describes a `mirrord.json` or `mirrord-up.yaml` option (docs, type, allowed values, default and required plan) from the installed version's schema.

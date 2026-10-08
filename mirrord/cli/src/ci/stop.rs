@@ -303,8 +303,8 @@ mod tests {
     use mirrord_config::container::ContainerRuntime;
     use mirrord_progress::ProgressTracker;
     #[cfg(not(target_os = "linux"))]
-    use nix::{errno::Errno, sys::signal::kill};
-    use nix::{sys::signal::Signal, unistd::Pid};
+    use nix::sys::signal::kill;
+    use nix::{errno::Errno, sys::signal::Signal, unistd::Pid};
     use tokio::{
         io::{AsyncBufReadExt, BufReader},
         process::{Child, ChildStdout, Command},
@@ -356,6 +356,9 @@ mod tests {
                         .rsplit_once(") ")
                         .is_some_and(|(_, fields)| fields.starts_with("Z ")),
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+                    // A process that disappears between opening and reading its procfs stat file
+                    // can yield ESRCH.
+                    Err(error) if error.raw_os_error() == Some(Errno::ESRCH as i32) => true,
                     Err(error) => panic!("failed to inspect process {pid}: {error}"),
                 };
                 #[cfg(not(target_os = "linux"))]
