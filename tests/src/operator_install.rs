@@ -15,6 +15,7 @@ use std::{collections::HashMap, ops::Not, process::ExitStatus, time::Duration};
 use futures::future::join_all;
 use k8s_openapi::api::{
     admissionregistration::v1::{ValidatingAdmissionPolicy, ValidatingAdmissionPolicyBinding},
+    apps::v1::Deployment,
     core::v1::Pod,
 };
 use kube::{
@@ -32,6 +33,9 @@ use crate::utils::client::{kube_client, KubeClient};
 
 const API_KEY: &str = "mirrord-e2e-tests-invalid-api-key";
 
+/// The env var of the operator Deployment that has the API key of the operator.
+const API_KEY_ENV: &str = "OPERATOR_CLOUD_API_KEY";
+
 /// The helm release that `mirrord operator install` attributes all objects to.
 const RELEASE_NAME: &str = "mirrord-operator";
 
@@ -42,8 +46,8 @@ const RELEASE_NAME_ANNOTATION: &str = "meta.helm.sh/release-name";
 /// the group is not available while the operator is down.
 const OPERATOR_API_GROUP: &str = "operator.metalbear.co";
 
-/// The label that selects the operator pods.
-const OPERATOR_POD_LABEL: (&str, &str) = ("app", "mirrord-operator");
+/// The label of the operator Deployment and its pods.
+const OPERATOR_LABEL: (&str, &str) = ("app", "mirrord-operator");
 
 /// Name of the admission policy and its binding that stop the operator pods from being created.
 const DENY_OPERATOR_PODS: &str = "mirrord-e2e-deny-operator-pods";
@@ -213,9 +217,40 @@ impl Drop for ResetOnFailure {
 /// Resets the cluster for a new test.
 async fn start_test(kube_client: KubeClient) -> (Client, ResetOnFailure) {
     let client = kube_client.get_client();
+    assert_operators_from_tests(&client).await;
     reset(&client).await;
 
     (client, ResetOnFailure(kube_client.get_config()))
+}
+
+/// Panics, before anything is deleted, if the cluster has an operator that these tests did not
+/// install, since [`reset`] removes the operator with all mirrord policies and profiles of the
+/// cluster. Every operator that the tests install has [`API_KEY`], also after helm adopts it.
+async fn assert_operators_from_tests(client: &Client) {
+    let (label, value) = OPERATOR_LABEL;
+    let deployments = Api::<Deployment>::all(client.clone())
+        .list(&ListParams::default().labels(&format!("{label}={value}")))
+        .await
+        .unwrap();
+
+    for deployment in deployments {
+        let api_key = deployment
+            .spec
+            .iter()
+            .flat_map(|spec| spec.template.spec.iter())
+            .flat_map(|spec| &spec.containers)
+            .flat_map(|container| container.env.iter().flatten())
+            .find(|env| env.name == API_KEY_ENV)
+            .and_then(|env| env.value.as_deref());
+        assert_eq!(
+            api_key,
+            Some(API_KEY),
+            "Deployment {}/{} is an operator that these tests did not install. The tests remove \
+            the operator, so run them only in a cluster for tests.",
+            deployment.namespace().unwrap_or_default(),
+            deployment.name_any(),
+        );
+    }
 }
 
 /// Makes the cluster reject new operator pods, so that the operator can't become ready.
@@ -223,7 +258,7 @@ async fn start_test(kube_client: KubeClient) -> (Client, ResetOnFailure) {
 /// Returns when the cluster enforces the policy, which it does not do right after the policy is
 /// created.
 async fn deny_operator_pods(client: &Client) {
-    let (label, value) = OPERATOR_POD_LABEL;
+    let (label, value) = OPERATOR_LABEL;
     let policy = serde_json::from_value::<ValidatingAdmissionPolicy>(serde_json::json!({
         "metadata": { "name": DENY_OPERATOR_PODS },
         "spec": {
