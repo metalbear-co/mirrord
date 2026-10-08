@@ -28,10 +28,13 @@ pub(crate) static FILES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
                 .map(|component| component.as_os_str().to_string_lossy())
                 .collect::<Vec<_>>()
                 .join("/");
-            let mut contents = String::new();
+            let mut contents = Vec::new();
             entry
-                .read_to_string(&mut contents)
-                .expect("vendored files are UTF-8");
+                .read_to_end(&mut contents)
+                .expect("build.rs packs a valid archive");
+            let contents = String::from_utf8(contents).unwrap_or_else(|_| {
+                panic!("`cargo xtask corpus` vendors only UTF-8 files, but `{path}` isn't")
+            });
             (path, contents)
         })
         .collect()

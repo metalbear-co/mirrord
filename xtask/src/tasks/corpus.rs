@@ -217,6 +217,12 @@ fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
             Some(&checkout),
             &["cat-file", "blob", &format!("FETCH_HEAD:{path}")],
         )?;
+        ensure!(
+            std::str::from_utf8(&contents).is_ok(),
+            "{path} in {}@{} isn't UTF-8 text, which `mirrord mcp` can't serve",
+            pin.repo,
+            pin.commit
+        );
         files.insert(relative.to_owned(), contents);
     }
 
