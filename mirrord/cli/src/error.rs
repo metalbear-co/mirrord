@@ -477,6 +477,15 @@ pub(crate) enum CliError {
         creator: String,
     },
 
+    #[error(
+        "the db_branches resolved from the target's MirrordSplitConfig do not fit this config: {0}"
+    )]
+    #[diagnostic(help(
+        "Fix the `dbBranches` entry on the MirrordSplitConfig, or the part of this config it \
+         conflicts with, such as `feature.env.override`."
+    ))]
+    ResolvedDbBranchesInvalid(#[source] ConfigError),
+
     #[error("{0}")]
     #[diagnostic(help(
         "The operator resolves `feature.db_branches: \"*\"` or a list of ids against the \
@@ -1057,6 +1066,9 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
             OperatorApiError::SplitConfigDbBranches(msg) => Self::SplitConfigDbBranches(msg),
+            OperatorApiError::ResolvedDbBranchesInvalid(error) => {
+                Self::ResolvedDbBranchesInvalid(error)
+            }
             error @ OperatorApiError::SplitConfigDbBranchEntry { .. } => {
                 Self::SplitConfigDbBranches(error.to_string())
             }

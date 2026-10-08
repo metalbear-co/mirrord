@@ -2,6 +2,7 @@ use std::{fmt, num::ParseIntError};
 
 pub use http::Error as HttpError;
 use mirrord_auth::error::ApiKeyError;
+use mirrord_config::config::ConfigError;
 use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
 use tower::retry::backoff::InvalidBackoff;
@@ -143,6 +144,14 @@ pub enum OperatorApiError {
         split_configs: String,
         error: String,
     },
+
+    /// The entries resolved from the target's `MirrordSplitConfig` fail a check an inline
+    /// `feature.db_branches` fails at config load, such as a connection variable that
+    /// `feature.env.override` also sets.
+    #[error(
+        "the db_branches resolved from the target's MirrordSplitConfig do not fit this config: {0}"
+    )]
+    ResolvedDbBranchesInvalid(#[source] ConfigError),
 
     /// Attaching to a branch another session created under the same key, from an entry whose
     /// copy mode differs from the one the branch was created with.

@@ -15,9 +15,14 @@ use mirrord_config::feature::database_branches::DatabaseBranchConfig;
 
 use crate::{
     client::error::OperatorApiError,
-    crd::db_branching::{
-        branch_database::{BranchDatabase, BranchDatabaseSpec, DialectConfig},
-        split_config::ResolveSplitConfigDbBranchesResponse,
+    crd::{
+        TARGET_NAMESPACE_ANNOTATION,
+        db_branching::{
+            branch_database::{
+                BranchDatabase, BranchDatabaseSpec, DialectConfig, SqlBranchCopyConfig,
+            },
+            split_config::ResolveSplitConfigDbBranchesResponse,
+        },
     },
 };
 
@@ -26,16 +31,11 @@ use crate::{
 /// same source database.
 pub const MIRRORD_SESSION_KEY_LABEL: &str = "mirrord-session-key";
 
-/// The branch id of a `dbBranches` entry under a session key: the entry id plus the key, so
-/// every service started under the key that points at the entry lands on one branch.
-pub fn branch_id(entry_id: &str, session_key: &str) -> String {
-    format!("{entry_id}-{session_key}")
-}
-
 /// The branches a `"*"` / ids request resolved to, as this session's inline entries.
 #[derive(Debug, Default)]
 pub struct ResolvedSplitConfigBranches {
-    /// The entries, each carrying its branch id (see [`branch_id`]).
+    /// The entries, each carrying its branch id: the entry id plus the session key, so every
+    /// service started under the key that points at the entry lands on one branch.
     pub entries: Vec<DatabaseBranchConfig>,
     /// The branch ids of those entries, for telling resolved branches from inline ones later
     /// in the flow.
@@ -53,7 +53,7 @@ pub fn entries_from_response(
     let split_configs = response.split_configs.join("`, `");
     let mut resolved = ResolvedSplitConfigBranches::default();
     for entry in &response.entries {
-        let id = branch_id(&entry.id, session_key);
+        let id = format!("{}-{session_key}", entry.id);
         let mut config = entry.config.clone();
         if let serde_json::Value::Object(fields) = &mut config {
             fields.insert("id".to_owned(), serde_json::Value::String(id.clone()));
@@ -71,11 +71,22 @@ pub fn entries_from_response(
     Ok(resolved)
 }
 
-/// The copy mode a branch spec asks for, as the user spells it (`empty`, `schema`, `all`).
-/// A generic branch has no mode: it either runs a copy Job or not.
+/// The copy mode a branch spec asks for, as the user spells it (`empty`, `schema`, `all`),
+/// followed by the modes of a PostgreSQL branch's additional databases. `None` when the spec
+/// leaves the choice to the operator: a generic branch without `copy` may still get a copy Job
+/// from its admin profile, so two such specs cannot be compared here.
 pub fn copy_mode(spec: &BranchDatabaseSpec) -> Option<String> {
     let copy = match spec.dialect().ok()? {
-        DialectConfig::Postgres(options) => serde_json::to_value(&options.copy),
+        DialectConfig::Postgres(options) => {
+            let mut mode = sql_copy_mode(&options.copy)?;
+            let mut additional = options.additional_databases.iter().collect::<Vec<_>>();
+            additional.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+            for database in additional {
+                let database_mode = sql_copy_mode(&database.copy)?;
+                mode.push_str(&format!(", {}: {database_mode}", database.name));
+            }
+            return Some(mode);
+        }
         DialectConfig::Mysql(options) => serde_json::to_value(&options.copy),
         DialectConfig::Mariadb(options) => serde_json::to_value(&options.copy),
         DialectConfig::Mssql(options) => serde_json::to_value(&options.copy),
@@ -87,21 +98,17 @@ pub fn copy_mode(spec: &BranchDatabaseSpec) -> Option<String> {
         DialectConfig::Dynamodb(options) => serde_json::to_value(&options.copy),
         DialectConfig::S3(options) => serde_json::to_value(&options.copy),
         DialectConfig::Turbopuffer(options) => serde_json::to_value(&options.copy),
-        DialectConfig::Generic(options) => {
-            return Some(
-                if options.copy.is_some() {
-                    "job"
-                } else {
-                    "empty"
-                }
-                .to_owned(),
-            );
-        }
+        DialectConfig::Generic(options) => return options.copy.is_some().then(|| "job".to_owned()),
     };
-    copy.ok()?
-        .get("mode")?
-        .as_str()
-        .map(|mode| mode.to_lowercase())
+    mode_of(copy.ok()?)
+}
+
+fn sql_copy_mode(copy: &SqlBranchCopyConfig) -> Option<String> {
+    mode_of(serde_json::to_value(copy).ok()?)
+}
+
+fn mode_of(copy: serde_json::Value) -> Option<String> {
+    copy.get("mode")?.as_str().map(|mode| mode.to_lowercase())
 }
 
 /// A session attaching to a branch another service created under the same key must ask for
@@ -133,20 +140,28 @@ pub fn check_attach_copy_mode(
 /// that point at one database give two copies of it, which is rarely what the admin meant.
 ///
 /// `ours` are this session's branches, `siblings` every branch under the key (ours included).
-/// Branches without a recorded source (older operators, or not yet resolved) are skipped.
+/// Branches without a recorded source (older operators, or not yet resolved) are skipped, and
+/// a source only counts as the same one within one target namespace, since a relative host
+/// such as `postgres` names a different Service in each. A pair of our own branches is reported
+/// once, on the later name.
 pub fn same_source_warnings<'a>(
     ours: impl IntoIterator<Item = &'a BranchDatabase>,
     siblings: &[BranchDatabase],
 ) -> Vec<String> {
-    let mut by_source: BTreeMap<String, Vec<&BranchDatabase>> = BTreeMap::new();
+    let mut by_source: BTreeMap<(String, String), Vec<&BranchDatabase>> = BTreeMap::new();
     for sibling in siblings {
         if let Some(source) = sibling
             .status
             .as_ref()
             .and_then(|status| status.source.as_ref())
         {
+            let namespace = sibling
+                .annotations()
+                .get(TARGET_NAMESPACE_ANNOTATION)
+                .cloned()
+                .unwrap_or_default();
             by_source
-                .entry(source.to_string())
+                .entry((namespace, source.to_string()))
                 .or_default()
                 .push(sibling);
         }
@@ -157,13 +172,17 @@ pub fn same_source_warnings<'a>(
     for branch in ours {
         ours_by_name.insert(branch.name_any(), branch);
     }
-    for (source, branches) in &by_source {
+    for ((_, source), branches) in &by_source {
         for branch in branches {
-            if ours_by_name.contains_key(&branch.name_any()).not() {
+            let name = branch.name_any();
+            if ours_by_name.contains_key(&name).not() {
                 continue;
             }
             for other in branches {
-                if other.name_any() == branch.name_any() {
+                let other_name = other.name_any();
+                if other_name == name
+                    || (ours_by_name.contains_key(&other_name) && other_name > name)
+                {
                     continue;
                 }
                 warnings.push(format!(
@@ -185,7 +204,9 @@ mod tests {
     use super::*;
     use crate::crd::{
         db_branching::{
-            branch_database::{PostgresOptions, SqlBranchCopyConfig, SqlBranchCopyMode},
+            branch_database::{
+                PgAdditionalDatabase, PostgresOptions, SqlBranchCopyConfig, SqlBranchCopyMode,
+            },
             core::{BranchDatabasePhase, BranchDatabaseStatus, BranchSourceInfo, ConnectionSource},
             split_config::ResolvedSplitConfigDbBranch,
         },
@@ -264,13 +285,6 @@ mod tests {
             }),
         });
         branch
-    }
-
-    /// The branch id is the entry id plus the session key, so every service under the key
-    /// that points at the entry derives the same deterministic branch name.
-    #[test]
-    fn branch_id_is_entry_id_plus_session_key() {
-        assert_eq!(branch_id("orders-pg", "a1b2c3"), "orders-pg-a1b2c3");
     }
 
     /// Resolved entries get their branch id written in, and a setting this CLI does not know
@@ -354,6 +368,50 @@ mod tests {
         assert_eq!(creator, "cake-maker");
     }
 
+    /// A PostgreSQL entry's additional databases are copied too, so their modes are part of
+    /// what an attaching service has to agree on.
+    #[test]
+    fn attach_compares_additional_database_copy_modes() {
+        let with_additional = |mode| {
+            let mut branch = pg_branch(
+                "b",
+                "orders-pg-a1b2c3",
+                "cake-maker",
+                SqlBranchCopyMode::Schema,
+            );
+            let options = branch.spec.postgres_options.as_mut().expect("a pg branch");
+            options.additional_databases = vec![PgAdditionalDatabase {
+                name: "analytics".to_owned(),
+                connection_source: None,
+                copy: SqlBranchCopyConfig {
+                    mode,
+                    items: None,
+                    dump_args: None,
+                },
+            }];
+            branch
+        };
+        let existing = with_additional(SqlBranchCopyMode::Schema);
+        assert!(
+            check_attach_copy_mode(&existing, &with_additional(SqlBranchCopyMode::Schema).spec)
+                .is_ok()
+        );
+
+        let error =
+            check_attach_copy_mode(&existing, &with_additional(SqlBranchCopyMode::Empty).spec)
+                .expect_err("the additional database's mode differs");
+        let OperatorApiError::BranchCopyModeMismatch {
+            existing_mode,
+            requested_mode,
+            ..
+        } = error
+        else {
+            panic!("unexpected error {error:?}");
+        };
+        assert_eq!(existing_mode, "schema, analytics: schema");
+        assert_eq!(requested_mode, "schema, analytics: empty");
+    }
+
     /// Two branches under one key copied from the same database warn on the session that owns
     /// the second one, naming both branches, the other branch's creator, and the database.
     /// Branches with distinct sources, or without a recorded one, stay quiet.
@@ -396,5 +454,27 @@ mod tests {
         assert!(warning.contains("give both SplitConfig entries the same id"));
 
         assert!(same_source_warnings([&users], &siblings).is_empty());
+
+        // Both branches ours: the pair is still one warning, not one per direction.
+        let warnings = same_source_warnings([&orders, &main, &users], &siblings);
+        let [warning] = warnings.as_slice() else {
+            panic!("a pair of our own branches gives one warning, got {warnings:?}");
+        };
+        assert!(
+            warning.starts_with(
+                "branch `orders-pg-a1b2c3` resolved to the same database as `pg-main-a1b2c3`"
+            ),
+            "{warning}"
+        );
+
+        // The same relative host in another target namespace is another database.
+        let mut elsewhere = main.clone();
+        elsewhere
+            .metadata
+            .annotations
+            .get_or_insert_with(Default::default)
+            .insert(TARGET_NAMESPACE_ANNOTATION.to_owned(), "other".to_owned());
+        let siblings = vec![orders.clone(), elsewhere.clone()];
+        assert!(same_source_warnings([&elsewhere], &siblings).is_empty());
     }
 }

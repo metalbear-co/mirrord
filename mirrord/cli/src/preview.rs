@@ -166,6 +166,20 @@ async fn preview_start(
             )));
         }
     }
+    // A `"*"` / ids request needs the operator's lookup. Refuse here too, before the existing
+    // session with the same key is replaced, so an older operator never tears down a running
+    // preview and then fails to start its replacement.
+    if layer_config
+        .feature
+        .db_branches
+        .split_config_request()
+        .is_some()
+    {
+        operator_api
+            .operator()
+            .spec
+            .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
+    }
 
     // Create the `PreviewSession` resource in the cluster. The CR name is derived from
     // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).

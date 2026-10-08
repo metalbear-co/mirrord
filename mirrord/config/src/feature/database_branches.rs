@@ -8,7 +8,7 @@ use std::{
 use fancy_regex::Regex;
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use schemars::{JsonSchema, Schema, SchemaGenerator};
-use serde::{Deserialize, Serialize, ser::SerializeMap};
+use serde::{Deserialize, Serialize, de::Error as _, ser::SerializeMap};
 use strum::IntoEnumIterator;
 use strum_macros::{EnumDiscriminants, EnumIter, IntoStaticStr};
 
@@ -446,8 +446,6 @@ impl<'de> Deserialize<'de> for DatabaseBranchesConfig {
     where
         D: serde::Deserializer<'de>,
     {
-        use serde::de::Error;
-
         let value = serde_json::Value::deserialize(deserializer)?;
         match value {
             serde_json::Value::String(star) if star == "*" => Ok(Self::FromSplitConfig(
@@ -3803,5 +3801,81 @@ mod tests {
             let config = parse(r#"{ "flavor": "container", "image": "example.com/app:1" }"#);
             config.verify(&database(None)).unwrap_err();
         }
+    }
+
+    /// The hand-written parser picks the form by the value's shape: `"*"` and a non-empty list
+    /// of strings ask the operator, any other list is inline entries (so an empty list stays
+    /// an empty inline list), and a typo inside an inline entry keeps serde's "unknown field"
+    /// message instead of becoming "did not match any variant".
+    #[test]
+    fn db_branches_config_parses_every_request_form() {
+        let parse = |value: Value| serde_json::from_value::<DatabaseBranchesConfig>(value);
+
+        assert_eq!(
+            parse(json!("*")).unwrap(),
+            DatabaseBranchesConfig::FromSplitConfig(SplitConfigDbBranches::All(
+                AllSplitConfigDbBranches::All
+            ))
+        );
+        assert_eq!(
+            parse(json!(["orders-pg", "sessions-redis"])).unwrap(),
+            DatabaseBranchesConfig::FromSplitConfig(SplitConfigDbBranches::Ids(vec![
+                "orders-pg".to_owned(),
+                "sessions-redis".to_owned()
+            ]))
+        );
+        assert_eq!(
+            parse(json!([])).unwrap(),
+            DatabaseBranchesConfig::Inline(Vec::new())
+        );
+        assert!(parse(json!([])).unwrap().is_empty());
+        assert!(parse(json!("*")).unwrap().is_empty().not());
+
+        let inline = parse(json!([{
+            "type": "pg",
+            "connection": { "url": "DATABASE_URL" },
+        }]))
+        .unwrap();
+        assert!(matches!(&inline, DatabaseBranchesConfig::Inline(branches) if branches.len() == 1));
+        assert!(inline.split_config_request().is_none());
+
+        let typo = parse(json!([{
+            "type": "pg",
+            "connection": { "url": "DATABASE_URL" },
+            "ttl_sec": 60,
+        }]))
+        .unwrap_err()
+        .to_string();
+        assert!(typo.contains("unknown field `ttl_sec`"), "{typo}");
+
+        let mixed = parse(json!(["orders-pg", { "type": "pg" }]))
+            .unwrap_err()
+            .to_string();
+        assert!(mixed.contains("invalid type: string"), "{mixed}");
+
+        let other = parse(json!({ "type": "pg" })).unwrap_err().to_string();
+        assert!(
+            other.contains("expected `\"*\"`, a list of MirrordSplitConfig entry ids"),
+            "{other}"
+        );
+        let star = parse(json!("all")).unwrap_err().to_string();
+        assert!(star.contains("got \"all\""), "{star}");
+    }
+
+    /// An id list is checked for ids that can never resolve: an empty one and a repeated one.
+    #[test]
+    fn db_branches_config_rejects_empty_and_duplicate_ids() {
+        let verify = |value: Value| {
+            serde_json::from_value::<DatabaseBranchesConfig>(value)
+                .unwrap()
+                .verify(&mut config::ConfigContext::default())
+                .map_err(|error| error.to_string())
+        };
+
+        assert!(verify(json!(["orders-pg", "users-pg"])).is_ok());
+        let empty = verify(json!(["orders-pg", ""])).unwrap_err();
+        assert!(empty.contains("must not be empty"), "{empty}");
+        let duplicate = verify(json!(["orders-pg", "orders-pg"])).unwrap_err();
+        assert!(duplicate.contains("listed twice"), "{duplicate}");
     }
 }

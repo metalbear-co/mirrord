@@ -27,6 +27,7 @@ use mirrord_auth::{
 };
 use mirrord_config::{
     LayerConfig,
+    config::{ConfigContext, EnvKey},
     feature::{
         database_branches::{
             DatabaseBranchConfig, SplitConfigDbBranches, default_creation_timeout_secs,
@@ -60,7 +61,7 @@ use crate::{
             CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
             create_mongodb_branches, create_mysql_branches, create_pg_branches,
             ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
-            list_reusable_mysql_branches, list_reusable_pg_branches,
+            list_reusable_mysql_branches, list_reusable_pg_branches, ownership_label_selector,
             relay_source_compatibility_warnings, reused_branch_connection_sources,
             wait_for_pending_branches,
         },
@@ -78,8 +79,12 @@ use crate::{
             mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase,
             pg::PgBranchDatabase,
+            split_config::{
+                AllEntries, ResolveSplitConfigDbBranchesRequest,
+                ResolveSplitConfigDbBranchesResponse, SplitConfigDbBranchesRequest,
+            },
         },
-        session::{SessionCiInfo, UpSessionInfo},
+        session::{SessionCiInfo, SessionTarget, UpSessionInfo},
     },
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CONNECT_PARAMS_HEADER,
@@ -731,14 +736,6 @@ where
         layer_config: &mut LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<ResolvedSplitConfigBranches> {
-        use crate::crd::{
-            db_branching::split_config::{
-                AllEntries, ResolveSplitConfigDbBranchesRequest,
-                ResolveSplitConfigDbBranchesResponse, SplitConfigDbBranchesRequest,
-            },
-            session::SessionTarget,
-        };
-
         let supported = self
             .operator
             .spec
@@ -804,11 +801,23 @@ where
             .map_err(|error| {
                 OperatorApiError::SplitConfigDbBranches(format!("build request: {error}"))
             })?;
-        let response: ResolveSplitConfigDbBranchesResponse = self
-            .client
-            .request(http_request)
-            .await
-            .map_err(|error| OperatorApiError::SplitConfigDbBranches(error.to_string()))?;
+        let response: ResolveSplitConfigDbBranchesResponse =
+            match (self.client.request(http_request).await, &request) {
+                (Ok(response), _) => response,
+                // Inline entries need nothing from the answer; a lookup that fails only costs
+                // the warning naming the configs the session ignores.
+                (Err(error), None) => {
+                    tracing::warn!(
+                        %error,
+                        "Could not check which MirrordSplitConfig dbBranches the inline \
+                         db_branches ignore"
+                    );
+                    return Ok(ResolvedSplitConfigBranches::default());
+                }
+                (Err(error), Some(_)) => {
+                    return Err(OperatorApiError::SplitConfigDbBranches(error.to_string()));
+                }
+            };
 
         for warning in &response.warnings {
             progress.warning(warning);
@@ -844,6 +853,16 @@ where
             .feature
             .db_branches
             .set_inline(resolved.entries.clone());
+
+        // The config was verified before these entries existed, so each entry's own checks
+        // and the env override conflict run now that it holds them.
+        let mut context = ConfigContext::default();
+        layer_config
+            .verify_db_branches(&mut context)
+            .map_err(OperatorApiError::ResolvedDbBranchesInvalid)?;
+        for warning in context.into_warnings() {
+            progress.warning(&warning);
+        }
         Ok(resolved)
     }
 
@@ -1082,6 +1101,7 @@ where
                 &target,
                 target_namespace,
                 layer_config.key.as_str(),
+                &split_config.branch_ids,
                 &subtask,
             )?;
 
@@ -1117,7 +1137,8 @@ where
 
             // Branches resolved from a MirrordSplitConfig are shared by every service started
             // under the key, so they carry the key as a label (the sessions find each other's
-            // branches through it) and their requested spec is kept for the attach check.
+            // branches through it) and their requested spec is kept for the attach check. The
+            // key is any string the user typed, so the label holds its hash.
             let split_config_specs: HashMap<String, BranchDatabaseSpec> = create_params
                 .iter()
                 .filter(|(_, params)| split_config.branch_ids.contains(&params.spec.id))
@@ -1127,7 +1148,7 @@ where
                 if split_config_specs.contains_key(name) {
                     params.labels.insert(
                         MIRRORD_SESSION_KEY_LABEL.to_owned(),
-                        layer_config.key.as_str().to_owned(),
+                        EnvKey::to_hashed_label_value(layer_config.key.as_str()),
                     );
                 }
             }
@@ -1283,8 +1304,9 @@ where
             if split_config_specs.is_empty().not() {
                 let siblings = branch_api
                     .list(&ListParams::default().labels(&format!(
-                        "{MIRRORD_SESSION_KEY_LABEL}={}",
-                        layer_config.key.as_str()
+                        "{MIRRORD_SESSION_KEY_LABEL}={},{}",
+                        EnvKey::to_hashed_label_value(layer_config.key.as_str()),
+                        ownership_label_selector(),
                     )))
                     .await
                     .map_err(|error| OperatorApiError::KubeError {
