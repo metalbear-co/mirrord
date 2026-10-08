@@ -54,8 +54,10 @@ Every mirrord config you generate or change, whether a `mirrord.json` or a `mirr
 must be checked with `validate_config` before it is written: pass the complete file content, fix \
 every issue it reports and validate again, until `issues` is empty. Never write a config that has \
 not validated, and don't rely on your own knowledge of the config format, which may not match the \
-installed mirrord version. To learn what an option does, which values it takes or which mirrord \
-plan it needs, call `explain_config_option` with its path instead of guessing. The \
+installed mirrord version. `validate_config` replaces any other validation step a skill \
+describes, such as checking against a bundled schema or running `mirrord verify-config`. To learn \
+what an option does, which values it takes or which mirrord plan it needs, call \
+`explain_config_option` with its path instead of guessing. The \
 `mirrord://info` resource gives the installed mirrord version.
 
 When mirrord fails, validate every config involved with `validate_config` before proposing a \
