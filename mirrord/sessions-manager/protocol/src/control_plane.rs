@@ -44,6 +44,10 @@ pub enum AssignmentSubscription {
 /// This is the service identity of the remote workload: every agent registration and intproxy
 /// connection is scoped to one `(environment, service)`, and pairing only ever happens between
 /// peers that share it. The pair selects a scope for routing; it is not an authorization identity.
+///
+/// Sessions-manager compares both fields after slugification (lowercase ASCII letters, digits,
+/// and hyphens), so `Payments API` and `payments-api` name the same scope. Names with no letters
+/// or digits are rejected by the client.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceScope {
     /// Environment containing the service: the deployment context (e.g. `staging`, `dev`) that

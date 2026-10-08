@@ -34,6 +34,11 @@ pub enum SessionsManagerClientError {
     MissingConfigEnvironment,
     #[error("Missing serverless service")]
     MissingConfigService,
+    #[error(
+        "serverless {field} {value:?} has no letters or digits, so it cannot be used as a \
+         sessions-manager scope"
+    )]
+    UnsluggableScope { field: &'static str, value: String },
     #[error("Missing serverless replica id")]
     MissingAgentReplicaID,
     #[error(transparent)]
