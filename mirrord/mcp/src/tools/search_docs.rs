@@ -28,6 +28,17 @@ const B: f64 = 0.75;
 /// How many body occurrences a term in the title counts as.
 const TITLE_WEIGHT: u32 = 3;
 
+/// Words too common to tell pages apart, left out of the index and of queries so that a question
+/// such as "how do I run without a target" ranks by its keywords. Words that are also mirrord
+/// terms, such as `up`, `all` and `off`, are kept.
+const STOP_WORDS: &[&str] = &[
+    "a", "about", "an", "and", "any", "are", "as", "at", "be", "but", "by", "can", "could", "do",
+    "does", "for", "from", "get", "has", "have", "how", "i", "if", "is", "it", "its", "me", "my",
+    "of", "or", "should", "so", "that", "the", "their", "then", "there", "these", "this", "to",
+    "use", "using", "was", "we", "what", "when", "where", "which", "who", "why", "will", "with",
+    "would", "you", "your",
+];
+
 /// The length a snippet is cut to, in characters.
 const SNIPPET_LENGTH: usize = 200;
 
@@ -188,8 +199,8 @@ fn tokens(text: &str) -> impl Iterator<Item = String> + '_ {
             let parts = word.split('_').filter(|_| word.contains('_'));
             std::iter::once(word).chain(parts)
         })
-        .filter(|token| token.is_empty().not())
         .map(str::to_lowercase)
+        .filter(|token| token.is_empty().not() && STOP_WORDS.contains(&token.as_str()).not())
 }
 
 fn without_front_matter(body: &str) -> &str {
