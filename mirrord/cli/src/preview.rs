@@ -187,7 +187,9 @@ async fn preview_start(
 
     let mut subtask = progress.subtask("creating preview session resource");
 
-    let config_target = layer_config.target.path.as_ref().ok_or_else(|| {
+    // Owned, like the image below: branch preparation edits the config while both are still
+    // needed.
+    let config_target = layer_config.target.path.clone().ok_or_else(|| {
         subtask.failure(None);
         CliError::PreviewTargetRequired
     })?;
@@ -249,7 +251,7 @@ async fn preview_start(
     };
 
     let session_target = resolve_config_target(
-        config_target,
+        &config_target,
         operator_api.client(),
         layer_config.target.namespace.as_deref(),
     )
@@ -296,6 +298,19 @@ async fn preview_start(
         .transpose()?
         .flatten();
 
+    // Label targets with branches were rejected above, so an empty config is the only way a
+    // label target gets here and it skips branch preparation entirely. The branches are
+    // prepared before an existing preview under the same key is replaced: a lookup or
+    // creation that fails must not have taken the running preview down first, and branches
+    // are keyed by the session key, so the replacement attaches to the same ones.
+    let branch_db_names = if layer_config.feature.db_branches.is_empty() {
+        BranchDbNames::default()
+    } else {
+        operator_api
+            .prepare_branch_dbs(&mut layer_config, &progress)
+            .await?
+    };
+
     // Check for an existing session with the same key+target.
     let key = layer_config.key.as_str();
     let existing_sessions = KeyMatcher::Simple(key)
@@ -339,7 +354,7 @@ async fn preview_start(
         };
     }
 
-    let session_name = PreviewSession::make_resource_name(config_target, key.to_owned());
+    let session_name = PreviewSession::make_resource_name(&config_target, key.to_owned());
 
     // Operators compiled with a custom OPERATOR_ISOLATION_MARKER only reconcile preview
     // sessions labeled with their marker (see the label selector in the preview-env
@@ -354,16 +369,6 @@ async fn preview_start(
             labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
         }
         labels
-    };
-
-    // Label targets with branches were rejected above, so an empty config is the only way a
-    // label target gets here and it skips branch preparation entirely.
-    let branch_db_names = if layer_config.feature.db_branches.is_empty() {
-        BranchDbNames::default()
-    } else {
-        operator_api
-            .prepare_branch_dbs(&mut layer_config, &progress)
-            .await?
     };
 
     // The namespace the session (and therefore the preview pod) lands in.

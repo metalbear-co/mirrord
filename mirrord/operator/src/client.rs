@@ -814,6 +814,12 @@ where
                     );
                     return Ok(ResolvedSplitConfigBranches::default());
                 }
+                // The operator's answer says what is wrong with the request (an unknown id,
+                // a config conflict) in its own words; it is shown as it is, not inside kube's
+                // wrapping of the response.
+                (Err(kube::Error::Api(response)), Some(_)) => {
+                    return Err(OperatorApiError::SplitConfigDbBranches(response.message));
+                }
                 (Err(error), Some(_)) => {
                     return Err(OperatorApiError::SplitConfigDbBranches(error.to_string()));
                 }
