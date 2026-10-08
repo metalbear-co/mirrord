@@ -220,38 +220,38 @@ where
     F: FnOnce(SockAddr) -> ConnectResult,
 {
     if setup().outgoing_config().ignore_localhost {
-        Detour::Bypass(Bypass::IgnoredInIncoming(ip_address))
-    } else {
-        Detour::Success(
-            SOCKETS
-                .lock()?
-                .iter()
-                .find_map(|(_, socket)| match socket.state {
-                    SocketState::Listening(Bound {
-                        requested_address,
-                        address,
-                    }) => {
-                        let is_same_target = requested_address.port() == ip_address.port();
-
-                        // Windows edge case - Python's socketpair is emulated by a loopback
-                        // listener bound to port 0. The connect target uses
-                        // the actual bound port, so we must match against
-                        // it.
-                        #[cfg(windows)]
-                        let is_same_target = is_same_target
-                            || (requested_address.is_emulated_socketpair()
-                                && address.port() == ip_address.port());
-
-                        (is_same_target && socket.protocol == user_socket_info.protocol)
-                            .then(|| SockAddr::from(address))
-                    }
-                    SocketState::Bound { .. }
-                    | SocketState::Initialized
-                    | SocketState::Connected(_) => None,
-                })
-                .map(connect_fn),
-        )
+        return Detour::Bypass(Bypass::IgnoredInIncoming(ip_address));
     }
+
+    // Find the address in a separate statement, so that the `SOCKETS` guard is dropped before
+    // `connect_fn` calls the real `connect`.
+    let local_address = SOCKETS
+        .lock()?
+        .iter()
+        .find_map(|(_, socket)| match socket.state {
+            SocketState::Listening(Bound {
+                requested_address,
+                address,
+            }) => {
+                let is_same_target = requested_address.port() == ip_address.port();
+
+                // Windows edge case - Python's socketpair is emulated by a loopback listener bound
+                // to port 0. The connect target uses the actual bound port, so we must match
+                // against it.
+                #[cfg(windows)]
+                let is_same_target = is_same_target
+                    || (requested_address.is_emulated_socketpair()
+                        && address.port() == ip_address.port());
+
+                (is_same_target && socket.protocol == user_socket_info.protocol)
+                    .then(|| SockAddr::from(address))
+            }
+            SocketState::Bound { .. } | SocketState::Initialized | SocketState::Connected(_) => {
+                None
+            }
+        });
+
+    Detour::Success(local_address.map(connect_fn))
 }
 
 /// Helper function to check if a port should be ignored (port 0)
@@ -312,7 +312,10 @@ pub fn connect_common<F>(
 where
     F: FnOnce(SockAddr) -> ConnectResult,
 {
-    let user_socket_info = match SOCKETS.lock()?.remove(&sockfd) {
+    // Remove from sockets in a separate statement, so that the `SOCKETS` guard is dropped before
+    // `reconstruct_user_socket` makes its system calls.
+    let removed = SOCKETS.lock()?.remove(&sockfd);
+    let user_socket_info = match removed {
         Some(socket) => socket,
         None => reconstruct_user_socket(sockfd)?,
     };
