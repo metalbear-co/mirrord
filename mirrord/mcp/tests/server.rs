@@ -258,3 +258,67 @@ async fn serves_skills() {
     assert_eq!(is_error, Some(true));
     assert!(text.contains("`mirrord-up`"), "{text}");
 }
+
+/// What `search_docs` finds, `read_doc` and the resources serve, skills included.
+#[tokio::test]
+async fn serves_docs() {
+    let (client, _signal) = connect(ProtocolVersion::V_2025_11_25).await;
+    let resources = client.list_all_resources().await.unwrap();
+
+    for (query, corpus) in [
+        ("running without a target", "docs/"),
+        ("kafka splitting known issues", "skills/"),
+    ] {
+        let hits = client
+            .call_tool(tool_call(
+                "search_docs",
+                json!({ "query": query, "limit": 1 }),
+            ))
+            .await
+            .unwrap()
+            .structured_content
+            .unwrap()["hits"]
+            .clone();
+        let [hit] = hits.as_array().unwrap().as_slice() else {
+            panic!("expected one hit for `{query}`: {hits}");
+        };
+        assert!(hit["path"].as_str().unwrap().starts_with(corpus), "{hit}");
+
+        let page = client
+            .call_tool(tool_call("read_doc", json!({ "path": hit["path"] })))
+            .await
+            .unwrap()
+            .structured_content
+            .unwrap();
+        assert_eq!(page["title"], hit["title"]);
+        assert!(page["source_url"].as_str().unwrap().starts_with("https://"));
+
+        let uri = hit["resource_uri"].as_str().unwrap();
+        if uri.starts_with("mirrord://docs/") {
+            assert!(
+                resources.iter().any(|resource| resource.uri == uri),
+                "{uri}"
+            );
+        }
+        let result = client
+            .read_resource(ReadResourceRequestParams::new(uri))
+            .await
+            .unwrap();
+        let [ResourceContents::TextResourceContents { text, .. }] = result.contents.as_slice()
+        else {
+            panic!("unexpected contents: {:?}", result.contents);
+        };
+        assert_eq!(text, page["content"].as_str().unwrap());
+    }
+
+    let result = client
+        .call_tool(tool_call("read_doc", json!({ "path": "targetless.md" })))
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    let text = &result.content[0].as_text().unwrap().text;
+    assert!(
+        text.contains("`docs/using-mirrord/targetless.md`"),
+        "{text}"
+    );
+}

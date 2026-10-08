@@ -8,6 +8,7 @@
 //! - the `mirrord://info` resource, describing this mirrord installation and the [`corpus`] it
 //!   ships;
 //! - every vendored skill, as a prompt and as a `mirrord://skills/<name>` resource;
+//! - every docs page, as a `mirrord://docs/<path>` resource;
 //! - [`INSTRUCTIONS`], which clients hand to the model.
 //!
 //! Usage is reported through [`telemetry`], from [`McpServer`]'s handler methods, so tools do not
@@ -33,7 +34,7 @@ use thiserror::Error;
 
 pub use crate::telemetry::McpTelemetry;
 use crate::{
-    corpus::SKILLS,
+    corpus::{PAGES, SKILLS},
     telemetry::{McpTool, ToolOutcome},
 };
 
@@ -59,6 +60,9 @@ skill's other checks, such as those of the Kubernetes resources it generates. To
 what an option does, which values it takes or which mirrord plan it needs, call \
 `explain_config_option` with its path instead of guessing. The \
 `mirrord://info` resource gives the installed mirrord version.
+
+To answer a question about mirrord, search the docs with `search_docs` and read the pages it finds \
+with `read_doc`, rather than answering from memory.
 
 When mirrord fails, validate every config involved with `validate_config` before proposing a \
 fix, and propose one fix at a time.
@@ -190,8 +194,16 @@ impl ServerHandler for McpServer {
                 .with_description(skill.description.clone())
                 .with_mime_type("text/markdown")
         });
+        let docs = PAGES
+            .iter()
+            .filter(|(path, _)| path.starts_with("docs/"))
+            .map(|(path, page)| {
+                Resource::new(&page.resource_uri, *path)
+                    .with_title(&page.title)
+                    .with_mime_type("text/markdown")
+            });
         Ok(ListResourcesResult::with_all_items(
-            std::iter::once(info).chain(skills).collect(),
+            std::iter::once(info).chain(skills).chain(docs).collect(),
         ))
     }
 
@@ -200,13 +212,21 @@ impl ServerHandler for McpServer {
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
-        if let Some(name) = request.uri.strip_prefix(SKILL_RESOURCE_URI_PREFIX) {
-            let skill = corpus::skill(&SKILLS, name)
-                .map_err(|error| ErrorData::resource_not_found(error.to_string(), None))?;
+        if let Some(page) = PAGES.values().find(|page| page.resource_uri == request.uri) {
+            let mime_type = match request.uri.rsplit_once('.') {
+                Some((_, "json")) => "application/json",
+                Some((_, "yaml")) => "application/yaml",
+                _ => "text/markdown",
+            };
             return Ok(ReadResourceResult::new(vec![
-                ResourceContents::text(skill.body, request.uri).with_mime_type("text/markdown"),
+                ResourceContents::text(page.body, request.uri).with_mime_type(mime_type),
             ])
             .into());
+        }
+        if let Some(name) = request.uri.strip_prefix(SKILL_RESOURCE_URI_PREFIX) {
+            let name = name.split('/').next().unwrap_or(name);
+            corpus::skill(&SKILLS, name)
+                .map_err(|error| ErrorData::resource_not_found(error.to_string(), None))?;
         }
         if request.uri != INFO_RESOURCE_URI {
             return Err(ErrorData::resource_not_found(

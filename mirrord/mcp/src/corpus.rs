@@ -177,8 +177,88 @@ fn parse_skill<'a>(
     })
 }
 
+/// A file of the docs or skills, as `search_docs`, `read_doc` and the resources serve it.
+pub(crate) struct Page {
+    pub(crate) title: String,
+    /// Where the page is published, for linking the user to it.
+    pub(crate) source_url: String,
+    pub(crate) resource_uri: String,
+    pub(crate) body: &'static str,
+}
+
+/// Every vendored file, keyed by its path in `corpus/`, e.g. `docs/using-mirrord/targetless.md`.
+pub(crate) static PAGES: LazyLock<BTreeMap<&'static str, Page>> = LazyLock::new(|| {
+    FILES
+        .iter()
+        .map(|(path, body)| {
+            let page = Page {
+                title: title(path, body),
+                source_url: source_url(path),
+                resource_uri: resource_uri(path),
+                body,
+            };
+            (path.as_str(), page)
+        })
+        .collect()
+});
+
+/// The `title` (docs) or `name` (skills) in the front matter, else the first heading, else the file
+/// name.
+fn title(path: &str, body: &str) -> String {
+    let from_front_matter = front_matter(body)
+        .and_then(|front_matter| serde_saphyr::from_str::<Value>(front_matter).ok())
+        .and_then(|front_matter| {
+            ["title", "name"].into_iter().find_map(|field| {
+                front_matter
+                    .get(field)?
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|title| title.is_empty().not())
+                    .map(str::to_owned)
+            })
+        });
+    from_front_matter
+        .or_else(|| {
+            body.lines()
+                .find_map(|line| line.strip_prefix("# "))
+                .map(|heading| heading.trim().to_owned())
+        })
+        .unwrap_or_else(|| path.rsplit('/').next().unwrap_or(path).to_owned())
+}
+
+/// Docs are published on `metalbear.com`, a directory's `README.md` at the directory's URL. Skills
+/// link to their file in the skills repo, at the pinned commit.
+fn source_url(path: &str) -> String {
+    match path.strip_prefix("docs/") {
+        Some(page) => {
+            let page = page.strip_suffix(".md").unwrap_or(page);
+            let page = match page.strip_suffix("README") {
+                Some(directory) => directory.to_owned(),
+                None => format!("{page}/"),
+            };
+            format!("https://metalbear.com/mirrord/docs/{page}")
+        }
+        None => format!(
+            "https://github.com/{}/blob/{}/{path}",
+            SKILLS_PIN.repo, SKILLS_PIN.commit
+        ),
+    }
+}
+
+/// `mirrord://docs/<path>` for docs. A skill's `SKILL.md` is the skill's own resource,
+/// `mirrord://skills/<name>`, and its other files are under it.
+fn resource_uri(path: &str) -> String {
+    match path.strip_prefix("skills/") {
+        Some(file) => {
+            let file = file.strip_suffix("/SKILL.md").unwrap_or(file);
+            format!("mirrord://skills/{file}")
+        }
+        None => format!("mirrord://{path}"),
+    }
+}
+
 /// The YAML between the `---` lines that open a page, if it has any.
-fn front_matter(page: &str) -> Option<&str> {
+pub(crate) fn front_matter(page: &str) -> Option<&str> {
     let rest = page.strip_prefix("---\n")?;
     let end = rest.find("\n---\n")?;
     rest.get(..end)
