@@ -54,8 +54,9 @@ Every mirrord config you generate or change, whether a `mirrord.json` or a `mirr
 must be checked with `validate_config` before it is written: pass the complete file content, fix \
 every issue it reports and validate again, until `issues` is empty. Never write a config that has \
 not validated, and don't rely on your own knowledge of the config format, which may not match the \
-installed mirrord version. `validate_config` replaces any other validation step a skill \
-describes, such as checking against a bundled schema or running `mirrord verify-config`. To learn \
+installed mirrord version. For `mirrord.json` and `mirrord-up.yaml`, `validate_config` replaces \
+the checks a skill describes against bundled schemas or with `mirrord verify-config`; keep the \
+skill's other checks, such as those of the Kubernetes resources it generates. To learn \
 what an option does, which values it takes or which mirrord plan it needs, call \
 `explain_config_option` with its path instead of guessing. The \
 `mirrord://info` resource gives the installed mirrord version.
@@ -67,7 +68,8 @@ Clusters are usually shared with other developers:
 - Default to `mirror` for incoming traffic. Use `steal` only when your process must be the one \
 responding, and on a shared cluster steal with an HTTP filter so you only take your own requests.
 - Target staging or development clusters, never production.
-- Sessions clean up on exit, and nothing you run is deployed to the cluster.";
+- `mirrord exec` and `mirrord up` sessions clean up on exit, and nothing they run is deployed to \
+the cluster. Preview environments are deployed, and stay until stopped or their TTL runs out.";
 
 /// URI of the resource describing this mirrord installation.
 const INFO_RESOURCE_URI: &str = "mirrord://info";
