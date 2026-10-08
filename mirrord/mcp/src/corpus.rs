@@ -11,7 +11,7 @@ use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// The `corpus/` markdown, packed by `build.rs`.
+/// The `corpus/` files, packed by `build.rs`.
 static ARCHIVE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/corpus.tar.gz"));
 
 /// Every vendored file, keyed by its path in `corpus/`, e.g. `skills/mirrord-up/SKILL.md`.
@@ -31,7 +31,7 @@ pub(crate) static FILES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
             let mut contents = String::new();
             entry
                 .read_to_string(&mut contents)
-                .expect("vendored markdown is UTF-8");
+                .expect("vendored files are UTF-8");
             (path, contents)
         })
         .collect()

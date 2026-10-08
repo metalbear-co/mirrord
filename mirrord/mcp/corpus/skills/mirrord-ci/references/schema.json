@@ -1,0 +1,3494 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LayerFileConfig",
+  "description": "mirrord allows for a high degree of customization when it comes to which features you want to enable, and how they should function.\n\nAll of the configuration fields have a default value, so a minimal configuration would be no configuration at all.\n\nThe configuration supports templating using the [Tera](https://keats.github.io/tera/docs/) template engine. Currently we don't provide additional values to the context, if you have anything you want us to provide please let us know.\n\nTo use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag. Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file or use the UI.\n\nTo help you get started, here are examples of a basic configuration file, and a complete configuration file containing all fields.\n\n### Basic `config.json` {#root-basic}\n\n```json { \"target\": \"pod/bear-pod\", \"feature\": { \"env\": true, \"fs\": \"read\", \"network\": true } } ```\n\n### Basic `config.json` with templating {#root-basic-templating}\n\n```json { \"target\": \"{{ get_env(name=\"TARGET\", default=\"pod/fallback\") }}\", \"feature\": { \"env\": true, \"fs\": \"read\", \"network\": true } } ```\n\n### Complete `config.json` {#root-complete}\n\nDon't use this example as a starting point, it's just here to show you all the available options. ```json { \"accept_invalid_certificates\": false, \"skip_processes\": \"ide-debugger\", \"target\": { \"path\": \"pod/bear-pod\", \"namespace\": \"default\" }, \"connect_tcp\": null, \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"labels\": { \"user\": \"meow\" }, \"annotations\": { \"cats.io/inject\": \"enabled\" }, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"flush_connections\": true, \"metrics\": \"0.0.0.0:9000\", }, \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" }, \"mapping\": { \".+_TIMEOUT\": \"1000\" } }, \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ] }, \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": { \"enabled\": true, \"filter\": { \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"] } } }, \"copy_target\": { \"scale_down\": false } }, \"operator\": true, \"kubeconfig\": \"~/.kube/config\", \"sip_binaries\": \"bash\", \"telemetry\": true, \"kube_context\": \"my-cluster\" } ```\n\n# Options {#root-options}",
+  "type": "object",
+  "properties": {
+    "accept_invalid_certificates": {
+      "title": "accept_invalid_certificates {#root-accept_invalid_certificates}",
+      "description": "Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed certificates).\n\nIf not provided, mirrord will use value from the kubeconfig.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "agent": {
+      "title": "agent {#root-agent}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AgentFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ci": {
+      "title": "ci {#root-ci}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CiFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "container": {
+      "title": "container {#root-container}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ContainerFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "experimental": {
+      "title": "experimental {#root-experimental}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ExperimentalFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "external_proxy": {
+      "title": "external_proxy {#root-external_proxy}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ExternalProxyFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "feature": {
+      "title": "feature {#root-feature}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FeatureFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "internal_proxy": {
+      "title": "internal_proxy {#root-internal_proxy}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/InternalProxyFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "key": {
+      "title": "key {#root-key}",
+      "description": "An identifier for a mirrord session.\n\nThis key can be referenced in your configuration using the `{{ key }}` template variable. For example, you can use it in HTTP filters: `\"header_filter\": \"x-session: key-{{ key }}\"`.\n\nPriority (highest to lowest): 1. CLI argument: `mirrord exec --key my-key` 2. Config file: `{ \"key\": \"my-key\" }` 3. Fallback: A unique key is randomly generated if neither option is provided\n\n```json { \"key\": \"my-session-key\", \"feature\": { \"network\": { \"incoming\": { \"http_filter\": { \"header_filter\": \"x-session: key-{{ key }}\" } } } } } ```",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "kube_context": {
+      "title": "kube_context {#root-kube_context}",
+      "description": "Kube context to use from the kubeconfig file. Will use current context if not specified.\n\n```json { \"kube_context\": \"mycluster\" } ```",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "kubeconfig": {
+      "title": "kubeconfig {#root-kubeconfig}",
+      "description": "Path to a kubeconfig file, if not specified, will use `KUBECONFIG`, or `~/.kube/config`, or the in-cluster config.\n\n```json { \"kubeconfig\": \"~/bear/kube-config\" } ```",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "operator": {
+      "title": "operator {#root-operator}",
+      "description": "Whether mirrord should use the operator. If not set, mirrord will first attempt to use the operator, but continue without it in case of failure.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "profile": {
+      "title": "profile {#root-profile}",
+      "description": "Name of the mirrord profile to use.\n\nTo select a cluster-wide profile\n\n```json { \"profile\": \"my-profile-name\" } ```\n\nTo select a namespaced profile\n\n```json { \"profile\": \"my-namespace/my-profile-name\" } ```",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sip_binaries": {
+      "title": "sip_binaries {#root-sip_binaries}",
+      "description": "Binaries to patch (macOS SIP).\n\nUse this when mirrord isn't loaded to protected binaries that weren't automatically patched.\n\nRuns `endswith` on the binary path (so `bash` would apply to any binary ending with `bash` while `/usr/bin/bash` would apply only for that binary).\n\n```json { \"sip_binaries\": [\"bash\", \"python\"] } ```",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/VecOrSingle_for_String"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "skip_build_tools": {
+      "title": "skip_build_tools {#root-skip_build_tools}",
+      "description": "Allows mirrord to skip build tools. Useful when running command lines that build and run the application in a single command.\n\nDefaults to `true`.\n\nBuild-Tools: `[\"as\", \"cc\", \"ld\", \"go\", \"air\", \"asm\", \"cc1\", \"cgo\", \"dlv\", \"gcc\", \"git\", \"link\", \"math\", \"cargo\", \"hpack\", \"rustc\", \"compile\", \"collect2\", \"cargo-watch\", \"debugserver\"]`",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "skip_extra_build_tools": {
+      "title": "skip_extra_build_tools {#root-skip_build_tools}",
+      "description": "Allows mirrord to skip the specified build tools. Useful when running command lines that build and run the application in a single command.\n\nMust also enable [`skip_build_tools`](#root-skip_build_tools) for this to take an effect.\n\nIt's similar to [`skip_processes`](#root-skip_processes), except that here it also skips SIP patching.\n\nAccepts a single value, or an array of values.\n\n```json { \"skip_extra_build_tools\": [\"bash\", \"node\"] } ```",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/VecOrSingle_for_String"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "skip_processes": {
+      "title": "skip_processes {#root-skip_processes}",
+      "description": "Allows mirrord to skip unwanted processes.\n\nUseful when process A spawns process B, and the user wants mirrord to operate only on process B. Accepts a single value, or an array of values.\n\n```json { \"skip_processes\": [\"bash\", \"node\"] } ```",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/VecOrSingle_for_String"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "skip_sip": {
+      "title": "skip_sip {#root-skip_sip}",
+      "description": "Allows mirrord to skip patching (macOS SIP) unwanted processes.\n\nWhen patching is skipped, mirrord will no longer be able to load into the process and its child processes.\n\nDefaults to `{ \"skip_sip\": \"git\" }`\n\nWhen specified, the given value will replace the default list rather than being added to.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/VecOrSingle_for_String"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "startup_retry": {
+      "title": "startup_retry {#root-startup_retry}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StartupRetryFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "target": {
+      "title": "target {#root-target}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/TargetFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "telemetry": {
+      "title": "telemetry {#root-telemetry}",
+      "description": "Controls whether or not mirrord sends telemetry data to MetalBear cloud. Telemetry sent doesn't contain personal identifiers or any data that should be considered sensitive. It is used to improve the product. [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "use_proxy": {
+      "title": "use_proxy {#root-use_proxy}",
+      "description": "When disabled, mirrord will remove `HTTP[S]_PROXY` env variables before doing any network requests. This is useful when the system sets a proxy but you don't want mirrord to use it. This also applies to the mirrord process (as it just removes the env). If the remote pod sets this env, the mirrord process will still use it.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "AdvancedFsUserConfig": {
+      "description": "Allows the user to specify the default behavior for file operations:\n\n1. `\"read\"` or `true` - Read from the remote file system (default) 2. `\"write\"` - Read/Write from the remote file system. 3. `\"local\"` or `false` - Read from the local file system. 4. `\"localwithoverrides\"` - perform fs operation locally, unless the path matches a pre-defined or user-specified exception.\n\n> Note: by default, some paths are read locally or remotely, regardless of the selected FS mode. > This is described in further detail below.\n\nBesides the default behavior, the user can specify behavior for specific regex patterns. Case insensitive.\n\n1. `\"read_write\"` - List of patterns that should be read/write remotely. 2. `\"read_only\"` - List of patterns that should be read only remotely. 3. `\"local\"` - List of patterns that should be read locally. 4. `\"not_found\"` - List of patters that should never be read nor written. These files should be treated as non-existent. 4. `\"mapping\"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))\n\nThe logic for choosing the behavior is as follows:\n\n1. Check agains \"mapping\" if path needs to be replaced, if matched then continue to next step with new path after replacements otherwise continue as usual. 2. Check if one of the patterns match the file path, do the corresponding action. There's no specified order if two lists match the same path, we will use the first one (and we do not guarantee what is first).\n\n**Warning**: Specifying the same path in two lists is unsupported and can lead to undefined behaviour.\n\n3. There are pre-defined exceptions to the set FS mode. 1. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs) are read locally by default. 2. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs) are read remotely by default when the mode is `localwithoverrides`. 3. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs) under the running user's home directory will not be found by the application when the mode is not `local`.\n\nIn order to override that default setting for a path, or a pattern, include it the appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even though it is covered by [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs), add `\"^/etc/.\"` to the `read_only` set.\n\n4. If none of the above match, use the default behavior (mode).\n\nFor more information, check the file operations [technical reference](https://metalbear.com/mirrord/docs/reference/fileops/).\n\n```json { \"feature\": { \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ], \"not_found\": [ \"\\\\.config/gcloud\" ] } } } ```",
+      "type": "object",
+      "properties": {
+        "local": {
+          "title": "feature.fs.local {#feature-fs-local}",
+          "description": "Specify file path patterns that if matched will be opened locally.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mapping": {
+          "title": "feature.fs.mapping {#feature-fs-mapping}",
+          "description": "Specify map of patterns that if matched will replace the path according to specification.\n\n*Capture groups are allowed.*\n\nExample: ```json { \"^/home/(?<user>\\\\S+)/dev/tomcat\": \"/etc/tomcat\" \"^/home/(?<user>\\\\S+)/dev/config/(?<app>\\\\S+)\": \"/mnt/configs/${user}-$app\" } ``` Will do the next replacements for any io operaton\n\n`/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml` `/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`\n\n- Relative paths: this feature (currently) does not apply mappings to relative paths, e.g. `../dev`.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "mode": {
+          "title": "feature.fs.mode {#feature-fs-mode}",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FsModeConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "not_found": {
+          "title": "feature.fs.not_found {#feature-fs-not_found}",
+          "description": "Specify file path patterns that if matched will be treated as non-existent.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "read_only": {
+          "title": "feature.fs.read_only {#feature-fs-read_only}",
+          "description": "Specify file path patterns that if matched will be read from the remote. if file matching the pattern is opened for writing or read/write it will be opened locally.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "read_write": {
+          "title": "feature.fs.read_write {#feature-fs-read_write}",
+          "description": "Specify file path patterns that if matched will be read and written to the remote.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "readonly_file_buffer": {
+          "title": "feature.fs.readonly_file_buffer {#feature-fs-readonly_file_buffer}",
+          "description": "Sets buffer size for read-only remote files in bytes. By default, the value is 128000 bytes, or 128 kB.\n\nSetting the value to 0 disables file buffering. Otherwise, read-only remote files will be read in chunks and buffered locally. This improves performance when the user application reads data in small portions.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "AgentFileConfig": {
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator. Agent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"flush_connections\": false, \"exclude_from_mesh\": false \"inject_headers\": false, \"max_body_buffer_size\": 65535, \"max_body_buffer_timeout\": 1000 } } ```",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "title": "agent.annotations {#agent-annotations}",
+          "description": "Allows setting up custom annotations for the agent Job and Pod.\n\n```json { \"agent\": { \"annotations\": { \"cats.io/inject\": \"enabled\" \"prometheus.io/scrape\": \"true\", \"prometheus.io/port\": \"9000\" } } } ```",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "check_out_of_pods": {
+          "title": "agent.check_out_of_pods {#agent-check_out_of_pods}",
+          "description": "Determine if to check whether there is room for agent job in target node. (Not applicable when using ephemeral containers feature)\n\nCan be disabled if the check takes too long and you are sure there is enough resources on each node",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "clean_iptables_on_start": {
+          "title": "agent.clean_iptables_on_start {#agent-clean_iptables_on_start}",
+          "description": "Clean leftover iptables rules and start the new agent instead of erroring out when there are existing mirrord rules in the target's iptables.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "communication_timeout": {
+          "title": "agent.communication_timeout {#agent-communication_timeout}",
+          "description": "Controls how long the agent lives when there are no connections.\n\nEach connection has its own heartbeat mechanism, so even if the local application has no messages, the agent stays alive until there are no more heartbeat messages.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "disabled_capabilities": {
+          "title": "agent.disabled_capabilities {#agent-disabled_capabilities}",
+          "description": "If nothing is disabled here, agent uses: 1. `NET_ADMIN`, 2. `SYS_PTRACE`, 3. `SYS_ADMIN`.\n\nHas no effect when using the targetless mode, as targetless agent containers have no capabilities.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "dns": {
+          "title": "agent.dns {#agent-dns}",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FileAgentDnsConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ephemeral": {
+          "title": "agent.ephemeral {#agent-ephemeral}",
+          "description": "Runs the agent as an [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/).\n\nNot compatible with targetless runs.\n\nDefaults to `false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "exclude_from_mesh": {
+          "title": "agent.exclude_from_mesh {#agent-exclude_from_mesh}",
+          "description": "When running the agent as an ephemeral container, use this option to exclude the agent's port from the service mesh sidecar proxy.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "flush_connections": {
+          "title": "agent.flush_connections {#agent-flush_connections}",
+          "description": "Flushes existing connections when starting to steal, might fix issues where connections aren't stolen (due to being already established)\n\nDefaults to `true`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "image": {
+          "title": "agent.image {#agent-image}",
+          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image `\"ghcr.io/metalbear-co/mirrord:latest\"`.\n\n```json { \"agent\": { \"image\": \"internal.repo/images/mirrord:latest\" } } ```\n\nComplete setup:\n\n```json { \"agent\": { \"image\": { \"registry\": \"internal.repo/images/mirrord\", \"tag\": \"latest\" } } } ```\n\nCan also be controlled via `MIRRORD_AGENT_IMAGE`, `MIRRORD_AGENT_IMAGE_REGISTRY`, and `MIRRORD_AGENT_IMAGE_TAG`. `MIRRORD_AGENT_IMAGE` takes precedence, followed by config values for registry/tag, then environment variables for registry/tag.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentImageFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "image_pull_policy": {
+          "title": "agent.image_pull_policy {#agent-image_pull_policy}",
+          "description": "Controls when a new agent image is downloaded.\n\nSupports `\"IfNotPresent\"`, `\"Always\"`, `\"Never\"`, or any valid kubernetes [image pull policy](https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy)\n\nDefaults to `\"IfNotPresent\"`",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image_pull_secrets": {
+          "title": "agent.image_pull_secrets {#agent-image_pull_secrets}",
+          "description": "List of secrets the agent pod has access to.\n\nTakes an array of entries with the format `{ name: <secret-name> }`.\n\nRead more [here](https://kubernetes.io/docs/concepts/containers/images/#referring-to-an-imagepullsecrets-on-a-pod).\n\n```json { \"agent\": { \"image_pull_secrets\": [ { \"name\": \"secret-key-1\" }, { \"name\": \"secret-key-2\" } ] } } ```",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/AgentPullSecret"
+          }
+        },
+        "inject_headers": {
+          "title": "agent.inject_headers {#agent-inject_headers}",
+          "description": "Sets whether `Mirrord-Agent` headers are injected into HTTP responses that went through the agent.\n\nPossible values for the header:\n\n- `passed-through`: set when the request was not sent to the local app (perhaps because it didn't match the filters)\n\n- `forwarded-to-client`: set when the request was sent to the local app",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "json_log": {
+          "title": "agent.json_log {#agent-json_log}",
+          "description": "Controls whether the agent produces logs in a human-friendly format, or json.\n\n```json { \"agent\": { \"json_log\": true } } ```",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "labels": {
+          "title": "agent.labels {#agent-labels}",
+          "description": "Allows setting up custom labels for the agent Job and Pod.\n\n```json { \"agent\": { \"labels\": { \"user\": \"meow\", \"state\": \"asleep\" } } } ```",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "log_level": {
+          "title": "agent.log_level {#agent-log_level}",
+          "description": "Log level for the agent.\n\nSupports `\"trace\"`, `\"debug\"`, `\"info\"`, `\"warn\"`, `\"error\"`, or any string that would work with `RUST_LOG`.\n\n```json { \"agent\": { \"log_level\": \"mirrord=debug,warn\" } } ```",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_body_buffer_size": {
+          "title": "agent.max_body_buffer_size {#agent-max_body_buffer_size}",
+          "description": "Maximum size, in bytes, of HTTP request body buffers. Used for temporarily storing bodies of incoming HTTP requests to run body filters. HTTP body filters will not match any requests with bodies larger than this.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "max_body_buffer_timeout": {
+          "title": "agent.max_body_buffer_timeout {#agent-max_body_buffer_timeout}",
+          "description": "Maximum timeout, in milliseconds, for receiving HTTP request bodies. HTTP body filters will not match any requests whose bodies do not arrive within this timeout.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "metrics": {
+          "title": "agent.metrics {#agent-metrics}",
+          "description": "Enables prometheus metrics for the agent pod.\n\nYou might need to add annotations to the agent pod depending on how prometheus is configured to scrape for metrics.\n\n```json { \"agent\": { \"metrics\": \"0.0.0.0:9000\" } } ```",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "namespace": {
+          "title": "agent.namespace {#agent-namespace}",
+          "description": "Namespace where the agent shall live.\n\n**Note:** ignored in targetless runs or when the agent is run as an ephemeral container.\n\nDefaults to the current kubernetes namespace.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nftables": {
+          "title": "agent.nftables {#agent-nftables}",
+          "description": "Determines which iptables backend will be used for traffic redirection.\n\nIf set to `true`, the agent will use iptables-nft. If set to `false`, the agent will use iptables-legacy. If not set, the agent will try to detect the correct backend at runtime.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "node_selector": {
+          "title": "agent.node_selector {#agent-node_selector}",
+          "description": "Allows setting up custom node selector for the agent Pod. Applies only to targetless runs, as targeted agent always runs on the same node as its target container.\n\n```json { \"agent\": { \"node_selector\": { \"kubernetes.io/hostname\": \"node1\" } } } ```",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "priority_class": {
+          "title": "agent.priority_class {#agent-priority_class}",
+          "description": "Specifies the priority class to assign to the agent pod.\n\n```json { \"agent\": { \"priority_class\": \"my-priority-class-name\" } } ```\n\nIn some cases, the agent pod may fail to schedule due to node resource constraints. Setting a priority class allows you to explicitly assign an existing priority class from your cluster to the agent pod, increasing its priority relative to other workloads.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "privileged": {
+          "title": "agent.privileged {#agent-privileged}",
+          "description": "Run the mirror agent as privileged container. Defaults to `false`.\n\nMight be needed in strict environments such as Bottlerocket.\n\nHas no effect when using the targetless mode, as targetless agent containers are never privileged.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "resources": {
+          "title": "agent.resources {#agent-resources}",
+          "description": "Set pod resource requirements. (not with ephemeral agents) Default is ```json { \"agent\": { \"resources\": { \"requests\": { \"cpu\": \"1m\", \"memory\": \"1Mi\" }, \"limits\": { \"cpu\": \"100m\", \"memory\": \"100Mi\" } } } } ```",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/io.k8s.api.core.v1.ResourceRequirements"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "security_context": {
+          "title": "agent.security_context {#agent-security_context}",
+          "description": "Agent pod security context (not with ephemeral agents). Support seccomp profile and app armor profile.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityContext"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "service_account": {
+          "title": "agent.service_account {#agent-service_account}",
+          "description": "Allows setting up custom Service Account for the agent Job and Pod.\n\n```json { \"agent\": { \"service_account\": \"my-service-account\" } } ```",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startup_timeout": {
+          "title": "agent.startup_timeout {#agent-startup_timeout}",
+          "description": "Controls how long to wait for the agent to finish initialization.\n\nIf initialization takes longer than this value, mirrord exits.\n\nDefaults to `60`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tolerations": {
+          "title": "agent.tolerations {#agent-tolerations}",
+          "description": "Set pod tolerations. (not with ephemeral agents).\n\nDefaults to `operator: Exists`.\n\n```json { \"agent\": { \"tolerations\": [ { \"key\": \"meow\", \"operator\": \"Exists\", \"effect\": \"NoSchedule\" } ] } } ```\n\nSet to an empty array to have no tolerations at all",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/io.k8s.api.core.v1.Toleration"
+          }
+        },
+        "ttl": {
+          "title": "agent.ttl {#agent-ttl}",
+          "description": "Controls how long the agent pod persists for after the agent exits (in seconds).\n\nCan be useful for collecting logs.\n\nDefaults to `1`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "AgentImageFileConfig": {
+      "description": "<!--${internal}--> Allows us to support the dual configuration for the agent image.\n\nWhatever values missing are replaced with our defaults.",
+      "anyOf": [
+        {
+          "description": "The shortened version of: `image: \"repo/mirrord:latest\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        {
+          "description": "Expanded version: `image: { registry: \"repo/mirrord\", tag: \"latest\" }`.",
+          "type": "object",
+          "properties": {
+            "registry": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tag": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "AgentPullSecret": {
+      "description": "<!--${internal}--> Specifies a secret reference for the agent pod.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "description": "Name of the secret.",
+          "type": "string"
+        }
+      }
+    },
+    "AppleVariablesConfig": {
+      "type": "object"
+    },
+    "BodyFilter": {
+      "description": "Currently only JSON body filtering is supported.",
+      "oneOf": [
+        {
+          "title": "feature.network.incoming.inner_filter.body_filter.json {#feature-network-incoming-inner-body-filter-json}",
+          "description": "Tries to parse the body as a JSON object and find (a) matching subobjects(s).\n\n`query` should be a valid JSONPath (RFC 9535) query string. `matches` should be a regex. Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate\n\nExample: ```json \"http_filter\": { \"body_filter\": { \"body\": \"json\", \"query\": \"$.library.books[*]\", \"matches\": \"^\\\\d{3,5}$\" } } ``` will match ```json { \"library\": { \"books\": [ 34555, 1233, 234 23432 ] } } ```\n\nThe filter will match if there is at least one query result.\n\nNon-string matches are stringified before being compared to the regex. To filter query results by type, the `typeof` [function extension](https://www.rfc-editor.org/rfc/rfc9535.html#name-function-extensions) is provided. It takes in a single `NodesType` parameter and returns `\"null\" | \"bool\" | \"number\" | \"string\" | \"array\" | \"object\"`, depending on the type of the argument. If not all nodes in the argument have the same type, it returns `nothing`.\n\nExample:\n\n```json \"body_filter\": { \"body\": \"json\", \"query\": \"$.books[?(typeof(@) == 'number')]\", \"matches\": \"4$\" } ``` will match\n\n```json { \"books\": [ 1111, 2222, 4444 ] } ```\n\nbut not\n\n```json { \"books\": [ \"1111\", \"2222\", \"4444\" ] } ```\n\nTo use with with `all_of` or `any_of`, use the following syntax: ```json \"http_filter\": { \"all_of\": [ { \"path\": \"/buildings\" }, { \"body\": \"json\", \"query\": \"$.library.books[*]\", \"matches\": \"^\\\\d{3,5}$\" } ] } ```",
+          "type": "object",
+          "required": [
+            "body",
+            "matches",
+            "query"
+          ],
+          "properties": {
+            "body": {
+              "type": "string",
+              "enum": [
+                "json"
+              ]
+            },
+            "matches": {
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "CiFileConfig": {
+      "description": "Configuration for mirrord for CI.\n\n```json { \"ci\": { \"output_dir\": \"/tmp/mirrord/\", } } ```",
+      "type": "object",
+      "properties": {
+        "output_dir": {
+          "title": "ci.output_dir {#ci-output_dir}",
+          "description": "Path to a directory where `mirrord ci` will flush application's stdout and stderr.\n\nDefaults to `/tmp/mirrord/`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ConcurrentSteal": {
+      "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution - `\"override\"`: If port lock detected then override it with new lock and force close the original locking connection.",
+      "oneOf": [
+        {
+          "description": "<!--${internal}--> ### override\n\nOverride any port lock and force close the original lock connection",
+          "type": "string",
+          "enum": [
+            "override"
+          ]
+        },
+        {
+          "description": "<!--${internal}--> ### continue\n\nContinue with normal execution",
+          "type": "string",
+          "enum": [
+            "continue"
+          ]
+        },
+        {
+          "description": "<!--${internal}--> ### abort\n\nAbort Execution when trying to steal traffic from a target whose traffic is already being stolen.",
+          "type": "string",
+          "enum": [
+            "abort"
+          ]
+        }
+      ]
+    },
+    "ContainerFileConfig": {
+      "description": "Unstable: `mirrord container` command specific config.",
+      "type": "object",
+      "properties": {
+        "cli_extra_args": {
+          "title": "container.cli_extra_args {#container-cli_extra_args}",
+          "description": "Any extra args to use when creating the sidecar mirrord-cli container.\n\nThis is useful when you want to use portforwarding, passing `-p local:container` won't work for main command but adding them here will work ```json { \"container\": { \"cli_extra_args\": [\"-p\", \"local:container\"] } } ```",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "cli_image": {
+          "title": "container.cli_image {#container-cli_image}",
+          "description": "Tag of the `mirrord-cli` image you want to use.\n\nDefaults to `\"ghcr.io/metalbear-co/mirrord-cli:<cli version>\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cli_image_lib_path": {
+          "title": "container.cli_image_lib_path {#container-cli_image}",
+          "description": "Path of the mirrord-layer lib inside the specified mirrord-cli image.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cli_prevent_cleanup": {
+          "title": "container.cli_prevent_cleanup {#container-cli_extra_args}",
+          "description": "Don't add `--rm` to sidecar command to prevent cleanup.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "cli_tls_path": {
+          "title": "container.cli_tls_path {#container-cli_tls_path}",
+          "description": "When using`mirrord container` with external_proxy TLS enabled (is enabled by default), you can specify the path where the certificate `.pem` file will be created, in the cli container.\n\nDefaults to `\"/opt/mirrord/tls/mirrord-tls.pem\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "override_host_ip": {
+          "title": "container.override_host_ip {#container-override_host_ip}",
+          "description": "Allows to override the IP address for the internal proxy to use when connecting to the host machine from within the container.\n\n```json5 { \"container\": { \"override_host_ip\": \"172.17.0.1\" // usual resolution of value from `host.docker.internal` } } ```\n\nThis should be useful if your host machine is exposed with a different IP address than the one bound as host.\n\n- If you're running inside WSL, and encountering problems, try setting `external_proxy.host_ip` T `0.0.0.0`, and this to the internal container runtime address (for docker, this  would be what `host.docker.internal` resolved to, which by default is `192.168.65.254`). You can find this ip by resolving it from inside a running container, e.g. `docker run --rm -it {image-with-nslookup} nslookup host.docker.internal`",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "ip"
+        },
+        "platform": {
+          "title": "container.platform {#container-platform}",
+          "description": "Platform specification for the target container (e.g., \"linux/amd64\", \"linux/arm64\").\n\nWhen specified, the target container will run with this platform, while the internal proxy container will still run on the native platform and contain both architectures (x64/arm64). The LD_PRELOAD will automatically use the correct architecture.\n\n```json { \"container\": { \"platform\": \"linux/amd64\" } } ```",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ContainerRuntime": {
+      "description": "Container runtimes supported by mirrord.",
+      "oneOf": [
+        {
+          "description": "Docker container runtime. (default)",
+          "type": "string",
+          "enum": [
+            "docker"
+          ]
+        },
+        {
+          "description": "Podman container runtime.",
+          "type": "string",
+          "enum": [
+            "podman"
+          ]
+        },
+        {
+          "description": "nerdctl container runtime (containerd).",
+          "type": "string",
+          "enum": [
+            "nerdctl"
+          ]
+        }
+      ]
+    },
+    "CopyTargetFileConfig": {
+      "title": "feature.copy_target {#copy_target}",
+      "description": "Allows the user to target a pod created dynamically from the original [`target`](#target). The new pod inherits most of the original target's specification, e.g. labels.\n\nSee the [copy target reference](https://metalbear.com/mirrord/docs/reference/copy-target/) for more details.\n\n### Minimal `copy_target` config {#copy_target-minimal}\n\n```json { \"feature\": { \"copy_target\": true } } ```\n\n### Advanced `copy_target` config {#copy_target-advanced}\n\n```json { \"feature\": { \"copy_target\": { \"enabled\": true, \"scale_down\": true, \"exclude_containers\": [\"my-container\"], \"exclude_init_containers\": [\"my-init-container\"] } } } ```",
+      "anyOf": [
+        {
+          "description": "Basic configuration that controls whether copy target is enabled (default false).",
+          "type": "boolean"
+        },
+        {
+          "description": "Allows the user to specify both enabling copy target and additional configuration options.",
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "Whether copy target is enabled",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "exclude_containers": {
+              "description": "List of containers to be ignored by copy_target",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "exclude_init_containers": {
+              "description": "List of init containers to be ignored by copy_target",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "scale_down": {
+              "description": "Scale down the target deployment to 0 for the time the copied pod is alive",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "CronJobTarget": {
+      "type": "object",
+      "required": [
+        "cron_job"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cron_job": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DatabaseBranchConfig": {
+      "description": "Configuration for a database branch.\n\nExample:\n\n```json { \"id\": \"my-branch-db\", \"name\": \"my-database-name\", \"ttl_secs\": 120, \"type\": \"mysql\", \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ```",
+      "oneOf": [
+        {
+          "description": "When configuring a branch for MongoDB, set `type` to `mongodb`.",
+          "type": "object",
+          "required": [
+            "connection",
+            "type"
+          ],
+          "properties": {
+            "connection": {
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
+              "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSource"
+                }
+              ]
+            },
+            "copy": {
+              "default": {
+                "collections": null,
+                "mode": "empty"
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/MongodbBranchCopyConfig"
+                }
+              ]
+            },
+            "creation_timeout_secs": {
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
+              "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
+              "default": 60,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "id": {
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
+              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
+              "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_secs": {
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
+              "default": 300,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "mongodb"
+              ]
+            },
+            "version": {
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
+              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        {
+          "description": "When configuring a branch for MySQL, set `type` to `mysql`.",
+          "type": "object",
+          "required": [
+            "connection",
+            "type"
+          ],
+          "properties": {
+            "connection": {
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
+              "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSource"
+                }
+              ]
+            },
+            "copy": {
+              "default": {
+                "mode": "empty",
+                "tables": null
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/MysqlBranchCopyConfig"
+                }
+              ]
+            },
+            "creation_timeout_secs": {
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
+              "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
+              "default": 60,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "id": {
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
+              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
+              "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_secs": {
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
+              "default": 300,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "mysql"
+              ]
+            },
+            "version": {
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
+              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        {
+          "description": "When configuring a branch for PostgreSQL, set `type` to `pg`.",
+          "type": "object",
+          "required": [
+            "connection",
+            "type"
+          ],
+          "properties": {
+            "connection": {
+              "title": "feature.db_branches[].connection (type: mysql, pg, mongodb) {#feature-db_branches-sql-connection}",
+              "description": "`connection` describes how to get the connection information to the source database. When the branch database is ready for use, Mirrord operator will replace the connection information with the branch database's.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSource"
+                }
+              ]
+            },
+            "copy": {
+              "default": {
+                "mode": "empty",
+                "tables": null
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/PgBranchCopyConfig"
+                }
+              ]
+            },
+            "creation_timeout_secs": {
+              "title": "feature.db_branches[].creation_timeout_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-creation_timeout_secs}",
+              "description": "The timeout in seconds to wait for a database branch to become ready after creation. Defaults to 60 seconds. Adjust this value based on your database size and cluster performance.",
+              "default": 60,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "iam_auth": {
+              "title": "feature.db_branches[].iam_auth (type: pg) {#feature-db_branches-pg-iam_auth}",
+              "description": "IAM authentication for the source database. Use this when your source database (AWS RDS, GCP Cloud SQL) requires IAM authentication instead of password-based authentication.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/PgIamAuthConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "id": {
+              "title": "feature.db_branches[].id (type: mysql, pg, mongodb) {#feature-db_branches-sql-id}",
+              "description": "Users can choose to specify a unique `id`. This is useful for reusing or sharing the same database branch among Kubernetes users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "title": "feature.db_branches[].name (type: mysql, pg, mongodb) {#feature-db_branches-sql-name}",
+              "description": "When source database connection detail is not accessible to mirrord operator, users can specify the database `name` so it is included in the connection options mirrord uses as the override.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_secs": {
+              "title": "feature.db_branches[].ttl_secs (type: mysql, pg, mongodb) {#feature-db_branches-sql-ttl_secs}",
+              "description": "Mirrord operator starts counting the TTL when a branch is no longer used by any session. The time-to-live (TTL) for the branch database is set to 300 seconds by default. Users can set `ttl_secs` to customize this value according to their need. Please note that longer TTL paired with frequent mirrord session turnover can result in increased resource usage. For this reason, branch database TTL caps out at 15 min.",
+              "default": 300,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "pg"
+              ]
+            },
+            "version": {
+              "title": "feature.db_branches[].version (type: mysql, pg, mongodb) {#feature-db_branches-sql-version}",
+              "description": "Mirrord operator uses a default version of the database image unless `version` is given.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        {
+          "description": "When configuring a branch for Redis, set `type` to `redis`.\n\nExample with URL-based connection: ```json { \"type\": \"redis\", \"location\": \"local\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"REDIS_URL\" } } } ```\n\nExample with separated settings: ```json { \"type\": \"redis\", \"location\": \"local\", \"connection\": { \"host\": { \"type\": \"env\", \"variable\": \"REDIS_HOST\" }, \"port\": 6379, \"password\": { \"type\": \"env\", \"variable\": \"REDIS_PASSWORD\" } } } ```",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "connection": {
+              "title": "feature.db_branches[].connection (type: redis) {#feature-db_branches-redis-connection}",
+              "description": "Connection configuration for the Redis instance.",
+              "default": {
+                "database": null,
+                "host": null,
+                "password": null,
+                "port": null,
+                "tls": null,
+                "url": null,
+                "username": null
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/RedisConnectionConfig"
+                }
+              ]
+            },
+            "id": {
+              "title": "feature.db_branches[].id (type: redis) {#feature-db_branches-redis-id}",
+              "description": "Optional unique identifier for reusing branches across sessions.",
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "local": {
+              "title": "feature.db_branches[].local (type: redis) {#feature-db_branches-redis-local}",
+              "description": "Local Redis runtime configuration. Only used when `location` is `local`.",
+              "default": {
+                "container_command": null,
+                "container_runtime": "docker",
+                "options": {
+                  "args": []
+                },
+                "port": 6379,
+                "runtime": "container",
+                "server_command": null,
+                "version": "7-alpine"
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/RedisLocalConfig"
+                }
+              ]
+            },
+            "location": {
+              "title": "feature.db_branches[].location (type: redis) {#feature-db_branches-redis-location}",
+              "description": "Where the Redis instance should run. - `local`: Spawns a local Redis instance managed by mirrord. - `remote`: Uses the remote Redis (default behavior, no-op).",
+              "default": "remote",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/RedisBranchLocation"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "redis"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "DatabaseBranchesConfig": {
+      "description": "A list of configurations for database branches.\n\n```json { \"feature\": { \"db_branches\": [ { \"name\": \"my-database-name\", \"ttl_secs\": 120, \"type\": \"mysql\", \"version\": \"8.0\", \"connection\": { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } } ] } } ```",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/DatabaseBranchConfig"
+      }
+    },
+    "DbBranchingConnectionSource": {
+      "description": "Different ways of connecting to the source database.\n\nExample:\n\nA single complete connection URL stored in an environment variable accessible from the target pod template.\n\n```json { \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } } ```",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "DbBranchingConnectionSourceKind": {
+      "description": "<!--${internal}--> Different ways to source the connection options.\n\nSupport: - `env` in the target's pod spec. - `envFrom` in the target's pod spec.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "variable"
+          ],
+          "properties": {
+            "container": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "env"
+              ]
+            },
+            "variable": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "variable"
+          ],
+          "properties": {
+            "container": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "env_from"
+              ]
+            },
+            "variable": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "DeploymentTarget": {
+      "description": "<!--${internal}--> Mirror the deployment specified by [`DeploymentTarget::deployment`].",
+      "type": "object",
+      "required": [
+        "deployment"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deployment": {
+          "description": "<!--${internal}--> Deployment to mirror.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DnsFileConfig": {
+      "description": "Resolve DNS via the remote pod.\n\nDefaults to `true`.\n\nMind that: - DNS resolving can be done in multiple ways. Some frameworks use `getaddrinfo`/`gethostbyname` functions, while others communicate directly with the DNS server at port `53` and perform a sort of manual resolution. Just enabling the `dns` feature in mirrord might not be enough. If you see an address resolution error, try enabling the [`fs`](#feature-fs) feature, and setting `read_only: [\"/etc/resolv.conf\"]`. - DNS filter currently works only with frameworks that use `getaddrinfo`/`gethostbyname` functions.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "filter": {
+          "title": "feature.network.dns.filter {#feature-network-dns-filter}",
+          "description": "Unstable: the precise syntax of this config is subject to change.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DnsFilterConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "DnsFilterConfig": {
+      "description": "List of addresses/ports/subnets that should be resolved through either the remote pod or local app, depending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when DNS resolution is done from the remote pod (which is the default behavior when you enable remote DNS), or from the local app (default when you have remote DNS disabled).\n\nTakes a list of values, such as:\n\n- Only queries for hostname `my-service-in-cluster` will go through the remote pod.\n\n```json { \"remote\": [\"my-service-in-cluster\"] } ```\n\n- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337`` will go through the remote pod.\n\n```json { \"remote\": [\"1.1.1.0/24:1337\"] } ```\n\n- Only queries for hostname `google.com` with service port `1337` or `7331` will go through the remote pod.\n\n```json { \"remote\": [\"google.com:1337\", \"google.com:7331\"] } ```\n\n- Only queries for `localhost` with service port `1337` will go through the local app.\n\n```json { \"local\": [\"localhost:1337\"] } ```\n\n- Only queries with service port `1337` or `7331` will go through the local app.\n\n```json { \"local\": [\":1337\", \":7331\"] } ```\n\nValid values follow this pattern: `[name|address|subnet/mask][:port]`.",
+      "oneOf": [
+        {
+          "description": "When filters are specified under `remote`, matching DNS queries will go through the remote pod, everything else will go through local.",
+          "type": "object",
+          "required": [
+            "remote"
+          ],
+          "properties": {
+            "remote": {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "When filters are specified under `local`, matching DNS queries will go through the local app , everything else will go through the remote pod.",
+          "type": "object",
+          "required": [
+            "local"
+          ],
+          "properties": {
+            "local": {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "EnvFileConfig": {
+      "description": "Allows the user to set or override the local process' environment variables with the ones from the remote pod.\n\nCan be set to one of the options:\n\n1. `false` - Disables the feature, won't have remote environment variables. 2. `true` - Enables the feature, will obtain remote environment variables. 3. object - see below (means `true` + additional configuration).\n\nWhich environment variables to load from the remote pod are controlled by setting either [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).\n\nSee the environment variables [reference](https://metalbear.com/mirrord/docs/reference/env/) for more details.\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV;MY_APP_*\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" }, \"mapping\": { \".+_TIMEOUT\": \"1000\" } } } } ```",
+      "type": "object",
+      "properties": {
+        "env_file": {
+          "title": "feature.env.env_file {#feature-env-env-file}",
+          "description": "Allows for passing environment variables from an env file.\n\nThese variables will override environment fetched from the remote target.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exclude": {
+          "title": "feature.env.exclude {#feature-env-exclude}",
+          "description": "Include the remote environment variables in the local process that are **NOT** specified by this option. Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of any character and `*` matches arbitrary many (including zero) occurrences of any character.\n\nSome of the variables that are excluded by default: `PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`.\n\nCan be passed as a list or as a semicolon-delimited string (e.g. `\"VAR;OTHER_VAR\"`).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "include": {
+          "title": "feature.env.include {#feature-env-include}",
+          "description": "Include only these remote environment variables in the local process. Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of any character and `*` matches arbitrary many (including zero) occurrences of any character.\n\nCan be passed as a list or as a semicolon-delimited string (e.g. `\"VAR;OTHER_VAR\"`).\n\nSome environment variables are excluded by default (`PATH` for example), including these requires specifying them with `include`",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "load_from_process": {
+          "title": "feature.env.load_from_process {#feature-env-load_from_process}",
+          "description": "Allows for changing the way mirrord loads remote environment variables. If set, the variables are fetched after the user application is started.\n\nThis setting is meant to resolve issues when using mirrord via the IntelliJ plugin on WSL and the remote environment contains a lot of variables.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "mapping": {
+          "title": "feature.env.mapping {#feature-env-mapping}",
+          "description": "Specify map of patterns that if matched will replace the value according to specification.\n\n*Capture groups are allowed.*\n\nExample: ```json { \".+_TIMEOUT\": \"10000\" \"LOG_.+_VERBOSITY\": \"debug\" \"(\\w+)_(\\d+)\": \"magic-value\" } ```\n\nWill do the next replacements for environment variables that match:\n\n* `CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000`\n\n* `LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug`\n\n* `DATA_1234: common-value` => `DATA_1234: magic-value`",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "override": {
+          "title": "feature.env.override {#feature-env-override}",
+          "description": "Allows setting or overriding environment variables (locally) with a custom value.\n\nFor example, if the remote pod has an environment variable `REGION=1`, but this is an undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.\n\nEnvironment specified here will also override variables passed via the env file.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "unset": {
+          "title": "feature.env.unset {#feature-env-unset}",
+          "description": "Allows unsetting environment variables in the executed process.\n\nThis is useful for when some system/user-defined environment like `AWS_PROFILE` make the application behave as if it's running locally, instead of using the remote settings. The unsetting happens from extension (if possible)/CLI and when process initializes. In some cases, such as Go the env might not be able to be modified from the process itself. This is case insensitive, meaning if you'd put `AWS_PROFILE` it'd unset both `AWS_PROFILE` and `Aws_Profile` and other variations.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExperimentalFileConfig": {
+      "description": "mirrord Experimental features. This shouldn't be used unless someone from MetalBear/mirrord tells you to.",
+      "type": "object",
+      "properties": {
+        "applev": {
+          "title": "_experimental_ applev {#experimental-applev}",
+          "description": "Configuration for inspecting and modifying apple variables. macOS only.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AppleVariablesConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "browser_extension_config": {
+          "title": "_experimental_ browser_extension_config {#experimental-browser_extension_config}",
+          "description": "mirrord will open a URL for initiating mirrord browser extension to automatically inject HTTP header that matches the HTTP filter configured in `feature.network.incoming.http_filter.header_filter`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "disable_reuseaddr": {
+          "title": "_experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}",
+          "description": "Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors. On macOS the application can use the same address many times but then we don't steal it correctly. This probably should be on by default but we want to gradually roll it out. <https://github.com/metalbear-co/mirrord/issues/2819> This option applies only on macOS.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "dlopen_cgo": {
+          "title": "_experimental_ dlopen_cgo {#experimental-dlopen_cgo}",
+          "description": "Useful when the user's application loads a c-shared golang library dynamically.\n\nDefaults to `false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "dns_permission_error_fatal": {
+          "title": "_experimental_ dns_permission_error_fatal {#experimental-dns_permission_error_fatal}",
+          "description": "Whether to terminate the session when a permission denied error occurs during DNS resolution. This error often means that the Kubernetes cluster is hardened, and the mirrord-agent is not fully functional without `agent.privileged` enabled.\n\nDefaults to `true`",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "enable_exec_hooks_linux": {
+          "title": "_experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}",
+          "description": "Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application shares sockets with child commands (e.g Python web servers with reload), but the feature is not stable and may cause other issues.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "force_hook_connect": {
+          "title": "_experimental_ force_hook_connect {#experimental-force_hook_connect}",
+          "description": "Forces hooking all instances of the connect function. In very niche cases the connect function has multiple exports and this flag makes us hook all of the instances. <https://linear.app/metalbear/issue/MBE-1385/mirrord-container-curl-doesnt-work-for-php-curl>",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hide_ipv6_interfaces": {
+          "title": "_experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}",
+          "description": "Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hook_rename": {
+          "title": "_experimental_ hook_rename {#experimental-hook_rename}",
+          "description": "Enables hooking the `rename` function.\n\nUseful if you need file remapping and your application uses `rename`, i.e. `php-fpm`, `twig`, to create and rename temporary files.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "idle_local_http_connection_timeout": {
+          "title": "_experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}",
+          "description": "Sets a timeout for idle local HTTP connections (in milliseconds).\n\nHTTP requests stolen with a filter are delivered to the local application from a HTTP connection made from the local machine. Once a request is delivered, the connection is cached for some time, so that it can be reused to deliver the next request.\n\nThis timeout determines for how long such connections are cached.\n\nSet to 0 to disable caching local HTTP connections (connections will be dropped as soon as the request is delivered).\n\nDefaults to 3000ms.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ignore_system_proxy_config": {
+          "title": "_experimental_ ignore_system_proxy_config {#experimental-ignore_system_proxy_config}",
+          "description": "Disables any system wide proxy configuration for affecting the running application.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "latency": {
+          "title": "_experimental_ latency {#experimental-latency}",
+          "description": "Configuration for adding artificial latency to outgoing network operations.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LatencyFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "non_blocking_tcp_connect": {
+          "title": "_experimental_ non_blocking_tcp_connect {#experimental-non_blocking_tcp_connect}",
+          "description": "Enables better support for outgoing connections using non-blocking TCP sockets.\n\nDefaults to `false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "sip_log_destination": {
+          "title": "_experimental_ sip_log_destination {#experimental-sip_log_destination}",
+          "description": "Writes basic fork-safe SIP patching logs to a destination file. Useful for seeing the state of SIP when `stdout` may be affected by another process.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tcp_ping4_mock": {
+          "title": "_experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}",
+          "description": "<https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "trust_any_certificate": {
+          "title": "_experimental_ trust_any_certificate {#experimental-trust_any_certificate}",
+          "description": "Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "use_dev_null": {
+          "title": "_experimental_ use_dev_null {#experimental-use_dev_null}",
+          "description": "Uses /dev/null for creating local fake files (should be better than using /tmp)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExternalProxyFileConfig": {
+      "description": "Configuration for the external proxy mirrord spawns when using the `mirrord container` command. This proxy is used to allow the internal proxy running in sidecar to connect to the mirrord agent.\n\nIf you get `ConnectionRefused` errors, increasing the timeouts a bit might solve the issue.\n\n```json { \"external_proxy\": { \"start_idle_timeout\": 30, \"idle_timeout\": 5 } } ```",
+      "type": "object",
+      "properties": {
+        "host_ip": {
+          "title": "external_proxy.host_ip {#external_proxy-host_ip}",
+          "description": "Specify a custom host ip addr to listen on.\n\nThis address must be accessible from within the container. If not specified, mirrord will try and resolve a local address to use.\n\n- If you're running inside WSL, and encountering problems, try setting this to `0.0.0.0`, and `container.override_host_ip` to the internal container runtime address (for docker, this would be what `host.docker.internal` resolved to, which by default is `192.168.65.254`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "ip"
+        },
+        "idle_timeout": {
+          "title": "external_proxy.idle_timeout {#external_proxy-idle_timeout}",
+          "description": "How much time to wait while we don't have any active connections before exiting.\n\nCommon cases would be running a chain of processes that skip using the layer and don't connect to the proxy.\n\n```json { \"external_proxy\": { \"idle_timeout\": 30 } } ```",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "json_log": {
+          "title": "external_proxy.json_log {#external_proxy-json_log}",
+          "description": "Whether the proxy should output logs in JSON format. If false, logs are output in human-readable format.\n\nDefaults to true.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "log_destination": {
+          "title": "external_proxy.log_destination {#external_proxy-log_destination}",
+          "description": "Set the log destination for the external proxy.\n\n1. If the provided path ends with a separator (`/` on UNIX, `\\` on Windows), it will be treated as a path to directory where the log file should be created. 2. Otherwise, if the path exists, mirrord will check if it's a directory or not. 3. Otherwise, it will be treated as a path to the log file.\n\nmirrord will auto create all parent directories.\n\nDefaults to a randomized path inside the temporary directory.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "log_level": {
+          "title": "external_proxy.log_level {#external_proxy-log_level}",
+          "description": "Set the log level for the external proxy.\n\nThe value should follow the RUST_LOG convention (i.e `mirrord=trace`).\n\nDefaults to `mirrord=info,warn`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "start_idle_timeout": {
+          "title": "external_proxy.start_idle_timeout {#external_proxy-start_idle_timeout}",
+          "description": "How much time to wait for the first connection to the external proxy in seconds.\n\nCommon cases would be running with dlv or any other debugger, which sets a breakpoint on process execution, delaying the layer startup and connection to the external proxy.\n\n```json { \"external_proxy\": { \"start_idle_timeout\": 60 } } ```",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tls_enable": {
+          "description": "<!--${internal}-->\n\nWhether to use TLS or a plain TCP when accepting a connection from the internal proxy sidecar.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FeatureFileConfig": {
+      "description": "Controls mirrord features.\n\nSee the [technical reference, Technical Reference](https://metalbear.com/mirrord/docs/reference/) to learn more about what each feature does.\n\nThe [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options have support for a shortened version, that you can see [here](#root-shortened).\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } }, \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ] }, \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": false }, \"copy_target\": false, \"hostname\": true } } ```",
+      "type": "object",
+      "properties": {
+        "copy_target": {
+          "title": "feature.copy_target {#feature-copy_target}",
+          "description": "Creates a new copy of the target. mirrord will use this copy instead of the original target (e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/overview/teams/?utm_source=copytarget).\n\nThis feature is not compatible with rollout targets and running without a target (`targetless` mode).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CopyTargetFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "db_branches": {
+          "title": "feature.db_branches {#feature-db_branches}",
+          "description": "Configuration for the database branching feature.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DatabaseBranchesConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "env": {
+          "title": "feature.env {#feature-env}",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_EnvFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fs": {
+          "title": "feature.fs {#feature-fs}",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_FsUserConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hostname": {
+          "title": "feature.hostname {#feature-hostname}",
+          "description": "Should mirrord return the hostname of the target pod when calling `gethostname`",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "network": {
+          "title": "feature.network {#feature-network}",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_NetworkFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "split_queues": {
+          "title": "feature.split_queues {#feature-split_queues}",
+          "description": "Define filters to split queues by, and make your local application consume only messages that match those filters. If you don't specify any filter for a queue that is however declared in the `MirrordWorkloadQueueRegistry` of the target you're using, a match-nothing filter will be used, and your local application will not receive any messages from that queue.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SplitQueuesConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FileAgentDnsConfig": {
+      "description": "Configuration options for how the agent performs DNS resolution.",
+      "type": "object",
+      "properties": {
+        "attempts": {
+          "title": "agent.dns.attempts {#agent-dns-attempts}",
+          "description": "Specifies the number of DNS resolution attempts the agent will make before failing. Setting this too high may cause the internal proxy to time out and exit.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "timeout": {
+          "title": "agent.dns.timeout {#agent-dns-timeout}",
+          "description": "Specifies how long (in seconds) the agent will wait for a DNS response before timing out. If not specified the agent uses a default value of 1 second. Setting this too high may cause the internal proxy to time out and exit.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "FsModeConfig": {
+      "title": "feature.fs.mode {#feature-fs-mode}",
+      "description": "Configuration for enabling read-only or read-write file operations.\n\nThese options are overriden by user specified overrides and mirrord default overrides.\n\nIf you set [`\"localwithoverrides\"`](#feature-fs-mode-localwithoverrides) then some files can be read/write remotely based on our default/user specified. Default option for general file configuration.\n\nThe accepted values are: `\"local\"`, `\"localwithoverrides`, `\"read\"`, or `\"write`.",
+      "oneOf": [
+        {
+          "title": "feature.fs.mode.local {#feature-fs-mode-local}",
+          "description": "mirrord won't do anything fs-related, all operations will be local.",
+          "type": "string",
+          "enum": [
+            "local"
+          ]
+        },
+        {
+          "title": "feature.fs.mode.localwithoverrides {#feature-fs-mode-localwithoverrides}",
+          "description": "mirrord will run overrides on some file operations, but most will be local.",
+          "type": "string",
+          "enum": [
+            "localwithoverrides"
+          ]
+        },
+        {
+          "title": "feature.fs.mode.read {#feature-fs-mode-read}",
+          "description": "mirrord will read files from the remote, but won't write to them.",
+          "type": "string",
+          "enum": [
+            "read"
+          ]
+        },
+        {
+          "title": "feature.fs.mode.write {#feature-fs-mode-write}",
+          "description": "mirrord will read/write from the remote.",
+          "type": "string",
+          "enum": [
+            "write"
+          ]
+        }
+      ]
+    },
+    "FsUserConfig": {
+      "title": "feature.fs {#fs}",
+      "description": "Changes file operations behavior based on user configuration.\n\nSee the file operations [reference](https://metalbear.com/mirrord/docs/reference/fileops/) for more details, and [fs advanced](#fs-advanced) for more information on how to fully setup mirrord file operations.\n\n### Minimal `fs` config {#fs-minimal}\n\n```json { \"feature\": { \"fs\": \"read\" } } ```\n\n### Advanced `fs` config {#fs-advanced}\n\n```json { \"feature\": { \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ] } } } ```",
+      "anyOf": [
+        {
+          "description": "<!--${internal}--> Basic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS` (default).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FsModeConfig"
+            }
+          ]
+        },
+        {
+          "description": "<!--${internal}--> Allows the user to specify both [`FsModeConfig`] (as above), and configuration for the overrides.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/AdvancedFsUserConfig"
+            }
+          ]
+        }
+      ]
+    },
+    "HttpFilterFileConfig": {
+      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set as `\"steal\"`, ignored otherwise.\n\nFor example, to filter based on header: ```json { \"header_filter\": \"host: api\\\\..+\" } ``` Setting that filter will make mirrord only steal requests with the `host` header set to hosts that start with \"api\", followed by a dot, and then at least one more character.\n\nFor example, to filter based on path: ```json { \"path_filter\": \"^/api/\" } ``` Setting this filter will make mirrord only steal requests to URIs starting with \"/api/\".\n\nThis can be useful for filtering out Kubernetes liveness, readiness and startup probes. For example, for avoiding stealing any probe sent by kubernetes, you can set this filter: ```json { \"header_filter\": \"^User-Agent: (?!kube-probe)\" } ``` Setting this filter will make mirrord only steal requests that **do** have a user agent that **does not** begin with \"kube-probe\".\n\nSimilarly, you can exclude certain paths using a negative look-ahead: ```json { \"path_filter\": \"^(?!/health/)\" } ``` Setting this filter will make mirrord only steal requests to URIs that do not start with \"/health/\".\n\nWith `all_of` and `any_of`, you can use multiple HTTP filters at the same time.\n\nIf you want to steal HTTP requests that match **every** pattern specified, use `all_of`. For example, this filter steals only HTTP requests to endpoint `/api/my-endpoint` that contain header `x-debug-session` with value `121212`. ```json { \"all_of\": [ { \"header\": \"^x-debug-session: 121212$\" }, { \"path\": \"^/api/my-endpoint$\" } ] } ```\n\nIf you want to steal HTTP requests that match **any** of the patterns specified, use `any_of`. For example, this filter steals HTTP requests to endpoint `/api/my-endpoint` **and** HTTP requests that contain header `x-debug-session` with value `121212`. ```json { \"any_of\": [ { \"path\": \"^/api/my-endpoint$\"}, { \"header\": \"^x-debug-session: 121212$\" } ] } ```",
+      "type": "object",
+      "properties": {
+        "all_of": {
+          "title": "feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}",
+          "description": "An array of HTTP filters.\n\nEach inner filter specifies either header or path regex. Requests must match all of the filters to be stolen.\n\nCannot be an empty list.\n\nExample: ```json { \"all_of\": [ { \"header\": \"x-user: my-user$\" }, { \"path\": \"^/api/v1/my-endpoint\" } { \"method\": \"post\" } ] } ```",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/InnerFilter"
+          }
+        },
+        "any_of": {
+          "title": "feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}",
+          "description": "An array of HTTP filters.\n\nEach inner filter specifies either header or path regex. Requests must match at least one of the filters to be stolen.\n\nCannot be an empty list.\n\nExample: ```json { \"any_of\": [ { \"header\": \"^x-user: my-user$\" }, { \"path\": \"^/api/v1/my-endpoint\" } { \"method\": \"post\" } ] } ```",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/InnerFilter"
+          }
+        },
+        "body_filter": {
+          "title": "feature.network.incoming.http_filter.body_filter {#feature-network-incoming-http-body-filter}",
+          "description": "Matches the request based on the contents of its body.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BodyFilter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "header_filter": {
+          "title": "feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "method_filter": {
+          "title": "feature.network.incoming.http_filter.method_filter {#feature-network-incoming-http-method-filter}",
+          "description": "Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods), and non-standard HTTP methods.\n\nCase-insensitive. If the request method matches the filter, the request is stolen.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path_filter": {
+          "title": "feature.network.incoming.http_filter.path_filter {#feature-network-incoming-http-path-filter}",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nCase-insensitive. Tries to find match in the path (without query) and path+query. If any of the two matches, the request is stolen.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ports": {
+          "title": "feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}",
+          "description": "Activate the HTTP traffic filter only for these ports. When absent, filtering will be done for all ports.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_uint16"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "IncomingAdvancedFileConfig": {
+      "title": "incoming (advanced setup)",
+      "description": "Advanced user configuration for network incoming traffic.",
+      "type": "object",
+      "properties": {
+        "http_filter": {
+          "title": "HTTP Filter",
+          "description": "Sets up the HTTP traffic filter (currently, only useful when `incoming: steal`).\n\nSee [`filter`](##filter) for details.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_HttpFilterFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "https_delivery": {
+          "title": "https_delivery",
+          "description": "DEPRECATED: use `tls_delivery` instead.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LocalTlsDelivery"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ignore_localhost": {
+          "title": "ignore_localhost",
+          "description": "Consider removing when adding <https://github.com/metalbear-co/mirrord/issues/702>",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "ignore_ports": {
+          "title": "ignore_ports",
+          "description": "Ports to ignore when mirroring/stealing traffic. Useful if you want specific ports to be used locally only.\n\nMutually exclusive with [`ports`](###ports).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
+          }
+        },
+        "listen_ports": {
+          "title": "listen_ports",
+          "description": "Mapping for local ports to actually used local ports. When application listens on a port while steal/mirror is active we fallback to random ports to avoid port conflicts. Using this configuration will always use the specified port. If this configuration doesn't exist, mirrord will try to listen on the original port and if it fails it will assign a random port\n\nThis is useful when you want to access ports exposed by your service locally For example, if you have a service that listens on port `80` and you want to access it, you probably can't listen on `80` without sudo, so you can use `[[80, 4480]]` then access it on `4480` while getting traffic from remote `80`. The value of `port_mapping` doesn't affect this.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "array",
+            "items": [
+              {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              },
+              {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              }
+            ],
+            "maxItems": 2,
+            "minItems": 2
+          }
+        },
+        "mode": {
+          "title": "mode",
+          "description": "Allows selecting between mirrorring or stealing traffic.\n\nSee [`mode`](##mode (incoming)) for details.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/IncomingMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "on_concurrent_steal": {
+          "title": "on_concurrent_steal",
+          "description": "(Operator Only): if value of override will force close any other connections on requested target",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConcurrentSteal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "port_mapping": {
+          "title": "port_mapping",
+          "description": "Mapping for local ports to remote ports.\n\nThis is useful when you want to mirror/steal a port to a different port on the remote machine. For example, your local process listens on port `9333` and the container listens on port `80`. You'd use `[[9333, 80]]`",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "array",
+            "items": [
+              {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              },
+              {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              }
+            ],
+            "maxItems": 2,
+            "minItems": 2
+          }
+        },
+        "ports": {
+          "title": "ports",
+          "description": "List of ports to mirror/steal traffic from. Other ports will remain local.\n\nMutually exclusive with [`ignore_ports`](###ignore_ports).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
+          }
+        },
+        "tls_delivery": {
+          "title": "tls_delivery",
+          "description": "(Operator Only): configures how mirrord delivers stolen TLS traffic to the local application.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LocalTlsDelivery"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "IncomingFileConfig": {
+      "title": "incoming (network)",
+      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://metalbear.com/mirrord/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it to the local process, see [`steal`](##steal);\n\n### Minimal `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": \"steal\" } } } ```\n\n### Advanced `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000], \"listen_ports\": [[80, 8111]] } } } } ```",
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/IncomingMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        {
+          "$ref": "#/definitions/IncomingAdvancedFileConfig"
+        }
+      ]
+    },
+    "IncomingMode": {
+      "description": "Allows selecting between mirrorring or stealing traffic.\n\nCan be set to either `\"mirror\"` (default), `\"steal\"` or `\"off\"`.\n\n- `\"mirror\"`: Sniffs on TCP port, and send a copy of the data to listeners. - `\"off\"`: Disables the incoming network feature. - `\"steal\"`: Supports 2 modes of operation:\n\n1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the user listens in a TCP socket (enabling the feature is enough to make this work, no additional configuration is needed);\n\n2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the traffic on the port if it is HTTP;",
+      "oneOf": [
+        {
+          "description": "<!--${internal}--> ### mirror\n\nSniffs on TCP port, and send a copy of the data to listeners.",
+          "type": "string",
+          "enum": [
+            "mirror"
+          ]
+        },
+        {
+          "description": "<!--${internal}--> ### steal\n\nStealer supports 2 modes of operation:\n\n1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the user listens in a TCP socket (enabling the feature is enough to make this work, no additional configuration is needed);\n\n2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the traffic on the port if it is HTTP;",
+          "type": "string",
+          "enum": [
+            "steal"
+          ]
+        },
+        {
+          "description": "<!--${internal}--> ### Off\n\nDisables the incoming network feature.",
+          "type": "string",
+          "enum": [
+            "off"
+          ]
+        }
+      ]
+    },
+    "InnerFilter": {
+      "anyOf": [
+        {
+          "title": "feature.network.incoming.inner_filter.header_filter {#feature-network-incoming-inner-header-filter}",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
+          "type": "object",
+          "required": [
+            "header"
+          ],
+          "properties": {
+            "header": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "title": "feature.network.incoming.inner_filter.path_filter {#feature-network-incoming-inner-path-filter}",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nCase-insensitive. Tries to find match in the path (without query) and path+query. If any of the two matches, the request is stolen.",
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "method"
+          ],
+          "properties": {
+            "method": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "title": "feature.network.incoming.inner_filter.body_filter {#feature-network-incoming-inner-body-filter}",
+          "description": "Matches the request based on the contents of its body. Currently only JSON body filtering is supported.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/BodyFilter"
+            }
+          ]
+        }
+      ]
+    },
+    "InternalProxyFileConfig": {
+      "description": "Configuration for the internal proxy mirrord spawns for each local mirrord session that local layers use to connect to the remote agent\n\nThis is seldom used, but if you get `ConnectionRefused` errors, you might want to increase the timeouts a bit.\n\n```json { \"internal_proxy\": { \"start_idle_timeout\": 30, \"idle_timeout\": 5 } } ```",
+      "type": "object",
+      "properties": {
+        "idle_timeout": {
+          "title": "internal_proxy.idle_timeout {#internal_proxy-idle_timeout}",
+          "description": "How much time to wait while we don't have any active connections before exiting.\n\nCommon cases would be running a chain of processes that skip using the layer and don't connect to the proxy.\n\n```json { \"internal_proxy\": { \"idle_timeout\": 30 } } ```",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "json_log": {
+          "title": "internal_proxy.json_log {#internal_proxy-json_log}",
+          "description": "Whether the proxy should output logs in JSON format. If false, logs are output in human-readable format.\n\nDefaults to true.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "log_destination": {
+          "title": "internal_proxy.log_destination {#internal_proxy-log_destination}",
+          "description": "Set the log destination for the internal proxy.\n\n1. If the provided path ends with a separator (`/` on UNIX, `\\` on Windows), it will be treated as a path to directory where the log file should be created. 2. Otherwise, if the path exists, mirrord will check if it's a directory or not. 3. Otherwise, it will be treated as a path to the log file.\n\nmirrord will auto create all parent directories.\n\nDefaults to a randomized path inside the temporary directory.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "log_level": {
+          "title": "internal_proxy.log_level {#internal_proxy-log_level}",
+          "description": "Set the log level for the internal proxy.\n\nThe value should follow the RUST_LOG convention (i.e `mirrord=trace`).\n\nDefaults to `mirrord=info,warn`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "process_logging_interval": {
+          "title": "internal_proxy.process_logging_interval {#internal_proxy-process_logging_interval}",
+          "description": "How often to log information about connected processes in seconds.\n\nThis feature logs details about processes that are currently connected to the internal proxy, including their PID, process name, command line, and connection status.\n\n```json { \"internal_proxy\": { \"process_logging_interval\": 60 } } ```",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "socket_timeout": {
+          "description": "<!--${internal}-->\n\nSometimes the cpu is too busy with other tasks and the internal proxy sockets end up timing out. It's set at a ridiculous high value to prevent this from happening when a user hits a breakpoint while debugging, and stays stopped for a while, which sometimes results in mirrord not working when they resume.\n\n```json { \"internal_proxy\": { \"socket_timeout\": 31536000 } } ```",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "start_idle_timeout": {
+          "title": "internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}",
+          "description": "How much time to wait for the first connection to the proxy in seconds.\n\nCommon cases would be running with dlv or any other debugger, which sets a breakpoint on process execution, delaying the layer startup and connection to proxy.\n\n```json { \"internal_proxy\": { \"start_idle_timeout\": 60 } } ```",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "JobTarget": {
+      "type": "object",
+      "required": [
+        "job"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "job": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "LatencyFileConfig": {
+      "description": "Configuration for adding artificial latency to outgoing network operations. Useful for testing application behavior under network delay conditions.",
+      "type": "object",
+      "properties": {
+        "receive_delay": {
+          "title": "_experimental_ latency.receive_delay {#experimental-latency-receive_delay}",
+          "description": "Delay in milliseconds for outgoing receive operations (Agent → Layer).\n\nDefaults to `0` (no delay).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "transmit_delay": {
+          "title": "_experimental_ latency.transmit_delay {#experimental-latency-transmit_delay}",
+          "description": "Delay in milliseconds for outgoing send operations (Layer → Agent).\n\nDefaults to `0` (no delay).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "LocalTlsDelivery": {
+      "description": "Stolen TLS traffic can be delivered to the local application either as TLS or as plain TCP. Note that stealing TLS traffic requires mirrord Operator support.\n\nTo have the stolen TLS traffic delivered with plain TCP, use:\n\n```json { \"protocol\": \"tcp\" } ```\n\nTo have the traffic delivered with TLS, use: ```json { \"protocol\": \"tls\" } ```\n\nBy default, the local mirrord TLS client will trust any certificate presented by the local application's TLS server. To override this behavior, you can either:\n\n1. Specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file directories. Each found certificate will be used as a trust anchor. 2. Specify a path to the cartificate chain used by the server.\n\nExample with trust roots: ```json { \"protocol\": \"tls\", \"trust_roots\": [\"/path/to/cert.pem\", \"/path/to/cert/dir\"] } ```\n\nExample with certificate chain: ```json { \"protocol\": \"tls\", \"server_cert\": \"/path/to/cert.pem\" } ```\n\nTo make a TLS connection to the local application's server, mirrord's TLS client needs a server name. You can supply it manually like this: ```json { \"protocol\": \"tls\", \"server_name\": \"my.test.server.name\" } ```\n\nIf you don't supply the server name:\n\n1. If `server_cert` is given, and the found end-entity certificate contains a valid server name, this server name will be used; 2. Otherwise, if the original client supplied an SNI extension, the server name from that extension will be used; 3. Otherwise, if the stolen request's URL contains a valid server name, that server name will be used; 4. Otherwise, `localhost` will be used.",
+      "type": "object",
+      "required": [
+        "protocol"
+      ],
+      "properties": {
+        "protocol": {
+          "title": "feature.network.incoming.tls_delivery.protocol {#feature-network-incoming-tls_delivery-protocol}",
+          "description": "Protocol to use when delivering the TLS traffic locally.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TlsDeliveryProtocol"
+            }
+          ]
+        },
+        "server_cert": {
+          "description": "Path to a PEM file containing the certificate chain used by the local application's TLS server.\n\nThis file must contain at least one certificate. It can contain entries of other types, e.g private keys, which are ignored.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "server_name": {
+          "title": "feature.network.incoming.tls_delivery.server_name {#feature-network-incoming-tls_delivery-server_name}",
+          "description": "Server name to use when making a connection.\n\nMust be a valid DNS name or an IP address.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust_roots": {
+          "title": "feature.network.incoming.tls_delivery.trust_roots {#feature-network-incoming-tls_delivery-trust_roots}",
+          "description": "Paths to PEM files and directories with PEM files containing allowed root certificates.\n\nDirectories are not traversed recursively.\n\nEach certificate found in the files is treated as an allowed root. The files can contain entries of other types, e.g private keys, which are ignored.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "MongodbBranchCollectionCopyConfig": {
+      "description": "Configuration for copying a specific collection.\n\nExample:\n\n```json { \"users\": { \"filter\": \"{\\\"name\\\": {\\\"$in\\\": [\\\"alice\\\", \\\"bob\\\"]}}\" }, \"orders\": { \"filter\": \"{\\\"created_at\\\": {\\\"$gt\\\": 1759948761}}\" } } ```\n\nWith the config above, only alice and bob from the `users` collection and orders created after the given timestamp will be copied.",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "description": "A MongoDB query filter in JSON format. Documents matching this filter will be copied.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "MongodbBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their MongoDB branch database:\n\n- Empty\n\nCreates an empty database. If the source DB connection options are found from the chosen target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord operator looks for the `name` field from the branch DB config object. This option is useful for users that run DB migrations themselves before starting the application.\n\n- All\n\nCopies both schema and data of all collections. Supports optional collection filters to copy only specific collections or filter documents within collections.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "collections": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/MongodbBranchCollectionCopyConfig"
+              }
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "empty"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "collections": {
+              "description": "Optional collection filters. If not specified, all collections are copied. If specified, only the listed collections are copied with their optional filters.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/MongodbBranchCollectionCopyConfig"
+              }
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "MysqlBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their MySQL branch database:\n\n- Empty\n\nCreates an empty database. If the source DB connection options are found from the chosen target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord operator looks for the `name` field from the branch DB config object. This option is useful for users that run DB migrations themselves before starting the application.\n\n- Schema\n\nCreates an empty database and copies schema of all tables.\n\n- All\n\nCopies both schema and data of all tables. This option shall only be used when the data volume of the source database is minimal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "empty"
+              ]
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/MysqlBranchTableCopyConfig"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "schema"
+              ]
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/MysqlBranchTableCopyConfig"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "MysqlBranchTableCopyConfig": {
+      "description": "In addition to copying an empty database or all tables' schema, mirrord operator will copy data from the source DB when an array of table configs are specified.\n\nExample:\n\n```json { \"users\": { \"filter\": \"my_db.users.name = 'alice' OR my_db.users.name = 'bob'\" }, \"orders\": { \"filter\": \"my_db.orders.created_at > 1759948761\" } } ```\n\nWith the config above, only alice and bob from the `users` table and orders created after the given timestamp will be copied.",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "NetworkFileConfig": {
+      "description": "Controls mirrord network operations.\n\nSee the network traffic [reference](https://metalbear.com/mirrord/docs/reference/traffic/) for more details.\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": { \"enabled\": true, \"filter\": { \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"] } } } } } ```",
+      "type": "object",
+      "properties": {
+        "dns": {
+          "title": "feature.network.dns {#feature-network-dns}",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_DnsFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "incoming": {
+          "title": "feature.network.incoming {#feature-network-incoming}",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_IncomingFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ipv6": {
+          "title": "feature.network.ipv6 {#feature-network-ipv6}",
+          "description": "Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6, or connects to other services over IPv6.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "outgoing": {
+          "title": "feature.network.outgoing {#feature-network-outgoing}",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_OutgoingFileConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "OutgoingFileConfig": {
+      "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic/#outgoing) for more details.\n\nYou can use either the `remote` or `local` value to turn outgoing traffic tunneling on or off.\n\n```json { \"feature\": { \"network\": { \"outgoing\": \"remote\" } } } ```\n\nAlternatively, you can use more fine-grained configuration. The `remote` and `local` config for this feature are **mutually** exclusive.\n\n```json { \"feature\": { \"network\": { \"outgoing\": { \"tcp\": true, \"udp\": true, \"ignore_localhost\": false, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"unix_streams\": \"bear.+\" } } } } ```",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "title": "feature.network.outgoing.filter {#feature.network.outgoing.filter}",
+          "description": "Filters that are used to send specific traffic from either the remote pod or the local app",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OutgoingFilterConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ignore_localhost": {
+          "title": "feature.network.outgoing.ignore_localhost {#feature.network.outgoing.ignore_localhost}",
+          "description": "Defaults to `false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "tcp": {
+          "title": "feature.network.outgoing.tcp {#feature.network.outgoing.tcp}",
+          "description": "Defaults to `true`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "udp": {
+          "title": "feature.network.outgoing.udp {#feature.network.outgoing.udp}",
+          "description": "Defaults to `true`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "unix_streams": {
+          "title": "feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}",
+          "description": "Connect to these unix streams remotely (and to all other paths locally).\n\nYou can either specify a single value or an array of values. Each value is interpreted as a regular expression ([Supported Syntax](https://docs.rs/regex/1.7.1/regex/index.html#syntax)).\n\nWhen your application connects to a unix socket, the target address will be converted to a string (non-utf8 bytes are replaced by a placeholder character) and matched against the set of regexes specified here. If there is a match, mirrord will connect your application with the target unix socket address on the target pod. Otherwise, it will leave the connection to happen locally on your machine.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "OutgoingFilterConfig": {
+      "description": "List of addresses/ports/subnets that should be sent through either the remote pod or local app, depending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when outgoing traffic is sent from the remote pod (which is the default behavior when you enable outgoing traffic), or from the local app (default when you have outgoing traffic disabled).\n\nTakes a list of values, such as:\n\n- Only UDP traffic on subnet `1.1.1.0/24` on port 1337 will go through the remote pod.\n\n```json { \"remote\": [\"udp://1.1.1.0/24:1337\"] } ```\n\n- Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go through the remote pod. ```json { \"remote\": [\"google.com:1337\", \"google.com:7331\"] } ```\n\n- Only TCP traffic on `localhost` on port 1337 will go through the local app, the rest will be emmited remotely in the cluster.\n\n```json { \"local\": [\"tcp://localhost:1337\"] } ```\n\n- Only outgoing traffic on port `1337` and `7331` will go through the local app. ```json { \"local\": [\":1337\", \":7331\"] } ```\n\nValid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.",
+      "oneOf": [
+        {
+          "description": "When filters are specified under `remote`, matching traffic will go through the remote pod, everything else will go through local.",
+          "type": "object",
+          "required": [
+            "remote"
+          ],
+          "properties": {
+            "remote": {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "When filters are specified under `local`, matching traffic will go through the local app, everything else will go through the remote pod.",
+          "type": "object",
+          "required": [
+            "local"
+          ],
+          "properties": {
+            "local": {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PgBranchCopyConfig": {
+      "description": "Users can choose from the following copy mode to bootstrap their PostgreSQL branch database:\n\n- Empty\n\nCreates an empty database. If the source DB connection options are found from the chosen target, mirrord operator extracts the database name and create an empty DB. Otherwise, mirrord operator looks for the `name` field from the branch DB config object. This option is useful for users that run DB migrations themselves before starting the application.\n\n- Schema\n\nCreates an empty database and copies schema of all tables.\n\n- All\n\nCopies both schema and data of all tables. This option shall only be used when the data volume of the source database is minimal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "empty"
+              ]
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/PgBranchTableCopyConfig"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "schema"
+              ]
+            },
+            "tables": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/PgBranchTableCopyConfig"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "PgBranchTableCopyConfig": {
+      "description": "In addition to copying an empty database or all tables' schema, mirrord operator will copy data from the source DB when an array of table configs are specified.\n\nExample:\n\n```json { \"users\": { \"filter\": \"name = 'alice' OR name = 'bob'\" }, \"orders\": { \"filter\": \"created_at > '2025-01-01'\" } } ```\n\nWith the config above, only alice and bob from the `users` table and orders created after the given timestamp will be copied.",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "PgIamAuthConfig": {
+      "description": "Environment variable sources follow the same pattern as `connection.url`: - `{ \"type\": \"env\", \"variable\": \"VAR_NAME\" }` - direct env var from pod spec - `{ \"type\": \"env_from\", \"variable\": \"VAR_NAME\" }` - from configMapRef/secretRef",
+      "oneOf": [
+        {
+          "description": "For AWS RDS/Aurora IAM authentication, set `type` to `\"aws_rds\"`.\n\nExample: ```json { \"iam_auth\": { \"type\": \"aws_rds\", \"region\": { \"type\": \"env\", \"variable\": \"MY_AWS_REGION\" }, \"access_key_id\": { \"type\": \"env_from\", \"variable\": \"AWS_KEY\" } } } ```\n\nThe init container must have AWS credentials (via IRSA, instance profile, or env vars).\n\nParameters: - `region`: AWS region. If not specified, uses AWS_REGION or AWS_DEFAULT_REGION. - `access_key_id`: AWS Access Key ID. If not specified, uses AWS_ACCESS_KEY_ID. - `secret_access_key`: AWS Secret Access Key. If not specified, uses AWS_SECRET_ACCESS_KEY. - `session_token`:  AWS Session Token (for temporary credentials). If not specified, uses AWS_SESSION_TOKEN.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "access_key_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "region": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "secret_access_key": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "session_token": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "aws_rds"
+              ]
+            }
+          }
+        },
+        {
+          "description": "For GCP Cloud SQL IAM authentication, set `type` to `\"gcp_cloud_sql\"`.\n\nExample for GCP Cloud SQL with credentials from a secret: ```json { \"iam_auth\": { \"type\": \"gcp_cloud_sql\", \"credentials_json\": { \"type\": \"env_from\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS_JSON\" } } } ```\n\nThe init container must have GCP credentials (via Workload Identity or service account key). Use either `credentials_json` OR `credentials_path`, not both.\n\nParameters: - `credentials_json`: Inline service account JSON key content. Specify the env var that contains the raw JSON content of the service account key. Example: ` { \"type\": \"env\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS_JSON\" } `. - `credentials_path`: Path to service account JSON key file. Specify the env var that contains the file path to the service account key. The file must be accessible from the init container. Example: `{\"type\": \"env\", \"variable\": \"GOOGLE_APPLICATION_CREDENTIALS\"}`. - `project`: GCP project ID. If not specified, uses GOOGLE_CLOUD_PROJECT or GCP_PROJECT.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "credentials_json": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "credentials_path": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "project": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DbBranchingConnectionSourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "gcp_cloud_sql"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "PodTarget": {
+      "description": "<!--${internal}--> Mirror the pod specified by [`PodTarget::pod`].",
+      "type": "object",
+      "required": [
+        "pod"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pod": {
+          "description": "<!--${internal}--> Pod to mirror.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "QueueFilter": {
+      "description": "Amazon Simple Queue Service and Kafka are supported.\n\nMore queue types might be added in the future.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "message_filter",
+            "queue_type"
+          ],
+          "properties": {
+            "message_filter": {
+              "description": "A filter is a mapping between message attribute names and regexes they should match. The local application will only receive messages that match **all** of the given patterns. This means, only messages that have **all** of the attributes in the filter, with values of those attributes matching the respective patterns.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "enum": [
+                "SQS"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "message_filter",
+            "queue_type"
+          ],
+          "properties": {
+            "message_filter": {
+              "description": "A filter is a mapping between message header names and regexes they should match. The local application will only receive messages that match **all** of the given patterns. This means, only messages that have **all** of the headers in the filter, with values of those headers matching the respective patterns.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "enum": [
+                "Kafka"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "RedisBranchLocation": {
+      "type": "string",
+      "enum": [
+        "local",
+        "remote"
+      ]
+    },
+    "RedisConnectionConfig": {
+      "description": "Supports either a complete URL or separated connection parameters. If both are provided, `url` takes precedence.\n\nThe following fields can be sourced via remote environment variable: - url - host - password - username\n\nExample: ```json \"connection\": { \"host\": { \"type\": \"env\", \"variable\": \"REDIS_HOST\" }, \"port\": 6379, \"password\": { \"type\": \"env\", \"variable\": \"REDIS_PASSWORD\" } } ```",
+      "type": "object",
+      "properties": {
+        "database": {
+          "title": "feature.db_branches[].connection.database (type: redis)",
+          "description": "Redis database number (default: 0).",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "host": {
+          "title": "feature.db_branches[].connection.host (type: redis)",
+          "description": "Redis host/hostname. Can be sourced from an environment variable.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RedisValueSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "password": {
+          "title": "feature.db_branches[].connection.password (type: redis)",
+          "description": "Redis password for authentication. Can be sourced from an environment variable.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RedisValueSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "port": {
+          "title": "feature.db_branches[].connection.port (type: redis)",
+          "description": "Redis port (default: 6379).",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "tls": {
+          "title": "feature.db_branches[].connection.tls (type: redis)",
+          "description": "Enable TLS/SSL connection.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "url": {
+          "title": "feature.db_branches[].connection.url (type: redis)",
+          "description": "Complete Redis URL (e.g., `redis://user:pass@host:6379/0`). Can be sourced from an environment variable.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RedisValueSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "username": {
+          "title": "feature.db_branches[].connection.username (type: redis)",
+          "description": "Redis username (Redis 6+ ACL). Can be sourced from an environment variable.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RedisValueSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RedisEnvSource": {
+      "description": "<!--${internal}--> Environment variable source for Redis values.",
+      "type": "object",
+      "required": [
+        "type",
+        "variable"
+      ],
+      "properties": {
+        "container": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "$ref": "#/definitions/RedisEnvSourceType"
+        },
+        "variable": {
+          "type": "string"
+        }
+      }
+    },
+    "RedisEnvSourceType": {
+      "description": "<!--${internal}--> Type marker for environment variable sources.",
+      "type": "string",
+      "enum": [
+        "env"
+      ]
+    },
+    "RedisLocalConfig": {
+      "description": "Configuration for local Redis runtime.",
+      "type": "object",
+      "properties": {
+        "container_command": {
+          "title": "feature.db_branches[].local.container_command (type: redis)",
+          "description": "Custom path to the container command. If not provided, uses the runtime name from PATH (e.g., \"docker\"). Example: `/usr/local/bin/docker` or `/home/user/.local/bin/podman`",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "container_runtime": {
+          "title": "feature.db_branches[].local.container_runtime (type: redis)",
+          "description": "Which container runtime to use (Docker, Podman, or nerdctl). Only applies when `runtime` is `container` or `auto`.",
+          "default": "docker",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContainerRuntime"
+            }
+          ]
+        },
+        "options": {
+          "title": "feature.db_branches[].local.options (type: redis)",
+          "description": "Additional Redis configuration options.",
+          "default": {
+            "args": []
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/RedisOptions"
+            }
+          ]
+        },
+        "port": {
+          "title": "feature.db_branches[].local.port (type: redis)",
+          "description": "Local port to bind Redis to (default: 6379).",
+          "default": 6379,
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "runtime": {
+          "title": "feature.db_branches[].local.runtime (type: redis)",
+          "description": "Runtime backend for local Redis: `container`, `redis_server`, or `auto`.",
+          "default": "container",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RedisRuntime"
+            }
+          ]
+        },
+        "server_command": {
+          "title": "feature.db_branches[].local.server_command (type: redis)",
+          "description": "Custom path to the redis-server binary. If not provided, uses \"redis-server\" from PATH. Example: `/opt/redis/bin/redis-server`",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "title": "feature.db_branches[].local.version (type: redis)",
+          "description": "Redis version/tag to use (default: \"7-alpine\"). Used as the container image tag.",
+          "default": "7-alpine",
+          "type": "string"
+        }
+      }
+    },
+    "RedisOptions": {
+      "description": "Example: ```json { \"args\": [\"--maxmemory\", \"256mb\", \"--appendonly\", \"yes\"] } ```",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Raw arguments passed directly to redis-server or as Docker CMD args. Use standard Redis config syntax (e.g., \"--maxmemory 256mb\").",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "RedisRuntime": {
+      "description": "For container-based runtimes, mirrord spawns the Redis image in a container. For `redis_server`, it runs the native binary directly.\n\nBackends: - `container` (default) - Uses a container runtime (Docker/Podman/nerdctl), configured via `container_runtime`. - `redis_server` - Uses native redis-server binary - `auto` - Tries container first, falls back to redis-server",
+      "type": "string",
+      "enum": [
+        "container",
+        "redis_server",
+        "auto"
+      ]
+    },
+    "RedisValueSource": {
+      "description": "<!--${internal}--> Source for a Redis configuration value.\n\nValues can be specified directly or sourced from environment variables.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/RedisEnvSource"
+        }
+      ]
+    },
+    "ReplicaSetTarget": {
+      "type": "object",
+      "required": [
+        "replica_set"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replica_set": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RolloutTarget": {
+      "description": "<!--${internal}--> Mirror the rollout specified by [`RolloutTarget::rollout`].",
+      "type": "object",
+      "required": [
+        "rollout"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rollout": {
+          "description": "<!--${internal}--> Rollout to mirror.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SecurityContext": {
+      "type": "object",
+      "properties": {
+        "app_armor_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityProfile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seccomp_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SecurityProfile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SecurityProfile": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "localhost_profile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      }
+    },
+    "ServiceTarget": {
+      "type": "object",
+      "required": [
+        "service"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SplitQueuesConfig": {
+      "description": "```json { \"feature\": { \"split_queues\": { \"first-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very\" } }, \"second-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"who\": \"you$\" } }, \"third-queue\": { \"queue_type\": \"Kafka\", \"message_filter\": { \"who\": \"you$\" } }, \"fourth-queue\": { \"queue_type\": \"Kafka\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very\" } }, } } } ```",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/QueueFilter"
+      }
+    },
+    "StartupRetryFileConfig": {
+      "description": "Controls how many times, and how often mirrord retries its initial Kubernetes API requests (e.g. for resolving the target or connecting to the mirrord Operator).\n\nIf you're having cluster connectivity issues when **starting** mirrord, consider increasing [`max_retries`](#startup_retry-max_retries) and changing both [`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry some of its initial Kubernetes API requests.\n\n```json { \"startup_retry\": { \"min_ms\": 500, \"max_ms\": 5000, \"max_retries\": 2, } } ```",
+      "type": "object",
+      "properties": {
+        "max_ms": {
+          "title": "startup_retry.max_ms {#startup_retry-max_ms}",
+          "description": "Sets the max interval (in milliseconds) of retries for Kubernetes API requests made by mirrord during startup (e.g. for resolving the target or connecting to the mirrord Operator).\n\nDefaults to `5000` milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "max_retries": {
+          "title": "startup_retry.max_retries {#startup_retry-max_retries}",
+          "description": "Sets the max amount of retries for Kubernetes API requests made by mirrord during startup (e.g. for resolving the target or connecting to the mirrord Operator).\n\nIf you want to **disable** request retries, set this value to `0`.\n\nDefaults to `2`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "min_ms": {
+          "title": "startup_retry.min_ms {#startup_retry-min_ms}",
+          "description": "Sets the min interval (in milliseconds) of retries for Kubernetes API requests made by mirrord during startup (e.g. for resolving the target or connecting to the mirrord Operator).\n\nDefaults to `500` milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "StatefulSetTarget": {
+      "type": "object",
+      "required": [
+        "stateful_set"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stateful_set": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Target": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/DeploymentTarget"
+        },
+        {
+          "$ref": "#/definitions/PodTarget"
+        },
+        {
+          "$ref": "#/definitions/RolloutTarget"
+        },
+        {
+          "$ref": "#/definitions/JobTarget"
+        },
+        {
+          "$ref": "#/definitions/CronJobTarget"
+        },
+        {
+          "$ref": "#/definitions/StatefulSetTarget"
+        },
+        {
+          "$ref": "#/definitions/ServiceTarget"
+        },
+        {
+          "$ref": "#/definitions/ReplicaSetTarget"
+        },
+        {
+          "enum": [
+            "targetless"
+          ]
+        }
+      ]
+    },
+    "TargetFileConfig": {
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Target"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "namespace": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "description": "<!--${internal}--> Path is optional so that it can also be specified via env var instead of via conf file, but it is not optional in a resulting [`TargetConfig`] object - either there is a path, or the target configuration is `None`.",
+              "default": null,
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Target"
+                },
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "TlsDeliveryProtocol": {
+      "oneOf": [
+        {
+          "description": "TLS traffic will be delivered over TCP.",
+          "type": "string",
+          "enum": [
+            "tcp"
+          ]
+        },
+        {
+          "description": "TLS traffic will be delivered over TLS.",
+          "type": "string",
+          "enum": [
+            "tls"
+          ]
+        }
+      ]
+    },
+    "ToggleableConfig_for_DnsFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/DnsFileConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_EnvFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/EnvFileConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_FsUserConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/FsUserConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_HttpFilterFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/HttpFilterFileConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_IncomingFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/IncomingFileConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_NetworkFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/NetworkFileConfig"
+        }
+      ]
+    },
+    "ToggleableConfig_for_OutgoingFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/OutgoingFileConfig"
+        }
+      ]
+    },
+    "VecOrSingle_for_String": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "VecOrSingle_for_uint16": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
+          }
+        }
+      ]
+    },
+    "io.k8s.api.core.v1.ResourceClaim": {
+      "description": "ResourceClaim references one entry in PodSpec.ResourceClaims.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "description": "Name must match the name of one entry in pod.spec.resourceClaims of the Pod where this field is used. It makes that resource available inside a container.",
+          "type": "string"
+        }
+      }
+    },
+    "io.k8s.api.core.v1.ResourceRequirements": {
+      "description": "ResourceRequirements describes the compute resource requirements.",
+      "type": "object",
+      "properties": {
+        "claims": {
+          "description": "Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.\n\nThis is an alpha field and requires enabling the DynamicResourceAllocation feature gate.\n\nThis field is immutable. It can only be set for containers.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/io.k8s.api.core.v1.ResourceClaim"
+          }
+        },
+        "limits": {
+          "description": "Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/io.k8s.apimachinery.pkg.api.resource.Quantity"
+          }
+        },
+        "requests": {
+          "description": "Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/io.k8s.apimachinery.pkg.api.resource.Quantity"
+          }
+        }
+      }
+    },
+    "io.k8s.api.core.v1.Toleration": {
+      "description": "The pod this Toleration is attached to tolerates any taint that matches the triple <key,value,effect> using the matching operator <operator>.",
+      "type": "object",
+      "properties": {
+        "effect": {
+          "description": "Effect indicates the taint effect to match. Empty means match all taint effects. When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.",
+          "type": "string"
+        },
+        "key": {
+          "description": "Key is the taint key that the toleration applies to. Empty means match all taint keys. If the key is empty, operator must be Exists; this combination means to match all values and all keys.",
+          "type": "string"
+        },
+        "operator": {
+          "description": "Operator represents a key's relationship to the value. Valid operators are Exists and Equal. Defaults to Equal. Exists is equivalent to wildcard for value, so that a pod can tolerate all taints of a particular category.",
+          "type": "string"
+        },
+        "tolerationSeconds": {
+          "description": "TolerationSeconds represents the period of time the toleration (which must be of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default, it is not set, which means tolerate the taint forever (do not evict). Zero and negative values will be treated as 0 (evict immediately) by the system.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "value": {
+          "description": "Value is the taint value the toleration matches to. If the operator is Exists, the value should be empty, otherwise just a regular string.",
+          "type": "string"
+        }
+      }
+    },
+    "io.k8s.apimachinery.pkg.api.resource.Quantity": {
+      "description": "Quantity is a fixed-point representation of a number. It provides convenient marshaling/unmarshaling in JSON and YAML, in addition to String() and AsInt64() accessors.\n\nThe serialization format is:\n\n``` <quantity>        ::= <signedNumber><suffix>\n\n\t(Note that <suffix> may be empty, from the \"\" case in <decimalSI>.)\n\n<digit>           ::= 0 | 1 | ... | 9 <digits>          ::= <digit> | <digit><digits> <number>          ::= <digits> | <digits>.<digits> | <digits>. | .<digits> <sign>            ::= \"+\" | \"-\" <signedNumber>    ::= <number> | <sign><number> <suffix>          ::= <binarySI> | <decimalExponent> | <decimalSI> <binarySI>        ::= Ki | Mi | Gi | Ti | Pi | Ei\n\n\t(International System of units; See: http://physics.nist.gov/cuu/Units/binary.html)\n\n<decimalSI>       ::= m | \"\" | k | M | G | T | P | E\n\n\t(Note that 1024 = 1Ki but 1000 = 1k; I didn't choose the capitalization.)\n\n<decimalExponent> ::= \"e\" <signedNumber> | \"E\" <signedNumber> ```\n\nNo matter which of the three exponent forms is used, no quantity may represent a number greater than 2^63-1 in magnitude, nor may it have more than 3 decimal places. Numbers larger or more precise will be capped or rounded up. (E.g.: 0.1m will rounded up to 1m.) This may be extended in the future if we require larger or smaller quantities.\n\nWhen a Quantity is parsed from a string, it will remember the type of suffix it had, and will use the same type again when it is serialized.\n\nBefore serializing, Quantity will be put in \"canonical form\". This means that Exponent/suffix will be adjusted up or down (with a corresponding increase or decrease in Mantissa) such that:\n\n- No precision is lost - No fractional digits will be emitted - The exponent (or suffix) is as large as possible.\n\nThe sign will be omitted unless the number is negative.\n\nExamples:\n\n- 1.5 will be serialized as \"1500m\" - 1.5Gi will be serialized as \"1536Mi\"\n\nNote that the quantity will NEVER be internally represented by a floating point number. That is the whole point of this exercise.\n\nNon-canonical values will still parse as long as they are well formed, but will be re-emitted in their canonical form. (So always use canonical form, or don't diff.)\n\nThis format is intended to make it difficult to use these numbers without writing some sort of special handling code in the hopes that that will cause implementors to also use a fixed point implementation.",
+      "type": "string"
+    }
+  }
+}

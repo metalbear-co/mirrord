@@ -1,5 +1,5 @@
 //! Packs the vendored docs and skills in `corpus/` into a gzipped tar that `src/corpus.rs` embeds,
-//! which keeps the markdown from taking its full size in the binary.
+//! which keeps the files from taking its full size in the binary.
 
 use std::{
     env,

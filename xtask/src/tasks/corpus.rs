@@ -22,11 +22,10 @@ struct Corpus {
     /// The directory under `mirrord/mcp/corpus` it is vendored into, and the name of its pin.
     name: &'static str,
     repo: &'static str,
-    /// The directory of the repo holding the content. Only the markdown files under it are
-    /// vendored, at the same paths relative to it.
+    /// The directory of the repo holding the content, vendored at the same paths relative to it.
     root: &'static str,
-    /// Markdown files under `root` that aren't vendored.
-    exclude: &'static [&'static str],
+    /// Vendor only the markdown under `root`, rather than every file.
+    markdown_only: bool,
 }
 
 const CORPORA: &[Corpus] = &[
@@ -34,15 +33,15 @@ const CORPORA: &[Corpus] = &[
         name: "docs",
         repo: "metalbear-co/docs",
         root: "docs",
-        exclude: &[],
+        markdown_only: true,
     },
     Corpus {
         name: "skills",
         repo: "metalbear-co/skills",
         root: "skills",
-        // A copy of the config reference, which `mirrord mcp` already serves from the config
-        // schema compiled into it.
-        exclude: &["mirrord-config/references/configuration.md"],
+        // Skills point the agent at the schemas and values files bundled with them, so those are
+        // served too.
+        markdown_only: false,
     },
 ];
 
@@ -210,7 +209,7 @@ fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
             .and_then(|path| path.strip_prefix('/'))
             .context("git listed a file outside the corpus root")?;
         let hidden = relative.split('/').any(|segment| segment.starts_with('.'));
-        if !relative.ends_with(".md") || hidden || corpus.exclude.contains(&relative) {
+        if hidden || (corpus.markdown_only && !relative.ends_with(".md")) {
             continue;
         }
 
@@ -224,7 +223,7 @@ fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
     fs::remove_dir_all(&checkout)?;
     ensure!(
         !files.is_empty(),
-        "{}@{} has no markdown under `{}`",
+        "{}@{} has nothing to vendor under `{}`",
         pin.repo,
         pin.commit,
         corpus.root
