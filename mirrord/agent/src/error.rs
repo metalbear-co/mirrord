@@ -1,5 +1,7 @@
 use std::{process::ExitStatus, sync::Arc};
 
+use mirrord_cluster_auth::ClusterAuthError;
+use mirrord_nightly_polyfill::error::Report;
 use mirrord_sessions_manager_client::SessionsManagerClientError;
 use thiserror::Error;
 
@@ -75,6 +77,25 @@ pub(crate) enum AgentError {
 
     #[error("Connection handoff failed: {0}")]
     RemoteIncomingHandoffError(#[from] RemoteIncomingHandoffError),
+
+    #[error("{0} is required when MIRRORD_OPERATOR_API_URL is set")]
+    MissingOperatorConfig(&'static str),
+
+    #[error(
+        "MIRRORD_SESSIONS_MANAGER_URL and MIRRORD_OPERATOR_API_URL are mutually exclusive; set \
+         the first for a standalone sessions-manager, the second for one hosted by the mirrord \
+         operator"
+    )]
+    ConflictingSessionsManagerEndpoints,
+
+    #[error(
+        "no AWS region to sign the EKS token for: MIRRORD_OPERATOR_API_URL is not an EKS \
+         endpoint hostname, so set AWS_REGION to the cluster's region"
+    )]
+    MissingOperatorRegion,
+
+    #[error("Failed to connect to the operator's cluster: {}", Report::new(.0))]
+    OperatorClusterConnection(#[from] ClusterAuthError),
 }
 
 pub(crate) type AgentResult<T, E = AgentError> = std::result::Result<T, E>;

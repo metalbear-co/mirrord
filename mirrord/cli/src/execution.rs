@@ -568,7 +568,7 @@ impl MirrordExecution {
                 .clone()
                 .map(|unset| unset.to_vec())
                 .unwrap_or_default(),
-            uses_operator: matches!(connect_info, AgentConnectInfo::Operator(..)),
+            uses_operator: connect_info.is_operator(),
         };
 
         Ok((execution, proxy_addr))
@@ -711,7 +711,10 @@ impl MirrordExecution {
         // session ID chosen during connection setup or fall back to a local UUID.
         let session_id = match &connect_info {
             AgentConnectInfo::Operator(session) => format!("{:X}", session.id()),
-            AgentConnectInfo::SessionsManager(connect_info) => connect_info.user_session_id.clone(),
+            AgentConnectInfo::SessionsManager(connect_info)
+            | AgentConnectInfo::OperatorSessionsManager(connect_info) => {
+                connect_info.user_session_id.clone()
+            }
             _ => uuid::Uuid::new_v4().to_string(),
         };
         proxy_command.env("MIRRORD_SESSION_ID", &session_id);
@@ -776,11 +779,7 @@ impl MirrordExecution {
             intproxy_address.to_string(),
         );
 
-        Ok((
-            env_vars,
-            Some(proxy_process),
-            matches!(connect_info, AgentConnectInfo::Operator(..)),
-        ))
+        Ok((env_vars, Some(proxy_process), connect_info.is_operator()))
     }
 
     /// Construct filter and retrieve remote environment from the connected agent using

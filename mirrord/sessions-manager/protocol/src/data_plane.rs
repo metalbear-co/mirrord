@@ -7,6 +7,13 @@ use url::Url;
 
 use crate::error::SessionsManagerProtocolError;
 
+/// Header carrying a [`DataPlaneAuthorization`] to the operator-hosted sessions-manager.
+///
+/// kube-apiserver authenticates the caller from `Authorization` and does not forward it to the
+/// operator's aggregated APIService, so the per-assignment credential needs a header of its own
+/// on that path. A standalone sessions-manager receives it in `Authorization`.
+pub const OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER: &str = "x-mirrord-data-plane-authorization";
+
 /// A credential whose value is exposed only at an explicit transport boundary.
 ///
 /// Serialization deliberately exposes the credential because [`crate::ConnectionAssignment`] is the
@@ -70,8 +77,21 @@ impl<'de> Deserialize<'de> for DataPlaneAuthorization {
 /// The current sessions-manager contract requires this endpoint to be an absolute path on the
 /// control-plane origin. The authorization in an assignment is forwarded to the resolved endpoint.
 /// Supporting another origin requires an explicit protocol change rather than an ambiguous URI.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct DataPlaneEndpoint(#[serde(with = "http_serde::uri")] Uri);
+
+#[derive(Deserialize)]
+struct DataPlaneEndpointWire(#[serde(with = "http_serde::uri")] Uri);
+
+impl<'de> Deserialize<'de> for DataPlaneEndpoint {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let endpoint = DataPlaneEndpointWire::deserialize(deserializer)?;
+        Self::new(endpoint.0).map_err(serde::de::Error::custom)
+    }
+}
 
 impl DataPlaneEndpoint {
     pub fn new(uri: Uri) -> Result<Self, SessionsManagerProtocolError> {
@@ -150,6 +170,34 @@ mod tests {
 
     use super::DataPlaneEndpoint;
     use crate::SessionsManagerProtocolError;
+
+    #[test]
+    fn deserialization_rejects_invalid_endpoints() {
+        for endpoint in [
+            "https://attacker.example/ws",
+            "//attacker.example/ws",
+            "/../etc/passwd",
+            "/foo/../bar",
+            r"/\attacker.example/ws",
+        ] {
+            assert!(
+                serde_json::from_value::<DataPlaneEndpoint>(serde_json::json!(endpoint)).is_err(),
+                "{endpoint}",
+            );
+        }
+    }
+
+    #[test]
+    fn valid_endpoint_roundtrips() {
+        let endpoint =
+            DataPlaneEndpoint::new(Uri::from_static("/ws/allocation?peer=agent")).unwrap();
+        let encoded = serde_json::to_value(&endpoint).unwrap();
+        assert_eq!(encoded, serde_json::json!("/ws/allocation?peer=agent"));
+        assert_eq!(
+            serde_json::from_value::<DataPlaneEndpoint>(encoded).unwrap(),
+            endpoint
+        );
+    }
 
     #[test]
     fn rejects_backslash_paths() {

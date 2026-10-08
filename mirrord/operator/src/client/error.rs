@@ -76,6 +76,9 @@ pub enum OperatorApiError {
     #[error("feature {feature} is not enabled on this mirrord operator")]
     FeatureDisabled { feature: NewOperatorFeature },
 
+    #[error("mirrord operator does not serve the operator-hosted sessions-manager")]
+    ServerlessSessionsManagerNotServed,
+
     #[error("{operation} failed with code {}: {}", status.code, status.reason)]
     StatusFailure {
         operation: OperatorOperation,

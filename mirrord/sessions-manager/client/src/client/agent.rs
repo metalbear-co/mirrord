@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use mirrord_protocol_io::{Agent, Connection};
 use mirrord_sessions_manager_protocol::{
     AgentIdentity, AssignmentId, ConnectionAssignment, ReplicaId, ServiceScope,
@@ -9,129 +7,54 @@ use tokio::{
     task::{JoinHandle, JoinSet},
 };
 use tokio_util::sync::CancellationToken;
-use url::Url;
 
 use crate::{
-    assignments::DeduplicatingAssignmentSubscriber,
-    client::ClientBuilder,
-    config::SessionsManagerConfig,
-    control_plane::HttpControlPlaneClient,
-    credentials::{CredentialProvider, credentials_from_env},
-    data_plane::{DataPlaneConnectRequest, DataPlaneTransport, WebSocketDataPlaneTransport},
-    error::SessionsManagerClientError,
-    retry::with_deadline,
+    assignments::DeduplicatingAssignmentSubscriber, client::validate_scope,
+    error::SessionsManagerClientError, retry::with_deadline, transport::SessionsManagerTransport,
 };
 
 const CONNECTIONS_QUEUE_CAPACITY: usize = 1024;
 const QUEUE_WARNING_THRESHOLDS: &[usize] = &[128, 256, 512, 1024];
 
-/// Registers an agent replica and starts its sessions-manager control plane.
-pub struct AgentClient<T = WebSocketDataPlaneTransport> {
-    identity: AgentIdentity,
-    /// Shuts down the [`AgentControlPlane`] task this client starts.
-    cancellation: CancellationToken,
-    builder: ClientBuilder<T>,
-}
-
-impl AgentClient<WebSocketDataPlaneTransport> {
-    pub fn new(
-        scope: ServiceScope,
-        replica_id: ReplicaId,
-        cancellation: impl Into<Option<CancellationToken>>,
-    ) -> Result<Self, SessionsManagerClientError> {
-        Ok(Self {
-            identity: AgentIdentity::new(replica_id),
-            cancellation: cancellation.into().unwrap_or_default(),
-            builder: ClientBuilder {
-                config: SessionsManagerConfig::new(
-                    scope,
-                    SessionsManagerConfig::base_url_from_env()?,
-                )?,
-                credentials: credentials_from_env()?,
-                transport: WebSocketDataPlaneTransport,
-            },
-        })
-    }
-}
-
-impl<T: DataPlaneTransport> AgentClient<T> {
-    pub fn with_credentials(mut self, credentials: Arc<dyn CredentialProvider>) -> Self {
-        self.builder = self.builder.with_credentials(credentials);
-        self
-    }
-
-    pub fn with_transport<U: DataPlaneTransport>(self, transport: U) -> AgentClient<U> {
-        AgentClient {
-            identity: self.identity,
-            cancellation: self.cancellation,
-            builder: self.builder.with_transport(transport),
-        }
-    }
-
-    pub fn start_control_plane(self) -> Result<AgentControlPlane, SessionsManagerClientError> {
-        let data_plane = DataPlaneContext {
-            base_url: self.builder.config.base_url.clone(),
-            transport: self.builder.transport,
-            credentials: self.builder.credentials.clone(),
-        };
-        let client = HttpControlPlaneClient::new(&self.builder.config, self.builder.credentials)?;
-
-        Ok(AgentControlPlane::start(
-            client,
-            self.identity,
-            self.cancellation,
-            data_plane,
-        ))
-    }
-}
-
-/// Carries the shared inputs required to upgrade an assignment's data-plane connection.
-struct DataPlaneContext<T> {
-    base_url: Url,
-    transport: T,
-    credentials: Arc<dyn CredentialProvider>,
-}
-
-impl<T: Clone> Clone for DataPlaneContext<T> {
-    fn clone(&self) -> Self {
-        Self {
-            base_url: self.base_url.clone(),
-            transport: self.transport.clone(),
-            credentials: self.credentials.clone(),
-        }
-    }
-}
-
-/// Owns the agent's background control-plane task and its established connections.
-pub struct AgentControlPlane {
+/// Registers an agent replica with sessions-manager and runs its control plane in the
+/// background, handing out each data-plane connection it establishes.
+///
+/// Dropping the client shuts the control plane down.
+pub struct AgentClient {
     receiver: mpsc::Receiver<Connection<Agent>>,
     cancellation: CancellationToken,
     task: Option<JoinHandle<Result<(), SessionsManagerClientError>>>,
 }
 
-impl AgentControlPlane {
-    fn start<T: DataPlaneTransport + 'static>(
-        client: HttpControlPlaneClient,
-        identity: AgentIdentity,
-        cancellation: CancellationToken,
-        data_plane: DataPlaneContext<T>,
-    ) -> Self {
+impl AgentClient {
+    /// Spawns the control-plane task, so this must be called within a Tokio runtime.
+    ///
+    /// `cancellation` shuts the control plane down when fired, as does [`Self::shutdown`].
+    pub fn start<T: SessionsManagerTransport>(
+        scope: ServiceScope,
+        replica_id: ReplicaId,
+        transport: T,
+        cancellation: impl Into<Option<CancellationToken>>,
+    ) -> Result<Self, SessionsManagerClientError> {
+        let scope = validate_scope(scope)?;
+        let identity = AgentIdentity::new(replica_id);
+        let cancellation = cancellation.into().unwrap_or_default();
         let (sender, receiver) = mpsc::channel(CONNECTIONS_QUEUE_CAPACITY);
         let queue = QueueSender { sender };
 
         let task = tokio::spawn(Self::run(
-            client,
+            transport,
+            scope,
             identity,
             queue,
             cancellation.clone(),
-            data_plane,
         ));
 
-        Self {
+        Ok(Self {
             receiver,
             cancellation,
             task: Some(task),
-        }
+        })
     }
 
     /// Shuts the control plane down when `cancellation` fires, by dropping [`Self::run_loop`]
@@ -140,36 +63,37 @@ impl AgentControlPlane {
     /// This is the only place the token is observed. Everything below is plain polling — dropping
     /// the loop future also drops its [`JoinSet`], which aborts any data-plane upgrade still in
     /// flight.
-    async fn run<T: DataPlaneTransport + 'static>(
-        client: HttpControlPlaneClient,
+    async fn run<T: SessionsManagerTransport>(
+        transport: T,
+        scope: ServiceScope,
         identity: AgentIdentity,
         queue: QueueSender,
         cancellation: CancellationToken,
-        data_plane: DataPlaneContext<T>,
     ) -> Result<(), SessionsManagerClientError> {
         tokio::select! {
             _ = cancellation.cancelled() => Ok(()),
-            result = Self::run_loop(client, identity, queue, data_plane) => {
+            result = Self::run_loop(transport, scope, identity, queue) => {
                 result
             }
         }
     }
 
-    async fn run_loop<T: DataPlaneTransport + 'static>(
-        client: HttpControlPlaneClient,
+    async fn run_loop<T: SessionsManagerTransport>(
+        transport: T,
+        scope: ServiceScope,
         identity: AgentIdentity,
         queue: QueueSender,
-        data_plane: DataPlaneContext<T>,
     ) -> Result<(), SessionsManagerClientError> {
         let mut dataplane_upgrades = JoinSet::new();
-        let mut assignments_subscriber = DeduplicatingAssignmentSubscriber::new(client, identity);
+        let mut assignments_subscriber =
+            DeduplicatingAssignmentSubscriber::new(transport.clone(), scope, identity);
 
         let result = loop {
             tokio::select! {
                 assignment = assignments_subscriber.next() => match assignment {
                     Ok(assignment) => Self::spawn_upgrade_task(
                         &mut dataplane_upgrades,
-                        data_plane.clone(),
+                        transport.clone(),
                         assignment,
                     ),
                     Err(error) => break Err(error),
@@ -213,29 +137,20 @@ impl AgentControlPlane {
         result
     }
 
-    fn spawn_upgrade_task<T: DataPlaneTransport + 'static>(
+    fn spawn_upgrade_task<T: SessionsManagerTransport>(
         dataplane_upgrades: &mut JoinSet<(
             AssignmentId,
             Result<Connection<Agent>, SessionsManagerClientError>,
         )>,
-        data_plane: DataPlaneContext<T>,
+        transport: T,
         assignment: ConnectionAssignment,
     ) {
-        let DataPlaneContext {
-            base_url,
-            transport,
-            credentials,
-        } = data_plane;
         let assignment_id = assignment.assignment_id.clone();
         dataplane_upgrades.spawn(async move {
             let deadline = tokio::time::Instant::now() + transport.connect_timeout();
             let result = with_deadline(
                 Some(deadline),
-                transport.connect::<Agent>(DataPlaneConnectRequest {
-                    control_plane_url: base_url,
-                    assignment,
-                    credentials,
-                }),
+                transport.connect_data_plane::<Agent>(assignment),
             )
             .await
             .flatten()
@@ -271,7 +186,7 @@ impl AgentControlPlane {
     }
 }
 
-impl Drop for AgentControlPlane {
+impl Drop for AgentClient {
     fn drop(&mut self) {
         self.cancellation.cancel();
         if let Some(task) = &self.task {
@@ -308,5 +223,101 @@ impl QueueSender {
             Err(mpsc::error::TrySendError::Full(_)) => Err(QueueSendError::Full),
             Err(mpsc::error::TrySendError::Closed(_)) => Err(QueueSendError::Closed),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use bytes::Bytes;
+    use futures::{StreamExt, stream};
+    use http_body_util::{BodyExt, Empty};
+    use hyper::Request;
+    use hyper_util::rt::TokioIo;
+    use mirrord_operator_websocket::{
+        connection::OperatorConnection,
+        upgrade::{BoxError, UpgradeContract, connect_ws_direct},
+    };
+    use mirrord_protocol_io::ProtocolEndpoint;
+    use mirrord_sessions_manager_protocol::AssignmentSubscription;
+    use tokio::{sync::watch, time::Instant};
+
+    use super::*;
+    use crate::control_plane::{ControlPlaneEvent, ControlPlaneEventStream};
+
+    /// Offers the same assignment on every subscription and upgrades it over an in-memory
+    /// WebSocket, so the agent control plane runs end to end without a sessions-manager.
+    #[derive(Clone)]
+    struct MockTransport;
+
+    impl SessionsManagerTransport for MockTransport {
+        async fn subscribe_assignments(
+            &self,
+            _scope: &ServiceScope,
+            _subscription: &AssignmentSubscription,
+        ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
+            let assignment = serde_json::from_value(serde_json::json!({
+                "assignment_id": "assignment-1",
+                "data_plane_endpoint": "/ws/assignment-1",
+                "authorization": "Bearer test",
+            }))?;
+            let events = stream::iter([Ok(ControlPlaneEvent::Assignment(assignment))])
+                .chain(stream::pending());
+            let (_activity_tx, activity_rx) = watch::channel(Instant::now());
+            Ok(ControlPlaneEventStream::new(Box::pin(events), activity_rx))
+        }
+
+        async fn connect_data_plane<E: ProtocolEndpoint + Send + Unpin + 'static>(
+            &self,
+            _assignment: ConnectionAssignment,
+        ) -> Result<OperatorConnection<E>, SessionsManagerClientError> {
+            let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+            tokio::spawn(async move {
+                let _socket = tokio_tungstenite::accept_async(server_io).await.unwrap();
+                std::future::pending::<()>().await;
+            });
+
+            let request = Request::get("http://sessions-manager.test/ws/assignment-1")
+                .body(Vec::new())
+                .unwrap();
+            let socket = connect_ws_direct(request, UpgradeContract::Direct, |request| async {
+                let (mut sender, connection) =
+                    hyper::client::conn::http1::handshake(TokioIo::new(client_io))
+                        .await
+                        .map_err(|error| Box::new(error) as BoxError)?;
+                tokio::spawn(connection.with_upgrades());
+                let response = sender
+                    .send_request(request.map(|_| Empty::<Bytes>::new()))
+                    .await
+                    .map_err(|error| Box::new(error) as BoxError)?;
+                Ok(response.map(|body| {
+                    body.map_err(|error| Box::new(error) as BoxError)
+                        .boxed_unsync()
+                }))
+            })
+            .await?;
+
+            Ok(OperatorConnection::new(socket))
+        }
+    }
+
+    /// The client spawns its control-plane loop and upgrade tasks generically over the transport,
+    /// so this also guards that a transport's futures stay `Send`.
+    #[tokio::test]
+    async fn control_plane_delivers_connection_from_transport() {
+        let scope = ServiceScope {
+            environment: "test".to_owned(),
+            service: "test".to_owned(),
+        };
+        let mut client =
+            AgentClient::start(scope, "replica-a".to_owned().into(), MockTransport, None).unwrap();
+
+        let connection = tokio::time::timeout(Duration::from_secs(10), client.recv())
+            .await
+            .expect("control plane delivered a connection in time");
+        assert!(connection.is_some());
+
+        client.shutdown().await.unwrap();
     }
 }

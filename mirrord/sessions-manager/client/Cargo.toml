@@ -23,6 +23,7 @@ mirrord-sessions-manager-protocol.workspace = true
 bytes.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
+kube.workspace = true
 hyper-rustls.workspace = true
 hyper-util = { workspace = true, features = [
   "client",
@@ -40,6 +41,7 @@ tracing.workspace = true
 serde.workspace = true
 slug.workspace = true
 serde_json.workspace = true
+serde_urlencoded.workspace = true
 tokio-util.workspace = true
 reqwest.workspace = true
 url.workspace = true
@@ -48,6 +50,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+tower = { workspace = true, features = ["util"] }
 
 [lib]
 doctest = false

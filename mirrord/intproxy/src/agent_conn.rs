@@ -20,7 +20,7 @@ use mirrord_protocol::DaemonMessage;
 use mirrord_protocol_io::ConnectionOutput;
 use mirrord_protocol_io::{Client, Connection, ProtocolError};
 use mirrord_sessions_manager_client::{
-    IntproxyClient, SessionsManagerClientError, SessionsManagerConnectInfo,
+    IntproxyClient, OperatorTransport, SessionsManagerClientError, SessionsManagerConnectInfo,
 };
 #[cfg(not(test))]
 use serde::Deserialize;
@@ -83,12 +83,21 @@ pub enum AgentConnectInfo {
     DirectKubernetes(AgentKubernetesConnectInfo),
     /// Connect directly to the agent through SessionsManager.
     SessionsManager(SessionsManagerConnectInfo),
+    /// Connect to the agent through the sessions-manager hosted by the operator, authenticating
+    /// with the user's kubeconfig.
+    OperatorSessionsManager(SessionsManagerConnectInfo),
     /// Use a dummy connection. The sender is used for
     /// sending the new dummy connection to the driver code.
     ///
     /// For tests only.
     #[cfg(test)]
     Dummy(#[serde(skip)] mpsc::Sender<(mpsc::Sender<DaemonMessage>, ConnectionOutput<Client>)>),
+}
+
+impl AgentConnectInfo {
+    pub fn is_operator(&self) -> bool {
+        matches!(self, Self::Operator(_) | Self::OperatorSessionsManager(_))
+    }
 }
 
 impl fmt::Display for AgentConnectInfoDiscriminants {
@@ -98,6 +107,7 @@ impl fmt::Display for AgentConnectInfoDiscriminants {
             Self::Operator => "operator",
             Self::DirectKubernetes => "agent",
             Self::SessionsManager => "sessions_manager",
+            Self::OperatorSessionsManager => "operator_sessions_manager",
             #[cfg(test)]
             Self::Dummy => "dummy",
         };
@@ -253,6 +263,23 @@ impl AgentConnection {
                     ReconnectFlow::ConnectInfo {
                         config: Box::new(config.clone()),
                         connect_info: AgentConnectInfo::SessionsManager(connect_info),
+                    },
+                )
+            }
+
+            AgentConnectInfo::OperatorSessionsManager(connect_info) => {
+                let transport = OperatorTransport::new(
+                    OperatorApi::serverless_sessions_manager_client(config).await?,
+                );
+                let proxy_client = IntproxyClient::with_transport(connect_info.clone(), transport)?;
+                let conn = Box::pin(proxy_client.connect(Duration::from_secs(60)))
+                    .await
+                    .map(Connection::from_channel)?;
+                (
+                    conn,
+                    ReconnectFlow::ConnectInfo {
+                        config: Box::new(config.clone()),
+                        connect_info: AgentConnectInfo::OperatorSessionsManager(connect_info),
                     },
                 )
             }

@@ -11,6 +11,13 @@ pub enum SessionsManagerClientError {
     Http(#[from] reqwest::Error),
     #[error("WebSocket data-plane upgrade failed: {0}")]
     WebSocketUpgrade(#[from] ConnectError),
+    #[error("Kubernetes request to the operator-hosted sessions-manager failed: {0}")]
+    Kube(Box<kube::Error>),
+    #[error(
+        "the mirrord operator does not serve sessions-manager routes (HTTP {0}); \
+         enable `operator.sessionsManager=true` in the operator Helm chart"
+    )]
+    ServerlessSessionsManagerNotServed(reqwest::StatusCode),
 
     #[error("URL is invalid: {0}")]
     Url(#[from] url::ParseError),
@@ -20,6 +27,10 @@ pub enum SessionsManagerClientError {
     InvalidContentType(Option<String>),
     #[error(transparent)]
     SseEventStream(#[from] EventStreamError<reqwest::Error>),
+    #[error(transparent)]
+    KubeSseEventStream(Box<EventStreamError<kube::Error>>),
+    #[error("failed to encode the control-plane subscription query: {0}")]
+    QueryEncoding(#[from] serde_urlencoded::ser::Error),
     #[error("sessions-manager {0} stream ended")]
     SseStreamEnded(&'static str),
     #[error(
@@ -45,6 +56,8 @@ pub enum SessionsManagerClientError {
     ProtocolError(#[from] SessionsManagerProtocolError),
     #[error("authorization header is invalid")]
     InvalidAuthorization,
+    #[error("assignment contains an invalid operator data-plane endpoint")]
+    InvalidOperatorDataPlaneEndpoint,
     #[error("sessions-manager shared secret is not a valid header value")]
     InvalidSharedSecret,
     #[error("WebSocket request construction failed: {0}")]
@@ -72,11 +85,12 @@ pub enum SessionsManagerClientError {
 impl SessionsManagerClientError {
     pub(crate) fn is_retryable(&self) -> bool {
         match self {
-            Self::HttpStatus(status) => {
-                *status == reqwest::StatusCode::REQUEST_TIMEOUT
-                    || *status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                    || status.is_server_error()
-            }
+            Self::HttpStatus(status) => is_retryable_status(*status),
+            Self::Kube(error) => is_retryable_kube_error(error),
+            Self::KubeSseEventStream(error) => match error.as_ref() {
+                EventStreamError::Transport(error) => is_retryable_kube_error(error),
+                _ => false,
+            },
             Self::WebSocket(_)
             | Self::Http(_)
             | Self::SseEventStream(EventStreamError::Transport(_))
@@ -89,6 +103,67 @@ impl SessionsManagerClientError {
     }
 }
 
+fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::REQUEST_TIMEOUT
+        || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || status.is_server_error()
+}
+
+fn is_retryable_kube_error(error: &kube::Error) -> bool {
+    match error {
+        kube::Error::Api(status) => {
+            reqwest::StatusCode::from_u16(status.code).is_ok_and(is_retryable_status)
+        }
+        kube::Error::HyperError(_) => true,
+        kube::Error::Service(error) => is_retryable_transport_error(error.as_ref()),
+        kube::Error::ReadEvents(error) => is_retryable_io_error(error),
+        _ => false,
+    }
+}
+
+fn is_retryable_transport_error(error: &(dyn std::error::Error + 'static)) -> bool {
+    if let Some(error) = error.downcast_ref::<kube::Error>() {
+        return is_retryable_kube_error(error);
+    }
+    if error.downcast_ref::<kube::client::AuthError>().is_some() {
+        return false;
+    }
+    if let Some(error) = error.downcast_ref::<std::io::Error>() {
+        return is_retryable_io_error(error);
+    }
+    if error.downcast_ref::<hyper::Error>().is_some() {
+        return true;
+    }
+    error.source().is_some_and(is_retryable_transport_error)
+}
+
+fn is_retryable_io_error(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::ConnectionRefused
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::NotConnected
+            | std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::TimedOut
+            | std::io::ErrorKind::Interrupted
+            | std::io::ErrorKind::UnexpectedEof
+            | std::io::ErrorKind::WouldBlock
+    )
+}
+
+impl From<kube::Error> for SessionsManagerClientError {
+    fn from(error: kube::Error) -> Self {
+        Self::Kube(Box::new(error))
+    }
+}
+
+impl From<EventStreamError<kube::Error>> for SessionsManagerClientError {
+    fn from(error: EventStreamError<kube::Error>) -> Self {
+        Self::KubeSseEventStream(Box::new(error))
+    }
+}
+
 impl From<tokio_tungstenite::tungstenite::Error> for SessionsManagerClientError {
     fn from(error: tokio_tungstenite::tungstenite::Error) -> Self {
         Self::WebSocket(Box::new(error))
@@ -96,3 +171,41 @@ impl From<tokio_tungstenite::tungstenite::Error> for SessionsManagerClientError 
 }
 
 pub type Result<T> = std::result::Result<T, SessionsManagerClientError>;
+
+#[cfg(test)]
+mod tests {
+    use super::SessionsManagerClientError;
+
+    #[test]
+    fn authentication_errors_are_terminal() {
+        let errors = [
+            kube::Error::Auth(kube::client::AuthError::ExecPluginFailed),
+            kube::Error::Service(Box::new(kube::Error::Auth(
+                kube::client::AuthError::ExecPluginFailed,
+            ))),
+            kube::Error::Service(Box::new(kube::client::AuthError::AuthExecStart(
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "auth exec timed out"),
+            ))),
+        ];
+        for error in errors {
+            assert!(!SessionsManagerClientError::from(error).is_retryable());
+        }
+    }
+
+    #[test]
+    fn connection_reset_is_retryable() {
+        let error = kube::Error::Service(Box::new(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "connection reset",
+        )));
+        assert!(SessionsManagerClientError::from(error).is_retryable());
+    }
+
+    #[test]
+    fn kube_sse_authentication_errors_are_terminal() {
+        let error = eventsource_stream::EventStreamError::Transport(kube::Error::Auth(
+            kube::client::AuthError::ExecPluginFailed,
+        ));
+        assert!(!SessionsManagerClientError::from(error).is_retryable());
+    }
+}
