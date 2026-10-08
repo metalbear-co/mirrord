@@ -7,21 +7,23 @@
 //! - the tools in [`tools`], answered offline from what is compiled into this binary;
 //! - the `mirrord://info` resource, describing this mirrord installation and the [`corpus`] it
 //!   ships;
+//! - every vendored skill, as a prompt and as a `mirrord://skills/<name>` resource;
 //! - [`INSTRUCTIONS`], which clients hand to the model.
 //!
 //! Usage is reported through [`telemetry`], from [`McpServer`]'s handler methods, so tools do not
 //! report anything themselves.
 
-use std::{sync::Once, time::Instant};
+use std::{ops::Not, sync::Once, time::Instant};
 
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, tool::ToolCallContext},
     model::{
-        CallToolRequestParams, CallToolResponse, DiscoverResult, Implementation,
-        InitializeRequestParams, InitializeResult, ListResourcesResult, PaginatedRequestParams,
-        ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
-        ResourceContents, ServerCapabilities, ServerConfig,
+        CallToolRequestParams, CallToolResponse, DiscoverResult, GetPromptRequestParams,
+        GetPromptResponse, GetPromptResult, Implementation, InitializeRequestParams,
+        InitializeResult, ListPromptsResult, ListResourcesResult, PaginatedRequestParams, Prompt,
+        PromptMessage, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
+        Resource, ResourceContents, Role, ServerCapabilities, ServerConfig,
     },
     service::{RequestContext, ServerInitializeError},
     tool_handler,
@@ -30,7 +32,11 @@ use serde_json::json;
 use thiserror::Error;
 
 pub use crate::telemetry::McpTelemetry;
-use crate::telemetry::{McpTool, ToolOutcome};
+use crate::{
+    corpus::SKILLS,
+    telemetry::{McpTool, ToolOutcome},
+    tools::get_skill,
+};
 
 mod corpus;
 mod schema;
@@ -39,16 +45,33 @@ pub mod tools;
 
 /// Handed to the model by the client, to steer it towards the tools.
 pub const INSTRUCTIONS: &str = "mirrord runs local processes in the context of a Kubernetes \
-cluster. Every mirrord config you generate or change, whether a `mirrord.json` or a \
-`mirrord-up.yaml`, must be checked with `validate_config` before it is written: pass the complete \
-file content, fix every issue it reports and validate again, until `issues` is empty. Never write \
-a config that has not validated, and don't rely on your own knowledge of the config format, which \
-may not match the installed mirrord version. To learn what an option does, which values it takes \
-or which mirrord plan it needs, call `explain_config_option` with its path instead of guessing. \
-The `mirrord://info` resource gives the installed mirrord version.";
+cluster.
+
+Before starting any mirrord task, call `get_skill` without arguments to list the mirrord skills, \
+then get the skill that matches the task and follow it.
+
+Every mirrord config you generate or change, whether a `mirrord.json` or a `mirrord-up.yaml`, \
+must be checked with `validate_config` before it is written: pass the complete file content, fix \
+every issue it reports and validate again, until `issues` is empty. Never write a config that has \
+not validated, and don't rely on your own knowledge of the config format, which may not match the \
+installed mirrord version. To learn what an option does, which values it takes or which mirrord \
+plan it needs, call `explain_config_option` with its path instead of guessing. The \
+`mirrord://info` resource gives the installed mirrord version.
+
+When mirrord fails, validate every config involved with `validate_config` before proposing a \
+fix, and propose one fix at a time.
+
+Clusters are usually shared with other developers:
+- Default to `mirror` for incoming traffic. Use `steal` only when your process must be the one \
+responding, and on a shared cluster steal with an HTTP filter so you only take your own requests.
+- Target staging or development clusters, never production.
+- Sessions clean up on exit, and nothing you run is deployed to the cluster.";
 
 /// URI of the resource describing this mirrord installation.
 const INFO_RESOURCE_URI: &str = "mirrord://info";
+
+/// Prefix of the URIs of the skill resources, followed by the skill's name.
+const SKILL_RESOURCE_URI_PREFIX: &str = "mirrord://skills/";
 
 #[derive(Debug, Error)]
 pub enum McpError {
@@ -100,6 +123,7 @@ impl ServerHandler for McpServer {
         ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
+                .enable_prompts()
                 .enable_resources()
                 .build(),
         )
@@ -152,13 +176,19 @@ impl ServerHandler for McpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        Ok(ListResourcesResult::with_all_items(vec![
-            Resource::new(INFO_RESOURCE_URI, "info")
-                .with_description(
-                    "The installed mirrord version, and the docs and skills commits it ships.",
-                )
-                .with_mime_type("application/json"),
-        ]))
+        let info = Resource::new(INFO_RESOURCE_URI, "info")
+            .with_description(
+                "The installed mirrord version, and the docs and skills commits it ships.",
+            )
+            .with_mime_type("application/json");
+        let skills = SKILLS.iter().map(|(name, skill)| {
+            Resource::new(format!("{SKILL_RESOURCE_URI_PREFIX}{name}"), *name)
+                .with_description(skill.description.clone())
+                .with_mime_type("text/markdown")
+        });
+        Ok(ListResourcesResult::with_all_items(
+            std::iter::once(info).chain(skills).collect(),
+        ))
     }
 
     async fn read_resource(
@@ -166,6 +196,16 @@ impl ServerHandler for McpServer {
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
+        if let Some(skill) = request
+            .uri
+            .strip_prefix(SKILL_RESOURCE_URI_PREFIX)
+            .and_then(|name| SKILLS.get(name))
+        {
+            return Ok(ReadResourceResult::new(vec![
+                ResourceContents::text(skill.body, request.uri).with_mime_type("text/markdown"),
+            ])
+            .into());
+        }
         if request.uri != INFO_RESOURCE_URI {
             return Err(ErrorData::resource_not_found(
                 format!("unknown resource `{}`", request.uri),
@@ -183,5 +223,52 @@ impl ServerHandler for McpServer {
                 .with_mime_type("application/json"),
         ])
         .into())
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        Ok(ListPromptsResult::with_all_items(
+            SKILLS
+                .iter()
+                .map(|(name, skill)| Prompt::new(*name, Some(&skill.description), None))
+                .collect(),
+        ))
+    }
+
+    /// Serves a skill's `SKILL.md`, followed by where to get the files it bundles: a prompt is
+    /// one message, and the skill refers to those files by path.
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        let Some(skill) = SKILLS.get(request.name.as_str()) else {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "unknown prompt `{}`, the available prompts are: {}",
+                    request.name,
+                    get_skill::list(SKILLS.keys()),
+                ),
+                None,
+            ));
+        };
+
+        let mut text = skill.body.to_owned();
+        if skill.files.is_empty().not() {
+            text.push_str(&format!(
+                "\n\nThis skill bundles these files, which the `get_skill` tool returns given \
+                `name: \"{}\"` and the file's path as `file`: {}\n",
+                request.name,
+                get_skill::list(skill.files.keys()),
+            ));
+        }
+        Ok(
+            GetPromptResult::new(vec![PromptMessage::new_text(Role::User, text)])
+                .with_description(skill.description.clone())
+                .into(),
+        )
     }
 }

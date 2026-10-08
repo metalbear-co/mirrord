@@ -4,12 +4,14 @@
 // Tests index into the JSON results with `value[key]`; a panic just fails the test.
 #![allow(clippy::indexing_slicing)]
 
+use std::ops::Not;
+
 use mirrord_mcp::{INSTRUCTIONS, McpServer, McpTelemetry};
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{
-        CallToolRequestParams, ClientConfig, ProtocolVersion, ReadResourceRequestParams,
-        ResourceContents,
+        CallToolRequestParams, ClientConfig, GetPromptRequestParams, ProtocolVersion,
+        ReadResourceRequestParams, ResourceContents,
     },
     service::RunningService,
 };
@@ -196,4 +198,83 @@ async fn serves_info_resource() {
         assert_eq!(info[corpus]["commit"].as_str().unwrap().len(), 40);
         assert!(info[corpus]["synced_at"].is_string());
     }
+}
+
+fn get_skill_call(arguments: Value) -> CallToolRequestParams {
+    CallToolRequestParams::new("get_skill").with_arguments(arguments.as_object().unwrap().clone())
+}
+
+/// Every skill `get_skill` lists is also served as a prompt and a resource, all from the same
+/// `SKILL.md`.
+#[tokio::test]
+async fn serves_skills() {
+    let (client, _signal) = connect(ProtocolVersion::V_2025_11_25).await;
+
+    let listed = client
+        .call_tool(get_skill_call(json!({})))
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
+    let skills = listed["skills"].as_array().unwrap();
+    assert!(skills.iter().any(|skill| skill["name"] == "mirrord-up"));
+
+    let prompts = client.list_all_prompts().await.unwrap();
+    let resources = client.list_all_resources().await.unwrap();
+    for skill in skills {
+        let name = skill["name"].as_str().unwrap();
+        assert!(
+            skill["description"]
+                .as_str()
+                .is_some_and(|description| description.is_empty().not())
+        );
+
+        let output = client
+            .call_tool(get_skill_call(json!({ "name": name })))
+            .await
+            .unwrap()
+            .structured_content
+            .unwrap();
+        let body = output["content"].as_str().unwrap();
+
+        assert!(prompts.iter().any(|prompt| prompt.name == name), "{name}");
+        let prompt = client
+            .get_prompt(GetPromptRequestParams::new(name))
+            .await
+            .unwrap();
+        let text = prompt.messages[0].content.as_text().unwrap();
+        assert!(text.text.starts_with(body), "{name}");
+
+        let uri = format!("mirrord://skills/{name}");
+        assert!(
+            resources.iter().any(|resource| resource.uri == uri),
+            "{name}"
+        );
+        let result = client
+            .read_resource(ReadResourceRequestParams::new(&uri))
+            .await
+            .unwrap();
+        let [ResourceContents::TextResourceContents { text, .. }] = result.contents.as_slice()
+        else {
+            panic!("unexpected contents: {:?}", result.contents);
+        };
+        assert_eq!(text, body);
+
+        for file in output["files"].as_array().unwrap() {
+            let file_output = client
+                .call_tool(get_skill_call(json!({ "name": name, "file": file })))
+                .await
+                .unwrap()
+                .structured_content
+                .unwrap();
+            assert!(file_output["content"].is_string(), "{name}/{file}");
+        }
+    }
+
+    let result = client
+        .call_tool(get_skill_call(json!({ "name": "no-such-skill" })))
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    assert!(format!("{:?}", result.content).contains("`mirrord-up`"));
 }

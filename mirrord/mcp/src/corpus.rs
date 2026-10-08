@@ -5,23 +5,16 @@
 //! `metalbear-co/skills` by `cargo xtask corpus`, which the release PR runs to bump the pins. The
 //! tests below are the checks the content has to pass to ship, so a bad bump fails the release PR.
 
-use std::{collections::BTreeMap, io::Read, sync::LazyLock};
+use std::{collections::BTreeMap, io::Read, ops::Not, sync::LazyLock};
 
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// The `corpus/` markdown, packed by `build.rs`.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "read by the docs and skills tools, still to come")
-)]
 static ARCHIVE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/corpus.tar.gz"));
 
 /// Every vendored file, keyed by its path in `corpus/`, e.g. `skills/mirrord-up/SKILL.md`.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "read by the docs and skills tools, still to come")
-)]
 pub(crate) static FILES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
     let mut archive = tar::Archive::new(GzDecoder::new(ARCHIVE));
     let entries = archive.entries().expect("build.rs packs a valid archive");
@@ -61,20 +54,88 @@ pub(crate) static SKILLS_PIN: LazyLock<Pin> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../corpus/skills.pin.json")).expect("valid skills pin")
 });
 
+/// A skill from the skills repo, served by `get_skill` and as an MCP prompt and resource.
+pub(crate) struct Skill<'a> {
+    /// From the `SKILL.md` front matter; tells the agent when to use the skill.
+    pub(crate) description: String,
+    /// The `SKILL.md`, front matter included.
+    pub(crate) body: &'a str,
+    /// The skill's other files, keyed by their path in its directory, e.g.
+    /// `references/known-issues.md`.
+    pub(crate) files: BTreeMap<&'a str, &'a str>,
+}
+
+/// Every skill that loads, keyed by name. Skills that don't are left out rather than failing the
+/// server; the tests below keep them from shipping.
+pub(crate) static SKILLS: LazyLock<BTreeMap<&'static str, Skill<'static>>> =
+    LazyLock::new(|| load_skills(&FILES).0);
+
+/// Loads the skills in `files`: every directory under `skills/` is one, and needs a `SKILL.md`
+/// whose front matter names it and describes it. Returns the skills that load, and why the others
+/// don't.
+fn load_skills(files: &BTreeMap<String, String>) -> (BTreeMap<&str, Skill<'_>>, Vec<String>) {
+    let mut dirs: BTreeMap<&str, BTreeMap<&str, &str>> = BTreeMap::new();
+    for (path, contents) in files {
+        if let Some((skill, file)) = path
+            .strip_prefix("skills/")
+            .and_then(|path| path.split_once('/'))
+        {
+            dirs.entry(skill).or_default().insert(file, contents);
+        }
+    }
+
+    let mut skills = BTreeMap::new();
+    let mut issues = Vec::new();
+    for (name, mut files) in dirs {
+        let path = format!("skills/{name}/SKILL.md");
+        let skill = files
+            .remove("SKILL.md")
+            .ok_or("missing".to_owned())
+            .and_then(move |body| {
+                let front_matter = front_matter(body).ok_or("no front matter".to_owned())?;
+                let front_matter: Value = serde_saphyr::from_str(front_matter)
+                    .map_err(|error| format!("invalid front matter: {error}"))?;
+                let field = |field| {
+                    front_matter
+                        .get(field)
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| value.is_empty().not())
+                };
+                if field("name") != Some(name) {
+                    return Err(format!("`name` must be `{name}`"));
+                }
+                let description = field("description").ok_or("no `description`".to_owned())?;
+                Ok(Skill {
+                    description: description.to_owned(),
+                    body,
+                    files,
+                })
+            });
+        match skill {
+            Ok(skill) => {
+                skills.insert(name, skill);
+            }
+            Err(issue) => issues.push(format!("{path}: {issue}")),
+        }
+    }
+    (skills, issues)
+}
+
+/// The YAML between the `---` lines that open a page, if it has any.
+fn front_matter(page: &str) -> Option<&str> {
+    let rest = page.strip_prefix("---\n")?;
+    let end = rest.find("\n---\n")?;
+    rest.get(..end)
+}
+
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
 
     use serde_json::Value;
 
-    use super::FILES;
-
-    /// The YAML between the `---` lines that open a page, if it has any.
-    fn front_matter(page: &str) -> Option<&str> {
-        let rest = page.strip_prefix("---\n")?;
-        let end = rest.find("\n---\n")?;
-        rest.get(..end)
-    }
+    use super::{FILES, front_matter, load_skills};
 
     /// Pages whose front matter isn't valid YAML.
     fn page_issues(files: &BTreeMap<String, String>) -> Vec<String> {
@@ -87,42 +148,6 @@ mod tests {
             .collect()
     }
 
-    /// Skills that can't be loaded: every directory under `skills/` is a skill, and needs a
-    /// `SKILL.md` whose front matter names it and describes it.
-    fn skill_issues(files: &BTreeMap<String, String>) -> Vec<String> {
-        let skills: BTreeSet<&str> = files
-            .keys()
-            .filter_map(|path| path.strip_prefix("skills/")?.split_once('/'))
-            .map(|(skill, _)| skill)
-            .collect();
-
-        skills
-            .into_iter()
-            .filter_map(|skill| {
-                let path = format!("skills/{skill}/SKILL.md");
-                let Some(page) = files.get(&path) else {
-                    return Some(format!("{path}: missing"));
-                };
-                let Some(front_matter) = front_matter(page) else {
-                    return Some(format!("{path}: no front matter"));
-                };
-                let front_matter: Value = serde_saphyr::from_str(front_matter).ok()?;
-                let field = |name| {
-                    front_matter
-                        .get(name)
-                        .and_then(Value::as_str)
-                        .filter(|value| !value.trim().is_empty())
-                };
-                if field("name") != Some(skill) {
-                    return Some(format!("{path}: `name` must be `{skill}`"));
-                }
-                field("description")
-                    .is_none()
-                    .then(|| format!("{path}: no `description`"))
-            })
-            .collect()
-    }
-
     #[test]
     fn pages_parse() {
         let issues = page_issues(&FILES);
@@ -131,7 +156,7 @@ mod tests {
 
     #[test]
     fn skills_load() {
-        let issues = skill_issues(&FILES);
+        let (_, issues) = load_skills(&FILES);
         assert!(issues.is_empty(), "{}", issues.join("\n"));
     }
 
@@ -144,14 +169,20 @@ mod tests {
                 "skills/misnamed/SKILL.md",
                 "---\nname: other\ndescription: d\n---\n",
             ),
+            (
+                "skills/good/SKILL.md",
+                "---\nname: good\ndescription: d\n---\n",
+            ),
         ]
         .into_iter()
         .map(|(path, page)| (path.to_owned(), page.to_owned()))
         .collect();
 
         assert_eq!(page_issues(&files).len(), 1);
+        let (skills, issues) = load_skills(&files);
+        assert_eq!(skills.into_keys().collect::<Vec<_>>(), ["good"]);
         assert_eq!(
-            skill_issues(&files),
+            issues,
             [
                 "skills/misnamed/SKILL.md: `name` must be `misnamed`",
                 "skills/no-skill-md/SKILL.md: missing",
