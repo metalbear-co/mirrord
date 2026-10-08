@@ -13,6 +13,7 @@ use std::{
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::corpus::{PAGES, Page, front_matter};
 
@@ -34,7 +35,7 @@ const SNIPPET_LENGTH: usize = 200;
 pub struct SearchDocsArgs {
     /// Keywords to search for, e.g. `steal http filter`.
     query: String,
-    /// How many hits to return, at most 20.
+    /// How many hits to return, from 1 to 20.
     #[serde(default)]
     limit: Option<usize>,
 }
@@ -123,8 +124,17 @@ static INDEX: LazyLock<Index> = LazyLock::new(|| {
     }
 });
 
-pub fn search_docs(args: SearchDocsArgs) -> SearchDocsOutput {
-    let limit = args.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+#[derive(Debug, Error)]
+pub enum SearchDocsError {
+    #[error("`limit` must be between 1 and {MAX_LIMIT}, got {0}")]
+    InvalidLimit(usize),
+}
+
+pub fn search_docs(args: SearchDocsArgs) -> Result<SearchDocsOutput, SearchDocsError> {
+    let limit = args.limit.unwrap_or(DEFAULT_LIMIT);
+    if (1..=MAX_LIMIT).contains(&limit).not() {
+        return Err(SearchDocsError::InvalidLimit(limit));
+    }
     let query: BTreeSet<String> = tokens(&args.query).collect();
     let index = &*INDEX;
     let count = index.documents.len() as f64;
@@ -153,17 +163,21 @@ pub fn search_docs(args: SearchDocsArgs) -> SearchDocsOutput {
             .then(document_a.path.cmp(document_b.path))
     });
 
+    // Some skill references repeat a docs page's sections word for word; a hit with the same title
+    // and snippet as a better one adds nothing but takes a slot.
+    let mut seen = BTreeSet::new();
     let hits = scored
         .into_iter()
-        .take(limit)
         .map(|(_, document)| SearchHit {
             title: document.page.title.clone(),
             path: document.path.to_owned(),
             resource_uri: document.page.resource_uri.clone(),
             snippet: snippet(without_front_matter(document.page.body), &query),
         })
+        .filter(|hit| seen.insert((hit.title.clone(), hit.snippet.clone())))
+        .take(limit)
         .collect();
-    SearchDocsOutput { hits }
+    Ok(SearchDocsOutput { hits })
 }
 
 /// Lowercased words. Identifiers such as `http_filter` count both whole and by their parts, so an
@@ -234,6 +248,7 @@ mod tests {
             query: query.to_owned(),
             limit: None,
         })
+        .unwrap()
         .hits
         .into_iter()
         .map(|hit| hit.path)
@@ -256,5 +271,25 @@ mod tests {
         assert_eq!(first.len(), DEFAULT_LIMIT);
         assert_eq!(first, search("steal http filter"));
         assert_eq!(first, search("STEAL HTTP Filter"));
+    }
+
+    #[test]
+    fn skips_repeated_sections() {
+        let hits = search("turbo task");
+        let troubleshooting = hits.iter().filter(|path| {
+            path.ends_with("troubleshooting.md") || path.ends_with("common-issues.md")
+        });
+        assert_eq!(troubleshooting.count(), 1, "{hits:?}");
+    }
+
+    #[test]
+    fn rejects_out_of_range_limits() {
+        for limit in [0, MAX_LIMIT + 1] {
+            let args = SearchDocsArgs {
+                query: "targetless".to_owned(),
+                limit: Some(limit),
+            };
+            assert!(search_docs(args).is_err(), "{limit}");
+        }
     }
 }

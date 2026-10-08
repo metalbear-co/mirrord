@@ -94,11 +94,16 @@ impl McpServer {
         version by keywords, e.g. `steal http filter` or `db branching postgres`. Returns the best \
         matching pages first, each with its title, the `path` to read it with `read_doc`, its \
         resource URI and the line that best matches. `limit` is the number of hits, 5 by default \
-        and at most 20. Search the docs before answering a question about mirrord from memory.",
+        and from 1 to 20. Search the docs before answering a question about mirrord from memory.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
-    fn search_docs(&self, Parameters(args): Parameters<SearchDocsArgs>) -> Json<SearchDocsOutput> {
-        Json(search_docs::search_docs(args))
+    fn search_docs(
+        &self,
+        Parameters(args): Parameters<SearchDocsArgs>,
+    ) -> Result<Json<SearchDocsOutput>, CallToolResult> {
+        search_docs::search_docs(args)
+            .map(Json)
+            .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
     }
 
     /// Serve one page of the vendored docs and skills, or list them.
