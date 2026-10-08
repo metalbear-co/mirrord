@@ -1,0 +1,1 @@
+TLS stealing can present a client certificate matching the identity of the original mTLS client: the agent when passing through unmatched traffic (`agentAsClient.identities` in the TLS steal configuration), and the local delivery when sending stolen and mirrored traffic to the local application (`feature.network.incoming.tls_delivery.client_identities`).

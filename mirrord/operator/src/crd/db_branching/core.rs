@@ -359,6 +359,10 @@ pub struct SessionInfo {
     pub id: String,
     /// Owner info of the session.
     pub owner: SessionOwner,
+    /// Operator process that registered the session. A session ends with that process, so an entry
+    /// from any other process belongs to a session that is already gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq)]

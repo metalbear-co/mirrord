@@ -752,7 +752,8 @@ impl StealingClient {
             IncomingTrafficTransportType::Tcp => {
                 assert!(expected.kind.uses_tls().not());
             }
-            IncomingTrafficTransportType::Tls { alpn_protocol, .. } => {
+            IncomingTrafficTransportType::Tls { alpn_protocol, .. }
+            | IncomingTrafficTransportType::TlsV2 { alpn_protocol, .. } => {
                 assert_eq!(
                     alpn_protocol,
                     expected.kind.alpn().map(|alpn| alpn.as_bytes().to_vec())

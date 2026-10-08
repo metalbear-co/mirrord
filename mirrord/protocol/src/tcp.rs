@@ -169,6 +169,61 @@ pub enum IncomingTrafficTransportType {
         alpn_protocol: Option<Vec<u8>>,
         server_name: Option<String>,
     },
+    /// [`IncomingTrafficTransportType::Tls`] extended with the identity of the original client.
+    ///
+    /// Requires [`TLS_CLIENT_IDENTITY_VERSION`].
+    TlsV2 {
+        alpn_protocol: Option<Vec<u8>>,
+        server_name: Option<String>,
+        /// Identity from the certificate presented by the original client.
+        client_identity: Option<TlsClientIdentity>,
+    },
+}
+
+impl IncomingTrafficTransportType {
+    /// ALPN protocol negotiated with the original client.
+    pub fn alpn_protocol(&self) -> Option<&[u8]> {
+        match self {
+            Self::Tls { alpn_protocol, .. } | Self::TlsV2 { alpn_protocol, .. } => {
+                alpn_protocol.as_deref()
+            }
+            Self::Tcp => None,
+        }
+    }
+
+    /// Server name sent by the original client in the SNI extension.
+    pub fn server_name(&self) -> Option<&str> {
+        match self {
+            Self::Tls { server_name, .. } | Self::TlsV2 { server_name, .. } => {
+                server_name.as_deref()
+            }
+            Self::Tcp => None,
+        }
+    }
+
+    pub fn client_identity(&self) -> Option<&TlsClientIdentity> {
+        match self {
+            Self::TlsV2 {
+                client_identity, ..
+            } => client_identity.as_ref(),
+            Self::Tcp | Self::Tls { .. } => None,
+        }
+    }
+}
+
+/// Identity of a TLS client, taken from the certificate it presented.
+///
+/// Allows the client to present a certificate with the same identity when delivering the traffic
+/// to a local server that authorizes requests based on the client's identity.
+///
+/// The names are exactly as found in the certificate, without any normalization.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct TlsClientIdentity {
+    /// DER encoding of the certificate subject's distinguished name.
+    pub subject: Vec<u8>,
+    /// DER encodings of the certificate's subject alternative names (including their tags), in
+    /// the order they appear in the certificate.
+    pub subject_alternative_names: Vec<Vec<u8>>,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -662,6 +717,10 @@ pub static HTTP_BODY_JSON_FILTER_VERSION: LazyLock<VersionReq> =
 /// ([`HttpFilter::Body`]) by JSON.
 pub static HTTP_HEADER_JQ_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.26.0".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows [`IncomingTrafficTransportType::TlsV2`].
+pub static TLS_CLIENT_IDENTITY_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.30.0".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.

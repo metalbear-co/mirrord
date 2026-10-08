@@ -18,6 +18,8 @@ use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use nix::errno::Errno;
 
 use super::ops::*;
+#[cfg(target_os = "macos")]
+use crate::socket::dns_sd::enable_dns_sd_hooks;
 use crate::{hooks::HookManager, replace};
 
 /// Here we keep addr infos that we allocated so we'll know when to use the original
@@ -860,6 +862,7 @@ pub(crate) unsafe fn enable_socket_hooks(
                     FnDns_configuration_free,
                     FN_DNS_CONFIGURATION_FREE
                 );
+                enable_dns_sd_hooks(hook_manager);
                 if experimental.ignore_system_proxy_config {
                     replace!(
                         hook_manager,
