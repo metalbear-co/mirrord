@@ -10,12 +10,12 @@ pub(crate) enum CiError {
     #[error(transparent)]
     CiApiKey(#[from] ApiKeyError),
 
-    #[error(
-        "The required environment variable {0} was not found or contains an invalid character!"
-    )]
+    #[error("The environment variable {0} contains an invalid character!")]
     #[diagnostic(help(
-        "`mirrord ci start` and `mirrord ci container` use `{0}` for operator credentials; \
-         set it to the value from `mirrord ci api-key`. Without the operator, leave it unset. \
+        "`mirrord ci start` and `mirrord ci container` use `{0}` for CI credentials; \
+         it is optional when a Free operator advertises keyless CI. Other installations \
+         require a key. Set it to the value from \
+         `mirrord ci api-key` when required. Without the operator, leave it unset. \
          Local `mirrord ci stop` requires no API key."
     ))]
     EnvVar(&'static str, std::env::VarError),
@@ -28,10 +28,11 @@ pub(crate) enum CiError {
     SerdeJson(#[from] serde_json::Error),
 
     #[error(
-        "`MIRRORD_CI_API_KEY` is required for operator-backed `mirrord ci start` and `mirrord ci container`."
+        "`MIRRORD_CI_API_KEY` is required for operator-backed `mirrord ci start` and `mirrord ci container` when the operator does not advertise keyless CI."
     )]
     #[diagnostic(help(
         "Set this environment variable to the value received from `mirrord ci api-key`. \
+         Supporting Free operators advertise keyless CI and use automatic ordinary credentials. \
          Without the operator, no CI API key is required. Local `mirrord ci stop` requires no API key."
     ))]
     MissingCiApiKey,
@@ -59,9 +60,11 @@ mod tests {
         assert!(message.contains("operator-backed"));
         assert!(message.contains("mirrord ci start"));
         assert!(message.contains("mirrord ci container"));
+        assert!(message.contains("does not advertise keyless CI"));
 
         let help = error.help().unwrap().to_string();
         assert!(help.contains("mirrord ci api-key"));
+        assert!(help.contains("Free operators advertise keyless CI"));
         assert!(help.contains("Without the operator, no CI API key is required"));
         assert!(help.contains("mirrord ci stop` requires no API key"));
     }

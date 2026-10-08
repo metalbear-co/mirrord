@@ -17,7 +17,10 @@ pub(crate) enum CiCommand {
 
     /// Starts mirrord for ci. Takes the same arguments as `mirrord exec` plus ci specific options.
     ///
-    /// - When using the operator, set `MIRRORD_CI_API_KEY` to a key from `mirrord ci api-key`.
+    /// - With a Free operator that advertises keyless CI, `MIRRORD_CI_API_KEY` is optional;
+    ///   ordinary credentials are automatic.
+    /// - With other installations, set `MIRRORD_CI_API_KEY` to a key from `mirrord ci api-key`.
+    /// - The operator enforces its license policy for CI credentials.
     /// - Without the operator, no API key is required.
     Start(Box<CiStartArgs>),
 
@@ -29,7 +32,10 @@ pub(crate) enum CiCommand {
     /// Starts mirrord for ci inside a container. Takes the same arguments as `mirrord container`,
     /// plus ci specific options.
     ///
-    /// - When using the operator, set `MIRRORD_CI_API_KEY` to a key from `mirrord ci api-key`.
+    /// - With a Free operator that advertises keyless CI, `MIRRORD_CI_API_KEY` is optional;
+    ///   ordinary credentials are automatic.
+    /// - With other installations, set `MIRRORD_CI_API_KEY` to a key from `mirrord ci api-key`.
+    /// - The operator enforces its license policy for CI credentials.
     /// - Without the operator, no API key is required.
     Container(Box<CiContainerArgs>),
 }
@@ -91,8 +97,25 @@ mod tests {
     use std::ops::Not;
 
     use clap::{Parser, error::ErrorKind};
+    use rstest::rstest;
 
     use crate::config::Cli;
+
+    #[rstest]
+    #[case("start")]
+    #[case("container")]
+    fn ci_session_help_explains_operator_credential_policy(#[case] subcommand: &str) {
+        let error = Cli::try_parse_from(["mirrord", "ci", subcommand, "--help"]).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+        let help = error.to_string();
+
+        assert!(help.contains("Free operator"));
+        assert!(help.contains("advertises keyless CI"));
+        assert!(help.contains("MIRRORD_CI_API_KEY` is optional"));
+        assert!(help.contains("ordinary credentials are automatic"));
+        assert!(help.contains("With other installations, set `MIRRORD_CI_API_KEY`"));
+        assert!(help.contains("Without the operator, no API key is required"));
+    }
 
     #[test]
     fn ci_stop_help_does_not_require_a_key() {
