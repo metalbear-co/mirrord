@@ -1240,6 +1240,9 @@ pub(super) enum DiagnoseCommand {
     /// The fingerprint is what the operator uses to identify individual users (e.g. for seat
     /// counting). One fingerprint is shown per operator license the machine has connected to.
     License,
+    /// Send the stored report for protected macOS binaries that required Rosetta.
+    #[cfg(target_os = "macos")]
+    SipReport,
 }
 
 // `mirrord container` command

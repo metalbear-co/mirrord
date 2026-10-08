@@ -1,6 +1,10 @@
 #![deny(unused_crate_dependencies)]
 
-use std::{collections::HashMap, str::FromStr, time::Instant};
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
@@ -49,14 +53,13 @@ pub fn read_kube_version_from_env() -> Option<(u16, u16)> {
     Some((major, minor))
 }
 
-/// Possible values for analytic data
-/// This is strict so we won't send sensitive data by accident.
-/// (Don't add strings)
+/// Possible values for analytic data.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum AnalyticValue {
     Bool(bool),
     Number(u32),
+    String(String),
     Uuid(Uuid),
     Nested(Analytics),
     Hash(AnalyticsHash),
@@ -255,6 +258,12 @@ impl From<u32> for AnalyticValue {
     }
 }
 
+impl From<String> for AnalyticValue {
+    fn from(value: String) -> Self {
+        AnalyticValue::String(value)
+    }
+}
+
 impl From<u64> for AnalyticValue {
     fn from(n: u64) -> Self {
         AnalyticValue::Number(u32::try_from(n).unwrap_or(u32::MAX))
@@ -324,6 +333,8 @@ pub enum ReportTarget {
     OperatorInstall,
     /// One run of `mirrord operator uninstall`.
     OperatorUninstall,
+    /// An ARM mac had to use Rosetta for some binaries.
+    MissingX86Binaries,
 }
 
 /// Header the client sets to tell the analytics-server which event a report is.
@@ -344,6 +355,7 @@ impl ReportTarget {
             ReportTarget::McpToolCalled => "mcp-tool-called",
             ReportTarget::OperatorInstall => "operator-install",
             ReportTarget::OperatorUninstall => "operator-uninstall",
+            ReportTarget::MissingX86Binaries => "missing-x86-binaries",
         }
     }
 }
@@ -510,6 +522,22 @@ impl AnalyticsReporter {
             version: CURRENT_VERSION,
         }
     }
+
+    /// Sends this report immediately instead of waiting for its drop task. Sets enabled to false so
+    /// another report will not be created on drop.
+    ///
+    /// `explicitly_enabled` can override MIRRORD_TELEMETRY=false if the user has explicitly asked
+    /// the report to be sent, e.g. with `mirrord diagnose sip-report`
+    pub async fn send_now(mut self, explicitly_enabled: bool) -> Result<(), reqwest::Error> {
+        if !(self.enabled || explicitly_enabled) {
+            self.enabled = false;
+            return Ok(());
+        }
+
+        self.enabled = false;
+        let report = self.as_report();
+        send_analytics(report, self.target).await
+    }
 }
 
 impl Reporter for AnalyticsReporter {
@@ -559,7 +587,9 @@ impl Drop for AnalyticsReporter {
             let watch = self.watch.clone();
             let target = self.target;
             tokio::spawn(async move {
-                send_analytics(report, target).await;
+                if let Err(error) = send_analytics(report, target).await {
+                    info!("Failed to send analytics: {error}");
+                }
                 // hold clone of watch to prevent it from being dropped
                 // allowing our task to finish
                 drop(watch);
@@ -591,20 +621,28 @@ struct AnalyticsReport {
 }
 
 const ANALYTICS_ENDPOINT: &str = "https://analytics.metalbear.com/api/v1/event";
+const ANALYTICS_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.com
+/// Send [`Analytics`] & [`AnalyticsOperatorProperties`] to [`ANALYTICS_ENDPOINT`].
+///
+/// Will time out after [`ANALYTICS_TIMEOUT`], preventing blocking execution when analytics are sent
+/// at a time other than the end of the session (e.g. for `ReportTarget::MissingX86Binaries`).
 #[tracing::instrument(level = Level::TRACE)]
-async fn send_analytics(report: AnalyticsReport, target: ReportTarget) {
-    let client = reqwest::Client::new();
-    let res = client
+async fn send_analytics(
+    report: AnalyticsReport,
+    target: ReportTarget,
+) -> Result<(), reqwest::Error> {
+    let client = reqwest::Client::builder()
+        .timeout(ANALYTICS_TIMEOUT)
+        .build()?;
+    client
         .post(ANALYTICS_ENDPOINT)
         .header(EVENT_KIND_HEADER, target.event_kind())
         .json(&report)
         .send()
-        .await;
-    if let Err(e) = res {
-        info!("Failed to send analytics: {e}");
-    }
+        .await?
+        .error_for_status()?;
+    Ok(())
 }
 
 #[cfg(test)]

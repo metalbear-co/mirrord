@@ -11,10 +11,17 @@ use mirrord_protocol_api::client::ProtocolConnector;
 use tokio::time::Instant;
 use tracing::Level;
 
+#[cfg(target_os = "macos")]
+pub(crate) use crate::diagnose::sip::prompt_sip_report as prompt_pending_sip_report;
+#[cfg(target_os = "macos")]
+use crate::diagnose::sip::send_sip_report;
 use crate::{
     CliError, CliResult, DiagnoseArgs, DiagnoseCommand, connection::create_and_connect,
     connector::AgentConnection, util::remove_proxy_env,
 };
+
+#[cfg(target_os = "macos")]
+mod sip;
 
 /// Sends a ping the connection and expects a pong.
 async fn ping(connection: &mut AgentConnection) -> CliResult<()> {
@@ -167,9 +174,15 @@ async fn diagnose_license() -> CliResult<()> {
 }
 
 /// Handle commands related to the operator `mirrord diagnose ...`
-pub(crate) async fn diagnose_command(args: DiagnoseArgs) -> CliResult<()> {
+pub(crate) async fn diagnose_command(
+    args: DiagnoseArgs,
+    _watch: drain::Watch,
+    _user_data: &crate::data::UserData,
+) -> CliResult<()> {
     match args.command {
         DiagnoseCommand::Latency { config_file } => diagnose_latency(config_file.as_deref()).await,
         DiagnoseCommand::License => diagnose_license().await,
+        #[cfg(target_os = "macos")]
+        DiagnoseCommand::SipReport => send_sip_report(_watch, _user_data.machine_id()).await,
     }
 }

@@ -382,7 +382,7 @@ impl MirrordExecution {
                     .and_then(|result| result.x64_fallback.as_ref())
                 {
                     progress.warning(&format!(
-                        "The protected system binary `{}` is missing from mirrord's native macOS bundle. This run requires Rosetta.",
+                        "The protected system binary `{}` is missing from mirrord's native macOS bundle. This run requires Rosetta. Run `mirrord diagnose sip-report` to send a report to the mirrord team.",
                         fallback.display(),
                     ));
                     env_vars.insert(
