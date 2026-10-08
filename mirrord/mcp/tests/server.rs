@@ -111,6 +111,34 @@ async fn serves_validate_config(#[case] protocol_version: ProtocolVersion) {
     );
 }
 
+#[tokio::test]
+async fn serves_explain_config_option() {
+    let (client, _signal) = connect(ProtocolVersion::V_2025_11_25).await;
+
+    let tools = client.list_all_tools().await.unwrap();
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool.name == "explain_config_option" && tool.output_schema.is_some())
+    );
+
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("explain_config_option").with_arguments(
+                json!({ "path": "feature.network.incoming.mode" })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    let output = result.structured_content.unwrap();
+    assert_eq!(output["found"], json!(true));
+    assert_eq!(output["allowed_values"], json!(["mirror", "steal", "off"]));
+    assert_eq!(output["plan"], json!("oss"));
+}
+
 /// Bad calls come back as error results, and the server keeps serving afterwards.
 #[tokio::test]
 async fn survives_bad_calls() {
@@ -159,5 +187,13 @@ async fn serves_info_resource() {
         panic!("unexpected contents: {:?}", result.contents);
     };
     let info: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(info, json!({ "version": env!("CARGO_PKG_VERSION") }));
+    assert_eq!(info["version"], json!(env!("CARGO_PKG_VERSION")));
+    for (corpus, repo) in [
+        ("docs", "metalbear-co/docs"),
+        ("skills", "metalbear-co/skills"),
+    ] {
+        assert_eq!(info[corpus]["repo"], json!(repo));
+        assert_eq!(info[corpus]["commit"].as_str().unwrap().len(), 40);
+        assert!(info[corpus]["synced_at"].is_string());
+    }
 }
