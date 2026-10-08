@@ -32,6 +32,7 @@ use kube::{
     config::{Config, KubeConfigOptions, Kubeconfig},
 };
 use mirrord_config::target::{Target, TargetDisplay};
+use mirrord_intproxy::session_monitor::MonitorEvent;
 use mirrord_operator::{
     client::{add_baggage_header, operator_installed},
     crd::{
@@ -327,7 +328,7 @@ fn parse_session_owner(user: &str) -> Option<OperatorSessionOwner> {
 pub(crate) struct TrackedSession {
     pub(crate) info: SessionInfo,
     pub(crate) endpoint: SessionEndpoint,
-    pub(crate) events: Vec<serde_json::Value>,
+    pub(crate) events: Vec<MonitorEvent>,
     pub(crate) client: SessionClient,
 }
 
@@ -458,56 +459,50 @@ pub(super) async fn token_auth(
     StatusCode::UNAUTHORIZED.into_response()
 }
 
-/// Appends parsed SSE values to the session's event buffer, capping at
-/// [`MAX_EVENTS_PER_SESSION`].
-async fn buffer_session_events(session_id: &str, values: Vec<serde_json::Value>, state: &AppState) {
+/// Buffers typed monitor events, capping at [`MAX_EVENTS_PER_SESSION`] so long sessions retain
+/// bounded traffic history.
+async fn buffer_session_events(session_id: &str, events: Vec<MonitorEvent>, state: &AppState) {
     let mut sessions = state.sessions.write().await;
     let Some(session) = sessions.get_mut(session_id) else {
         return;
     };
-    for value in values {
-        let port =
-            if value.get("type").and_then(|value| value.as_str()) == Some("port_subscription") {
-                value
-                    .get("port")
-                    .and_then(|value| value.as_u64())
-                    .and_then(|port| u16::try_from(port).ok())
-            } else {
-                None
-            };
-
-        if let Some(port) = port {
-            if let Some(mode) = value.get("mode").and_then(|value| value.as_str()) {
-                let hit_count = value.get("hit_count").and_then(|value| value.as_u64());
-                match session
-                    .info
-                    .port_subscriptions
-                    .iter_mut()
-                    .find(|subscription| subscription.port == port)
-                {
-                    Some(subscription) => {
-                        subscription.mode = mode.to_owned();
-                        subscription.hit_count = hit_count;
-                    }
-                    None => session.info.port_subscriptions.push(
-                        mirrord_session_monitor_protocol::PortSubscription {
-                            port,
-                            mode: mode.to_owned(),
-                            hit_count,
-                        },
-                    ),
+    for event in events {
+        if let MonitorEvent::PortSubscription {
+            port,
+            mode,
+            hit_count,
+        } = &event
+        {
+            match session
+                .info
+                .port_subscriptions
+                .iter_mut()
+                .find(|subscription| subscription.port == *port)
+            {
+                Some(subscription) => {
+                    subscription.mode = mode.clone();
+                    subscription.hit_count = *hit_count;
                 }
+                None => session.info.port_subscriptions.push(
+                    mirrord_session_monitor_protocol::PortSubscription {
+                        port: *port,
+                        mode: mode.clone(),
+                        hit_count: *hit_count,
+                    },
+                ),
             }
 
             // Every hit sends a port subscription event. Keeping them all would fill this buffer
             // and remove older traffic events, so keep only the latest event for each port.
-            session.events.retain(|buffered| {
-                buffered.get("type").and_then(|value| value.as_str()) != Some("port_subscription")
-                    || buffered.get("port").and_then(|value| value.as_u64())
-                        != Some(u64::from(port))
+            session.events.retain(|buffered| match buffered {
+                MonitorEvent::PortSubscription {
+                    port: buffered_port,
+                    ..
+                } => buffered_port != port,
+                _ => true,
             });
         }
-        session.events.push(value);
+        session.events.push(event);
     }
     if session.events.len() > MAX_EVENTS_PER_SESSION {
         session
@@ -534,8 +529,8 @@ async fn stream_session_events(session_id: String, client: SessionClient, state:
                 break;
             }
         };
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&event.data) {
-            buffer_session_events(&session_id, vec![val], &state).await;
+        if let Ok(event) = serde_json::from_str::<MonitorEvent>(&event.data) {
+            buffer_session_events(&session_id, vec![event], &state).await;
         }
     }
 
@@ -684,15 +679,14 @@ async fn session_events_sse(State(state): State<AppState>, Path(id): Path<String
             }
         };
 
-        use futures::stream::StreamExt as _;
         while let Some(result) = sse_stream.next().await {
             let event = match result {
                 Ok(e) => e,
                 Err(_) => break,
             };
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&event.data) {
+            if let Ok(event) = serde_json::from_str::<MonitorEvent>(&event.data) {
                 let data_str =
-                    serde_json::to_string(&val).expect("SSE event serialization cannot fail");
+                    serde_json::to_string(&event).expect("SSE event serialization cannot fail");
                 if tx
                     .send(Ok(sse::Event::default().data(data_str)))
                     .await
@@ -1423,56 +1417,77 @@ mod tests {
             .status()
     }
 
+    fn tracked_session(session_id: &str, sessions_dir: &std::path::Path) -> TrackedSession {
+        let endpoint = SessionEndpoint::for_session(session_id, sessions_dir);
+        TrackedSession {
+            info: SessionInfo {
+                session_id: session_id.to_owned(),
+                key: None,
+                target: "deployment/test".to_owned(),
+                namespace: None,
+                context: None,
+                started_at: "2026-09-22T12:00:00Z".to_owned(),
+                mirrord_version: "0.0.0".to_owned(),
+                is_operator: false,
+                processes: Vec::new(),
+                port_subscriptions: Vec::new(),
+                config: serde_json::Value::Null,
+            },
+            endpoint: endpoint.clone(),
+            events: Vec::new(),
+            client: SessionClient::new(endpoint),
+        }
+    }
+
     #[tokio::test]
     async fn event_buffer_keeps_only_the_latest_port_subscription_per_port() {
         let state = test_state();
         let session_id = "test-session";
-        let endpoint = SessionEndpoint::for_session(session_id, std::path::Path::new("/tmp"));
-        state.sessions.write().await.insert(
-            session_id.to_owned(),
-            TrackedSession {
-                info: SessionInfo {
-                    session_id: session_id.to_owned(),
-                    key: None,
-                    target: "deployment/test".to_owned(),
-                    namespace: None,
-                    context: None,
-                    started_at: "2026-09-22T12:00:00Z".to_owned(),
-                    mirrord_version: "0.0.0".to_owned(),
-                    is_operator: false,
-                    processes: Vec::new(),
-                    port_subscriptions: Vec::new(),
-                    config: serde_json::Value::Null,
-                },
-                endpoint: endpoint.clone(),
-                events: vec![
-                    serde_json::json!({"type": "file_op", "path": "/visible"}),
-                    serde_json::json!({
-                        "type": "port_subscription",
-                        "port": 80,
-                        "mode": "steal",
-                        "hit_count": 1
-                    }),
-                ],
-                client: SessionClient::new(endpoint),
+        let mut session = tracked_session(session_id, std::path::Path::new("unused"));
+        session.info.port_subscriptions =
+            vec![mirrord_session_monitor_protocol::PortSubscription {
+                port: 80,
+                mode: "steal".to_owned(),
+                hit_count: Some(1),
+            }];
+        session.events = vec![
+            MonitorEvent::FileOp {
+                path: Some("/visible".to_owned()),
+                operation: "read".to_owned(),
             },
-        );
+            MonitorEvent::PortSubscription {
+                port: 80,
+                mode: "steal".to_owned(),
+                hit_count: Some(1),
+            },
+        ];
+        state
+            .sessions
+            .write()
+            .await
+            .insert(session_id.to_owned(), session);
 
         buffer_session_events(
             session_id,
             vec![
-                serde_json::json!({
-                    "type": "port_subscription",
-                    "port": 81,
-                    "mode": "mirror",
-                    "hit_count": 3
-                }),
-                serde_json::json!({
-                    "type": "port_subscription",
-                    "port": 80,
-                    "mode": "steal",
-                    "hit_count": 2
-                }),
+                MonitorEvent::PortSubscription {
+                    port: 81,
+                    mode: "mirror".to_owned(),
+                    hit_count: Some(3),
+                },
+                MonitorEvent::PortSubscription {
+                    port: 80,
+                    mode: "steal".to_owned(),
+                    hit_count: Some(2),
+                },
+                MonitorEvent::DnsQuery {
+                    host: "example.test".to_owned(),
+                },
+                MonitorEvent::PortSubscription {
+                    port: 80,
+                    mode: "mirror".to_owned(),
+                    hit_count: None,
+                },
             ],
             &state,
         )
@@ -1481,30 +1496,94 @@ mod tests {
         let sessions = state.sessions.read().await;
         let session = sessions.get(session_id).unwrap();
         assert_eq!(
-            session.events,
-            vec![
-                serde_json::json!({"type": "file_op", "path": "/visible"}),
-                serde_json::json!({
+            serde_json::to_value(&session.events).unwrap(),
+            serde_json::json!([
+                {"type": "file_op", "path": "/visible", "operation": "read"},
+                {
                     "type": "port_subscription",
                     "port": 81,
                     "mode": "mirror",
                     "hit_count": 3
-                }),
-                serde_json::json!({
+                },
+                {"type": "dns_query", "host": "example.test"},
+                {
                     "type": "port_subscription",
                     "port": 80,
-                    "mode": "steal",
-                    "hit_count": 2
-                }),
-            ]
+                    "mode": "mirror",
+                },
+            ])
         );
         assert_eq!(
             serde_json::to_value(&session.info.port_subscriptions).unwrap(),
             serde_json::json!([
+                {"port": 80, "mode": "mirror"},
                 {"port": 81, "mode": "mirror", "hit_count": 3},
-                {"port": 80, "mode": "steal", "hit_count": 2},
             ])
         );
+        drop(sessions);
+
+        buffer_session_events(
+            "missing-session",
+            vec![MonitorEvent::PortSubscription {
+                port: 80,
+                mode: "steal".to_owned(),
+                hit_count: Some(99),
+            }],
+            &state,
+        )
+        .await;
+        assert_eq!(state.sessions.read().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn event_buffer_caps_history_after_coalescing() {
+        let state = test_state();
+        let session_id = "capped-session";
+        state.sessions.write().await.insert(
+            session_id.to_owned(),
+            tracked_session(session_id, std::path::Path::new("unused")),
+        );
+        let mut events = vec![MonitorEvent::PortSubscription {
+            port: 80,
+            mode: "steal".to_owned(),
+            hit_count: Some(1),
+        }];
+        events.extend(
+            (0..MAX_EVENTS_PER_SESSION + 2).map(|pid| MonitorEvent::LayerDisconnected {
+                pid: u32::try_from(pid).unwrap(),
+            }),
+        );
+        events.extend((2..5).map(|hit_count| MonitorEvent::PortSubscription {
+            port: 80,
+            mode: "steal".to_owned(),
+            hit_count: Some(hit_count),
+        }));
+
+        buffer_session_events(session_id, events, &state).await;
+
+        let sessions = state.sessions.read().await;
+        let events = &sessions.get(session_id).unwrap().events;
+        assert_eq!(events.len(), MAX_EVENTS_PER_SESSION);
+        let retained_pids: Vec<_> = events
+            .iter()
+            .take(MAX_EVENTS_PER_SESSION - 1)
+            .map(|event| match event {
+                MonitorEvent::LayerDisconnected { pid } => *pid,
+                other => panic!("unexpected retained event: {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            retained_pids,
+            (3..u32::try_from(MAX_EVENTS_PER_SESSION + 2).unwrap()).collect::<Vec<_>>()
+        );
+        assert!(matches!(
+            events.last().unwrap(),
+            MonitorEvent::PortSubscription {
+                port: 80,
+                hit_count: Some(4),
+                ..
+            }
+        ));
     }
 
     /// `/health` is intentionally outside the auth middleware so k8s probes can hit it.
