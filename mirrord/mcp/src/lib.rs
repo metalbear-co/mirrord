@@ -33,6 +33,7 @@ pub use crate::telemetry::McpTelemetry;
 use crate::telemetry::{McpTool, ToolOutcome};
 
 mod corpus;
+mod schema;
 mod telemetry;
 pub mod tools;
 
@@ -42,8 +43,9 @@ cluster. Every mirrord config you generate or change, whether a `mirrord.json` o
 `mirrord-up.yaml`, must be checked with `validate_config` before it is written: pass the complete \
 file content, fix every issue it reports and validate again, until `issues` is empty. Never write \
 a config that has not validated, and don't rely on your own knowledge of the config format, which \
-may not match the installed mirrord version. The `mirrord://info` resource gives the installed \
-mirrord version.";
+may not match the installed mirrord version. To learn what an option does, which values it takes \
+or which mirrord plan it needs, call `explain_config_option` with its path instead of guessing. \
+The `mirrord://info` resource gives the installed mirrord version.";
 
 /// URI of the resource describing this mirrord installation.
 const INFO_RESOURCE_URI: &str = "mirrord://info";

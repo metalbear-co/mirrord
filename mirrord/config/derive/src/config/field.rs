@@ -106,9 +106,14 @@ impl ConfigField {
             quote! { #[deprecated(note = #note)] }
         });
 
+        let plan = flags.plan.as_ref().map(
+            |plan| quote! { #[schemars(extend("x-mirrord-plan" = crate::plan::Plan::#plan))] },
+        );
+
         quote! {
             #(#docs)*
             #deprecated
+            #plan
             #rename
             #[serde(default, skip_serializing_if = "Option::is_none")]
             #vis #ident: Option<#target>

@@ -8,6 +8,7 @@ use crate::config::{ConfigError, Result};
 /// Mirror the rollout specified by [`RolloutTarget::rollout`].
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Oss))]
 pub struct RolloutTarget {
     /// <!--${internal}-->
     /// Rollout to mirror.
@@ -18,9 +19,9 @@ pub struct RolloutTarget {
 
 impl FromSplit for RolloutTarget {
     fn from_split(split: &mut std::str::Split<char>) -> Result<Self> {
-        let rollout = split
-            .next()
-            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned()))?;
+        let rollout = split.next().ok_or_else(|| {
+            ConfigError::InvalidTargetPath(FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned())
+        })?;
         match (split.next(), split.next()) {
             (Some("container"), Some(container)) => Ok(Self {
                 rollout: rollout.to_owned(),
@@ -30,7 +31,7 @@ impl FromSplit for RolloutTarget {
                 rollout: rollout.to_owned(),
                 container: None,
             }),
-            _ => Err(ConfigError::InvalidTarget(
+            _ => Err(ConfigError::InvalidTargetPath(
                 FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned(),
             )),
         }

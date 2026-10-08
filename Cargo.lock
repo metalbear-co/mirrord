@@ -5649,6 +5649,7 @@ version = "3.271.0"
 dependencies = [
  "drain",
  "flate2",
+ "json-patch",
  "jsonschema",
  "mirrord-analytics",
  "mirrord-config",
@@ -5661,6 +5662,7 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "serde_path_to_error",
+ "strsim",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "tar",
