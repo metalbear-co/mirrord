@@ -79,8 +79,7 @@ pub fn rosetta_fallbacks_path() -> Result<PathBuf> {
         .join("rosetta-fallbacks.jsonl"))
 }
 
-/// Gets a lock on the fallback report so that multiple processes doint send the same report.
-pub fn acquire_rosetta_fallback_report_lock() -> Result<File> {
+fn open_rosetta_fallback_report_lock() -> Result<File> {
     let mut lock_path = rosetta_fallbacks_path()?.into_os_string();
     lock_path.push(".report.lock");
     let lock_path = PathBuf::from(lock_path);
@@ -89,13 +88,28 @@ pub fn acquire_rosetta_fallback_report_lock() -> Result<File> {
     })?;
     fs::create_dir_all(parent)?;
 
-    let file = OpenOptions::new()
+    Ok(OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(false)
-        .open(lock_path)?;
+        .open(lock_path)?)
+}
+
+/// Gets a lock on the fallback report so that multiple processes don't send the same report.
+pub fn acquire_rosetta_fallback_report_lock() -> Result<File> {
+    let file = open_rosetta_fallback_report_lock()?;
     file.lock_exclusive()?;
     Ok(file)
+}
+
+/// Tries to lock the report without delaying session startup.
+pub fn try_acquire_rosetta_fallback_report_lock() -> Result<Option<File>> {
+    let file = open_rosetta_fallback_report_lock()?;
+    match file.try_lock_exclusive() {
+        Ok(true) => Ok(Some(file)),
+        Ok(false) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn open_rosetta_fallbacks_for_append() -> Result<(File, Vec<u8>)> {

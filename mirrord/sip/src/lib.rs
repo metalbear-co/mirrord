@@ -428,20 +428,20 @@ mod main {
         opts: SipPatchOptions<'_>,
         logger: &mut SipLoggerGuard<'_>,
     ) -> Result<SipPatchResult> {
-        let mut missing_from_bundle = false;
-        if let Some(bundle_dir) = opts.sip_binaries_dir {
+        let missing_from_bundle = if let Some(bundle_dir) = opts.sip_binaries_dir {
             if let Some(prebuilt) = bundle::find_in_bundle(path, bundle_dir, logger) {
                 return Ok(SipPatchResult {
                     path: prebuilt,
                     x64_fallback: None,
                 });
             }
-            missing_from_bundle = true;
+            true
         } else {
             logger.log(format_args!(
                 "SIP utils directory not set, skipping check for pre-built SIP utility binaries"
             ));
-        }
+            false
+        };
 
         set_fallback_frameworks_path_if_mac_app(path, logger);
 

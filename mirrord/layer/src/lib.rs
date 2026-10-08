@@ -272,6 +272,16 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
             },
             log_info,
         ) {
+            if let Some(fallback) = result.x64_fallback.as_ref() {
+                // SAFETY: the layer constructor runs before user threads start, so environment
+                // mutation cannot race another thread.
+                unsafe {
+                    std::env::set_var(
+                        mirrord_sip::MIRRORD_SIP_X64_FALLBACK_ENV,
+                        fallback.as_os_str(),
+                    )
+                };
+            }
             let err = exec::execvp(result.path, args);
             tracing::error!("Couldn't execute {:?}", err);
             return Err(LayerError::ExecFailed(err));

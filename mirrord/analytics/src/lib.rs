@@ -59,11 +59,11 @@ pub fn read_kube_version_from_env() -> Option<(u16, u16)> {
 pub enum AnalyticValue {
     Bool(bool),
     Number(u32),
-    String(String),
     Uuid(Uuid),
     Nested(Analytics),
     Hash(AnalyticsHash),
     List(Vec<AnalyticValue>),
+    String(String),
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone, Copy)]
@@ -118,7 +118,7 @@ impl FromStr for ExecutionKind {
 ///
 /// Reported on analytics events as the numeric `ai_agent` property (alongside the
 /// `is_ai_agent` boolean), so AI-agent-driven usage can be distinguished from direct
-/// human usage. [`AnalyticValue`] has no string variant by design, hence the numeric mapping.
+/// human usage. The numeric mapping keeps the analytics schema stable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum AiAgent {
@@ -703,6 +703,16 @@ mod tests {
                 "preview_key_identifier": "a2V5"
             })
         );
+    }
+
+    #[test]
+    fn uuid_value_round_trip() {
+        let id = Uuid::from_u128(0x67e5504410b1426f9247bb680e5fe0c8);
+        let serialized = serde_json::to_string(&AnalyticValue::Uuid(id)).expect("serializes UUID");
+        let deserialized: AnalyticValue =
+            serde_json::from_str(&serialized).expect("deserializes UUID");
+
+        assert!(matches!(deserialized, AnalyticValue::Uuid(value) if value == id));
     }
 
     #[test]

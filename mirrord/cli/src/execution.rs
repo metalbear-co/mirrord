@@ -329,10 +329,17 @@ impl MirrordExecution {
             }
             #[cfg(target_os = "macos")]
             {
-                env_vars.insert(
-                    MIRRORD_ROSETTA_FALLBACKS_PATH_ENV.to_owned(),
-                    rosetta_fallbacks_path()?.to_string_lossy().into_owned(),
-                );
+                match rosetta_fallbacks_path() {
+                    Ok(path) => {
+                        env_vars.insert(
+                            MIRRORD_ROSETTA_FALLBACKS_PATH_ENV.to_owned(),
+                            path.to_string_lossy().into_owned(),
+                        );
+                    }
+                    Err(error) => progress.warning(&format!(
+                        "Rosetta fallback reporting is disabled because its data path could not be determined: {error}"
+                    )),
+                }
 
                 let log_info =
                     config
