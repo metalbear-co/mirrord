@@ -11,6 +11,7 @@ use std::{
     path::PathBuf,
     str::FromStr,
     sync::Arc,
+    time::Duration,
 };
 
 use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
@@ -1071,6 +1072,18 @@ pub(super) struct OperatorInstallArgs {
         default_value = "https://app.metalbear.com"
     )]
     pub app_url: String,
+
+    /// How long to wait for the operator to become ready before the installation fails.
+    ///
+    /// Lets the e2e tests fail an installation without waiting for the default.
+    #[arg(
+        long,
+        env = "MIRRORD_OPERATOR_INSTALL_READY_TIMEOUT",
+        hide = true,
+        value_parser = humantime::parse_duration,
+        default_value = "5m"
+    )]
+    pub ready_timeout: Duration,
 }
 
 #[derive(Args, Debug)]
