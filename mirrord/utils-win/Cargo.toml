@@ -52,11 +52,17 @@ winapi = { workspace = true, features = [
 ] }
 zip = { version = "2", default-features = false }
 windows-sys = { version = "0.59", features = [
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
+    "Wdk_System_Threading",
     "Win32_Foundation",
+    "Win32_Security",
     "Win32_Storage_FileSystem",
+    "Win32_System_IO",
     "Win32_System_Kernel",
     "Win32_System_Memory",
     "Win32_System_Diagnostics_Debug",
+    "Win32_System_Threading",
 ] }
 bincode.workspace = true
 chrono.workspace = true
@@ -64,3 +70,7 @@ ci_info.workspace = true
 rand.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+# Oplocks, to hold an open of a file from a test.
+winapi = { workspace = true, features = ["ioapiset", "winioctl"] }

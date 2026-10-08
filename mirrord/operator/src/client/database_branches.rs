@@ -7,7 +7,7 @@ use std::{
 use flate2::{Compression, write::GzEncoder};
 use k8s_openapi::ByteString;
 use kube::{
-    Api, Resource,
+    Api, Resource, ResourceExt,
     api::{ListParams, ObjectMeta, Patch, PatchParams},
     runtime::wait::await_condition,
 };
@@ -1029,7 +1029,8 @@ fn deterministic_branch_name(dialect: &str, target_namespace: &str, id: &str) ->
     format!("mirrord-{dialect}-branch-{short:016x}")
 }
 
-/// Outcome of [`create_branches`], kept apart so the caller can say which is which.
+/// Outcome of [`create_branches`], kept apart so the caller can say which is which. Each branch
+/// is as it was once ready, status included.
 #[derive(Debug, Default)]
 pub struct CreatedBranches {
     /// Branches this session minted.
@@ -1103,7 +1104,7 @@ pub async fn create_branches<P: Progress>(
     }
 
     let has_reused = !reused_branches.is_empty();
-    let outcome = CreatedBranches {
+    let mut outcome = CreatedBranches {
         created: created_branches,
         reused: reused_branches,
     };
@@ -1158,6 +1159,16 @@ pub async fn create_branches<P: Progress>(
                 operation: OperatorOperation::DbBranching,
                 message: error_msg,
             });
+        }
+
+        let name = db.name_any();
+
+        if let Some(branch) = outcome
+            .created
+            .get_mut(&name)
+            .or(outcome.reused.get_mut(&name))
+        {
+            *branch = db;
         }
     }
 
@@ -1221,6 +1232,34 @@ fn classify_existing_branches(
         bucket.insert(name, db);
     }
     existing
+}
+
+/// The connection mapping this session sends along for the branches it reuses, keyed by branch
+/// resource name.
+///
+/// The operator rewrites a session's env vars using a branch's `spec.connectionSource`, which
+/// names the vars of the workload that CREATED the branch. A workload reusing the branch under
+/// the same `id` may read its connection from other vars (`AUDIT_DB_HOST` where the creator has
+/// `DB_HOST`), so for those the session's own mapping (`requested`, from this config) has to
+/// reach the operator. A reused branch whose spec already equals what this session declares is
+/// left out, so the common same-config reuse sends nothing extra and behaves as before.
+///
+/// Both inputs are keyed by the branch resource name, the same key the lookup and create
+/// paths use.
+pub fn reused_branch_connection_sources<'a>(
+    requested: &HashMap<String, CrdConnectionSource>,
+    reused: impl IntoIterator<Item = (&'a String, &'a BranchDatabase)>,
+) -> BTreeMap<String, CrdConnectionSource> {
+    reused
+        .into_iter()
+        .filter_map(|(name, branch)| {
+            let source = requested.get(name)?;
+            if branch.spec.connection_source == *source {
+                return None;
+            }
+            Some((name.clone(), source.clone()))
+        })
+        .collect()
 }
 
 /// Look up the branch databases that already exist under the resource names in `params`.
@@ -2468,24 +2507,33 @@ impl UnifiedBranchParams {
 
 #[cfg(test)]
 mod test {
-    use std::collections::{BTreeMap, HashMap};
+    use std::{
+        collections::{BTreeMap, HashMap},
+        time::Duration,
+    };
 
-    use k8s_openapi::{apimachinery::pkg::apis::meta::v1::MicroTime, jiff::Timestamp};
-    use kube::ResourceExt;
+    use http::{Method, Request, Response};
+    use k8s_openapi::{
+        apimachinery::pkg::apis::meta::v1::{Condition, MicroTime, Time},
+        jiff::Timestamp,
+    };
+    use kube::{Api, Client, ResourceExt, client::Body};
     use mirrord_config::{
         feature::database_branches::{
-            S3BranchConfig, SqlBranchMigrationsConfig, TurbopufferBranchConfig,
+            S3BranchConfig, SingleOrVec, SqlBranchMigrationsConfig, TurbopufferBranchConfig,
         },
         target::Target,
     };
     use mirrord_progress::NullProgress;
 
     use super::{
-        BranchDatabase, BranchDatabaseId, ConfigConnectionSource, CrdConnectionSource,
-        DatabaseBranchesConfig, MigrationsSpec, ObjectMeta, OperatorApiError, UnifiedBranchParams,
-        UnifiedDatabaseBranchParams, build_migration_archive, classify_existing_branches,
-        convert_connection_source, extract_literal_values, read_migrations,
+        BranchDatabase, BranchDatabaseId, ConfigConnectionSource, ConnectionParamsSpec,
+        CrdConnectionSource, DatabaseBranchesConfig, MigrationsSpec, ObjectMeta, OperatorApiError,
+        SOURCE_COMPATIBLE_CONDITION, UnifiedBranchParams, UnifiedDatabaseBranchParams,
+        build_migration_archive, classify_existing_branches, convert_connection_source,
+        create_branches, extract_literal_values, read_migrations,
         replace_spec_values_with_secret_refs, replace_values_with_secret_refs, resolve_branch_id,
+        reused_branch_connection_sources,
     };
     use crate::crd::{
         db_branching::{
@@ -2524,9 +2572,8 @@ mod test {
         params
     }
 
-    /// A branch found under the deterministic name for `id`, in the given phase (`None` is a
-    /// branch the operator has not picked up yet).
-    fn found_branch(id: &str, phase: Option<BranchDatabasePhase>) -> (String, BranchDatabase) {
+    /// The params of an S3 branch with the given `id`.
+    fn s3_branch_params(id: &str) -> UnifiedBranchParams {
         let config: S3BranchConfig = serde_json::from_value(serde_json::json!({
             "source": { "type": "env_from", "params": { "bucket": "MY_BUCKET_ENV_VAR" } },
         }))
@@ -2537,8 +2584,13 @@ mod test {
             name: "my-app".to_owned(),
             container: String::new(),
         };
-        let params =
-            UnifiedBranchParams::from_s3(id, &config, "default", &session_target, HashMap::new());
+        UnifiedBranchParams::from_s3(id, &config, "default", &session_target, HashMap::new())
+    }
+
+    /// A branch found under the deterministic name for `id`, in the given phase (`None` is a
+    /// branch the operator has not picked up yet).
+    fn found_branch(id: &str, phase: Option<BranchDatabasePhase>) -> (String, BranchDatabase) {
+        let params = s3_branch_params(id);
         let status = phase.map(|phase| BranchDatabaseStatus {
             pod_name: None,
             phase,
@@ -2558,6 +2610,74 @@ mod test {
             status,
         };
         (branch.name_any(), branch)
+    }
+
+    /// A branch this session creates reaches the caller as it was once ready, so the conditions
+    /// the operator recorded on the way, such as a `SourceCompatible` warning, are there to relay.
+    #[tokio::test]
+    async fn created_branch_comes_back_as_it_was_once_ready() {
+        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let api = Api::<BranchDatabase>::namespaced(Client::new(service, "default"), "default");
+
+        let (name, created) = found_branch("created", None);
+        let (_, mut ready) = found_branch("created", Some(BranchDatabasePhase::Ready));
+        let warning = Condition {
+            last_transition_time: Time(Timestamp::now()),
+            message: "the branch is missing stored routines".to_owned(),
+            observed_generation: None,
+            reason: "SourceMismatch".to_owned(),
+            status: "False".to_owned(),
+            type_: SOURCE_COMPATIBLE_CONDITION.to_owned(),
+        };
+        ready
+            .status
+            .as_mut()
+            .unwrap()
+            .conditions
+            .push(warning.clone());
+
+        let json =
+            |value: serde_json::Value| Response::new(Body::from(value.to_string().into_bytes()));
+
+        let (outcome, ()) = tokio::join!(
+            create_branches(
+                &api,
+                HashMap::from([(name.clone(), s3_branch_params("created"))]),
+                Duration::from_secs(10),
+                &NullProgress,
+            ),
+            async {
+                let (request, send) = handle.next_request().await.unwrap();
+                assert_eq!(request.method(), Method::POST);
+                send.send_response(json(serde_json::to_value(&created).unwrap()));
+
+                let (request, send) = handle.next_request().await.unwrap();
+                assert_eq!(request.method(), Method::GET);
+                send.send_response(json(serde_json::json!({
+                    "apiVersion": "dbs.mirrord.metalbear.co/v1alpha1",
+                    "kind": "BranchDatabaseList",
+                    "metadata": { "resourceVersion": "1" },
+                    "items": [ready],
+                })));
+            },
+        );
+
+        let outcome = outcome.unwrap();
+        let conditions = outcome
+            .created
+            .get(&name)
+            .unwrap()
+            .status
+            .as_ref()
+            .unwrap()
+            .conditions
+            .iter()
+            .map(|condition| (condition.type_.as_str(), condition.message.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            conditions,
+            [(warning.type_.as_str(), warning.message.as_str())]
+        );
     }
 
     /// The lookup runs before the create, so what it reports has to be what the create
@@ -2600,6 +2720,47 @@ mod test {
         let (key, branch) = found_branch("shared-id", Some(BranchDatabasePhase::Ready));
         let existing = classify_existing_branches([(key.clone(), branch)]);
         assert!(existing.ready.contains_key(&key));
+    }
+
+    /// A `users` workload reusing the branch an `orders` workload created under the same `id`
+    /// declared `AUDIT_DB_*` vars, but the branch spec still says `DB_*`. Building the session
+    /// env from the branch spec then appended the creator's `DB_*` vars to the `users` pod and
+    /// left `AUDIT_DB_*` pointing at the source database. The session has to ship its own
+    /// mapping for that branch - and only for that one: a reused branch whose spec already
+    /// matches, or a branch this session did not ask for, sends nothing.
+    #[test]
+    fn reused_branch_ships_the_sessions_mapping_only_when_it_differs() {
+        let (same_id, same_branch) = found_branch("same", Some(BranchDatabasePhase::Ready));
+        let (other_id, other_branch) = found_branch("other", Some(BranchDatabasePhase::Ready));
+        let (unrequested_id, unrequested_branch) =
+            found_branch("unrequested", Some(BranchDatabasePhase::Ready));
+
+        let audit_source = CrdConnectionSource::Params(Box::new(ConnectionParamsSpec {
+            host: Some(SingleOrVec::from(ConnectionSourceKind::Env {
+                container: None,
+                variable: "AUDIT_DB_HOST".to_owned(),
+            })),
+            ..Default::default()
+        }));
+        let requested = HashMap::from([
+            (same_id.clone(), same_branch.spec.connection_source.clone()),
+            (other_id.clone(), audit_source.clone()),
+        ]);
+
+        let shipped = reused_branch_connection_sources(
+            &requested,
+            [
+                (&same_id, &same_branch),
+                (&other_id, &other_branch),
+                (&unrequested_id, &unrequested_branch),
+            ],
+        );
+
+        assert_eq!(
+            shipped,
+            BTreeMap::from([(other_branch.name_any(), audit_source)]),
+            "only the branch whose spec names other vars carries the session's mapping"
+        );
     }
 
     /// An S3 branch is cloned in the provider's cloud, so its spec carries none of the pod

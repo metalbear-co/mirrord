@@ -2,10 +2,22 @@ use std::{net::IpAddr, ops::Deref};
 
 use mirrord_config::feature::network::{
     dns::{DnsConfig, DnsFilterConfig},
-    filter::AddressFilter,
+    filter::{AddressFilter, AddressFilterError},
 };
 
-use crate::detour::{Bypass, Detour};
+use crate::{
+    detour::{Bypass, Detour},
+    setup::SetupError,
+};
+
+/// A `feature.network.dns.filter` entry that does not parse.
+#[derive(Debug, thiserror::Error)]
+#[error("{filter:?}: {source}")]
+pub struct DnsFilterError {
+    pub filter: String,
+    #[source]
+    pub source: AddressFilterError,
+}
 
 /// Generated from [`DnsConfig`] provided in the [`LayerConfig`](mirrord_config::LayerConfig).
 /// Decides whether DNS queries are done locally or remotely.
@@ -52,13 +64,16 @@ impl DnsSelector {
     }
 }
 
-impl From<&DnsConfig> for DnsSelector {
-    fn from(value: &DnsConfig) -> Self {
+/// Fails with [`SetupError::DnsFilter`] on a filter that does not parse.
+impl TryFrom<&DnsConfig> for DnsSelector {
+    type Error = SetupError;
+
+    fn try_from(value: &DnsConfig) -> Result<Self, Self::Error> {
         if !value.enabled {
-            return Self {
+            return Ok(Self {
                 filters: Default::default(),
                 filter_is_local: false,
-            };
+            });
         }
 
         let (filters, filter_is_local) = match &value.filter {
@@ -71,15 +86,46 @@ impl From<&DnsConfig> for DnsSelector {
             .into_iter()
             .flatten()
             .map(|filter| {
-                filter
-                    .parse::<AddressFilter>()
-                    .expect("bad address filter, should be verified in the CLI")
+                filter.parse().map_err(|source| DnsFilterError {
+                    filter: filter.to_owned(),
+                    source,
+                })
             })
-            .collect();
+            .collect::<Result<_, DnsFilterError>>()?;
 
-        Self {
+        Ok(Self {
             filters,
             filter_is_local,
-        }
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mirrord_config::util::VecOrSingle;
+
+    use super::*;
+
+    /// The setup error names the filter that does not parse.
+    #[test]
+    fn an_invalid_filter_is_named_in_the_setup_error() {
+        let filter = "google.com/24:7777";
+        let config = DnsConfig {
+            enabled: true,
+            filter: Some(DnsFilterConfig::Remote(VecOrSingle::Single(
+                filter.to_owned(),
+            ))),
+        };
+
+        let error =
+            DnsSelector::try_from(&config).expect_err("a hostname with a subnet does not parse");
+
+        assert!(
+            matches!(
+                &error,
+                SetupError::DnsFilter(DnsFilterError { filter: named, .. }) if named == filter
+            ),
+            "{error:?}"
+        );
     }
 }

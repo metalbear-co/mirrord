@@ -7,25 +7,30 @@
 # of a test that failed for good). A run that failed publishes the reports of the jobs it did get
 # through, since a broken `main` retries tests like any other.
 #
-# Usage: flaky-tests.sh <repo> <run-id>
+# Usage: flaky-tests.sh <repo> <run-id> <out-dir>
 #
 # Reports every test that was retried at all, leaving the threshold to whoever decides what is worth
-# filing: a test already tracked by an open issue is counted on it however rarely it flakes.
+# filing: a test already tracked by an open issue is noted on it however rarely it flakes. The cases
+# rstest generates are reported as the test function that declares them, so a parametrized test is
+# one test however many of its cases flaked.
 #
-# Writes captured failure output and a markdown table to stdout. On $GITHUB_OUTPUT it sets `count` and `tests`, the latter
-# `<retries>\t<package>\t<test>` lines, most retried first.
+# Writes a directory per test into <out-dir>, holding the captured failure output of its retried cases
+# in `output.log` and, for a parametrized test, a markdown table of their arguments in `cases.md`. Writes
+# a markdown table to stdout. On $GITHUB_OUTPUT it sets `count` and `tests`, the latter
+# `<retries>\t<package>\t<test>\t<dir>` lines, most retried first.
 
 set -euo pipefail
 
 repo=$1
 run_id=$2
+out_dir=$3
 
 readonly ARTIFACT=nextest-junit
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-mkdir -p "$work/reports"
+mkdir -p "$work/reports" "$out_dir"
 
 artifacts=$(gh api "repos/$repo/actions/runs/$run_id/artifacts?per_page=100")
 
@@ -53,14 +58,52 @@ else
   echo "::warning::run $run_id published no $ARTIFACT artifact" >&2
 fi
 
-python3 - "$work/reports" "$work/ranked.tsv" << 'PY'
-import pathlib, sys
+python3 - "$work/reports" "$work/ranked.tsv" "$out_dir" << 'PY'
+import pathlib, re, sys
 from collections import Counter
 from xml.etree import ElementTree
 
-reports, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+reports, out, sightings = (pathlib.Path(arg) for arg in sys.argv[1:4])
 retries = Counter()
 failures = {}
+names = {}
+
+# rstest declares each case as a module under its test function: `case_<n>[_<description>]` for a
+# `#[case]`, and `<argument>_<n>_<value>` for every `#[values]` argument, where <n> counts from one and
+# <value> is the argument's expression with its punctuation folded into underscores. A plain test can
+# be named that way too, so a name is read as a case only when everything the report holds under the
+# same function is one.
+CASE = re.compile(r"case_(\d+)(?:_(\w*))?")
+VALUE = re.compile(r"(\w+?)_(\d+)_(\w*)")
+
+
+def parameter(segment):
+    if match := CASE.fullmatch(segment):
+        return "case", match[1], match[2] or ""
+    if match := VALUE.fullmatch(segment):
+        return match.groups()
+    return None
+
+
+def function(pkg, test):
+    segments = test.split("::")
+    while len(segments) > 1 and parameter(segments[-1]):
+        segments.pop()
+    prefix = "::".join(segments) + "::"
+    cases = (name[len(prefix):] for name in names[pkg] if name.startswith(prefix))
+    if all(parameter(segment) for case in cases for segment in case.split("::")):
+        return prefix.removesuffix("::")
+    return test
+
+
+def table(test, cases):
+    rows = [[parameter(segment) for segment in case.removeprefix(f"{test}::").split("::")] for case in cases]
+    lines = ["| " + " | ".join(f"`{name}`" for name, _, _ in rows[0]) + " |", "|" + "---|" * len(rows[0])]
+    for row in rows:
+        cells = (f"{int(n)} `{value}`" if value else str(int(n)) for _, n, value in row)
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines) + "\n"
+
 
 for report in reports.rglob("*.xml"):
     try:
@@ -69,9 +112,10 @@ for report in reports.rglob("*.xml"):
         continue
 
     for case in root.iter("testcase"):
+        key = (case.get("classname", "?"), case.get("name", "?"))
+        names.setdefault(key[0], set()).add(key[1])
         attempts = len(case.findall("flakyFailure")) + len(case.findall("rerunFailure"))
         if attempts:
-            key = (case.get("classname", "?"), case.get("name", "?"))
             retries[key] += attempts
             output = failures.setdefault(key, [])
             for attempt in list(case):
@@ -87,14 +131,25 @@ for report in reports.rglob("*.xml"):
                         if captured.text:
                             output.extend((f"--- {stream} ---", captured.text))
 
-ranked = sorted(retries.items(), key=lambda kv: (-kv[1], kv[0]))
-out.write_text("".join(f"{count}\t{pkg}\t{test}\n" for (pkg, test), count in ranked))
-# Prefix every captured line so test output cannot issue Actions workflow commands.
-for (pkg, test), _ in ranked:
-    print(f"Test failure: {pkg}/{test}")
-    for line in "\n".join(failures[(pkg, test)]).splitlines():
-        print(f"| {line}")
+tests = {}
+for (pkg, case), count in retries.items():
+    tests.setdefault((pkg, function(pkg, case)), Counter())[case] = count
 
+ranked = sorted(tests.items(), key=lambda kv: (-kv[1].total(), kv[0]))
+rows = []
+for index, ((pkg, test), cases) in enumerate(ranked):
+    sighting = sightings / str(index)
+    sighting.mkdir()
+    sections = (f"=== {case} ===\n" + "\n".join(failures[(pkg, case)]) for case in sorted(cases))
+    (sighting / "output.log").write_text("\n".join(sections) + "\n")
+    # Prefix every captured line so test output cannot issue Actions workflow commands.
+    for case in sorted(cases):
+        print(f"Test failure: {pkg}/{case}")
+        for line in "\n".join(failures[(pkg, case)]).splitlines():
+            print(f"| {line}")
+    (sighting / "cases.md").write_text("" if test in cases else table(test, sorted(cases)))
+    rows.append(f"{cases.total()}\t{pkg}\t{test}\t{sighting}\n")
+out.write_text("".join(rows))
 PY
 
 {

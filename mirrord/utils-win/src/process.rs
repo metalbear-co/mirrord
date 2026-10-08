@@ -9,19 +9,14 @@ use winapi::{
         ntdef::HANDLE,
     },
     um::{
-        handleapi::{CloseHandle, INVALID_HANDLE_VALUE},
+        handleapi::CloseHandle,
         libloaderapi::{LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW},
-        processenv::GetCommandLineW,
         processthreadsapi::{
             GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, OpenProcess,
             OpenProcessToken, ProcessIdToSessionId,
         },
         securitybaseapi::{GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation},
         synchapi::WaitForSingleObject,
-        tlhelp32::{
-            CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
-            TH32CS_SNAPPROCESS,
-        },
         winbase::{QueryFullProcessImageNameW, WAIT_OBJECT_0},
         winnt::{
             PROCESS_QUERY_LIMITED_INFORMATION, SECURITY_MANDATORY_HIGH_RID,
@@ -31,6 +26,10 @@ use winapi::{
         },
         wow64apiset::IsWow64Process2,
     },
+};
+use windows_sys::{
+    Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation},
+    Win32::System::Threading::PROCESS_BASIC_INFORMATION,
 };
 
 /// Returns the current process's executable name.
@@ -147,8 +146,6 @@ pub struct ProcessIdentity {
     pub parent_pid: Option<u32>,
     /// The parent process's image name, when it could be read.
     pub parent_name: Option<String>,
-    /// The raw command line.
-    pub command_line: String,
     /// The integrity-level label. For example `medium` or `high`.
     pub integrity: &'static str,
     /// The Windows session id, when it could be read.
@@ -160,20 +157,18 @@ pub struct ProcessIdentity {
 impl ProcessIdentity {
     /// Gathers the current process's identity.
     ///
-    /// This touches several Windows APIs and the process snapshot. Run it at a safe time. Never
-    /// from a crash handler.
+    /// This touches several Windows APIs. Run it at a safe time. Never from a crash handler.
     ///
     /// # Returns
     ///
     /// A best-effort [`ProcessIdentity`].
     pub fn capture() -> Self {
         let pid = unsafe { GetCurrentProcessId() };
-        let (parent_pid, parent_name) = parent_of(pid);
+        let (parent_pid, parent_name) = parent_of_current();
         Self {
             pid,
             parent_pid,
             parent_name,
-            command_line: current_command_line(),
             integrity: current_integrity(),
             session_id: session_of(pid),
             wow64: current_wow64(),
@@ -181,63 +176,35 @@ impl ProcessIdentity {
     }
 }
 
-/// Finds a process's parent id and the parent's image name.
+/// Finds this process's parent id and the parent's image name.
 ///
-/// This walks a one-shot process snapshot. The whole snapshot is read first so the parent can be
-/// resolved regardless of its position in the list.
-fn parent_of(pid: u32) -> (Option<u32>, Option<String>) {
-    let processes = snapshot_processes();
-    let parent_pid = processes
-        .iter()
-        .find(|(process_pid, _, _)| *process_pid == pid)
-        .map(|(_, parent, _)| *parent);
-    let parent_name = parent_pid.and_then(|parent| {
-        processes
-            .iter()
-            .find(|(process_pid, _, _)| *process_pid == parent)
-            .map(|(_, _, name)| name.clone())
-    });
+/// The id is the one the kernel recorded at creation, read with `NtQueryInformationProcess`
+/// rather than from a snapshot of every process on the machine. The name is read from the parent
+/// itself, so it is missing when the parent is gone or cannot be opened.
+fn parent_of_current() -> (Option<u32>, Option<String>) {
+    let parent_pid = parent_pid_of_current();
+    let parent_name = parent_pid
+        .map(|parent| process_status(parent).name)
+        .filter(|name| !name.is_empty());
     (parent_pid, parent_name)
 }
 
-/// Reads the full process list as `(pid, parent_pid, name)` tuples.
-fn snapshot_processes() -> Vec<(u32, u32, String)> {
-    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-    if snapshot == INVALID_HANDLE_VALUE {
-        return Vec::new();
-    }
-
-    let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
-    entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as DWORD;
-
-    let mut out = Vec::new();
-    let mut have = unsafe { Process32FirstW(snapshot, &mut entry) };
-    while have != FALSE {
-        out.push((
-            entry.th32ProcessID,
-            entry.th32ParentProcessID,
-            u16_buffer_to_string(entry.szExeFile),
-        ));
-        have = unsafe { Process32NextW(snapshot, &mut entry) };
-    }
-
-    unsafe { CloseHandle(snapshot) };
-    out
-}
-
-/// Reads the current process's raw command line.
-fn current_command_line() -> String {
-    let ptr = unsafe { GetCommandLineW() };
-    if ptr.is_null() {
-        return String::new();
-    }
-
-    let mut len = 0usize;
-    while unsafe { *ptr.add(len) } != 0 {
-        len += 1;
-    }
-    let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
-    u16_buffer_to_string(slice)
+/// The id of the process that created this one, when the kernel answers.
+fn parent_pid_of_current() -> Option<u32> {
+    // Every field is an integer or a pointer, for which zero is valid.
+    let mut information: PROCESS_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+    let status = unsafe {
+        NtQueryInformationProcess(
+            GetCurrentProcess().cast(),
+            ProcessBasicInformation,
+            (&mut information as *mut PROCESS_BASIC_INFORMATION).cast(),
+            std::mem::size_of::<PROCESS_BASIC_INFORMATION>() as u32,
+            std::ptr::null_mut(),
+        )
+    };
+    (status >= 0)
+        .then(|| u32::try_from(information.InheritedFromUniqueProcessId).ok())
+        .flatten()
 }
 
 /// Reads a process's session id.

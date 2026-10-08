@@ -260,7 +260,6 @@ pub const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
 ///     "path": "pod/bear-pod",
 ///     "namespace": "default"
 ///   },
-///   "connect_tcp": null,
 ///   "agent": {
 ///     "log_level": "info",
 ///     "json_log": false,
@@ -275,12 +274,11 @@ pub const MIRRORD_CRASH_EPHEMERAL_DIR: &str = "MIRRORD_CRASH_EPHEMERAL_DIR";
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
 ///     "flush_connections": true,
-///     "metrics": "0.0.0.0:9000",
+///     "metrics": "0.0.0.0:9000"
 ///   },
 ///   "feature": {
 ///     "env": {
 ///       "include": "DATABASE_USER;PUBLIC_ENV",
-///       "exclude": "DATABASE_PASSWORD;SECRET_ENV",
 ///       "override": {
 ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
 ///         "LOCAL_BEAR": "panda"
@@ -1575,6 +1573,7 @@ mod tests {
         agent::AgentFileConfig,
         feature::{
             FeatureFileConfig,
+            env::EnvFileConfig,
             fs::{FsModeConfig, FsUserConfig},
             network::{
                 NetworkFileConfig,
@@ -2082,6 +2081,50 @@ mod tests {
             .read_to_string(&mut existing_content);
 
         assert_eq!(existing_content.replace("\r\n", "\n"), compare_content);
+    }
+
+    /// Users copy parts of the config examples in the docs into their own config, so each example
+    /// must pass the same checks as `mirrord verify-config`.
+    ///
+    /// The example is the first JSON block after `heading` in the docs of the type. An empty
+    /// `heading` selects the first JSON block in the docs.
+    ///
+    /// With `ide`, the test does the checks of `mirrord verify-config --ide`, where the user
+    /// selects the target later. The `feature` example needs this, because it uses steal mode
+    /// and has no target, and steal mode needs a target.
+    #[rstest]
+    #[case::complete(
+        schemars::schema_for!(LayerFileConfig),
+        "### Complete `config.json`",
+        false
+    )]
+    #[case::feature(schemars::schema_for!(FeatureFileConfig), "", true)]
+    #[case::env(schemars::schema_for!(EnvFileConfig), "", false)]
+    fn docs_example_is_valid(#[case] schema: Schema, #[case] heading: &str, #[case] ide: bool) {
+        let example = {
+            let docs = schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("type should have docs");
+            let (_, rest) = docs
+                .split_once(heading)
+                .unwrap_or_else(|| panic!("docs should have {heading:?}"));
+            let (_, block) = rest
+                .split_once("```json\n")
+                .expect("example should be in a JSON block");
+            let (example, _) = block.split_once("```").expect("JSON block should end");
+            example
+        };
+
+        let mut file = NamedTempFile::with_suffix(".json").unwrap();
+        file.write_all(example.as_bytes()).unwrap();
+
+        let mut context = ConfigContext::default()
+            .override_env(LayerConfig::FILE_PATH_ENV, file.path())
+            .strict_env(true)
+            .empty_target_final(!ide);
+        let config = LayerConfig::resolve(&mut context).unwrap();
+        config.verify(&mut context).unwrap();
     }
 
     /// Related to issue #2936: https://github.com/metalbear-co/mirrord/issues/2936.
@@ -2728,8 +2771,9 @@ mod tests {
         out
     }
 
-    /// Regression for the original Windows layer panic at
-    /// `mirrord-layer-lib::file::mapper::FileRemapper::new`.
+    /// Regression for a Windows layer that failed to start because a mapping
+    /// pattern did not compile in
+    /// `mirrord-layer-lib::file::mapper::FileRemapper::try_new`.
     ///
     /// Pre-fix `apply_magic` interpolated `$HOME` straight into the `.aws`
     /// mapping regex. On Windows with `HOME=C:\Users\foo` (e.g. set by Git

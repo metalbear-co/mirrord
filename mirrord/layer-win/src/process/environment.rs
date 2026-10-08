@@ -1,119 +1,42 @@
-//! Windows environment block parsing utilities
+//! The environment block a process creation was given.
 //!
-//! This module provides safe, robust parsing of Windows environment blocks
-//! with comprehensive edge case handling based on
-//! <https://nullprogram.com/blog/2023/08/23/> analysis.
+//! The block itself is read by `WindowsEnv::from_block` in
+//! `mirrord_layer_lib::process::windows::environment`, which also compares names the way Windows
+//! compares them. This module only decides whether there is a block, and in which encoding.
 
-use std::{collections::HashMap, ffi::c_void};
+use std::ffi::c_void;
 
-use str_win::{MultiBufferChar, find_multi_buffer_safe_len, multi_buffer_to_strings};
+use mirrord_layer_lib::process::windows::environment::WindowsEnv;
 use winapi::um::winbase::CREATE_UNICODE_ENVIRONMENT;
 
-/// Filter environment strings according to Windows requirements and log invalid entries
-///
-/// Windows environment variables must:
-/// - Not be empty (except for special empty environment case)
-/// - Not start with '=' (reserved syntax)
-/// - Contain at least one '=' (key=value format)
-fn filter_environment_strings<T: MultiBufferChar>(strings: Vec<String>) -> Vec<String> {
-    let original_count = strings.len();
-    let mut filtered_strings = Vec::new();
-    let mut filtered_count = 0;
-
-    let type_name = if std::mem::size_of::<T>() == 2 {
-        "Unicode"
-    } else {
-        "ANSI"
-    };
-
-    for s in strings {
-        if !s.is_empty() && !s.starts_with('=') && s.contains('=') {
-            filtered_strings.push(s);
-        } else {
-            filtered_count += 1;
-            tracing::warn!(
-                "Filtered out invalid environment entry ({}): {:?}",
-                type_name,
-                s
-            );
-        }
-    }
-
-    if filtered_count > 0 {
-        tracing::warn!(
-            "Filtered {} invalid environment entries out of {} total ({})",
-            filtered_count,
-            original_count,
-            type_name
-        );
-    }
-
-    filtered_strings
-}
-
-/// Parse Windows environment block into HashMap
+/// Parse the environment block a process creation was given.
 ///
 /// The environment block can be either ANSI or Unicode depending on the creation flags.
-/// This function checks the CREATE_UNICODE_ENVIRONMENT flag to determine the format.
+/// This function checks the CREATE_UNICODE_ENVIRONMENT flag to determine the format, and reads
+/// the block with [`WindowsEnv::from_block`].
+///
+/// # Returns
+///
+/// `None` for a null block, which inherits this process's environment. Otherwise the caller's
+/// environment, empty for a block that holds only its terminator, which asks for no variables at
+/// all.
 ///
 /// # Safety
 /// This function is unsafe because it dereferences raw pointers from the Windows API.
 /// The caller must ensure that the environment pointer is valid and properly formatted.
-pub unsafe fn parse_environment_block(
+pub unsafe fn parse_caller_environment(
     environment: *mut c_void,
     creation_flags: u32,
-) -> HashMap<String, String> {
+) -> Option<WindowsEnv> {
     if environment.is_null() {
-        return HashMap::new();
+        return None;
     }
 
-    if creation_flags & CREATE_UNICODE_ENVIRONMENT != 0 {
-        unsafe { parse_environment_block_typed::<u16>(environment) }
+    Some(if creation_flags & CREATE_UNICODE_ENVIRONMENT != 0 {
+        unsafe { WindowsEnv::from_block::<u16>(environment.cast()) }
     } else {
-        unsafe { parse_environment_block_typed::<u8>(environment) }
-    }
-}
-
-/// Type-specific environment block parser - eliminates duplicate unsafe calls
-unsafe fn parse_environment_block_typed<T: MultiBufferChar>(
-    environment: *mut c_void,
-) -> HashMap<String, String> {
-    let env_ptr = environment as *const T;
-
-    // Find the actual size using str-win safe length utility
-    let final_size = match unsafe { find_multi_buffer_safe_len(env_ptr, 65536) } {
-        // Valid environment (more than just double null)
-        Some(size) if size > 2 => size,
-        // Empty or malformed environment
-        _ => return HashMap::new(),
-    };
-
-    // Create slice with actual found size
-    let env_slice = unsafe { std::slice::from_raw_parts(env_ptr, final_size) };
-
-    // Parse environment strings using str-win utilities
-    let raw_strings = multi_buffer_to_strings(env_slice);
-
-    // Filter out invalid entries with logging
-    let valid_strings = filter_environment_strings::<T>(raw_strings);
-
-    // Convert to HashMap
-    // Note: Windows maintains invariant that duplicate variables have same value
-    build_environment_map(valid_strings)
-}
-
-/// Build HashMap from validated environment strings
-fn build_environment_map(env_strings: Vec<String>) -> HashMap<String, String> {
-    let mut env_map = HashMap::new();
-    for env_string in env_strings {
-        if let Some((name, value)) = env_string.split_once('=') {
-            // Only insert if name is non-empty (additional safety check)
-            if !name.is_empty() {
-                env_map.insert(name.to_owned(), value.to_owned());
-            }
-        }
-    }
-    env_map
+        unsafe { WindowsEnv::from_block::<u8>(environment.cast()) }
+    })
 }
 
 #[cfg(test)]
@@ -122,111 +45,83 @@ mod tests {
 
     use super::*;
 
-    /// Helper to test empty environment parsing for any character type
-    fn test_empty_environment<T: MultiBufferChar>() -> HashMap<String, String> {
-        let empty_env: [T; 2] = [T::default(), T::default()];
-        unsafe { parse_environment_block_typed::<T>(empty_env.as_ptr() as *mut c_void) }
+    /// Encodes `entries` as a Unicode environment block, in the given order.
+    fn unicode_block(entries: &[&str]) -> Vec<u16> {
+        let mut block = entries
+            .iter()
+            .flat_map(|entry| entry.encode_utf16().chain([0]))
+            .collect::<Vec<_>>();
+        block.push(0);
+        if entries.is_empty() {
+            block.push(0);
+        }
+        block
     }
 
-    #[test]
-    fn test_empty_environment_special_case() {
-        // Test empty environment for both u8 and u16
-        let result_u16 = test_empty_environment::<u16>();
-        assert!(result_u16.is_empty());
-
-        let result_u8 = test_empty_environment::<u8>();
-        assert!(result_u8.is_empty());
+    /// Parses `entries` the way the hook parses a caller's Unicode block.
+    fn parse(entries: &[&str]) -> WindowsEnv {
+        let mut block = unicode_block(entries);
+        unsafe {
+            parse_caller_environment(
+                block.as_mut_ptr() as *mut c_void,
+                CREATE_UNICODE_ENVIRONMENT,
+            )
+        }
+        .expect("an explicit block")
     }
 
+    /// A null block inherits; a block that holds only its terminator asks for no variables.
     #[test]
-    fn test_invalid_entries_filtered() {
-        // Test entries that should be filtered out per Windows rules
-        let invalid_entries = [
-            "=INVALID", // Starts with =
-            "NOEQUALS", // No = character
-            "",         // Empty string
-        ];
+    fn an_empty_block_is_not_an_inherited_one() {
+        assert_eq!(
+            unsafe { parse_caller_environment(std::ptr::null_mut(), CREATE_UNICODE_ENVIRONMENT) },
+            None
+        );
 
-        for entry in &invalid_entries {
-            let bytes = entry.as_bytes();
-            assert!(!bytes.is_empty() || !entry.starts_with('=') || !entry.contains('='));
-        }
+        assert_eq!(parse(&[]), WindowsEnv::new());
+
+        let mut ansi_empty = [0u8, 0u8];
+        assert_eq!(
+            unsafe { parse_caller_environment(ansi_empty.as_mut_ptr() as *mut c_void, 0) },
+            Some(WindowsEnv::new())
+        );
     }
 
+    /// The creation flags pick the block's encoding.
     #[test]
-    fn test_warning_for_invalid_entries() {
-        // Test that we generate warnings for invalid entries in Unicode parsing
-        let mut env_u16: Vec<u16> = Vec::new();
+    fn the_creation_flags_pick_the_encoding() {
+        let expected = Some(WindowsEnv::from_ordered_entries([(
+            "A".to_owned(),
+            "1".to_owned(),
+        )]));
 
-        // Add valid entry
-        for c in "VALID=value".encode_utf16() {
-            env_u16.push(c);
-        }
-        env_u16.push(0);
-
-        // Add invalid entry that starts with =
-        for c in "=INVALID".encode_utf16() {
-            env_u16.push(c);
-        }
-        env_u16.push(0);
-
-        // Add invalid entry without =
-        for c in "NOEQUALS".encode_utf16() {
-            env_u16.push(c);
-        }
-        env_u16.push(0);
-
-        env_u16.push(0); // Double null terminator
-
-        let result =
-            unsafe { parse_environment_block_typed::<u16>(env_u16.as_mut_ptr() as *mut c_void) };
-
-        // Should only contain the valid entry
-        assert_eq!(result.len(), 1);
-        assert_eq!(result.get("VALID"), Some(&"value".to_owned()));
-
-        // Invalid entries should have been filtered out and warnings logged
-        assert!(!result.contains_key("=INVALID"));
-        assert!(!result.contains_key("NOEQUALS"));
+        let mut ansi = *b"A=1\0\0";
+        assert_eq!(
+            unsafe { parse_caller_environment(ansi.as_mut_ptr() as *mut c_void, 0) },
+            expected
+        );
+        assert_eq!(Some(parse(&["A=1"])), expected);
     }
 
+    /// Windows limits one variable to 32767 characters, but not the block: a pod's environment
+    /// easily passes 32768 units, and all of it reaches the child.
     #[test]
-    fn test_malformed_utf8_handling() {
-        // Test that we handle invalid UTF-8 gracefully
-        let mut env_data = vec![
-            b'V', b'A', b'R', b'=', 0xFF, 0xFE, // Invalid UTF-8 sequence
-            0,    // Null terminator
-            0, 0, // Double null terminator
-        ];
+    fn a_block_larger_than_32768_units_is_kept_whole() {
+        let entries = (0..800)
+            .map(|i| {
+                format!(
+                    "SERVICE_{i:04}_PORT_8080_TCP_ADDR=10.96.{}.{}",
+                    i / 250,
+                    i % 250
+                )
+            })
+            .collect::<Vec<_>>();
+        let environment = parse(&entries.iter().map(String::as_str).collect::<Vec<_>>());
 
-        let result =
-            unsafe { parse_environment_block_typed::<u8>(env_data.as_mut_ptr() as *mut c_void) };
-
-        // Should still parse the variable name even with invalid UTF-8 value
-        assert!(result.contains_key("VAR"));
-    }
-
-    #[test]
-    fn test_normal_environment_parsing() {
-        // Test normal case with Unicode
-        let mut env_u16: Vec<u16> = Vec::new();
-
-        // "PATH=C:\\bin\0USER=test\0\0"
-        for c in "PATH=C:\\bin".encode_utf16() {
-            env_u16.push(c);
-        }
-        env_u16.push(0);
-        for c in "USER=test".encode_utf16() {
-            env_u16.push(c);
-        }
-        env_u16.push(0);
-        env_u16.push(0); // Double null terminator
-
-        let result =
-            unsafe { parse_environment_block_typed::<u16>(env_u16.as_mut_ptr() as *mut c_void) };
-
-        assert_eq!(result.len(), 2);
-        assert_eq!(result.get("PATH"), Some(&"C:\\bin".to_owned()));
-        assert_eq!(result.get("USER"), Some(&"test".to_owned()));
+        assert_eq!(environment.len(), entries.len());
+        assert_eq!(
+            environment.get("SERVICE_0799_PORT_8080_TCP_ADDR"),
+            Some("10.96.3.49")
+        );
     }
 }

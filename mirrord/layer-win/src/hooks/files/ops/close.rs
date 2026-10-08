@@ -6,9 +6,7 @@
 //! descriptor" event to the remote pod, and it is also responsible of
 //! removing the
 //! [`HandleContext`](crate::hooks::files::managed_handle::HandleContext)
-//! for `handle` from the
-//! [`crate::hooks::files::managed_handle::MANAGED_HANDLES`]
-//! structure.
+//! for `handle` from the managed file registry.
 //!
 //! Any IOCP binding the file holds lives in its `HandleContext`, so removing
 //! the entry drops the binding with it -- no separate unbind step. Ports
@@ -19,10 +17,8 @@
 //! As a result, all future operations done on our [`HANDLE`] will be
 //! invalid.
 //!
-//! Due to details of the
-//! [`crate::hooks::files::managed_handle::MANAGED_HANDLES`]
-//! structure management, a [`HANDLE`] value can never be reclaimed, so
-//! all cases of reusage must be treated as a bug.
+//! Due to details of the managed file registry, a [`HANDLE`] value can
+//! never be reclaimed, so all cases of reusage must be treated as a bug.
 //!
 //! All instances of a failed network operation are marked by the return
 //! value of [`STATUS_UNEXPECTED_NETWORK_ERROR`].
@@ -34,12 +30,18 @@ use winapi::shared::{
     ntstatus::{STATUS_SUCCESS, STATUS_UNEXPECTED_NETWORK_ERROR},
 };
 
-use crate::hooks::files::{managed_handle::MANAGED_HANDLES, types::NT_CLOSE_ORIGINAL};
+use crate::hooks::files::{
+    managed_handle::{managed_file, remove_handle},
+    types::NT_CLOSE_ORIGINAL,
+};
 
 /// Body of `nt_close_hook`.
+///
+/// Every `CloseHandle` in the process comes through here, and [`managed_file`] turns away a handle
+/// that cannot be managed before the registry lookup.
 pub(in crate::hooks::files) unsafe fn handle(handle: HANDLE) -> NTSTATUS {
     unsafe {
-        if let Some(managed_handle) = MANAGED_HANDLES.get(&handle)
+        if let Some(managed_handle) = managed_file(handle)
             && let Ok(handle_context) = managed_handle.try_read()
         {
             let req = make_proxy_request_no_response(CloseFileRequest {
@@ -48,14 +50,14 @@ pub(in crate::hooks::files) unsafe fn handle(handle: HANDLE) -> NTSTATUS {
 
             // Remove the entry (and with it any IOCP binding) regardless of the
             // agent response, so we don't leak.
-            MANAGED_HANDLES.remove(&handle);
+            remove_handle(handle);
 
             if req.is_err() {
                 tracing::error!("nt_close_hook: Failed closing fd when closing file handle!");
                 return STATUS_UNEXPECTED_NETWORK_ERROR;
             }
 
-            tracing::info!(
+            tracing::debug!(
                 "nt_close_hook: Succesfully closed handle {:8x}",
                 handle as usize
             );

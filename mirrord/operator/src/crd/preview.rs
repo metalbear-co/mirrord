@@ -35,7 +35,7 @@ use crate::crd::queue_filter::{MessageFilter, QueueType, message_filter_crd_sche
 pub mod view;
 use uuid::Uuid;
 
-use super::session::SessionTarget;
+use super::{db_branching::core::ConnectionSource, session::SessionTarget};
 #[cfg(feature = "client")]
 use crate::client::connect_params::BranchDbNames;
 
@@ -136,6 +136,95 @@ pub struct PreviewSessionSpec {
     /// `None` (also what older CLIs send) inherits everything from the source CronJob.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cronjob: Option<PreviewCronJobConfig>,
+
+    /// Parts of the preview taken from the user's manifest files (`mirrord preview start
+    /// --resource`) instead of the live cluster, because they differ from what is live.
+    ///
+    /// `None` (also what older CLIs send) builds the preview from the target's live spec. The
+    /// CLI only creates a session with this field against an operator that advertises
+    /// `PreviewSpecResources`: an older CRD schema prunes it, which would silently drop the
+    /// user's files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec_resources: Option<PreviewSpecResources>,
+}
+
+/// The user's versions of the target and the ConfigMaps and Secrets its pod uses.
+///
+/// Only objects that differ from the live cluster (or do not exist there) travel here. Live
+/// objects are never modified: the operator creates preview-scoped copies of these ConfigMaps
+/// and Secrets, owned by the session so they go away with it, and points the preview pod at
+/// the copies. The real workload keeps using the originals.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSpecResources {
+    /// The user's pod template for the target, as a JSON `PodTemplateSpec`.
+    ///
+    /// An opaque string for the same reason as [`PreviewIncomingConfig::http_filter`]: typing
+    /// it would embed the whole Kubernetes pod template schema in this CRD and freeze it.
+    /// `None` when the files do not define the target, or define it the same as the live one;
+    /// the preview pod then uses the target's live template.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pod_template: Option<String>,
+
+    /// ConfigMaps the pod template refers to whose contents differ from the live ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config_maps: Vec<PreviewSpecConfigMap>,
+
+    /// Secrets the pod template refers to whose contents differ from the live ones. The
+    /// contents are not stored here, see [`PreviewSpecSecret`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secrets: Vec<PreviewSpecSecret>,
+}
+
+/// A ConfigMap from the user's files, by the name the pod template refers to it with.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSpecConfigMap {
+    /// Name the pod template uses. The ConfigMap with this name in the cluster (if any) is
+    /// left untouched.
+    pub name: String,
+
+    /// The ConfigMap's `data`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub data: BTreeMap<String, String>,
+
+    /// The ConfigMap's `binaryData`, base64-encoded as in the manifest.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub binary_data: BTreeMap<String, String>,
+}
+
+/// A Secret from the user's files, by the name the pod template refers to it with.
+///
+/// Like `secret_mounts`, the values never travel on the CR: the CLI stores them in the session's
+/// secret mounts `Secret` (see [`secret_mounts_secret_name`]) and this names the keys holding
+/// them, so reading the session never reveals them.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSpecSecret {
+    /// Name the pod template uses. The Secret with this name in the cluster (if any) is left
+    /// untouched.
+    pub name: String,
+
+    /// The Secret's `type` (`Opaque` when unset).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+
+    /// Each data key of the user's Secret, mapped to the key in the session's secret mounts
+    /// `Secret` holding its value.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub keys: BTreeMap<String, String>,
+}
+
+impl PreviewSpecSecret {
+    /// Key in the session's secret mounts `Secret` for the `key_index`-th data key of the
+    /// `secret_index`-th spec Secret.
+    ///
+    /// Indexes rather than the user's key names keep it a valid Secret key of bounded length
+    /// whatever the user's keys are, and the `s` prefix keeps it apart from the `k<n>` keys
+    /// secret mounts use and the TLS client auth keys.
+    pub fn session_secret_key(secret_index: usize, key_index: usize) -> String {
+        format!("s{secret_index}-{key_index}")
+    }
 }
 
 /// Settings for previews whose target is a CronJob.
@@ -206,6 +295,28 @@ impl PreviewSessionSpec {
     /// Returns `true` when `ttl_secs` should _not_ be treated as infinite.
     pub fn has_ttl(&self) -> bool {
         self.ttl_secs < PreviewTtl::INFINITE_TTL_SECS
+    }
+
+    /// Whether the CLI stores anything in this session's secret mounts `Secret` (see
+    /// [`secret_mounts_secret_name`]): secret mount files, the TLS client certificate, or the
+    /// values of Secrets from `--resource` manifests. Everything that reads or copies that
+    /// `Secret` asks this one question, so a new use of it cannot be missed by one of them.
+    pub fn uses_session_secret(&self) -> bool {
+        let tls_client_auth = self
+            .incoming
+            .as_ref()
+            .and_then(|incoming| incoming.tls_delivery.as_ref())
+            .and_then(|delivery| delivery.client_auth.as_ref())
+            .is_some();
+        // A spec Secret with no values stores nothing, so the CLI uploads no Secret for it.
+        let spec_secrets = self.spec_resources.as_ref().is_some_and(|resources| {
+            resources
+                .secrets
+                .iter()
+                .any(|secret| !secret.keys.is_empty())
+        });
+
+        !self.secret_mounts.is_empty() || tls_client_auth || spec_secrets
     }
 }
 
@@ -474,8 +585,10 @@ pub struct PreviewIncomingConfig {
 /// The operator, not the CLI, makes the TLS connection to the preview pod, so paths on the
 /// user's machine mean nothing here: the CLI reads the client certificate files and stores
 /// their contents in the session's secret mounts `Secret` (see [`secret_mounts_secret_name`]),
-/// and this only names the keys. `protocol`, `trust_roots` and `server_cert` have no preview
-/// counterpart: delivery is always TLS and the pod's certificate is never verified.
+/// and this only names the keys. Alternatively the certificate can live in the target's
+/// container, in which case this names the in-container paths and the operator reads them
+/// itself. `protocol`, `trust_roots` and `server_cert` have no preview counterpart: delivery
+/// is always TLS and the pod's certificate is never verified.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewTlsDelivery {
@@ -491,6 +604,23 @@ pub struct PreviewTlsDelivery {
     /// request with a `BadCertificate` alert, which surfaces as a 502.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_auth: Option<PreviewTlsClientAuth>,
+
+    /// Client certificate the operator reads from a running pod of the target and presents to
+    /// the preview pod, for targets whose own process already holds the identity the preview
+    /// pod expects. Nothing leaves the cluster. Ignored when `client_auth` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_auth_from_target: Option<PreviewTlsClientAuthFromTarget>,
+}
+
+/// Paths inside the target's container of the client certificate and its key.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewTlsClientAuthFromTarget {
+    /// Path of the PEM certificate chain.
+    pub cert_path: String,
+
+    /// Path of the PEM private key.
+    pub key_path: String,
 }
 
 /// Keys in the session's secret mounts `Secret` holding the client certificate and its key.
@@ -806,6 +936,99 @@ mod tests {
     }
 
     #[test]
+    fn spec_without_spec_resources_deserializes_and_serializes_unchanged() {
+        let old = json!({
+            "image": "nginx",
+            "key": "pr-123",
+            "target": {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "name": "app",
+                "container": "app",
+            },
+            "ttlSecs": 3600,
+            "replicas": 1,
+        });
+        let spec: PreviewSessionSpec =
+            serde_json::from_value(old.clone()).expect("spec from an older CLI should deserialize");
+
+        assert_eq!(spec.spec_resources, None);
+        assert_eq!(serde_json::to_value(&spec).unwrap(), old);
+    }
+
+    #[test]
+    fn spec_resources_round_trip() {
+        let resources = PreviewSpecResources {
+            pod_template: Some(r#"{"spec":{"containers":[]}}"#.to_owned()),
+            config_maps: vec![PreviewSpecConfigMap {
+                name: "app-config".to_owned(),
+                data: BTreeMap::from([("LEVEL".to_owned(), "debug".to_owned())]),
+                binary_data: BTreeMap::new(),
+            }],
+            secrets: vec![PreviewSpecSecret {
+                name: "app-secret".to_owned(),
+                r#type: None,
+                keys: BTreeMap::from([(
+                    "password".to_owned(),
+                    PreviewSpecSecret::session_secret_key(0, 0),
+                )]),
+            }],
+        };
+
+        let value = serde_json::to_value(&resources).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "podTemplate": r#"{"spec":{"containers":[]}}"#,
+                "configMaps": [{"name": "app-config", "data": {"LEVEL": "debug"}}],
+                "secrets": [{"name": "app-secret", "keys": {"password": "s0-0"}}],
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<PreviewSpecResources>(value).unwrap(),
+            resources
+        );
+    }
+
+    /// Secrets from `--resource` manifests ride in the session Secret like secret mounts, so
+    /// everything that copies that Secret between clusters must see it as in use.
+    #[test]
+    fn spec_resource_secrets_use_the_session_secret() {
+        let mut spec: PreviewSessionSpec = serde_json::from_value(json!({
+            "image": "nginx",
+            "key": "pr-123",
+            "target": {"apiVersion": "apps/v1", "kind": "Deployment", "name": "app", "container": "app"},
+            "ttlSecs": 3600,
+        }))
+        .unwrap();
+        assert!(!spec.uses_session_secret());
+
+        spec.spec_resources = Some(PreviewSpecResources {
+            config_maps: vec![PreviewSpecConfigMap::default()],
+            ..Default::default()
+        });
+        assert!(!spec.uses_session_secret());
+
+        spec.spec_resources = Some(PreviewSpecResources {
+            secrets: vec![PreviewSpecSecret::default()],
+            ..Default::default()
+        });
+        assert!(
+            !spec.uses_session_secret(),
+            "a Secret without values stores nothing in the session Secret"
+        );
+
+        spec.spec_resources = Some(PreviewSpecResources {
+            secrets: vec![PreviewSpecSecret {
+                keys: BTreeMap::from([("password".to_owned(), "s0-0".to_owned())]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        assert!(spec.uses_session_secret());
+    }
+
+    #[test]
     fn idle_config_round_trips() {
         let idle = PreviewIdleConfig {
             start_idle: true,
@@ -1083,6 +1306,16 @@ pub struct PreviewDbBranchingConfig {
     /// turbopuffer branch namespace names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub turbopuffer_branch_names: Vec<String>,
+    /// This session's own connection mapping for the branches it reuses, keyed by branch
+    /// resource name.
+    ///
+    /// A branch's `spec.connectionSource` names the env vars of the workload that created it.
+    /// Another workload sharing the branch `id` reads its connection from differently named
+    /// vars (`AUDIT_DB_HOST` where the creator has `DB_HOST`), so the operator builds this
+    /// session's overrides from the mapping here instead of the branch spec. Branches this
+    /// session created are absent: their spec already is this mapping.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub connection_sources: BTreeMap<String, ConnectionSource>,
 }
 
 impl PreviewDbBranchingConfig {
@@ -1108,6 +1341,7 @@ impl PreviewDbBranchingConfig {
             cockroachdb_branch_names,
             s3_branch_names,
             turbopuffer_branch_names,
+            connection_sources: _,
         } = self;
 
         [
@@ -1148,6 +1382,7 @@ impl PreviewDbBranchingConfig {
                 cockroachdb_branch_names: branch_db_names.cockroachdb,
                 s3_branch_names: branch_db_names.s3,
                 turbopuffer_branch_names: branch_db_names.turbopuffer,
+                connection_sources: branch_db_names.connection_sources,
             })
         }
     }

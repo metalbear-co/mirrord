@@ -52,7 +52,10 @@
 //! - They are inserted starting from the numeric value `0x50000000`.
 //! - They grow in linear numeric order from the starting point.
 
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use mirrord_layer_lib::{
     file::filter::FileMode, proxy_connection::make_proxy_request_with_response, setup::setup,
@@ -76,6 +79,10 @@ use crate::{
     },
     process::memory::is_memory_valid,
 };
+
+/// Set while remote opens get no answer from the proxy at all, so that each period of failures is
+/// one warning rather than one per open.
+static REMOTE_OPEN_UNREACHABLE: AtomicBool = AtomicBool::new(false);
 
 /// Returns `true` iff `desired_access` satisfies the NT requirement
 /// that `FILE_SYNCHRONOUS_IO_{ALERT,NONALERT}` in `create_options`
@@ -167,7 +174,7 @@ pub(in crate::hooks::files) unsafe fn handle(
         let mapper = setup.file_remapper();
         let unix_path = String::from(mapper.change_path_str(parsed_unix_path.as_str()));
         if parsed_unix_path != unix_path {
-            tracing::info!(
+            tracing::debug!(
                 "nt_create_file_hook: mapping matched, \"{}\" -> \"{}\"",
                 parsed_unix_path,
                 unix_path
@@ -195,7 +202,7 @@ pub(in crate::hooks::files) unsafe fn handle(
                     || desired_access & FILE_APPEND_DATA != 0
                     || desired_access & GENERIC_WRITE != 0
                 {
-                    tracing::warn!(
+                    tracing::debug!(
                         path = unix_path,
                         "nt_create_file_hook: write mode not supported presently. falling back to original!"
                     );
@@ -234,6 +241,11 @@ pub(in crate::hooks::files) unsafe fn handle(
             open_options,
         });
 
+        // Any answer means the request went through, and ends a period of failures to get one.
+        if req.is_ok() && REMOTE_OPEN_UNREACHABLE.swap(false, Ordering::Relaxed) {
+            tracing::info!("nt_create_file_hook: remote opens get an answer from the proxy again");
+        }
+
         let managed_handle = match req {
             Ok(Ok(file)) => {
                 let current_time = WindowsTime::current().as_file_time();
@@ -253,34 +265,48 @@ pub(in crate::hooks::files) unsafe fn handle(
                     iocp_binding: None,
                 }))
             }
+            // The remote file system's answer, such as a missing file: routine for a program
+            // probing for files.
             Ok(Err(e)) => {
-                tracing::warn!(
+                tracing::debug!(
                     ?e,
                     ?unix_path,
                     "nt_create_file_hook: Request for open file failed!"
                 );
                 None
             }
+            // No answer at all: the connection or the protocol failed, and an open meant to be
+            // remote is about to happen locally.
             Err(e) => {
-                tracing::warn!(
-                    ?e,
-                    ?unix_path,
-                    "nt_create_file_hook: Request for open file failed!"
-                );
+                if REMOTE_OPEN_UNREACHABLE.swap(true, Ordering::Relaxed) {
+                    tracing::debug!(
+                        ?e,
+                        ?unix_path,
+                        "nt_create_file_hook: Request for open file failed!"
+                    );
+                } else {
+                    tracing::warn!(
+                        error = ?e,
+                        ?unix_path,
+                        "nt_create_file_hook: a remote open got no answer from the proxy, so it \
+                         opens the local file. Later failures like it are logged at debug until \
+                         one gets through"
+                    );
+                }
                 None
             }
         };
 
         if let Some(handle) = managed_handle {
             *file_handle = *handle;
-            tracing::info!(
+            tracing::debug!(
                 "nt_create_file_hook: Succesfully opened remote file handle for {} ({:8x})",
                 unix_path,
                 *file_handle as usize
             );
             STATUS_SUCCESS
         } else {
-            tracing::info!(
+            tracing::debug!(
                 ?unix_path,
                 "nt_create_file_hook: Failed opening remote file handle"
             );
