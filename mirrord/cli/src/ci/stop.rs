@@ -347,7 +347,6 @@ mod tests {
 
     /// Waits until the child has exited. In Linux CI containers, PID 1 may not reap an orphaned
     /// child promptly, so a zombie still has a PID even though it cannot run or hold a port.
-    /// A process that disappears between opening and reading its procfs stat file can yield ESRCH.
     async fn assert_gone(pid: Pid) {
         timeout(Duration::from_secs(5), async {
             loop {
@@ -356,12 +355,10 @@ mod tests {
                     Ok(stat) => stat
                         .rsplit_once(") ")
                         .is_some_and(|(_, fields)| fields.starts_with("Z ")),
-                    Err(error)
-                        if error.kind() == std::io::ErrorKind::NotFound
-                            || error.raw_os_error() == Some(Errno::ESRCH as i32) =>
-                    {
-                        true
-                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+                    // A process that disappears between opening and reading its procfs stat file
+                    // can yield ESRCH.
+                    Err(error) if error.raw_os_error() == Some(Errno::ESRCH as i32) => true,
                     Err(error) => panic!("failed to inspect process {pid}: {error}"),
                 };
                 #[cfg(not(target_os = "linux"))]
