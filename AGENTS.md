@@ -14,12 +14,17 @@ responses, handles reconnects, and routes messages to the right feature proxy.
 actual I/O work requested by the layers.
 - `mirrord-protocol`: defines the shared messages (`ClientMessage`, `DaemonMessage`) sent between layer/intproxy/agent.
 - `mirrord-config`: config types and validation. Used by the CLI and layer to decide what features are enabled and what
-target to use.
+target to use. Every option records the plan it needs (`oss`, `team` or `enterprise`, per its docs page) as
+`x-mirrord-plan` in the schema, as a `mirrord_config::plan::Plan`: `#[config(plan = Team)]` on `MirrordConfig`
+fields, `#[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Team))]` elsewhere. Nested options inherit it, except that every option under
+`feature` and every target kind needs its own; tests in `mirrord-mcp` fail on an option without one.
 - `mirrord`: the CLI that resolves configuration, creates or connects to the agent, starts the intproxy, and launches
 the user's local process with the mirrord layer loaded.
 - `mirrord-mcp`: the MCP server behind `mirrord mcp`, which exposes mirrord to AI agents over stdio. Tools are
 registered in its `tools` module and must be answered offline, from what is compiled into the binary. Usage is
-reported through `mirrord-analytics`, and every new tool needs a variant in its `McpTool` telemetry enum.
+reported through `mirrord-analytics`, and every new tool needs a variant in its `McpTool` telemetry enum. The docs and
+skills it answers from are vendored into `mirrord/mcp/corpus` from pinned upstream commits: never edit them by hand,
+bump them with `cargo xtask corpus sync --bump` (the release PR does).
 
 ## Command Reference
 

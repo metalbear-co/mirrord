@@ -12,14 +12,16 @@
         "context": null,
         "operator": null,
         "telemetry": null
-      }
+      },
+      "x-mirrord-plan": "oss"
     },
     "services": {
       "description": "Per-service configurations keyed by service name.",
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/ServiceConfig"
-      }
+      },
+      "x-mirrord-plan": "oss"
     }
   },
   "additionalProperties": false,
@@ -106,7 +108,8 @@
       "additionalProperties": false,
       "required": [
         "cron_job"
-      ]
+      ],
+      "x-mirrord-plan": "team"
     },
     "DeploymentTarget": {
       "description": "<!--${internal}-->\nMirror the deployment specified by [`DeploymentTarget::deployment`].",
@@ -126,7 +129,8 @@
       "additionalProperties": false,
       "required": [
         "deployment"
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "InnerFilter": {
       "anyOf": [
@@ -207,7 +211,8 @@
       "additionalProperties": false,
       "required": [
         "job"
-      ]
+      ],
+      "x-mirrord-plan": "team"
     },
     "LabelTarget": {
       "description": "Selects every pod in the target namespace that has all configured labels.",
@@ -230,7 +235,8 @@
       "additionalProperties": false,
       "required": [
         "labels"
-      ]
+      ],
+      "x-mirrord-plan": "team"
     },
     "PodTarget": {
       "description": "<!--${internal}-->\nMirror the pod specified by [`PodTarget::pod`].",
@@ -250,7 +256,8 @@
       "additionalProperties": false,
       "required": [
         "pod"
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "ReplicaSetTarget": {
       "type": "object",
@@ -268,7 +275,8 @@
       "additionalProperties": false,
       "required": [
         "replica_set"
-      ]
+      ],
+      "x-mirrord-plan": "team"
     },
     "RolloutTarget": {
       "description": "<!--${internal}-->\nMirror the rollout specified by [`RolloutTarget::rollout`].",
@@ -288,7 +296,8 @@
       "additionalProperties": false,
       "required": [
         "rollout"
-      ]
+      ],
+      "x-mirrord-plan": "oss"
     },
     "RunConfig": {
       "description": "Includes all information necessary to build the `mirrord` command\nfor this session.",
@@ -352,7 +361,8 @@
       "additionalProperties": false,
       "required": [
         "serverless"
-      ]
+      ],
+      "x-mirrord-plan": "enterprise"
     },
     "ServiceConfig": {
       "description": "Per-service configuration.",
@@ -587,7 +597,8 @@
         {
           "description": "The local service takes over *all* incoming traffic: the target workload is copied and the\noriginal is scaled down to zero.\n\nThe service's `http_filter` is ignored, with a warning. The target must support\n`copy_target` with `scale_down`.",
           "type": "string",
-          "const": "replace"
+          "const": "replace",
+          "x-mirrord-plan": "team"
         },
         {
           "description": "Incoming traffic is mirrored to the local service, leaving traffic to the original service\nunaltered.\n\nUses the service's `http_filter` if set. Otherwise, requests with a header matching the\nregex `baggage: .*mirrord-session={key}.*` are mirrored, where `{key}` is the session key.",
@@ -612,7 +623,8 @@
       "additionalProperties": false,
       "required": [
         "service"
-      ]
+      ],
+      "x-mirrord-plan": "team"
     },
     "SpecifiedTarget": {
       "description": "The target workload of a service.",
@@ -658,7 +670,8 @@
       "additionalProperties": false,
       "required": [
         "stateful_set"
-      ]
+      ],
+      "x-mirrord-plan": "team"
     },
     "Target": {
       "oneOf": [
@@ -695,7 +708,8 @@
         {
           "enum": [
             "targetless"
-          ]
+          ],
+          "x-mirrord-plan": "oss"
         }
       ]
     },
