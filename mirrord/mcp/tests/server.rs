@@ -62,9 +62,8 @@ async fn connect(
     (client, signal)
 }
 
-fn validate_config_call(arguments: Value) -> CallToolRequestParams {
-    CallToolRequestParams::new("validate_config")
-        .with_arguments(arguments.as_object().unwrap().clone())
+fn tool_call(name: &'static str, arguments: Value) -> CallToolRequestParams {
+    CallToolRequestParams::new(name).with_arguments(arguments.as_object().unwrap().clone())
 }
 
 #[rstest]
@@ -86,10 +85,13 @@ async fn serves_validate_config(#[case] protocol_version: ProtocolVersion) {
     assert!(tool.output_schema.is_some());
 
     let result = client
-        .call_tool(validate_config_call(json!({
-            "format": "mirrord.json",
-            "content": r#"{ "feature": { "network": { "incoming": { "mode": "foo" } } } }"#,
-        })))
+        .call_tool(tool_call(
+            "validate_config",
+            json!({
+                "format": "mirrord.json",
+                "content": r#"{ "feature": { "network": { "incoming": { "mode": "foo" } } } }"#,
+            }),
+        ))
         .await
         .unwrap();
     assert_ne!(result.is_error, Some(true));
@@ -101,10 +103,13 @@ async fn serves_validate_config(#[case] protocol_version: ProtocolVersion) {
     );
 
     let result = client
-        .call_tool(validate_config_call(json!({
-            "format": "mirrord-up.yaml",
-            "content": "services:\n  app:\n    run:\n      command: [\"true\"]\n",
-        })))
+        .call_tool(tool_call(
+            "validate_config",
+            json!({
+                "format": "mirrord-up.yaml",
+                "content": "services:\n  app:\n    run:\n      command: [\"true\"]\n",
+            }),
+        ))
         .await
         .unwrap();
     assert_eq!(
@@ -125,14 +130,10 @@ async fn serves_explain_config_option() {
     );
 
     let result = client
-        .call_tool(
-            CallToolRequestParams::new("explain_config_option").with_arguments(
-                json!({ "path": "feature.network.incoming.mode" })
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            ),
-        )
+        .call_tool(tool_call(
+            "explain_config_option",
+            json!({ "path": "feature.network.incoming.mode" }),
+        ))
         .await
         .unwrap();
     let output = result.structured_content.unwrap();
@@ -147,10 +148,13 @@ async fn survives_bad_calls() {
     let (client, _signal) = connect(ProtocolVersion::V_2025_11_25).await;
 
     let result = client
-        .call_tool(validate_config_call(json!({
-            "format": "mirrord.toml",
-            "content": "",
-        })))
+        .call_tool(tool_call(
+            "validate_config",
+            json!({
+                "format": "mirrord.toml",
+                "content": "",
+            }),
+        ))
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(true));
@@ -161,10 +165,13 @@ async fn survives_bad_calls() {
         .unwrap_err();
 
     let result = client
-        .call_tool(validate_config_call(json!({
-            "format": "mirrord.json",
-            "content": "{}",
-        })))
+        .call_tool(tool_call(
+            "validate_config",
+            json!({
+                "format": "mirrord.json",
+                "content": "{}",
+            }),
+        ))
         .await
         .unwrap();
     assert_eq!(result.structured_content.unwrap()["valid"], json!(true));
@@ -200,10 +207,6 @@ async fn serves_info_resource() {
     }
 }
 
-fn get_skill_call(arguments: Value) -> CallToolRequestParams {
-    CallToolRequestParams::new("get_skill").with_arguments(arguments.as_object().unwrap().clone())
-}
-
 /// Every skill `get_skill` lists is also served as a prompt and a resource, all from the same
 /// `SKILL.md`.
 #[tokio::test]
@@ -211,7 +214,7 @@ async fn serves_skills() {
     let (client, _signal) = connect(ProtocolVersion::V_2025_11_25).await;
 
     let listed = client
-        .call_tool(get_skill_call(json!({})))
+        .call_tool(tool_call("get_skill", json!({})))
         .await
         .unwrap()
         .structured_content
@@ -230,7 +233,7 @@ async fn serves_skills() {
         );
 
         let output = client
-            .call_tool(get_skill_call(json!({ "name": name })))
+            .call_tool(tool_call("get_skill", json!({ "name": name })))
             .await
             .unwrap()
             .structured_content
@@ -262,7 +265,10 @@ async fn serves_skills() {
 
         for file in output["files"].as_array().unwrap() {
             let file_output = client
-                .call_tool(get_skill_call(json!({ "name": name, "file": file })))
+                .call_tool(tool_call(
+                    "get_skill",
+                    json!({ "name": name, "file": file }),
+                ))
                 .await
                 .unwrap()
                 .structured_content
@@ -272,7 +278,7 @@ async fn serves_skills() {
     }
 
     let result = client
-        .call_tool(get_skill_call(json!({ "name": "no-such-skill" })))
+        .call_tool(tool_call("get_skill", json!({ "name": "no-such-skill" })))
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(true));
