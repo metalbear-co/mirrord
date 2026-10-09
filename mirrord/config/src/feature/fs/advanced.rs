@@ -97,7 +97,7 @@ pub const PREFETCH_TIMEOUT_DEFAULT: u64 = 30;
 /// }
 /// ```
 ///
-/// ### Windows paths {#fs-windows-paths}
+/// #### Windows paths {#fs-windows-paths}
 ///
 /// On Windows, the patterns of `read_write`, `read_only`, `local`, `not_found` and `mapping` are
 /// matched against two forms of the path, both with forward slashes:
