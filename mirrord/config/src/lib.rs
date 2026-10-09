@@ -51,7 +51,7 @@ use tera::Tera;
 use tracing::warn;
 
 use crate::{
-    agent::AgentConfig,
+    agent::{AgentConfig, LinuxCapability},
     ci::CiConfig,
     config::{FromFileError, source::MirrordConfigSource},
     container::ContainerConfig,
@@ -893,6 +893,19 @@ impl LayerConfig {
                 "Agent namespace is ignored when using an ephemeral container for the agent."
                     .to_owned(),
             );
+        }
+
+        let known_capabilities = LinuxCapability::all()
+            .iter()
+            .map(|capability| capability.as_spec_str())
+            .collect::<Vec<_>>();
+        for name in self.agent.disabled_capabilities.iter().flatten() {
+            if known_capabilities.contains(&name.as_str()).not() {
+                context.add_warning(format!(
+                    "`{name}` in `agent.disabled_capabilities` is ignored, valid values are: {}.",
+                    known_capabilities.join(", ")
+                ));
+            }
         }
 
         if matches!(
@@ -3073,5 +3086,30 @@ mod tests {
     #[test]
     fn magic_auto_mount_defaults_to_enabled() {
         assert!(default_config().feature.magic.auto_mount);
+    }
+
+    /// A name that isn't one of the agent's capabilities is ignored, so the user gets a warning.
+    #[test]
+    fn unknown_disabled_capability_warns() {
+        let config = ConfigType::Json
+            .parse(r#"{ "agent": { "disabled_capabilities": ["SYS_PTRACE", "CAP_SYS_ADMIN"] } }"#);
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify(&mut context)
+            .expect("an unknown capability should not be an error");
+
+        let warnings = context
+            .into_warnings()
+            .into_iter()
+            .filter(|warning| warning.contains("agent.disabled_capabilities"))
+            .collect::<Vec<_>>();
+        assert!(
+            matches!(warnings.as_slice(), [warning] if warning.contains("`CAP_SYS_ADMIN`")),
+            "unexpected warnings: {warnings:?}"
+        );
     }
 }

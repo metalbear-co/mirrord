@@ -448,7 +448,7 @@
         },
         "disabled_capabilities": {
           "title": "agent.disabled_capabilities {#agent-disabled_capabilities}",
-          "description": "If nothing is disabled here, agent uses:\n1. `NET_ADMIN`,\n2. `SYS_PTRACE`,\n3. `SYS_ADMIN`.\n\nHas no effect when using the targetless mode,\nas targetless agent containers have no capabilities.",
+          "description": "Linux capabilities to remove from the agent container.\n\nIf nothing is disabled here, agent uses:\n1. `NET_ADMIN`,\n2. `SYS_PTRACE`,\n3. `SYS_ADMIN`.\n\nThe names have to be written exactly as above, any other value is ignored.\n\n```json\n{\n  \"agent\": {\n    \"disabled_capabilities\": [\"NET_ADMIN\"]\n  }\n}\n```\n\nHas no effect when using the targetless mode,\nas targetless agent containers have no capabilities.",
           "type": [
             "array",
             "null"
