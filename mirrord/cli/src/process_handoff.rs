@@ -70,7 +70,12 @@ impl Progress for ProcessHandoffProgress<'_> {
     }
 
     fn add_to_print_buffer(&mut self, msg: &str) {
-        self.task.add_to_print_buffer(msg);
+        // The root prints its buffer after the tree's last redraw. The task's would print before
+        // the root finishes, and that redraw would land on it.
+        match self.root.as_deref_mut() {
+            Some(root) => root.add_to_print_buffer(msg),
+            None => self.task.add_to_print_buffer(msg),
+        }
     }
 
     fn set_fail_on_drop(&mut self, fail: bool) {
