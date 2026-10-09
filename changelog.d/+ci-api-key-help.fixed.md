@@ -1,1 +1,1 @@
-Corrected CI command help: operator-backed CI sessions require a CI API key, while no-operator sessions and `mirrord ci stop` do not.
+Corrected CI command help: `mirrord ci start` and `mirrord ci container` use automatic ordinary credentials without a CI API key when a supporting Free operator advertises keyless CI; other operator-backed CI sessions require a CI API key. No-operator sessions and local `mirrord ci stop` do not require one.
