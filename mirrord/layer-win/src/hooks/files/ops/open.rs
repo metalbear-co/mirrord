@@ -19,10 +19,12 @@
 //! 3. **path classification** -- only NT disk paths (`is_nt_path_disk_path`) and
 //!    convertible-to-Unix paths (`str_win::path_to_unix_path`) are candidates. Root (`/`) is
 //!    bypassed (frameworks sometimes open the drive root for metadata we don't model).
-//! 4. **mapping + filter** -- the Unix path goes through
-//!    [`FileRemapper::change_path_str`](mirrord_layer_lib::file::mapper::FileRemapper::change_path_str)
+//! 4. **mapping + filter** -- the Unix path, with and without its drive (`C:/app.json` and
+//!    `/app.json`), goes through
+//!    [`FileRemapper::change_pattern_path`](mirrord_layer_lib::file::mapper::FileRemapper::change_pattern_path)
 //!    and [`FileFilter::check`](mirrord_layer_lib::file::filter::FileFilter::check); the filter
-//!    decides remote-open / local-open / not-found.
+//!    decides remote-open / local-open / not-found. A mapped path is a remote path, so the filter
+//!    sees it without a drive.
 //! 5. **write support** -- write-capable accesses (FILE_WRITE_DATA / FILE_APPEND_DATA /
 //!    GENERIC_WRITE) fall through; write IO is not yet remoted.
 //! 6. **pointer validation** -- `file_handle` and `io_status_block` are checked; invalid memory
@@ -58,7 +60,9 @@ use std::{
 };
 
 use mirrord_layer_lib::{
-    file::filter::FileMode, proxy_connection::make_proxy_request_with_response, setup::setup,
+    file::{filter::FileMode, pattern_path::PatternPath},
+    proxy_connection::make_proxy_request_with_response,
+    setup::setup,
 };
 use mirrord_protocol::file::{OpenFileRequest, OpenOptionsInternal};
 use phnt::ffi::{_IO_STATUS_BLOCK, FILE_SYNCHRONOUS_IO_ALERT, FILE_SYNCHRONOUS_IO_NONALERT};
@@ -152,13 +156,13 @@ pub(in crate::hooks::files) unsafe fn handle(
             return run_original();
         }
 
-        let Some(parsed_unix_path) = path_to_unix_path(name.clone()) else {
+        let Some(requested_path) = path_to_unix_path(name.clone()) else {
             return run_original();
         };
 
         // Some frameworks open the drive root (e.g. `C:\`) to inspect
         // metadata. We don't remote root directory handles.
-        if parsed_unix_path == "/" {
+        if requested_path.path == "/" {
             tracing::debug!(
                 "nt_create_file_hook: bypassing remote open for root directory \"{}\"",
                 name
@@ -170,19 +174,32 @@ pub(in crate::hooks::files) unsafe fn handle(
         //
         // Run the parsed path through the file-remapper, then ask the
         // filter whether it should be opened locally, treated as
-        // not-found, or remoted (read-only / read-write).
+        // not-found, or remoted (read-only / read-write). Patterns see
+        // the path with and without its drive.
+        let with_drive = requested_path.with_drive();
+        let pattern_path = PatternPath {
+            path: &requested_path.path,
+            with_drive: with_drive.as_deref(),
+        };
         let mapper = setup.file_remapper();
-        let unix_path = String::from(mapper.change_path_str(parsed_unix_path.as_str()));
-        if parsed_unix_path != unix_path {
+        let unix_path = mapper.change_pattern_path(pattern_path).into_owned();
+        let mapped = requested_path.path != unix_path;
+        if mapped {
             tracing::debug!(
                 "nt_create_file_hook: mapping matched, \"{}\" -> \"{}\"",
-                parsed_unix_path,
+                name,
                 unix_path
             );
         }
 
+        // A mapped path is a path on the remote, which has no drives.
+        let filter_path = if mapped {
+            PatternPath::from(&unix_path)
+        } else {
+            pattern_path
+        };
         let filter = setup.file_filter();
-        match filter.check(&unix_path) {
+        match filter.check(filter_path) {
             Some(FileMode::Local(_)) => {
                 tracing::trace!("nt_create_file_hook: reading \"{}\" locally!", name);
                 return run_original();
@@ -251,6 +268,7 @@ pub(in crate::hooks::files) unsafe fn handle(
                 let current_time = WindowsTime::current().as_file_time();
                 Some(insert_handle(HandleContext {
                     path: unix_path.clone(),
+                    requested_path,
                     fd: file.fd,
                     desired_access,
                     file_attributes,

@@ -14,6 +14,7 @@ use mirrord_config::{
 };
 use regex::{RegexSet, RegexSetBuilder};
 
+use super::pattern_path::PatternPath;
 #[cfg(unix)]
 use super::unix::*;
 #[cfg(windows)]
@@ -147,25 +148,29 @@ impl FileFilter {
         })
     }
 
-    pub fn check<T: AsRef<str>>(&self, path: T) -> Option<FileMode> {
-        let path = path.as_ref();
+    /// Which file mode applies to `path`, or [`None`] when the `feature.fs.mode` decides.
+    ///
+    /// A pattern applies when it matches any form of the path (see [`PatternPath`]). The lists are
+    /// checked in the same order whatever form matched.
+    pub fn check<'p>(&self, path: impl Into<PatternPath<'p>>) -> Option<FileMode> {
+        let path = path.into();
 
         match self.mode {
             FsModeConfig::Local => Some(FileMode::Local(false)),
             FsModeConfig::Read | FsModeConfig::Write | FsModeConfig::LocalWithOverrides => {
-                if self.not_found.is_match(path) {
+                if path.is_match(&self.not_found) {
                     Some(FileMode::NotFound(false))
-                } else if self.read_write.is_match(path) {
+                } else if path.is_match(&self.read_write) {
                     Some(FileMode::ReadWrite(false))
-                } else if self.read_only.is_match(path) {
+                } else if path.is_match(&self.read_only) {
                     Some(FileMode::ReadOnly(false))
-                } else if self.local.is_match(path) {
+                } else if path.is_match(&self.local) {
                     Some(FileMode::Local(false))
-                } else if self.default_not_found.is_match(path) {
+                } else if path.is_match(&self.default_not_found) {
                     Some(FileMode::NotFound(true))
-                } else if self.default_remote_ro.is_match(path) {
+                } else if path.is_match(&self.default_remote_ro) {
                     Some(FileMode::ReadOnly(true))
-                } else if self.default_local.is_match(path) {
+                } else if path.is_match(&self.default_local) {
                     Some(FileMode::Local(true))
                 } else {
                     None
@@ -185,5 +190,106 @@ impl FileFilter {
 impl Default for FileFilter {
     fn default() -> Self {
         Self::try_new(FsConfig::default()).expect("the default configuration has no patterns")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mirrord_config::{
+        feature::fs::{FsConfig, FsModeConfig},
+        util::VecOrSingle,
+    };
+    use rstest::rstest;
+
+    use super::{FileFilter, FileMode};
+    use crate::file::pattern_path::PatternPath;
+
+    /// A filter in `read` mode whose only user list is `read_only`.
+    fn read_only(patterns: &[&str]) -> FileFilter {
+        FileFilter::try_new(FsConfig {
+            mode: FsModeConfig::Read,
+            read_only: Some(VecOrSingle::Multiple(
+                patterns
+                    .iter()
+                    .map(|pattern| (*pattern).to_owned())
+                    .collect(),
+            )),
+            ..Default::default()
+        })
+        .expect("the test patterns are valid regexes")
+    }
+
+    /// `C:\Repos\app\appsettings.json` as the Windows layer passes it to the filter.
+    const ON_C: PatternPath = PatternPath {
+        path: "/Repos/app/appsettings.json",
+        with_drive: Some("C:/Repos/app/appsettings.json"),
+    };
+
+    /// `D:\Repos\app\appsettings.json`, the same path on another drive.
+    const ON_D: PatternPath = PatternPath {
+        path: "/Repos/app/appsettings.json",
+        with_drive: Some("D:/Repos/app/appsettings.json"),
+    };
+
+    /// A pattern without a drive matches the path on every drive.
+    #[rstest]
+    #[case::anchored("^/Repos/app/")]
+    #[case::unanchored(r"appsettings\.json$")]
+    fn a_pattern_without_a_drive_matches_every_drive(#[case] pattern: &str) {
+        let filter = read_only(&[pattern]);
+
+        assert_eq!(filter.check(ON_C), Some(FileMode::ReadOnly(false)));
+        assert_eq!(filter.check(ON_D), Some(FileMode::ReadOnly(false)));
+    }
+
+    /// A pattern that names a drive applies to that drive only, whatever case the drive is in.
+    #[rstest]
+    #[case::upper_case("^C:/Repos/app/")]
+    #[case::lower_case("^c:/repos/app/")]
+    fn a_pattern_with_a_drive_matches_that_drive_only(#[case] pattern: &str) {
+        let filter = read_only(&[pattern]);
+
+        assert_eq!(filter.check(ON_C), Some(FileMode::ReadOnly(false)));
+        assert_eq!(
+            filter.check(ON_D),
+            None,
+            "D: is not the drive the pattern names"
+        );
+    }
+
+    /// A path with one form (every Unix path, and a Windows path off any drive) never matches a
+    /// pattern that names a drive.
+    #[test]
+    fn a_path_without_a_drive_does_not_match_a_drive_pattern() {
+        let filter = read_only(&["^C:/Repos/"]);
+
+        assert_eq!(filter.check("/Repos/app/appsettings.json"), None);
+    }
+
+    /// Which list wins doesn't depend on which form matched: `not_found` beats `read_only` even
+    /// when only the drive form matches it.
+    #[test]
+    fn list_order_holds_across_forms() {
+        let filter = FileFilter::try_new(FsConfig {
+            mode: FsModeConfig::Read,
+            not_found: Some(VecOrSingle::Single("^C:/Repos/app/".to_owned())),
+            read_only: Some(VecOrSingle::Single("^/Repos/".to_owned())),
+            ..Default::default()
+        })
+        .expect("the test patterns are valid regexes");
+
+        assert_eq!(filter.check(ON_C), Some(FileMode::NotFound(false)));
+        assert_eq!(filter.check(ON_D), Some(FileMode::ReadOnly(false)));
+    }
+
+    /// The default patterns are written without a drive, so they keep applying on every drive.
+    #[cfg(windows)]
+    #[rstest]
+    #[case::c(PatternPath { path: "/Windows/System32/kernel32.dll", with_drive: Some("C:/Windows/System32/kernel32.dll") })]
+    #[case::d(PatternPath { path: "/Windows/System32/kernel32.dll", with_drive: Some("D:/Windows/System32/kernel32.dll") })]
+    fn default_local_patterns_apply_on_every_drive(#[case] path: PatternPath) {
+        let filter = FileFilter::default();
+
+        assert_eq!(filter.check(path), Some(FileMode::Local(true)));
     }
 }
