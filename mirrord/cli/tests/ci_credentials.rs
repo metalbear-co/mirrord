@@ -51,23 +51,39 @@ async fn operator_request(
         }
         (Method::POST, CREDENTIAL_PATH) => {
             let mut credential: Value = serde_json::from_slice(&body).unwrap();
-            requests
-                .credential_kinds
-                .push(credential["spec"]["kind"].as_str().unwrap().to_owned());
+            requests.credential_kinds.push(
+                credential
+                    .get("spec")
+                    .unwrap()
+                    .get("kind")
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+            );
             let issuer = CertifiedIssuer::self_signed(
                 CertificateParams::default(),
                 KeyPair::generate_for(&rcgen::PKCS_ED25519).unwrap(),
             )
             .unwrap();
             let certificate = CertificateSigningRequestParams::from_pem(
-                credential["spec"]["csr"].as_str().unwrap(),
+                credential
+                    .get("spec")
+                    .unwrap()
+                    .get("csr")
+                    .unwrap()
+                    .as_str()
+                    .unwrap(),
             )
             .unwrap()
             .signed_by(&issuer)
             .unwrap();
             let certificate: Certificate = certificate.pem().parse().unwrap();
             requests.issued_certificate = Some(certificate.encode_der().unwrap());
-            credential["status"] = json!({"certificate": certificate.encode_pem().unwrap()});
+            credential.as_object_mut().unwrap().insert(
+                "status".to_owned(),
+                json!({"certificate": certificate.encode_pem().unwrap()}),
+            );
             (StatusCode::CREATED, Json(credential))
         }
         (Method::GET, TARGET_PATH) => {
@@ -132,7 +148,9 @@ impl Fixture {
                 }
             }
         });
-        operator["spec"]
+        operator
+            .get_mut("spec")
+            .unwrap()
             .as_object_mut()
             .unwrap()
             .extend(feature_fields.as_object().unwrap().clone());
