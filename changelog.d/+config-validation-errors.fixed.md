@@ -1,0 +1,1 @@
+An invalid `feature.network.incoming.http_filter` (a regex, method or jq expression that doesn't compile, or `method_filter`/`header_filter_jq` combined with another filter) is reported when the config is verified, instead of crashing the layer when it starts.

@@ -22,6 +22,7 @@ use crate::config::{ConfigError, Result};
 /// eligible agent with the lowest replica id.
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Enterprise))]
 pub struct ServerlessTarget {
     /// Name of the service in sessions-manager: the logical workload whose replicas
     /// each run an agent companion. Together with the environment it forms the
@@ -42,9 +43,9 @@ impl ServerlessTarget {
 
 impl FromSplit for ServerlessTarget {
     fn from_split(split: &mut Split<char>) -> Result<Self> {
-        let service = split
-            .next()
-            .ok_or_else(|| ConfigError::InvalidTarget(FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned()))?;
+        let service = split.next().ok_or_else(|| {
+            ConfigError::InvalidTargetPath(FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned())
+        })?;
 
         match (split.next(), split.next()) {
             (Some("container"), Some(container)) => Ok(Self {
@@ -55,7 +56,7 @@ impl FromSplit for ServerlessTarget {
                 serverless: service.to_owned(),
                 container: None,
             }),
-            _ => Err(ConfigError::InvalidTarget(
+            _ => Err(ConfigError::InvalidTargetPath(
                 FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned(),
             )),
         }

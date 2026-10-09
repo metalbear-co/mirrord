@@ -1,0 +1,15 @@
+{
+    "feature": {
+        "fs": "local",
+        "network": {
+            "dns": {
+                "enabled": true,
+                "filter": {
+                    "local": [
+                        "local.test"
+                    ]
+                }
+            }
+        }
+    }
+}

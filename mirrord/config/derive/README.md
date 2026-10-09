@@ -15,6 +15,7 @@ This crate implements the derive macro `MirrordConfig`, which introduces the `co
     - `unstable` mark field as unstable and print an error message to the user.
     - `deprecated | deprecated = &str` mark field as deprecated and print either a default message or a custom one.
     - `rename = &str` pass `#[serde(rename = &str)]` to generated struct.
+    - `plan = Plan` record the mirrord plan the field needs, a variant of `crate::plan::Plan` (e.g. `plan = Team`), as `x-mirrord-plan` in the generated struct's schema. The generated struct must derive `JsonSchema` (`#[config(derive = "JsonSchema")]`).
 
 Example
 

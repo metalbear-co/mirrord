@@ -5,7 +5,8 @@
 //! JSON-RPC messages over its stdin/stdout, so nothing else may ever be written to stdout (logs go
 //! to stderr). It exposes:
 //! - the tools in [`tools`], answered offline from what is compiled into this binary;
-//! - the `mirrord://info` resource, describing this mirrord installation;
+//! - the `mirrord://info` resource, describing this mirrord installation and the [`corpus`] it
+//!   ships;
 //! - [`INSTRUCTIONS`], which clients hand to the model.
 //!
 //! Usage is reported through [`telemetry`], from [`McpServer`]'s handler methods, so tools do not
@@ -31,15 +32,20 @@ use thiserror::Error;
 pub use crate::telemetry::McpTelemetry;
 use crate::telemetry::{McpTool, ToolOutcome};
 
+mod corpus;
+mod schema;
 mod telemetry;
 pub mod tools;
 
 /// Handed to the model by the client, to steer it towards the tools.
 pub const INSTRUCTIONS: &str = "mirrord runs local processes in the context of a Kubernetes \
-cluster. Before writing or changing a mirrord config file (`mirrord.json` or `mirrord-up.yaml`), \
-call `validate_config` with the complete file content and fix every issue it reports; never write \
-a config that has not validated with an empty `issues` list. The `mirrord://info` resource gives \
-the installed mirrord version.";
+cluster. Every mirrord config you generate or change, whether a `mirrord.json` or a \
+`mirrord-up.yaml`, must be checked with `validate_config` before it is written: pass the complete \
+file content, fix every issue it reports and validate again, until `issues` is empty. Never write \
+a config that has not validated, and don't rely on your own knowledge of the config format, which \
+may not match the installed mirrord version. To learn what an option does, which values it takes \
+or which mirrord plan it needs, call `explain_config_option` with its path instead of guessing. \
+The `mirrord://info` resource gives the installed mirrord version.";
 
 /// URI of the resource describing this mirrord installation.
 const INFO_RESOURCE_URI: &str = "mirrord://info";
@@ -148,7 +154,9 @@ impl ServerHandler for McpServer {
     ) -> Result<ListResourcesResult, ErrorData> {
         Ok(ListResourcesResult::with_all_items(vec![
             Resource::new(INFO_RESOURCE_URI, "info")
-                .with_description("The installed mirrord version.")
+                .with_description(
+                    "The installed mirrord version, and the docs and skills commits it ships.",
+                )
                 .with_mime_type("application/json"),
         ]))
     }
@@ -165,7 +173,11 @@ impl ServerHandler for McpServer {
             ));
         }
 
-        let info = json!({ "version": env!("CARGO_PKG_VERSION") });
+        let info = json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "docs": &*corpus::DOCS_PIN,
+            "skills": &*corpus::SKILLS_PIN,
+        });
         Ok(ReadResourceResult::new(vec![
             ResourceContents::text(info.to_string(), INFO_RESOURCE_URI)
                 .with_mime_type("application/json"),

@@ -49,21 +49,18 @@ impl LocalTcpConnection {
                 tls_setup,
             } => {
                 let stream = socket.connect(peer).await?;
-                let stream = match (transport, tls_setup) {
+                let stream = match (&transport, tls_setup) {
                     (IncomingTrafficTransportType::Tcp, ..) => MaybeTls::NoTls(stream),
                     (.., None) => MaybeTls::NoTls(stream),
-                    (
-                        IncomingTrafficTransportType::Tls {
-                            alpn_protocol,
-                            server_name: original_server_name,
-                        },
-                        Some(setup),
-                    ) => {
-                        let (connector, server_name) = setup.get(alpn_protocol).await?;
+                    (.., Some(setup)) => {
+                        let client_identity =
+                            setup.select_identity(transport.client_identity()).await?;
+                        let (connector, server_name) = setup
+                            .get(transport.alpn_protocol().map(Vec::from), client_identity)
+                            .await?;
                         let server_name = server_name
                             .or_else(|| {
-                                let name = original_server_name.clone()?;
-                                ServerName::try_from(name).ok()
+                                ServerName::try_from(transport.server_name()?.to_owned()).ok()
                             })
                             .unwrap_or_else(|| {
                                 ServerName::try_from("localhost")

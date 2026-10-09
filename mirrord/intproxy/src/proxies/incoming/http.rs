@@ -36,6 +36,9 @@ pub struct LocalHttpClient {
     address: SocketAddr,
     /// Whether this client uses TLS.
     uses_tls: bool,
+    /// Client certificate presented to the user application, as selected with
+    /// [`LocalTlsSetup::select_identity`](super::tls::LocalTlsSetup::select_identity).
+    client_identity: Option<usize>,
 }
 
 impl LocalHttpClient {
@@ -70,6 +73,10 @@ impl LocalHttpClient {
 
     pub fn uses_tls(&self) -> bool {
         self.uses_tls
+    }
+
+    pub fn client_identity(&self) -> Option<usize> {
+        self.client_identity
     }
 
     /// Whether the connection with the user application's HTTP server is gone.

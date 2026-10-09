@@ -48,6 +48,17 @@ pub enum StealTlsSetupErrorInner {
     VerifierBuilderError(#[from] VerifierBuilderError),
     #[error("certificate chain is invalid: {0}")]
     CertChainInvalid(#[source] rustls::Error),
+    #[error(
+        "certificate found in `{}` has neither a subject nor subject alternative names, \
+        so it cannot be matched with the original client's identity",
+        .0.display()
+    )]
+    NoCertIdentity(PathBuf),
+    #[error(
+        "`agentAsClient.identities` requires `agentAsServer.verification` without \
+        `acceptAnyCert`, because the identity of an unverified client cannot be trusted"
+    )]
+    IdentitiesWithoutClientVerification,
     #[error("background task panicked")]
     BackgroundTaskPanicked,
     #[error(transparent)]

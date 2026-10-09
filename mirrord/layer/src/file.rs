@@ -35,6 +35,20 @@ type DirStreamFd = usize;
 /// We use Arc so we can support dup more nicely, this means that if user
 /// Opens file `A`, receives fd 1, then dups, receives 2 - both stay open, until both are closed.
 /// Previously in such scenario we would close the remote, causing issues.
+///
+/// Dropping the last [`Arc`] of a [`ops::RemoteFile`] sends a close request to the intproxy. So
+/// when you remove or replace an entry, drop the old value only after the guard is released.
+/// Otherwise other threads that lock `OPEN_FILES` (the file hooks, `dup` and `fork`) wait for that
+/// I/O.
+///
+/// A single statement, such as `OPEN_FILES.lock()?.remove(&fd);` or
+/// `drop(OPEN_FILES.lock()?.remove(&fd));`, drops the old value while the guard is still alive.
+/// Put the old value in a variable, and drop it in a later statement:
+///
+/// ```ignore
+/// let removed_file = OPEN_FILES.lock()?.remove(&fd);
+/// drop(removed_file);
+/// ```
 pub(crate) static OPEN_FILES: LazyLock<Mutex<HashMap<LocalFd, Arc<ops::RemoteFile>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
