@@ -86,14 +86,12 @@ struct Index {
 
 /// The markdown of the docs and skills, except for pages that would crowd out the ones answering a
 /// query, which can still be read with `read_doc`:
-/// - the skills' JSON schemas and Helm values, which match nearly any keyword;
-/// - `SUMMARY.md`, which is only the docs' table of contents;
+/// - the files bundled with skills that aren't markdown, such as Helm values, which match nearly
+///   any keyword;
 /// - the skills' `README.md`s, short summaries of their `SKILL.md` for people browsing the repo.
 static INDEX: LazyLock<Index> = LazyLock::new(|| {
     let searchable = |path: &str| {
-        path.ends_with(".md")
-            && path != "docs/SUMMARY.md"
-            && (path.starts_with("skills/") && path.ends_with("/README.md")).not()
+        path.ends_with(".md") && (path.starts_with("skills/") && path.ends_with("/README.md")).not()
     };
     let documents: Vec<Document> = PAGES
         .iter()
