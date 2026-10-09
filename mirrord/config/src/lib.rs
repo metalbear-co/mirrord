@@ -20,6 +20,7 @@ pub mod logfile_path;
 pub mod plan;
 pub mod retry;
 pub mod target;
+mod template;
 pub mod util;
 
 use std::{collections::HashMap, ffi::OsStr, io::Read, ops::Not, path::Path};
@@ -1521,6 +1522,10 @@ impl LayerFileConfig {
     /// Renders the Tera templates in the raw `content` of a config file, returning the text that
     /// gets deserialized. `path` only selects how the `key` field is extracted from `content`.
     ///
+    /// Besides Tera's own functions and filters, templates can use the `path_pattern` and
+    /// `regex_escape` filters of the `template` module, which print text that is safe in a
+    /// pattern.
+    ///
     /// # Key Resolution for Template Rendering
     ///
     /// Config files can reference `{{ key }}` in templates (e.g., for HTTP header filters).
@@ -1545,6 +1550,7 @@ impl LayerFileConfig {
         context: &mut ConfigContext,
     ) -> Result<String, FromFileError> {
         let mut template_engine = Tera::default();
+        template::register(&mut template_engine);
         template_engine.add_raw_template("main", content)?;
 
         let mut tera_context = tera::Context::new();
