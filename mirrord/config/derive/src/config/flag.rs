@@ -15,7 +15,7 @@ pub enum ConfigFlagsType {
 /// Contains flags parsed from `#[config(...)]` and `#[doc]` attributes
 ///
 /// ConfigFlagsType::Container -> ["derive", "generator", "map_to"]
-/// ConfigFlagsType::Field -> ["default", "env", "nested", "rename", "toggleable"]
+/// ConfigFlagsType::Field -> ["default", "env", "nested", "plan", "rename", "toggleable"]
 #[derive(Debug, Default)]
 pub struct ConfigFlags {
     pub doc: Vec<Attribute>,
@@ -39,6 +39,11 @@ pub struct ConfigFlags {
     pub toggleable: bool,
     pub unstable: bool,
     pub deprecated: Option<Lit>,
+
+    /// The mirrord plan the option needs, a variant of `crate::plan::Plan`, e.g.
+    /// `#[config(plan = Team)]`. Recorded in the schema as `x-mirrord-plan`, where `mirrord mcp`
+    /// reads it.
+    pub plan: Option<Ident>,
 }
 
 /// Retrieves the [`enum@Lit`] that is inside a [`MetaNameValue`].
@@ -131,6 +136,17 @@ impl ConfigFlags {
                         if mode == ConfigFlagsType::Field && meta.path.is_ident("rename") =>
                     {
                         flags.rename = lit_in_meta_name_value(&meta);
+                    }
+                    Meta::NameValue(meta)
+                        if mode == ConfigFlagsType::Field && meta.path.is_ident("plan") =>
+                    {
+                        let Expr::Path(plan) = &meta.value else {
+                            return Err(meta
+                                .value
+                                .span()
+                                .error("plan should be a variant of `Plan`, e.g. `plan = Team`"));
+                        };
+                        flags.plan = plan.path.get_ident().cloned();
                     }
                     Meta::NameValue(meta)
                         if mode == ConfigFlagsType::Field && meta.path.is_ident("deprecated") =>

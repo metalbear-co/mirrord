@@ -73,6 +73,7 @@ jobs:
       flaky_report_changed: ${{ steps.changed-flaky-report.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
+      corpus_changed: ${{ steps.changed-corpus.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
       runner_image_changed: ${{ steps.changed-runner-image.outputs.any_changed }}
       install_script_changed: ${{ steps.changed-install-script.outputs.any_changed }}
@@ -236,6 +237,13 @@ jobs:
             echo "Error: Protocol has changed but Cargo.toml has not. Please update Cargo.toml."
             exit 1
           fi
+      - name: get corpus changes
+        id: changed-corpus
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          files: |
+            mirrord/mcp/corpus/**
+            xtask/src/tasks/corpus.rs
       - name: get config changes
         id: changed-config-schema
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -270,6 +278,7 @@ jobs:
           echo ${{ steps.changed-windows.outputs.any_changed }};
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};
+          echo ${{ steps.changed-corpus.outputs.any_changed }};
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
           echo ${{ steps.changed-frontend-only.outputs.only_changed }};
           echo ${{ steps.changed-install-script.outputs.any_changed }};
@@ -326,6 +335,26 @@ jobs:
     with:
       rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
     secrets: inherit
+
+  # The vendored docs and skills must be byte-identical to their pinned upstream commits.
+  corpus_check:
+    needs: [plan]
+    if: ${{ needs.plan.outputs.corpus_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    runs-on: ${{ needs.plan.outputs.runner_4 }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - run: rm rust-toolchain.toml
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+        with:
+          cache: false
+          toolchain: ${{ needs.plan.outputs.rust_toolchain }}
+      - name: Rust cache
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
+        with:
+          shared-key: mirrord
+      - run: cargo xtask corpus check
 
   install_script:
     needs: [plan]
@@ -484,6 +513,7 @@ jobs:
         cargo-deny,
         windows_tests,
         install_script,
+        corpus_check,
       ]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:

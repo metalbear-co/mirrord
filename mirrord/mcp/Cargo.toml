@@ -22,6 +22,8 @@ mirrord-config = { path = "../config" }
 mirrord-up = { path = "../up" }
 
 drain.workspace = true
+flate2.workspace = true
+json-patch.workspace = true
 jsonschema.workspace = true
 rmcp.workspace = true
 schemars.workspace = true
@@ -30,11 +32,17 @@ serde.workspace = true
 serde_json.workspace = true
 serde_path_to_error.workspace = true
 serde-saphyr.workspace = true
+strsim.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
+tar.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-std", "rt", "macros"] }
 uuid.workspace = true
+
+[build-dependencies]
+flate2.workspace = true
+tar.workspace = true
 
 [dev-dependencies]
 rmcp = { workspace = true, features = ["client"] }

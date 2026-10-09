@@ -1,10 +1,6 @@
-import threading
-import time
 from enum import Enum, unique
-from os import getpid, kill
-from signal import SIGTERM
 
-from fastapi import FastAPI, Response
+from fastapi import BackgroundTasks, FastAPI, Response
 
 app = FastAPI()
 
@@ -12,18 +8,12 @@ app = FastAPI()
 class HttpMethod(str, Enum):
     GET = "GET"
 
-def kill_later():
-    def kill_thread():
-        time.sleep(1)
-        kill(getpid(), SIGTERM)
-
-    threading.Thread(target=kill_thread).start()
-
-
 def handle_request(method: HttpMethod):
-    print(f'{method}: Request completed')
-    kill_later()
-    return Response(content=method, media_type="text/plain")
+    background = BackgroundTasks()
+    # The test sends SIGTERM after this line, so print it after sending the response.
+    # stdout is a pipe; flush the line so Python buffering cannot delay shutdown.
+    background.add_task(print, f'{method}: Request completed', flush=True)
+    return Response(content=method, media_type="text/plain", background=background)
 
 @app.get("/")
 def get():
