@@ -15,17 +15,26 @@ use mirrord_progress::{Progress, ProgressTracker};
 /// [`LayerManagedProcess::execute`](mirrord_layer_lib::process::windows::execution::LayerManagedProcess::execute)
 /// by `mirrord exec`.
 ///
-/// Finishing it finishes the whole progress tree (the task, then the root), and
-/// `LayerManagedProcess` does that before resuming the child's main thread: once the layer is
-/// ready when it loads immediately, or before the wait when it loads on resume. Either way the
-/// child never writes to the console while a spinner is still alive.
-pub(crate) struct ProcessHandoffProgress<'a, P> {
-    pub(crate) task: P,
-    /// Only the top-level handoff progress owns the root, subtasks get [`None`].
-    pub(crate) root: Option<&'a mut ProgressTracker>,
+/// Finishing it finishes the root too, task first. `execute` finishes it before the child first
+/// runs, so no spinner is left redrawing over what the child prints.
+pub(crate) struct ProcessHandoffProgress<'a> {
+    task: ProgressTracker,
+    /// Finished right after `task`, on its first success. [`None`] once finished, and in
+    /// subtasks, which never own the root.
+    root: Option<&'a mut ProgressTracker>,
 }
 
-impl<P: Progress> Progress for ProcessHandoffProgress<'_, P> {
+impl<'a> ProcessHandoffProgress<'a> {
+    /// Starts the `text` task under `root`, and takes the root over until the handoff.
+    pub(crate) fn new(root: &'a mut ProgressTracker, text: &str) -> Self {
+        Self {
+            task: root.subtask(text),
+            root: Some(root),
+        }
+    }
+}
+
+impl Progress for ProcessHandoffProgress<'_> {
     fn subtask(&self, text: &str) -> Self {
         Self {
             task: self.task.subtask(text),

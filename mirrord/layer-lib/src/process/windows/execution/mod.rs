@@ -435,6 +435,9 @@ impl LayerManagedProcess {
     /// A process mirrord cannot load its layer into is ended and reported as an error (see
     /// [`LayerFailurePolicy::Terminate`]): the user asked for this program under mirrord, and
     /// nothing retries it.
+    ///
+    /// `progress` succeeds before the program's primary thread first runs, so a caller that shares
+    /// its console with the program can end its own output there.
     pub fn execute<P>(
         application_name: Option<String>,
         command_line: String,

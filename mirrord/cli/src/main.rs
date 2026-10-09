@@ -493,7 +493,10 @@ async fn exec_process(
     // print an invitation to the newsletter on certain run count numbers
     suggest_newsletter_signup(user_data, progress).await;
 
+    #[cfg(not(target_os = "windows"))]
     let mut sub_progress = progress.subtask("running process");
+    #[cfg(target_os = "windows")]
+    let mut sub_progress = ProcessHandoffProgress::new(progress, "running process");
 
     // Nudge users toward queue splitting when appropriate
     suggest_queue_splitting(
@@ -502,12 +505,6 @@ async fn exec_process(
         execution_info.uses_operator,
         &mut sub_progress,
     )?;
-
-    #[cfg(target_os = "windows")]
-    let sub_progress = ProcessHandoffProgress {
-        task: sub_progress,
-        root: Some(progress),
-    };
 
     run_process_with_mirrord(
         binary,
