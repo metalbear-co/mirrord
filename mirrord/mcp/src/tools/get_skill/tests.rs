@@ -29,7 +29,13 @@ fn skill_lists_its_files() {
     let (skills, _) = load_skills(&files);
     let output = get_skill(&skills, args(Some("a"), None)).unwrap();
     assert_eq!(output.files, Some(vec!["references/x.md".to_owned()]));
-    assert!(skills["a"].prompt("a").contains("`references/x.md`"));
+    assert!(
+        skills
+            .get("a")
+            .unwrap()
+            .prompt("a")
+            .contains("`references/x.md`")
+    );
 }
 
 #[test]
