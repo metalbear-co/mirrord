@@ -27,6 +27,8 @@ struct Corpus {
     /// The extensions of the files under `root` that are vendored. `mirrord mcp` serves text only,
     /// so images and other binary files upstream are skipped rather than failing the sync.
     extensions: &'static [&'static str],
+    /// Files under `root` that aren't vendored.
+    exclude: &'static [&'static str],
 }
 
 const CORPORA: &[Corpus] = &[
@@ -35,14 +37,23 @@ const CORPORA: &[Corpus] = &[
         repo: "metalbear-co/docs",
         root: "docs",
         extensions: &["md"],
+        exclude: &[],
     },
     Corpus {
         name: "skills",
         repo: "metalbear-co/skills",
         root: "skills",
-        // Skills point the agent at the schemas and values files bundled with them, so those are
+        // Skills point the agent at the files bundled with them, such as Helm values, so those are
         // served too.
         extensions: &["md", "json", "yaml", "yml"],
+        // Copies of the config schema and of the config reference generated from it, which lag
+        // behind the schema compiled into `mirrord mcp` and served by its config tools.
+        exclude: &[
+            "mirrord-config/references/configuration.md",
+            "mirrord-config/references/schema.json",
+            "mirrord-ci/references/schema.json",
+            "mirrord-db-branching/references/db-branches-schema.json",
+        ],
     },
 ];
 
@@ -215,7 +226,7 @@ fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
         let vendored = relative
             .rsplit_once('.')
             .is_some_and(|(_, extension)| corpus.extensions.contains(&extension));
-        if hidden || !vendored {
+        if hidden || !vendored || corpus.exclude.contains(&relative) {
             continue;
         }
 
