@@ -10,11 +10,11 @@ use std::{
     collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use anyhow::{Context, Result, bail, ensure};
 use chrono::{SecondsFormat, Utc};
+use mirrord_command::resolve_command;
 use serde::{Deserialize, Serialize};
 
 /// An upstream repo vendored into the corpus.
@@ -262,7 +262,7 @@ fn repo_url(repo: &str) -> String {
 
 /// Runs git, in `dir` if given, and returns its stdout.
 fn git(dir: Option<&Path>, args: &[&str]) -> Result<Vec<u8>> {
-    let mut command = Command::new("git");
+    let mut command = resolve_command("git");
     if let Some(dir) = dir {
         command.current_dir(dir);
     }

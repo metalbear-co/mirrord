@@ -14,11 +14,12 @@ use mirrord_auth::{
     certificate::Certificate,
     credentials::{CiApiKey, Credentials},
 };
+use mirrord_command::resolve_tokio_command;
 use rcgen::{CertificateParams, CertificateSigningRequestParams, CertifiedIssuer, KeyPair};
 use rstest::rstest;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-use tokio::{net::TcpListener, process::Command, sync::Mutex, task::JoinHandle, time::timeout};
+use tokio::{net::TcpListener, sync::Mutex, task::JoinHandle, time::timeout};
 
 const OPERATOR_PATH: &str = "/apis/operator.metalbear.co/v1/mirrordoperators/operator";
 const CREDENTIAL_PATH: &str =
@@ -194,7 +195,7 @@ impl Fixture {
     }
 
     async fn run_ci(&self, subcommand: &str, api_key: Option<&str>) -> Output {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_mirrord"));
+        let mut command = resolve_tokio_command(env!("CARGO_BIN_EXE_mirrord"));
         command
             .current_dir(self.directory.path())
             .env_clear()
