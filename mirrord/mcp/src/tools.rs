@@ -21,7 +21,7 @@ pub mod validate_config;
 
 use explain_config_option::{ExplainConfigOptionArgs, ExplainConfigOptionOutput};
 use get_skill::GetSkillArgs;
-use read_doc::{ReadDocArgs, ReadDocOutput};
+use read_doc::ReadDocArgs;
 use search_docs::{SearchDocsArgs, SearchDocsOutput};
 use validate_config::{ValidateConfigArgs, ValidateConfigOutput};
 
@@ -110,17 +110,16 @@ impl McpServer {
     #[tool(
         name = "read_doc",
         description = "Read one page of the mirrord docs or skills shipped with the installed \
-        mirrord version, by the `path` `search_docs` returns. Returns the page's full markdown, \
-        its title and the URL it is published at. Without a `path`, lists every page. An unknown \
-        path returns the closest known paths.",
+        mirrord version, by the `path` `search_docs` returns. Returns the page's title and the URL \
+        it is published at, followed by its full markdown. Without a `path`, lists every page with \
+        its title. An unknown path returns the closest known paths.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     fn read_doc(
         &self,
         Parameters(args): Parameters<ReadDocArgs>,
-    ) -> Result<Json<ReadDocOutput>, CallToolResult> {
+    ) -> Result<String, CallToolResult> {
         read_doc::read_doc(args)
-            .map(Json)
             .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
     }
 }

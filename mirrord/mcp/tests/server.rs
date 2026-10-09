@@ -284,14 +284,17 @@ async fn serves_docs() {
         };
         assert!(hit["path"].as_str().unwrap().starts_with(corpus), "{hit}");
 
-        let page = client
+        let result = client
             .call_tool(tool_call("read_doc", json!({ "path": hit["path"] })))
             .await
-            .unwrap()
-            .structured_content
             .unwrap();
-        assert_eq!(page["title"], hit["title"]);
-        assert!(page["source_url"].as_str().unwrap().starts_with("https://"));
+        assert!(result.structured_content.is_none());
+        let page = &result.content[0].as_text().unwrap().text;
+        let title = hit["title"].as_str().unwrap();
+        assert!(
+            page.starts_with(&format!("Title: {title}\nSource: https://")),
+            "{page}"
+        );
 
         let uri = hit["resource_uri"].as_str().unwrap();
         if uri.starts_with("mirrord://docs/") {
@@ -308,7 +311,7 @@ async fn serves_docs() {
         else {
             panic!("unexpected contents: {:?}", result.contents);
         };
-        assert_eq!(text, page["content"].as_str().unwrap());
+        assert!(page.ends_with(text.as_str()), "{uri}");
     }
 
     let result = client

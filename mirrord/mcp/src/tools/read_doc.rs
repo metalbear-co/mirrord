@@ -2,7 +2,7 @@
 //! `search_docs` returns, or lists every page.
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use thiserror::Error;
 
 use crate::corpus::PAGES;
@@ -18,46 +18,20 @@ pub struct ReadDocArgs {
     path: Option<String>,
 }
 
-#[derive(Debug, Default, Serialize, JsonSchema)]
-pub struct ReadDocOutput {
-    /// Every page, when no `path` was given.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pages: Option<Vec<PageSummary>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    title: Option<String>,
-    /// Where the page is published, for linking the user to it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source_url: Option<String>,
-    /// The page's full markdown.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct PageSummary {
-    path: String,
-    title: String,
-}
-
 #[derive(Debug, Error)]
 pub enum ReadDocError {
     #[error("unknown page `{path}`, the closest pages are: {closest}")]
     UnknownPage { path: String, closest: String },
 }
 
-pub fn read_doc(args: ReadDocArgs) -> Result<ReadDocOutput, ReadDocError> {
+/// Answers in markdown: a page goes out as text, once, where structured output would also carry it
+/// serialized as text, escaped.
+pub fn read_doc(args: ReadDocArgs) -> Result<String, ReadDocError> {
     let Some(path) = args.path else {
-        let pages = PAGES
+        return Ok(PAGES
             .iter()
-            .map(|(path, page)| PageSummary {
-                path: (*path).to_owned(),
-                title: page.title.clone(),
-            })
-            .collect();
-        return Ok(ReadDocOutput {
-            pages: Some(pages),
-            ..Default::default()
-        });
+            .map(|(path, page)| format!("- `{path}`: {}\n", page.title))
+            .collect());
     };
 
     let Some(page) = PAGES.get(path.as_str()) else {
@@ -66,12 +40,10 @@ pub fn read_doc(args: ReadDocArgs) -> Result<ReadDocOutput, ReadDocError> {
             path,
         });
     };
-    Ok(ReadDocOutput {
-        title: Some(page.title.clone()),
-        source_url: Some(page.source_url.clone()),
-        content: Some(page.body.to_owned()),
-        ..Default::default()
-    })
+    Ok(format!(
+        "Title: {}\nSource: {}\n\n{}",
+        page.title, page.source_url, page.body
+    ))
 }
 
 /// The known paths closest to `asked`: those ending with it first (`targetless.md` for
