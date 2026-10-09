@@ -322,6 +322,7 @@ enum PodField {
     Name,
     Patched,
     Ready,
+    Reason,
 }
 
 impl PodField {
@@ -330,6 +331,7 @@ impl PodField {
             Self::Name => Some(pod.name.clone()),
             Self::Patched => Some(pod.patched.to_string()),
             Self::Ready => Some(pod.ready.to_string()),
+            Self::Reason => Some(pod.reason.clone().unwrap_or_else(dash)),
         }
     }
 }

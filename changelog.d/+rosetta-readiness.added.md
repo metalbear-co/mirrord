@@ -1,0 +1,1 @@
+- Added local fallback collection and `mirrord diagnose sip-report` for protected macOS binaries that still require Rosetta.
