@@ -351,6 +351,8 @@ mod operator;
 mod pitm;
 mod port_forward;
 mod process_env;
+#[cfg(windows)]
+mod process_handoff;
 // Prefetched files exist for the layer to serve in place of remote ones, and the layer is unix
 // only, so copying them anywhere else would be work nothing can use.
 #[cfg(unix)]
@@ -380,6 +382,8 @@ use verify_config::verify_config;
 
 #[cfg(target_os = "macos")]
 use crate::diagnose::sip::prompt_sip_report;
+#[cfg(target_os = "windows")]
+use crate::process_handoff::ProcessHandoffProgress;
 use crate::{
     ci::{MirrordCi, ci_api_key_available},
     config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
@@ -500,6 +504,12 @@ async fn exec_process(
         execution_info.uses_operator,
         &mut sub_progress,
     )?;
+
+    #[cfg(target_os = "windows")]
+    let sub_progress = ProcessHandoffProgress {
+        task: sub_progress,
+        root: Some(progress),
+    };
 
     run_process_with_mirrord(
         binary,
