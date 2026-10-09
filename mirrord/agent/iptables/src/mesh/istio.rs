@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use tracing::warn;
 
 use crate::{
-    ChainNames, IPTables, error::IPTablesResult, output::OutputRedirect,
+    ChainNames, IPTablesBackend, error::IPTablesResult, output::OutputRedirect,
     prerouting::PreroutingRedirect, redirect::Redirect,
 };
 
@@ -27,21 +27,18 @@ const ORIGINAL_PREFIX: &str = "mirrord-localnet-original-";
 /// value and tearing the chain down.
 const REF_PREFIX: &str = "mirrord-localnet-ref-";
 
-pub struct AmbientRedirect<IPT: IPTables> {
-    prerouting: PreroutingRedirect<IPT>,
-    output: OutputRedirect<true, IPT>,
-    ipt: Arc<IPT>,
+pub struct AmbientRedirect {
+    prerouting: PreroutingRedirect,
+    output: OutputRedirect<true>,
+    ipt: Arc<IPTablesBackend>,
     /// Unique id for this agent, used as the suffix of our refcount rule so we can
     /// identify and remove our own ref on shutdown without disturbing other agents.
     agent_id: String,
 }
 
-impl<IPT> AmbientRedirect<IPT>
-where
-    IPT: IPTables,
-{
+impl AmbientRedirect {
     pub fn create(
-        ipt: Arc<IPT>,
+        ipt: Arc<IPTablesBackend>,
         chain_names: &ChainNames,
         pod_ips: Option<&str>,
     ) -> IPTablesResult<Self> {
@@ -56,7 +53,7 @@ where
         })
     }
 
-    pub fn load(ipt: Arc<IPT>, chain_names: &ChainNames) -> IPTablesResult<Self> {
+    pub fn load(ipt: Arc<IPTablesBackend>, chain_names: &ChainNames) -> IPTablesResult<Self> {
         let prerouting = PreroutingRedirect::load(ipt.clone(), chain_names.prerouting.clone())?;
         let output = OutputRedirect::load(ipt.clone(), chain_names.mesh.clone())?;
 
@@ -168,10 +165,7 @@ where
 }
 
 #[async_trait]
-impl<IPT> Redirect for AmbientRedirect<IPT>
-where
-    IPT: IPTables + Send + Sync,
-{
+impl Redirect for AmbientRedirect {
     async fn mount_entrypoint(&self) -> IPTablesResult<()> {
         self.register_route_localnet().await?;
         // To prevent a race, we write `1` unconditionally on every mount.
