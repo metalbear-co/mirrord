@@ -13,7 +13,7 @@ pub struct GetSkillArgs {
     /// The skill to get, e.g. `mirrord-up`. Leave out to list every skill.
     name: Option<String>,
     /// A file bundled with the skill, by its path in the skill's directory, e.g.
-    /// `references/known-issues.md`. Leave out to get the skill's `SKILL.md`.
+    /// `references/known-issues.md`. Leave out, or pass `SKILL.md`, to get the skill's `SKILL.md`.
     file: Option<String>,
 }
 
@@ -76,17 +76,18 @@ pub fn get_skill(args: GetSkillArgs) -> Result<GetSkillOutput, GetSkillError> {
             available: list(SKILLS.keys()),
         });
     };
-    let content =
-        match file {
-            None => skill.body,
-            Some(file) => skill.files.get(file.as_str()).copied().ok_or_else(|| {
-                GetSkillError::UnknownFile {
-                    name,
-                    file,
-                    available: list(skill.files.keys()),
-                }
+    let content = match file.as_deref() {
+        None | Some("SKILL.md") => skill.body,
+        Some(file) => skill
+            .files
+            .get(file)
+            .copied()
+            .ok_or_else(|| GetSkillError::UnknownFile {
+                name,
+                file: file.to_owned(),
+                available: list(skill.files.keys()),
             })?,
-        };
+    };
     Ok(GetSkillOutput {
         content: Some(content.to_owned()),
         files: Some(skill.files.keys().map(|file| (*file).to_owned()).collect()),
