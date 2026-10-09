@@ -1,3 +1,5 @@
+#[cfg(target_os = "windows")]
+use std::ops::Not;
 use std::{collections::HashSet, time::Duration};
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -218,7 +220,9 @@ impl Progress for SpinnerProgress {
         // On Windows, we need to print a final line break to avoid having exec process's stdout
         // begin the same line as the "Ready"
         #[cfg(target_os = "windows")]
-        println!();
+        if self.indent == 0 && self.root_progress.is_hidden().not() {
+            eprintln!();
+        }
         self.message_buffer.iter().for_each(|msg| println!("{msg}"));
     }
 
