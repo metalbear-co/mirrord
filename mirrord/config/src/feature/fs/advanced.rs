@@ -348,6 +348,62 @@ impl FsConfig {
     pub fn is_active(&self) -> bool {
         !matches!(self.mode, FsModeConfig::Local)
     }
+
+    /// Warns about each pattern written as a Windows path with backslashes.
+    ///
+    /// On Windows, the layer matches paths with forward slashes only, so such a pattern matches
+    /// nothing, and often isn't a valid regex either (`\R` in `C:\Repos`). It's a warning rather
+    /// than an error, and Windows only, because elsewhere a backslash is an ordinary file name
+    /// character.
+    pub fn verify(&self, context: &mut ConfigContext) {
+        if !cfg!(windows) {
+            return;
+        }
+
+        for (list, pattern) in self.backslash_path_patterns() {
+            context.add_warning(format!(
+                "`feature.fs.{list}` pattern `{pattern}` is a path with backslashes, but on \
+                 Windows mirrord matches paths with forward slashes: `C:\\Repos\\app.json` is \
+                 matched as `C:/Repos/app.json` and `/Repos/app.json`, so this pattern never \
+                 matches. Write it with `/`, and for a path from the environment use a template: \
+                 `{{{{ get_env(name='TEMP') | path_pattern }}}}`."
+            ));
+        }
+    }
+
+    /// The patterns, with the list each is in, that look like a Windows path written with
+    /// backslashes: they start with a drive and a backslash (`C:\Repos`), or match a backslash
+    /// (`\\`), which no path the layer matches holds.
+    fn backslash_path_patterns(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        let lists = [
+            ("read_write", &self.read_write),
+            ("read_only", &self.read_only),
+            ("local", &self.local),
+            ("not_found", &self.not_found),
+        ]
+        .into_iter()
+        .flat_map(|(list, patterns)| {
+            patterns
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .map(move |pattern| (list, pattern.as_str()))
+        });
+        let mapping = self
+            .mapping
+            .iter()
+            .flatten()
+            .map(|(pattern, _)| ("mapping", pattern.as_str()));
+
+        lists.chain(mapping).filter(|(_, pattern)| {
+            let unanchored = pattern.strip_prefix('^').unwrap_or(pattern);
+            let starts_with_drive = matches!(
+                unanchored.as_bytes(),
+                [letter, b':', b'\\', ..] if letter.is_ascii_alphabetic()
+            );
+            starts_with_drive || pattern.contains(r"\\")
+        })
+    }
 }
 
 impl From<FsModeConfig> for AnalyticValue {
@@ -421,5 +477,89 @@ mod tests {
             .unwrap();
 
         assert_eq!(fs_config, expect);
+    }
+
+    /// The warnings [`FsConfig::verify`] gives for `config`.
+    #[cfg(windows)]
+    fn warnings(config: FsConfig) -> Vec<String> {
+        let mut context = ConfigContext::default();
+        config.verify(&mut context);
+        context.into_warnings()
+    }
+
+    /// The patterns customers write when they copy a path from Explorer: backslashes, escaped
+    /// once for JSON (`C:\Repos`) or twice more for the regex (`C:\\Repos`).
+    #[cfg(windows)]
+    #[rstest]
+    #[case::escaped_for_json(r"C:\Repos\app\appsettings.json")]
+    #[case::escaped_for_the_regex(r"C:\\Repos\\app\\appsettings\.json")]
+    #[case::anchored(r"^C:\Repos\app")]
+    #[case::without_a_drive(r"\\Repos\\app")]
+    fn a_path_with_backslashes_is_warned_about_in_every_list(#[case] pattern: &str) {
+        let patterns = || Some(VecOrSingle::Single(pattern.to_owned()));
+        let lists = [
+            (
+                "read_write",
+                FsConfig {
+                    read_write: patterns(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "read_only",
+                FsConfig {
+                    read_only: patterns(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "local",
+                FsConfig {
+                    local: patterns(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "not_found",
+                FsConfig {
+                    not_found: patterns(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "mapping",
+                FsConfig {
+                    mapping: Some([(pattern.to_owned(), "/app".to_owned())].into()),
+                    ..Default::default()
+                },
+            ),
+        ];
+
+        for (list, config) in lists {
+            let warnings = warnings(config);
+            let [warning] = warnings.as_slice() else {
+                panic!("one warning for `{list}`, got {warnings:?}");
+            };
+            assert!(
+                warning.contains(&format!("`feature.fs.{list}` pattern `{pattern}`")),
+                "the warning names the list and the pattern: {warning}"
+            );
+        }
+    }
+
+    /// Ordinary regexes use backslashes too, to escape a `.` or for a class like `\d`: those are
+    /// not paths, and get no warning.
+    #[cfg(windows)]
+    #[rstest]
+    #[case::forward_slashes("^C:/Repos/app/")]
+    #[case::escaped_dot(r".+\.json$")]
+    #[case::digit_class(r"^/logs/\d+\.log$")]
+    fn a_regex_escape_is_not_warned_about(#[case] pattern: &str) {
+        let config = FsConfig {
+            read_only: Some(VecOrSingle::Single(pattern.to_owned())),
+            ..Default::default()
+        };
+
+        assert_eq!(warnings(config), Vec::<String>::new());
     }
 }

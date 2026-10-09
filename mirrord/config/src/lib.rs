@@ -908,6 +908,8 @@ impl LayerConfig {
             );
         }
 
+        self.feature.fs.verify(context);
+
         let http_filter = &self.feature.network.incoming.http_filter;
         let used_filters = [
             http_filter.path_filter.is_some(),
