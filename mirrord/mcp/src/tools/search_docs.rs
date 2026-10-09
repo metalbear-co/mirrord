@@ -15,7 +15,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::corpus::{PAGES, Page, front_matter};
+use crate::{
+    corpus::{PAGES, front_matter},
+    tools::explain_config_option::OPTION_PAGES,
+};
 
 /// Hits returned when the agent doesn't ask for a number.
 const DEFAULT_LIMIT: usize = 5;
@@ -68,10 +71,13 @@ struct SearchHit {
     snippet: String,
 }
 
-/// A searchable page, tokenized.
+/// A searchable page or config option, tokenized.
 struct Document {
     path: &'static str,
-    page: &'static Page,
+    title: &'static str,
+    resource_uri: &'static str,
+    /// What is searched, and the snippet is taken from.
+    text: &'static str,
     /// How often each term occurs, title occurrences weighted by [`TITLE_WEIGHT`].
     terms: BTreeMap<String, u32>,
     length: u32,
@@ -84,8 +90,8 @@ struct Index {
     average_length: f64,
 }
 
-/// The markdown of the docs and skills, except for pages that would crowd out the ones answering a
-/// query, which can still be read with `read_doc`:
+/// The markdown of the docs and skills, and every config option with a description. Left out are
+/// pages that would crowd out the ones answering a query, which can still be read with `read_doc`:
 /// - the files bundled with skills that aren't markdown, such as Helm values, which match nearly
 ///   any keyword;
 /// - the skills' `README.md`s, short summaries of their `SKILL.md` for people browsing the repo.
@@ -93,26 +99,37 @@ static INDEX: LazyLock<Index> = LazyLock::new(|| {
     let searchable = |path: &str| {
         path.ends_with(".md") && (path.starts_with("skills/") && path.ends_with("/README.md")).not()
     };
-    let documents: Vec<Document> = PAGES
+    let pages = PAGES
         .iter()
         .filter(|(path, _)| searchable(path))
-        .map(|(path, page)| {
-            let mut terms = BTreeMap::new();
-            let mut length = 0;
-            for term in tokens(without_front_matter(page.body)) {
-                *terms.entry(term).or_default() += 1;
-                length += 1;
+        .map(|(path, page)| Document {
+            path,
+            title: &page.title,
+            resource_uri: &page.resource_uri,
+            text: without_front_matter(page.body),
+            terms: BTreeMap::new(),
+            length: 0,
+        });
+    let options = OPTION_PAGES.iter().map(|option| Document {
+        path: &option.path,
+        title: &option.title,
+        resource_uri: &option.resource_uri,
+        text: &option.description,
+        terms: BTreeMap::new(),
+        length: 0,
+    });
+    let documents: Vec<Document> = pages
+        .chain(options)
+        .map(|mut document| {
+            for term in tokens(document.text) {
+                *document.terms.entry(term).or_default() += 1;
+                document.length += 1;
             }
-            for term in tokens(&page.title) {
-                *terms.entry(term).or_default() += TITLE_WEIGHT;
-                length += TITLE_WEIGHT;
+            for term in tokens(document.title) {
+                *document.terms.entry(term).or_default() += TITLE_WEIGHT;
+                document.length += TITLE_WEIGHT;
             }
-            Document {
-                path,
-                page,
-                terms,
-                length,
-            }
+            document
         })
         .collect();
 
@@ -178,10 +195,10 @@ pub fn search_docs(args: SearchDocsArgs) -> Result<SearchDocsOutput, SearchDocsE
     let hits = scored
         .into_iter()
         .map(|(_, document)| SearchHit {
-            title: document.page.title.clone(),
+            title: document.title.to_owned(),
             path: document.path.to_owned(),
-            resource_uri: document.page.resource_uri.clone(),
-            snippet: snippet(without_front_matter(document.page.body), &query),
+            resource_uri: document.resource_uri.to_owned(),
+            snippet: snippet(document.text, &query),
         })
         .filter(|hit| seen.insert((hit.title.clone(), hit.snippet.clone())))
         .take(limit)

@@ -90,9 +90,9 @@ impl McpServer {
     /// Keyword search over the vendored docs and skills.
     #[tool(
         name = "search_docs",
-        description = "Search the mirrord docs and skills shipped with the installed mirrord \
-        version by keywords, e.g. `steal http filter` or `db branching postgres`. Returns the best \
-        matching pages first, each with its title, the `path` to read it with `read_doc`, its \
+        description = "Search the mirrord docs, skills and config options of the installed \
+        mirrord version by keywords, e.g. `steal http filter` or `db branching postgres`. Returns \
+        the best matching pages first, each with its title, the `path` to read it with `read_doc`, its \
         resource URI and the line that best matches. `limit` is the number of hits, 5 by default \
         and from 1 to 20. Search the docs before answering a question about mirrord from memory.",
         annotations(read_only_hint = true, open_world_hint = false)
@@ -109,10 +109,11 @@ impl McpServer {
     /// Serve one page of the vendored docs and skills, or list them.
     #[tool(
         name = "read_doc",
-        description = "Read one page of the mirrord docs or skills shipped with the installed \
-        mirrord version, by the `path` `search_docs` returns. Returns the page's title and the URL \
-        it is published at, followed by its full markdown. Without a `path`, lists every page with \
-        its title. An unknown path returns the closest known paths.",
+        description = "Read one page of the mirrord docs or skills, or one config option, of the \
+        installed mirrord version, by the `path` `search_docs` returns. Returns the page's title \
+        and the URL it is published at, followed by its full markdown. Without a `path`, lists \
+        every docs and skills page with its title. An unknown path returns the closest known \
+        paths.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     fn read_doc(

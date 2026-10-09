@@ -1,1 +1,1 @@
-Added the `search_docs` and `read_doc` tools to `mirrord mcp`, for keyword search and reading of the docs and skills shipped with mirrord, and served every docs page as a `mirrord://docs/<path>` resource.
+Added the `search_docs` and `read_doc` tools to `mirrord mcp`, for keyword search and reading of the docs, skills, and config options shipped with mirrord, and served every docs page as a `mirrord://docs/<path>` resource.

@@ -5,15 +5,16 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::corpus::PAGES;
+use crate::{corpus::PAGES, tools::explain_config_option::read_option};
 
 /// How many paths an unknown path suggests.
 const SUGGESTIONS: usize = 5;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ReadDocArgs {
-    /// The page's path, as `search_docs` returns it, e.g. `docs/using-mirrord/targetless.md`.
-    /// Leave out to list every page.
+    /// The page's path, as `search_docs` returns it, e.g. `docs/using-mirrord/targetless.md`, or
+    /// `config/<file>/<option>` for a config option, e.g. `config/mirrord.json/agent.ttl`. Leave
+    /// out to list every page.
     #[serde(default)]
     path: Option<String>,
 }
@@ -34,6 +35,9 @@ pub fn read_doc(args: ReadDocArgs) -> Result<String, ReadDocError> {
             .collect());
     };
 
+    if let Some(option) = read_option(&path) {
+        return Ok(option);
+    }
     let Some(page) = PAGES.get(path.as_str()) else {
         return Err(ReadDocError::UnknownPage {
             closest: closest(&path),

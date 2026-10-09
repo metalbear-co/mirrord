@@ -36,6 +36,7 @@ pub use crate::telemetry::McpTelemetry;
 use crate::{
     corpus::{PAGES, SKILLS},
     telemetry::{McpTool, ToolOutcome},
+    tools::explain_config_option::read_option,
 };
 
 mod corpus;
@@ -220,6 +221,12 @@ impl ServerHandler for McpServer {
             };
             return Ok(ReadResourceResult::new(vec![
                 ResourceContents::text(page.body, request.uri).with_mime_type(mime_type),
+            ])
+            .into());
+        }
+        if let Some(option) = request.uri.strip_prefix("mirrord://").and_then(read_option) {
+            return Ok(ReadResourceResult::new(vec![
+                ResourceContents::text(option, request.uri).with_mime_type("text/markdown"),
             ])
             .into());
         }

@@ -268,6 +268,7 @@ async fn serves_docs() {
     for (query, corpus) in [
         ("running without a target", "docs/"),
         ("kafka splitting known issues", "skills/"),
+        ("agent ttl", "config/mirrord.json/"),
     ] {
         let hits = client
             .call_tool(tool_call(
