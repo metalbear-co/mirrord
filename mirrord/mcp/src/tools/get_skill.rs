@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::corpus::SKILLS;
+use crate::corpus::{self, SKILLS, UnknownSkill, list};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetSkillArgs {
@@ -39,8 +39,8 @@ struct SkillSummary {
 
 #[derive(Debug, Error)]
 pub enum GetSkillError {
-    #[error("unknown skill `{name}`, the available skills are: {available}")]
-    UnknownSkill { name: String, available: String },
+    #[error(transparent)]
+    UnknownSkill(#[from] UnknownSkill),
     #[error("skill `{name}` has no file `{file}`, its files are: {available}")]
     UnknownFile {
         name: String,
@@ -70,12 +70,7 @@ pub fn get_skill(args: GetSkillArgs) -> Result<GetSkillOutput, GetSkillError> {
         });
     };
 
-    let Some(skill) = SKILLS.get(name.as_str()) else {
-        return Err(GetSkillError::UnknownSkill {
-            name,
-            available: list(SKILLS.keys()),
-        });
-    };
+    let skill = corpus::skill(&name)?;
     let content = match file.as_deref() {
         None | Some("SKILL.md") => skill.body,
         Some(file) => skill
@@ -93,12 +88,4 @@ pub fn get_skill(args: GetSkillArgs) -> Result<GetSkillOutput, GetSkillError> {
         files: Some(skill.files.keys().map(|file| (*file).to_owned()).collect()),
         ..Default::default()
     })
-}
-
-/// Names for an error message, e.g. `` `mirrord-up`, `mirrord-ci` ``.
-pub(crate) fn list<'a>(names: impl Iterator<Item = &'a &'a str>) -> String {
-    names
-        .map(|name| format!("`{name}`"))
-        .collect::<Vec<_>>()
-        .join(", ")
 }

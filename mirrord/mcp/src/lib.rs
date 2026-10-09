@@ -35,7 +35,6 @@ pub use crate::telemetry::McpTelemetry;
 use crate::{
     corpus::SKILLS,
     telemetry::{McpTool, ToolOutcome},
-    tools::get_skill,
 };
 
 mod corpus;
@@ -200,11 +199,9 @@ impl ServerHandler for McpServer {
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
-        if let Some(skill) = request
-            .uri
-            .strip_prefix(SKILL_RESOURCE_URI_PREFIX)
-            .and_then(|name| SKILLS.get(name))
-        {
+        if let Some(name) = request.uri.strip_prefix(SKILL_RESOURCE_URI_PREFIX) {
+            let skill = corpus::skill(name)
+                .map_err(|error| ErrorData::resource_not_found(error.to_string(), None))?;
             return Ok(ReadResourceResult::new(vec![
                 ResourceContents::text(skill.body, request.uri).with_mime_type("text/markdown"),
             ])
@@ -249,16 +246,8 @@ impl ServerHandler for McpServer {
         request: GetPromptRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<GetPromptResponse, ErrorData> {
-        let Some(skill) = SKILLS.get(request.name.as_str()) else {
-            return Err(ErrorData::invalid_params(
-                format!(
-                    "unknown prompt `{}`, the available prompts are: {}",
-                    request.name,
-                    get_skill::list(SKILLS.keys()),
-                ),
-                None,
-            ));
-        };
+        let skill = corpus::skill(&request.name)
+            .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
 
         let mut text = skill.body.to_owned();
         if skill.files.is_empty().not() {
@@ -266,7 +255,7 @@ impl ServerHandler for McpServer {
                 "\n\nThis skill bundles these files, which the `get_skill` tool returns given \
                 `name: \"{}\"` and the file's path as `file`: {}\n",
                 request.name,
-                get_skill::list(skill.files.keys()),
+                corpus::list(skill.files.keys()),
             ));
         }
         Ok(

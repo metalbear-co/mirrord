@@ -10,6 +10,7 @@ use std::{collections::BTreeMap, io::Read, ops::Not, sync::LazyLock};
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use thiserror::Error;
 
 /// The `corpus/` files, packed by `build.rs`.
 static ARCHIVE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/corpus.tar.gz"));
@@ -72,6 +73,30 @@ pub(crate) struct Skill<'a> {
 /// server; the tests below keep them from shipping.
 pub(crate) static SKILLS: LazyLock<BTreeMap<&'static str, Skill<'static>>> =
     LazyLock::new(|| load_skills(&FILES).0);
+
+/// The skill `name`, for `get_skill`, the prompts and the resources alike.
+pub(crate) fn skill(name: &str) -> Result<&'static Skill<'static>, UnknownSkill> {
+    SKILLS.get(name).ok_or_else(|| UnknownSkill {
+        name: name.to_owned(),
+        available: list(SKILLS.keys()),
+    })
+}
+
+/// Names the available skills, so the agent can retry with one of them.
+#[derive(Debug, Error)]
+#[error("unknown skill `{name}`, the available skills are: {available}")]
+pub struct UnknownSkill {
+    name: String,
+    available: String,
+}
+
+/// Names for a message, e.g. `` `mirrord-up`, `mirrord-ci` ``.
+pub(crate) fn list<'a>(names: impl Iterator<Item = &'a &'a str>) -> String {
+    names
+        .map(|name| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 /// Loads the skills in `files`: every directory under `skills/` is one, and needs a `SKILL.md`
 /// whose front matter names it and describes it. Returns the skills that load, and why the others
