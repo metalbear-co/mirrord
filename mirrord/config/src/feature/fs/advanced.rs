@@ -96,6 +96,42 @@ pub const PREFETCH_TIMEOUT_DEFAULT: u64 = 30;
 ///   }
 /// }
 /// ```
+///
+/// ### Windows paths {#fs-windows-paths}
+///
+/// On Windows, the patterns of `read_write`, `read_only`, `local`, `not_found` and `mapping` are
+/// matched against two forms of the path, both with forward slashes:
+///
+/// | Form | `D:\Workspaces\myapp\app.json` becomes | A pattern for this form matches |
+/// |---|---|---|
+/// | without the drive | `/Workspaces/myapp/app.json` | the path on every drive |
+/// | with the drive | `D:/Workspaces/myapp/app.json` | the path on that drive only |
+///
+/// A pattern applies when it matches either form. So `^/Workspaces/` matches the folder on
+/// every drive, and `^D:/Workspaces/` matches it on `D:` only. Like the rest of a pattern, the
+/// drive letter ignores case.
+///
+/// Write patterns with forward slashes. A backslash in a pattern never matches, since neither
+/// form has one, and mirrord warns about a pattern that looks like a path with backslashes.
+///
+/// For a path from the environment, use the `path_pattern` template filter. It gives the path's
+/// form with the drive, escaped so that it matches literally and fits in any config format:
+///
+/// ```json
+/// {
+///   "feature": {
+///     "fs": {
+///       "local": ["^{{ get_env(name='TEMP') | path_pattern }}/"]
+///     }
+///   }
+/// }
+/// ```
+///
+/// - **`%TEMP%` is not read locally by default.** The pattern above reads it locally.
+/// - **A short 8.3 name still matches the long one.** When the path exists, `path_pattern` also
+///   matches its full name, so `C:\Users\FIRSTN~1` matches `C:\Users\First Name`.
+/// - **The result never ends in a separator.** Add `/` to match what's inside the folder.
+/// - **For text that isn't a path,** such as a user name, `regex_escape` escapes it as-is.
 #[derive(MirrordConfig, Default, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[config(
     map_to = "AdvancedFsUserConfig",
@@ -111,16 +147,8 @@ pub struct FsConfig {
     ///
     /// Specify file path patterns that if matched will be read and written to the remote.
     ///
-    /// ##### Windows
-    ///
-    /// Patterns are matched against a unix-style form of the requested path, not the raw
-    /// Windows path. Before matching, the drive letter is stripped and backslashes are
-    /// converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
-    /// `/Workspaces/myapp/app.json`.
-    ///
-    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
-    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-    /// regex sees contains no backslashes at all — they were stripped during translation.
+    /// On Windows, write the patterns with forward slashes. They match the path with and without
+    /// its drive, as [Windows paths](#fs-windows-paths) explains.
     #[config(env = "MIRRORD_FILE_READ_WRITE_PATTERN")]
     pub read_write: Option<VecOrSingle<String>>,
 
@@ -129,32 +157,16 @@ pub struct FsConfig {
     /// Specify file path patterns that if matched will be read from the remote.
     /// if file matching the pattern is opened for writing or read/write it will be opened locally.
     ///
-    /// ##### Windows
-    ///
-    /// Patterns are matched against a unix-style form of the requested path, not the raw
-    /// Windows path. Before matching, the drive letter is stripped and backslashes are
-    /// converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
-    /// `/Workspaces/myapp/app.json`.
-    ///
-    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
-    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-    /// regex sees contains no backslashes at all — they were stripped during translation.
+    /// On Windows, write the patterns with forward slashes. They match the path with and without
+    /// its drive, as [Windows paths](#fs-windows-paths) explains.
     pub read_only: Option<VecOrSingle<String>>,
 
     /// #### feature.fs.local {#feature-fs-local}
     ///
     /// Specify file path patterns that if matched will be opened locally.
     ///
-    /// ##### Windows
-    ///
-    /// Patterns are matched against a unix-style form of the requested path, not the raw
-    /// Windows path. Before matching, the drive letter is stripped and backslashes are
-    /// converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
-    /// `/Workspaces/myapp/app.json`.
-    ///
-    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
-    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-    /// regex sees contains no backslashes at all — they were stripped during translation.
+    /// On Windows, write the patterns with forward slashes. They match the path with and without
+    /// its drive, as [Windows paths](#fs-windows-paths) explains.
     #[config(env = "MIRRORD_FILE_LOCAL_PATTERN")]
     pub local: Option<VecOrSingle<String>>,
 
@@ -162,16 +174,8 @@ pub struct FsConfig {
     ///
     /// Specify file path patterns that if matched will be treated as non-existent.
     ///
-    /// ##### Windows
-    ///
-    /// Patterns are matched against a unix-style form of the requested path, not the raw
-    /// Windows path. Before matching, the drive letter is stripped and backslashes are
-    /// converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
-    /// `/Workspaces/myapp/app.json`.
-    ///
-    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
-    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-    /// regex sees contains no backslashes at all — they were stripped during translation.
+    /// On Windows, write the patterns with forward slashes. They match the path with and without
+    /// its drive, as [Windows paths](#fs-windows-paths) explains.
     pub not_found: Option<VecOrSingle<String>>,
 
     /// #### feature.fs.mapping {#feature-fs-mapping}
@@ -201,29 +205,29 @@ pub struct FsConfig {
     ///
     /// ##### Windows
     ///
-    /// Patterns are matched against a unix-style form of the requested path, not the raw
-    /// Windows path. Before matching, the drive letter is stripped and backslashes are
-    /// converted to forward slashes, so:
+    /// Patterns match the path with and without its drive, with forward slashes, as
+    /// [Windows paths](#fs-windows-paths) explains:
     ///
-    /// `D:\Workspaces\myapp\config\app.json` is matched as `/Workspaces/myapp/config/app.json`
+    /// - **A pattern without a drive** (`^/Workspaces/`) maps the path on every drive.
+    /// - **A pattern with a drive** (`^C:/Repos/`) maps the path on that drive only.
     ///
-    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
-    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-    /// regex sees contains no backslashes at all — they were stripped during translation.
-    ///
-    /// The replacement value is sent to the agent as-is and is what the remote (Linux) pod
-    /// will see on disk, so it should also use forward slashes.
+    /// The value is the path the remote (Linux) pod opens, so write it with forward slashes and
+    /// no drive. A drive left in the result is dropped.
     ///
     /// Example:
     /// ```json
     /// {
-    ///   "^/Workspaces/(?<app>[^/]+)/config/(?<file>.+)": "/etc/${app}/$file"
+    ///   "^/Workspaces/(?<app>[^/]+)/config/(?<file>.+)": "/etc/${app}/$file",
+    ///   "^C:/Repos/api/appsettings\\.json$": "/app/appsettings.json"
     /// }
     /// ```
     ///
-    /// Will produce the following replacement:
+    /// Will produce the following replacements:
     ///
     /// `D:\Workspaces\myapp\config\app.json` => `/etc/myapp/app.json`
+    /// `C:\Repos\api\appsettings.json` => `/app/appsettings.json`
+    ///
+    /// `D:\Repos\api\appsettings.json` stays as it is, because the second pattern names `C:`.
     ///
     /// ##### Caveats
     ///
