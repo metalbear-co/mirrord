@@ -24,8 +24,9 @@ struct Corpus {
     repo: &'static str,
     /// The directory of the repo holding the content, vendored at the same paths relative to it.
     root: &'static str,
-    /// Vendor only the markdown under `root`, rather than every file.
-    markdown_only: bool,
+    /// The extensions of the files under `root` that are vendored. `mirrord mcp` serves text only,
+    /// so images and other binary files upstream are skipped rather than failing the sync.
+    extensions: &'static [&'static str],
 }
 
 const CORPORA: &[Corpus] = &[
@@ -33,7 +34,7 @@ const CORPORA: &[Corpus] = &[
         name: "docs",
         repo: "metalbear-co/docs",
         root: "docs",
-        markdown_only: true,
+        extensions: &["md"],
     },
     Corpus {
         name: "skills",
@@ -41,7 +42,7 @@ const CORPORA: &[Corpus] = &[
         root: "skills",
         // Skills point the agent at the schemas and values files bundled with them, so those are
         // served too.
-        markdown_only: false,
+        extensions: &["md", "json", "yaml", "yml"],
     },
 ];
 
@@ -60,19 +61,21 @@ pub fn sync(bump: bool) -> Result<()> {
     for corpus in CORPORA {
         let pin_path = corpus_dir().join(format!("{}.pin.json", corpus.name));
         let pin = if bump {
-            let pin = Pin {
+            Pin {
                 repo: corpus.repo.to_owned(),
                 commit: upstream_head(corpus.repo)?,
                 synced_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
-            };
-            fs::write(&pin_path, serde_json::to_string_pretty(&pin)? + "\n")
-                .with_context(|| format!("failed to write {}", pin_path.display()))?;
-            pin
+            }
         } else {
             read_pin(&pin_path)?
         };
 
         let files = fetch(corpus, &pin)?;
+        // Written once its commit is known to sync, so a failed sync keeps the previous pin.
+        if bump {
+            fs::write(&pin_path, serde_json::to_string_pretty(&pin)? + "\n")
+                .with_context(|| format!("failed to write {}", pin_path.display()))?;
+        }
         let dir = corpus_dir().join(corpus.name);
         if dir.exists() {
             fs::remove_dir_all(&dir)
@@ -209,7 +212,10 @@ fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
             .and_then(|path| path.strip_prefix('/'))
             .context("git listed a file outside the corpus root")?;
         let hidden = relative.split('/').any(|segment| segment.starts_with('.'));
-        if hidden || (corpus.markdown_only && !relative.ends_with(".md")) {
+        let vendored = relative
+            .rsplit_once('.')
+            .is_some_and(|(_, extension)| corpus.extensions.contains(&extension));
+        if hidden || !vendored {
             continue;
         }
 
