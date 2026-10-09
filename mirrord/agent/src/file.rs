@@ -1245,6 +1245,7 @@ mod tests {
         fs::write(sentinel.path(), "host sentinel").unwrap();
         let rooted_sentinel = root.path().join(sentinel.path().strip_prefix("/").unwrap());
         assert!(rooted_sentinel.exists().not());
+        fs::create_dir_all(rooted_sentinel.parent().unwrap()).unwrap();
 
         for dirfd in [None, Some(fd), Some(u64::MAX)] {
             assert_eq!(
@@ -1253,6 +1254,14 @@ mod tests {
                     libc::ENOENT
                 )))
             );
+            assert_eq!(
+                fs::read_to_string(sentinel.path()).unwrap(),
+                "host sentinel"
+            );
+
+            fs::write(&rooted_sentinel, "target sentinel").unwrap();
+            unlink_at(&mut manager, dirfd, sentinel.path(), 0).unwrap();
+            assert!(rooted_sentinel.exists().not());
             assert_eq!(
                 fs::read_to_string(sentinel.path()).unwrap(),
                 "host sentinel"
