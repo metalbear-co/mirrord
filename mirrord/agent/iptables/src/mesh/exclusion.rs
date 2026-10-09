@@ -3,29 +3,26 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::Level;
 
-use crate::{IPTables, chain::IPTableChain, error::IPTablesResult, redirect::Redirect};
+use crate::{IPTablesBackend, chain::IPTableChain, error::IPTablesResult, redirect::Redirect};
 
 /// Type used for excluding certain ports from the service mesh proxy.
 #[derive(Debug)]
-pub struct MeshExclusion<IPT: IPTables> {
-    managed: IPTableChain<IPT>,
+pub struct MeshExclusion {
+    managed: IPTableChain,
 }
 
-impl<IPT> MeshExclusion<IPT>
-where
-    IPT: IPTables,
-{
+impl MeshExclusion {
     const ENTRYPOINT: &'static str = "PREROUTING";
 
     /// Create a new `chain` and mount it.
-    pub fn create(ipt: Arc<IPT>, chain: &str) -> IPTablesResult<Self> {
+    pub fn create(ipt: Arc<IPTablesBackend>, chain: &str) -> IPTablesResult<Self> {
         let managed = IPTableChain::create(ipt, chain.to_string())?;
 
         Ok(Self { managed })
     }
 
     /// Load existing `chain` and mount it.
-    pub fn load(ipt: Arc<IPT>, chain: &str) -> IPTablesResult<Self> {
+    pub fn load(ipt: Arc<IPTablesBackend>, chain: &str) -> IPTablesResult<Self> {
         let managed = IPTableChain::load(ipt, chain.to_string())?;
 
         Ok(Self { managed })
@@ -63,39 +60,45 @@ where
 }
 
 #[derive(Debug)]
-pub struct WithMeshExclusion<IPT: IPTables, T> {
-    exclusion: MeshExclusion<IPT>,
+pub struct WithMeshExclusion<T> {
+    exclusion: MeshExclusion,
     inner: Box<T>,
 }
 
-impl<IPT, T> WithMeshExclusion<IPT, T>
+impl<T> WithMeshExclusion<T>
 where
-    IPT: IPTables,
     T: Redirect,
 {
     #[tracing::instrument(level = Level::TRACE, skip_all)]
-    pub fn create(ipt: Arc<IPT>, chain_name: &str, inner: Box<T>) -> IPTablesResult<Self> {
+    pub fn create(
+        ipt: Arc<IPTablesBackend>,
+        chain_name: &str,
+        inner: Box<T>,
+    ) -> IPTablesResult<Self> {
         let exclusion = MeshExclusion::create(ipt, chain_name)?;
 
         Ok(WithMeshExclusion { exclusion, inner })
     }
 
     #[tracing::instrument(level = Level::TRACE, skip_all)]
-    pub fn load(ipt: Arc<IPT>, chain_name: &str, inner: Box<T>) -> IPTablesResult<Self> {
+    pub fn load(
+        ipt: Arc<IPTablesBackend>,
+        chain_name: &str,
+        inner: Box<T>,
+    ) -> IPTablesResult<Self> {
         let exclusion = MeshExclusion::load(ipt, chain_name)?;
 
         Ok(WithMeshExclusion { exclusion, inner })
     }
 
-    pub fn exclusion(&self) -> &MeshExclusion<IPT> {
+    pub fn exclusion(&self) -> &MeshExclusion {
         &self.exclusion
     }
 }
 
 #[async_trait]
-impl<IPT, T> Redirect for WithMeshExclusion<IPT, T>
+impl<T> Redirect for WithMeshExclusion<T>
 where
-    IPT: IPTables + Send + Sync,
     T: Redirect + Send + Sync,
 {
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
@@ -135,12 +138,12 @@ mod tests {
     use mockall::predicate::eq;
 
     use super::*;
-    use crate::{ChainNames, MockIPTables};
+    use crate::{ChainNames, MockIPTablesWrapper};
 
     #[test]
     fn default() {
         let chain_names = ChainNames::legacy();
-        let mut mock = MockIPTables::new();
+        let mut mock = MockIPTablesWrapper::new();
 
         mock.expect_create_chain()
             .with(eq(chain_names.exclude_from_mesh.clone()))
