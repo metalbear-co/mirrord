@@ -2,8 +2,9 @@
 //! page that answers its question without network access.
 //!
 //! Pages are ranked with [BM25](https://en.wikipedia.org/wiki/Okapi_BM25), with title matches
-//! weighted up. The index is kept in sorted maps and ties are broken by path, so a query ranks the
-//! same way every time, which a hash map's per-process ordering wouldn't guarantee.
+//! weighted up and words that start with a query word weighted down. The index is kept in sorted
+//! maps and ties are broken by path, so a query ranks the same way every time, which a hash map's
+//! per-process ordering wouldn't guarantee.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -30,6 +31,14 @@ const B: f64 = 0.75;
 
 /// How many body occurrences a term in the title counts as.
 const TITLE_WEIGHT: u32 = 3;
+
+/// How much a word that only starts with a query word counts, against an exact match, so that
+/// `postgres` finds `postgresql` without outranking pages that say `postgres`.
+const PREFIX_WEIGHT: f64 = 0.5;
+
+/// The shortest query word that also matches longer words starting with it. Shorter ones, such as
+/// `env`, would match too much.
+const MIN_PREFIX_LENGTH: usize = 4;
 
 /// Words too common to tell pages apart, left out of the index and of queries so that a question
 /// such as "how do I run without a target" ranks by its keywords. Words that are also mirrord
@@ -165,19 +174,54 @@ pub fn search_docs(args: SearchDocsArgs) -> Result<SearchDocsOutput, SearchDocsE
     let index = &*INDEX;
     let count = index.documents.len() as f64;
 
+    // How rare a term is. A word that isn't in the index is as rare as can be.
+    let idf = |term: &str| {
+        let containing = index.document_frequency.get(term).copied().unwrap_or(0);
+        let containing = f64::from(containing);
+        (1.0 + (count - containing + 0.5) / (containing + 0.5)).ln()
+    };
+
+    // The index terms each query word matches, with how much each counts.
+    let matched: Vec<(&str, Vec<(&str, f64)>)> = query
+        .iter()
+        .map(|word| {
+            let terms = index
+                .document_frequency
+                .range(word.clone()..)
+                .map(|(term, _)| term.as_str())
+                .take_while(|term| term.starts_with(word.as_str()))
+                .filter_map(|term| match term == word {
+                    true => Some((term, 1.0)),
+                    false => (word.len() >= MIN_PREFIX_LENGTH).then_some((term, PREFIX_WEIGHT)),
+                })
+                .collect();
+            (word.as_str(), terms)
+        })
+        .collect();
+
+    // A query word scores by its best match in the document, so a word that starts many others
+    // (`target`: `targets`, `targetless`) doesn't add them all up, and a longer word counts as
+    // no rarer than the query word, so a common one (`mirrord`) doesn't weigh in through rare
+    // identifiers that start with it.
     let mut scored: Vec<(f64, &Document)> = index
         .documents
         .iter()
         .filter_map(|document| {
-            let score: f64 = query
+            let normalization = 1.0 - B + B * f64::from(document.length) / index.average_length;
+            let score: f64 = matched
                 .iter()
-                .filter_map(|term| {
-                    let frequency = f64::from(*document.terms.get(term)?);
-                    let containing = f64::from(*index.document_frequency.get(term)?);
-                    let idf = (1.0 + (count - containing + 0.5) / (containing + 0.5)).ln();
-                    let normalization =
-                        1.0 - B + B * f64::from(document.length) / index.average_length;
-                    Some(idf * frequency * (K1 + 1.0) / (frequency + K1 * normalization))
+                .map(|(word, terms)| {
+                    terms
+                        .iter()
+                        .filter_map(|(term, weight)| {
+                            let frequency = f64::from(*document.terms.get(*term)?);
+                            let idf = idf(term).min(idf(word));
+                            Some(
+                                weight * idf * frequency * (K1 + 1.0)
+                                    / (frequency + K1 * normalization),
+                            )
+                        })
+                        .fold(0.0, f64::max)
                 })
                 .sum();
             (score > 0.0).then_some((score, document))
