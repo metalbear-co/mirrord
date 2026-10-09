@@ -840,6 +840,12 @@ pub enum NewOperatorFeature {
     /// the first database while the app keeps talking to the source for the others.
     PgBranchAdditionalDatabases,
 
+    /// A multi-cluster primary's interception event stream also carries every linked cluster's
+    /// events, each naming the cluster it came from in `cluster`, and reports a linked cluster
+    /// it cannot reach as a `cluster_unavailable` event. Lets `mirrord subscribe` say up front
+    /// whether a primary streams the whole setup or just its own cluster.
+    MultiClusterSubscribe,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -923,6 +929,7 @@ impl Display for NewOperatorFeature {
                 "TLS client certificate read from the target for previews"
             }
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
+            NewOperatorFeature::MultiClusterSubscribe => "multi-cluster subscribe",
             NewOperatorFeature::QueueSplittingWithComposedFilters => {
                 "queue splitting with composable message filters"
             }

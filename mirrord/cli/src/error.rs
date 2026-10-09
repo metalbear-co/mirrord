@@ -895,6 +895,13 @@ pub(crate) enum CliError {
     ))]
     SubscribeError(String),
 
+    #[error("Cannot stream every session's events from this operator: {0}")]
+    #[diagnostic(help(
+        "Pass `--key <key>` to stream one session, or upgrade the operator to 3.210.0 or newer \
+        to stream them all.{GENERAL_HELP}"
+    ))]
+    SubscribeAllSessionsUnsupported(String),
+
     #[error(transparent)]
     ProtocolError(#[from] mirrord_protocol_api::client::ClientError),
 

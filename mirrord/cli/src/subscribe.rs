@@ -10,8 +10,9 @@ use std::{io::Write, ops::Not};
 use clap::Args;
 use futures::{Stream, StreamExt, io::AsyncBufReadExt};
 use http::Request;
-use kube::Client;
+use kube::{Api, Client};
 use mirrord_config::config::ConfigContext;
+use mirrord_operator::crd::{MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME};
 use tracing::Level;
 
 use crate::{
@@ -79,7 +80,62 @@ pub(crate) async fn operator_event_stream(
     }))
 }
 
-/// Streams interception events for a session key from the operator to stdout as JSON.
+/// What the stream will carry, decided from the operator's advertised features before
+/// subscribing, so the command says so up front instead of leaving the user to guess from the
+/// events that do or do not show up.
+#[derive(Debug, PartialEq, Eq)]
+enum StreamScope {
+    /// Events intercepted by this operator only. The `note`, when set, says why the stream is
+    /// narrower than it could be.
+    OneCluster { note: Option<&'static str> },
+    /// A multi-cluster primary that relays every linked cluster's events too.
+    AllClusters,
+}
+
+/// Decides what the stream covers and whether streaming every session is allowed, from the
+/// operator's features. `None` features means the operator could not be read.
+///
+/// Streaming every session needs an operator that serves a keyless stream; with a key any
+/// operator works, so a failed operator read does not block a keyed subscription.
+fn stream_scope(
+    key: Option<&str>,
+    features: Option<&[NewOperatorFeature]>,
+) -> Result<StreamScope, CliError> {
+    let has = |feature| features.is_some_and(|features| features.contains(&feature));
+
+    if key.is_none() && !has(NewOperatorFeature::SubscribeEventOptions) {
+        let reason = match features {
+            Some(_) => "it serves one session's events at a time",
+            None => "its advertised features could not be read",
+        };
+        return Err(CliError::SubscribeAllSessionsUnsupported(reason.to_owned()));
+    }
+
+    if !has(NewOperatorFeature::MultiClusterPrimary) {
+        return Ok(StreamScope::OneCluster { note: None });
+    }
+
+    if has(NewOperatorFeature::MultiClusterSubscribe) {
+        Ok(StreamScope::AllClusters)
+    } else {
+        Ok(StreamScope::OneCluster {
+            note: Some(
+                "This multi-cluster operator does not relay events from its linked clusters, so \
+                 only events intercepted on this cluster are streamed. Upgrade the operator to \
+                 see every cluster.",
+            ),
+        })
+    }
+}
+
+/// The features the operator advertises, or the reason they could not be read.
+async fn operator_features(client: &Client) -> Result<Vec<NewOperatorFeature>, kube::Error> {
+    let operator: MirrordOperatorCrd = Api::all(client.clone()).get(OPERATOR_STATUS_NAME).await?;
+    Ok(operator.spec.supported_features())
+}
+
+/// Streams interception events for a session key, or for every session, from the operator to
+/// stdout as JSON.
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
 pub(crate) async fn subscribe_command(args: SubscribeArgs) -> CliResult<()> {
     let mut cfg_context = ConfigContext::default().override_envs(args.as_env_vars());
@@ -89,17 +145,34 @@ pub(crate) async fn subscribe_command(args: SubscribeArgs) -> CliResult<()> {
         remove_proxy_env();
     }
 
-    let key = layer_config
-        .key
-        .provided()
-        .ok_or(CliError::SessionKeyRequired)?;
-
+    let key = layer_config.key.provided();
     let client = kube_client_from_layer_config(&layer_config).await?;
 
-    let mut events =
-        std::pin::pin!(operator_event_stream(&client, Some(key), args.event_stream_options).await?);
+    let features = match operator_features(&client).await {
+        Ok(features) => Some(features),
+        Err(error) => {
+            tracing::debug!(%error, "could not read the operator's features before subscribing");
+            None
+        }
+    };
+    let scope = stream_scope(key, features.as_deref())?;
 
-    eprintln!("Subscribed to events for session key `{key}`.");
+    let mut events =
+        std::pin::pin!(operator_event_stream(&client, key, args.event_stream_options).await?);
+
+    match key {
+        Some(key) => eprintln!("Subscribed to events for session key `{key}`."),
+        None => eprintln!("Subscribed to events for every session."),
+    }
+    match scope {
+        StreamScope::AllClusters => {
+            eprintln!(
+                "Streaming from the primary and its linked clusters; `cluster` names each event's source."
+            )
+        }
+        StreamScope::OneCluster { note: Some(note) } => eprintln!("Warning: {note}"),
+        StreamScope::OneCluster { note: None } => {}
+    }
 
     let mut stdout = std::io::stdout();
     while let Some(payload) = events.next().await {
@@ -117,4 +190,67 @@ pub(crate) async fn subscribe_command(args: SubscribeArgs) -> CliResult<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// A primary from before this feature: it fans sessions out but not events.
+    const OLD_PRIMARY: &[NewOperatorFeature] = &[
+        NewOperatorFeature::SubscribeEventOptions,
+        NewOperatorFeature::MultiClusterPrimary,
+    ];
+
+    const PRIMARY: &[NewOperatorFeature] = &[
+        NewOperatorFeature::SubscribeEventOptions,
+        NewOperatorFeature::MultiClusterPrimary,
+        NewOperatorFeature::MultiClusterSubscribe,
+    ];
+
+    /// A keyed subscription works against any operator, even one whose features could not be
+    /// read, because every operator serves one session's stream.
+    #[test]
+    fn a_key_subscribes_whatever_the_operator_advertises() {
+        assert_eq!(
+            stream_scope(Some("k"), None).unwrap(),
+            StreamScope::OneCluster { note: None }
+        );
+        assert_eq!(
+            stream_scope(Some("k"), Some(&[])).unwrap(),
+            StreamScope::OneCluster { note: None }
+        );
+    }
+
+    /// Without a key the operator must serve a keyless stream, so an older or unreadable
+    /// operator is refused up front instead of silently streaming nothing.
+    #[test]
+    fn no_key_needs_an_operator_that_streams_every_session() {
+        assert!(matches!(
+            stream_scope(None, Some(&[])),
+            Err(CliError::SubscribeAllSessionsUnsupported(_))
+        ));
+        assert!(matches!(
+            stream_scope(None, None),
+            Err(CliError::SubscribeAllSessionsUnsupported(_))
+        ));
+        assert_eq!(
+            stream_scope(None, Some(&[NewOperatorFeature::SubscribeEventOptions])).unwrap(),
+            StreamScope::OneCluster { note: None }
+        );
+    }
+
+    /// A primary that relays its linked clusters streams the whole setup; one that does not is
+    /// still subscribed, with a warning that only its own cluster is covered.
+    #[test]
+    fn a_primary_streams_every_cluster_only_when_it_relays_them() {
+        assert_eq!(
+            stream_scope(Some("k"), Some(PRIMARY)).unwrap(),
+            StreamScope::AllClusters
+        );
+        assert!(matches!(
+            stream_scope(Some("k"), Some(OLD_PRIMARY)).unwrap(),
+            StreamScope::OneCluster { note: Some(_) }
+        ));
+    }
 }
