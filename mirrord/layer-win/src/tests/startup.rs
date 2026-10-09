@@ -39,6 +39,10 @@ use winapi::{
 const ISOLATED: &str = "MIRRORD_LAYER_WIN_ISOLATED_TEST";
 
 /// Starts the ignored test `name` in a fresh copy of this test binary.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a full path to an .exe, which needs no shim lookup"
+)]
 fn spawn_isolated(name: &str, environment: &[(&str, String)]) -> Child {
     Command::new(std::env::current_exe().expect("test binary"))
         .args([

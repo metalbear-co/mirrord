@@ -5304,7 +5304,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-command"
-version = "3.268.0"
+version = "3.271.0"
 dependencies = [
  "tempfile",
  "tokio",
@@ -10346,6 +10346,7 @@ dependencies = [
  "chrono",
  "ci_info",
  "embed-resource",
+ "mirrord-command",
  "mirrord-config",
  "rand 0.10.2",
  "str-win",
