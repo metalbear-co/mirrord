@@ -4,8 +4,6 @@
 // Tests index into the JSON results with `value[key]`; a panic just fails the test.
 #![allow(clippy::indexing_slicing)]
 
-use std::ops::Not;
-
 use mirrord_mcp::{INSTRUCTIONS, McpServer, McpTelemetry};
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
@@ -213,40 +211,32 @@ async fn serves_info_resource() {
 async fn serves_skills() {
     let (client, _signal) = connect(ProtocolVersion::V_2025_11_25).await;
 
-    let listed = client
-        .call_tool(tool_call("get_skill", json!({})))
-        .await
-        .unwrap()
-        .structured_content
-        .unwrap();
-    let skills = listed["skills"].as_array().unwrap();
-    assert!(skills.iter().any(|skill| skill["name"] == "mirrord-up"));
+    let call_text = async |arguments: Value| {
+        let result = client
+            .call_tool(tool_call("get_skill", arguments))
+            .await
+            .unwrap();
+        assert!(result.structured_content.is_none());
+        let [content] = result.content.as_slice() else {
+            panic!("expected one content block: {:?}", result.content);
+        };
+        (result.is_error, content.as_text().unwrap().text.clone())
+    };
 
+    let (_, listed) = call_text(json!({})).await;
     let prompts = client.list_all_prompts().await.unwrap();
     let resources = client.list_all_resources().await.unwrap();
-    for skill in skills {
-        let name = skill["name"].as_str().unwrap();
-        assert!(
-            skill["description"]
-                .as_str()
-                .is_some_and(|description| description.is_empty().not())
-        );
+    assert!(prompts.iter().any(|prompt| prompt.name == "mirrord-up"));
+    for prompt in &prompts {
+        let name = prompt.name.as_str();
+        assert!(listed.contains(&format!("- `{name}`: ")), "{name}");
 
-        let output = client
-            .call_tool(tool_call("get_skill", json!({ "name": name })))
-            .await
-            .unwrap()
-            .structured_content
-            .unwrap();
-        let body = output["content"].as_str().unwrap();
-
-        assert!(prompts.iter().any(|prompt| prompt.name == name), "{name}");
+        let (_, skill) = call_text(json!({ "name": name })).await;
         let prompt = client
             .get_prompt(GetPromptRequestParams::new(name))
             .await
             .unwrap();
-        let text = prompt.messages[0].content.as_text().unwrap();
-        assert!(text.text.starts_with(body), "{name}");
+        assert_eq!(prompt.messages[0].content.as_text().unwrap().text, skill);
 
         let uri = format!("mirrord://skills/{name}");
         assert!(
@@ -261,27 +251,10 @@ async fn serves_skills() {
         else {
             panic!("unexpected contents: {:?}", result.contents);
         };
-        assert_eq!(text, body);
-
-        for file in output["files"].as_array().unwrap() {
-            let file_output = client
-                .call_tool(tool_call(
-                    "get_skill",
-                    json!({ "name": name, "file": file }),
-                ))
-                .await
-                .unwrap()
-                .structured_content
-                .unwrap();
-            assert!(file_output["content"].is_string(), "{name}/{file}");
-        }
+        assert!(skill.starts_with(text.as_str()), "{name}");
     }
 
-    let result = client
-        .call_tool(tool_call("get_skill", json!({ "name": "no-such-skill" })))
-        .await
-        .unwrap();
-    assert_eq!(result.is_error, Some(true));
-    let text = &result.content[0].as_text().unwrap().text;
+    let (is_error, text) = call_text(json!({ "name": "no-such-skill" })).await;
+    assert_eq!(is_error, Some(true));
     assert!(text.contains("`mirrord-up`"), "{text}");
 }

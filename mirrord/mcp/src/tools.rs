@@ -18,7 +18,7 @@ pub mod get_skill;
 pub mod validate_config;
 
 use explain_config_option::{ExplainConfigOptionArgs, ExplainConfigOptionOutput};
-use get_skill::{GetSkillArgs, GetSkillOutput};
+use get_skill::GetSkillArgs;
 use validate_config::{ValidateConfigArgs, ValidateConfigOutput};
 
 #[tool_router(vis = "pub(crate)")]
@@ -71,16 +71,15 @@ impl McpServer {
         configuring a session, running several services with `mirrord up`, installing the \
         Operator, splitting queues or branching databases. Call it without arguments to list \
         every skill with what it is for, then with the `name` of the skill that matches the task \
-        to get its `SKILL.md`, and follow it. Pass `file` as well to get a file bundled with the \
-        skill, such as one of the `files` the skill returns.",
+        to get its `SKILL.md`, and follow it. Pass `file` as well to get one of the files the \
+        skill bundles, which are listed after its `SKILL.md`.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     fn get_skill(
         &self,
         Parameters(args): Parameters<GetSkillArgs>,
-    ) -> Result<Json<GetSkillOutput>, CallToolResult> {
+    ) -> Result<String, CallToolResult> {
         get_skill::get_skill(&SKILLS, args)
-            .map(Json)
             .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
     }
 }

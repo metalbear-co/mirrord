@@ -27,14 +27,12 @@ fn args(name: Option<&str>, file: Option<&str>) -> GetSkillArgs {
 fn skill_lists_its_files() {
     let files = corpus();
     let (skills, _) = load_skills(&files);
-    let output = get_skill(&skills, args(Some("a"), None)).unwrap();
-    assert_eq!(output.files, Some(vec!["references/x.md".to_owned()]));
-    assert!(
-        skills
-            .get("a")
-            .unwrap()
-            .prompt("a")
-            .contains("`references/x.md`")
+    let skill = get_skill(&skills, args(Some("a"), None)).unwrap();
+    assert!(skill.starts_with("---\nname: a\n"), "{skill}");
+    assert!(skill.contains("`references/x.md`"), "{skill}");
+    assert_eq!(
+        get_skill(&skills, args(Some("a"), Some("references/x.md"))).unwrap(),
+        "# X\n"
     );
 }
 

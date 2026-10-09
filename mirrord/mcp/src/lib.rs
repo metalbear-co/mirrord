@@ -250,7 +250,7 @@ impl ServerHandler for McpServer {
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
         Ok(GetPromptResult::new(vec![PromptMessage::new_text(
             Role::User,
-            skill.prompt(&request.name),
+            skill.text(&request.name),
         )])
         .with_description(skill.description.clone())
         .into())

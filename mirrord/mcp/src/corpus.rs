@@ -70,9 +70,9 @@ pub(crate) struct Skill<'a> {
 }
 
 impl Skill<'_> {
-    /// The skill `name` as a prompt: its `SKILL.md`, followed by where to get the files it bundles,
-    /// since a prompt is one message and the skill refers to those files by path.
-    pub(crate) fn prompt(&self, name: &str) -> String {
+    /// The skill `name` as one message, for `get_skill` and the prompts: its `SKILL.md`, followed
+    /// by where to get the files it bundles, which the skill refers to by path.
+    pub(crate) fn text(&self, name: &str) -> String {
         let mut text = self.body.to_owned();
         if self.files.is_empty().not() {
             text.push_str(&format!(
