@@ -54,6 +54,10 @@ pub fn read_kube_version_from_env() -> Option<(u16, u16)> {
 }
 
 /// Possible values for analytic data.
+///
+/// Variant order affect deserialization, but all values are deserialized by the server into json
+/// `Value`. This means, for example, `Uuid` and `SanitizedString` will become `String`. Rount trip
+/// serialization to the same [`AnalyticValue`] variant is not important.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum AnalyticValue {
@@ -61,9 +65,8 @@ pub enum AnalyticValue {
     Number(u32),
     Uuid(Uuid),
     Nested(Analytics),
-    Hash(AnalyticsHash),
+    String(SanitizedString),
     List(Vec<AnalyticValue>),
-    String(String),
 }
 
 #[derive(Default, Debug, Serialize, Deserialize, Clone, Copy)]
@@ -203,22 +206,28 @@ impl Analytics {
     }
 }
 
-/// Type safe abstraction for Bytes to send hash values, should be explicitly created so we woun't
-/// accidentaly send sensitive data
+/// Type safe abstraction for sending [`String`] values, should be explicitly created so we don't
+/// accidentaly send sensitive data.
 ///
-/// Saved as base64 for more optimal size of json
+/// If hashed, values are base64 for more optimal size of json.
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct AnalyticsHash(String);
+pub struct SanitizedString(String);
 
-impl AnalyticsHash {
-    /// Create AnalyticsHash from hash bytes
+impl SanitizedString {
+    /// Creates a [`SanitizedString`] contianing `bytes` encoded as base 64.
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        AnalyticsHash(general_purpose::STANDARD_NO_PAD.encode(bytes))
+        SanitizedString(general_purpose::STANDARD_NO_PAD.encode(bytes))
     }
 
-    /// Create AnalyticsHash from base64 string
+    /// Creates a [`SanitizedString`] from a base64 string.
     pub fn from_base64(val: &str) -> Self {
-        AnalyticsHash(val.to_owned())
+        SanitizedString(val.to_owned())
+    }
+
+    /// Creates a [`SanitizedString`] containing an explicitly non-sensitive value. Used only when
+    /// we need to know the value itself, e.g. for `mirrord::diagnose::sip::send_entries()`.
+    pub fn new_plaintext(val: &str) -> Self {
+        SanitizedString(val.to_owned())
     }
 
     /// Deterministically hashes a session key with the operator license fingerprint.
@@ -258,12 +267,6 @@ impl From<u32> for AnalyticValue {
     }
 }
 
-impl From<String> for AnalyticValue {
-    fn from(value: String) -> Self {
-        AnalyticValue::String(value)
-    }
-}
-
 impl From<u64> for AnalyticValue {
     fn from(n: u64) -> Self {
         AnalyticValue::Number(u32::try_from(n).unwrap_or(u32::MAX))
@@ -288,9 +291,9 @@ impl From<Analytics> for AnalyticValue {
     }
 }
 
-impl From<AnalyticsHash> for AnalyticValue {
-    fn from(hash: AnalyticsHash) -> Self {
-        AnalyticValue::Hash(hash)
+impl From<SanitizedString> for AnalyticValue {
+    fn from(hash: SanitizedString) -> Self {
+        AnalyticValue::String(hash)
     }
 }
 
@@ -507,7 +510,7 @@ impl AnalyticsReporter {
                 .and_then(|properties| properties.license_hash.as_ref())
         {
             let session_key_identifier =
-                AnalyticsHash::for_session_key(key, license_fingerprint.as_str());
+                SanitizedString::for_session_key(key, license_fingerprint.as_str());
             self.analytics
                 .add("session_key_identifier", session_key_identifier);
         }
@@ -530,7 +533,6 @@ impl AnalyticsReporter {
     /// the report to be sent, e.g. with `mirrord diagnose sip-report`
     pub async fn send_now(mut self, explicitly_enabled: bool) -> Result<(), reqwest::Error> {
         if !(self.enabled || explicitly_enabled) {
-            self.enabled = false;
             return Ok(());
         }
 
@@ -577,9 +579,10 @@ impl Reporter for NullReporter {
     }
 }
 
-/// Must be called in tokio runtime
-/// We rely on the main tokio runtime to be started using the macro,
-/// meaning it will wait for all ongoing tasks to finish before exiting.
+/// Must be called in tokio runtime.
+///
+/// We rely on the main tokio runtime to be started using the macro, meaning it will wait for all
+/// ongoing tasks to finish before exiting.
 impl Drop for AnalyticsReporter {
     fn drop(&mut self) {
         if self.enabled && (self.error.is_some() || !self.error_only_send) {
@@ -598,14 +601,14 @@ impl Drop for AnalyticsReporter {
     }
 }
 
-/// Extra fields for `AnalyticsReport` when using mirrord with operator.
+/// Extra fields for [`AnalyticsReport`] when using mirrord with operator.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AnalyticsOperatorProperties {
     /// client certificate public key
-    pub client_hash: Option<AnalyticsHash>,
+    pub client_hash: Option<SanitizedString>,
 
     /// sha256 fingerprint from operator license
-    pub license_hash: Option<AnalyticsHash>,
+    pub license_hash: Option<SanitizedString>,
 }
 
 #[derive(Debug, Serialize)]
@@ -695,7 +698,10 @@ mod tests {
     #[test]
     fn hash_value_serialization() {
         let mut analytics = Analytics::default();
-        analytics.add("preview_key_identifier", AnalyticsHash::from_bytes(b"key"));
+        analytics.add(
+            "preview_key_identifier",
+            SanitizedString::from_bytes(b"key"),
+        );
 
         assert_json_eq!(
             analytics,
@@ -703,16 +709,6 @@ mod tests {
                 "preview_key_identifier": "a2V5"
             })
         );
-    }
-
-    #[test]
-    fn uuid_value_round_trip() {
-        let id = Uuid::from_u128(0x67e5504410b1426f9247bb680e5fe0c8);
-        let serialized = serde_json::to_string(&AnalyticValue::Uuid(id)).expect("serializes UUID");
-        let deserialized: AnalyticValue =
-            serde_json::from_str(&serialized).expect("deserializes UUID");
-
-        assert!(matches!(deserialized, AnalyticValue::Uuid(value) if value == id));
     }
 
     #[test]

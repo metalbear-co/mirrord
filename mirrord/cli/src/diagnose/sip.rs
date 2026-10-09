@@ -3,7 +3,9 @@ use std::{
     io::{self, IsTerminal, Write},
 };
 
-use mirrord_analytics::{AnalyticsReporter, ReportTarget, Reporter};
+use mirrord_analytics::{
+    AnalyticValue, AnalyticsReporter, ReportTarget, Reporter, SanitizedString,
+};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_sip::rosetta::{
     RosettaFallbackEntry, acquire_rosetta_fallback_report_lock, load_rosetta_fallbacks,
@@ -17,16 +19,20 @@ async fn send_entries(
     entries: &[RosettaFallbackEntry],
     mut analytics: AnalyticsReporter,
 ) -> CliResult<usize> {
-    let report_entries: Vec<_> = entries
+    let report_entries: Vec<AnalyticValue> = entries
         .iter()
-        .map(|entry| RosettaFallbackEntry {
-            binary_path: sanitize_binary_path(&entry.binary_path).into_owned(),
-            os_version: entry.os_version.clone(),
+        .filter_map(|entry| {
+            let entry = RosettaFallbackEntry {
+                binary_path: sanitize_binary_path(&entry.binary_path).into_owned(),
+                os_version: entry.os_version.clone(),
+            };
+            serde_json::to_string(&entry)
+                .ok()
+                .map(|value| SanitizedString::new_plaintext(&value).into())
         })
         .collect();
-    analytics
-        .get_mut()
-        .add("binaries", serde_json::to_string(&report_entries)?);
+    analytics.get_mut().add("binaries", report_entries);
+
     analytics.send_now(true).await?;
     mark_rosetta_fallbacks_reported(entries)?;
     Ok(entries.len())
@@ -59,7 +65,7 @@ pub(crate) async fn send_sip_report(watch: drain::Watch, machine_id: Uuid) -> Cl
     Ok(())
 }
 
-pub(crate) async fn prompt_sip_report(
+pub async fn prompt_sip_report(
     progress: &ProgressTracker,
     watch: drain::Watch,
     machine_id: Uuid,

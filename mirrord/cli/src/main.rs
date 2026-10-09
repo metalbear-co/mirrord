@@ -378,6 +378,8 @@ use mirrord_layer_lib::process::windows::{
 };
 use verify_config::verify_config;
 
+#[cfg(target_os = "macos")]
+use crate::diagnose::sip::prompt_sip_report;
 use crate::{
     ci::{MirrordCi, ci_api_key_available},
     config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
@@ -896,9 +898,7 @@ async fn exec(
     result?;
 
     #[cfg(target_os = "macos")]
-    if let Err(error) =
-        diagnose::prompt_pending_sip_report(progress, watch.clone(), user_data.machine_id()).await
-    {
+    if let Err(error) = prompt_sip_report(progress, watch.clone(), user_data.machine_id()).await {
         progress.warning(&error.to_string());
     }
 
