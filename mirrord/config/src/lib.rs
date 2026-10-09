@@ -20,7 +20,7 @@ pub mod logfile_path;
 pub mod plan;
 pub mod retry;
 pub mod target;
-mod template;
+pub mod template;
 pub mod util;
 
 use std::{collections::HashMap, ffi::OsStr, io::Read, ops::Not, path::Path};

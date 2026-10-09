@@ -8,6 +8,8 @@
 //!
 //! - `regex_escape`: any text, such as a header value in `http_filter`.
 //! - `path_pattern`: a path, in the form the `feature.fs` patterns match.
+//!
+//! The layer builds its own default patterns from the environment with the same functions.
 
 use std::collections::HashMap;
 
@@ -98,7 +100,7 @@ pub fn regex_escape(text: &str) -> Result<String, PatternFilterError> {
 /// long name a program may open instead, and a link also matches its target.
 ///
 /// The result never ends in a separator. A pattern adds `/` to match what's inside a folder:
-/// `"^{{ get_env(name=\"TEMP\") | path_pattern }}/"`.
+/// `"^{{ get_env(name='TEMP') | path_pattern }}/"`.
 ///
 /// # Errors
 ///
@@ -118,6 +120,18 @@ pub fn path_pattern(path: &str) -> Result<String, PatternFilterError> {
         )),
         _ => regex_escape(&given),
     }
+}
+
+/// A regex that matches `path` the way the `feature.fs` patterns see it, as it is spelled.
+///
+/// This is [`path_pattern`] without the canonical form, so it never touches the filesystem. The
+/// layer builds its default patterns with it while it starts, where reading the disk is unsafe.
+///
+/// # Errors
+///
+/// A control character in the path, as [`regex_escape`] explains.
+pub fn literal_path_pattern(path: &str) -> Result<String, PatternFilterError> {
+    regex_escape(&pattern_form(path))
 }
 
 /// `path` in the form the `feature.fs` patterns match, without a trailing separator.

@@ -1,3 +1,6 @@
+use std::env;
+
+use mirrord_config::template::literal_path_pattern;
 use regex::RegexSetBuilder;
 
 /// This is the list of path patterns that are read locally by default in all fs modes. If you want
@@ -5,10 +8,10 @@ use regex::RegexSetBuilder;
 /// pattern in the `feature.fs.read_only` or `feature.fs.read_write` configuration field,
 /// respectively.
 ///
-/// Folders that depend on the user's environment, like `%TEMP%`, aren't here: a config reads them
-/// locally with a template, e.g. `"local": ["^{{ get_env(name='TEMP') | path_pattern }}/"]`.
+/// `%TEMP%` is among them, as a literal regex for the folder on its drive. A config that wants it
+/// on the remote names it, e.g. `"read_only": ["^{{ get_env(name='TEMP') | path_pattern }}/"]`.
 pub fn regex_set_builder() -> RegexSetBuilder {
-    RegexSetBuilder::new([
+    let mut patterns: Vec<String> = [
         r".\.dll$",
         r".\.pdb$",
         r".\.so$",
@@ -26,5 +29,18 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r"^(?i)^\/Users\/[^/]+\/AppData\/Local\/Programs\/Python",
         r"^(?i)^\/windows\/system32",
         r"^(?i)^\/Program Files",
-    ])
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+
+    // As spelled in the variable: the layer is starting, and must not read the disk to resolve it.
+    if let Some(temp) = env::var("TEMP")
+        .ok()
+        .and_then(|temp| literal_path_pattern(&temp).ok())
+    {
+        patterns.push(format!("^{temp}/"));
+    }
+
+    RegexSetBuilder::new(patterns)
 }

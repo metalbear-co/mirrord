@@ -1,1 +1,1 @@
-On Windows, `feature.fs` patterns can name a drive, as in `^C:/Repos/`, and the `path_pattern` template filter turns a path from the environment into a pattern: `"^{{ get_env(name='TEMP') | path_pattern }}/"`.
+On Windows, `feature.fs` patterns can name a drive, as in `^C:/Repos/`, and the `path_pattern` template filter turns a path from the environment into a pattern, as in `"^{{ get_env(name='TEMP') | path_pattern }}/(.*)$": "/tmp/$1"`.

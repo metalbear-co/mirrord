@@ -323,4 +323,44 @@ mod tests {
 
         assert_eq!(filter.check(path), Some(FileMode::Local(true)));
     }
+
+    /// A file in `%TEMP%`, in the forms the Windows layer matches.
+    #[cfg(windows)]
+    fn in_temp() -> str_win::UnixPath {
+        let temp = std::env::var("TEMP").expect("Windows sets TEMP");
+        str_win::path_to_unix_path(format!(r"{temp}\cor-1467.txt")).expect("TEMP is a rooted path")
+    }
+
+    /// `%TEMP%` is read locally unless a config says otherwise.
+    #[cfg(windows)]
+    #[test]
+    fn temp_is_read_locally_by_default() {
+        let file = in_temp();
+        let with_drive = file.with_drive();
+
+        let mode = FileFilter::default().check(PatternPath {
+            path: &file.path,
+            with_drive: with_drive.as_deref(),
+        });
+
+        assert_eq!(mode, Some(FileMode::Local(true)));
+    }
+
+    /// A config sends `%TEMP%` to the remote by naming it, as the docs show.
+    #[cfg(windows)]
+    #[test]
+    fn a_config_can_send_temp_to_the_remote() {
+        let temp = std::env::var("TEMP").expect("Windows sets TEMP");
+        let pattern = mirrord_config::template::path_pattern(&temp).expect("TEMP is a plain path");
+        let filter = read_only(&[&format!("^{pattern}/")]);
+        let file = in_temp();
+        let with_drive = file.with_drive();
+
+        let mode = filter.check(PatternPath {
+            path: &file.path,
+            with_drive: with_drive.as_deref(),
+        });
+
+        assert_eq!(mode, Some(FileMode::ReadOnly(false)));
+    }
 }

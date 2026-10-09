@@ -115,21 +115,25 @@ pub const PREFETCH_TIMEOUT_DEFAULT: u64 = 30;
 /// form has one, and mirrord warns about a pattern that looks like a path with backslashes.
 ///
 /// For a path from the environment, use the `path_pattern` template filter. It gives the path's
-/// form with the drive, escaped so that it matches literally and fits in any config format:
+/// form with the drive, escaped so that it matches literally and fits in any config format.
+///
+/// `%TEMP%` is read locally by default. To use the pod's `/tmp` instead, map it:
 ///
 /// ```json
 /// {
 ///   "feature": {
 ///     "fs": {
-///       "local": ["^{{ get_env(name='TEMP') | path_pattern }}/"]
+///       "mapping": {
+///         "^{{ get_env(name='TEMP') | path_pattern }}/(.*)$": "/tmp/$1"
+///       }
 ///     }
 ///   }
 /// }
 /// ```
 ///
-/// - **`%TEMP%` is not read locally by default.** The pattern above reads it locally.
-/// - **A short 8.3 name still matches the long one.** When the path exists, `path_pattern` also
-///   matches its full name, so `C:\Users\FIRSTN~1` matches `C:\Users\First Name`.
+/// - **Both the short and long name of a folder match.** Windows can give a folder an old-style
+///   short name, like `FIRSTN~1` for `First Name`, and `%TEMP%` often uses it. `path_pattern`
+///   matches both, as long as the folder exists.
 /// - **The result never ends in a separator.** Add `/` to match what's inside the folder.
 /// - **For text that isn't a path,** such as a user name, `regex_escape` escapes it as-is.
 #[derive(MirrordConfig, Default, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
