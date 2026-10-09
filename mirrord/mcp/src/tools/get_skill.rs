@@ -1,6 +1,6 @@
 //! The `get_skill` tool: serves the skills vendored from `metalbear-co/skills`, so an agent with
 //! only `mirrord mcp` configured can find and follow the skill for its task without installing the
-//! skills separately. The skills are listed from the [corpus](crate::corpus), never by hand.
+//! skills separately. The skills are listed from the [corpus], never by hand.
 
 use std::collections::BTreeMap;
 
