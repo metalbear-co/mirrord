@@ -1,14 +1,14 @@
-use std::env;
-
 use regex::RegexSetBuilder;
-use str_win::path_to_unix_path;
 
 /// This is the list of path patterns that are read locally by default in all fs modes. If you want
 /// to read or write in the cluster a path covered by those patterns, you need to include it in a
 /// pattern in the `feature.fs.read_only` or `feature.fs.read_write` configuration field,
 /// respectively.
+///
+/// Folders that depend on the user's environment, like `%TEMP%`, aren't here: a config reads them
+/// locally with a template, e.g. `"local": ["^{{ get_env(name='TEMP') | path_pattern }}/"]`.
 pub fn regex_set_builder() -> RegexSetBuilder {
-    let mut patterns: Vec<String> = [
+    RegexSetBuilder::new([
         r".\.dll$",
         r".\.pdb$",
         r".\.so$",
@@ -26,19 +26,5 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r"^(?i)^\/Users\/[^/]+\/AppData\/Local\/Programs\/Python",
         r"^(?i)^\/windows\/system32",
         r"^(?i)^\/Program Files",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
-
-    // Add %TEMP% to read-local-by-default.
-    if let Ok(Some(mut temp)) = env::var("TEMP").map(path_to_unix_path) {
-        if !temp.ends_with("/") {
-            temp.push('/');
-        }
-
-        patterns.push(temp);
-    }
-
-    RegexSetBuilder::new(patterns)
+    ])
 }
