@@ -133,12 +133,6 @@ fn stream_scope(
     }
 }
 
-/// The features the operator advertises, or the reason they could not be read.
-async fn operator_features(client: &Client) -> Result<Vec<NewOperatorFeature>, kube::Error> {
-    let operator: MirrordOperatorCrd = Api::all(client.clone()).get(OPERATOR_STATUS_NAME).await?;
-    Ok(operator.spec.supported_features())
-}
-
 /// Streams interception events for a session key, or for every session, from the operator to
 /// stdout as JSON.
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
@@ -155,16 +149,13 @@ pub(crate) async fn subscribe_command(args: SubscribeArgs) -> CliResult<()> {
 
     // The feature read only decides what to say about the stream, so it runs beside opening the
     // stream rather than delaying it; events buffer on the open connection meanwhile.
+    let operator: Api<MirrordOperatorCrd> = Api::all(client.clone());
     let (features, events) = tokio::join!(
-        operator_features(&client),
+        operator.get(OPERATOR_STATUS_NAME),
         operator_event_stream(&client, key, args.event_stream_options)
     );
-    let features = features
-        .inspect_err(|error| {
-            tracing::debug!(%error, "could not read the operator's features before subscribing");
-        })
-        .ok();
-    let scope = stream_scope(key, features.as_deref())?;
+    let features = features.map(|operator| operator.spec.supported_features());
+    let scope = stream_scope(key, features.as_deref().ok())?;
     let mut events = std::pin::pin!(events?);
 
     match key {
@@ -172,10 +163,13 @@ pub(crate) async fn subscribe_command(args: SubscribeArgs) -> CliResult<()> {
         None => eprintln!("Subscribed to events for every session."),
     }
     match scope {
-        StreamScope::Unconfirmed if key.is_none() => eprintln!(
-            "Could not read the operator's features; streaming every session is unconfirmed and \
-             an operator older than 3.210.0 refuses it."
-        ),
+        // The cause is what the user needs to fix (a permission, a connection); the stream is
+        // opened anyway and an operator older than 3.210.0 refuses a keyless one itself.
+        StreamScope::Unconfirmed if key.is_none() => {
+            if let Err(error) = &features {
+                eprintln!("Could not read the operator's features ({error}); streaming anyway.");
+            }
+        }
         StreamScope::Unconfirmed => {}
         StreamScope::AllClusters => {
             eprintln!(
