@@ -282,5 +282,6 @@ async fn serves_skills() {
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(true));
-    assert!(format!("{:?}", result.content).contains("`mirrord-up`"));
+    let text = &result.content[0].as_text().unwrap().text;
+    assert!(text.contains("`mirrord-up`"), "{text}");
 }
