@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::HashMap, path::PathBuf};
 
-use regex::{Regex, RegexSet, RegexSetBuilder};
+use regex::{Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 
 use super::pattern_path::PatternPath;
 
@@ -20,9 +20,13 @@ impl FileRemapper {
         let filter = RegexSetBuilder::new(mapping.keys())
             .case_insensitive(true)
             .build()?;
+        // Case-insensitive like the set above: a pattern the set matches must also replace.
         let mapping = mapping
             .into_iter()
-            .map(|(pattern, value)| Ok((Regex::new(&pattern)?, value)))
+            .map(|(pattern, value)| {
+                let pattern = RegexBuilder::new(&pattern).case_insensitive(true).build()?;
+                Ok((pattern, value))
+            })
             .collect::<Result<_, regex::Error>>()?;
 
         Ok(FileRemapper { filter, mapping })
@@ -158,6 +162,18 @@ mod tests {
         path: "/Repos/app/appsettings.json",
         with_drive: Some("D:/Repos/app/appsettings.json"),
     };
+
+    /// The mapping is case-insensitive in full: a pattern whose case differs from the path's must
+    /// rewrite the path, not only be detected as matching it.
+    #[test]
+    fn a_pattern_in_another_case_still_replaces() {
+        let remapper = remapper(&[("^/repos/app/(.*)$", "/app/$1")]);
+
+        assert_eq!(
+            remapper.change_path_str("/Repos/App/appsettings.json"),
+            "/app/appsettings.json"
+        );
+    }
 
     /// A mapping without a drive applies on every drive.
     #[test]
