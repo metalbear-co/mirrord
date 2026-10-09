@@ -67,8 +67,9 @@ Clusters are usually shared with other developers:
 - Default to `mirror` for incoming traffic. Use `steal` only when your process must be the one \
 responding, and on a shared cluster steal with an HTTP filter so you only take your own requests.
 - Target staging or development clusters, never production.
-- `mirrord exec` and `mirrord up` sessions clean up on exit, and nothing they run is deployed to \
-the cluster. Preview environments are deployed, and stay until stopped or their TTL runs out.";
+- Nothing `mirrord exec` or `mirrord up` runs is deployed to the cluster, and their sessions end \
+when they exit. Database branches a session creates stay until their TTL runs out, and preview \
+environments are deployed and stay until stopped or their TTL runs out.";
 
 /// URI of the resource describing this mirrord installation.
 const INFO_RESOURCE_URI: &str = "mirrord://info";
