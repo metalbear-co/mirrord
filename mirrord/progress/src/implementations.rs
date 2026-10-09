@@ -169,6 +169,9 @@ pub struct SpinnerProgress {
     fail_on_drop: bool,
     root_progress: MultiProgress,
     progress: ProgressBar,
+    /// What the task finishes as without a message: `warning` and `info` replace the bar's
+    /// message, and the task would otherwise finish as its last one.
+    title: String,
     indent: usize,
     message_buffer: Vec<String>,
 }
@@ -187,6 +190,7 @@ impl SpinnerProgress {
             indent: 0,
             root_progress,
             progress,
+            title: text.to_owned(),
             message_buffer: vec![],
         }
     }
@@ -205,6 +209,7 @@ impl Progress for SpinnerProgress {
             root_progress: self.root_progress.clone(),
             indent,
             progress,
+            title: text.to_owned(),
             message_buffer: vec![],
         }
     }
@@ -215,7 +220,7 @@ impl Progress for SpinnerProgress {
             self.progress.finish_with_message(format!("✓ {msg}"));
         } else {
             self.progress
-                .finish_with_message(format!("✓ {}", self.progress.message()));
+                .finish_with_message(format!("✓ {}", self.title));
         }
         // On Windows, we need to print a final line break to avoid having exec process's stdout
         // begin the same line as the "Ready"

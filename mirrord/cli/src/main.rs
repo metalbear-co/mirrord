@@ -488,8 +488,6 @@ async fn exec_process(
         config_file_path,
         execution_info.uses_operator,
     );
-    // Without the success message, the final progress displays the last info message
-    // as the subtask title.
     sub_progress_config.success(Some("config summary"));
 
     // print an invitation to the newsletter on certain run count numbers
