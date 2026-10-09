@@ -3,6 +3,9 @@ retries = 2
 slow-timeout = { period = "1m", terminate-after = 3 }
 failure-output = "immediate-final"
 final-status-level = "fail"
+# The `operator_install` tests install the cluster-wide operator, which the sessions of all other
+# e2e tests would use. So only the `operator-install` profile runs them.
+default-filter = "not (package(mirrord-tests) & test(/^operator_install::/))"
 
 [[profile.default.overrides]]
 filter = "package(mirrord-tests)"
@@ -10,3 +13,8 @@ slow-timeout = { period = "2m", terminate-after = 3 }
 
 [profile.default.junit]
 path = "junit.xml"
+
+[profile.operator-install]
+default-filter = "package(mirrord-tests) & test(/^operator_install::/)"
+# Each test installs the cluster-wide operator, so they must not run at the same time.
+test-threads = 1

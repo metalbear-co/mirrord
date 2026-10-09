@@ -16,6 +16,9 @@ use crate::{
     connector::AgentConnection, util::remove_proxy_env,
 };
 
+#[cfg(target_os = "macos")]
+pub(crate) mod sip;
+
 /// Sends a ping the connection and expects a pong.
 async fn ping(connection: &mut AgentConnection) -> CliResult<()> {
     connection.send(ClientMessage::Ping).await?;
@@ -167,9 +170,15 @@ async fn diagnose_license() -> CliResult<()> {
 }
 
 /// Handle commands related to the operator `mirrord diagnose ...`
-pub(crate) async fn diagnose_command(args: DiagnoseArgs) -> CliResult<()> {
+pub(crate) async fn diagnose_command(
+    args: DiagnoseArgs,
+    _watch: drain::Watch,
+    _user_data: &crate::data::UserData,
+) -> CliResult<()> {
     match args.command {
         DiagnoseCommand::Latency { config_file } => diagnose_latency(config_file.as_deref()).await,
         DiagnoseCommand::License => diagnose_license().await,
+        #[cfg(target_os = "macos")]
+        DiagnoseCommand::SipReport => sip::send_sip_report(_watch, _user_data.machine_id()).await,
     }
 }

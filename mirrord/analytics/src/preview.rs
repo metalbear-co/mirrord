@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Analytics, AnalyticsHash, AnalyticsReporter, ExecutionKind, Reporter};
+use crate::{Analytics, AnalyticsReporter, ExecutionKind, Reporter, SanitizedString};
 
 pub const PREVIEW_START_TYPE: &str = "preview_env_start";
 pub const PREVIEW_STOP_TYPE: &str = "preview_env_stop";
@@ -10,7 +10,7 @@ pub const PREVIEW_STATUS_TYPE: &str = "preview_env_status";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PreviewEvent {
-    pub preview_key_identifier: AnalyticsHash,
+    pub preview_key_identifier: SanitizedString,
     pub runtime_seconds: u32,
     #[serde(flatten)]
     pub kind: PreviewEventKind,
@@ -24,7 +24,7 @@ impl PreviewEvent {
         kind: PreviewEventKind,
     ) -> Self {
         let preview_key_identifier =
-            AnalyticsHash::for_session_key(preview_key, license_fingerprint);
+            SanitizedString::for_session_key(preview_key, license_fingerprint);
 
         Self {
             preview_key_identifier,
