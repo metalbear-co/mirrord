@@ -148,10 +148,12 @@ impl FileFilter {
         })
     }
 
-    /// Which file mode applies to `path`, or [`None`] when the `feature.fs.mode` decides.
+    /// Which file mode applies to `path`, or [`None`] when it goes to the remote, as `read` and
+    /// `write` send every path no pattern matches.
     ///
     /// A pattern applies when it matches any form of the path (see [`PatternPath`]). The lists are
-    /// checked in the same order whatever form matched.
+    /// checked in the same order whatever form matched. Under `localwithoverrides`, a path no
+    /// pattern matches is [`FileMode::Local`].
     pub fn check<'p>(&self, path: impl Into<PatternPath<'p>>) -> Option<FileMode> {
         let path = path.into();
 
@@ -170,7 +172,9 @@ impl FileFilter {
                     Some(FileMode::NotFound(true))
                 } else if path.is_match(&self.default_remote_ro) {
                     Some(FileMode::ReadOnly(true))
-                } else if path.is_match(&self.default_local) {
+                } else if path.is_match(&self.default_local)
+                    || self.mode == FsModeConfig::LocalWithOverrides
+                {
                     Some(FileMode::Local(true))
                 } else {
                     None
@@ -280,6 +284,33 @@ mod tests {
 
         assert_eq!(filter.check(ON_C), Some(FileMode::NotFound(false)));
         assert_eq!(filter.check(ON_D), Some(FileMode::ReadOnly(false)));
+    }
+
+    /// `localwithoverrides` keeps a path local unless a pattern sends it to the remote, so a
+    /// caller that sends every [`None`] to the remote still leaves the rest of the disk alone.
+    #[test]
+    fn localwithoverrides_keeps_unmatched_paths_local() {
+        let filter = FileFilter::try_new(FsConfig {
+            mode: FsModeConfig::LocalWithOverrides,
+            read_only: Some(VecOrSingle::Single("^D:/Repos/".to_owned())),
+            ..Default::default()
+        })
+        .expect("the test patterns are valid regexes");
+
+        assert_eq!(filter.check(ON_D), Some(FileMode::ReadOnly(false)));
+        assert_eq!(
+            filter.check(ON_C),
+            Some(FileMode::Local(true)),
+            "no pattern names C:, so the mode keeps it local"
+        );
+    }
+
+    /// `read` sends a path no pattern matches to the remote: [`None`] tells the caller so.
+    #[test]
+    fn read_sends_unmatched_paths_to_the_remote() {
+        let filter = read_only(&["^D:/Repos/"]);
+
+        assert_eq!(filter.check(ON_C), None);
     }
 
     /// The default patterns are written without a drive, so they keep applying on every drive.
