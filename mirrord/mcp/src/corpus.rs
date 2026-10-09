@@ -29,7 +29,7 @@ pub(crate) static FILES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
                 .map(|component| component.as_os_str().to_string_lossy())
                 .collect::<Vec<_>>()
                 .join("/");
-            let mut contents = Vec::new();
+            let mut contents = Vec::with_capacity(entry.size() as usize);
             entry
                 .read_to_end(&mut contents)
                 .expect("build.rs packs a valid archive");
