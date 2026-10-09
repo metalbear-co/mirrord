@@ -42,10 +42,13 @@ pub(crate) mod error;
 pub(super) mod start;
 pub(crate) mod stop;
 
-/// Env var that the user has to set in order to execute `mirrord ci start` and `mirrord ci stop`
-/// commands when the operator is available.
+/// Optional CI credentials for operator-backed `mirrord ci start` and `mirrord ci container`.
 ///
-/// Should be set in their CI to the value they got from [`generate_ci_api_key`].
+/// Free operators that advertise keyless CI accept automatic ordinary credentials when this is
+/// unset. Other installations require a key from [`generate_ci_api_key`]. The operator enforces its
+/// license policy.
+/// Without the operator, no API key is required. Local `mirrord ci stop` uses saved process
+/// state and requires no operator credentials.
 pub(crate) const MIRRORD_CI_API_KEY: &str = "MIRRORD_CI_API_KEY";
 
 /// Alias for mirrord-for-ci results.
@@ -289,13 +292,17 @@ fn spawn_background_user_command(
     Ok(child)
 }
 
-/// mirrord-for-ci operations require a [`CiApiKey`] to run.
+/// Retains explicit CI metadata independently of the optional [`CiApiKey`].
+///
+/// Operator-backed sessions use automatic ordinary credentials when the key is absent and the
+/// operator advertises keyless CI, so paid or older installations reject missing keys before
+/// credential issuance or session preparation. The operator also enforces its license policy.
 ///
 /// `mirrord ci start` stores the process group of the background user command and the pid of our
 /// intproxy so that we can stop these processes on `mirrord ci stop`.
 #[derive(Debug)]
 pub(super) struct MirrordCi {
-    /// Used as the `Credentials` (certificate) for the `mirrord ci` operations.
+    /// Overrides automatic ordinary credentials for operator-backed CI sessions.
     ci_api_key: Option<CiApiKey>,
 
     /// Arguments for the mirrord for CI operations that involve starting something:
