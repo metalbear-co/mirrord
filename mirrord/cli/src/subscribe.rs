@@ -80,11 +80,14 @@ pub(crate) async fn operator_event_stream(
     }))
 }
 
-/// What the stream will carry, decided from the operator's advertised features before
-/// subscribing, so the command says so up front instead of leaving the user to guess from the
-/// events that do or do not show up.
+/// What the stream will carry, decided from the operator's advertised features before the first
+/// event, so the command says so up front instead of leaving the user to guess from the events
+/// that do or do not show up.
 #[derive(Debug, PartialEq, Eq)]
 enum StreamScope {
+    /// The operator's features could not be read, so nothing is promised: the stream itself
+    /// decides, and an operator too old for the request refuses it there.
+    Unconfirmed,
     /// Events intercepted by this operator only. The `note`, when set, says why the stream is
     /// narrower than it could be.
     OneCluster { note: Option<&'static str> },
@@ -92,23 +95,25 @@ enum StreamScope {
     AllClusters,
 }
 
-/// Decides what the stream covers and whether streaming every session is allowed, from the
-/// operator's features. `None` features means the operator could not be read.
+/// Decides what the stream covers from the operator's features, refusing up front only what the
+/// operator is known not to serve: every session at once needs `SubscribeEventOptions`.
 ///
-/// Streaming every session needs an operator that serves a keyless stream; with a key any
-/// operator works, so a failed operator read does not block a keyed subscription.
+/// `None` features means the operator could not be read, which must not block a subscription:
+/// streaming the events needs `watch` on `events`, not `get` on the operator resource, so a user
+/// allowed to do the first but not the second still gets their stream.
 fn stream_scope(
     key: Option<&str>,
     features: Option<&[NewOperatorFeature]>,
 ) -> Result<StreamScope, CliError> {
-    let has = |feature| features.is_some_and(|features| features.contains(&feature));
+    let Some(features) = features else {
+        return Ok(StreamScope::Unconfirmed);
+    };
+    let has = |feature| features.contains(&feature);
 
     if key.is_none() && !has(NewOperatorFeature::SubscribeEventOptions) {
-        let reason = match features {
-            Some(_) => "it serves one session's events at a time",
-            None => "its advertised features could not be read",
-        };
-        return Err(CliError::SubscribeAllSessionsUnsupported(reason.to_owned()));
+        return Err(CliError::SubscribeAllSessionsUnsupported(
+            "it serves one session's events at a time".to_owned(),
+        ));
     }
 
     if !has(NewOperatorFeature::MultiClusterPrimary) {
@@ -148,23 +153,30 @@ pub(crate) async fn subscribe_command(args: SubscribeArgs) -> CliResult<()> {
     let key = layer_config.key.provided();
     let client = kube_client_from_layer_config(&layer_config).await?;
 
-    let features = match operator_features(&client).await {
-        Ok(features) => Some(features),
-        Err(error) => {
+    // The feature read only decides what to say about the stream, so it runs beside opening the
+    // stream rather than delaying it; events buffer on the open connection meanwhile.
+    let (features, events) = tokio::join!(
+        operator_features(&client),
+        operator_event_stream(&client, key, args.event_stream_options)
+    );
+    let features = features
+        .inspect_err(|error| {
             tracing::debug!(%error, "could not read the operator's features before subscribing");
-            None
-        }
-    };
+        })
+        .ok();
     let scope = stream_scope(key, features.as_deref())?;
-
-    let mut events =
-        std::pin::pin!(operator_event_stream(&client, key, args.event_stream_options).await?);
+    let mut events = std::pin::pin!(events?);
 
     match key {
         Some(key) => eprintln!("Subscribed to events for session key `{key}`."),
         None => eprintln!("Subscribed to events for every session."),
     }
     match scope {
+        StreamScope::Unconfirmed if key.is_none() => eprintln!(
+            "Could not read the operator's features; streaming every session is unconfirmed and \
+             an operator older than 3.210.0 refuses it."
+        ),
+        StreamScope::Unconfirmed => {}
         StreamScope::AllClusters => {
             eprintln!(
                 "Streaming from the primary and its linked clusters; `cluster` names each event's source."
@@ -208,30 +220,33 @@ mod test {
         NewOperatorFeature::MultiClusterSubscribe,
     ];
 
-    /// A keyed subscription works against any operator, even one whose features could not be
-    /// read, because every operator serves one session's stream.
+    /// An operator whose features could not be read never blocks a subscription, with or without
+    /// a key: the stream needs `watch` on `events`, not `get` on the operator resource.
     #[test]
-    fn a_key_subscribes_whatever_the_operator_advertises() {
+    fn an_unreadable_operator_leaves_the_scope_unconfirmed() {
         assert_eq!(
             stream_scope(Some("k"), None).unwrap(),
-            StreamScope::OneCluster { note: None }
+            StreamScope::Unconfirmed
         );
+        assert_eq!(stream_scope(None, None).unwrap(), StreamScope::Unconfirmed);
+    }
+
+    /// A keyed subscription works against any operator that could be read, whatever it
+    /// advertises, because every operator serves one session's stream.
+    #[test]
+    fn a_key_subscribes_whatever_the_operator_advertises() {
         assert_eq!(
             stream_scope(Some("k"), Some(&[])).unwrap(),
             StreamScope::OneCluster { note: None }
         );
     }
 
-    /// Without a key the operator must serve a keyless stream, so an older or unreadable
-    /// operator is refused up front instead of silently streaming nothing.
+    /// Without a key, an operator known to serve one session at a time is refused up front
+    /// instead of silently streaming nothing.
     #[test]
     fn no_key_needs_an_operator_that_streams_every_session() {
         assert!(matches!(
             stream_scope(None, Some(&[])),
-            Err(CliError::SubscribeAllSessionsUnsupported(_))
-        ));
-        assert!(matches!(
-            stream_scope(None, None),
             Err(CliError::SubscribeAllSessionsUnsupported(_))
         ));
         assert_eq!(
