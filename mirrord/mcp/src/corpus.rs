@@ -115,39 +115,45 @@ fn load_skills(files: &BTreeMap<String, String>) -> (BTreeMap<&str, Skill<'_>>, 
     let mut skills = BTreeMap::new();
     let mut issues = Vec::new();
     for (name, mut files) in dirs {
-        let path = format!("skills/{name}/SKILL.md");
-        let skill = files
-            .remove("SKILL.md")
-            .ok_or("missing".to_owned())
-            .and_then(move |body| {
-                let front_matter = front_matter(body).ok_or("no front matter".to_owned())?;
-                let front_matter: Value = serde_saphyr::from_str(front_matter)
-                    .map_err(|error| format!("invalid front matter: {error}"))?;
-                let field = |field| {
-                    front_matter
-                        .get(field)
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .filter(|value| value.is_empty().not())
-                };
-                if field("name") != Some(name) {
-                    return Err(format!("`name` must be `{name}`"));
-                }
-                let description = field("description").ok_or("no `description`".to_owned())?;
-                Ok(Skill {
-                    description: description.to_owned(),
-                    body,
-                    files,
-                })
-            });
+        let skill = match files.remove("SKILL.md") {
+            Some(body) => parse_skill(name, body, files),
+            None => Err("missing".to_owned()),
+        };
         match skill {
             Ok(skill) => {
                 skills.insert(name, skill);
             }
-            Err(issue) => issues.push(format!("{path}: {issue}")),
+            Err(issue) => issues.push(format!("skills/{name}/SKILL.md: {issue}")),
         }
     }
     (skills, issues)
+}
+
+/// Reads the skill `name` from its `SKILL.md` (`body`) and the other files in its directory.
+fn parse_skill<'a>(
+    name: &str,
+    body: &'a str,
+    files: BTreeMap<&'a str, &'a str>,
+) -> Result<Skill<'a>, String> {
+    let front_matter = front_matter(body).ok_or("no front matter")?;
+    let front_matter: Value = serde_saphyr::from_str(front_matter)
+        .map_err(|error| format!("invalid front matter: {error}"))?;
+    let field = |field| {
+        front_matter
+            .get(field)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| value.is_empty().not())
+    };
+    if field("name") != Some(name) {
+        return Err(format!("`name` must be `{name}`"));
+    }
+    let description = field("description").ok_or("no `description`")?;
+    Ok(Skill {
+        description: description.to_owned(),
+        body,
+        files,
+    })
 }
 
 /// The YAML between the `---` lines that open a page, if it has any.
