@@ -69,16 +69,35 @@ pub(crate) struct Skill<'a> {
     pub(crate) files: BTreeMap<&'a str, &'a str>,
 }
 
+impl Skill<'_> {
+    /// The skill `name` as a prompt: its `SKILL.md`, followed by where to get the files it bundles,
+    /// since a prompt is one message and the skill refers to those files by path.
+    pub(crate) fn prompt(&self, name: &str) -> String {
+        let mut text = self.body.to_owned();
+        if self.files.is_empty().not() {
+            text.push_str(&format!(
+                "\n\nThis skill bundles these files, which the `get_skill` tool returns given \
+                `name: \"{name}\"` and the file's path as `file`: {}\n",
+                list(self.files.keys()),
+            ));
+        }
+        text
+    }
+}
+
 /// Every skill that loads, keyed by name. Skills that don't are left out rather than failing the
 /// server; the tests below keep them from shipping.
 pub(crate) static SKILLS: LazyLock<BTreeMap<&'static str, Skill<'static>>> =
     LazyLock::new(|| load_skills(&FILES).0);
 
 /// The skill `name`, for `get_skill`, the prompts and the resources alike.
-pub(crate) fn skill(name: &str) -> Result<&'static Skill<'static>, UnknownSkill> {
-    SKILLS.get(name).ok_or_else(|| UnknownSkill {
+pub(crate) fn skill<'s, 'a>(
+    skills: &'s BTreeMap<&'a str, Skill<'a>>,
+    name: &str,
+) -> Result<&'s Skill<'a>, UnknownSkill> {
+    skills.get(name).ok_or_else(|| UnknownSkill {
         name: name.to_owned(),
-        available: list(SKILLS.keys()),
+        available: list(skills.keys()),
     })
 }
 
@@ -101,7 +120,9 @@ pub(crate) fn list<'a>(names: impl Iterator<Item = &'a &'a str>) -> String {
 /// Loads the skills in `files`: every directory under `skills/` is one, and needs a `SKILL.md`
 /// whose front matter names it and describes it. Returns the skills that load, and why the others
 /// don't.
-fn load_skills(files: &BTreeMap<String, String>) -> (BTreeMap<&str, Skill<'_>>, Vec<String>) {
+pub(crate) fn load_skills(
+    files: &BTreeMap<String, String>,
+) -> (BTreeMap<&str, Skill<'_>>, Vec<String>) {
     let mut dirs: BTreeMap<&str, BTreeMap<&str, &str>> = BTreeMap::new();
     for (path, contents) in files {
         if let Some((skill, file)) = path

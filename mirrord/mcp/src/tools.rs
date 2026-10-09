@@ -11,7 +11,7 @@ use rmcp::{
     tool, tool_router,
 };
 
-use crate::McpServer;
+use crate::{McpServer, corpus::SKILLS};
 
 pub mod explain_config_option;
 pub mod get_skill;
@@ -79,7 +79,7 @@ impl McpServer {
         &self,
         Parameters(args): Parameters<GetSkillArgs>,
     ) -> Result<Json<GetSkillOutput>, CallToolResult> {
-        get_skill::get_skill(args)
+        get_skill::get_skill(&SKILLS, args)
             .map(Json)
             .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
     }

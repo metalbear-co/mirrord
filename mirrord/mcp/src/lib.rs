@@ -13,7 +13,7 @@
 //! Usage is reported through [`telemetry`], from [`McpServer`]'s handler methods, so tools do not
 //! report anything themselves.
 
-use std::{ops::Not, sync::Once, time::Instant};
+use std::{sync::Once, time::Instant};
 
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
@@ -200,7 +200,7 @@ impl ServerHandler for McpServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
         if let Some(name) = request.uri.strip_prefix(SKILL_RESOURCE_URI_PREFIX) {
-            let skill = corpus::skill(name)
+            let skill = corpus::skill(&SKILLS, name)
                 .map_err(|error| ErrorData::resource_not_found(error.to_string(), None))?;
             return Ok(ReadResourceResult::new(vec![
                 ResourceContents::text(skill.body, request.uri).with_mime_type("text/markdown"),
@@ -246,22 +246,13 @@ impl ServerHandler for McpServer {
         request: GetPromptRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<GetPromptResponse, ErrorData> {
-        let skill = corpus::skill(&request.name)
+        let skill = corpus::skill(&SKILLS, &request.name)
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-
-        let mut text = skill.body.to_owned();
-        if skill.files.is_empty().not() {
-            text.push_str(&format!(
-                "\n\nThis skill bundles these files, which the `get_skill` tool returns given \
-                `name: \"{}\"` and the file's path as `file`: {}\n",
-                request.name,
-                corpus::list(skill.files.keys()),
-            ));
-        }
-        Ok(
-            GetPromptResult::new(vec![PromptMessage::new_text(Role::User, text)])
-                .with_description(skill.description.clone())
-                .into(),
-        )
+        Ok(GetPromptResult::new(vec![PromptMessage::new_text(
+            Role::User,
+            skill.prompt(&request.name),
+        )])
+        .with_description(skill.description.clone())
+        .into())
     }
 }

@@ -2,11 +2,13 @@
 //! only `mirrord mcp` configured can find and follow the skill for its task without installing the
 //! skills separately. The skills are listed from the [corpus](crate::corpus), never by hand.
 
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::corpus::{self, SKILLS, UnknownSkill, list};
+use crate::corpus::{self, Skill, UnknownSkill, list};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetSkillArgs {
@@ -51,13 +53,17 @@ pub enum GetSkillError {
     FileWithoutName,
 }
 
-pub fn get_skill(args: GetSkillArgs) -> Result<GetSkillOutput, GetSkillError> {
+/// Answers from `skills`, which the server passes as [`SKILLS`](crate::corpus::SKILLS).
+pub(crate) fn get_skill(
+    skills: &BTreeMap<&str, Skill<'_>>,
+    args: GetSkillArgs,
+) -> Result<GetSkillOutput, GetSkillError> {
     let GetSkillArgs { name, file } = args;
     let Some(name) = name else {
         if file.is_some() {
             return Err(GetSkillError::FileWithoutName);
         }
-        let skills = SKILLS
+        let skills = skills
             .iter()
             .map(|(name, skill)| SkillSummary {
                 name: (*name).to_owned(),
@@ -70,7 +76,7 @@ pub fn get_skill(args: GetSkillArgs) -> Result<GetSkillOutput, GetSkillError> {
         });
     };
 
-    let skill = corpus::skill(&name)?;
+    let skill = corpus::skill(skills, &name)?;
     let content = match file.as_deref() {
         None | Some("SKILL.md") => skill.body,
         Some(file) => skill
@@ -89,3 +95,6 @@ pub fn get_skill(args: GetSkillArgs) -> Result<GetSkillOutput, GetSkillError> {
         ..Default::default()
     })
 }
+
+#[cfg(test)]
+mod tests;
