@@ -38,10 +38,16 @@ RUN sed -i '/^default-members = \[/,/^\]/d' /app/Cargo.toml && \
 
 
 # Build final binary against BuildKit cache mounts. The target directory is one of them, so cargo's
-# own fingerprints already skip everything unchanged since the last build on this builder.
+# own fingerprints skip every registry and git dependency unchanged since the last build on this
+# builder. The workspace crates are touched first: cargo judges a path crate fresh by its files'
+# mtimes, and the copied sources carry the checkout's mtimes, which are not reliably newer than
+# the rlibs a previous build of another revision left in the cached target directory. Without the
+# touch, an agent built from a new revision has linked against stale `mirrord-tls-util` and
+# `mirrord-agent-env` rlibs and failed with unresolved imports.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-agent-$TARGETARCH,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git-agent-$TARGETARCH,sharing=locked \
     --mount=type=cache,target=/app/target,id=target-agent-$TARGETARCH,sharing=locked \
+    find /app/mirrord /app/Cargo.toml /app/Cargo.lock -type f -exec touch {} + && \
     cargo +nightly-2026-08-13 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
     # Copy binary out of cached target directory
     cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
