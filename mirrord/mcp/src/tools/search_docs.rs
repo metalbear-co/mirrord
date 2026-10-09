@@ -80,11 +80,13 @@ struct SearchHit {
     snippet: String,
 }
 
-/// A searchable page or config option, tokenized.
+/// A searchable section of a page, or a config option, tokenized.
 struct Document {
     path: &'static str,
     title: &'static str,
     resource_uri: &'static str,
+    /// The section's heading, weighted like the title.
+    heading: Option<&'static str>,
     /// What is searched, and the snippet is taken from.
     text: &'static str,
     /// How often each term occurs, title occurrences weighted by [`TITLE_WEIGHT`].
@@ -99,7 +101,10 @@ struct Index {
     average_length: f64,
 }
 
-/// The markdown of the docs and skills, and every config option with a description. Left out are
+/// The sections of the markdown of the docs and skills, and every config option with a
+/// description. A page is searched by section so that a long page ranks on the part that matches,
+/// rather than having the match diluted by the rest, and its snippet comes from that part. Left out
+/// are
 /// pages that would crowd out the ones answering a query, which can still be read with `read_doc`:
 /// - the files bundled with skills that aren't markdown, such as Helm values, which match nearly
 ///   any keyword;
@@ -111,18 +116,24 @@ static INDEX: LazyLock<Index> = LazyLock::new(|| {
     let pages = PAGES
         .iter()
         .filter(|(path, _)| searchable(path))
-        .map(|(path, page)| Document {
-            path,
-            title: &page.title,
-            resource_uri: &page.resource_uri,
-            text: without_front_matter(page.body),
-            terms: BTreeMap::new(),
-            length: 0,
+        .flat_map(|(path, page)| {
+            sections(without_front_matter(page.body))
+                .into_iter()
+                .map(|(heading, text)| Document {
+                    path,
+                    title: &page.title,
+                    resource_uri: &page.resource_uri,
+                    heading,
+                    text,
+                    terms: BTreeMap::new(),
+                    length: 0,
+                })
         });
     let options = OPTION_PAGES.iter().map(|option| Document {
         path: &option.path,
         title: &option.title,
         resource_uri: &option.resource_uri,
+        heading: None,
         text: &option.description,
         terms: BTreeMap::new(),
         length: 0,
@@ -134,7 +145,8 @@ static INDEX: LazyLock<Index> = LazyLock::new(|| {
                 *document.terms.entry(term).or_default() += 1;
                 document.length += 1;
             }
-            for term in tokens(document.title) {
+            for term in tokens(document.title).chain(document.heading.into_iter().flat_map(tokens))
+            {
                 *document.terms.entry(term).or_default() += TITLE_WEIGHT;
                 document.length += TITLE_WEIGHT;
             }
@@ -233,19 +245,24 @@ pub fn search_docs(args: SearchDocsArgs) -> Result<SearchDocsOutput, SearchDocsE
             .then(document_a.path.cmp(document_b.path))
     });
 
-    // Some skill references repeat a docs page's sections word for word; a hit with the same title
-    // and snippet as a better one adds nothing but takes a slot.
-    let mut seen = BTreeSet::new();
+    // A page is hit once, through its best section. Some skill references repeat a docs page's
+    // sections word for word, and a section with the same title and text as a better one adds
+    // nothing but takes a slot.
+    let mut pages = BTreeSet::new();
+    let mut sections = BTreeSet::new();
     let hits = scored
         .into_iter()
-        .map(|(_, document)| SearchHit {
+        .map(|(_, document)| document)
+        .filter(|document| {
+            pages.insert(document.path) && sections.insert((document.title, document.text))
+        })
+        .take(limit)
+        .map(|document| SearchHit {
             title: document.title.to_owned(),
             path: document.path.to_owned(),
             resource_uri: document.resource_uri.to_owned(),
             snippet: snippet(document.text, &query),
         })
-        .filter(|hit| seen.insert((hit.title.clone(), hit.snippet.clone())))
-        .take(limit)
         .collect();
     Ok(SearchDocsOutput { hits })
 }
@@ -260,6 +277,35 @@ fn tokens(text: &str) -> impl Iterator<Item = String> + '_ {
         })
         .map(str::to_lowercase)
         .filter(|token| token.is_empty().not() && STOP_WORDS.contains(&token.as_str()).not())
+}
+
+/// Splits markdown at its headings, outside code blocks, into each section's heading and text
+/// (heading line included). The text before the first heading has no heading, and is left out when
+/// blank.
+fn sections(markdown: &str) -> Vec<(Option<&str>, &str)> {
+    let mut sections = Vec::new();
+    let mut heading = None;
+    let mut start = 0;
+    let mut in_code = false;
+    let mut offset = 0;
+    for line in markdown.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_code = in_code.not();
+        } else if in_code.not() && trimmed.starts_with('#') {
+            if let Some(text) = markdown.get(start..offset) {
+                sections.push((heading, text));
+            }
+            heading = Some(trimmed.trim_start_matches('#').trim());
+            start = offset;
+        }
+        offset += line.len();
+    }
+    if let Some(text) = markdown.get(start..) {
+        sections.push((heading, text));
+    }
+    sections.retain(|(heading, text)| heading.is_some() || text.trim().is_empty().not());
+    sections
 }
 
 fn without_front_matter(body: &str) -> &str {
@@ -361,5 +407,18 @@ mod tests {
             };
             assert!(search_docs(args).is_err(), "{limit}");
         }
+    }
+
+    #[test]
+    fn splits_sections_outside_code() {
+        let markdown = "intro\n# One\n```sh\n# a comment\n```\n## Two\ntext\n";
+        assert_eq!(
+            sections(markdown),
+            [
+                (None, "intro\n"),
+                (Some("One"), "# One\n```sh\n# a comment\n```\n"),
+                (Some("Two"), "## Two\ntext\n"),
+            ]
+        );
     }
 }
