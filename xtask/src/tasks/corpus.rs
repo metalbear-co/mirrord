@@ -22,10 +22,12 @@ struct Corpus {
     /// The directory under `mirrord/mcp/corpus` it is vendored into, and the name of its pin.
     name: &'static str,
     repo: &'static str,
-    /// The directory of the repo holding the content. Only the markdown files under it are
-    /// vendored, at the same paths relative to it.
+    /// The directory of the repo holding the content, vendored at the same paths relative to it.
     root: &'static str,
-    /// Markdown files under `root` that aren't vendored.
+    /// The extensions of the files under `root` that are vendored. `mirrord mcp` serves text only,
+    /// so images and other binary files upstream are skipped rather than failing the sync.
+    extensions: &'static [&'static str],
+    /// Files under `root` that aren't vendored.
     exclude: &'static [&'static str],
 }
 
@@ -34,15 +36,25 @@ const CORPORA: &[Corpus] = &[
         name: "docs",
         repo: "metalbear-co/docs",
         root: "docs",
-        exclude: &[],
+        extensions: &["md"],
+        // GitBook's navigation, not a page.
+        exclude: &["SUMMARY.md"],
     },
     Corpus {
         name: "skills",
         repo: "metalbear-co/skills",
         root: "skills",
-        // A copy of the config reference, which `mirrord mcp` already serves from the config
-        // schema compiled into it.
-        exclude: &["mirrord-config/references/configuration.md"],
+        // Skills point the agent at the files bundled with them, such as Helm values, so those are
+        // served too.
+        extensions: &["md", "json", "yaml", "yml"],
+        // Copies of the config schema and of the config reference generated from it, which lag
+        // behind the schema compiled into `mirrord mcp` and served by its config tools.
+        exclude: &[
+            "mirrord-config/references/configuration.md",
+            "mirrord-config/references/schema.json",
+            "mirrord-ci/references/schema.json",
+            "mirrord-db-branching/references/db-branches-schema.json",
+        ],
     },
 ];
 
@@ -61,19 +73,21 @@ pub fn sync(bump: bool) -> Result<()> {
     for corpus in CORPORA {
         let pin_path = corpus_dir().join(format!("{}.pin.json", corpus.name));
         let pin = if bump {
-            let pin = Pin {
+            Pin {
                 repo: corpus.repo.to_owned(),
                 commit: upstream_head(corpus.repo)?,
                 synced_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
-            };
-            fs::write(&pin_path, serde_json::to_string_pretty(&pin)? + "\n")
-                .with_context(|| format!("failed to write {}", pin_path.display()))?;
-            pin
+            }
         } else {
             read_pin(&pin_path)?
         };
 
         let files = fetch(corpus, &pin)?;
+        // Written once its commit is known to sync, so a failed sync keeps the previous pin.
+        if bump {
+            fs::write(&pin_path, serde_json::to_string_pretty(&pin)? + "\n")
+                .with_context(|| format!("failed to write {}", pin_path.display()))?;
+        }
         let dir = corpus_dir().join(corpus.name);
         if dir.exists() {
             fs::remove_dir_all(&dir)
@@ -210,7 +224,10 @@ fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
             .and_then(|path| path.strip_prefix('/'))
             .context("git listed a file outside the corpus root")?;
         let hidden = relative.split('/').any(|segment| segment.starts_with('.'));
-        if !relative.ends_with(".md") || hidden || corpus.exclude.contains(&relative) {
+        let vendored = relative
+            .rsplit_once('.')
+            .is_some_and(|(_, extension)| corpus.extensions.contains(&extension));
+        if hidden || !vendored || corpus.exclude.contains(&relative) {
             continue;
         }
 
@@ -218,13 +235,19 @@ fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
             Some(&checkout),
             &["cat-file", "blob", &format!("FETCH_HEAD:{path}")],
         )?;
+        ensure!(
+            std::str::from_utf8(&contents).is_ok(),
+            "{path} in {}@{} isn't UTF-8 text, which `mirrord mcp` can't serve",
+            pin.repo,
+            pin.commit
+        );
         files.insert(relative.to_owned(), contents);
     }
 
     fs::remove_dir_all(&checkout)?;
     ensure!(
         !files.is_empty(),
-        "{}@{} has no markdown under `{}`",
+        "{}@{} has nothing to vendor under `{}`",
         pin.repo,
         pin.commit,
         corpus.root
