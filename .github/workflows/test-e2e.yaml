@@ -126,6 +126,12 @@ jobs:
           command: >-
             cargo xtask test-e2e --binary target/debug/mirrord --layer target/debug/libmirrord_layer.so -- --no-default-features --features job --test-threads=6 &&
             cargo xtask test-e2e --binary target/debug/mirrord --layer target/debug/libmirrord_layer.so -- --no-default-features --features ephemeral --test-threads=6
+      # Runs after the other tests, which would use the operator that these tests install.
+      - name: Run operator install E2E tests
+        if: ${{ matrix.cluster-runtime == 'kind' }}
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: cargo xtask test-e2e --binary target/debug/mirrord --layer target/debug/libmirrord_layer.so -- --profile operator-install
       - name: Collect logs
         if: ${{ failure() }}
         run: |

@@ -378,6 +378,8 @@ use mirrord_layer_lib::process::windows::{
 };
 use verify_config::verify_config;
 
+#[cfg(target_os = "macos")]
+use crate::diagnose::sip::prompt_sip_report;
 use crate::{
     ci::{MirrordCi, ci_api_key_available},
     config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
@@ -876,7 +878,7 @@ async fn exec(
     let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
         Default::default(),
-        watch,
+        watch.clone(),
         user_data.machine_id(),
         Some(config.key.as_str().to_owned()),
     );
@@ -894,6 +896,11 @@ async fn exec(
         progress.warning(&warning);
     }
     result?;
+
+    #[cfg(target_os = "macos")]
+    if let Err(error) = prompt_sip_report(progress, watch.clone(), user_data.machine_id()).await {
+        progress.warning(&error.to_string());
+    }
 
     let res = exec_process(
         config,
@@ -1177,7 +1184,7 @@ fn main() -> miette::Result<()> {
             Commands::Teams => {
                 windows_unsupported!((), "teams", { teams::navigate_to_intro().await })
             }
-            Commands::Diagnose(args) => diagnose_command(*args).await?,
+            Commands::Diagnose(args) => diagnose_command(*args, watch, &user_data).await?,
             Commands::Container(args) => windows_unsupported!(args, "container", {
                 let mut progress = ProgressTracker::from_env("mirrord container");
 
