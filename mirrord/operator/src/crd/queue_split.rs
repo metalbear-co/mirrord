@@ -148,4 +148,7 @@ pub struct QueueSplitTargetPod {
     pub patched: bool,
     /// The pod is in the `Running` phase with all containers ready.
     pub ready: bool,
+    /// What keeps the pod from being ready.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }

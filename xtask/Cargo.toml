@@ -15,9 +15,11 @@ edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+chrono.workspace = true
 clap.workspace = true
 dirs.workspace = true
 dunce.workspace = true
 mirrord-command = { path = "../mirrord/command" }
 reqwest.workspace = true
+serde.workspace = true
 serde_json.workspace = true

@@ -5611,6 +5611,7 @@ dependencies = [
  "mirrord-command",
  "mirrord-config",
  "mirrord-intproxy",
+ "mirrord-intproxy-protocol",
  "mirrord-protocol",
  "mirrord-sip",
  "mirrord-test-utils",
@@ -5661,6 +5662,8 @@ name = "mirrord-mcp"
 version = "3.271.0"
 dependencies = [
  "drain",
+ "flate2",
+ "json-patch",
  "jsonschema",
  "mirrord-analytics",
  "mirrord-config",
@@ -5673,8 +5676,10 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "serde_path_to_error",
+ "strsim",
  "strum 0.27.2",
  "strum_macros 0.27.2",
+ "tar",
  "thiserror 2.0.20",
  "tokio",
  "uuid",
@@ -5757,7 +5762,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.29.1"
+version = "1.30.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -5910,10 +5915,13 @@ dependencies = [
  "fs4",
  "hex",
  "itertools 0.14.0",
+ "libc",
  "object 0.36.7",
  "once_cell",
  "rand 0.10.2",
  "rstest",
+ "serde",
+ "serde_json",
  "tar",
  "tempfile",
  "thiserror 2.0.20",
@@ -5977,6 +5985,7 @@ dependencies = [
  "http 1.5.0",
  "pem 3.0.6",
  "rcgen",
+ "rstest",
  "rustls",
  "rustls-pemfile",
  "tempfile",
@@ -11292,11 +11301,13 @@ name = "xtask"
 version = "3.271.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "dirs 6.0.0",
  "dunce",
  "mirrord-command",
  "reqwest 0.13.4",
+ "serde",
  "serde_json",
 ]
 

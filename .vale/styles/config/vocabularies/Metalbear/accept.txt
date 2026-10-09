@@ -83,6 +83,7 @@ crypto
 runtime
 goroutine
 plaintext
+[vV]endor(?:ed|ing)?
 
 # Linux syscalls and C API
 variadic
@@ -180,6 +181,7 @@ greptile
 Greptile
 Liquibase
 Jev
+devshell
 
 # Cloud services
 SNS

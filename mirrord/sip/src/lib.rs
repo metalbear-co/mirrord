@@ -11,6 +11,7 @@ mod bundle;
 mod codesign;
 mod error;
 mod logger;
+pub mod rosetta;
 mod rpath;
 
 /// Concerns MacOS' SIP (System Integrity Protection) mechanism and how to sidestep it.
@@ -104,6 +105,9 @@ mod main {
     /// Must be kept in sync with the version downloaded by `xtask` (see
     /// `xtask/src/tasks/sip_binaries.rs`).
     pub const APPLE_UTILS_VERSION: &str = "v8";
+
+    /// Set on the first patched process when SIP patching had to use an x86_64 system binary.
+    pub const MIRRORD_SIP_X64_FALLBACK_ENV: &str = "MIRRORD_SIP_X64_FALLBACK";
 
     /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
     /// scripts. Uses `temp_dir()`/mirrord/ because this is where the layer is extracted
@@ -200,11 +204,16 @@ mod main {
     struct BinaryInfo {
         offset: usize,
         size: usize,
+        is_x86_64: bool,
     }
 
     impl BinaryInfo {
-        fn new(offset: usize, size: usize) -> Self {
-            Self { offset, size }
+        fn new(offset: usize, size: usize, is_x86_64: bool) -> Self {
+            Self {
+                offset,
+                size,
+                is_x86_64,
+            }
         }
 
         /// Takes the cpu type and subtype and the bytes of a file that is a non-fat Mach-O, and
@@ -218,7 +227,11 @@ mod main {
                 // The binary has an architecture we know how to patch, so proceed.
                 // We don't check if this is a thin arm binary on an intel chip because that would
                 // not run regardless of SIP.
-                Ok(Self::new(0, bytes.len()))
+                Ok(Self::new(
+                    0,
+                    bytes.len(),
+                    cpu_type == macho::CPU_TYPE_X86_64,
+                ))
             } else {
                 Err(SipError::NoSupportedArchitecture)
             }
@@ -270,7 +283,13 @@ mod main {
                     let found_arch = fat_slice.arches().iter().find(is_fat_x64_arch);
 
                     found_arch
-                        .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))
+                        .map(|arch| {
+                            Self::new(
+                                arch.offset() as usize,
+                                arch.size() as usize,
+                                is_fat_x64_arch(&arch),
+                            )
+                        })
                         .ok_or(SipError::NoSupportedArchitecture)
                 }
 
@@ -292,11 +311,53 @@ mod main {
                     let found_arch = fat_slice.arches().iter().find(is_fat_x64_arch);
 
                     found_arch
-                        .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))
+                        .map(|arch| {
+                            Self::new(
+                                arch.offset() as usize,
+                                arch.size() as usize,
+                                is_fat_x64_arch(&arch),
+                            )
+                        })
                         .ok_or(SipError::NoSupportedArchitecture)
                 }
                 other => Err(SipError::UnsupportedFileFormat(format!("{other:?}"))),
             }
+        }
+    }
+
+    /// The result of patching one SIP-protected executable.
+    #[derive(Debug)]
+    pub struct SipPatchResult {
+        /// Path to the executable that must run instead of the protected executable.
+        pub path: PathBuf,
+        /// Protected system binary whose x86_64 slice had to be used because it was not bundled.
+        pub x64_fallback: Option<PathBuf>,
+    }
+
+    impl SipPatchResult {
+        pub fn path_string(&self) -> String {
+            self.path.to_string_lossy().into()
+        }
+    }
+
+    fn is_apple_silicon() -> bool {
+        let mut value: libc::c_int = 0;
+        let mut size = std::mem::size_of_val(&value);
+        // SAFETY: the name is static, and `size` bounds the writable `value` buffer.
+        let status = unsafe {
+            libc::sysctlbyname(
+                c"hw.optional.arm64".as_ptr(),
+                (&mut value as *mut libc::c_int).cast(),
+                &mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+
+        if status == 0 {
+            value == 1
+        } else {
+            cfg!(target_arch = "aarch64")
         }
     }
 
@@ -367,29 +428,50 @@ mod main {
     /// `path`, write it into `output`, give it the same permissions, and sign the new binary.
     fn patch_binary(
         path: &Path,
+        is_x86_64: bool,
         opts: SipPatchOptions<'_>,
         logger: &mut SipLoggerGuard<'_>,
-    ) -> Result<PathBuf> {
-        if let Some(bundle_dir) = opts.sip_binaries_dir {
+    ) -> Result<SipPatchResult> {
+        let missing_from_bundle = if let Some(bundle_dir) = opts.sip_binaries_dir {
             if let Some(prebuilt) = bundle::find_in_bundle(path, bundle_dir, logger) {
-                return Ok(prebuilt);
+                return Ok(SipPatchResult {
+                    path: prebuilt,
+                    x64_fallback: None,
+                });
             }
+            true
         } else {
             logger.log(format_args!(
                 "SIP utils directory not set, skipping check for pre-built SIP utility binaries"
             ));
-        }
+            false
+        };
 
         set_fallback_frameworks_path_if_mac_app(path, logger);
 
         let output = get_output_path(path)?;
+        let report_x64_fallback = missing_from_bundle && is_apple_silicon();
+        let x64_fallback = (report_x64_fallback && is_x86_64).then(|| path.to_owned());
+        if let Some(binary) = &x64_fallback {
+            logger.log(format_args!(
+                "The protected system binary {binary:?} is missing from mirrord's native macOS \
+                bundle and requires Rosetta. Run `mirrord diagnose sip-report` to send the report \
+                to the mirrord team."
+            ));
+        }
 
         if output.exists() {
             logger.log(format_args!(
                 "Using existing SIP-patched version of {path:?}: {output:?}"
             ));
-            return Ok(output);
+            return Ok(SipPatchResult {
+                path: output,
+                x64_fallback,
+            });
         }
+
+        let data = std::fs::read(path)?;
+        let binary_info = BinaryInfo::from_object_bytes(&data)?;
 
         // If the same file is executed in parallel, parallel signing could fail. So do the work on
         // a temp file, and then move it to its final destination once ready and signed.
@@ -398,11 +480,7 @@ mod main {
         logger.log(format_args!(
             "{path:?} is a SIP-protected binary, preparing a SIP-patched version at {output:?}"
         ));
-        let data = std::fs::read(path)?;
         let permissions = std::fs::metadata(path)?.permissions();
-
-        // Propagate Err if the binary does not contain any supported architecture (x64/arm64).
-        let binary_info = BinaryInfo::from_object_bytes(&data)?;
 
         // Just the thin binary - if the file was a thin binary of a supported architecture to
         // begin with then it's the whole file, if its a fat binary then it's just a part of it.
@@ -439,7 +517,10 @@ mod main {
             return Err(SipError::BinaryMoveFailed(err.error));
         }
 
-        Ok(output)
+        Ok(SipPatchResult {
+            path: output,
+            x64_fallback,
+        })
     }
 
     /// Create a new file at `patched_path` with the same contents as `original_path` except for
@@ -551,9 +632,10 @@ mod main {
         SipScript {
             path: PathBuf,
             shebang: ScriptShebang,
+            interpreter_is_x86_64: bool,
         },
         /// The executable is a SIP-protected binary.
-        SipBinary(PathBuf),
+        SipBinary { path: PathBuf, is_x86_64: bool },
         /// The binary that ends up being executed is not SIP protected.
         NoSip,
     }
@@ -655,7 +737,11 @@ mod main {
             // file is an object file
             is_binary_sip(&complete_path, &data, opts).map(|is_sip| {
                 if is_sip {
-                    SipBinary(complete_path)
+                    SipBinary {
+                        path: complete_path,
+                        is_x86_64: BinaryInfo::from_object_bytes(&data)
+                            .is_ok_and(|binary| binary.is_x86_64),
+                    }
                 } else {
                     NoSip
                 }
@@ -681,6 +767,8 @@ mod main {
                     SipScript {
                         path: complete_path,
                         shebang,
+                        interpreter_is_x86_64: BinaryInfo::from_object_bytes(&data)
+                            .is_ok_and(|binary| binary.is_x86_64),
                     }
                 } else {
                     // The interpreter the shebang points to is not protected.
@@ -753,7 +841,7 @@ mod main {
         binary_path: &str,
         opts: SipPatchOptions,
         log_info: Option<SipLogInfo>,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<SipPatchResult>> {
         let mut logger = log_info
             .as_ref()
             .map(|log_info| SipLogger::new_at(log_info.log_destination))
@@ -789,21 +877,30 @@ mod main {
         // DO NOT INTRODUCE NEW TRACING LOGS OR CHANGE THE LEVEL OF EXISTING LOGS - tracing logs are
         // NOT fork safe, and have been suspected to cause issues.
         match status {
-            Ok(SipScript { path, shebang }) => {
-                let patched_interpreter =
-                    patch_binary(&shebang.interpreter_path, opts, &mut logger)
-                        .inspect(|patched_interpreter| {
-                            logger.log(format_args!(
-                                "Prepared patched script interpreter at {patched_interpreter:?}"
-                            ));
-                        })
-                        .inspect_err(|error| {
-                            logger.log(format_args!(
-                                "Failed to prepare patched script interpreter: {error:?}"
-                            ));
-                        })?;
+            Ok(SipScript {
+                path,
+                shebang,
+                interpreter_is_x86_64,
+            }) => {
+                let patched_interpreter = patch_binary(
+                    &shebang.interpreter_path,
+                    interpreter_is_x86_64,
+                    opts,
+                    &mut logger,
+                )
+                .inspect(|patched_interpreter| {
+                    logger.log(format_args!(
+                        "Prepared patched script interpreter at {:?}",
+                        patched_interpreter.path,
+                    ));
+                })
+                .inspect_err(|error| {
+                    logger.log(format_args!(
+                        "Failed to prepare patched script interpreter: {error:?}"
+                    ));
+                })?;
                 let patched_script =
-                    patch_script(&path, shebang, &patched_interpreter, &mut logger)
+                    patch_script(&path, shebang, &patched_interpreter.path, &mut logger)
                         .inspect(|patched_script| {
                             logger.log(format_args!(
                                 "Prepared patched script at {patched_script:?}"
@@ -812,20 +909,24 @@ mod main {
                         .inspect_err(|error| {
                             logger.log(format_args!("Failed to prepare patched script: {error:?}"));
                         })?;
-                Ok(Some(patched_script.to_string_lossy().into_owned()))
+                Ok(Some(SipPatchResult {
+                    path: patched_script,
+                    x64_fallback: patched_interpreter.x64_fallback,
+                }))
             }
 
-            Ok(SipBinary(binary)) => {
-                let patched_binary = patch_binary(&binary, opts, &mut logger)
+            Ok(SipBinary { path, is_x86_64 }) => {
+                let patched_binary = patch_binary(&path, is_x86_64, opts, &mut logger)
                     .inspect(|patched_binary| {
                         logger.log(format_args!(
-                            "Prepared patched binary at {patched_binary:?}"
+                            "Prepared patched binary at {:?}",
+                            patched_binary.path,
                         ));
                     })
                     .inspect_err(|error| {
                         logger.log(format_args!("Failed to prepare patched binary: {error:?}"));
                     })?;
-                Ok(Some(patched_binary.to_string_lossy().into_owned()))
+                Ok(Some(patched_binary))
             }
 
             Ok(NoSip) => Ok(None),
@@ -922,7 +1023,7 @@ mod main {
         fn is_sip_true() {
             assert!(matches!(
                 get_sip_status("/bin/ls", SipPatchOptions::default()),
-                Ok(SipBinary(_))
+                Ok(SipBinary { .. })
             ));
         }
 
@@ -967,20 +1068,24 @@ mod main {
         fn patch_binary_and_verify_dyld_print(bin_path: &str) {
             let patched_bin_path = patch_binary(
                 bin_path.as_ref(),
+                false,
                 Default::default(),
                 &mut SipLogger::noop().lock(),
             )
             .unwrap();
             assert!(matches!(
                 get_sip_status(
-                    patched_bin_path.to_str().unwrap(),
+                    patched_bin_path
+                        .path
+                        .to_str()
+                        .expect("patched path must be UTF-8"),
                     SipPatchOptions::default()
                 )
                 .unwrap(),
                 NoSip
             ));
             // Check DYLD_* features work on patched binary:
-            run_and_verify_dyld_print(&patched_bin_path);
+            run_and_verify_dyld_print(&patched_bin_path.path);
         }
 
         /// Call `sip_patch` (it's the public function this crate exposes), verify the patched
@@ -991,11 +1096,12 @@ mod main {
                 .unwrap()
                 .unwrap();
             assert!(matches!(
-                get_sip_status(&patched_bin_path, SipPatchOptions::default()).unwrap(),
+                get_sip_status(&patched_bin_path.path_string(), SipPatchOptions::default())
+                    .unwrap(),
                 NoSip
             ));
             // Check DYLD_* features work on patched binary:
-            run_and_verify_dyld_print(patched_bin_path.as_ref());
+            run_and_verify_dyld_print(patched_bin_path.path.as_ref());
         }
 
         #[test]
@@ -1058,11 +1164,12 @@ mod main {
             let path = "/usr/bin/file";
             let patched_path_buf = patch_binary(
                 path.as_ref(),
+                false,
                 Default::default(),
                 &mut SipLogger::noop().lock(),
             )
             .unwrap();
-            let patched_path = patched_path_buf.to_str().unwrap();
+            let patched_path = patched_path_buf.path.to_str().unwrap();
             assert!(matches!(
                 get_sip_status(patched_path, SipPatchOptions::default()).unwrap(),
                 SipStatus::NoSip
@@ -1100,7 +1207,7 @@ mod main {
             .unwrap()
             .unwrap();
             // Check DYLD_* features work on it:
-            let output = std::process::Command::new(patched_path)
+            let output = std::process::Command::new(&patched_path.path)
                 .env("DYLD_PRINT_LIBRARIES", "1")
                 .output()
                 .unwrap();
@@ -1178,7 +1285,7 @@ mod main {
             )
             .unwrap()
             .unwrap();
-            let new_shebang = read_shebang_from_file(changed_script_path)
+            let new_shebang = read_shebang_from_file(changed_script_path.path)
                 .unwrap()
                 .unwrap();
             let new_interpreter_path = new_shebang.interpreter_path.to_str().unwrap();
@@ -1283,7 +1390,7 @@ mod main {
                 .unwrap();
             assert!(matches!(
                 get_sip_status(signed_temp_file_path, SipPatchOptions::default()).unwrap(),
-                SipStatus::SipBinary(_),
+                SipStatus::SipBinary { .. },
             ));
             assert!(matches!(
                 get_sip_status(

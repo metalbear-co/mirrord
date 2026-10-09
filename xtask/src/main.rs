@@ -20,6 +20,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Vendor the docs and skills repos that `mirrord mcp` answers from
+    Corpus {
+        #[command(subcommand)]
+        command: CorpusCommand,
+    },
+
     /// Build CLI binaries (includes the merged UI frontend and layer)
     BuildCli {
         /// Target platform (linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64,
@@ -156,6 +162,19 @@ enum Commands {
     },
 }
 
+#[derive(Subcommand)]
+enum CorpusCommand {
+    /// Replace the vendored files with those of the pinned commits
+    Sync {
+        /// First move the pins to upstream HEAD
+        #[arg(long)]
+        bump: bool,
+    },
+
+    /// Fail unless the vendored files are byte-identical to those of the pinned commits
+    Check,
+}
+
 fn parse_platform(s: &str) -> Result<Platform, String> {
     match s {
         "linux-x86_64" | "linux-x86-64" | "linux-amd64" => Ok(Platform::LinuxX86_64),
@@ -205,6 +224,11 @@ fn main() -> Result<()> {
 
             tasks::release::build_release_cli(options)?;
         }
+
+        Commands::Corpus { command } => match command {
+            CorpusCommand::Sync { bump } => tasks::corpus::sync(bump)?,
+            CorpusCommand::Check => tasks::corpus::check()?,
+        },
 
         Commands::BuildUi => {
             tasks::ui::build_ui()?;

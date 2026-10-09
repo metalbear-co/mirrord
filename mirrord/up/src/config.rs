@@ -65,6 +65,7 @@ pub enum ServiceMode {
     ///
     /// The service's `http_filter` is ignored, with a warning. The target must support
     /// `copy_target` with `scale_down`.
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Team))]
     Replace,
 
     /// Incoming traffic is mirrored to the local service, leaving traffic to the original service
@@ -505,8 +506,10 @@ pub struct ServiceConfig {
 pub struct UpConfig {
     /// Settings applied to all services.
     #[serde(default)]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
     pub common: CommonConfig,
     /// Per-service configurations keyed by service name.
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
     pub services: HashMap<Arc<str>, ServiceConfig>,
 }
 
@@ -522,19 +525,44 @@ pub enum WindowsSupportError {
     Ci,
 }
 
+/// The settings of `common` in a `mirrord-up.yaml` that end up in the mirrord config generated
+/// for each service, with the `mirrord.json` option each one sets. Their own settings map onto the
+/// same names below that option. `context` is applied through the kube context `mirrord up`
+/// picks, the others by [`ServiceConfig::assemble`], which this must be changed along with.
+pub const COMMON_LAYER_PATHS: &[(&str, &str)] = &[
+    ("accept_invalid_certificates", "accept_invalid_certificates"),
+    ("operator", "operator"),
+    ("telemetry", "telemetry"),
+    ("context", "kube_context"),
+];
+
+/// The settings of a service in a `mirrord-up.yaml` that [`ServiceConfig::assemble`] copies into
+/// the mirrord config it generates for the service, with the `mirrord.json` option each one sets,
+/// and must be changed along with it. Their own settings map onto the same names below that
+/// option (e.g. `http_filter.header_filter`); a service's `config_patch` is a mirrord config
+/// itself. Settings missing here, like `run`, only steer `mirrord up`.
+pub const SERVICE_LAYER_PATHS: &[(&str, &str)] = &[
+    ("context", "kube_context"),
+    ("target", "target"),
+    ("env", "feature.env"),
+    ("default_mode", "feature.network.incoming.mode"),
+    ("http_filter", "feature.network.incoming.http_filter"),
+    ("ignore_ports", "feature.network.incoming.ignore_ports"),
+];
+
 impl ServiceConfig {
-    /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `cfg` from
+    /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `base` from
     /// [`CommonConfig::base_config`].
     fn assemble(
         self,
         service_name: &Arc<str>,
-        mut cfg: LayerConfig,
+        base: LayerConfig,
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
     ) -> Result<(LayerConfig, RunConfig), ConfigPatchErrorKind> {
-        let kube_context = up_context.get_context(self.context);
-        cfg.kube_context = kube_context.as_deref().map(Into::into);
+        let kube_context = up_context.get_context(self.context.clone());
+        let mut cfg = self.unpatched_config(base, &key, kube_context.clone());
 
         cfg.target = match self.target.as_resolved(service_name, kube_context) {
             Ok(resolved) => resolved,
@@ -556,14 +584,58 @@ impl ServiceConfig {
             },
         };
 
-        cfg.feature.env = self.env;
+        if let Some(patch) = self.config_patch {
+            cfg = apply_config_patch(cfg, patch, &key)?;
+        }
 
+        Ok((cfg, self.run))
+    }
+
+    /// The mirrord config `mirrord up` merges this service's `config_patch` into, as JSON, but
+    /// without the target, which needs the cluster to resolve. Lets a patch be checked against
+    /// what it is merged into without running it (e.g. in `mirrord mcp`), where an issue can be
+    /// told apart as the patch's or a setting's. Takes the service on its own, so the rest of a
+    /// `mirrord-up.yaml` doesn't have to be valid.
+    ///
+    /// Like [`UpConfig::verify_services`], ignores `MIRRORD_*` environment variables.
+    pub fn unpatched_config_json(
+        &self,
+        service_name: &Arc<str>,
+        common: &CommonConfig,
+        key: &EnvKey,
+    ) -> Result<serde_json::Value, UpError> {
+        let base = common.base_config(&mut ConfigContext::default().strict_env(true))?;
+        let kube_context = UpKubeContext {
+            command_arg: None,
+            common_context: common.context.clone(),
+        }
+        .get_context(self.context.clone());
+        let config = self.unpatched_config(base, key, kube_context);
+        patchable(config, key).map_err(|source| {
+            ConfigPatchError {
+                service: service_name.clone(),
+                source: ConfigPatchErrorKind::Serialize(source),
+            }
+            .into()
+        })
+    }
+
+    /// The mirrord config of this service before its target is set and its `config_patch` is
+    /// merged in: `base` with the service's own settings and what its mode implies.
+    fn unpatched_config(
+        &self,
+        mut cfg: LayerConfig,
+        key: &EnvKey,
+        kube_context: Option<Arc<str>>,
+    ) -> LayerConfig {
+        cfg.kube_context = kube_context.as_deref().map(Into::into);
+        cfg.feature.env = self.env.clone();
         cfg.feature.network.incoming.mode = self.default_mode.into();
 
         match self.default_mode {
             ServiceMode::Split | ServiceMode::Mirror => {
                 cfg.feature.network.incoming.http_filter = if self.http_filter.is_filter_set() {
-                    self.http_filter
+                    self.http_filter.clone()
                 } else {
                     HttpFilterConfig {
                         header_filter: Some(format!(
@@ -575,18 +647,12 @@ impl ServiceConfig {
                 };
 
                 cfg.feature.split_queues =
-                    SplitQueuesConfig::all_wildcard_with_mode(&key, self.default_mode.into());
+                    SplitQueuesConfig::all_wildcard_with_mode(key, self.default_mode.into());
             }
 
+            // `Replace` mode should steal all traffic from the copied target, so `http_filter` is
+            // ignored; `service_configs` tells the user.
             ServiceMode::Replace => {
-                // `Replace` mode should steal all traffic from the copied target. Log and ignore
-                // the filter.
-                if self.http_filter.is_filter_set() {
-                    eprintln!(
-                        "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
-                    );
-                }
-
                 cfg.feature.copy_target = CopyTargetConfig {
                     enabled: true,
                     scale_down: true,
@@ -596,14 +662,9 @@ impl ServiceConfig {
             }
         }
 
-        cfg.feature.network.incoming.ignore_ports = self.ignore_ports.into_iter().collect();
+        cfg.feature.network.incoming.ignore_ports = self.ignore_ports.iter().copied().collect();
         cfg.key = key.clone();
-
-        if let Some(patch) = self.config_patch {
-            cfg = apply_config_patch(cfg, patch, &key)?;
-        }
-
-        Ok((cfg, self.run))
+        cfg
     }
 
     fn resolve_target(
@@ -660,18 +721,7 @@ fn apply_config_patch(
     patch: serde_json::Value,
     key: &EnvKey,
 ) -> Result<LayerConfig, ConfigPatchErrorKind> {
-    let mut layer_config_json =
-        serde_json::to_value(config).map_err(ConfigPatchErrorKind::Serialize)?;
-
-    // `LayerConfig` preserves whether a key was provided or generated in its serialized form,
-    // while a user-facing mirrord config represents it as a string.
-    if let Some(object) = layer_config_json.as_object_mut() {
-        object.insert(
-            "key".to_owned(),
-            serde_json::Value::String(key.as_str().to_owned()),
-        );
-    }
-
+    let mut layer_config_json = patchable(config, key).map_err(ConfigPatchErrorKind::Serialize)?;
     json_patch::merge(&mut layer_config_json, &patch);
 
     let file_config: LayerFileConfig =
@@ -685,6 +735,22 @@ fn apply_config_patch(
     config.verify(&mut context)?;
 
     Ok(config)
+}
+
+/// `config` as the JSON a `config_patch` is merged into.
+fn patchable(config: LayerConfig, key: &EnvKey) -> Result<serde_json::Value, serde_json::Error> {
+    let mut json = serde_json::to_value(config)?;
+
+    // `LayerConfig` preserves whether a key was provided or generated in its serialized form,
+    // while a user-facing mirrord config represents it as a string.
+    if let Some(object) = json.as_object_mut() {
+        object.insert(
+            "key".to_owned(),
+            serde_json::Value::String(key.as_str().to_owned()),
+        );
+    }
+
+    Ok(json)
 }
 
 /// All the information necessary to start and manage one of the child
@@ -848,10 +914,9 @@ impl UpConfig {
                 }
             };
 
-            // As in the service's `mirrord exec` session, where a missing target means targetless.
-            let mut context = ConfigContext::default()
-                .strict_env(true)
-                .empty_target_final(true);
+            // As in the service's `mirrord exec` session, which doesn't take a missing target for
+            // targetless when verifying; `validate_targets` checks the mode against it below.
+            let mut context = ConfigContext::default().strict_env(true);
             if let Err(source) = config.verify(&mut context) {
                 errors.push(ServiceError::Validation {
                     service: service_name.clone(),
@@ -949,18 +1014,27 @@ impl UpConfig {
     /// [`Self::unresolved_targets`] -- this method will panic
     /// otherwise. Entries that are used to resolve a target will be
     /// removed from the `resolved_targets`.
+    ///
+    /// `context` is what the configs are generated with, which reads `MIRRORD_*` environment
+    /// variables unless it's [`ConfigContext::strict_env`].
     pub(crate) fn service_configs(
         self,
         key: &EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
+        context: &mut ConfigContext,
     ) -> Result<Vec<SubprocessCfg>, UpError> {
-        let base_config = self.common.base_config(&mut ConfigContext::default())?;
+        let base_config = self.common.base_config(context)?;
 
         self.services
             .into_iter()
             .map(|(service_name, svc)| {
                 let mode = svc.default_mode;
+                if mode == ServiceMode::Replace && svc.http_filter.is_filter_set() {
+                    eprintln!(
+                        "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
+                    );
+                }
                 let (config, run) = svc
                     .assemble(
                         &service_name,
@@ -1159,6 +1233,77 @@ mod tests {
     /// Helper: parse YAML into UpConfig via the two-layer config system.
     fn parse(yaml: &str) -> UpConfig {
         serde_saphyr::from_str(yaml).unwrap()
+    }
+
+    /// The value at the `mirrord.json` path `layer_path` of the config `mirrord up` generates for
+    /// the one service of `yaml`.
+    fn layer_value(yaml: &str, layer_path: &str) -> serde_json::Value {
+        let config = parse(yaml);
+        let up_context = UpKubeContext {
+            command_arg: None,
+            common_context: config.common.context.clone(),
+        };
+        let mut configs = config
+            .service_configs(
+                &EnvKey::Provided("key".to_owned()),
+                &mut HashMap::new(),
+                up_context,
+                &mut ConfigContext::default().strict_env(true),
+            )
+            .unwrap();
+        value_at(
+            &serde_json::to_value(configs.remove(0).config).unwrap(),
+            layer_path,
+        )
+    }
+
+    fn value_at(config: &serde_json::Value, layer_path: &str) -> serde_json::Value {
+        let pointer: String = layer_path
+            .split('.')
+            .map(|segment| format!("/{segment}"))
+            .collect();
+        config.pointer(&pointer).cloned().unwrap_or_default()
+    }
+
+    /// Each setting of [`COMMON_LAYER_PATHS`] and [`SERVICE_LAYER_PATHS`] changes the
+    /// `mirrord.json` option it's listed with, so the tables can't drift from what `mirrord up`
+    /// does.
+    #[test]
+    fn layer_paths_match_the_generated_config() {
+        let value = |setting: &str| match setting {
+            "accept_invalid_certificates" => "true",
+            "operator" | "telemetry" => "false",
+            "context" => "my-context",
+            "target" => "{ path: deployment/api }",
+            "env" => "{ include: A }",
+            "default_mode" => "mirror",
+            "http_filter" => "{ header_filter: x }",
+            "ignore_ports" => "[80]",
+            other => panic!("no value to set `{other}` to"),
+        };
+        let service =
+            |extra: &str| format!("services:\n  api:\n{extra}    run:\n      command: [x]\n");
+        let base = service("    target: none\n");
+
+        for (setting, layer_path) in COMMON_LAYER_PATHS {
+            let changed = format!("common:\n  {setting}: {}\n{base}", value(setting));
+            assert_ne!(
+                layer_value(&base, layer_path),
+                layer_value(&changed, layer_path),
+                "common.{setting} -> {layer_path}"
+            );
+        }
+        for (setting, layer_path) in SERVICE_LAYER_PATHS {
+            let mut extra = format!("    {setting}: {}\n", value(setting));
+            if *setting != "target" {
+                extra.push_str("    target: none\n");
+            }
+            assert_ne!(
+                layer_value(&base, layer_path),
+                layer_value(&service(&extra), layer_path),
+                "services.*.{setting} -> {layer_path}"
+            );
+        }
     }
 
     fn windows_validation_fixture() -> UpConfig {
@@ -1379,6 +1524,7 @@ mod tests {
                 &EnvKey::Provided("sqs-session".to_owned()),
                 &mut HashMap::new(),
                 UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
             )
             .unwrap();
         assert_eq!(services.len(), 1);
@@ -1415,6 +1561,7 @@ mod tests {
                 &EnvKey::Provided("sqs-mirror".to_owned()),
                 &mut HashMap::new(),
                 UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
             )
             .unwrap();
         assert_eq!(services.len(), 1);
@@ -1454,7 +1601,12 @@ mod tests {
             &key,
         )
         .unwrap()
-        .service_configs(&key, &mut HashMap::new(), UpKubeContext::default())
+        .service_configs(
+            &key,
+            &mut HashMap::new(),
+            UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
+        )
         .unwrap();
 
         let service = services.pop().unwrap();
@@ -1491,6 +1643,7 @@ mod tests {
             &EnvKey::Provided("jagiellon".to_owned()),
             &mut HashMap::new(),
             UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
         )
         .err()
         .expect("invalid split queue shape should fail schema validation");
@@ -1524,6 +1677,7 @@ mod tests {
             &EnvKey::Provided("jadwiga".to_owned()),
             &mut HashMap::new(),
             UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
         )
         .err()
         .expect("invalid jq should fail config validation");
@@ -1567,6 +1721,7 @@ mod tests {
             &EnvKey::Provided("a-session".to_owned()),
             &mut HashMap::new(),
             UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
         )
         .unwrap();
         assert_eq!(services.len(), 1);
@@ -1606,6 +1761,7 @@ mod tests {
             &EnvKey::Provided("a-session".to_owned()),
             &mut HashMap::new(),
             UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
         )
         .unwrap();
         assert_eq!(services.len(), 1);
@@ -1685,6 +1841,7 @@ mod tests {
                 &EnvKey::Provided("a-session".to_owned()),
                 &mut HashMap::new(),
                 UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
             )
             .unwrap();
 
@@ -1720,6 +1877,7 @@ mod tests {
             &EnvKey::Provided("a-session".to_owned()),
             &mut HashMap::new(),
             UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
         )
         .unwrap();
 
@@ -1977,7 +2135,12 @@ mod tests {
         ]);
 
         let subprocesses: HashMap<String, SubprocessCfg> = config
-            .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
+            .service_configs(
+                &key,
+                &mut resolved_targets,
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
             .unwrap()
             .into_iter()
             .map(|cfg| (cfg.service_name.to_string(), cfg))
@@ -2038,7 +2201,12 @@ mod tests {
         let mut resolved_targets = HashMap::new();
 
         config
-            .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
+            .service_configs(
+                &key,
+                &mut resolved_targets,
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
             .unwrap();
     }
 
@@ -2065,7 +2233,12 @@ mod tests {
         )]);
 
         config
-            .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
+            .service_configs(
+                &key,
+                &mut resolved_targets,
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
             .unwrap();
     }
 
@@ -2092,7 +2265,12 @@ mod tests {
         )]);
 
         config
-            .service_configs(&key, &mut resolved_targets, UpKubeContext::default())
+            .service_configs(
+                &key,
+                &mut resolved_targets,
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
             .unwrap();
     }
 
