@@ -3518,9 +3518,11 @@ mod test {
             kube_context: None,
         };
 
+        let values = HashMap::from([("password".to_owned(), "secret".to_owned())]);
         let mut paths = Vec::new();
+        let mut bodies = Vec::new();
         let result = tokio::select! {
-            result = api.create_credential_secret("team", "branch", HashMap::new()) => result,
+            result = api.create_credential_secret("team", "branch", values) => result,
             () = async {
                 while let Some((request, send)) = handle.next_request().await {
                     let path = request.uri().path().to_owned();
@@ -3529,8 +3531,10 @@ mod test {
                     } else {
                         StatusCode::OK
                     };
+                    let body = request.into_body().collect_bytes().await.unwrap();
 
                     paths.push(path);
+                    bodies.push(serde_json::from_slice::<serde_json::Value>(&body).unwrap());
                     send.send_response(
                         Response::builder()
                             .status(status)
@@ -3541,7 +3545,17 @@ mod test {
             } => unreachable!("the mock service lives as long as the client"),
         };
 
+        let expected_body = serde_json::json!({
+            "namespace": "team",
+            "branch_id": "branch",
+            "values": {"password": "secret"},
+        });
+
         assert_eq!(paths, expected_paths);
+        assert!(
+            bodies.iter().all(|body| *body == expected_body),
+            "{bodies:?}"
+        );
         assert_eq!(result.is_ok(), succeeds, "{result:?}");
     }
 }
