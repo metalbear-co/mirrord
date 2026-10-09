@@ -181,6 +181,7 @@ greptile
 Greptile
 Liquibase
 Jev
+devshell
 
 # Cloud services
 SNS
