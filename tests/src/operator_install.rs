@@ -23,11 +23,11 @@ use kube::{
     discovery::{verbs, Discovery},
     Api, Client, Config, ResourceExt,
 };
+use mirrord_command::resolve_tokio_command;
 use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME};
 use mirrord_test_utils::run_command::run_mirrord;
 use rstest::rstest;
 use tempfile::TempDir;
-use tokio::process::Command;
 
 use crate::utils::client::{kube_client, KubeClient};
 
@@ -160,7 +160,7 @@ async fn operator_status(client: &Client) -> kube::Result<MirrordOperatorCrd> {
 /// directory, so that `helm repo add` does not change the helm repositories of the user.
 async fn run_with_helm(program: &str, args: &[&str]) {
     let helm_home = TempDir::new().unwrap();
-    let output = Command::new(program)
+    let output = resolve_tokio_command(program)
         .args(args)
         .env("HELM_CONFIG_HOME", helm_home.path().join("config"))
         .env("HELM_CACHE_HOME", helm_home.path().join("cache"))
