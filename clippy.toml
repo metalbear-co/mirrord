@@ -1,3 +1,5 @@
+# Clippy reads only the nearest `clippy.toml`, so a crate with its own file never sees this one.
+# `layer-lib`, `layer-win` and `utils-win` have one: copy a new ban into theirs too.
 disallowed-methods = [
     { path = "std::process::Command::new", reason = "on Windows only `.exe` is appended to bare program names, so `.cmd`/`.bat` shims such as `npm.cmd` are never found", replacement = "mirrord_command::resolve_command" },
     # `allow-invalid` because crates that don't depend on tokio can't resolve this path.

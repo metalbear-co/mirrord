@@ -1643,7 +1643,7 @@ mod tests {
 
         for crash in [false, true] {
             let monitor = quiet_session(&session);
-            let mut child = std::process::Command::new("ping")
+            let mut child = mirrord_command::resolve_command("ping")
                 .args(["-n", "60", "127.0.0.1"])
                 .stdout(std::process::Stdio::null())
                 .spawn()
@@ -1840,7 +1840,7 @@ mod tests {
         // A junction is a reparse point any user can create. It is named as a log, so only the
         // link check keeps it out.
         let junction = session.0.join(layer_log_name("junction", 2));
-        let created = std::process::Command::new("cmd")
+        let created = mirrord_command::resolve_command("cmd")
             .args(["/C", "mklink", "/J"])
             .arg(&junction)
             .arg(&outside.0)
@@ -1965,7 +1965,7 @@ mod tests {
         // Holds the monitor's open of the log until the test lets go of it.
         let oplock = BatchOplock::request(&log_path);
 
-        let mut child = std::process::Command::new("ping")
+        let mut child = mirrord_command::resolve_command("ping")
             .args(["-n", "60", "127.0.0.1"])
             .stdout(std::process::Stdio::null())
             .spawn()
