@@ -111,8 +111,10 @@ pub const PREFETCH_TIMEOUT_DEFAULT: u64 = 30;
 /// every drive, and `^D:/Workspaces/` matches it on `D:` only. Like the rest of a pattern, the
 /// drive letter ignores case.
 ///
-/// Write patterns with forward slashes. A backslash in a pattern never matches, since neither
-/// form has one, and mirrord warns about a pattern that looks like a path with backslashes.
+/// Write patterns with forward slashes. A pattern that needs a backslash in the path (`\\`, or
+/// `C:\` copied from Explorer) never matches, since neither form has one, and mirrord warns about
+/// it. A backslash that escapes a regex character (`\.`, `\d`), or one choice in a class
+/// (`[\\/]`), is fine.
 ///
 /// For a path from the environment, use the `path_pattern` template filter. It gives the path's
 /// form with the drive, escaped so that it matches literally and fits in any config format.
@@ -380,8 +382,8 @@ impl FsConfig {
     }
 
     /// The patterns, with the list each is in, that look like a Windows path written with
-    /// backslashes: they start with a drive and a backslash (`C:\Repos`), or match a backslash
-    /// (`\\`), which no path the layer matches holds.
+    /// backslashes: they start with a drive and a backslash (`C:\Repos`), or need a backslash
+    /// (`\\`) to match, which no path the layer matches holds.
     fn backslash_path_patterns(&self) -> impl Iterator<Item = (&'static str, &str)> {
         let lists = [
             ("read_write", &self.read_write),
@@ -409,9 +411,37 @@ impl FsConfig {
                 unanchored.as_bytes(),
                 [letter, b':', b'\\', ..] if letter.is_ascii_alphabetic()
             );
-            starts_with_drive || pattern.contains(r"\\")
+            starts_with_drive || needs_a_backslash(pattern)
         })
     }
+}
+
+/// Whether `pattern` has an escaped backslash (`\\`) outside a character class, which a path must
+/// hold for the pattern to match.
+///
+/// In a class, a backslash is one choice among others: `[\\/]` matches the `/` the layer's paths
+/// have.
+fn needs_a_backslash(pattern: &str) -> bool {
+    let mut class_depth = 0_usize;
+    let mut characters = pattern.chars().peekable();
+    while let Some(character) = characters.next() {
+        match character {
+            '\\' => {
+                if characters.next() == Some('\\') && class_depth == 0 {
+                    return true;
+                }
+            }
+            '[' => {
+                class_depth += 1;
+                // A `]` first in a class, after any `^`, is a literal `]`, not the class's end.
+                characters.next_if_eq(&'^');
+                characters.next_if_eq(&']');
+            }
+            ']' if class_depth > 0 => class_depth -= 1,
+            _ => {}
+        }
+    }
+    false
 }
 
 impl From<FsModeConfig> for AnalyticValue {
@@ -503,6 +533,7 @@ mod tests {
     #[case::escaped_for_the_regex(r"C:\\Repos\\app\\appsettings\.json")]
     #[case::anchored(r"^C:\Repos\app")]
     #[case::without_a_drive(r"\\Repos\\app")]
+    #[case::after_a_class(r"^/[ab]\\Repos")]
     fn a_path_with_backslashes_is_warned_about_in_every_list(#[case] pattern: &str) {
         let patterns = || Some(VecOrSingle::Single(pattern.to_owned()));
         let lists = [
@@ -556,12 +587,14 @@ mod tests {
     }
 
     /// Ordinary regexes use backslashes too, to escape a `.` or for a class like `\d`: those are
-    /// not paths, and get no warning.
+    /// not paths, and get no warning. Nor does a backslash that is one choice in a class.
     #[cfg(windows)]
     #[rstest]
     #[case::forward_slashes("^C:/Repos/app/")]
     #[case::escaped_dot(r".+\.json$")]
     #[case::digit_class(r"^/logs/\d+\.log$")]
+    #[case::either_separator(r"^C:[\\/]Repos[\\/]")]
+    #[case::bracket_first_in_a_class(r"^/Repos/[]\\]")]
     fn a_regex_escape_is_not_warned_about(#[case] pattern: &str) {
         let config = FsConfig {
             read_only: Some(VecOrSingle::Single(pattern.to_owned())),
