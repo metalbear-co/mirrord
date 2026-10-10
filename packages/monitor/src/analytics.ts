@@ -11,8 +11,17 @@ declare const __MIRRORD_VERSION__: string
  * Users upgrade on their own schedule, so without it a crash fixed in a newer release is
  * indistinguishable from a live regression.
  *
- * Reported as the person property `version`, matching what the CLI sets on
- * `client_session_v1` so one breakdown key spans both surfaces.
+ * Reported twice, because the two scopes fail differently:
+ *
+ * - As the event property `mirrord_version`, stamped on every event in `before_send`. This
+ *   is the one triage reads. It travels in the same request as the event it describes, so
+ *   an event is either attributed or absent, never attributed to nothing.
+ * - As the person property `version`, matching what the CLI sets on `client_session_v1` so
+ *   one breakdown key spans both surfaces. This is a single `$set` per page load, and a
+ *   person whose `$set` never lands stays unattributed on every event they ever send.
+ *
+ * Stamping in `before_send` rather than registering a super property keeps the value out of
+ * persisted storage, so a later run on a different version cannot inherit a stale one.
  */
 const MIRRORD_VERSION: string | undefined =
   typeof __MIRRORD_VERSION__ === 'undefined' ? undefined : __MIRRORD_VERSION__
@@ -56,6 +65,16 @@ export function initAnalytics(telemetryEnabled: boolean) {
         linked_flag: true,
         url_trigger: true,
       })
+    },
+    before_send: (event) => {
+      if (!event) return event
+      return {
+        ...event,
+        properties: {
+          ...event.properties,
+          mirrord_version: MIRRORD_VERSION ?? 'unknown',
+        },
+      }
     },
   })
   initialized = true
