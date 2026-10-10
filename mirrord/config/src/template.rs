@@ -102,7 +102,9 @@ pub fn regex_escape(text: &str) -> Result<String, PatternFilterError> {
 /// On Windows the path gets forward slashes and keeps its drive (`C:\Users\me` becomes
 /// `C:/Users/me`), so it matches on that drive only. A path that exists also matches in its
 /// canonical form: a short 8.3 name, common in `%TEMP%` (`C:\Users\FIRSTN~1`), also matches the
-/// long name a program may open instead, and a link also matches its target.
+/// long name a program may open instead, and a link also matches its target. A canonical form on a
+/// network share (`\\?\UNC\server\share\x`, for a mapped `H:\x`) is left out: it has no drive, so
+/// it would match the path on every drive.
 ///
 /// The result never ends in a separator. A pattern adds `/` to match what's inside a folder:
 /// `"^{{ get_env(name='TEMP') | path_pattern }}/"`.
@@ -114,7 +116,7 @@ pub fn path_pattern(path: &str) -> Result<String, PatternFilterError> {
     let given = pattern_form(path);
     let canonical = std::fs::canonicalize(path)
         .ok()
-        .and_then(|canonical| canonical.to_str().map(pattern_form));
+        .and_then(|canonical| canonical.to_str().and_then(canonical_form));
 
     match canonical {
         // The patterns ignore case, so a canonical form that differs only in case adds nothing.
@@ -148,6 +150,16 @@ fn pattern_form(path: &str) -> String {
     };
 
     path.trim_end_matches('/').to_owned()
+}
+
+/// `canonical`, the canonical form of a path, in the form the `feature.fs` patterns match.
+///
+/// [`None`] on Windows for a canonical path with no drive, such as one on a network share.
+fn canonical_form(canonical: &str) -> Option<String> {
+    #[cfg(windows)]
+    str_win::path_to_unix_path(canonical)?.drive?;
+
+    Some(pattern_form(canonical))
 }
 
 #[cfg(test)]
@@ -288,6 +300,18 @@ mod tests {
         assert!(
             !pattern.is_match("C:/Users/JoXDoe Work 1/AppData/Local/Temp"),
             "`.`, `(` and `[` are literal"
+        );
+    }
+
+    /// A canonical form on a network share has no drive, so it's left out rather than match the
+    /// path on every drive.
+    #[cfg(windows)]
+    #[test]
+    fn a_canonical_form_without_a_drive_is_left_out() {
+        assert_eq!(canonical_form(r"\\?\UNC\server\share\Users\me"), None);
+        assert_eq!(
+            canonical_form(r"\\?\C:\Users\me").as_deref(),
+            Some("C:/Users/me")
         );
     }
 
