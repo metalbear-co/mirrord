@@ -45,37 +45,47 @@ impl FileRemapper {
     // Don't instrument trace this or `change_path` because it spams a lot
     pub fn change_path_str<'p>(&self, path_str: &'p str) -> Cow<'p, str> {
         self.change_pattern_path(path_str.into())
+            .unwrap_or(Cow::Borrowed(path_str))
     }
 
     /// Rewrites `path` with the first mapping that matches any of its forms (see
-    /// [`PatternPath`]), returning the path the agent opens.
+    /// [`PatternPath`]), returning the path the agent opens, or [`None`] when no mapping matches.
+    ///
+    /// A mapping can match and still give back the path without its drive (`^C:/data/(.*)$`
+    /// mapped to `/data/$1`), so only [`None`] means the path wasn't mapped.
     ///
     /// A mapping that matches the path without its drive replaces in that form, so a value that
     /// rewrites only part of the path can't pull the drive into it. Only a mapping that needs the
-    /// drive to match (`^C:/Repos/`) replaces in the form with the drive. The result never keeps
-    /// a drive, because the remote has none.
+    /// drive to match (`^C:/Repos/`) replaces in the form with the drive. The result of a path
+    /// with a drive never keeps one, because the remote has none.
     // Don't instrument trace this either, for the same reason.
-    pub fn change_pattern_path<'p>(&self, path: PatternPath<'p>) -> Cow<'p, str> {
+    pub fn change_pattern_path<'p>(&self, path: PatternPath<'p>) -> Option<Cow<'p, str>> {
         let first_without_drive = self.filter.matches(path.path).iter().next();
         let first_with_drive = path.with_drive.and_then(|with_drive| {
             let index = self.filter.matches(with_drive).iter().next()?;
             Some((index, with_drive))
         });
 
-        match (first_without_drive, first_with_drive) {
+        let replaced = match (first_without_drive, first_with_drive) {
             // A mapping that matches with the drive and comes first can't match without it,
             // or it would be `first_without_drive`.
             (without, Some((index, with_drive)))
                 if without.is_none_or(|without| index < without) =>
             {
-                match self.replace_path_str(index, with_drive) {
-                    Cow::Borrowed(replaced) => Cow::Borrowed(strip_drive(replaced)),
-                    Cow::Owned(replaced) => Cow::Owned(strip_drive(&replaced).to_owned()),
-                }
+                self.replace_path_str(index, with_drive)
             }
             (Some(index), _) => self.replace_path_str(index, path.path),
-            (None, _) => Cow::Borrowed(path.path),
+            (None, _) => return None,
+        };
+
+        // Only a Windows path has a drive form. On Unix, `C:/srv` is a relative path, kept as-is.
+        if path.with_drive.is_none() {
+            return Some(replaced);
         }
+        Some(match replaced {
+            Cow::Borrowed(replaced) => Cow::Borrowed(strip_drive(replaced)),
+            Cow::Owned(replaced) => Cow::Owned(strip_drive(&replaced).to_owned()),
+        })
     }
 
     // Don't instrument trace this or `change_path_str` because it spams a lot
@@ -92,8 +102,9 @@ impl FileRemapper {
 /// `replaced` without a leading drive (`C:/srv/app.json` becomes `/srv/app.json`), so the agent
 /// never gets one.
 ///
-/// Only a mapping that needs the drive to match replaces in the form with the drive, and its value
-/// may still carry one, as in `^C:/Repos/(.*)` mapped to `C:/srv/$1`.
+/// A mapping's value may carry a drive, as in `^/Repos/(.*)` mapped to `C:/srv/$1`, and so may the
+/// result of a mapping that replaces in the form with the drive (`^(C:)/Repos/(.*)` to
+/// `$1/srv/$2`).
 fn strip_drive(replaced: &str) -> &str {
     match replaced.as_bytes() {
         [letter, b':', rest @ ..]
@@ -180,8 +191,14 @@ mod tests {
     fn a_mapping_without_a_drive_applies_on_every_drive() {
         let remapper = remapper(&[("^/Repos/app/(.*)$", "/app/$1")]);
 
-        assert_eq!(remapper.change_pattern_path(ON_C), "/app/appsettings.json");
-        assert_eq!(remapper.change_pattern_path(ON_D), "/app/appsettings.json");
+        assert_eq!(
+            remapper.change_pattern_path(ON_C).as_deref(),
+            Some("/app/appsettings.json")
+        );
+        assert_eq!(
+            remapper.change_pattern_path(ON_D).as_deref(),
+            Some("/app/appsettings.json")
+        );
     }
 
     /// A mapping that names a drive rewrites paths on that drive only.
@@ -189,11 +206,26 @@ mod tests {
     fn a_mapping_with_a_drive_applies_to_that_drive_only() {
         let remapper = remapper(&[("^C:/Repos/app/(.*)$", "/app/$1")]);
 
-        assert_eq!(remapper.change_pattern_path(ON_C), "/app/appsettings.json");
+        assert_eq!(
+            remapper.change_pattern_path(ON_C).as_deref(),
+            Some("/app/appsettings.json")
+        );
         assert_eq!(
             remapper.change_pattern_path(ON_D),
-            "/Repos/app/appsettings.json",
+            None,
             "a path on D: is left alone"
+        );
+    }
+
+    /// A drive mapping whose result is the path without its drive still counts as a mapping, so
+    /// the filter sees the mapped (remote) path rather than the local one with its drive.
+    #[test]
+    fn a_mapping_that_only_drops_the_drive_still_maps() {
+        let remapper = remapper(&[("^C:/Repos/app/(.*)$", "/Repos/app/$1")]);
+
+        assert_eq!(
+            remapper.change_pattern_path(ON_C).as_deref(),
+            Some("/Repos/app/appsettings.json")
         );
     }
 
@@ -203,7 +235,10 @@ mod tests {
     fn a_full_windows_path_in_forward_slashes_maps() {
         let remapper = remapper(&[("C:/Repos/app/appsettings.json", "/app/appsettings.json")]);
 
-        assert_eq!(remapper.change_pattern_path(ON_C), "/app/appsettings.json");
+        assert_eq!(
+            remapper.change_pattern_path(ON_C).as_deref(),
+            Some("/app/appsettings.json")
+        );
     }
 
     /// A pattern that matches without the drive replaces in that form, so a value that rewrites
@@ -213,13 +248,18 @@ mod tests {
         let remapper = remapper(&[(r"appsettings\.json$", "settings.json")]);
 
         assert_eq!(
-            remapper.change_pattern_path(ON_C),
-            "/Repos/app/settings.json"
+            remapper.change_pattern_path(ON_C).as_deref(),
+            Some("/Repos/app/settings.json")
         );
     }
 
-    /// A drive left in the result of a drive mapping is dropped, since the remote has no drives.
+    /// A drive left in the result of a mapping is dropped, since the remote has no drives.
     #[rstest]
+    #[case::drive_in_the_value_of_a_mapping_without_a_drive(
+        "^/Repos/app/(.*)$",
+        "C:/srv/$1",
+        "/srv/appsettings.json"
+    )]
     #[case::drive_in_the_value("^C:/Repos/app/(.*)$", "C:/srv/$1", "/srv/appsettings.json")]
     #[case::drive_kept_by_a_capture("^(C:)/Repos/app/(.*)$", "$1/srv/$2", "/srv/appsettings.json")]
     #[case::only_the_drive_is_left("^(C:)/Repos/app/appsettings.json$", "$1", "/")]
@@ -230,7 +270,7 @@ mod tests {
     ) {
         let remapper = remapper(&[(pattern, value)]);
 
-        assert_eq!(remapper.change_pattern_path(ON_C), expect);
+        assert_eq!(remapper.change_pattern_path(ON_C).as_deref(), Some(expect));
     }
 
     /// Text that only looks like the start of a drive is left alone.

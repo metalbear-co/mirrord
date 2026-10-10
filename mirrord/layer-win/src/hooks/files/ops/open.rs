@@ -55,6 +55,7 @@
 //! - They grow in linear numeric order from the starting point.
 
 use std::{
+    borrow::Cow,
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -182,8 +183,11 @@ pub(in crate::hooks::files) unsafe fn handle(
             with_drive: with_drive.as_deref(),
         };
         let mapper = setup.file_remapper();
-        let unix_path = mapper.change_pattern_path(pattern_path).into_owned();
-        let mapped = requested_path.path != unix_path;
+        let mapped_path = mapper
+            .change_pattern_path(pattern_path)
+            .map(Cow::into_owned);
+        let mapped = mapped_path.is_some();
+        let unix_path = mapped_path.unwrap_or_else(|| requested_path.path.clone());
         if mapped {
             tracing::debug!(
                 "nt_create_file_hook: mapping matched, \"{}\" -> \"{}\"",
