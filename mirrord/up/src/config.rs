@@ -1453,6 +1453,19 @@ mod tests {
     }
 
     #[test]
+    fn windows_validation_rejects_selected_container_services() {
+        let mut config = windows_validation_fixture();
+        config
+            .select_services(&["exec".to_owned(), "zeta-container".to_owned()])
+            .unwrap();
+
+        assert!(matches!(
+            config.validate_windows(false),
+            Err(WindowsSupportError::Container(name)) if &*name == "zeta-container"
+        ));
+    }
+
+    #[test]
     fn windows_validation_rejects_ci_for_exec_services() {
         let mut config = windows_validation_fixture();
         config.select_services(&["exec".to_owned()]).unwrap();
