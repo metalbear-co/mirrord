@@ -5,7 +5,7 @@ use std::{
 };
 
 use mirrord_agent_env::envs;
-use mirrord_agent_iptables::{ChainNames, IPTablesWrapper, SafeIpTables, error::IPTablesError};
+use mirrord_agent_iptables::{ChainNames, SafeIpTables, error::IPTablesError};
 use nix::sys::socket::{
     self, SockaddrIn, SockaddrIn6,
     sockopt::{Ip6tOriginalDst, OriginalDst},
@@ -20,7 +20,7 @@ use crate::entrypoint::IPTABLES_IDENTIFIER;
 /// and an iptables/ip6tables wrapper to set rules that send traffic to that listener.
 pub struct IpTablesRedirector {
     /// For altering iptables/ip6tables rules.
-    iptables: Option<SafeIpTables<IPTablesWrapper>>,
+    iptables: Option<SafeIpTables>,
     /// Port of [`Self::listener`](Self::listener).
     ///
     /// Kept as a field, so that we don't have to call [`TcpListener::local_addr`]

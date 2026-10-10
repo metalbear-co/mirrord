@@ -2,6 +2,7 @@ use std::{fmt, num::ParseIntError};
 
 pub use http::Error as HttpError;
 use mirrord_auth::error::ApiKeyError;
+use mirrord_config::config::ConfigError;
 use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
 use tower::retry::backoff::InvalidBackoff;
@@ -126,6 +127,45 @@ pub enum OperatorApiError {
 
     #[error("failed to create credential secret: {0}")]
     CredentialSecretCreation(String),
+
+    /// The operator could not resolve `feature.db_branches` against the target's
+    /// `MirrordSplitConfig`. The message comes from the operator and names the workload, the
+    /// namespace, and the configs it looked at.
+    #[error("failed to resolve db_branches from the target's MirrordSplitConfig: {0}")]
+    SplitConfigDbBranches(String),
+
+    /// A resolved `dbBranches` entry does not parse with this CLI's config version.
+    #[error(
+        "dbBranches entry `{id}` on MirrordSplitConfig `{split_configs}` uses a setting this \
+         mirrord version does not know: {error}"
+    )]
+    SplitConfigDbBranchEntry {
+        id: String,
+        split_configs: String,
+        error: String,
+    },
+
+    /// The entries resolved from the target's `MirrordSplitConfig` fail a check an inline
+    /// `feature.db_branches` fails at config load, such as a connection variable that
+    /// `feature.env.override` also sets.
+    #[error(
+        "the db_branches resolved from the target's MirrordSplitConfig do not fit this config: {0}"
+    )]
+    ResolvedDbBranchesInvalid(#[source] ConfigError),
+
+    /// Attaching to a branch another session created under the same key, from an entry whose
+    /// copy mode differs from the one the branch was created with.
+    #[error(
+        "branch `{branch_id}` exists with copy mode \"{existing_mode}\", this service asked for \
+         \"{requested_mode}\""
+    )]
+    BranchCopyModeMismatch {
+        branch_id: String,
+        existing_mode: String,
+        requested_mode: String,
+        /// The workload whose session created the branch.
+        creator: String,
+    },
 
     #[error("failed to create preview secret mounts: {0}")]
     PreviewSecretMountCreation(String),

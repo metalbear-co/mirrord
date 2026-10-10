@@ -854,6 +854,45 @@ impl LayerConfig {
         self.feature.fs.read_only = Some(append_dedup(existing, patterns));
     }
 
+    /// The checks that reach into `feature.db_branches`: each branch's own invariants and the
+    /// env overrides that would undo a branch's redirect. Run by [`Self::verify`], and again
+    /// once a `"*"` / ids request has been resolved into inline entries, which `verify` could
+    /// not see.
+    pub fn verify_db_branches(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+        self.feature.db_branches.verify(context)?;
+
+        // guard against env overrides conflicting with db branching keys
+        if let Some(overrides) = self.feature.env.r#override.as_ref()
+            && !overrides.is_empty()
+        {
+            let mut conflicts: Vec<&str> = self
+                .feature
+                .db_branches
+                .iter()
+                .flat_map(DatabaseBranchConfig::connection_env_keys)
+                .filter(|key| overrides.contains_key(*key))
+                .collect();
+
+            if conflicts.is_empty().not() {
+                conflicts.sort();
+                conflicts.dedup();
+                return Err(ConfigError::ConflictAt {
+                    setting: "feature.env.override".into(),
+                    message: format!(
+                        "the following environment variables appear in both \
+                         `feature.env.override` and `feature.db_branches[].connection`: {}. \
+                         Database branching redirects these variables through the operator, \
+                         so overriding them locally would defeat the redirection. Remove \
+                         them from `feature.env.override`.",
+                        conflicts.join(", "),
+                    ),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     /// Verifies that there are no conflicting settings in this config.
     ///
     /// Fills the given [`ConfigContext`] with warnings.
@@ -1180,37 +1219,7 @@ impl LayerConfig {
         self.feature.network.dns.verify(context)?;
         self.feature.network.outgoing.verify(context)?;
         self.feature.split_queues.verify(context)?;
-        self.feature.db_branches.verify(context)?;
-
-        // guard against env overrides conflicting with db branching keys
-        if let Some(overrides) = self.feature.env.r#override.as_ref()
-            && !overrides.is_empty()
-        {
-            let mut conflicts: Vec<&str> = self
-                .feature
-                .db_branches
-                .0
-                .iter()
-                .flat_map(DatabaseBranchConfig::connection_env_keys)
-                .filter(|key| overrides.contains_key(*key))
-                .collect();
-
-            if conflicts.is_empty().not() {
-                conflicts.sort();
-                conflicts.dedup();
-                return Err(ConfigError::ConflictAt {
-                    setting: "feature.env.override".into(),
-                    message: format!(
-                        "the following environment variables appear in both \
-                     `feature.env.override` and `feature.db_branches[].connection`: {}. \
-                     Database branching redirects these variables through the operator, \
-                     so overriding them locally would defeat the redirection. Remove \
-                     them from `feature.env.override`.",
-                        conflicts.join(", "),
-                    ),
-                });
-            }
-        }
+        self.verify_db_branches(context)?;
 
         self.feature.preview.verify()?;
 
