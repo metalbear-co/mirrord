@@ -3,9 +3,10 @@ import type { SubscribeEventRow } from './subscribeEvents'
 /** Rows kept in memory. Beyond this the oldest are dropped. */
 export const MAX_ROWS = 10_000
 
-// Request ids are unique only within their connection, and connections only within their session.
+// Request ids are unique only within their connection, connections only within their session,
+// and on a multi-cluster primary each cluster numbers its own connections from zero.
 function pairKey(row: SubscribeEventRow): string {
-  return `${row.sessionKey} ${row.correlation}`
+  return `${row.sessionKey} ${row.cluster} ${row.correlation}`
 }
 
 /**

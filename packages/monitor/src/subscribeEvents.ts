@@ -8,6 +8,8 @@ export interface SubscribeEventRow {
   seq: number
   timestamp: string
   sessionKey: string
+  /** The cluster that intercepted it on a multi-cluster primary; empty elsewhere. */
+  cluster: string
   /** The intercepted workload. */
   serviceName: string
   /** The payload tag, or the broker for a queue message. */
@@ -146,6 +148,7 @@ export function toEventRow(
     seq,
     timestamp: asString(event['timestamp']),
     sessionKey: asString(event['session_key']),
+    cluster: asString(event['cluster']),
     serviceName: asString(event['service_name']),
     type: described.type,
     source: described.source,

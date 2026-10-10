@@ -1529,6 +1529,8 @@ pub(super) struct SubscribeArgs {
     ///
     /// Matches the `--key` value passed to `mirrord exec` for the session whose interception
     /// events you want to observe. Can also be set via the `key` field in the mirrord config file.
+    /// Omit it to stream every session's events, each naming its session (operator 3.210.0 or
+    /// newer).
     #[arg(short = 'k', long)]
     pub key: Option<String>,
 
