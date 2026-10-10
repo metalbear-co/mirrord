@@ -1,4 +1,4 @@
-use std::process::Command;
+use mirrord_command::resolve_command;
 
 /// Temporarily switches the Windows console host to legacy mode (ForceV2=0) and restores the
 /// original registry setting when dropped.
@@ -46,7 +46,7 @@ impl Drop for LegacyConsoleGuard {
 }
 
 fn query_force_v2() -> LegacyConsoleResult<Option<u32>> {
-    let output = Command::new("reg")
+    let output = resolve_command("reg")
         .args(["query", "HKCU\\Console", "/v", "ForceV2"])
         .output()
         .map_err(|err| format!("failed to query ForceV2 registry value: {err}"))?;
@@ -80,7 +80,7 @@ fn query_force_v2() -> LegacyConsoleResult<Option<u32>> {
 }
 
 fn set_force_v2(value: Option<u32>) -> LegacyConsoleResult<()> {
-    let mut command = Command::new("reg");
+    let mut command = resolve_command("reg");
 
     if let Some(v) = value {
         command.args([

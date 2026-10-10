@@ -74,6 +74,7 @@ tokio-seqpacket.workspace = true
 rcgen.workspace = true
 rstest.workspace = true
 mirrord-session-monitor-client.workspace = true
+mirrord-command = { path = "../command" }
 futures.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }

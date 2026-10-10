@@ -1,6 +1,7 @@
-use std::{fmt, fs, io, net::IpAddr, path::PathBuf, process::Command, sync::LazyLock};
+use std::{fmt, fs, io, net::IpAddr, path::PathBuf, sync::LazyLock};
 
 use ipnet::IpNet;
+use mirrord_command::resolve_command;
 use mirrord_protocol::vpn::NetworkConfiguration;
 
 use crate::{config::VpnConfig, error::VpnError};
@@ -83,7 +84,7 @@ pub fn create_subnet_route<'a>(
     subnet: &'a IpNet,
     gateway: &'a IpAddr,
 ) -> io::Result<RouteCommandGuard<'a>> {
-    let output = Command::new("route")
+    let output = resolve_command("route")
         .args([
             "-n",
             "add",
@@ -105,7 +106,7 @@ pub struct RouteCommandGuard<'a> {
 
 impl Drop for RouteCommandGuard<'_> {
     fn drop(&mut self) {
-        let result = Command::new("route")
+        let result = resolve_command("route")
             .args([
                 "-n",
                 "delete",

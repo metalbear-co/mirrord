@@ -14,6 +14,8 @@ use drain::Watch;
 use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
+#[cfg(not(target_os = "windows"))]
+use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
     LayerConfig, ci::CiConfig, config::ConfigContext, container::ContainerRuntime,
 };
@@ -394,7 +396,7 @@ impl MirrordCi {
         )
         .await?;
 
-        let mut command = Command::new(binary_path);
+        let mut command = resolve_tokio_command(binary_path);
         command
             .args(binary_args.iter().skip(1))
             .envs(env_vars)
@@ -499,7 +501,7 @@ impl MirrordCi {
         // to delete them with `mirrord ci stop` even if the following code fails.
         mirrord_ci_store.write_to_file().await?;
 
-        let mut command = Command::new(binary_path);
+        let mut command = resolve_tokio_command(binary_path);
         command.args(binary_args).kill_on_drop(false);
 
         // If `--foreground` don't write stdio to file.
@@ -637,13 +639,13 @@ mod tests {
         collections::HashSet, os::unix::process::ExitStatusExt, process::Stdio, time::Duration,
     };
 
+    use mirrord_command::resolve_tokio_command;
     use nix::{
         sys::signal::{Signal, killpg},
         unistd::{Pid, getpgid},
     };
     use tokio::{
         io::{AsyncBufReadExt, BufReader},
-        process::Command,
         time::timeout,
     };
 
@@ -724,7 +726,7 @@ mod tests {
     #[tokio::test]
     async fn ci_process_group_background_spawn_records_leader_and_owns_descendant() {
         let mut store = MirrordCiStore::default();
-        let mut command = Command::new("sh");
+        let mut command = resolve_tokio_command("sh");
         command
             .args(["-c", "sh -c 'sleep 30 & echo $!; wait' & wait"])
             .stdout(Stdio::piped())

@@ -9,11 +9,12 @@ use std::{
     sync::Arc,
 };
 
+use mirrord_command::resolve_tokio_command;
 use mirrord_config::MIRRORD_TEST_INTPROXY_ADDR;
 pub use mirrord_layer_tests::intproxy::TestIntProxy;
 pub use mirrord_test_utils::{TestProcess, run_command::run_exec};
 use rstest::fixture;
-use tokio::{io::AsyncWriteExt, net::TcpListener, process::Command};
+use tokio::{io::AsyncWriteExt, net::TcpListener};
 use tracing::subscriber::DefaultGuard;
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
@@ -217,7 +218,7 @@ impl Application {
             "python3"
         };
 
-        let mut python = Command::new(python_exec)
+        let mut python = resolve_tokio_command(python_exec)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
