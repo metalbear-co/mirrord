@@ -61,11 +61,16 @@ fn filter(
 /// | Character | Class | Reads as |
 /// |---|---|---|
 /// | `]` | `[]]` | a `]` first in a class is literal |
-/// | `[` | `[Z-[&&[:punct:]]` | `Z` to `[`, punctuation only |
-/// | `^` | `[]^&&[^]]]` | `]` or `^`, but not `]` |
+/// | `[` | `[Z-[&&[^]Z]]` | `Z` to `[`, minus `]` and `Z` |
+/// | `^` | `[_^&&[^_]]` | `_` or `^`, but not `_` |
 /// | `\` | `[Z-^&&[^Z-[]&&[^]^]]` | `Z` to `^`, minus `Z`, `[`, `]` and `^` |
 /// | `"` | `[!-#&&[^!#]]` | `!` to `#`, minus `!` and `#` |
 /// | `'` | `[&-(&&[^&(]]` | `&` to `(`, minus `&` and `(` |
+///
+/// `http_filter` compiles its patterns with `fancy_regex`, which finds a class's end by counting
+/// every `[` against every `]`, except a `]` first in the outermost class. So each class above
+/// keeps that count even, or `fancy_regex` would split it where `regex` doesn't: the `[` that
+/// ends `Z-[` is paired with the leading `]` of a nested class.
 ///
 /// # Errors
 ///
@@ -78,8 +83,8 @@ pub fn regex_escape(text: &str) -> Result<String, PatternFilterError> {
                 escaped.extend(['[', character, ']'])
             }
             ']' => escaped.push_str("[]]"),
-            '[' => escaped.push_str("[Z-[&&[:punct:]]"),
-            '^' => escaped.push_str("[]^&&[^]]]"),
+            '[' => escaped.push_str("[Z-[&&[^]Z]]"),
+            '^' => escaped.push_str("[_^&&[^_]]"),
             '\\' => escaped.push_str("[Z-^&&[^Z-[]&&[^]^]]"),
             '"' => escaped.push_str("[!-#&&[^!#]]"),
             '\'' => escaped.push_str("[&-(&&[^&(]]"),
@@ -187,6 +192,28 @@ mod tests {
                     folded.is_match(&other.to_string()),
                     same_folded,
                     "{escaped:?} (from {character:?}) against {other:?}, ignoring case"
+                );
+            }
+        }
+    }
+
+    /// `http_filter` compiles its patterns with `fancy_regex`, which parses classes itself before
+    /// handing them to `regex`: each escaped character must mean the same there.
+    #[test]
+    fn each_character_matches_only_itself_in_an_http_filter() {
+        for character in printable_ascii() {
+            let escaped = regex_escape(&character.to_string()).expect("printable is escapable");
+            let exact = fancy_regex::Regex::new(&format!("^{escaped}$"))
+                .unwrap_or_else(|error| panic!("{escaped:?} must compile: {error}"));
+
+            for other in printable_ascii() {
+                let matched = exact
+                    .is_match(&other.to_string())
+                    .expect("a plain class can't fail to match");
+                assert_eq!(
+                    matched,
+                    other == character,
+                    "{escaped:?} (from {character:?}) against {other:?}"
                 );
             }
         }
