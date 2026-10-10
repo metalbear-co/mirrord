@@ -166,6 +166,20 @@ async fn preview_start(
             )));
         }
     }
+    // A `"*"` / ids request needs the operator's lookup. Refuse here too, before the existing
+    // session with the same key is replaced, so an older operator never tears down a running
+    // preview and then fails to start its replacement.
+    if layer_config
+        .feature
+        .db_branches
+        .split_config_request()
+        .is_some()
+    {
+        operator_api
+            .operator()
+            .spec
+            .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
+    }
 
     // Create the `PreviewSession` resource in the cluster. The CR name is derived from
     // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).
@@ -173,12 +187,15 @@ async fn preview_start(
 
     let mut subtask = progress.subtask("creating preview session resource");
 
-    let config_target = layer_config.target.path.as_ref().ok_or_else(|| {
+    // Owned, like the image below: branch preparation edits the config while both are still
+    // needed.
+    let config_target = layer_config.target.path.clone().ok_or_else(|| {
         subtask.failure(None);
         CliError::PreviewTargetRequired
     })?;
 
-    let image = layer_config.feature.preview.image.as_ref().ok_or_else(|| {
+    // Owned: branch preparation below edits the config while the image is still needed.
+    let image = layer_config.feature.preview.image.clone().ok_or_else(|| {
         subtask.failure(None);
         CliError::PreviewImageRequired
     })?;
@@ -234,7 +251,7 @@ async fn preview_start(
     };
 
     let session_target = resolve_config_target(
-        config_target,
+        &config_target,
         operator_api.client(),
         layer_config.target.namespace.as_deref(),
     )
@@ -281,6 +298,19 @@ async fn preview_start(
         .transpose()?
         .flatten();
 
+    // Label targets with branches were rejected above, so an empty config is the only way a
+    // label target gets here and it skips branch preparation entirely. The branches are
+    // prepared before an existing preview under the same key is replaced: a lookup or
+    // creation that fails must not have taken the running preview down first, and branches
+    // are keyed by the session key, so the replacement attaches to the same ones.
+    let branch_db_names = if layer_config.feature.db_branches.is_empty() {
+        BranchDbNames::default()
+    } else {
+        operator_api
+            .prepare_branch_dbs(&mut layer_config, &progress)
+            .await?
+    };
+
     // Check for an existing session with the same key+target.
     let key = layer_config.key.as_str();
     let existing_sessions = KeyMatcher::Simple(key)
@@ -295,7 +325,7 @@ async fn preview_start(
         let name = session.name_any();
 
         subtask.warning(&format!("replacing existing session '{name}'"));
-        if &session.spec.image == image {
+        if session.spec.image == image {
             subtask.warning(&format!("configured image and existing session's image are the same ('{image}'), this command will only restart the existing deployment"));
         }
 
@@ -324,7 +354,7 @@ async fn preview_start(
         };
     }
 
-    let session_name = PreviewSession::make_resource_name(config_target, key.to_owned());
+    let session_name = PreviewSession::make_resource_name(&config_target, key.to_owned());
 
     // Operators compiled with a custom OPERATOR_ISOLATION_MARKER only reconcile preview
     // sessions labeled with their marker (see the label selector in the preview-env
@@ -339,16 +369,6 @@ async fn preview_start(
             labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
         }
         labels
-    };
-
-    // Label targets with branches were rejected above, so an empty config is the only way a
-    // label target gets here and it skips branch preparation entirely.
-    let branch_db_names = if layer_config.feature.db_branches.is_empty() {
-        BranchDbNames::default()
-    } else {
-        operator_api
-            .prepare_branch_dbs(&layer_config, &progress)
-            .await?
     };
 
     // The namespace the session (and therefore the preview pod) lands in.

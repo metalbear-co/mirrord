@@ -5,7 +5,7 @@ use fancy_regex::Regex;
 use mirrord_agent_env::{envs, mesh::MeshVendor};
 
 use crate::{
-    ChainNames, IPTables, error::IPTablesResult, output::OutputRedirect,
+    ChainNames, IPTablesBackend, error::IPTablesResult, output::OutputRedirect,
     prerouting::PreroutingRedirect, redirect::Redirect,
 };
 
@@ -18,18 +18,15 @@ static MULTIPORT_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
 static TCP_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-p tcp -m tcp --dport ([\d:,]+)").unwrap());
 
-pub struct MeshRedirect<IPT: IPTables> {
-    prerouting: PreroutingRedirect<IPT>,
-    output: OutputRedirect<false, IPT>,
+pub struct MeshRedirect {
+    prerouting: PreroutingRedirect,
+    output: OutputRedirect<false>,
     vendor: MeshVendor,
 }
 
-impl<IPT> MeshRedirect<IPT>
-where
-    IPT: IPTables,
-{
+impl MeshRedirect {
     pub fn create(
-        ipt: Arc<IPT>,
+        ipt: Arc<IPTablesBackend>,
         chain_names: &ChainNames,
         vendor: MeshVendor,
         pod_ips: Option<&str>,
@@ -50,7 +47,7 @@ where
     }
 
     pub fn load(
-        ipt: Arc<IPT>,
+        ipt: Arc<IPTablesBackend>,
         chain_names: &ChainNames,
         vendor: MeshVendor,
     ) -> IPTablesResult<Self> {
@@ -64,7 +61,7 @@ where
         })
     }
 
-    fn get_skip_ports(ipt: &IPT, vendor: &MeshVendor) -> IPTablesResult<Vec<String>> {
+    fn get_skip_ports(ipt: &IPTablesBackend, vendor: &MeshVendor) -> IPTablesResult<Vec<String>> {
         let chain_name = vendor.input_chain();
         let lookup_regex = if let Some(regex) = vendor.skip_ports_regex() {
             regex
@@ -90,10 +87,7 @@ where
 }
 
 #[async_trait]
-impl<IPT> Redirect for MeshRedirect<IPT>
-where
-    IPT: IPTables + Send + Sync,
-{
+impl Redirect for MeshRedirect {
     async fn mount_entrypoint(&self) -> IPTablesResult<()> {
         self.prerouting.mount_entrypoint().await?;
         self.output.mount_entrypoint().await?;
@@ -138,13 +132,13 @@ where
 
 /// Extends the [`MeshVendor`] type with methods that are only relevant for the agent.
 pub(super) trait MeshVendorExt: Sized {
-    fn detect<IPT: IPTables>(ipt: &IPT) -> IPTablesResult<Option<Self>>;
+    fn detect(ipt: &IPTablesBackend) -> IPTablesResult<Option<Self>>;
     fn input_chain(&self) -> &str;
     fn skip_ports_regex(&self) -> Option<&Regex>;
 }
 
 impl MeshVendorExt for MeshVendor {
-    fn detect<IPT: IPTables>(ipt: &IPT) -> IPTablesResult<Option<Self>> {
+    fn detect(ipt: &IPTablesBackend) -> IPTablesResult<Option<Self>> {
         if envs::ISTIO_CNI.from_env_or_default() {
             return Ok(Some(MeshVendor::IstioCni));
         }
@@ -207,9 +201,9 @@ mod tests {
     use mockall::predicate::eq;
     use nix::unistd::getgid;
 
-    use crate::{ChainNames, MockIPTables, mesh::MeshRedirect, redirect::Redirect};
+    use crate::{ChainNames, MockIPTablesWrapper, mesh::MeshRedirect, redirect::Redirect};
 
-    fn create_mesh_list_values(mock: &mut MockIPTables) {
+    fn create_mesh_list_values(mock: &mut MockIPTablesWrapper) {
         mock.expect_list_rules()
             .with(eq("OUTPUT"))
             .returning(|_| Ok(vec!["-j PROXY_INIT_OUTPUT".to_owned()]));
@@ -240,7 +234,7 @@ mod tests {
     async fn add_redirect() {
         let chain_names = ChainNames::legacy();
         let gid = getgid();
-        let mut mock = MockIPTables::new();
+        let mut mock = MockIPTablesWrapper::new();
 
         create_mesh_list_values(&mut mock);
 

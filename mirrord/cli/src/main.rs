@@ -351,6 +351,8 @@ mod operator;
 mod pitm;
 mod port_forward;
 mod process_env;
+#[cfg(windows)]
+mod process_handoff;
 // Prefetched files exist for the layer to serve in place of remote ones, and the layer is unix
 // only, so copying them anywhere else would be work nothing can use.
 #[cfg(unix)]
@@ -378,6 +380,10 @@ use mirrord_layer_lib::process::windows::{
 };
 use verify_config::verify_config;
 
+#[cfg(target_os = "macos")]
+use crate::diagnose::sip::prompt_sip_report;
+#[cfg(target_os = "windows")]
+use crate::process_handoff::ProcessHandoffProgress;
 use crate::{
     ci::{MirrordCi, ci_api_key_available},
     config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
@@ -482,14 +488,15 @@ async fn exec_process(
         config_file_path,
         execution_info.uses_operator,
     );
-    // Without the success message, the final progress displays the last info message
-    // as the subtask title.
     sub_progress_config.success(Some("config summary"));
 
     // print an invitation to the newsletter on certain run count numbers
     suggest_newsletter_signup(user_data, progress).await;
 
+    #[cfg(not(target_os = "windows"))]
     let mut sub_progress = progress.subtask("running process");
+    #[cfg(target_os = "windows")]
+    let mut sub_progress = ProcessHandoffProgress::new(progress, "running process");
 
     // Nudge users toward queue splitting when appropriate
     suggest_queue_splitting(
@@ -876,7 +883,7 @@ async fn exec(
     let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
         Default::default(),
-        watch,
+        watch.clone(),
         user_data.machine_id(),
         Some(config.key.as_str().to_owned()),
     );
@@ -894,6 +901,11 @@ async fn exec(
         progress.warning(&warning);
     }
     result?;
+
+    #[cfg(target_os = "macos")]
+    if let Err(error) = prompt_sip_report(progress, watch.clone(), user_data.machine_id()).await {
+        progress.warning(&error.to_string());
+    }
 
     let res = exec_process(
         config,
@@ -1177,7 +1189,7 @@ fn main() -> miette::Result<()> {
             Commands::Teams => {
                 windows_unsupported!((), "teams", { teams::navigate_to_intro().await })
             }
-            Commands::Diagnose(args) => diagnose_command(*args).await?,
+            Commands::Diagnose(args) => diagnose_command(*args, watch, &user_data).await?,
             Commands::Container(args) => windows_unsupported!(args, "container", {
                 let mut progress = ProgressTracker::from_env("mirrord container");
 

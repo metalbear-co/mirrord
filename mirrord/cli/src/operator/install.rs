@@ -82,6 +82,7 @@ async fn install(
         yes,
         manifest: manifest_path,
         app_url,
+        ready_timeout,
     } = args;
 
     let mut progress = ProgressTracker::from_env("mirrord operator install");
@@ -167,8 +168,13 @@ async fn install(
 
     run.phase = InstallPhase::WaitForOperator;
     let mut subtask = progress.subtask("waiting for the operator to become ready");
-    let operator =
-        cluster::wait_for_operator(&client, manifest.operator_namespace(), &context_arg).await?;
+    let operator = cluster::wait_for_operator(
+        &client,
+        manifest.operator_namespace(),
+        ready_timeout,
+        &context_arg,
+    )
+    .await?;
     subtask.success(None);
     progress.success(None);
 

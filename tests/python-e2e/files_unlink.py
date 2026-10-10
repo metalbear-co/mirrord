@@ -48,6 +48,39 @@ class FileOpsTest(unittest.TestCase):
         os.close(dir_fd)
         self.assertFalse(os.path.isfile(test_file_abs_path))
 
+    def test_unlinkat_remote_directory_identity(self):
+        """An opened directory keeps its identity when its old pathname is reused."""
+        test_dir = f"/tmp/remote_test/test_unlinkat_identity_{uuid.uuid4()}"
+        original = os.path.join(test_dir, "original")
+        moved = os.path.join(test_dir, "moved")
+        original_file = os.path.join(original, "victim")
+        moved_file = os.path.join(moved, "victim")
+        dir_fd = None
+        try:
+            os.makedirs(original)
+            with open(original_file, "w") as file:
+                file.write(TEXT)
+            dir_fd = os.open(original, os.O_RDONLY | os.O_DIRECTORY)
+            os.rename(original, moved)
+            os.mkdir(original)
+            with open(original_file, "w") as file:
+                file.write("replacement")
+
+            os.unlink("victim", dir_fd=dir_fd)
+
+            self.assertFalse(os.path.exists(moved_file))
+            with open(original_file) as file:
+                self.assertEqual(file.read(), "replacement")
+        finally:
+            if dir_fd is not None:
+                os.close(dir_fd)
+            for path in (original_file, moved_file):
+                if os.path.exists(path):
+                    os.unlink(path)
+            for path in (original, moved, test_dir):
+                if os.path.isdir(path):
+                    os.rmdir(path)
+
     def test_unlink_local(self):
         """
         Creates a file locally and removes the link to it using unlink
