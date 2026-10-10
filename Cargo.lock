@@ -5304,7 +5304,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-command"
-version = "3.268.0"
+version = "3.271.0"
 dependencies = [
  "tempfile",
  "tokio",
