@@ -176,11 +176,18 @@ impl Service {
         self.force_stop().await
     }
 
-    /// Job Object termination reaches every descendant before the direct child
-    /// is reaped, matching the Unix forced-shutdown guarantee.
+    /// Job Object termination reaches every descendant along with the direct
+    /// child, matching the Unix forced-shutdown guarantee.
+    ///
+    /// Only the direct child is waited for, not process-wrap's whole-job `wait`.
+    /// That one waits for an event on the job's completion port, and polling
+    /// the child's `try_wait` during supervision takes those events off the
+    /// port. After a service exits on its own the port can be empty for good,
+    /// and the job `wait` would block forever.
     #[cfg(windows)]
     async fn force_stop(&mut self) -> io::Result<()> {
-        Box::into_pin(self.child.kill()).await?;
+        self.child.start_kill()?;
+        self.child.inner_mut().wait().await?;
         Ok(())
     }
 }
