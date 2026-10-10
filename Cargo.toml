@@ -174,7 +174,7 @@ json-patch = { version = "4.2", default-features = false }
 k8s-cri = "0.11"
 k8s-openapi = { version = "0.28", features = ["v1_32"] }
 
-kube = { git = "https://github.com/metalbear-co/kube.git", rev = "3cbb98d5550d1b69e515d4dac51e815f4a4481e8", default-features = false, features = [
+kube = { git = "https://github.com/metalbear-co/kube.git", rev = "2f2b38d13e9a09491a1d1ddc6ae2cd3c6b32399f", default-features = false, features = [
     "runtime",
     "derive",
     "client",
