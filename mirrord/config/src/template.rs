@@ -168,6 +168,11 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    #[cfg(windows)]
+    use crate::{
+        LayerFileConfig,
+        config::{ConfigContext, MirrordConfig},
+    };
 
     /// An anchored, case-insensitive regex from `pattern`, as the `feature.fs` sets build them.
     fn fs_regex(pattern: &str) -> Regex {
@@ -358,11 +363,6 @@ mod tests {
         #[case] extension: &str,
         #[case] content: &str,
     ) {
-        use crate::{
-            LayerFileConfig,
-            config::{ConfigContext, MirrordConfig},
-        };
-
         // SAFETY: no other test touches this variable, and std serializes access to the
         // environment on Windows.
         unsafe {
