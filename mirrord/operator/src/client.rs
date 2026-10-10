@@ -18,7 +18,7 @@ use kube::{
     api::{ListParams, PostParams},
     client::ClientBuilder,
 };
-use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
+use mirrord_analytics::{AnalyticsOperatorProperties, Reporter, SanitizedString};
 use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
@@ -350,7 +350,7 @@ impl OperatorApi<NoClientCert> {
                         .license
                         .fingerprint
                         .as_deref()
-                        .map(AnalyticsHash::from_base64),
+                        .map(SanitizedString::from_base64),
                 });
 
                 return Ok(Some(Self {
@@ -400,14 +400,14 @@ impl OperatorApi<NoClientCert> {
         let certificate = ci_api_key.credentials().as_ref();
 
         reporter.set_operator_properties(AnalyticsOperatorProperties {
-            client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
+            client_hash: Some(SanitizedString::from_bytes(&certificate.public_key_data())),
             license_hash: self
                 .operator
                 .spec
                 .license
                 .fingerprint
                 .as_deref()
-                .map(AnalyticsHash::from_base64),
+                .map(SanitizedString::from_base64),
         });
 
         self.prepare_with_certificate(progress, layer_config, certificate)
@@ -503,14 +503,14 @@ impl OperatorApi<NoClientCert> {
             let certificate = self.get_client_certificate().await?;
 
             reporter.set_operator_properties(AnalyticsOperatorProperties {
-                client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
+                client_hash: Some(SanitizedString::from_bytes(&certificate.public_key_data())),
                 license_hash: self
                     .operator
                     .spec
                     .license
                     .fingerprint
                     .as_deref()
-                    .map(AnalyticsHash::from_base64),
+                    .map(SanitizedString::from_base64),
             });
 
             Ok(self
@@ -2944,13 +2944,13 @@ impl OperatorApi<PreparedClientCert> {
         R: Reporter,
     {
         reporter.set_operator_properties(AnalyticsOperatorProperties {
-            client_hash: Some(AnalyticsHash::from_bytes(
+            client_hash: Some(SanitizedString::from_bytes(
                 session.client_cert.public_key_data().as_ref(),
             )),
             license_hash: session
                 .operator_license_fingerprint
                 .as_ref()
-                .map(|fingerprint| AnalyticsHash::from_base64(fingerprint)),
+                .map(|fingerprint| SanitizedString::from_base64(fingerprint)),
         });
 
         let (mut config, _) = Self::base_client_config(layer_config).await?;

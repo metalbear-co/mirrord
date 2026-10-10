@@ -2,25 +2,22 @@ use std::{ops::Deref, sync::Arc};
 
 use async_trait::async_trait;
 
-use crate::{IPTables, Redirect, chain::IPTableChain, error::IPTablesResult};
+use crate::{IPTablesBackend, Redirect, chain::IPTableChain, error::IPTablesResult};
 
-pub struct PreroutingRedirect<IPT: IPTables> {
-    managed: IPTableChain<IPT>,
+pub struct PreroutingRedirect {
+    managed: IPTableChain,
 }
 
-impl<IPT> PreroutingRedirect<IPT>
-where
-    IPT: IPTables,
-{
+impl PreroutingRedirect {
     const ENTRYPOINT: &'static str = "PREROUTING";
 
-    pub fn create(ipt: Arc<IPT>, chain_name: String) -> IPTablesResult<Self> {
+    pub fn create(ipt: Arc<IPTablesBackend>, chain_name: String) -> IPTablesResult<Self> {
         let managed = IPTableChain::create(ipt, chain_name)?;
 
         Ok(PreroutingRedirect { managed })
     }
 
-    pub fn load(ipt: Arc<IPT>, chain_name: String) -> IPTablesResult<Self> {
+    pub fn load(ipt: Arc<IPTablesBackend>, chain_name: String) -> IPTablesResult<Self> {
         let managed = IPTableChain::load(ipt, chain_name)?;
 
         Ok(PreroutingRedirect { managed })
@@ -28,10 +25,7 @@ where
 }
 
 #[async_trait]
-impl<IPT> Redirect for PreroutingRedirect<IPT>
-where
-    IPT: IPTables + Send + Sync,
-{
+impl Redirect for PreroutingRedirect {
     async fn mount_entrypoint(&self) -> IPTablesResult<()> {
         self.managed.inner().add_rule(
             Self::ENTRYPOINT,
@@ -67,11 +61,8 @@ where
     }
 }
 
-impl<IPT> Deref for PreroutingRedirect<IPT>
-where
-    IPT: IPTables,
-{
-    type Target = IPTableChain<IPT>;
+impl Deref for PreroutingRedirect {
+    type Target = IPTableChain;
 
     fn deref(&self) -> &Self::Target {
         &self.managed
@@ -84,12 +75,14 @@ mod tests {
 
     use mockall::predicate::eq;
 
-    use crate::{ChainNames, MockIPTables, prerouting::PreroutingRedirect, redirect::Redirect};
+    use crate::{
+        ChainNames, MockIPTablesWrapper, prerouting::PreroutingRedirect, redirect::Redirect,
+    };
 
     #[tokio::test]
     async fn add_redirect() {
         let chain_names = ChainNames::legacy();
-        let mut mock = MockIPTables::new();
+        let mut mock = MockIPTablesWrapper::new();
 
         mock.expect_create_chain()
             .with(eq(chain_names.prerouting.clone()))
@@ -119,7 +112,7 @@ mod tests {
     #[tokio::test]
     async fn add_redirect_twice() {
         let chain_names = ChainNames::legacy();
-        let mut mock = MockIPTables::new();
+        let mut mock = MockIPTablesWrapper::new();
 
         mock.expect_create_chain()
             .with(eq(chain_names.prerouting.clone()))
@@ -159,7 +152,7 @@ mod tests {
     #[tokio::test]
     async fn remove_redirect() {
         let chain_names = ChainNames::legacy();
-        let mut mock = MockIPTables::new();
+        let mut mock = MockIPTablesWrapper::new();
 
         mock.expect_create_chain()
             .with(eq(chain_names.prerouting.clone()))

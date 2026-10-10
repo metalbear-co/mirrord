@@ -614,10 +614,11 @@ pub enum OperatorFeatures {
 /// A new variant is not self-contained - the operator's license gating lives in a separate
 /// repository and has to be updated alongside it:
 ///
-/// - `LicenseType::allows` decides which tiers include the feature. Paid tiers get new variants
-///   automatically, but the free tier is an allowlist, so a new variant is withheld there until it
-///   is added explicitly. Leaving it withheld is the correct default for anything the operator adds
-///   on top of open-source mirrord.
+/// - `LicenseType::allows` decides which tiers include the feature. Paid tiers generally get new
+///   variants automatically, but the free tier is an allowlist, so a new variant is withheld there
+///   until it is added explicitly. Leaving it withheld is the correct default for anything the
+///   operator adds on top of open-source mirrord. [`KeylessCi`](Self::KeylessCi) is a Free-only
+///   exception: paid and legacy licenses require CI API keys for explicit CI sessions.
 /// - Advertisement filtering is automatic, but *enforcement* is not. If clients request the feature
 ///   through connect params, add it to `ConnectParams::requested_licensed_features`; if it has its
 ///   own endpoint, guard that handler directly.
@@ -840,6 +841,10 @@ pub enum NewOperatorFeature {
     /// the first database while the app keeps talking to the source for the others.
     PgBranchAdditionalDatabases,
 
+    /// This operator accepts explicit CI sessions using ordinary client certificates without a CI
+    /// API key. Advertised only with a Free license, so clients can reject missing keys before
+    /// requesting credentials or preparing a session on paid or older installations.
+    KeylessCi,
     /// This operator resolves `feature.db_branches: "*"` (or a list of entry ids) against the
     /// `dbBranches` entries on the target's `MirrordSplitConfig`, through
     /// `POST /splitconfigdbbranches`, and records each branch's resolved source in its status.
@@ -936,6 +941,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::PgBranchAdditionalDatabases => {
                 "PostgreSQL branches with additional databases"
             }
+            NewOperatorFeature::KeylessCi => "keyless CI",
             NewOperatorFeature::DbBranchesFromSplitConfig => {
                 "db_branches resolved from the target's MirrordSplitConfig"
             }

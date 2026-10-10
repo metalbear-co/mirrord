@@ -126,16 +126,22 @@ where
         }
     }
 
+    if mirrord_for_ci.is_some_and(|ci| ci.api_key().is_none())
+        && api
+            .operator()
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::KeylessCi)
+            .not()
+    {
+        return Err(CiError::MissingCiApiKey.into());
+    }
+
     let mut user_cert_subtask = operator_subtask.subtask("preparing user credentials");
-    let api = match mirrord_for_ci {
-        Some(mirrord_for_ci) => {
-            api.with_ci_api_key(
-                analytics,
-                progress,
-                layer_config,
-                mirrord_for_ci.api_key().ok_or(CiError::MissingCiApiKey)?,
-            )
-            .await
+    let api = match mirrord_for_ci.and_then(MirrordCi::api_key) {
+        Some(key) => {
+            api.with_ci_api_key(analytics, progress, layer_config, key)
+                .await
         }
         None => {
             api.with_client_certificate(analytics, progress, layer_config)

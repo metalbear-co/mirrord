@@ -363,6 +363,10 @@ pub(crate) enum CliError {
     ))]
     SipError(#[from] mirrord_sip::SipError),
 
+    #[cfg(target_os = "macos")]
+    #[error("Failed to send the Rosetta fallback report: {0}")]
+    RosettaReportRequest(#[from] reqwest::Error),
+
     #[error(transparent)]
     #[diagnostic(transparent)]
     OperatorSetupError(#[from] OperatorSetupError),
