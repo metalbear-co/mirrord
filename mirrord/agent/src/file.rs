@@ -7,7 +7,7 @@ use std::{
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
     os::{
-        fd::AsRawFd,
+        fd::{AsFd, AsRawFd},
         unix::{ffi::OsStrExt, fs::MetadataExt, prelude::FileExt},
     },
     path::{Path, PathBuf, StripPrefixError},
@@ -51,7 +51,13 @@ impl PathExt for Path {
 #[derive(Debug)]
 pub enum RemoteFile {
     File(File),
-    Directory(PathBuf),
+    /// The handle preserves identity for relative unlinkat after the directory is renamed or
+    /// its old pathname is replaced.
+    /// Other directory operations still need the cached path for their path-based APIs.
+    Directory {
+        file: File,
+        path: PathBuf,
+    },
 }
 
 fn log_err(entry_res: io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal> {
@@ -312,7 +318,10 @@ impl FileManager {
         let metadata = file.metadata()?;
 
         let remote_file = if metadata.is_dir() {
-            RemoteFile::Directory(path.into_owned())
+            RemoteFile::Directory {
+                file,
+                path: path.into_owned(),
+            }
         } else {
             RemoteFile::File(file)
         };
@@ -336,7 +345,10 @@ impl FileManager {
             .get(&relative_fd)
             .ok_or(ResponseError::NotFound(relative_fd))?;
 
-        if let RemoteFile::Directory(relative_dir) = relative_dir {
+        if let RemoteFile::Directory {
+            path: relative_dir, ..
+        } = relative_dir
+        {
             let path = relative_dir.join(&path);
 
             let file = OpenOptions::from(open_options).open(&path)?;
@@ -348,7 +360,7 @@ impl FileManager {
             let metadata = file.metadata()?;
 
             let remote_file = if metadata.is_dir() {
-                RemoteFile::Directory(path)
+                RemoteFile::Directory { file, path }
             } else {
                 RemoteFile::File(file)
             };
@@ -370,7 +382,7 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| match remote_file {
                 RemoteFile::File(file) => Ok(file),
-                RemoteFile::Directory(..) => Err(ResponseError::NotFile(fd)),
+                RemoteFile::Directory { .. } => Err(ResponseError::NotFile(fd)),
             })
             .and_then(|file| {
                 let mut buffer = Vec::with_capacity(4096);
@@ -398,7 +410,7 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| match remote_file {
                 RemoteFile::File(file) => Ok(file),
-                RemoteFile::Directory(..) => Err(ResponseError::NotFile(fd)),
+                RemoteFile::Directory { .. } => Err(ResponseError::NotFile(fd)),
             })
             .and_then(|file| {
                 let mut buffer = vec![0; buffer_size as usize];
@@ -489,7 +501,10 @@ impl FileManager {
             .get(&dirfd)
             .ok_or(ResponseError::NotFound(dirfd))?;
 
-        if let RemoteFile::Directory(relative_dir) = relative_dir {
+        if let RemoteFile::Directory {
+            path: relative_dir, ..
+        } = relative_dir
+        {
             let path = relative_dir.join(path);
 
             match nix::unistd::mkdir(&path, nix::sys::stat::Mode::from_bits_truncate(mode)) {
@@ -525,20 +540,20 @@ impl FileManager {
         path: &Path,
         flags: u32,
     ) -> RemoteResult<()> {
-        let path = match dirfd {
-            Some(dirfd) => {
-                let relative_dir = self
+        // Relative requests must use the opened directory, without looking up a stale path or
+        // its ancestors again. Absolute requests use target-root resolution regardless of dirfd.
+        let (os_dirfd, path) = match (dirfd, path.is_absolute()) {
+            (Some(dirfd), false) => {
+                match self
                     .open_files
                     .get(&dirfd)
-                    .ok_or(ResponseError::NotFound(dirfd))?;
-
-                if let RemoteFile::Directory(relative_dir) = relative_dir {
-                    Cow::Owned(relative_dir.join(path))
-                } else {
-                    return Err(ResponseError::NotDirectory(dirfd));
+                    .ok_or(ResponseError::NotFound(dirfd))?
+                {
+                    RemoteFile::Directory { file, .. } => (file.as_fd(), Cow::Borrowed(path)),
+                    RemoteFile::File(_) => return Err(ResponseError::NotDirectory(dirfd)),
                 }
             }
-            None => self.resolve_path(path)?,
+            _ => (AT_FDCWD, self.resolve_path(path)?),
         };
 
         let flags = match flags as i32 {
@@ -551,12 +566,7 @@ impl FileManager {
             }
         };
 
-        // `path` is already resolved against `dirfd`, so we can just use it with `AT_FDCWD`.
-        //
-        // TODO(alex): clanker says that what we're doing here is not really equivalent to
-        // `unlinkat`, renaming a dir or replacing the original path could cause issues, also
-        // potential issues with symlinks and permissions.
-        nix::unistd::unlinkat(AT_FDCWD, path.as_ref(), flags)
+        nix::unistd::unlinkat(os_dirfd, path.as_ref(), flags)
             .map_err(|error| ResponseError::from(std::io::Error::from_raw_os_error(error as i32)))
     }
 
@@ -769,7 +779,9 @@ impl FileManager {
                 {
                     // `parent_path` is already resolved, so it has to be turned back into a
                     // target path before joining, as the result is resolved again below.
-                    RemoteFile::Directory(parent_path) => match self.path_resolver.as_ref() {
+                    RemoteFile::Directory {
+                        path: parent_path, ..
+                    } => match self.path_resolver.as_ref() {
                         Some(resolver) => resolver.unresolve(parent_path)?.join(path),
                         None => parent_path.join(path),
                     },
@@ -790,7 +802,7 @@ impl FileManager {
                             metadata: file.metadata()?.into(),
                         });
                     }
-                    RemoteFile::Directory(path) => {
+                    RemoteFile::Directory { path, .. } => {
                         return Ok(XstatResponse {
                             metadata: path.metadata()?.into(),
                         });
@@ -824,7 +836,7 @@ impl FileManager {
         let statfs = match target {
             RemoteFile::File(file) => nix::sys::statfs::fstatfs(file)
                 .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?,
-            RemoteFile::Directory(path) => nix::sys::statfs::statfs(path)
+            RemoteFile::Directory { path, .. } => nix::sys::statfs::statfs(path)
                 .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?,
         };
 
@@ -860,7 +872,7 @@ impl FileManager {
             .get(&fd)
             .ok_or(ResponseError::NotFound(fd))?
         {
-            RemoteFile::Directory(path) => Ok(path),
+            RemoteFile::Directory { path, .. } => Ok(path),
             _ => Err(ResponseError::NotDirectory(fd)),
         }?;
 
@@ -923,7 +935,7 @@ impl FileManager {
             Entry::Vacant(e) => match self.open_files.get(&fd) {
                 None => Err(ResponseError::NotFound(fd)),
                 Some(RemoteFile::File(_file)) => Err(ResponseError::NotDirectory(fd)),
-                Some(RemoteFile::Directory(dir)) => {
+                Some(RemoteFile::Directory { path: dir, .. }) => {
                     let current_and_parent = Self::get_current_and_parent_entries(dir);
                     let stream =
                         GetDEnts64Stream::new(dir.read_dir()?, current_and_parent).peekable();
@@ -1027,7 +1039,7 @@ impl FileManager {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, os::unix::fs::symlink};
+    use std::{fs, ops::Not, os::unix::fs::symlink};
 
     use rstest::rstest;
 
@@ -1038,7 +1050,7 @@ mod tests {
     const S_IFLNK: u32 = 0o120000;
 
     /// Targeted, targetless and workload companion agents resolve paths differently, so stat
-    /// requests are exercised with each.
+    /// and relative unlinkat requests are exercised with each.
     #[derive(Debug, Clone, Copy)]
     enum Mode {
         Targeted,
@@ -1093,6 +1105,211 @@ mod tests {
         manager
             .xstat(Some(path.into()), fd, follow_symlink)
             .map(|response| response.metadata.mode & S_IFMT)
+    }
+
+    fn open_readonly(manager: &mut FileManager, path: PathBuf, relative_fd: Option<u64>) -> u64 {
+        let open_options = OpenOptionsInternal {
+            read: true,
+            ..Default::default()
+        };
+        match relative_fd {
+            Some(relative_fd) => match manager
+                .handle_message(FileRequest::OpenRelative(OpenRelativeFileRequest {
+                    relative_fd,
+                    path,
+                    open_options,
+                }))
+                .unwrap()
+            {
+                Some(FileResponse::Open(result)) => result.unwrap().fd,
+                response => panic!("unexpected open response: {response:?}"),
+            },
+            None => manager.open(path, open_options).unwrap().fd,
+        }
+    }
+
+    fn unlink_at(
+        manager: &mut FileManager,
+        dirfd: Option<u64>,
+        pathname: impl Into<PathBuf>,
+        flags: u32,
+    ) -> RemoteResult<()> {
+        match manager
+            .handle_message(FileRequest::UnlinkAt(UnlinkAtRequest {
+                dirfd,
+                pathname: pathname.into(),
+                flags,
+            }))
+            .unwrap()
+        {
+            Some(FileResponse::Unlink(result)) => result,
+            response => panic!("unexpected unlink response: {response:?}"),
+        }
+    }
+
+    #[rstest]
+    fn unlinkat_preserves_opened_directory(
+        #[values(Mode::Targeted, Mode::Targetless, Mode::WorkloadCompanion)] mode: Mode,
+        #[values(false, true)] open_relative: bool,
+        #[values(0, libc::AT_REMOVEDIR as u32)] flags: u32,
+    ) {
+        let (root, mut manager, dir) = setup(mode);
+        let host_dir = root.path().join("a/b/c");
+        let victim = if flags == 0 { "file" } else { "empty" };
+        if flags != 0 {
+            fs::create_dir(host_dir.join(victim)).unwrap();
+        }
+        let fd = if open_relative {
+            let parent_fd = open_readonly(&mut manager, dir.parent().unwrap().to_owned(), None);
+            open_readonly(&mut manager, PathBuf::from("c"), Some(parent_fd))
+        } else {
+            open_readonly(&mut manager, dir, None)
+        };
+
+        let moved = root.path().join("a/b/moved");
+        fs::rename(&host_dir, &moved).unwrap();
+        fs::create_dir(&host_dir).unwrap();
+        if flags == 0 {
+            fs::write(host_dir.join(victim), "replacement").unwrap();
+        } else {
+            fs::create_dir(host_dir.join(victim)).unwrap();
+        }
+
+        unlink_at(&mut manager, Some(fd), victim, flags).unwrap();
+
+        assert_eq!(
+            fs::symlink_metadata(moved.join(victim))
+                .unwrap_err()
+                .raw_os_error(),
+            Some(libc::ENOENT)
+        );
+        if flags == 0 {
+            assert_eq!(
+                fs::read_to_string(host_dir.join(victim)).unwrap(),
+                "replacement"
+            );
+        } else {
+            assert!(host_dir.join(victim).is_dir());
+        }
+    }
+
+    #[rstest]
+    fn unlinkat_does_not_revisit_replaced_ancestor(
+        #[values(Mode::Targeted, Mode::Targetless, Mode::WorkloadCompanion)] mode: Mode,
+    ) {
+        let (root, mut manager, dir) = setup(mode);
+        let fd = open_readonly(&mut manager, dir, None);
+        let moved = root.path().join("a/original_b");
+        fs::rename(root.path().join("a/b"), &moved).unwrap();
+        let decoy = root.path().join("decoy");
+        fs::create_dir_all(decoy.join("c")).unwrap();
+        fs::write(decoy.join("c/file"), "decoy").unwrap();
+        symlink(&decoy, root.path().join("a/b")).unwrap();
+
+        unlink_at(&mut manager, Some(fd), "file", 0).unwrap();
+
+        assert_eq!(
+            fs::symlink_metadata(moved.join("c/file"))
+                .unwrap_err()
+                .raw_os_error(),
+            Some(libc::ENOENT)
+        );
+        assert_eq!(fs::read_to_string(decoy.join("c/file")).unwrap(), "decoy");
+    }
+
+    #[rstest]
+    fn unlinkat_removes_relative_links_without_following(
+        #[values(Mode::Targeted, Mode::Targetless, Mode::WorkloadCompanion)] mode: Mode,
+    ) {
+        let (root, mut manager, dir) = setup(mode);
+        let fd = open_readonly(&mut manager, dir, None);
+        let host_dir = root.path().join("a/b/c");
+
+        for link in ["link", "dangling"] {
+            unlink_at(&mut manager, Some(fd), link, 0).unwrap();
+            assert_eq!(
+                fs::symlink_metadata(host_dir.join(link))
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(libc::ENOENT)
+            );
+        }
+        assert_eq!(fs::read_to_string(host_dir.join("file")).unwrap(), "hello");
+    }
+
+    #[test]
+    fn unlinkat_absolute_paths_ignore_dirfd_and_use_target_root() {
+        let (root, mut manager, dir) = setup(Mode::Targeted);
+        let fd = open_readonly(&mut manager, dir, None);
+        let sentinel = tempfile::NamedTempFile::new().unwrap();
+        fs::write(sentinel.path(), "host sentinel").unwrap();
+        let rooted_sentinel = root.path().join(sentinel.path().strip_prefix("/").unwrap());
+        assert!(rooted_sentinel.exists().not());
+        fs::create_dir_all(rooted_sentinel.parent().unwrap()).unwrap();
+
+        for dirfd in [None, Some(fd), Some(u64::MAX)] {
+            assert_eq!(
+                unlink_at(&mut manager, dirfd, sentinel.path(), 0),
+                Err(ResponseError::from(io::Error::from_raw_os_error(
+                    libc::ENOENT
+                )))
+            );
+            assert_eq!(
+                fs::read_to_string(sentinel.path()).unwrap(),
+                "host sentinel"
+            );
+
+            fs::write(&rooted_sentinel, "target sentinel").unwrap();
+            unlink_at(&mut manager, dirfd, sentinel.path(), 0).unwrap();
+            assert!(rooted_sentinel.exists().not());
+            assert_eq!(
+                fs::read_to_string(sentinel.path()).unwrap(),
+                "host sentinel"
+            );
+        }
+    }
+
+    #[rstest]
+    fn unlinkat_relative_errors_preserve_files(
+        #[values(Mode::Targeted, Mode::Targetless, Mode::WorkloadCompanion)] mode: Mode,
+    ) {
+        let (root, mut manager, dir) = setup(mode);
+        let fd = open_readonly(&mut manager, dir.clone(), None);
+        let file_fd = open_readonly(&mut manager, dir.join("file"), None);
+        let closed_fd = open_readonly(&mut manager, dir, None);
+        assert!(
+            manager
+                .handle_message(FileRequest::Close(CloseFileRequest { fd: closed_fd }))
+                .unwrap()
+                .is_none()
+        );
+
+        for (dirfd, path, flags, expected) in [
+            (u64::MAX, "file", 0, ResponseError::NotFound(u64::MAX)),
+            (closed_fd, "file", 0, ResponseError::NotFound(closed_fd)),
+            (file_fd, "file", 0, ResponseError::NotDirectory(file_fd)),
+            (
+                fd,
+                "file",
+                libc::AT_REMOVEDIR as u32 | 1,
+                ResponseError::from(io::Error::from_raw_os_error(libc::EINVAL)),
+            ),
+            (
+                fd,
+                "missing",
+                0,
+                ResponseError::from(io::Error::from_raw_os_error(libc::ENOENT)),
+            ),
+        ] {
+            assert_eq!(
+                unlink_at(&mut manager, Some(dirfd), path, flags),
+                Err(expected)
+            );
+            assert_eq!(
+                fs::read_to_string(root.path().join("a/b/c/file")).unwrap(),
+                "hello"
+            );
+        }
     }
 
     #[rstest]

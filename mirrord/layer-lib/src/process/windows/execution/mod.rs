@@ -435,6 +435,9 @@ impl LayerManagedProcess {
     /// A process mirrord cannot load its layer into is ended and reported as an error (see
     /// [`LayerFailurePolicy::Terminate`]): the user asked for this program under mirrord, and
     /// nothing retries it.
+    ///
+    /// `progress` succeeds before the program's primary thread first runs, so a caller that shares
+    /// its console with the program can end its own output there.
     pub fn execute<P>(
         application_name: Option<String>,
         command_line: String,
@@ -768,7 +771,15 @@ impl LayerManagedProcess {
                 }
                 return Ok(self);
             }
-            LoadTiming::OnResume => self.resume_main_thread()?,
+            // The program runs from here on, while its layer comes up, and it shares the
+            // launcher's console: progress is done before the program can write to it, and the
+            // wait below only decides how the launch ends.
+            LoadTiming::OnResume => {
+                if let Some(mut progress) = progress.take() {
+                    progress.success(Some("layer loading on resume"));
+                }
+                self.resume_main_thread()?;
+            }
             LoadTiming::Immediate => {}
         }
 
@@ -1486,11 +1497,15 @@ mod tests {
 
     #[test]
     fn a_ready_layer_resumes_the_program_once() {
-        for method in [InjectionMethod::LoadLibrary, InjectionMethod::Apc] {
+        // A layer that loads on resume finishes progress before the program runs, not on ready.
+        for (method, reported) in [
+            (InjectionMethod::LoadLibrary, "Ready!"),
+            (InjectionMethod::Apc, "layer loading on resume"),
+        ] {
             let launched = Launch::new(method, Layer::Ready).run();
             assert_eq!(
                 launched.progress,
-                ["Ready!"],
+                [reported],
                 "{method}: the layer was injected"
             );
             assert_eq!(launched.creations, 1);
@@ -1646,7 +1661,11 @@ mod tests {
         }
         .run();
         assert_eq!(launched.creations, 1);
-        assert!(launched.progress.is_empty(), "never reported ready");
+        assert_eq!(
+            launched.progress,
+            ["layer loading on resume"],
+            "done before the program ran, and not again"
+        );
         assert!(launched.result.is_ok(), "a timeout is not a failed launch");
         assert_eq!(launched.exit_code(), RAN, "the program ran to its end");
     }
