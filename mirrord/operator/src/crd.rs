@@ -845,6 +845,12 @@ pub enum NewOperatorFeature {
     /// API key. Advertised only with a Free license, so clients can reject missing keys before
     /// requesting credentials or preparing a session on paid or older installations.
     KeylessCi,
+    /// This operator resolves `feature.db_branches: "*"` (or a list of entry ids) against the
+    /// `dbBranches` entries on the target's `MirrordSplitConfig`, through
+    /// `POST /splitconfigdbbranches`, and records each branch's resolved source in its status.
+    /// Gated so the CLI fails fast: an older operator has no such endpoint, and the session
+    /// would otherwise start without the branches the config asked for.
+    DbBranchesFromSplitConfig,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -936,6 +942,9 @@ impl Display for NewOperatorFeature {
                 "PostgreSQL branches with additional databases"
             }
             NewOperatorFeature::KeylessCi => "keyless CI",
+            NewOperatorFeature::DbBranchesFromSplitConfig => {
+                "db_branches resolved from the target's MirrordSplitConfig"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

@@ -489,6 +489,20 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
         return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
     }
 
+    // Only the operator can look the entries up on the workload's MirrordSplitConfig, so a
+    // session that asks for them has nothing to run without it.
+    if config.feature.db_branches.split_config_request().is_some() {
+        send_upgrade_ide_message(
+            progress,
+            "db_branches taken from a MirrordSplitConfig require the mirrord operator, which is \
+             part of mirrord for Teams.",
+            "requiresoperator",
+        )?;
+        return Err(CliError::FeatureRequiresOperatorError(
+            "feature.db_branches set to \"*\" or entry ids".into(),
+        ));
+    }
+
     match (
         // user in mutipod without operator
         matches!(

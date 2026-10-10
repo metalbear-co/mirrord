@@ -4,13 +4,10 @@
     clippy::disallowed_methods,
     reason = "Linux-only, the Windows lookup in `mirrord_command::resolve_command` never applies"
 )]
-use std::{
-    fmt::Debug,
-    ops::Not,
-    sync::{Arc, OnceLock},
-};
+use std::{fmt::Debug, sync::Arc};
 
-use caps::{CapSet, Capability};
+#[cfg(test)]
+use caps as _;
 use enum_dispatch::enum_dispatch;
 use mirrord_agent_env::mesh::MeshVendor;
 use tracing::{Level, warn};
@@ -28,6 +25,8 @@ use crate::{
     standard::StandardRedirect,
 };
 
+#[cfg(not(test))]
+mod backend;
 mod chain;
 pub mod error;
 mod flush_connections;
@@ -36,6 +35,14 @@ mod output;
 mod prerouting;
 mod redirect;
 mod standard;
+
+#[cfg(not(test))]
+pub use backend::{get_iptables, warn_on_backend_mesh_mismatch};
+
+#[cfg(not(test))]
+use self::IPTablesWrapper as IPTablesBackend;
+#[cfg(test)]
+use self::MockIPTablesWrapper as IPTablesBackend;
 
 /// Holds the iptables chain names for this agent instance.
 ///
@@ -78,25 +85,6 @@ impl ChainNames {
 
 const IPTABLES_TABLE_NAME: &str = "nat";
 
-#[cfg_attr(test, allow(clippy::indexing_slicing))] // `mockall::automock` violates our clippy rules
-#[cfg_attr(test, mockall::automock)]
-pub trait IPTables {
-    fn with_table(&self, table_name: &'static str) -> Self
-    where
-        Self: Sized;
-
-    fn create_chain(&self, name: &str) -> IPTablesResult<()>;
-    fn remove_chain(&self, name: &str) -> IPTablesResult<()>;
-    fn chain_exists(&self, chain: &str) -> IPTablesResult<bool>;
-
-    fn add_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()>;
-    fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> IPTablesResult<()>;
-    fn list_rules(&self, chain: &str) -> IPTablesResult<Vec<String>>;
-
-    fn list_table(&self) -> IPTablesResult<Vec<String>>;
-    fn remove_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()>;
-}
-
 #[derive(Clone)]
 pub struct IPTablesWrapper {
     table_name: &'static str,
@@ -120,11 +108,10 @@ impl From<iptables::IPTables> for IPTablesWrapper {
     }
 }
 
-impl IPTables for IPTablesWrapper {
-    fn with_table(&self, table_name: &'static str) -> Self
-    where
-        Self: Sized,
-    {
+#[cfg_attr(test, allow(clippy::indexing_slicing))] // `mockall::automock` violates our clippy rules
+#[cfg_attr(test, mockall::automock)]
+impl IPTablesWrapper {
+    pub fn with_table(&self, table_name: &'static str) -> Self {
         IPTablesWrapper {
             table_name,
             tables: self.tables.clone(),
@@ -132,7 +119,7 @@ impl IPTables for IPTablesWrapper {
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err)]
-    fn create_chain(&self, name: &str) -> IPTablesResult<()> {
+    pub fn create_chain(&self, name: &str) -> IPTablesResult<()> {
         self.tables.new_chain(self.table_name, name)?;
         self.tables.append(self.table_name, name, "-j RETURN")?;
 
@@ -140,7 +127,7 @@ impl IPTables for IPTablesWrapper {
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err)]
-    fn remove_chain(&self, name: &str) -> IPTablesResult<()> {
+    pub fn remove_chain(&self, name: &str) -> IPTablesResult<()> {
         self.tables.flush_chain(self.table_name, name)?;
         self.tables.delete_chain(self.table_name, name)?;
 
@@ -148,36 +135,36 @@ impl IPTables for IPTablesWrapper {
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err)]
-    fn chain_exists(&self, chain: &str) -> IPTablesResult<bool> {
+    pub fn chain_exists(&self, chain: &str) -> IPTablesResult<bool> {
         Ok(self.tables.chain_exists(self.table_name, chain)?)
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err)]
-    fn add_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()> {
+    pub fn add_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()> {
         self.tables
             .append(self.table_name, chain, rule)
             .map_err(From::from)
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err)]
-    fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> IPTablesResult<()> {
+    pub fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> IPTablesResult<()> {
         self.tables
             .insert(self.table_name, chain, rule, index)
             .map_err(From::from)
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err)]
-    fn list_rules(&self, chain: &str) -> IPTablesResult<Vec<String>> {
+    pub fn list_rules(&self, chain: &str) -> IPTablesResult<Vec<String>> {
         self.tables.list(self.table_name, chain).map_err(From::from)
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err)]
-    fn list_table(&self) -> IPTablesResult<Vec<String>> {
+    pub fn list_table(&self) -> IPTablesResult<Vec<String>> {
         self.tables.list_table(self.table_name).map_err(From::from)
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err)]
-    fn remove_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()> {
+    pub fn remove_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()> {
         self.tables
             .delete(self.table_name, chain, rule)
             .map_err(From::from)
@@ -185,33 +172,31 @@ impl IPTables for IPTablesWrapper {
 }
 
 #[enum_dispatch(Redirect)]
-enum Redirects<IPT: IPTables + Send + Sync> {
-    Ambient(AmbientRedirect<IPT>),
-    Standard(StandardRedirect<IPT>),
-    Mesh(MeshRedirect<IPT>),
-    FlushConnections(FlushConnections<Redirects<IPT>>),
-    PrerouteFallback(PreroutingRedirect<IPT>),
-    WithMeshExclusion(WithMeshExclusion<IPT, Redirects<IPT>>),
+enum Redirects {
+    Ambient(AmbientRedirect),
+    Standard(StandardRedirect),
+    Mesh(MeshRedirect),
+    FlushConnections(FlushConnections<Redirects>),
+    PrerouteFallback(PreroutingRedirect),
+    WithMeshExclusion(WithMeshExclusion<Redirects>),
 }
 
-/// Wrapper struct for IPTables so it flushes on drop.
-pub struct SafeIpTables<IPT: IPTables + Send + Sync> {
-    redirect: Redirects<IPT>,
-    ipt: Arc<IPT>,
+/// Manages traffic redirection through explicit entrypoint cleanup and chain deletion on drop.
+pub struct SafeIpTables {
+    redirect: Redirects,
+    ipt: Arc<IPTablesBackend>,
     chain_names: ChainNames,
 }
 
-/// Wrapper for using iptables. This creates a new chain on creation and deletes it on drop.
+/// Wrapper for using iptables. Managed chains are created on creation and deleted on drop.
+/// Entrypoint rules are removed explicitly with [`Self::cleanup`] or [`Self::cleanup_verified`].
 /// The way it works is that it adds a chain, then adds a rule to the chain that returns to the
 /// original chain (fallback) and adds a rule in the "PREROUTING" table that jumps to the new chain.
 /// Connections will then go PREROUTING -> OUR_CHAIN -> IF MATCH REDIRECT -> IF NOT MATCH FALLBACK
 /// -> ORIGINAL_CHAIN
-impl<IPT> SafeIpTables<IPT>
-where
-    IPT: IPTables + Send + Sync,
-{
+impl SafeIpTables {
     pub async fn create(
-        ipt: IPT,
+        ipt: IPTablesBackend,
         chain_names: &ChainNames,
         flush_connections: bool,
         pod_ips: Option<&str>,
@@ -273,9 +258,9 @@ where
     /// List rules from previous mirrord agent that exist on the IP table
     #[tracing::instrument(level = Level::TRACE, skip(ipt, chain_names) ret, err)]
     pub async fn list_mirrord_rules<'a>(
-        ipt: &'_ IPT,
+        ipt: &'_ IPTablesBackend,
         chain_names: &'a ChainNames,
-    ) -> IPTablesResult<impl Iterator<Item = String> + use<IPT, 'a>> {
+    ) -> IPTablesResult<impl Iterator<Item = String> + use<'a>> {
         let rules = ipt.list_table()?;
 
         Ok(rules.into_iter().filter(|rule| {
@@ -291,7 +276,7 @@ where
     }
 
     pub async fn load(
-        ipt: IPT,
+        ipt: IPTablesBackend,
         chain_names: &ChainNames,
         flush_connections: bool,
         with_mesh_exclusion: bool,
@@ -404,7 +389,7 @@ where
         }
     }
 
-    pub fn exclusion(&self) -> Option<&MeshExclusion<IPT>> {
+    pub fn exclusion(&self) -> Option<&MeshExclusion> {
         match &self.redirect {
             Redirects::WithMeshExclusion(redirect) => Some(redirect.exclusion()),
             _ => None,
@@ -412,196 +397,16 @@ where
     }
 }
 
-/// Returns correct [`IPTablesWrapper`] to use for traffic redirection.
-///
-/// If `nftables` is `false`, this function will return the `ip[6]tables-legacy` wrapper.
-///
-/// If `nftables` is `true`, this function will return the `ip[6]tables-nft` wrapper.
-///
-/// If `nftables` is [`None`], this function will choose between legacy and nftables:
-/// 1. If mesh rules are found with `ip[6]tables-nft`, `ip[6]tables-nft` wrapper will be returned.
-/// 2. Otherwise, if mesh rules are found with `ip[6]tables-legacy`, `ip[6]tables-legacy` wrapper
-///    will be returned.
-/// 3. Otherwise, if `ip[6]tables-legacy` is functional (checked by adding a dummy rule into the
-///    "nat" table), `ip[6]tables-legacy` wrapper will be returned.
-/// 4. Otherwise, `ip[6]tables-nft` wrapper will be returned.
-///
-/// # Safety
-///
-/// Unless `nftables` argument is provided, this function will use iptables commands when detecting
-/// the correct backend to use. Such actions can automatically load backend-specific kernel
-/// modules, and switch the active iptables backend in the kernel, at least in some cases. This is
-/// **not** acceptable for us.
-///
-/// 1. In properly isolated Kubernetes implementations (unlike kind, for example), unprivileged
-///    agents will never be able to load kernel modules. This is because the agent container does
-///    not have [`Capability::CAP_SYS_MODULE`].
-/// 2. Even in properly isolated Kubernetes implementations, privileged agents might still be able
-///    to load kernel modules. Because of this, this function will drop the
-///    [`Capability::CAP_SYS_MODULE`] before running any iptables commands.
-pub fn get_iptables(nftables: Option<bool>, ip6: bool) -> IPTablesWrapper {
-    /// Whether we should use ip6tables-nft when no backend is explicitly configured,
-    ///
-    /// Initialized with the first call of this function for IPv6, if the
-    /// `nftables` argument is not provided.
-    static DETECTED_NFTABLES_V6: OnceLock<bool> = OnceLock::new();
-    /// Whether we should use iptables-nft when no backend is explicitly configured,
-    ///
-    /// Initialized with the first call of this function for IPv4, if the
-    /// `nftables` argument is not provided.
-    static DETECTED_NFTABLES_V4: OnceLock<bool> = OnceLock::new();
-    let detected_nftables = if ip6 {
-        &DETECTED_NFTABLES_V6
-    } else {
-        &DETECTED_NFTABLES_V4
-    };
-
-    // If `nftables` or `detected_nftables` is set, always return early.
-    // This function calls itself recursively later.
-    let nftables = nftables.or_else(|| detected_nftables.get().copied());
-    if let Some(nftables) = nftables {
-        let path = match (nftables, ip6) {
-            (true, true) => "/usr/sbin/ip6tables-nft",
-            (true, false) => "/usr/sbin/iptables-nft",
-            (false, true) => "/usr/sbin/ip6tables-legacy",
-            (false, false) => "/usr/sbin/iptables-legacy",
-        };
-        return iptables::new_with_cmd(path)
-            .expect("IPTables initialization should not fail, the binary should be present in the agent image")
-            .into();
-    }
-
-    let legacy = get_iptables(Some(false), ip6);
-    let nft = get_iptables(Some(true), ip6);
-
-    try_drop_cap_sys_module();
-
-    for (backend, is_nft) in [(&legacy, false), (&nft, true)] {
-        match MeshVendor::detect(backend) {
-            Ok(Some(mesh)) => {
-                tracing::info!(
-                    %mesh,
-                    command = backend.tables.cmd,
-                    "Detected mesh rules with one of the iptables backends. \
-                    Using this backend."
-                );
-                let _ = detected_nftables.set(is_nft);
-                return backend.clone();
-            }
-            Ok(None) => {
-                tracing::debug!(
-                    command = backend.tables.cmd,
-                    "No mesh rules detected with one of the iptables backends."
-                );
-            }
-            Err(error) => {
-                tracing::debug!(
-                    error = %error,
-                    command = backend.tables.cmd,
-                    "Failed to detect mesh rules with one of the iptables backends."
-                );
-            }
-        }
-    }
-
-    let legacy_works = legacy
-        .tables
-        .append("nat", "INPUT", "-p 255 -j RETURN")
-        .inspect_err(|error| {
-            tracing::debug!(
-                %error,
-                command = legacy.tables.cmd,
-                "Failed to add a dummy rule using iptables-legacy binary, \
-                assuming no kernel support for it.",
-            )
-        })
-        .is_ok();
-    let _ = detected_nftables.set(legacy_works.not());
-    let wrapper = if legacy_works {
-        let _ = legacy.tables.delete("nat", "INPUT", "-p 255 -j RETURN")
-            .inspect_err(|error| {
-                tracing::error!(
-                    %error,
-                    command = legacy.tables.cmd,
-                    "Failed to delete a dummy rule added when checking kernel support for iptables-legacy. \
-                    The rule should not affect any traffic."
-                )
-            });
-        legacy
-    } else {
-        nft
-    };
-
-    tracing::info!(
-        command = wrapper.tables.cmd,
-        "Using iptables backend picked based on kernel support for iptables-legacy.",
-    );
-
-    wrapper
-}
-
-/// Checks whether an explicitly configured iptables backend hides service mesh rules living in the
-/// other backend, and logs a loud warning if so.
-///
-/// When no backend is explicitly configured, [`get_iptables`] picks the backend where mesh rules
-/// are found, so mesh-aware redirection kicks in automatically. An explicit setting skips that
-/// detection. If the mesh's rules live in the other backend, mesh detection silently fails and the
-/// agent falls back to the standard redirect, which races the mesh's own PREROUTING redirect and
-/// can deliver still-encrypted mesh traffic (e.g. a raw TLS ClientHello) directly to the
-/// application's plaintext port.
-pub fn warn_on_backend_mesh_mismatch(nftables: bool, ip6: bool) {
-    let selected = get_iptables(Some(nftables), ip6);
-    if matches!(MeshVendor::detect(&selected), Ok(Some(..))) {
-        return;
-    }
-
-    try_drop_cap_sys_module();
-
-    let other = get_iptables(Some(nftables.not()), ip6);
-    if let Ok(Some(mesh)) = MeshVendor::detect(&other) {
-        tracing::warn!(
-            %mesh,
-            configured_backend = selected.tables.cmd,
-            mesh_rules_found_with = other.tables.cmd,
-            "Service mesh rules were found with the iptables backend other than the explicitly \
-            configured one. Mesh-aware traffic redirection will not be used, and intercepting \
-            incoming traffic is likely to break meshed traffic to the target, e.g. deliver \
-            encrypted bytes directly to the application's port. Remove the explicit backend \
-            setting (`agent.nftables` config / `MIRRORD_AGENT_NFTABLES`) to let the agent pick \
-            the backend automatically."
-        );
-    }
-}
-
-/// Drops [`Capability::CAP_SYS_MODULE`] from the current thread.
-///
-/// This will prevent the thread from loading kernel modules.
-fn try_drop_cap_sys_module() {
-    let has_cap = caps::has_cap(None, CapSet::Effective, Capability::CAP_SYS_MODULE)
-        .inspect_err(|error| tracing::warn!(%error, "Failed to check if the current thread has CAP_SYS_MODULE."))
-        .unwrap_or_default();
-    if has_cap.not() {
-        tracing::debug!("Verified that the current thread does not have CAP_SYS_MODULE.");
-        return;
-    }
-
-    if let Err(error) = caps::drop(None, CapSet::Effective, Capability::CAP_SYS_MODULE) {
-        tracing::error!(%error, "Failed to drop CAP_SYS_MODULE from the current thread.");
-    } else {
-        tracing::debug!("Dropped CAP_SYS_MODULE from the current thread.");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use mockall::predicate::{eq, str};
 
-    use crate::{ChainNames, MockIPTables, SafeIpTables};
+    use crate::{ChainNames, MockIPTablesWrapper, SafeIpTables};
 
     #[tokio::test]
     async fn default() {
         let chain_names = ChainNames::legacy();
-        let mut mock = MockIPTables::new();
+        let mut mock = MockIPTablesWrapper::new();
 
         mock.expect_list_rules()
             .with(eq("OUTPUT"))
@@ -710,7 +515,7 @@ mod tests {
     #[tokio::test]
     async fn linkerd() {
         let cn = ChainNames::legacy();
-        let mut mock = MockIPTables::new();
+        let mut mock = MockIPTablesWrapper::new();
 
         mock.expect_list_rules()
             .with(eq("OUTPUT"))
@@ -844,7 +649,7 @@ mod tests {
     #[tokio::test]
     async fn with_mesh_exclusion() {
         let chain_names = ChainNames::legacy();
-        let mut mock = MockIPTables::new();
+        let mut mock = MockIPTablesWrapper::new();
 
         mock.expect_list_rules()
             .with(eq("OUTPUT"))
@@ -977,12 +782,12 @@ mod tests {
         assert!(ipt.cleanup().await.is_ok());
     }
 
-    /// Ensure that clean ip tables pass the ['SafeIpTables::ensure_iptables_clean'] check.
-    /// A fresh IP table, or one with only non-agent names, should pass.
+    /// A fresh IP table, or one with only non-agent names, has no leftover rules for
+    /// [`SafeIpTables::list_mirrord_rules`] to report.
     #[tokio::test]
     async fn pass_on_clean() {
         let chain_names = ChainNames::legacy();
-        let mut mock = MockIPTables::new();
+        let mut mock = MockIPTablesWrapper::new();
 
         // clean table returns non-mirrord rules only
         mock.expect_list_table().with().times(1).returning(|| {
@@ -1002,12 +807,12 @@ mod tests {
         );
     }
 
-    /// Ensure that dirty ip tables fail the ['SafeIpTables::ensure_iptables_clean'] check.
-    /// If there are any chains in the IP table with names used by the agent, the check should fail.
+    /// Chains with names used by the agent must be reported by
+    /// [`SafeIpTables::list_mirrord_rules`] so stale redirection rules can be detected.
     #[tokio::test]
     async fn fail_on_dirty() {
         let chain_names = ChainNames::legacy();
-        let mut mock = MockIPTables::new();
+        let mut mock = MockIPTablesWrapper::new();
 
         // dirty table returns non-mirrord rules, plus a leftover mirrord rule
         mock.expect_list_table().with().times(1).returning(|| {

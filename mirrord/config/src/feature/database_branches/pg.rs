@@ -370,7 +370,7 @@ mod tests {
     }
 
     fn only_branch(config: &DatabaseBranchesConfig) -> &DatabaseBranchConfig {
-        let [branch] = config.as_slice() else {
+        let [branch] = config.inline() else {
             panic!("expected one branch, got {config:?}");
         };
         branch
