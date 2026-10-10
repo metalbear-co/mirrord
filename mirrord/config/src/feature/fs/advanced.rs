@@ -96,6 +96,48 @@ pub const PREFETCH_TIMEOUT_DEFAULT: u64 = 30;
 ///   }
 /// }
 /// ```
+///
+/// #### Windows paths {#fs-windows-paths}
+///
+/// On Windows, the patterns of `read_write`, `read_only`, `local`, `not_found` and `mapping` are
+/// matched against two forms of the path, both with forward slashes:
+///
+/// | Form | `D:\Workspaces\myapp\app.json` becomes | A pattern for this form matches |
+/// |---|---|---|
+/// | without the drive | `/Workspaces/myapp/app.json` | the path on every drive |
+/// | with the drive | `D:/Workspaces/myapp/app.json` | the path on that drive only |
+///
+/// A pattern applies when it matches either form. So `^/Workspaces/` matches the folder on
+/// every drive, and `^D:/Workspaces/` matches it on `D:` only. Like the rest of a pattern, the
+/// drive letter ignores case.
+///
+/// Write patterns with forward slashes. A pattern that needs a backslash in the path (`\\`, or
+/// `C:\` copied from Explorer) never matches, since neither form has one, and mirrord warns about
+/// it. A backslash that escapes a regex character (`\.`, `\d`), or one choice in a class
+/// (`[\\/]`), is fine.
+///
+/// For a path from the environment, use the `path_pattern` template filter. It gives the path's
+/// form with the drive, escaped so that it matches literally and fits in any config format.
+///
+/// `%TEMP%` is read locally by default. To use the pod's `/tmp` instead, map it:
+///
+/// ```json
+/// {
+///   "feature": {
+///     "fs": {
+///       "mapping": {
+///         "^{{ get_env(name='TEMP') | path_pattern }}/(.*)$": "/tmp/$1"
+///       }
+///     }
+///   }
+/// }
+/// ```
+///
+/// - **Both the short and long name of a folder match.** Windows can give a folder an old-style
+///   short name, like `FIRSTN~1` for `First Name`, and `%TEMP%` often uses it. `path_pattern`
+///   matches both, as long as the folder exists.
+/// - **The result never ends in a separator.** Add `/` to match what's inside the folder.
+/// - **For text that isn't a path,** such as a user name, `regex_escape` escapes it as-is.
 #[derive(MirrordConfig, Default, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[config(
     map_to = "AdvancedFsUserConfig",
@@ -111,16 +153,8 @@ pub struct FsConfig {
     ///
     /// Specify file path patterns that if matched will be read and written to the remote.
     ///
-    /// ##### Windows
-    ///
-    /// Patterns are matched against a unix-style form of the requested path, not the raw
-    /// Windows path. Before matching, the drive letter is stripped and backslashes are
-    /// converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
-    /// `/Workspaces/myapp/app.json`.
-    ///
-    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
-    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-    /// regex sees contains no backslashes at all — they were stripped during translation.
+    /// On Windows, write the patterns with forward slashes. They match the path with and without
+    /// its drive, as [Windows paths](#fs-windows-paths) explains.
     #[config(env = "MIRRORD_FILE_READ_WRITE_PATTERN")]
     pub read_write: Option<VecOrSingle<String>>,
 
@@ -129,32 +163,16 @@ pub struct FsConfig {
     /// Specify file path patterns that if matched will be read from the remote.
     /// if file matching the pattern is opened for writing or read/write it will be opened locally.
     ///
-    /// ##### Windows
-    ///
-    /// Patterns are matched against a unix-style form of the requested path, not the raw
-    /// Windows path. Before matching, the drive letter is stripped and backslashes are
-    /// converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
-    /// `/Workspaces/myapp/app.json`.
-    ///
-    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
-    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-    /// regex sees contains no backslashes at all — they were stripped during translation.
+    /// On Windows, write the patterns with forward slashes. They match the path with and without
+    /// its drive, as [Windows paths](#fs-windows-paths) explains.
     pub read_only: Option<VecOrSingle<String>>,
 
     /// #### feature.fs.local {#feature-fs-local}
     ///
     /// Specify file path patterns that if matched will be opened locally.
     ///
-    /// ##### Windows
-    ///
-    /// Patterns are matched against a unix-style form of the requested path, not the raw
-    /// Windows path. Before matching, the drive letter is stripped and backslashes are
-    /// converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
-    /// `/Workspaces/myapp/app.json`.
-    ///
-    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
-    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-    /// regex sees contains no backslashes at all — they were stripped during translation.
+    /// On Windows, write the patterns with forward slashes. They match the path with and without
+    /// its drive, as [Windows paths](#fs-windows-paths) explains.
     #[config(env = "MIRRORD_FILE_LOCAL_PATTERN")]
     pub local: Option<VecOrSingle<String>>,
 
@@ -162,16 +180,8 @@ pub struct FsConfig {
     ///
     /// Specify file path patterns that if matched will be treated as non-existent.
     ///
-    /// ##### Windows
-    ///
-    /// Patterns are matched against a unix-style form of the requested path, not the raw
-    /// Windows path. Before matching, the drive letter is stripped and backslashes are
-    /// converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
-    /// `/Workspaces/myapp/app.json`.
-    ///
-    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
-    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-    /// regex sees contains no backslashes at all — they were stripped during translation.
+    /// On Windows, write the patterns with forward slashes. They match the path with and without
+    /// its drive, as [Windows paths](#fs-windows-paths) explains.
     pub not_found: Option<VecOrSingle<String>>,
 
     /// #### feature.fs.mapping {#feature-fs-mapping}
@@ -201,29 +211,29 @@ pub struct FsConfig {
     ///
     /// ##### Windows
     ///
-    /// Patterns are matched against a unix-style form of the requested path, not the raw
-    /// Windows path. Before matching, the drive letter is stripped and backslashes are
-    /// converted to forward slashes, so:
+    /// Patterns match the path with and without its drive, with forward slashes, as
+    /// [Windows paths](#fs-windows-paths) explains:
     ///
-    /// `D:\Workspaces\myapp\config\app.json` is matched as `/Workspaces/myapp/config/app.json`
+    /// - **A pattern without a drive** (`^/Workspaces/`) maps the path on every drive.
+    /// - **A pattern with a drive** (`^C:/Repos/`) maps the path on that drive only.
     ///
-    /// Patterns must therefore be written with forward slashes. Backslashes in the regex
-    /// (e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-    /// regex sees contains no backslashes at all — they were stripped during translation.
-    ///
-    /// The replacement value is sent to the agent as-is and is what the remote (Linux) pod
-    /// will see on disk, so it should also use forward slashes.
+    /// The value is the path the remote (Linux) pod opens, so write it with forward slashes and
+    /// no drive. A drive left in the result is dropped.
     ///
     /// Example:
     /// ```json
     /// {
-    ///   "^/Workspaces/(?<app>[^/]+)/config/(?<file>.+)": "/etc/${app}/$file"
+    ///   "^/Workspaces/(?<app>[^/]+)/config/(?<file>.+)": "/etc/${app}/$file",
+    ///   "^C:/Repos/api/appsettings\\.json$": "/app/appsettings.json"
     /// }
     /// ```
     ///
-    /// Will produce the following replacement:
+    /// Will produce the following replacements:
     ///
     /// `D:\Workspaces\myapp\config\app.json` => `/etc/myapp/app.json`
+    /// `C:\Repos\api\appsettings.json` => `/app/appsettings.json`
+    ///
+    /// `D:\Repos\api\appsettings.json` stays as it is, because the second pattern names `C:`.
     ///
     /// ##### Caveats
     ///
@@ -348,6 +358,90 @@ impl FsConfig {
     pub fn is_active(&self) -> bool {
         !matches!(self.mode, FsModeConfig::Local)
     }
+
+    /// Warns about each pattern written as a Windows path with backslashes.
+    ///
+    /// On Windows, the layer matches paths with forward slashes only, so such a pattern matches
+    /// nothing, and often isn't a valid regex either (`\R` in `C:\Repos`). It's a warning rather
+    /// than an error, and Windows only, because elsewhere a backslash is an ordinary file name
+    /// character.
+    pub fn verify(&self, context: &mut ConfigContext) {
+        if !cfg!(windows) {
+            return;
+        }
+
+        for (list, pattern) in self.backslash_path_patterns() {
+            context.add_warning(format!(
+                "`feature.fs.{list}` pattern `{pattern}` is a path with backslashes, but on \
+                 Windows mirrord matches paths with forward slashes: `C:\\Repos\\app.json` is \
+                 matched as `C:/Repos/app.json` and `/Repos/app.json`, so this pattern never \
+                 matches. Write it with `/`, and for a path from the environment use a template: \
+                 `{{{{ get_env(name='TEMP') | path_pattern }}}}`."
+            ));
+        }
+    }
+
+    /// The patterns, with the list each is in, that look like a Windows path written with
+    /// backslashes: they start with a drive and a backslash (`C:\Repos`), or need a backslash
+    /// (`\\`) to match, which no path the layer matches holds.
+    fn backslash_path_patterns(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        let lists = [
+            ("read_write", &self.read_write),
+            ("read_only", &self.read_only),
+            ("local", &self.local),
+            ("not_found", &self.not_found),
+        ]
+        .into_iter()
+        .flat_map(|(list, patterns)| {
+            patterns
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .map(move |pattern| (list, pattern.as_str()))
+        });
+        let mapping = self
+            .mapping
+            .iter()
+            .flatten()
+            .map(|(pattern, _)| ("mapping", pattern.as_str()));
+
+        lists.chain(mapping).filter(|(_, pattern)| {
+            let unanchored = pattern.strip_prefix('^').unwrap_or(pattern);
+            let starts_with_drive = matches!(
+                unanchored.as_bytes(),
+                [letter, b':', b'\\', ..] if letter.is_ascii_alphabetic()
+            );
+            starts_with_drive || needs_a_backslash(pattern)
+        })
+    }
+}
+
+/// Whether `pattern` has an escaped backslash (`\\`) outside a character class, which a path must
+/// hold for the pattern to match.
+///
+/// In a class, a backslash is one choice among others: `[\\/]` matches the `/` the layer's paths
+/// have.
+fn needs_a_backslash(pattern: &str) -> bool {
+    let mut class_depth = 0_usize;
+    let mut characters = pattern.chars().peekable();
+    while let Some(character) = characters.next() {
+        match character {
+            '\\' => {
+                if characters.next() == Some('\\') && class_depth == 0 {
+                    return true;
+                }
+            }
+            '[' => {
+                class_depth += 1;
+                // A `]` first in a class, after any `^`, is a literal `]`, not the class's end.
+                characters.next_if_eq(&'^');
+                characters.next_if_eq(&']');
+            }
+            ']' if class_depth > 0 => class_depth -= 1,
+            _ => {}
+        }
+    }
+    false
 }
 
 impl From<FsModeConfig> for AnalyticValue {
@@ -421,5 +515,92 @@ mod tests {
             .unwrap();
 
         assert_eq!(fs_config, expect);
+    }
+
+    /// The warnings [`FsConfig::verify`] gives for `config`.
+    #[cfg(windows)]
+    fn warnings(config: FsConfig) -> Vec<String> {
+        let mut context = ConfigContext::default();
+        config.verify(&mut context);
+        context.into_warnings()
+    }
+
+    /// The patterns customers write when they copy a path from Explorer: backslashes, escaped
+    /// once for JSON (`C:\Repos`) or twice more for the regex (`C:\\Repos`).
+    #[cfg(windows)]
+    #[rstest]
+    #[case::escaped_for_json(r"C:\Repos\app\appsettings.json")]
+    #[case::escaped_for_the_regex(r"C:\\Repos\\app\\appsettings\.json")]
+    #[case::anchored(r"^C:\Repos\app")]
+    #[case::without_a_drive(r"\\Repos\\app")]
+    #[case::after_a_class(r"^/[ab]\\Repos")]
+    fn a_path_with_backslashes_is_warned_about_in_every_list(#[case] pattern: &str) {
+        let patterns = || Some(VecOrSingle::Single(pattern.to_owned()));
+        let lists = [
+            (
+                "read_write",
+                FsConfig {
+                    read_write: patterns(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "read_only",
+                FsConfig {
+                    read_only: patterns(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "local",
+                FsConfig {
+                    local: patterns(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "not_found",
+                FsConfig {
+                    not_found: patterns(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "mapping",
+                FsConfig {
+                    mapping: Some([(pattern.to_owned(), "/app".to_owned())].into()),
+                    ..Default::default()
+                },
+            ),
+        ];
+
+        for (list, config) in lists {
+            let warnings = warnings(config);
+            let [warning] = warnings.as_slice() else {
+                panic!("one warning for `{list}`, got {warnings:?}");
+            };
+            assert!(
+                warning.contains(&format!("`feature.fs.{list}` pattern `{pattern}`")),
+                "the warning names the list and the pattern: {warning}"
+            );
+        }
+    }
+
+    /// Ordinary regexes use backslashes too, to escape a `.` or for a class like `\d`: those are
+    /// not paths, and get no warning. Nor does a backslash that is one choice in a class.
+    #[cfg(windows)]
+    #[rstest]
+    #[case::forward_slashes("^C:/Repos/app/")]
+    #[case::escaped_dot(r".+\.json$")]
+    #[case::digit_class(r"^/logs/\d+\.log$")]
+    #[case::either_separator(r"^C:[\\/]Repos[\\/]")]
+    #[case::bracket_first_in_a_class(r"^/Repos/[]\\]")]
+    fn a_regex_escape_is_not_warned_about(#[case] pattern: &str) {
+        let config = FsConfig {
+            read_only: Some(VecOrSingle::Single(pattern.to_owned())),
+            ..Default::default()
+        };
+
+        assert_eq!(warnings(config), Vec::<String>::new());
     }
 }
