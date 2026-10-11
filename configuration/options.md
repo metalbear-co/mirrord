@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-10-07T00:00:00.000Z
+lastmod: 2026-10-11T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -909,9 +909,11 @@ This option is compatible only with deployment targets.
 
 Configuration for the database branching feature.
 
-A list of configurations for database branches.
+The branch databases a session runs with. Either defined here, or taken from the
+`dbBranches` entries a cluster admin put on the target's `MirrordSplitConfig`, so `mirrord
+exec` and `mirrord up` use one definition that does not drift.
 
-Using a connection URL:
+Inline, using a connection URL:
 ```json
 {
   "feature": {
@@ -927,7 +929,7 @@ Using a connection URL:
 }
 ```
 
-Using individual connection params:
+Inline, using individual connection params:
 ```json
 {
   "feature": {
@@ -943,6 +945,36 @@ Using individual connection params:
   }
 }
 ```
+
+Every `dbBranches` entry of the target's `MirrordSplitConfig`:
+```json
+{
+  "feature": {
+    "db_branches": "*"
+  }
+}
+```
+
+Only the entries with these ids:
+```json
+{
+  "feature": {
+    "db_branches": ["orders-pg", "sessions-redis"]
+  }
+}
+```
+
+With `"*"` or a list of ids the operator resolves the entries, and sessions started under
+the same key that point at the same entry share one branch (its id is the entry id plus the
+key). An id that matches no entry fails the session, naming the ids the workload has; a
+workload with no `dbBranches` gives no branches and the session continues. An operator
+that cannot resolve entries fails the session before it starts. Inline definitions always
+win: with them, any `dbBranches` on the workload are ignored with a warning.
+
+`"*"` or a list of entry ids, resolved by the operator against the target's
+`MirrordSplitConfig`.
+
+Branches defined in this config.
 
 Configuration for a database branch.
 
@@ -1443,10 +1475,8 @@ MariaDB 12 branch image, so MariaDB-only objects such as sequences and system-ve
 
 Users can choose from the following copy mode to bootstrap their MariaDB branch database.
 
-All copy modes accept `dump_args`. When this field is set, it replaces the default
-`mariadb-dump` arguments. The defaults are `--single-transaction` and `--no-tablespaces`;
-include them explicitly when overriding if you want to preserve the default behavior. An
-empty list means no dump args.
+All copy modes accept `dump_args`, passed to `mariadb-dump` as-is, which can leave out what the
+copy mode copies, such as stored routines with `--skip-routines`.
 
 - Empty
 
@@ -1639,10 +1669,8 @@ When configuring a branch for MySQL, set `type` to `mysql`.
 
 Users can choose from the following copy mode to bootstrap their MySQL branch database.
 
-All copy modes accept `dump_args`. When this field is set, it replaces the default
-`mysqldump` arguments. The defaults are `--single-transaction` and `--no-tablespaces`;
-include them explicitly when overriding if you want to preserve the default behavior. An
-empty list means no dump args.
+All copy modes accept `dump_args`, passed to `mysqldump` as-is, which can leave out what the
+copy mode copies, such as stored routines with `--skip-routines`.
 
 - Empty
 
@@ -3388,11 +3416,27 @@ mirrord's TLS client one to present:
 }
 ```
 
+If the local application authorizes requests based on the identity of the client, give
+mirrord more client certificates to choose from. When the original client presented a
+certificate, mirrord presents the first of these with the same identity, and falls back to
+`client_cert` and `client_key` when none has it:
+```json
+{
+  "protocol": "tls",
+  "client_cert": "/path/to/default.cert.pem",
+  "client_key": "/path/to/default.key.pem",
+  "client_identities": [
+    { "cert": "/path/to/client-a.cert.pem", "key": "/path/to/client-a.key.pem" },
+    { "cert": "/path/to/client-b.cert.pem", "key": "/path/to/client-b.key.pem" }
+  ]
+}
+```
+
 In preview sessions (`mirrord preview start`) the mirrord operator makes the TLS connection to
 the preview pod, so `client_cert` and `client_key` are read locally, stored in the session's
-Secret and presented by the operator. `server_name` is used the same way. The other settings
-do not apply to previews: the operator always delivers over TLS and does not verify the
-preview pod's certificate.
+Secret and presented by the operator. `server_name` is used the same way. The other settings,
+including `client_identities`, do not apply to previews: the operator always delivers over TLS
+and does not verify the preview pod's certificate.
 
 When the target's own process already holds a client certificate the preview pod accepts,
 a preview can use it in place without copying it out of the cluster. Point `client_cert`
@@ -3431,6 +3475,37 @@ On the machine running mirrord.
 
 Inside the target's container. Preview sessions only: the mirrord operator reads the
 files from a running pod of the target.
+
+##### feature.network.incoming.tls_delivery.client_identities {#feature-network-incoming-tls_delivery-client_identities}
+
+Additional client certificates, for local applications that authorize requests based on
+the identity of the client.
+
+When the original client presented a certificate, mirrord presents the first of these
+with the same identity. The identity is the set of subject alternative names, or the
+subject if the certificate has no SANs. DNS names are compared case-insensitively, all
+other names byte by byte. If none matches, or the original client presented no
+certificate, `client_cert` and `client_key` are used.
+
+The original client's certificate is known only when the mirrord operator's TLS steal
+configuration verifies clients against trust roots.
+
+Certificates can be presented only during the TLS handshake. Local applications that
+request a client certificate later (TLS 1.2 renegotiation, TLS 1.3 post-handshake
+authentication) are not supported.
+
+These files are always read from the machine running mirrord, regardless of
+`client_cert_source`.
+
+A client certificate with its private key, see [`LocalTlsDelivery::client_identities`].
+
+Path to a PEM file containing the certificate chain.
+
+This file must contain at least one certificate.
+
+Path to a PEM file containing the private key of `cert`.
+
+This file must contain exactly one private key.
 
 ##### feature.network.incoming.tls_delivery.client_key {#feature-network-incoming-tls_delivery-client_key}
 
@@ -3612,11 +3687,27 @@ mirrord's TLS client one to present:
 }
 ```
 
+If the local application authorizes requests based on the identity of the client, give
+mirrord more client certificates to choose from. When the original client presented a
+certificate, mirrord presents the first of these with the same identity, and falls back to
+`client_cert` and `client_key` when none has it:
+```json
+{
+  "protocol": "tls",
+  "client_cert": "/path/to/default.cert.pem",
+  "client_key": "/path/to/default.key.pem",
+  "client_identities": [
+    { "cert": "/path/to/client-a.cert.pem", "key": "/path/to/client-a.key.pem" },
+    { "cert": "/path/to/client-b.cert.pem", "key": "/path/to/client-b.key.pem" }
+  ]
+}
+```
+
 In preview sessions (`mirrord preview start`) the mirrord operator makes the TLS connection to
 the preview pod, so `client_cert` and `client_key` are read locally, stored in the session's
-Secret and presented by the operator. `server_name` is used the same way. The other settings
-do not apply to previews: the operator always delivers over TLS and does not verify the
-preview pod's certificate.
+Secret and presented by the operator. `server_name` is used the same way. The other settings,
+including `client_identities`, do not apply to previews: the operator always delivers over TLS
+and does not verify the preview pod's certificate.
 
 When the target's own process already holds a client certificate the preview pod accepts,
 a preview can use it in place without copying it out of the cluster. Point `client_cert`
@@ -3655,6 +3746,37 @@ On the machine running mirrord.
 
 Inside the target's container. Preview sessions only: the mirrord operator reads the
 files from a running pod of the target.
+
+##### feature.network.incoming.tls_delivery.client_identities {#feature-network-incoming-tls_delivery-client_identities}
+
+Additional client certificates, for local applications that authorize requests based on
+the identity of the client.
+
+When the original client presented a certificate, mirrord presents the first of these
+with the same identity. The identity is the set of subject alternative names, or the
+subject if the certificate has no SANs. DNS names are compared case-insensitively, all
+other names byte by byte. If none matches, or the original client presented no
+certificate, `client_cert` and `client_key` are used.
+
+The original client's certificate is known only when the mirrord operator's TLS steal
+configuration verifies clients against trust roots.
+
+Certificates can be presented only during the TLS handshake. Local applications that
+request a client certificate later (TLS 1.2 renegotiation, TLS 1.3 post-handshake
+authentication) are not supported.
+
+These files are always read from the machine running mirrord, regardless of
+`client_cert_source`.
+
+A client certificate with its private key, see [`LocalTlsDelivery::client_identities`].
+
+Path to a PEM file containing the certificate chain.
+
+This file must contain at least one certificate.
+
+Path to a PEM file containing the private key of `cert`.
+
+This file must contain exactly one private key.
 
 ##### feature.network.incoming.tls_delivery.client_key {#feature-network-incoming-tls_delivery-client_key}
 
