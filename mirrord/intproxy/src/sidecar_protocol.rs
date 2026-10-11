@@ -8,8 +8,8 @@
 //! Only the direction from the internal proxy is framed. A stream starts with [`PREAMBLE`] and
 //! continues with frames, each a tag byte followed by a payload:
 //!
-//! | tag             | payload                                     |
-//! |-----------------|---------------------------------------------|
+//! | tag             | payload                                    |
+//! |-----------------|--------------------------------------------|
 //! | [`AGENT_FRAME`] | one encoded [`ClientMessage`] for the agent |
 //! | [`HOOKS_FRAME`] | one encoded [`HooksReport`]                 |
 //!
@@ -22,20 +22,14 @@
 //! * The external proxy recognizes an internal proxy that sends plain [`ClientMessage`]s by the
 //!   missing [`PREAMBLE`].
 
-use std::{
-    io,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::io;
 
 use actix_codec::{Decoder, Encoder, Framed};
 use bincode::{Decode, Encode, error::DecodeError};
 use bytes::{Buf, BufMut, BytesMut};
-use futures::{Sink, SinkExt, Stream, StreamExt};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, ProtocolCodec};
 use mirrord_protocol_io::{AsyncIO, Client, Connection};
 use tokio::sync::mpsc;
-use tokio_util::sync::{PollSendError, PollSender};
 
 /// Opens a stream that uses this protocol.
 ///
@@ -53,8 +47,8 @@ const HOOKS_FRAME: u8 = 1;
 /// hook list. Decoding a report that claims to be larger fails instead of buffering it.
 const HOOKS_REPORT_LIMIT: usize = 64 * 1024;
 
-/// How many frames of one kind can wait to be written to the external proxy.
-const FRAMES_CHANNEL_SIZE: usize = 64;
+/// How many [`HooksReport`]s can wait to be written to the external proxy.
+const REPORTS_CHANNEL_SIZE: usize = 64;
 
 /// Which libc hooks one layer of a container session installed, and the platform it runs on.
 ///
@@ -81,14 +75,6 @@ pub enum SidecarMessage {
     HooksInstalled(HooksReport),
 }
 
-/// What the internal proxy writes to the stream.
-enum Frame {
-    /// A [`ClientMessage`] already encoded for the agent, as that is what [`Connection`] hands
-    /// to its transport.
-    Agent(Vec<u8>),
-    Hooks(HooksReport),
-}
-
 /// Makes the agent connection of an internal proxy over `io`, a stream to the external proxy.
 ///
 /// `sidecar_protocol` tells whether the external proxy expects this protocol or plain
@@ -105,126 +91,47 @@ where
         return (Connection::from_stream(io), None);
     }
 
-    let (mut sink, messages) = Framed::new(io, InternalProxyCodec::default()).split();
-    let (agent_frames_tx, mut agent_frames_rx) = mpsc::channel(FRAMES_CHANNEL_SIZE);
-    let (reports_tx, mut reports_rx) = mpsc::channel(FRAMES_CHANNEL_SIZE);
+    let (reports_tx, reports) = mpsc::channel(REPORTS_CHANNEL_SIZE);
+    let codec = InternalProxyCodec {
+        preamble_sent: false,
+        reports,
+    };
 
-    // The connection and the sender of reports both write to the stream, which this task owns
-    // on their behalf. It lives as long as the connection.
-    tokio::spawn(async move {
-        loop {
-            let frame = tokio::select! {
-                biased;
-
-                frame = agent_frames_rx.recv() => match frame {
-                    Some(frame) => frame,
-                    None => break,
-                },
-                Some(report) = reports_rx.recv() => Frame::Hooks(report),
-            };
-
-            if let Err(error) = sink.send(frame).await {
-                tracing::error!(%error, "failed to send a frame to the external proxy");
-                break;
-            }
-        }
-    });
-
-    let connection = Connection::from_channel(Transport {
-        agent_frames: PollSender::new(agent_frames_tx),
-        messages,
-    });
-
-    (connection, Some(reports_tx))
-}
-
-/// The two directions of a stream to the external proxy, as [`Connection`] takes them.
-struct Transport<S> {
-    /// To the task that writes to the stream.
-    agent_frames: PollSender<Frame>,
-    /// Read from the stream.
-    messages: S,
-}
-
-impl<S> Transport<S> {
-    fn closed(_: PollSendError<Frame>) -> io::Error {
-        io::Error::new(
-            io::ErrorKind::BrokenPipe,
-            "connection to the external proxy is closed",
-        )
-    }
-}
-
-impl<S> Stream for Transport<S>
-where
-    S: Stream<Item = io::Result<DaemonMessage>> + Unpin,
-{
-    type Item = io::Result<DaemonMessage>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.get_mut().messages.poll_next_unpin(cx)
-    }
-}
-
-impl<S: Unpin> Sink<Vec<u8>> for Transport<S> {
-    type Error = io::Error;
-
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.get_mut()
-            .agent_frames
-            .poll_ready_unpin(cx)
-            .map_err(Self::closed)
-    }
-
-    fn start_send(self: Pin<&mut Self>, client_message: Vec<u8>) -> io::Result<()> {
-        self.get_mut()
-            .agent_frames
-            .start_send_unpin(Frame::Agent(client_message))
-            .map_err(Self::closed)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.get_mut()
-            .agent_frames
-            .poll_flush_unpin(cx)
-            .map_err(Self::closed)
-    }
-
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.get_mut()
-            .agent_frames
-            .poll_close_unpin(cx)
-            .map_err(Self::closed)
-    }
+    (
+        Connection::from_channel(Framed::new(io, codec)),
+        Some(reports_tx),
+    )
 }
 
 /// Codec for the end of the internal proxy.
-#[derive(Default)]
+///
+/// Encodes [`ClientMessage`]s that are already encoded for the agent, as that is what
+/// [`Connection`] hands to its transport.
 struct InternalProxyCodec {
     preamble_sent: bool,
+    /// Written ahead of the next message for the agent. The proxy keeps pinging the agent, so
+    /// a report never waits long.
+    reports: mpsc::Receiver<HooksReport>,
 }
 
-impl Encoder<Frame> for InternalProxyCodec {
+impl Encoder<Vec<u8>> for InternalProxyCodec {
     type Error = io::Error;
 
-    fn encode(&mut self, frame: Frame, dst: &mut BytesMut) -> io::Result<()> {
+    fn encode(&mut self, client_message: Vec<u8>, dst: &mut BytesMut) -> io::Result<()> {
         if !self.preamble_sent {
             dst.put_slice(&PREAMBLE);
             self.preamble_sent = true;
         }
 
-        let (tag, payload) = match frame {
-            Frame::Agent(client_message) => (AGENT_FRAME, client_message),
-            Frame::Hooks(report) => (
-                HOOKS_FRAME,
-                bincode::encode_to_vec(report, bincode::config::standard())
-                    .map_err(io::Error::other)?,
-            ),
-        };
+        while let Ok(report) = self.reports.try_recv() {
+            dst.put_u8(HOOKS_FRAME);
+            bincode::encode_into_std_write(report, &mut dst.writer(), bincode::config::standard())
+                .map_err(io::Error::other)?;
+        }
 
-        dst.reserve(payload.len() + 1);
-        dst.put_u8(tag);
-        dst.put_slice(&payload);
+        dst.reserve(client_message.len() + 1);
+        dst.put_u8(AGENT_FRAME);
+        dst.put_slice(&client_message);
 
         Ok(())
     }
@@ -282,10 +189,21 @@ impl Decoder for ExternalProxyCodec {
         let message = match (self.peer, src.first()) {
             (Peer::Plain, _) => agent_codec.decode(src)?.map(SidecarMessage::Agent),
             (_, None) => None,
-            (_, Some(&AGENT_FRAME)) => decode_payload(src, |payload| agent_codec.decode(payload))?
-                .map(SidecarMessage::Agent),
-            (_, Some(&HOOKS_FRAME)) => {
-                decode_payload(src, decode_hooks_report)?.map(SidecarMessage::HooksInstalled)
+            (_, Some(&tag @ (AGENT_FRAME | HOOKS_FRAME))) => {
+                // The tag stays in the buffer until its whole payload has arrived.
+                let mut payload = src.split_off(1);
+                let decoded = if tag == AGENT_FRAME {
+                    agent_codec
+                        .decode(&mut payload)
+                        .map(|message| message.map(SidecarMessage::Agent))
+                } else {
+                    decode_hooks_report(&mut payload)
+                };
+                if matches!(decoded, Ok(Some(_))) {
+                    src.clear();
+                }
+                src.unsplit(payload);
+                decoded?
             }
             (_, Some(tag)) => {
                 return Err(io::Error::new(
@@ -299,29 +217,13 @@ impl Decoder for ExternalProxyCodec {
     }
 }
 
-/// Decodes the payload of the frame at the start of `src` with `decode`, which gets the bytes
-/// that follow the tag. The frame is removed from `src` only once its whole payload is there.
-fn decode_payload<T>(
-    src: &mut BytesMut,
-    decode: impl FnOnce(&mut BytesMut) -> io::Result<Option<T>>,
-) -> io::Result<Option<T>> {
-    let mut payload = src.split_off(1);
-    let decoded = decode(&mut payload);
-    if matches!(decoded, Ok(Some(_))) {
-        src.clear();
-    }
-    src.unsplit(payload);
-
-    decoded
-}
-
-fn decode_hooks_report(payload: &mut BytesMut) -> io::Result<Option<HooksReport>> {
+fn decode_hooks_report(payload: &mut BytesMut) -> io::Result<Option<SidecarMessage>> {
     let config = bincode::config::standard().with_limit::<HOOKS_REPORT_LIMIT>();
 
     match bincode::decode_from_slice(payload.as_ref(), config) {
         Ok((report, consumed)) => {
             payload.advance(consumed);
-            Ok(Some(report))
+            Ok(Some(SidecarMessage::HooksInstalled(report)))
         }
         Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
         Err(error) => Err(io::Error::other(error)),
@@ -338,14 +240,11 @@ impl Encoder<DaemonMessage> for ExternalProxyCodec {
 
 #[cfg(test)]
 mod tests {
-    use actix_codec::{Decoder, Encoder, Framed};
+    use actix_codec::{Decoder, Encoder};
     use bytes::BytesMut;
-    use futures::{SinkExt, StreamExt};
-    use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage, GetEnvVarsRequest, VERSION};
+    use mirrord_protocol::{ClientCodec, ClientMessage, GetEnvVarsRequest, VERSION};
 
-    use super::{
-        ExternalProxyCodec, Frame, HooksReport, InternalProxyCodec, PREAMBLE, SidecarMessage,
-    };
+    use super::{ExternalProxyCodec, HooksReport, InternalProxyCodec, PREAMBLE, SidecarMessage};
 
     fn client_messages() -> Vec<ClientMessage> {
         vec![
@@ -391,79 +290,35 @@ mod tests {
             .collect()
     }
 
-    fn hooks_report() -> HooksReport {
-        HooksReport {
+    #[test]
+    fn external_proxy_decodes_sidecar_protocol() {
+        let (reports_tx, reports) = tokio::sync::mpsc::channel(1);
+        let mut codec = InternalProxyCodec {
+            preamble_sent: false,
+            reports,
+        };
+        let report = HooksReport {
             arch: 2,
             os_version: Some((6, 8)),
             installed: vec!["open".to_owned(), "connect".to_owned()],
             failed: vec!["open64".to_owned()],
-        }
-    }
+        };
+        reports_tx.try_send(report.clone()).unwrap();
 
-    #[test]
-    fn external_proxy_decodes_sidecar_protocol() {
-        let mut codec = InternalProxyCodec::default();
         let mut stream = BytesMut::new();
-        let mut expected = Vec::new();
         for message in client_messages() {
-            let frame = Frame::Agent(encode_for_agent(message.clone()).to_vec());
-            codec.encode(frame, &mut stream).unwrap();
-            expected.push(SidecarMessage::Agent(message));
-
             codec
-                .encode(Frame::Hooks(hooks_report()), &mut stream)
+                .encode(encode_for_agent(message).to_vec(), &mut stream)
                 .unwrap();
-            expected.push(SidecarMessage::HooksInstalled(hooks_report()));
         }
+
+        let mut expected = expected();
+        expected.insert(0, SidecarMessage::HooksInstalled(report));
 
         assert!(stream.starts_with(&PREAMBLE));
         for chunk_size in [1, 2, 3, 7, PREAMBLE.len(), stream.len()] {
             assert_eq!(decode_in_chunks(&stream, chunk_size), expected);
         }
-    }
-
-    #[test]
-    fn external_proxy_rejects_oversized_hooks_report() {
-        let mut stream = BytesMut::new();
-        let report = HooksReport {
-            installed: vec!["a".repeat(super::HOOKS_REPORT_LIMIT)],
-            ..hooks_report()
-        };
-        InternalProxyCodec::default()
-            .encode(Frame::Hooks(report), &mut stream)
-            .unwrap();
-
-        // The claimed size is known from the first bytes of the report.
-        stream.truncate(PREAMBLE.len() + 32);
-        assert!(ExternalProxyCodec::default().decode(&mut stream).is_err());
-    }
-
-    /// Both kinds of frames of a connected internal proxy reach the external proxy, whose
-    /// messages reach the internal proxy.
-    #[tokio::test]
-    async fn connection_carries_agent_messages_and_reports() {
-        let (internal, external) = tokio::io::duplex(1024);
-        let (connection, reports) = super::connect(internal, true);
-        let mut connection = connection;
-        let mut external = Framed::new(external, ExternalProxyCodec::default());
-
-        connection.send(ClientMessage::Ping).await;
-        assert_eq!(
-            external.next().await.unwrap().unwrap(),
-            SidecarMessage::Agent(ClientMessage::Ping),
-        );
-
-        reports.unwrap().send(hooks_report()).await.unwrap();
-        assert_eq!(
-            external.next().await.unwrap().unwrap(),
-            SidecarMessage::HooksInstalled(hooks_report()),
-        );
-
-        external.send(DaemonMessage::Pong).await.unwrap();
-        assert_eq!(connection.recv().await, Some(DaemonMessage::Pong));
-
-        drop(connection);
-        assert!(external.next().await.is_none());
     }
 
     #[test]

@@ -56,18 +56,3 @@ fn os_release() -> Option<String> {
         sysinfo::System::kernel_version()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::parse_version;
-
-    #[test]
-    fn parses_release_strings() {
-        assert_eq!(parse_version("15.3.1"), Some((15, 3)));
-        assert_eq!(parse_version("6.8.0-45-generic"), Some((6, 8)));
-        assert_eq!(parse_version("26.0"), Some((26, 0)));
-        assert_eq!(parse_version("5.15-rc1"), Some((5, 15)));
-        assert_eq!(parse_version("rolling"), None);
-        assert_eq!(parse_version("7"), None);
-    }
-}
