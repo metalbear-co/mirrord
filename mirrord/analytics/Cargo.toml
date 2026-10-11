@@ -26,9 +26,7 @@ drain.workspace = true
 uuid.workspace = true
 ci_info.workspace = true
 sha2.workspace = true
-
-[target.'cfg(unix)'.dependencies]
-libc.workspace = true
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 
 [dev-dependencies]
 serde_json.workspace = true
