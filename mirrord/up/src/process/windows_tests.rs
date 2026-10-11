@@ -16,6 +16,7 @@ use std::{
     process::{ExitStatus, Stdio},
 };
 
+use mirrord_command::{resolve_command, resolve_tokio_command};
 use rstest::rstest;
 use tempfile::TempDir;
 use tokio::process::Child;
@@ -64,7 +65,7 @@ fn helper_args(helper: &str) -> [String; 5] {
 }
 
 fn helper(helper: &str, directory: &Path) -> Command {
-    let mut command = Command::new(std::env::current_exe().unwrap());
+    let mut command = resolve_tokio_command(std::env::current_exe().unwrap());
     command
         .args(helper_args(helper))
         .env(DIRECTORY_ENV, directory)
@@ -159,7 +160,7 @@ fn child_helper() {
             let grandchild = format!("{name}-grandchild");
             // Never waited for on purpose: only the service's Job Object may end the grandchild.
             #[allow(clippy::zombie_processes)]
-            std::process::Command::new(std::env::current_exe().unwrap())
+            resolve_command(std::env::current_exe().unwrap())
                 .args(helper_args("child_helper"))
                 .env(NAME_ENV, &grandchild)
                 .env(MODE_ENV, "serve")
@@ -374,7 +375,7 @@ async fn spawn_failure_is_returned_instead_of_panicking() {
     let directory = TempDir::new().unwrap();
     let missing = (
         Arc::from("missing"),
-        Command::new(directory.path().join("missing.exe")),
+        resolve_tokio_command(directory.path().join("missing.exe")),
     );
     // Teardown starts before the spawned service can write its PID, so this only checks that
     // supervision returns. The service's Job Object is kill-on-close, so it ends either way.
