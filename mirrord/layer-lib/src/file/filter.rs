@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::LazyLock};
 
 /// Controls which files are ignored (opened locally) by mirrord file operations.
 ///
@@ -89,9 +89,12 @@ pub struct FileFilter {
     pub read_write: RegexSet,
     pub local: RegexSet,
     pub not_found: RegexSet,
-    pub default_local: RegexSet,
-    pub default_remote_ro: RegexSet,
-    pub default_not_found: RegexSet,
+    /// The default sets are large and take around a millisecond to compile, which every process
+    /// the layer loads into would pay at startup. They are never consulted in
+    /// [`FsModeConfig::Local`], so they are compiled on first use.
+    pub default_local: LazyLock<RegexSet>,
+    pub default_remote_ro: LazyLock<RegexSet>,
+    pub default_not_found: LazyLock<RegexSet>,
     pub mode: FsModeConfig,
 }
 
@@ -131,9 +134,9 @@ impl FileFilter {
         let local = make("local", local)?;
         let not_found = make("not_found", not_found)?;
 
-        let default_local = generate_local_set();
-        let default_remote_ro = generate_remote_ro_set();
-        let default_not_found = generate_not_found_set();
+        let default_local = LazyLock::new(generate_local_set as fn() -> RegexSet);
+        let default_remote_ro = LazyLock::new(generate_remote_ro_set as fn() -> RegexSet);
+        let default_not_found = LazyLock::new(generate_not_found_set as fn() -> RegexSet);
 
         Ok(Self {
             read_only,
