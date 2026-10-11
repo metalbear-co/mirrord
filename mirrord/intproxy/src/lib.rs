@@ -21,8 +21,7 @@ use mirrord_intproxy_protocol::{
     IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
 };
 use mirrord_protocol::{
-    CLIENT_READY_FOR_LOGS, ClientMessage, ContainerHooksReport, DaemonMessage, FileRequest,
-    LogLevel,
+    CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
 };
 use mirrord_protocol_io::{Client, TxHandle};
 use ping_pong::{PingPong, PingPongMessage};
@@ -35,6 +34,7 @@ use proxies::{
 use semver::Version;
 use tokio::{
     net::TcpListener,
+    sync::mpsc,
     time,
     time::{Interval, MissedTickBehavior},
 };
@@ -53,6 +53,7 @@ use crate::{
     hook_usage::HookUsage,
     main_tasks::{ConnectionRefresh, LayerClosed},
     session_monitor::{MonitorEvent, MonitorTx, RedactedVarNames, chaos::ChaosWatcherRx},
+    sidecar_protocol::HooksReport,
 };
 
 pub mod agent_conn;
@@ -69,6 +70,7 @@ pub mod proxies;
 mod remote_resources;
 mod request_queue;
 pub mod session_monitor;
+pub mod sidecar_protocol;
 
 /// Extracts the primary file path from a [`FileRequest`] variant, if one exists.
 ///
@@ -164,10 +166,9 @@ pub struct IntProxy {
 
     /// Hooks installed by the layers of this session.
     hook_usage: HookUsage,
-    /// Whether hook reports of the layers are also sent over the agent connection.
-    ///
-    /// See [`Self::forward_hook_reports`].
-    forward_hook_reports: bool,
+    /// Where to pass the hook reports of the layers on, when the agent connection goes through
+    /// an external proxy that collects them.
+    hook_reports: Option<mpsc::Sender<HooksReport>>,
 }
 
 /// Timing configuration for [`IntProxy`] maintenance tasks.
@@ -297,7 +298,7 @@ impl IntProxy {
     /// [`TcpListener`].
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_connection(
-        agent_conn: AgentConnection,
+        mut agent_conn: AgentConnection,
         listener: TcpListener,
         file_buffer_size: u64,
         https_delivery: LocalTlsDelivery,
@@ -368,6 +369,7 @@ impl IntProxy {
         );
 
         let agent_tx = agent_conn.connection.tx_handle();
+        let hook_reports = agent_conn.hook_reports.take();
 
         let agent = background_tasks.register_restartable(
             agent_conn,
@@ -408,7 +410,7 @@ impl IntProxy {
             agent_tx,
             monitor_tx,
             hook_usage: Default::default(),
-            forward_hook_reports: false,
+            hook_reports,
         }
     }
 
@@ -416,16 +418,6 @@ impl IntProxy {
     /// is consumed by its run loop.
     pub fn hook_usage(&self) -> HookUsage {
         self.hook_usage.clone()
-    }
-
-    /// Makes this proxy pass the hook reports of the layers on as
-    /// [`ClientMessage::ContainerHooks`].
-    ///
-    /// Meant for a proxy that runs in a sidecar container and whose agent connection goes
-    /// through an external proxy that consumes the message. Any other peer would receive a
-    /// message it does not expect.
-    pub fn forward_hook_reports(&mut self) {
-        self.forward_hook_reports = true;
     }
 
     /// Check if any layer connections are still alive
@@ -931,15 +923,16 @@ impl IntProxy {
                     .await
             }
             LayerToProxyMessage::HooksInstalled(report) => {
-                if self.forward_hook_reports {
-                    self.agent_tx
-                        .send(ClientMessage::ContainerHooks(ContainerHooksReport {
-                            arch: Arch::current() as u32,
-                            os_version: platform::os_version(),
-                            installed: report.installed.clone(),
-                            failed: report.failed.clone(),
-                        }))
-                        .await;
+                if let Some(hook_reports) = &self.hook_reports {
+                    let report = HooksReport {
+                        arch: Arch::current() as u32,
+                        os_version: platform::os_version(),
+                        installed: report.installed.clone(),
+                        failed: report.failed.clone(),
+                    };
+                    if hook_reports.try_send(report).is_err() {
+                        tracing::debug!("dropping a hook report for the external proxy");
+                    }
                 }
                 self.hook_usage.record(report);
             }
@@ -1147,6 +1140,7 @@ mod test {
         let (connection, proxy_tx, proxy_rx) = Connection::dummy();
 
         let agent_conn = AgentConnection {
+            hook_reports: None,
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
@@ -1270,6 +1264,7 @@ mod test {
         let (connection, proxy_tx, _proxy_rx) = Connection::dummy();
 
         let agent_conn = AgentConnection {
+            hook_reports: None,
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
@@ -1368,6 +1363,7 @@ mod test {
         let (connection, _proxy_tx, _proxy_rx) = Connection::dummy();
 
         let agent_conn = AgentConnection {
+            hook_reports: None,
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
@@ -1408,6 +1404,7 @@ mod test {
             let proxy_addr = listener.local_addr().unwrap();
             let (connection, _proxy_tx, _proxy_rx) = Connection::dummy();
             let agent_conn = AgentConnection {
+                hook_reports: None,
                 connection,
                 reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
             };
@@ -1516,6 +1513,7 @@ mod test {
 
         let (connection, proxy_tx, proxy_rx) = Connection::dummy();
         let agent_conn = AgentConnection {
+            hook_reports: None,
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };

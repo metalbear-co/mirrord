@@ -42,11 +42,10 @@ use mirrord_config::{LayerConfig, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM
 use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
     hook_usage::HookUsage,
+    sidecar_protocol::{ExternalProxyCodec, HooksReport, SidecarMessage},
 };
 use mirrord_intproxy_protocol::HooksInstalled;
-use mirrord_protocol::{
-    ClientMessage, ContainerHooksReport, DaemonCodec, DaemonMessage, LogLevel, LogMessage,
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::mpsc,
@@ -278,7 +277,7 @@ pub async fn proxy(
             }
 
             Some(report) = hook_reports_rx.recv() => {
-                let ContainerHooksReport { arch, os_version, installed, failed } = report;
+                let HooksReport { arch, os_version, installed, failed } = report;
 
                 // The layers run in the container, whose platform the report of this process
                 // does not otherwise describe.
@@ -321,21 +320,20 @@ async fn handle_connection(
     peer_addr: SocketAddr,
     mut agent_conn: AgentConnection,
     cancellation_token: CancellationToken,
-    hook_reports: mpsc::Sender<ContainerHooksReport>,
+    hook_reports: mpsc::Sender<HooksReport>,
 ) {
-    let mut stream = actix_codec::Framed::new(stream, DaemonCodec::default());
+    let mut stream = actix_codec::Framed::new(stream, ExternalProxyCodec::default());
 
     loop {
         tokio::select! {
             client_message = stream.next() => {
                 match client_message {
-                    // Meant for this proxy, the agent does not expect it.
-                    Some(Ok(ClientMessage::ContainerHooks(report))) => {
+                    Some(Ok(SidecarMessage::HooksInstalled(report))) => {
                         if hook_reports.try_send(report).is_err() {
                             tracing::debug!(?peer_addr, "dropping a hook report");
                         }
                     }
-                    Some(Ok(client_message)) => {
+                    Some(Ok(SidecarMessage::Agent(client_message))) => {
                         agent_conn.connection.send(client_message).await;
                     }
                     Some(Err(error)) => {

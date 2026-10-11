@@ -438,6 +438,7 @@ mod tests {
         let proxy_addr = listener.local_addr().unwrap();
         let (connection, _proxy_tx, _proxy_rx) = Connection::dummy();
         let agent_conn = AgentConnection {
+            hook_reports: None,
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };

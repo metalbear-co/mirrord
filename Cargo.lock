@@ -5387,9 +5387,11 @@ dependencies = [
 name = "mirrord-intproxy"
 version = "3.271.0"
 dependencies = [
+ "actix-codec",
  "anyhow",
  "assert-json-diff",
  "axum",
+ "bincode",
  "bytes",
  "futures",
  "http-body-util",
@@ -5763,7 +5765,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.31.0"
+version = "1.30.0"
 dependencies = [
  "actix-codec",
  "bincode",

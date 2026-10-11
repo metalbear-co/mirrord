@@ -38,6 +38,7 @@ use tracing::Level;
 use crate::{
     background_tasks::{BackgroundTask, MessageBus, RestartableBackgroundTask},
     main_tasks::{ConnectionRefresh, ProxyMessage},
+    sidecar_protocol::{self, HooksReport},
 };
 
 mod portforward;
@@ -73,6 +74,12 @@ pub enum AgentConnectInfo {
     ExternalProxy {
         proxy_addr: SocketAddr,
         tls_pem: Option<PathBuf>,
+        /// Whether the external proxy understands the
+        /// [`sidecar_protocol`](crate::sidecar_protocol).
+        ///
+        /// Absent in connect info made by a CLI that does not know the protocol.
+        #[serde(default)]
+        sidecar_protocol: bool,
     },
     /// Connect to the agent through the operator.
     Operator(
@@ -160,6 +167,9 @@ pub enum AgentConnectionMessage {
 pub struct AgentConnection {
     pub connection: Connection<Client>,
     pub reconnect: ReconnectFlow,
+    /// Present when the other end is an external proxy that collects the hook reports of the
+    /// layers.
+    pub hook_reports: Option<tokio::sync::mpsc::Sender<HooksReport>>,
 }
 
 impl AgentConnection {
@@ -172,6 +182,7 @@ impl AgentConnection {
         analytics: &mut R,
     ) -> Result<Self, AgentConnectionError> {
         let kind = connect_info.discriminant();
+        let mut hook_reports = None;
 
         let (connection, reconnect) = match connect_info {
             AgentConnectInfo::Operator(session) => {
@@ -194,6 +205,7 @@ impl AgentConnection {
             AgentConnectInfo::ExternalProxy {
                 proxy_addr,
                 tls_pem,
+                sidecar_protocol,
             } => {
                 // Right after the sidecar container is created, cross-network port forwarding
                 // (e.g. WSL2's docker bridge) may not be fully established yet, so the first
@@ -205,7 +217,7 @@ impl AgentConnection {
                     .max_delay(Duration::from_secs(3))
                     .take(3);
 
-                let conn = Retry::start(retry_strategy, || async {
+                let (conn, reports) = Retry::start(retry_strategy, || async {
                     let stream = if config.container.host_gateway_detection {
                         // The sidecar container is always started with
                         // `--add-host mirrord-external-proxy:host-gateway`, so this resolves
@@ -224,16 +236,19 @@ impl AgentConnection {
                         socket.connect(proxy_addr).await?
                     };
 
-                    let conn: Connection<Client> = match &tls_pem {
+                    let conn = match &tls_pem {
                         Some(tls_pem) => {
-                            tls::wrap_raw_connection(stream, tls_pem.as_path()).await?
+                            let stream =
+                                tls::wrap_raw_connection(stream, tls_pem.as_path()).await?;
+                            sidecar_protocol::connect(stream, sidecar_protocol)
                         }
-                        None => Connection::from_stream(stream),
+                        None => sidecar_protocol::connect(stream, sidecar_protocol),
                     };
 
                     Ok::<_, AgentConnectionError>(conn)
                 })
                 .await?;
+                hook_reports = reports;
 
                 (conn, ReconnectFlow::Break(kind))
             }
@@ -274,6 +289,7 @@ impl AgentConnection {
         Ok(Self {
             connection,
             reconnect,
+            hook_reports,
         })
     }
 
@@ -287,6 +303,7 @@ impl AgentConnection {
         Ok(Self {
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+            hook_reports: None,
         })
     }
 
