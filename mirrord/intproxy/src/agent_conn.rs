@@ -75,7 +75,7 @@ pub enum AgentConnectInfo {
         proxy_addr: SocketAddr,
         tls_pem: Option<PathBuf>,
         /// Whether the external proxy understands the
-        /// [`sidecar_protocol`](crate::sidecar_protocol).
+        /// [`sidecar_protocol`].
         ///
         /// Absent in connect info made by a CLI that does not know the protocol.
         #[serde(default)]
