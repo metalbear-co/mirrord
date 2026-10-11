@@ -5386,6 +5386,7 @@ dependencies = [
 name = "mirrord-intproxy"
 version = "3.272.0"
 dependencies = [
+ "actix-codec",
  "anyhow",
  "assert-json-diff",
  "axum",
