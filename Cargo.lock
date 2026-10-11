@@ -5623,6 +5623,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "winapi",
 ]
 
 [[package]]
@@ -6037,6 +6038,7 @@ version = "3.271.0"
 dependencies = [
  "assert-json-diff",
  "clap",
+ "dunce",
  "futures",
  "inquire",
  "itertools 0.14.0",
@@ -6065,6 +6067,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "uuid",
+ "winapi",
  "yamlpatch",
  "yamlpath",
 ]

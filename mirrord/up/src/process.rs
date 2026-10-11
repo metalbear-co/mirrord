@@ -176,11 +176,18 @@ impl Service {
         self.force_stop().await
     }
 
-    /// Job Object termination reaches every descendant before the direct child
-    /// is reaped, matching the Unix forced-shutdown guarantee.
+    /// Job Object termination reaches every descendant along with the direct
+    /// child, matching the Unix forced-shutdown guarantee.
+    ///
+    /// Only the direct child is waited for, not process-wrap's whole-job `wait`.
+    /// That one waits for an event on the job's completion port, and polling
+    /// the child's `try_wait` during supervision takes those events off the
+    /// port. After a service exits on its own the port can be empty for good,
+    /// and the job `wait` would block forever.
     #[cfg(windows)]
     async fn force_stop(&mut self) -> io::Result<()> {
-        Box::into_pin(self.child.kill()).await?;
+        self.child.start_kill()?;
+        self.child.inner_mut().wait().await?;
         Ok(())
     }
 }
@@ -328,7 +335,7 @@ async fn forward_output(
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 async fn supervise(
     commands: Vec<(Arc<str>, Command)>,
     ready: ReadyTracker,
@@ -473,6 +480,12 @@ async fn supervise_with_second_signal(
     Ok((result, forced_signal))
 }
 
+#[cfg(test)]
+mod test_support;
+
+#[cfg(all(test, windows))]
+mod windows_tests;
+
 #[cfg(all(test, unix))]
 mod tests {
     use std::{path::Path, process::Stdio};
@@ -483,9 +496,10 @@ mod tests {
     use tempfile::TempDir;
     use tokio::process::Child;
 
-    use super::*;
-
-    const TEST_GRACE: Duration = Duration::from_millis(200);
+    use super::{
+        test_support::{TEST_GRACE, wait_for_file, wait_for_helper_ready},
+        *,
+    };
 
     fn command(script: &str, directory: &Path) -> (Arc<str>, Command) {
         let mut command = resolve_tokio_command("sh");
@@ -498,16 +512,6 @@ mod tests {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         (Arc::from("test"), command)
-    }
-
-    async fn wait_for_file(path: &Path) {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while path.exists().not() {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("child did not start");
     }
 
     #[tokio::test]
@@ -739,25 +743,6 @@ mod tests {
             std::fs::write(directory.join("draining"), []).unwrap();
             tokio::time::sleep(Duration::from_secs(60)).await;
         }
-    }
-
-    async fn wait_for_helper_ready(helper: &mut Child) {
-        let mut lines = BufReader::new(helper.stdout.take().unwrap()).lines();
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let line = lines
-                    .next_line()
-                    .await
-                    .unwrap()
-                    .expect("helper exited before readiness");
-                if line.contains(SESSION_READY_MESSAGE) {
-                    break;
-                }
-            }
-        })
-        .await
-        .unwrap();
-        tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
     }
 
     fn signal_test_helper(
