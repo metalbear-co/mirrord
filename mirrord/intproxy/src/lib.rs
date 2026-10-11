@@ -13,6 +13,7 @@ use futures::FutureExt;
 use layer_conn::LayerConnection;
 use layer_initializer::{LayerInitializer, LayerInitializerShutdown};
 use main_tasks::{FromLayer, LayerForked, MainTaskId, NewLayer, ProxyMessage, ToLayer};
+use mirrord_analytics::platform::{self, Arch};
 use mirrord_config::{
     experimental::ExperimentalConfig, feature::network::incoming::tls_delivery::LocalTlsDelivery,
 };
@@ -20,7 +21,8 @@ use mirrord_intproxy_protocol::{
     IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
 };
 use mirrord_protocol::{
-    CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
+    CLIENT_READY_FOR_LOGS, ClientMessage, ContainerHooksReport, DaemonMessage, FileRequest,
+    LogLevel,
 };
 use mirrord_protocol_io::{Client, TxHandle};
 use ping_pong::{PingPong, PingPongMessage};
@@ -162,6 +164,10 @@ pub struct IntProxy {
 
     /// Hooks installed by the layers of this session.
     hook_usage: HookUsage,
+    /// Whether hook reports of the layers are also sent over the agent connection.
+    ///
+    /// See [`Self::forward_hook_reports`].
+    forward_hook_reports: bool,
 }
 
 /// Timing configuration for [`IntProxy`] maintenance tasks.
@@ -402,6 +408,7 @@ impl IntProxy {
             agent_tx,
             monitor_tx,
             hook_usage: Default::default(),
+            forward_hook_reports: false,
         }
     }
 
@@ -409,6 +416,16 @@ impl IntProxy {
     /// is consumed by its run loop.
     pub fn hook_usage(&self) -> HookUsage {
         self.hook_usage.clone()
+    }
+
+    /// Makes this proxy pass the hook reports of the layers on as
+    /// [`ClientMessage::ContainerHooks`].
+    ///
+    /// Meant for a proxy that runs in a sidecar container and whose agent connection goes
+    /// through an external proxy that consumes the message. Any other peer would receive a
+    /// message it does not expect.
+    pub fn forward_hook_reports(&mut self) {
+        self.forward_hook_reports = true;
     }
 
     /// Check if any layer connections are still alive
@@ -913,7 +930,19 @@ impl IntProxy {
                     .send(SimpleProxyMessage::GetEnvReq(message_id, layer_id, req))
                     .await
             }
-            LayerToProxyMessage::HooksInstalled(report) => self.hook_usage.record(report),
+            LayerToProxyMessage::HooksInstalled(report) => {
+                if self.forward_hook_reports {
+                    self.agent_tx
+                        .send(ClientMessage::ContainerHooks(ContainerHooksReport {
+                            arch: Arch::current() as u32,
+                            os_version: platform::os_version(),
+                            installed: report.installed.clone(),
+                            failed: report.failed.clone(),
+                        }))
+                        .await;
+                }
+                self.hook_usage.record(report);
+            }
             other => Err(ProxyRuntimeError::UnexpectedLayerMessage(other))?,
         }
 

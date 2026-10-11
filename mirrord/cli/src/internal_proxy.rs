@@ -65,6 +65,14 @@ use crate::{
     util::create_listen_socket,
 };
 
+/// Set on an internal proxy sidecar by a CLI whose external proxy consumes
+/// [`ClientMessage::ContainerHooks`].
+///
+/// The image of the sidecar can be of another mirrord version than the CLI on the container
+/// host, and an external proxy that does not know the message cannot decode it.
+pub(crate) const MIRRORD_EXTPROXY_ACCEPTS_HOOK_REPORTS_ENV: &str =
+    "MIRRORD_EXTPROXY_ACCEPTS_HOOK_REPORTS";
+
 /// Serializes the resolved [`LayerConfig`] as a JSON object containing only the fields that
 /// differ from a freshly generated default config. The session monitor shows the result in
 /// its Config tab, so users see only what they (or the environment) customized instead of
@@ -421,7 +429,7 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let proxy = IntProxy::new_with_connection(
+    let mut proxy = IntProxy::new_with_connection(
         agent_conn,
         listener,
         config.feature.fs.readonly_file_buffer,
@@ -441,6 +449,9 @@ pub(crate) async fn proxy(
         chaos_rx,
     );
     let hook_usage = proxy.hook_usage();
+    if container_mode && env::var_os(MIRRORD_EXTPROXY_ACCEPTS_HOOK_REPORTS_ENV).is_some() {
+        proxy.forward_hook_reports();
+    }
 
     let res = proxy
         .run_with_shutdown(

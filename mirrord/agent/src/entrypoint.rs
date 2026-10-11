@@ -746,6 +746,8 @@ impl ClientConnectionHandler {
             ClientMessage::ShareLink(update) => {
                 self.share_links.update(update);
             }
+            // Consumed by the external proxy of a container session, not meant for the agent.
+            ClientMessage::ContainerHooks(_) => {}
         }
 
         Ok(true)

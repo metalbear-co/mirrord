@@ -18,7 +18,9 @@ Besides the name of the operating system, each session reports the CPU architect
 
 ## Hooks
 
-mirrord works by replacing a fixed list of libc functions (`open`, `connect`, ...) in the processes it runs. Not every function in that list exists on every platform. Each session reports, per function name in that list, in how many processes the replacement was installed and in how many it could not be. A process counts once, when mirrord loads into it; a forked child shares the replacements of its parent and is not counted again. Sessions started with `mirrord container` do not report this. This shows us which replacements never apply on a given platform and can be removed there.
+mirrord works by replacing a fixed list of libc functions (`open`, `connect`, ...) in the processes it runs. Not every function in that list exists on every platform. Each session reports, per function name in that list, in how many processes the replacement was installed and in how many it could not be. A process counts once, when mirrord loads into it; a forked child shares the replacements of its parent and is not counted again.
+
+In a session started with `mirrord container`, the processes run in a container whose platform can differ from that of the machine running mirrord. Such a session also reports the CPU architecture and the kernel version of the container. This shows us which replacements never apply on a given platform and can be removed there.
 
 Only names from mirrord's own list are sent. Nothing about the application is included: no process names, arguments, paths or library names.
 

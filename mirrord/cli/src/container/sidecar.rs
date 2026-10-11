@@ -26,6 +26,7 @@ use crate::{
     container::{command_builder::RuntimeCommandBuilder, command_display::CommandExt},
     error::ContainerError,
     execution::MIRRORD_EXECUTION_KIND_ENV,
+    internal_proxy::MIRRORD_EXTPROXY_ACCEPTS_HOOK_REPORTS_ENV,
     util::MIRRORD_CONSOLE_ADDR_ENV,
 };
 
@@ -248,6 +249,7 @@ impl IntproxySidecar {
             &(ExecutionKind::Container as u32).to_string(),
         );
         sidecar_command.add_env(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "true");
+        sidecar_command.add_env(MIRRORD_EXTPROXY_ACCEPTS_HOOK_REPORTS_ENV, "true");
 
         let connect_info = if let Some(tls) = tls {
             let client_pem_path = tls.client_pem().to_str().ok_or_else(|| {

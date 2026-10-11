@@ -39,9 +39,18 @@ use mirrord_analytics::{
     read_kube_version_from_env,
 };
 use mirrord_config::{LayerConfig, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM};
-use mirrord_intproxy::agent_conn::{AgentConnectInfo, AgentConnection};
-use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, LogLevel, LogMessage};
-use tokio::net::{TcpListener, TcpStream};
+use mirrord_intproxy::{
+    agent_conn::{AgentConnectInfo, AgentConnection},
+    hook_usage::HookUsage,
+};
+use mirrord_intproxy_protocol::HooksInstalled;
+use mirrord_protocol::{
+    ClientMessage, ContainerHooksReport, DaemonCodec, DaemonMessage, LogLevel, LogMessage,
+};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::mpsc,
+};
 use tokio_rustls::server::TlsStream;
 use tokio_util::{either::Either, sync::CancellationToken};
 use tracing::Level;
@@ -56,6 +65,10 @@ use crate::{
     internal_proxy::connect_and_ping,
     util::create_listen_socket,
 };
+
+/// How many hook reports can wait to be counted. A report beyond that is dropped, which only
+/// makes the counts in analytics lower.
+const HOOK_REPORTS_CHANNEL_SIZE: usize = 256;
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
@@ -150,6 +163,11 @@ pub async fn proxy(
 
     let mut ping_pong_ticker = tokio::time::interval(Duration::from_secs(30));
 
+    // Hook reports arrive on the connections of the internal proxy, which are served by their
+    // own tasks. The sender kept here keeps the channel open while no connection exists.
+    let (hook_reports_tx, mut hook_reports_rx) = mpsc::channel(HOOK_REPORTS_CHANNEL_SIZE);
+    let hook_usage = HookUsage::default();
+
     loop {
         tokio::select! {
             conn = listener.accept() => {
@@ -166,6 +184,7 @@ pub async fn proxy(
                     let connections = connections.clone();
                     let cancellation_token = cancellation_token.clone();
                     let connection_cancelation_token = cancellation_token.child_token();
+                    let hook_reports_tx = hook_reports_tx.clone();
 
                     let agent_conn = connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await.inspect_err(|_| cancellation_token.cancel())?;
                     connections.fetch_add(1, Ordering::Relaxed);
@@ -176,7 +195,7 @@ pub async fn proxy(
                             None => Either::Left(stream)
                         };
 
-                        handle_connection(stream, peer_addr, agent_conn, connection_cancelation_token).await;
+                        handle_connection(stream, peer_addr, agent_conn, connection_cancelation_token, hook_reports_tx).await;
 
                         tracing::debug!(?peer_addr, "closed connection");
 
@@ -258,6 +277,21 @@ pub async fn proxy(
                 }
             }
 
+            Some(report) = hook_reports_rx.recv() => {
+                let ContainerHooksReport { arch, os_version, installed, failed } = report;
+
+                // The layers run in the container, whose platform the report of this process
+                // does not otherwise describe.
+                analytics.get_mut().add("container_arch", arch);
+                if let Some((major, minor)) = os_version {
+                    analytics.get_mut().add("container_os_version_major", major);
+                    analytics.get_mut().add("container_os_version_minor", minor);
+                }
+
+                hook_usage.record(HooksInstalled { installed, failed });
+                analytics.get_mut().add("hooks", &hook_usage);
+            }
+
             _ = ping_pong_ticker.tick() => {
                 tracing::debug!("sending ping");
 
@@ -281,12 +315,13 @@ pub async fn proxy(
     Ok(())
 }
 
-#[tracing::instrument(level = Level::TRACE, skip(agent_conn))]
+#[tracing::instrument(level = Level::TRACE, skip(agent_conn, hook_reports))]
 async fn handle_connection(
     stream: Either<TcpStream, TlsStream<TcpStream>>,
     peer_addr: SocketAddr,
     mut agent_conn: AgentConnection,
     cancellation_token: CancellationToken,
+    hook_reports: mpsc::Sender<ContainerHooksReport>,
 ) {
     let mut stream = actix_codec::Framed::new(stream, DaemonCodec::default());
 
@@ -294,6 +329,12 @@ async fn handle_connection(
         tokio::select! {
             client_message = stream.next() => {
                 match client_message {
+                    // Meant for this proxy, the agent does not expect it.
+                    Some(Ok(ClientMessage::ContainerHooks(report))) => {
+                        if hook_reports.try_send(report).is_err() {
+                            tracing::debug!(?peer_addr, "dropping a hook report");
+                        }
+                    }
                     Some(Ok(client_message)) => {
                         agent_conn.connection.send(client_message).await;
                     }

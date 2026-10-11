@@ -203,6 +203,28 @@ pub enum ClientMessage {
     /// Sent by the operator. Supported from
     /// [`SHARE_LINK_VERSION`](crate::share_link::SHARE_LINK_VERSION).
     ShareLink(ShareLinkRequest),
+
+    /// Hooks installed by a layer of a container session.
+    ///
+    /// Sent by an internal proxy that runs in a sidecar container, for the external proxy on the
+    /// container host, which sends the analytics of the session. The external proxy consumes
+    /// the message, it never reaches the agent.
+    ContainerHooks(ContainerHooksReport),
+}
+
+/// Which libc hooks one layer of a container session installed, and the platform it runs on.
+///
+/// The platform is that of the container, which can differ from the container host's.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ContainerHooksReport {
+    /// CPU architecture, in the numeric form used in analytics.
+    pub arch: u32,
+    /// Major and minor version of the operating system, when known.
+    pub os_version: Option<(u32, u32)>,
+    /// Symbols whose hook was installed.
+    pub installed: Vec<String>,
+    /// Symbols whose hook could not be installed.
+    pub failed: Vec<String>,
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
