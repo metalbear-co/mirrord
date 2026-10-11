@@ -52,6 +52,19 @@ pub enum LayerToProxyMessage {
     Incoming(IncomingRequest),
     /// Fetch environment variables from the target.
     GetEnv(GetEnvVarsRequest),
+    /// Which hooks the layer installed. Sent once per process and not answered.
+    HooksInstalled(HooksInstalled),
+}
+
+/// Result of a layer installing its hooks, as the names of the symbols the hooks replace.
+///
+/// The layer tries the same list of symbols on every platform, so some hooks fail on every
+/// load. Knowing which ones also succeed somewhere is what tells those apart from hooks that can
+/// be removed.
+#[derive(Encode, Decode, Debug, Default, PartialEq, Eq)]
+pub struct HooksInstalled {
+    pub installed: Vec<String>,
+    pub failed: Vec<String>,
 }
 
 /// Layer process information

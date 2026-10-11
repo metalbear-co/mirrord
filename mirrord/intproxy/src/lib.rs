@@ -48,6 +48,7 @@ use crate::{
     background_tasks::{RestartableBackgroundTaskWrapper, TaskError},
     error::{ProxyRuntimeError, ProxyStartupError},
     failover_strategy::FailoverStrategy,
+    hook_usage::HookUsage,
     main_tasks::{ConnectionRefresh, LayerClosed},
     session_monitor::{MonitorEvent, MonitorTx, RedactedVarNames, chaos::ChaosWatcherRx},
 };
@@ -56,6 +57,7 @@ pub mod agent_conn;
 pub mod background_tasks;
 pub mod error;
 mod failover_strategy;
+pub mod hook_usage;
 mod layer_conn;
 mod layer_initializer;
 pub mod main_tasks;
@@ -157,6 +159,9 @@ pub struct IntProxy {
 
     /// Session monitor event sender
     monitor_tx: MonitorTx,
+
+    /// Hooks installed by the layers of this session.
+    hook_usage: HookUsage,
 }
 
 /// Timing configuration for [`IntProxy`] maintenance tasks.
@@ -396,7 +401,14 @@ impl IntProxy {
             process_logging_interval,
             agent_tx,
             monitor_tx,
+            hook_usage: Default::default(),
         }
+    }
+
+    /// Returns a handle to the hook counts of this session, which stays readable after this proxy
+    /// is consumed by its run loop.
+    pub fn hook_usage(&self) -> HookUsage {
+        self.hook_usage.clone()
     }
 
     /// Check if any layer connections are still alive
@@ -615,6 +627,7 @@ impl IntProxy {
                     msg.message,
                     LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
                         | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_))
+                        | LayerToProxyMessage::HooksInstalled(_)
                 ) {
                     self.pending_layers.insert((msg.layer_id, msg.message_id));
                 }
@@ -900,6 +913,7 @@ impl IntProxy {
                     .send(SimpleProxyMessage::GetEnvReq(message_id, layer_id, req))
                     .await
             }
+            LayerToProxyMessage::HooksInstalled(report) => self.hook_usage.record(report),
             other => Err(ProxyRuntimeError::UnexpectedLayerMessage(other))?,
         }
 

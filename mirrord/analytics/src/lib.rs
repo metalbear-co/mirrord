@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use tracing::{Level, info};
 use uuid::Uuid;
 
+pub mod platform;
 pub mod preview;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -393,6 +394,11 @@ impl AnalyticsReporter {
         analytics.add("is_ai_agent", ai_agent.is_some());
         if let Some(agent) = ai_agent {
             analytics.add("ai_agent", agent as u32);
+        }
+        analytics.add("arch", platform::Arch::current() as u32);
+        if let Some((major, minor)) = platform::os_version() {
+            analytics.add("os_version_major", major);
+            analytics.add("os_version_minor", minor);
         }
 
         AnalyticsReporter {

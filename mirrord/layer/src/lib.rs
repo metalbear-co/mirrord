@@ -85,7 +85,7 @@ use std::{
 
 use ctor::ctor;
 use file::{OPEN_FILES, ops::RemoteFile};
-use hooks::HookManager;
+use hooks::{HookManager, HookOutcomes};
 #[cfg(all(
     any(target_arch = "x86_64", target_arch = "aarch64"),
     target_os = "linux"
@@ -98,7 +98,7 @@ use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, feature::env::mapper::EnvVarsRemapper,
 };
-use mirrord_intproxy_protocol::NewSessionRequest;
+use mirrord_intproxy_protocol::{HooksInstalled, LayerToProxyMessage, NewSessionRequest};
 #[cfg(doc)]
 use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_lib::{
@@ -429,7 +429,7 @@ fn layer_start(config: LayerConfig) {
     init_layer_setup(config, false);
 
     let state = setup();
-    enable_hooks(state);
+    let hook_outcomes = enable_hooks(state);
     register_atfork_handlers();
 
     let _detour_guard = DetourGuard::new();
@@ -472,6 +472,8 @@ fn layer_start(config: LayerConfig) {
             .set(new_connection)
             .expect("setting PROXY_CONNECTION singleton")
     }
+
+    report_hook_outcomes(hook_outcomes);
 
     let fetch_env = setup().env_config().load_from_process.unwrap_or(false)
         && !std::env::var(REMOTE_ENV_FETCHED)
@@ -596,6 +598,7 @@ fn sip_only_layer_start(
     init_layer_setup(config, true);
 
     unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };
+    report_hook_outcomes(hook_manager.take_outcomes());
     register_atfork_handlers();
 
     if let Some(unset) = setup().env_config().unset.as_ref() {
@@ -605,6 +608,25 @@ fn sip_only_layer_start(
                 unsafe { std::env::remove_var(&key) };
             }
         });
+    }
+}
+
+/// Tells the internal proxy which hooks this process got, so that the session's analytics show
+/// which of them never install on this platform.
+///
+/// Best effort, and a no-op when there is no internal proxy to talk to.
+fn report_hook_outcomes(outcomes: HookOutcomes) {
+    #[allow(static_mut_refs)]
+    let Some(connection) = (unsafe { PROXY_CONNECTION.get() }) else {
+        return;
+    };
+
+    let report = HooksInstalled {
+        installed: outcomes.installed,
+        failed: outcomes.failed,
+    };
+    if let Err(error) = connection.send(LayerToProxyMessage::HooksInstalled(report)) {
+        tracing::debug!(%error, "failed to report installed hooks to the internal proxy");
     }
 }
 
@@ -620,7 +642,7 @@ fn sip_only_layer_start(
 ///   `true`, see [`NetworkConfig`](mirrord_config::feature::network::NetworkConfig), and
 ///   [`hooks::enable_socket_hooks`](socket::hooks::enable_socket_hooks).
 #[mirrord_layer_macro::instrument(level = tracing::Level::TRACE)]
-fn enable_hooks(state: &LayerSetup) {
+fn enable_hooks(state: &LayerSetup) -> HookOutcomes {
     let enabled_file_ops = state.fs_config().is_active();
     let enabled_remote_dns = state.remote_dns_enabled();
 
@@ -725,6 +747,8 @@ fn enable_hooks(state: &LayerSetup) {
             }
         }
     }
+
+    hook_manager.take_outcomes()
 }
 
 /// Keeps a `fork` out of the middle of a close.

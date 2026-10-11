@@ -12,6 +12,16 @@ Types of data sent:
 
 When there's an error, we send the name of the error (out of a hard-coded list, so there's no risk of any sensitive data being sent).
 
+## Platform
+
+Besides the name of the operating system, each session reports the CPU architecture mirrord was built for and the major and minor version of the operating system: the product version on macOS (for example `15.3`), the kernel release on Linux (for example `6.8`). No hostname, build number or distribution name is included.
+
+## Hooks
+
+mirrord works by replacing a fixed list of libc functions (`open`, `connect`, ...) in the processes it runs. Not every function in that list exists on every platform. Each session reports, per function name in that list, in how many processes the replacement was installed and in how many it could not be. This shows us which replacements never apply on a given platform and can be removed there.
+
+Only names from mirrord's own list are sent. Nothing about the application is included: no process names, arguments, paths or library names.
+
 ## `mirrord up`
 
 `mirrord up` emits one additional anonymous event per invocation summarizing the multi-service configuration: the number of services, which YAML fields are populated and across how many services, which run types (`exec` / `container`) are used, whether a custom `--key` was provided, the success/failure outcome, and (on failure) a coarse error category (`config_validation` / `service_crash` / `internal_error`). No service names, config values, target paths, or command arguments are included.

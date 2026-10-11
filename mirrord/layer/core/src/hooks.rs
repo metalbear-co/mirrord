@@ -33,9 +33,17 @@ impl ProbeListener for Probe {
     }
 }
 
+/// Names of the symbols a [`HookManager`] was asked to hook, by whether the hook was installed.
+#[derive(Debug, Default)]
+pub struct HookOutcomes {
+    pub installed: Vec<String>,
+    pub failed: Vec<String>,
+}
+
 /// Struct for managing the hooks using Frida.
 pub struct HookManager<'a> {
     interceptor: Interceptor,
+    outcomes: HookOutcomes,
     modules: Vec<Module>,
     // process is need for Linux build and having different struct between OS feels over kill
     #[allow(dead_code)]
@@ -136,13 +144,26 @@ impl<'a> HookManager<'a> {
         // First try to hook the default exported one, if it fails, fallback to first lib that
         // provides it.
         let function = Module::find_global_export_by_name(symbol);
-        match function {
+        let result = match function {
             Some(func) => self
                 .interceptor
                 .replace(func, NativePointer(detour), NativePointer(null_mut()))
                 .or_else(|_| self.hook_any_lib_export(symbol, detour, None)),
             None => self.hook_any_lib_export(symbol, detour, None),
-        }
+        };
+
+        let outcome = match result {
+            Ok(..) => &mut self.outcomes.installed,
+            Err(..) => &mut self.outcomes.failed,
+        };
+        outcome.push(symbol.to_owned());
+
+        result
+    }
+
+    /// Takes the outcomes of the [`Self::hook_export_or_any`] calls made so far.
+    pub fn take_outcomes(&mut self) -> HookOutcomes {
+        std::mem::take(&mut self.outcomes)
     }
 
     #[cfg(target_os = "linux")]
@@ -224,6 +245,7 @@ impl<'a> Default for HookManager<'a> {
         let modules = process.enumerate_modules();
         Self {
             interceptor,
+            outcomes: Default::default(),
             modules,
             process,
         }

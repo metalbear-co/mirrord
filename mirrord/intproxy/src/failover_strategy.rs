@@ -353,7 +353,8 @@ impl FailoverStrategy {
     ) {
         match message {
             LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
-            | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_)) => {
+            | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_))
+            | LayerToProxyMessage::HooksInstalled(_) => {
                 tracing::info!(message = ?message, "Proxy in failover mode, ignoring a message");
             }
             _ => self.send_error_to_layer(layer_id, message_id).await,

@@ -71,6 +71,12 @@ impl ChaosAnalyticsReporter {
         });
     }
 
+    /// Gives access to the analytics of the [`AnalyticsReporter`] in `self.inner`, for data that
+    /// is only known once the session is over.
+    pub fn analytics_mut(&mut self) -> &mut Analytics {
+        self.inner.get_mut()
+    }
+
     /// Sets the error on the [`AnalyticsReporter`] in `self.inner`.
     pub fn set_inner_error(&mut self, error: AnalyticsError) {
         self.inner.set_error(error);

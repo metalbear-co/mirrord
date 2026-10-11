@@ -421,7 +421,7 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let res = IntProxy::new_with_connection(
+    let proxy = IntProxy::new_with_connection(
         agent_conn,
         listener,
         config.feature.fs.readonly_file_buffer,
@@ -439,14 +439,30 @@ pub(crate) async fn proxy(
         &config.experimental,
         monitor_tx,
         chaos_rx,
-    )
-    .run_with_shutdown(
-        first_connection_timeout,
-        consecutive_connection_timeout,
-        shutdown,
-    )
+    );
+    let hook_usage = proxy.hook_usage();
+
+    let res = proxy
+        .run_with_shutdown(
+            first_connection_timeout,
+            consecutive_connection_timeout,
+            shutdown,
+        )
+        .await
+        .map_err(From::from);
+
+    if tokio::time::timeout(Duration::from_secs(1), async {
+        chaos_reporter
+            .write()
+            .await
+            .analytics_mut()
+            .add("hooks", &hook_usage);
+    })
     .await
-    .map_err(From::from);
+    .is_err()
+    {
+        warn!("Hook usage could not be set in analytics")
+    };
 
     if res.is_err()
         && tokio::time::timeout(Duration::from_secs(1), async {
