@@ -22,6 +22,7 @@ use crate::{
     IntProxy, LayerInitializerTask,
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     error::{ProxyRuntimeError, ProxyStartupError},
+    hook_usage::HookUsage,
     layer_conn::LayerConnection,
     main_tasks::{FromLayer, MainTaskId, ProxyMessage},
     process_termination, quiesce_and_collect_layers,
@@ -102,6 +103,8 @@ pub(super) struct FailoverStrategy {
     /// shutdown path tear them down instead of leaving silent processes that keep holding their
     /// ports.
     connected_layers: HashMap<LayerId, ProcessInfo>,
+    /// Shared with the failed proxy, so that layers starting during failover are still counted.
+    hook_usage: HookUsage,
 }
 
 impl FailoverStrategy {
@@ -118,6 +121,7 @@ impl FailoverStrategy {
             any_connection_accepted: failed_proxy.any_connection_accepted,
             fail_cause: error,
             connected_layers: failed_proxy.connected_layers,
+            hook_usage: failed_proxy.hook_usage,
         }
     }
 
@@ -352,9 +356,9 @@ impl FailoverStrategy {
         }: FromLayer,
     ) {
         match message {
+            LayerToProxyMessage::HooksInstalled(report) => self.hook_usage.record(report),
             LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
-            | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_))
-            | LayerToProxyMessage::HooksInstalled(_) => {
+            | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_)) => {
                 tracing::info!(message = ?message, "Proxy in failover mode, ignoring a message");
             }
             _ => self.send_error_to_layer(layer_id, message_id).await,

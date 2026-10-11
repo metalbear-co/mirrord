@@ -105,7 +105,8 @@ async fn answer(layer: &mut FakeLayerConnection) -> Option<LayerToProxyMessage> 
             })),
         )),
         LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
-        | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_)) => None,
+        | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_))
+        | LayerToProxyMessage::HooksInstalled(_) => None,
         other => panic!("unexpected request from the layer: {other:?}"),
     };
     if let Some(response) = response {
