@@ -37,6 +37,7 @@ strsim.workspace = true
 strum.workspace = true
 tokio = { workspace = true, features = ["process", "rt", "signal", "sync", "time"] }
 clap.workspace = true
+dunce.workspace = true
 inquire.workspace = true
 uuid.workspace = true
 yamlpatch.workspace = true
