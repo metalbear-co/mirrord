@@ -39,8 +39,11 @@ use mirrord_analytics::{
     read_kube_version_from_env,
 };
 use mirrord_config::{LayerConfig, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM};
-use mirrord_intproxy::agent_conn::{AgentConnectInfo, AgentConnection};
-use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, LogLevel, LogMessage};
+use mirrord_intproxy::{
+    agent_conn::{AgentConnectInfo, AgentConnection},
+    sidecar_protocol::{ExternalProxyCodec, SidecarMessage},
+};
+use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::server::TlsStream;
 use tokio_util::{either::Either, sync::CancellationToken};
@@ -288,13 +291,13 @@ async fn handle_connection(
     mut agent_conn: AgentConnection,
     cancellation_token: CancellationToken,
 ) {
-    let mut stream = actix_codec::Framed::new(stream, DaemonCodec::default());
+    let mut stream = actix_codec::Framed::new(stream, ExternalProxyCodec::default());
 
     loop {
         tokio::select! {
             client_message = stream.next() => {
                 match client_message {
-                    Some(Ok(client_message)) => {
+                    Some(Ok(SidecarMessage::Agent(client_message))) => {
                         agent_conn.connection.send(client_message).await;
                     }
                     Some(Err(error)) => {

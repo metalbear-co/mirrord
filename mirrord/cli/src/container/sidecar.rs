@@ -262,11 +262,13 @@ impl IntproxySidecar {
             AgentConnectInfo::ExternalProxy {
                 proxy_addr: extproxy_addr,
                 tls_pem: Some(config.container.cli_tls_path.clone()),
+                sidecar_protocol: true,
             }
         } else {
             AgentConnectInfo::ExternalProxy {
                 proxy_addr: extproxy_addr,
                 tls_pem: None,
+                sidecar_protocol: true,
             }
         };
         sidecar_command.add_env(
