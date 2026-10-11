@@ -2,6 +2,7 @@ use std::{fmt, io, net::SocketAddr, ops::Not, path::Path, process::Stdio, time::
 
 use futures::{FutureExt, Stream};
 use mirrord_analytics::ExecutionKind;
+use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
     LayerConfig, config::ConfigError, container::MIRRORD_EXTERNAL_PROXY_HOSTNAME,
     internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
@@ -285,7 +286,7 @@ impl IntproxySidecar {
             .with_command(sidecar_container_command)
             .into_command_args();
 
-        let mut sidecar_container_spawn = Command::new(&runtime_binary);
+        let mut sidecar_container_spawn = resolve_tokio_command(&runtime_binary);
         sidecar_container_spawn.args(sidecar_args);
         let container_id = exec_and_get_first_line(sidecar_container_spawn).await?;
 
@@ -311,7 +312,7 @@ impl IntproxySidecar {
     /// 2. Internal proxy's standard streams
     #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))]
     pub async fn start(self) -> Result<(SocketAddr, SidecarLogs), IntproxySidecarError> {
-        let mut command = Command::new(&self.runtime_binary);
+        let mut command = resolve_tokio_command(&self.runtime_binary);
         command.args(["start", "--attach", &self.container_id]);
 
         let mut child = command

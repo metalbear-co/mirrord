@@ -1,9 +1,10 @@
 #![cfg(not(target_os = "windows"))]
 // Currently browser only supported on not(windows)
 
-use std::{process::Command, sync::LazyLock};
+use std::sync::LazyLock;
 
 use base64::engine::{Engine, general_purpose::STANDARD};
+use mirrord_command::resolve_command;
 use mirrord_config::feature::network::NetworkConfig;
 use mirrord_progress::Progress;
 use serde::Serialize;
@@ -44,7 +45,7 @@ where
     fn open_in_chrome(url: &str) -> std::io::Result<()> {
         #[cfg(target_os = "macos")]
         {
-            Command::new("open")
+            resolve_command("open")
                 .args(["-a", "Google Chrome", url])
                 .status()
                 .map(|_| ())
@@ -52,7 +53,10 @@ where
 
         #[cfg(target_os = "linux")]
         {
-            Command::new("google-chrome").arg(url).status().map(|_| ())
+            resolve_command("google-chrome")
+                .arg(url)
+                .status()
+                .map(|_| ())
         }
     }
     if is_chrome_installed() {
@@ -70,7 +74,7 @@ where
 
 #[cfg(target_os = "macos")]
 fn is_chrome_installed() -> bool {
-    Command::new("open")
+    resolve_command("open")
         .args(["-Ra", "Google Chrome"])
         .status()
         .map(|status| status.success())
@@ -79,7 +83,7 @@ fn is_chrome_installed() -> bool {
 
 #[cfg(target_os = "linux")]
 fn is_chrome_installed() -> bool {
-    Command::new("which")
+    resolve_command("which")
         .arg("google-chrome")
         .output()
         .map(|output| output.status.success())

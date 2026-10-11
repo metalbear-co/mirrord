@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use mirrord_command::resolve_command;
 
 use super::signing;
 use crate::relative_to_root;
@@ -109,7 +110,7 @@ pub fn cargo_build(target: Target, options: CargoOptions) -> Command {
     }
     let zigbuild = options.zigbuild && is_linux;
 
-    let mut cmd = Command::new("cargo");
+    let mut cmd = resolve_command("cargo");
     cmd.arg(if zigbuild { "zigbuild" } else { "build" });
 
     if options.release {
@@ -168,7 +169,7 @@ pub fn build_shim(options: CargoOptions) -> Result<PathBuf> {
     let shim_path = shim_dir.join("shim.dylib");
     println!("Building arm64e shim...");
 
-    let status = Command::new("clang")
+    let status = resolve_command("clang")
         .args(["-arch", "arm64e", "-dynamiclib", "-o"])
         .arg(&shim_path)
         .arg("mirrord/layer/shim.c")
@@ -218,7 +219,7 @@ pub fn link_macos_universal_layer(release: bool) -> Result<PathBuf> {
     let universal_layer = universal_dir.join("libmirrord_layer.dylib");
     println!("Creating universal dylib with lipo...");
 
-    let status = Command::new("lipo")
+    let status = resolve_command("lipo")
         .args(["-create", "-output"])
         .arg(&universal_layer)
         .arg(&x86_layer)
@@ -262,7 +263,7 @@ pub fn build_macos_universal_layer(
     // Create universal dylib
     let universal_layer = universal_dir.join("libmirrord_layer.dylib");
     println!("Creating universal dylib...");
-    let status = Command::new("lipo")
+    let status = resolve_command("lipo")
         .args(["-create", "-output"])
         .arg(&universal_layer)
         .arg(&x86_layer)

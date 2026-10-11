@@ -29,6 +29,7 @@ use inquire::{Confirm, Select};
 use k8s_openapi::api::core::v1::Namespace;
 use miette::Diagnostic;
 use mirrord_analytics::MIRRORD_UP_CORRELATION_ID_ENV;
+use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
     config::{ConfigContext, ConfigError, EnvKey},
     target::{Target, TargetType},
@@ -42,7 +43,7 @@ use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use serde_saphyr::{DefaultMessageFormatter, MessageFormatter};
 use tera::Tera;
 use thiserror::Error;
-use tokio::{process::Command, task::JoinError};
+use tokio::task::JoinError;
 use uuid::Uuid;
 use yamlpatch::{Op, Patch, apply_yaml_patches};
 use yamlpath::{Document, route};
@@ -648,7 +649,7 @@ pub async fn run(
 
             let encoded_cfg = config.encode()?;
 
-            let mut cmd = Command::new(std::env::current_exe()?);
+            let mut cmd = resolve_tokio_command(std::env::current_exe()?);
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())

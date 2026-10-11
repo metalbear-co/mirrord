@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 use std::{collections::HashMap, process::Stdio};
 
+use mirrord_command::resolve_tokio_command;
 use tempfile::tempdir;
-use tokio::process::Command;
 
 use crate::TestProcess;
 
@@ -155,7 +155,7 @@ pub async fn run_mirrord(
 
     // Used for debugging with breakpoint on `let server` to debug mirrord execution
     println!("executing mirrord with args {args:?}",);
-    let mut server = Command::new(&path);
+    let mut server = resolve_tokio_command(&path);
     server
         .args(&args)
         .envs(env)

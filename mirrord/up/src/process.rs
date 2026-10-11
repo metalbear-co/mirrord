@@ -490,6 +490,7 @@ mod windows_tests;
 mod tests {
     use std::{path::Path, process::Stdio};
 
+    use mirrord_command::resolve_tokio_command;
     use nix::sys::signal::kill;
     use rstest::rstest;
     use tempfile::TempDir;
@@ -501,7 +502,7 @@ mod tests {
     };
 
     fn command(script: &str, directory: &Path) -> (Arc<str>, Command) {
-        let mut command = Command::new("sh");
+        let mut command = resolve_tokio_command("sh");
         command
             .args(["-c", script])
             .current_dir(directory)
@@ -700,7 +701,7 @@ mod tests {
         let valid = command("exec sleep 60", directory.path());
         let missing = (
             Arc::from("missing"),
-            Command::new(directory.path().join("missing")),
+            resolve_tokio_command(directory.path().join("missing")),
         );
         let result = supervise(
             vec![valid, missing],
@@ -750,7 +751,7 @@ mod tests {
         natural_exit: bool,
         ignores_term: bool,
     ) -> Child {
-        let mut helper = Command::new(std::env::current_exe().unwrap());
+        let mut helper = resolve_tokio_command(std::env::current_exe().unwrap());
         helper
             .args([
                 "--exact",

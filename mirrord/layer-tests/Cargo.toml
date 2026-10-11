@@ -37,6 +37,7 @@ tracing-subscriber.workspace = true
 
 libc.workspace = true
 mirrord-intproxy = { path = "../intproxy" }
+mirrord-command = { path = "../command", features = ["tokio"] }
 rand.workspace = true
 tracing.workspace = true
 mirrord-test-utils = { path = "../../test-utils" }

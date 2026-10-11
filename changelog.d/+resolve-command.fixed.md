@@ -1,0 +1,1 @@
+On Windows, programs that mirrord runs by name (`docker`, `podman`, `redis-server`, `git`, ...) are now also found when they are installed as `.cmd`/`.bat` shims, the same way `cmd.exe` and PowerShell resolve them through `PATHEXT`.

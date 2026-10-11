@@ -1,10 +1,10 @@
 use std::{
     env,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use anyhow::{Context, Result};
+use mirrord_command::resolve_command;
 
 /// Check if we should use gon for signing (CI environment)
 fn should_use_gon() -> bool {
@@ -42,7 +42,7 @@ fn sign_with_gon(paths: &[impl AsRef<Path>]) -> Result<()> {
     std::fs::write(config_path, config).context("Failed to write gon config")?;
 
     // Run gon
-    let status = Command::new("gon")
+    let status = resolve_command("gon")
         .args(["-log-level=debug", "-log-json"])
         .arg(config_path)
         .status()
@@ -63,7 +63,7 @@ fn sign_with_gon(paths: &[impl AsRef<Path>]) -> Result<()> {
 fn sign_with_codesign(path: &Path) -> Result<()> {
     println!("Signing {} with codesign (local mode)...", path.display());
 
-    let status = Command::new("codesign")
+    let status = resolve_command("codesign")
         .args(["-f", "-s", "-"])
         .arg(path)
         .status()
