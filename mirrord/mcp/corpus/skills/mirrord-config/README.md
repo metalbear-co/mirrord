@@ -24,13 +24,13 @@ This skill helps AI agents:
 
 ## How it works
 
-1. Reads the official mirrord JSON schema and configuration reference
+1. Looks up options with the mirrord MCP server's `explain_config_option` when connected, otherwise in the configuration reference
 2. Generates or validates configs based on your request
-3. Runs `mirrord verify-config` for authoritative validation
+3. Validates with the mirrord MCP server's `validate_config` when connected, otherwise with `mirrord verify-config`
 4. Returns validated JSON with explanations
 
 ## References
 
 This skill uses local reference files:
-- `references/schema.json` — mirrord JSON Schema
+- `references/schema.json`: mirrord JSON Schema, synced from upstream. The fence tag check validates config examples against it; read it only as a last resort, when neither `validate_config` (mirrord MCP server) nor `mirrord verify-config` is available
 - `references/configuration.md` — Configuration reference

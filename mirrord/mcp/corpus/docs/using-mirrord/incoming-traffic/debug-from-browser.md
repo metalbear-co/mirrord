@@ -117,7 +117,7 @@ The browser extension was originally driven by `mirrord exec` printing a configu
 
 When you run `mirrord exec` against this config, the CLI prints a `chrome-extension://...` URL and opens it. The extension's configure page reads the embedded backend and token and stores them. After that the popup behaves the same as in the `mirrord ui` flow.
 
-You'll also want HTTP context propagation set up in your app so the header survives across service hops. Most tracing libraries already forward `baggage` or `tracestate` automatically; only add manual forwarding if your stack does not.
+You'll also want HTTP context propagation set up in your app so the header survives across service hops. Most tracing libraries already forward `baggage` or `tracestate` automatically; only add manual forwarding if your stack does not. The [`mirrord-header-propagation`](https://github.com/metalbear-co/skills/tree/main/skills/mirrord-header-propagation) skill can check and set this up for you.
 
 This experimental feature still requires the extension to be installed before you run `mirrord exec`. If it isn't, Chrome will block the configure URL and show an error page.
 

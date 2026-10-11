@@ -33,7 +33,7 @@ Links a Kubernetes workload (Deployment, StatefulSet, or Argo Rollout) to the Ka
 Each entry describes an environment variable source. Supported types:
 
 #### directEnvVar
-```yaml
+```yaml crd
 - directEnvVar:
     container: consumer     # container name in the pod spec
     variable: KAFKA_TOPIC   # env var name
@@ -56,7 +56,7 @@ Each entry describes an environment variable source. Supported types:
 
 ## Full example
 
-```yaml
+```yaml crd
 apiVersion: queues.mirrord.metalbear.co/v1alpha
 kind: MirrordKafkaTopicsConsumer
 metadata:
@@ -95,7 +95,7 @@ spec:
 
 The `id` field in each topic entry is what developers reference in their mirrord.json:
 
-```json
+```json mirrord
 {
   "feature": {
     "split_queues": {

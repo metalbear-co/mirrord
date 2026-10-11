@@ -61,7 +61,7 @@ The mirrord config schema contains an `_experimental_.latency` option for outgoi
 
 ## Rule anatomy
 
-```json
+```json chaos-rule
 {
   "name": "latency for database interactions",
   "priority": 10,
@@ -90,7 +90,7 @@ Two effects are supported. A rule has exactly one.
 
 **`latency`**: delays the connection's read and/or write operations:
 
-```json
+```json chaos-rule
 "effect": {
   "latency": {
     "read_ms": 100,
@@ -104,7 +104,7 @@ At least one of `read_ms` or `write_ms` must be non-zero, or the rule is rejecte
 
 **`connection_error`**: fails the connection:
 
-```json
+```json chaos-rule
 "effect": {
   "connection_error": {
     "type": "reset",
@@ -119,7 +119,7 @@ At least one of `read_ms` or `write_ms` must be non-zero, or the rule is rejecte
 
 `mirrord chaos` prints the full rule, pretty-printed by default or as JSON with `--format json`. Note two differences from the request shape: the `effect` is nested **inside** the `selector`, and `upstream` comes back with an explicit port, where `0` means any port:
 
-```json
+```json output
 {
   "id": "6b8f1c4e-2a73-4d9b-8e56-c3f0a7d1b924",
   "name": "latency for database interactions",
@@ -193,7 +193,7 @@ Rule files are declarative JSON: check them into the repo (e.g. `.mirrord/chaos/
 
 Tag the session with a known key (`mirrord exec --key`) so the pipeline can find its session ID in the `mirrord session list` output:
 
-```yaml
+```yaml workflow
 # GitHub Actions excerpt: assumes mirrord is installed and kubeconfig is set up
 - name: Run integration tests under chaos
   run: |
