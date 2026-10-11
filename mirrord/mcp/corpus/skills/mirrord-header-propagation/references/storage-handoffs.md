@@ -51,11 +51,13 @@ The consumer needs `s3:GetObject` (HeadObject is authorised by it), plus `s3:Get
 
 **mirrord queue splitting** — on the queue's `queueConfig` `MirrordPropertyList`, set `s3_event: "true"` (plus `sns: "true"` for S3 → SNS → SQS); the operator then fetches the object's user metadata (needs `s3:GetObject`) and exposes it as `S3Metadata`:
 
-```json
-"split_queues": {
-  "uploads-queue": {
-    "queue_type": "SQS",
-    "jq_filter": ".S3Metadata.baggage // \"\" | test(\"mirrord-session=alice\")"
+```json mirrord=feature
+{
+  "split_queues": {
+    "uploads-queue": {
+      "queue_type": "SQS",
+      "jq_filter": ".S3Metadata.baggage // \"\" | test(\"mirrord-session=alice\")"
+    }
   }
 }
 ```
@@ -103,13 +105,17 @@ def callback(message):
         context.detach(token)
 ```
 
-Notification **attributes** (`bucketId`, `objectId`, `eventType`, ...) never include custom metadata, so a `message_filter` on `baggage` can't match. Filter on the payload:
+Notification **attributes** (`bucketId`, `objectId`, `eventType`, ...) never include custom metadata, so a `message_filter` on `baggage` can't match. Filter on the object's metadata instead:
 
-```json
-"split_queues": {
-  "uploads-sub": {
-    "queue_type": "GCPPubSub",
-    "jq_filter": ".data | @base64d | fromjson | .metadata.baggage // \"\" | test(\"mirrord-session=alice\")"
+**mirrord queue splitting** — on the queue's `queueConfig` `MirrordPropertyList`, set `gcs_event: "true"` (operator 3.214.0+); the operator then exposes the notification's object custom metadata as `gcsMetadata`. With a `JSON_API_V1` payload it reads `metadata` off the message data directly; with `NONE` it fetches the object's metadata from Cloud Storage itself (needs `storage.objects.get` on the bucket for the client config's identity — grant it if the consumer's service account lacks it), so this also covers the `NONE` case the in-process consumer above can't:
+
+```json mirrord=feature
+{
+  "split_queues": {
+    "uploads-sub": {
+      "queue_type": "GCPPubSub",
+      "jq_filter": ".gcsMetadata.baggage // \"\" | test(\"mirrord-session=alice\")"
+    }
   }
 }
 ```

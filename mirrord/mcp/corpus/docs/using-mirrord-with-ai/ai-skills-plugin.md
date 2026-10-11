@@ -23,6 +23,7 @@ Skills are reusable instruction modules that teach AI agents how to work with mi
 - Configure the mirrord operator for team environments
 - Help set up [database branching](../sharing-the-cluster/db-branching.md) for your cluster
 - Configure [queue splitting](../sharing-the-cluster/queue-splitting.md) for Kafka topics
+- Make your services [propagate the baggage header](../use-cases/preview-environments-in-ci.md#header-propagation-for-backend-testing) across HTTP, gRPC, and queues, so filters, preview environments, and queue splitting follow a request end to end, and get a report of every hop where the header is still dropped
 - Create [preview environments](../use-cases/preview-environments.md), ad hoc or per-PR in CI
 - [Chaos test](../use-cases/chaos-testing.md) your app with per-session latency and connection-error rules
 

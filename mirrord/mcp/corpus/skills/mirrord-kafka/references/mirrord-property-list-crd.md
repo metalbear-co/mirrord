@@ -60,7 +60,7 @@ This keeps older setups working while you migrate.
 
 ### Plaintext (dev)
 
-```yaml
+```yaml crd
 apiVersion: mirrord.metalbear.co/v1
 kind: MirrordPropertyList
 metadata:
@@ -76,7 +76,7 @@ spec:
 
 ### AWS MSK IAM
 
-```yaml
+```yaml crd
 spec:
   properties:
     - name: bootstrap.servers
@@ -93,7 +93,7 @@ When `mirrord.auth.kind: MSK_IAM`, the operator automatically adds `sasl.mechani
 
 Never inline PEM key material or passwords. Store them in a Secret and reference with `valueFrom.secretKeyRef`:
 
-```yaml
+```yaml crd
 spec:
   properties:
     - name: bootstrap.servers
@@ -121,7 +121,7 @@ spec:
 
 ### Kafka Streams (Java client)
 
-```yaml
+```yaml crd
 spec:
   properties:
     - name: bootstrap.servers
@@ -138,7 +138,7 @@ Some client libraries — KafkaJS, for example — advertise their own partition
 
 Set `mirrord.temporary_group_id: "true"` on the Kafka `MirrordPropertyList`:
 
-```yaml
+```yaml crd
 spec:
   properties:
     - name: bootstrap.servers
@@ -151,7 +151,7 @@ With this set, splits patch the workload's consumer-group env vars (`appConfig.g
 
 The operator can only join the original group once every pod of the previous generation has left it, so the split waits for the workload's rollout to finish — 180 seconds by default, then the session fails. For a slower rollout (many replicas, a long termination grace period, a consumer that stays in the group until its session timeout expires), raise the wait with `mirrord.group_join_timeout`, in seconds:
 
-```yaml
+```yaml crd
 spec:
   properties:
     - name: mirrord.temporary_group_id
@@ -168,7 +168,7 @@ By default, the operator creates temporary (split) topics with a replication fac
 
 Set `mirrord.split_topic.replication_factor` on the Kafka `MirrordPropertyList` to control the factor. Requires operator **3.191.0+**; earlier operators reject it as an unknown `mirrord.` key.
 
-```yaml
+```yaml crd
 spec:
   properties:
     - name: bootstrap.servers
@@ -194,21 +194,28 @@ The store can be given two ways:
 - **Inline**, base64-encoded, via `mirrord.ssl.truststore.base64` / `mirrord.ssl.keystore.base64`. Recommended — nothing to mount into the operator pod.
 - **As a file**, via the standard `ssl.truststore.location` / `ssl.keystore.location`. The path is read from the **operator pod's** filesystem (not the target workload).
 
-Base64-encode the stores into a Secret next to their passwords:
+Work in a private directory: `mktemp -d` creates it with mode `0700`, so other local users can't read anything inside it. Base64-encode the stores into it, put each store password in its own file there (`truststore.password`, `keystore.password`, no trailing newline, written with an editor rather than `echo` so it stays out of shell history), create the Secret from those files, then delete the directory once it succeeds:
 
 ```sh
+dir=$(mktemp -d)
+base64 < truststore.jks | tr -d '\n' > "$dir/truststore.jks.base64"
+base64 < keystore.jks | tr -d '\n' > "$dir/keystore.jks.base64"
+# write the two password files into "$dir" now
 kubectl create secret generic kafka-stores --namespace meme \
-  --from-literal=truststore.jks.base64="$(base64 < truststore.jks | tr -d '\n')" \
-  --from-literal=keystore.jks.base64="$(base64 < keystore.jks | tr -d '\n')" \
-  --from-literal=truststore.password=changeit \
-  --from-literal=keystore.password=changeit
+  --from-file=truststore.jks.base64="$dir/truststore.jks.base64" \
+  --from-file=keystore.jks.base64="$dir/keystore.jks.base64" \
+  --from-file=truststore.password="$dir/truststore.password" \
+  --from-file=keystore.password="$dir/keystore.password" \
+  && rm -r "$dir"
 ```
+
+If Secret creation fails, the files stay in `$dir` for a retry; delete it with `rm -r "$dir"` when you are done.
 
 > The Secret must hold the **base64 text** of the store, not the raw bytes — property values are read as UTF-8 strings, so a key created with `--from-file=keystore.jks` cannot be read.
 
 Reference the secret keys from the `MirrordPropertyList`:
 
-```yaml
+```yaml crd
 apiVersion: mirrord.metalbear.co/v1
 kind: MirrordPropertyList
 metadata:

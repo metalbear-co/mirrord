@@ -106,7 +106,7 @@ For `MirrordSplitConfig`:
 
 Remind the user once, early, to enable Temporal splitting:
 
-```yaml
+```yaml helm-values
 operator:
   temporalSplitting: true
   # Optional — the operator's Temporal proxy port (default 7233):
@@ -126,7 +126,7 @@ Rules:
 - Temporal Cloud with an API key needs only `tls: "true"` + `apiKey` (publicly trusted cert). A private CA needs `tlsCaCert`; mTLS needs `tlsClientCert` + `tlsClientKey`.
 - Connection settings are read when a split **starts** — rotated certificates are picked up by the next split, not running ones.
 
-```yaml
+```yaml crd
 apiVersion: mirrord.metalbear.co/v1
 kind: MirrordPropertyList
 metadata:
@@ -156,7 +156,7 @@ Rules:
 - Per-queue Temporal options (`max_buffered_tasks`) live in a separate `MirrordPropertyList` referenced by the queue's `queueConfig`.
 - `spec.drainTimeout` (seconds) keeps the split's temporary resources alive after the last session ends so a new session can reuse them; unset or `0` tears down immediately. It does **not** wait for in-flight work.
 
-```yaml
+```yaml crd
 apiVersion: queues.mirrord.metalbear.co/v1
 kind: MirrordSplitConfig
 metadata:
@@ -189,7 +189,7 @@ The operator can only read the worker's env vars if they are defined directly in
 Show the developer-facing config referencing the queue IDs. Temporal uses `queue_type: "Temporal"`. Two filter kinds, and you can combine them:
 
 **Filter on task metadata (`message_filter`):**
-```json
+```json mirrord
 {
   "operator": true,
   "target": "deployment/<workload>",
@@ -214,7 +214,7 @@ Supported `message_filter` keys — each maps a key to a regex, and **all** spec
 An empty `message_filter: {}` with no `jq_filter` is **match-none** (the local worker gets zero tasks).
 
 **Composable metadata filter (`filter`) — NEW, alternative to `message_filter`:**
-```json
+```json mirrord
 {
   "operator": true,
   "target": "deployment/<workload>",
@@ -236,7 +236,7 @@ An empty `message_filter: {}` with no `jq_filter` is **match-none** (the local w
 `filter` takes a single `{ "metadata": "<regex>" }`, or an `any_of`/`all_of` list of them. Each `metadata` regex is matched against every task metadata entry (the same keys `message_filter` supports — `workflow_id`, `header.<name>`, search attributes, …) rendered as `<name>: <value>`. Use either `filter` or `message_filter` on an entry, not both. Requires mirrord **3.264.0+** and operator **3.212.0+**. A `metadata` regex can't be verified against a specific attribute name, so a queue covered by a `splitQueues` policy rule rejects a lone `metadata` filter the same way it rejects a lone `jq_filter` — use `message_filter` there instead.
 
 **Filter on task content (`jq_filter`):**
-```json
+```json mirrord
 {
   "operator": true,
   "target": "deployment/<workload>",
