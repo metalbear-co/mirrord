@@ -14,7 +14,7 @@
 #   MIRRORD_INSTALL_DIR  directory to install into; created when missing, never uses sudo.
 #                        Without it: ~/.local/bin when it is on PATH, else /usr/local/bin.
 #   MIRRORD_VERIFY=1     download the release zip and check it against the .shasum256 file
-#                        published with the release (needs unzip)
+#                        published with the release (needs unzip); only the value 1 turns it on
 #   MIRRORD_CHECKSUM     expected SHA-256 of that zip, as shown on the release page; implies
 #                        MIRRORD_VERIFY and fails when the download differs
 #
@@ -35,7 +35,7 @@ get_latest_version() {
 copy() {
   if [ -n "${MIRRORD_INSTALL_DIR:-}" ]; then
     mkdir -p "$MIRRORD_INSTALL_DIR"
-    mv /tmp/mirrord/mirrord "$MIRRORD_INSTALL_DIR/mirrord"
+    mv "$WORK/mirrord" "$MIRRORD_INSTALL_DIR/mirrord"
     return
   fi
   case ":$PATH:" in
@@ -43,13 +43,13 @@ copy() {
       if [ ! -d "$HOME/.local/bin" ]; then
         mkdir -p "$HOME/.local/bin"
       fi
-      mv /tmp/mirrord/mirrord "$HOME/.local/bin/mirrord"
+      mv "$WORK/mirrord" "$HOME/.local/bin/mirrord"
       ;;
     *)
       # Try without sudo first, run with sudo only if mv failed without it.
-      mv /tmp/mirrord/mirrord /usr/local/bin/mirrord || (
+      mv "$WORK/mirrord" /usr/local/bin/mirrord || (
         echo "Cannot write to installation target directory as current user, writing as root."
-        sudo mv /tmp/mirrord/mirrord /usr/local/bin/mirrord
+        sudo mv "$WORK/mirrord" /usr/local/bin/mirrord
       )
       ;;
   esac
@@ -76,11 +76,11 @@ download_verified() {
     echo "unzip is required to verify the download; install it or unset MIRRORD_VERIFY and MIRRORD_CHECKSUM"
     exit 1
   fi
-  curl -o "/tmp/mirrord/$asset" -fsSL "$base/$asset"
-  curl -o "/tmp/mirrord/$sums" -fsSL "$base/$sums"
+  curl -o "$WORK/$asset" -fsSL "$base/$asset"
+  curl -o "$WORK/$sums" -fsSL "$base/$sums"
 
-  actual=$(sha256_of "/tmp/mirrord/$asset" | tr 'A-F' 'a-f')
-  published=$(awk 'NF { print $1; exit }' "/tmp/mirrord/$sums" | tr 'A-F' 'a-f')
+  actual=$(sha256_of "$WORK/$asset" | tr 'A-F' 'a-f')
+  published=$(awk 'NF { print $1; exit }' "$WORK/$sums" | tr 'A-F' 'a-f')
   if [ "$actual" != "$published" ]; then
     echo "$asset does not match the checksum published with release $version: got $actual, release says $published."
     echo "The download is corrupt or tampered with; not installing it."
@@ -94,8 +94,7 @@ download_verified() {
   fi
   echo "Verified $asset: sha256 $actual"
 
-  unzip -o -q "/tmp/mirrord/$asset" -d /tmp/mirrord
-  rm -f "/tmp/mirrord/$asset" "/tmp/mirrord/$sums"
+  unzip -o -q "$WORK/$asset" -d "$WORK"
 }
 
 # This function decides what version will be installed based on the following priority:
@@ -134,13 +133,16 @@ install() {
       file_issue_prompt
       ;;
   esac
-  mkdir -p /tmp/mirrord
-  if [ -n "${MIRRORD_VERIFY:-}" ] || [ -n "${MIRRORD_CHECKSUM:-}" ]; then
+  # A directory of this run's own, so nothing else can swap the download between the check and
+  # the install, and nothing is left behind.
+  WORK=$(mktemp -d 2>/dev/null || mktemp -d -t mirrord)
+  trap 'rm -rf "$WORK"' EXIT
+  if [ "${MIRRORD_VERIFY:-}" = "1" ] || [ -n "${MIRRORD_CHECKSUM:-}" ]; then
     download_verified "$version" "$OS" "$ARCH"
   else
-    curl -o /tmp/mirrord/mirrord -fsSL "https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord_${OS}_${ARCH}"
+    curl -o "$WORK/mirrord" -fsSL "https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord_${OS}_${ARCH}"
   fi
-  chmod +x /tmp/mirrord/mirrord
+  chmod +x "$WORK/mirrord"
   copy
   echo "mirrord installed! Have fun! For feedback and support, join our Slack: https://metalbear.co/slack , open an issue or discussion on our GitHub: https://github.com/metalbear-co/mirrord/ or send us an email at hi@metalbear.co"
   echo ""
