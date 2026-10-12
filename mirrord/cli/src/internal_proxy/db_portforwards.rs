@@ -794,7 +794,7 @@ mod tests {
 
     #[test]
     fn extract_url_env() {
-        let config = DatabaseBranchesConfig(vec![mysql(Some("db1"), url_env("DB_URL"))]);
+        let config = DatabaseBranchesConfig::Inline(vec![mysql(Some("db1"), url_env("DB_URL"))]);
         let result = extract_portforward_configs(&config, "key");
 
         assert_eq!(result.len(), 1);
@@ -823,7 +823,7 @@ mod tests {
                 env_var_name: None,
             },
         };
-        let config = DatabaseBranchesConfig(vec![mysql(Some("db3"), conn)]);
+        let config = DatabaseBranchesConfig::Inline(vec![mysql(Some("db3"), conn)]);
         assert!(extract_portforward_configs(&config, "key").is_empty());
     }
 
@@ -841,7 +841,7 @@ mod tests {
                 extra: Default::default(),
             },
         }));
-        let config = DatabaseBranchesConfig(vec![mysql(Some("db5"), conn)]);
+        let config = DatabaseBranchesConfig::Inline(vec![mysql(Some("db5"), conn)]);
         let result = extract_portforward_configs(&config, "key");
 
         assert_eq!(result.len(), 1);
@@ -876,7 +876,7 @@ mod tests {
                 extra: Default::default(),
             },
         }));
-        let config = DatabaseBranchesConfig(vec![cockroachdb(Some("crdb1"), conn)]);
+        let config = DatabaseBranchesConfig::Inline(vec![cockroachdb(Some("crdb1"), conn)]);
         let result = extract_portforward_configs(&config, "key");
 
         assert_eq!(result.len(), 1);
@@ -925,7 +925,7 @@ mod tests {
                 extra: Default::default(),
             },
         }));
-        let config = DatabaseBranchesConfig(vec![cockroachdb(Some("crdb2"), conn)]);
+        let config = DatabaseBranchesConfig::Inline(vec![cockroachdb(Some("crdb2"), conn)]);
         let result = extract_portforward_configs(&config, "key");
 
         assert_eq!(result.len(), 1);
@@ -1347,7 +1347,7 @@ mod tests {
 
     #[test]
     fn extract_pg_captures_query_params() {
-        let config = DatabaseBranchesConfig(vec![pg(Some("db1"), url_env("DB_URL"))]);
+        let config = DatabaseBranchesConfig::Inline(vec![pg(Some("db1"), url_env("DB_URL"))]);
         let result = extract_portforward_configs(&config, "key");
 
         let pf = result.into_iter().next().unwrap();
@@ -1377,7 +1377,7 @@ mod tests {
                 copy: Default::default(),
             },
         ];
-        let config = DatabaseBranchesConfig(vec![DatabaseBranchConfig::Pg(branch)]);
+        let config = DatabaseBranchesConfig::Inline(vec![DatabaseBranchConfig::Pg(branch)]);
 
         let portforwards = extract_portforward_configs(&config, "key");
         assert_eq!(
@@ -1492,7 +1492,7 @@ mod tests {
                 session_token: None,
             }),
         }));
-        let config = DatabaseBranchesConfig(vec![with_iam]);
+        let config = DatabaseBranchesConfig::Inline(vec![with_iam]);
         let pf = extract_portforward_configs(&config, "key")
             .into_iter()
             .next()
@@ -1513,7 +1513,7 @@ mod tests {
             copy: Default::default(),
             iam_auth: None,
         }));
-        let config = DatabaseBranchesConfig(vec![without_iam]);
+        let config = DatabaseBranchesConfig::Inline(vec![without_iam]);
         let pf = extract_portforward_configs(&config, "key")
             .into_iter()
             .next()

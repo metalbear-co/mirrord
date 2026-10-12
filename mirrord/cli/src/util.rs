@@ -4,6 +4,7 @@ use std::{io, net::SocketAddr};
 
 #[cfg(not(target_os = "windows"))]
 use io::Write;
+use mirrord_command::resolve_command;
 use mirrord_config::{
     LayerConfig, config::ConfigContext, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
 };
@@ -221,7 +222,7 @@ pub(crate) fn is_pid_alive(pid: u32) -> bool {
 #[cfg(windows)]
 pub(crate) fn is_pid_alive(pid: u32) -> bool {
     // Untested AI slop
-    std::process::Command::new("tasklist")
+    resolve_command("tasklist")
         .args(["/FI", &format!("PID eq {pid}"), "/NH"])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
@@ -242,9 +243,7 @@ pub fn run_cleanup_guardian(
     }
 
     if let (Some(runtime), Some(name)) = (container_runtime, container_name) {
-        let _ = std::process::Command::new(&runtime)
-            .args(["rm", "-f", &name])
-            .output();
+        let _ = resolve_command(&runtime).args(["rm", "-f", &name]).output();
     }
 
     if let Some(pid) = process_pid {

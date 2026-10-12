@@ -20,7 +20,7 @@ description: How to (very) quickly start using mirrord
 Get mirrord running in under 5 minutes. You'll need:
 
 - **Locally:** macOS (Intel/Apple Silicon), Linux (x86_64), or Windows (x86_64/WSL). `kubectl` configured and pointing at your cluster.
-- **In the cluster:** A running workload (deployment, pod, [etc.](../reference/targets.md)) you want to work with. Linux kernel 4.20+, Docker or containerd runtime.
+- **In the cluster:** A running workload (deployment, pod, [etc.](../reference/targets.md)) you want to work with. Linux kernel 5.4+, and a containerd, CRI-O, or Docker runtime.
 
 ## Install
 
@@ -143,13 +143,15 @@ Install the [mirrord browser extension](https://chromewebstore.google.com/detail
 
 {% hint style="info" %}
 **Working with a team?** [mirrord for Teams](https://app.metalbear.com) adds access control, traffic policies, and concurrent session management so your whole team can use mirrord safely.
+
+**Working with an AI coding agent?** It can start a seven-day Enterprise trial itself, without an account or a credit card, and hand you a link to claim it afterwards. See [Agent-Started Trials](../using-mirrord-with-ai/agent-started-trials.md).
 {% endhint %}
 
 ## Configuration
 
 mirrord reads config from `<project-path>/.mirrord/mirrord.json` (also supports `.toml` and `.yaml`). You can also prefix config files, e.g. `my-config.mirrord.json`.
 
-Run `mirrord wizard` to generate a config file interactively, or see the full [configuration options](https://metalbear.com/mirrord/docs/config).
+Run `mirrord wizard` to generate a config file interactively, or see the full [configuration options](https://metalbear.com/mirrord/docs/config). To keep an Operator preference across projects, see [Global Configuration](../installing-mirrord/global-configuration.md).
 
 {% hint style="info" %}
 The IDE extensions provide autocomplete for mirrord config files.

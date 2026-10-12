@@ -1,0 +1,1395 @@
+# Default values for mirrord-operator.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+namespace: mirrord
+
+## Whether we should create the namespace or not
+## If you set this to false, you must create the namespace manually
+createNamespace: true
+
+## For each namespace you'd like a namespaced role to be created in, add here.
+## The chart will create a role that is required to use mirrord in the namespace
+## and it can be bound via rolebinding (That you need to create yourself).
+roleNamespaces: []
+
+## Additional Kubernetes resources to create with the chart. Entries are rendered as templates,
+## so they can reference chart values and release information.
+extraObjects: []
+
+role:
+  # Note there's a cluster role version of it below.
+  mirrord-operator-user:
+    # add labels to the role, for i.e aggregate RBAC
+    labels: {}
+
+clusterRole:
+  mirrord-operator-user-basic:
+    # add labels to the role, for i.e aggregate RBAC
+    labels: {}
+  mirrord-operator-user:
+    # add labels to the role, for i.e aggregate RBAC
+    labels: {}
+  mirrord-operator-ci:
+    # add labels to the role, for i.e aggregate RBAC
+    labels: {}
+
+operator:
+  image: ghcr.io/metalbear-co/operator
+
+  # Number of replicas of the operator's deployment.
+  # At all times, only one of the replicas acts as the leader and serves mirrord sessions.
+  # Additional replicas remain in a standby mode,
+  # ready to resume the work in case the leader exits (e.g. due to node failure).
+  replicas: 1
+
+  # How long Kubernetes waits for an operator pod to exit after asking it to stop.
+  # The operator drains its tasks and then releases leadership, needing a little
+  # over 20 seconds.
+  terminationGracePeriodSeconds: 25
+
+  # Override the pull policy, useful for local development.
+  # imagePullPolicy: Always
+
+  # Set this value to specify a tag to use instead of the `appVersion`.
+  # imageTag: test
+
+  podAnnotations: {}
+  podLabels: {}
+
+  ## Custom labels to be added to all Kubernetes resources created by this chart.
+  ## These labels will be applied to higher-level resources like Deployments, Services, etc.
+  ## For pod-specific labels, use operator.podLabels instead.
+  ## Example:
+  ## labels:
+  ##   team: platform
+  labels: {}
+
+  ## Custom annotations to be added to all Kubernetes resources created by this chart, except the
+  ## CustomResourceDefinitions. Those are left unannotated so that an ordering hint set here cannot
+  ## delay them past the workloads that depend on them.
+  ## For pod-specific annotations, use operator.podAnnotations instead.
+  ## GitOps tools read annotations off the resources themselves, so this is where a sync-wave or a
+  ## similar ordering hint belongs; podAnnotations never leaves the pod template.
+  ## Example:
+  ## annotations:
+  ##   argocd.argoproj.io/sync-wave: "1"
+  annotations: {}
+
+  ## Optional human-friendly name for this cluster.
+  ## When set, it is reported on the operator's startup telemetry events, so the cluster shows up
+  ## with a recognizable label (instead of only an opaque identifier) in the license server and in
+  ## the mirrord cloud. Leave unset to omit it.
+  # clusterName: "staging-us-east"
+
+  jsonLog: true
+  # Require Kubernetes front-proxy client certificates on operator API routes.
+  # The operator validates the certificate chain using the front-proxy CA from the cluster's
+  # extension-apiserver-authentication configmap. Disable this only for environments where
+  # requests reach the operator without kube-apiserver/front-proxy client certificates, for
+  # example local development, custom API routing, or debugging through traffic interception.
+  requireFrontProxyClientCert: true
+
+  # Define additional environment variables for the operator. Note that variables which reference
+  # other variables must be defined _after_ those that they reference, as variables are added to
+  # the manifest in order.
+  extraEnv:
+  #   MY_ENV_VAR: "value"
+  #   HOST_IP:
+  #     valueFrom:
+  #       fieldRef:
+  #         fieldPath: status.hostIP
+  #   MY_REFERENCED_VAR: "$(HOST_IP):$(MY_ENV_VAR)"
+
+  # Define additional volume mounts for the operator container.
+  # extraVolumeMounts:
+  #   - name: my-secret
+  #     mountPath: /etc/my-secret
+  #     readOnly: true
+
+  # Define additional volumes for the operator deployment.
+  # extraVolumes:
+  #   - name: my-secret
+  #     secret:
+  #       secretName: my-secret
+
+  # Has to be set to `true` in order to use the SQS queue splitting feature.
+  sqsSplitting: false
+  # Has to be set to `true` in order to use the Kafka queue splitting feature.
+  kafkaSplitting: false
+  # Has to be set to `true` in order to use the RabbitMQ queue splitting feature.
+  rmqSplitting: false
+  # Has to be set to `true` in order to use the GCP Pub/Sub queue splitting feature.
+  gcpPubsubSplitting: false
+  # Has to be set to `true` in order to use the Azure Service Bus queue splitting feature.
+  azureServiceBusSplitting: false
+  # Has to be set to `true` in order to use the Redis Pub/Sub queue splitting feature.
+  redisPubsubSplitting: false
+  # Has to be set to `true` in order to use the Temporal queue splitting feature.
+  temporalSplitting: false
+  # Has to be set to `true` in order to use the BullMQ queue splitting feature.
+  bullmqSplitting: false
+  # Has to be set to `true` in order to use the NATS queue splitting feature.
+  natsSplitting: false
+  # Has to be set to `true` in order to use the core NATS (non-JetStream) pub/sub
+  # queue splitting feature. Best-effort delivery: nothing is persisted.
+  natsPubsubSplitting: false
+  # Temporal queue splitting proxy settings.
+  temporalProxy:
+    # Port for the Temporal frontend proxy workers connect to via `TEMPORAL_ADDRESS`.
+    port: 7233
+  # Has to be set to `true` in order to use the argocd application auto-sync pause feature.
+  applicationPauseAutoSync: false
+
+  # Has to be set to `true` in order to use the suspend flux controllers feature.
+  suspendFluxControllers: false
+  # Has to be set to `true` in order to let the operator pause KEDA scale-in.
+  pauseKedaScaleIn: false
+  # Has to be set to `true` in order to use the MySQL database branching feature.
+  mysqlBranching: false
+  # Has to be set to `true` in order to use the MariaDB database branching feature.
+  mariadbBranching: false
+  # Has to be set to `true` in order to use the PostgreSQL database branching feature.
+  pgBranching: false
+  # Has to be set to `true` in order to use the MongoDB database branching feature.
+  mongodbBranching: false
+  # Has to be set to `true` in order to use the DynamoDB database branching feature.
+  dynamodbBranching: false
+  # Has to be set to `true` in order to use the MSSQL database branching feature.
+  mssqlBranching: false
+  # Has to be set to `true` in order to use the Redis database branching feature.
+  redisBranching: false
+  # Has to be set to `true` in order to use the Google Cloud Spanner database branching feature.
+  spannerBranching: false
+  # Has to be set to `true` in order to use the ClickHouse database branching feature.
+  clickhouseBranching: false
+  # Has to be set to `true` in order to use the CockroachDB database branching feature.
+  cockroachdbBranching: false
+  # Has to be set to `true` in order to use the generic (user-supplied image) database
+  # branching feature. NOTE: enabling this lets users who can create branches run arbitrary
+  # container images as branch pods (under the namespace default service account). Restrict
+  # the images with `genericBranchConfig.dbPod.allowedImages` if needed; when that field is
+  # absent, all images are allowed.
+  genericBranching: false
+  # Has to be set to `true` in order to use the S3 bucket branching feature. The operator
+  # clones buckets in the customer's cloud account with its own AWS credentials (from the
+  # service account's IAM role annotation); there is no branch pod and no `s3BranchConfig`.
+  s3Branching: false
+  # Has to be set to `true` in order to use the turbopuffer namespace branching feature. The
+  # operator branches namespaces through turbopuffer's API with the API key it reads off the
+  # target workload; there is no branch pod and no `turbopufferBranchConfig`.
+  turbopufferBranching: false
+  # Settings for the turbopuffer namespace branching feature.
+  turbopufferOptions:
+    # Domains a turbopuffer branch may send its API key to, on top of `turbopuffer.com`, which
+    # is always allowed. Set this only for a dedicated cluster served from another domain: a
+    # branch names its own endpoint, so anything listed here is a host the operator will hand
+    # the resolved API key to.
+    allowedHosts: []
+  # Grants cluster-wide Secret permissions needed when users pass literal
+  # database credentials in the mirrord config instead of referencing
+  # existing K8s Secrets.
+  dbBranchingLiteralCredentials: true
+  # Enables the preview environments feature. Set to `false` to leave out the PreviewSession CRD
+  # and the operator permissions that preview environments need.
+  previewEnv: true
+  # Records which Services mirrord sessions talk to, for the cluster topology view in the
+  # dashboard. Makes the operator watch every Service and EndpointSlice in the cluster, and
+  # grants it read access to EndpointSlices.
+  topology: false
+
+  # Sharing preview environments via a plain link. Requires `previewEnv: true` and the
+  # `mirrord-share-ingress` chart deployed with a matching `shareDomain`.
+  shareIngress:
+    # Domain that preview share hosts are minted under, as `<slug>.<shareDomain>`, entered without
+    # a leading "*." wildcard. When empty, no share host is minted and previews are not shareable by link.
+    shareDomain: ""
+    # Mint share hosts without the random suffix, as `<sanitized key>.<shareDomain>` (the key
+    # lowercased, other characters turned into "-"), so a link can be built from the session key
+    # alone - for example by a PR bot from the PR number. One live session per host on the
+    # cluster: a second session whose key gives the same host fails at creation, naming the
+    # session that holds it. Sessions that already have a host keep it. The links become
+    # guessable, so only enable this when the ingress in front of `mirrord-share-ingress`
+    # authenticates every request.
+    stableSlugs: false
+
+  preview:
+    # Annotations added to the pods created by preview environments.
+    annotations: {}
+
+    # Labels added to the pods created by preview environments.
+    labels: {}
+
+    # How long to retain "failed" preview sessions before deleting them.
+    #
+    # Note that this option controls the time that the session's _internal custom resource_ remains in the cluster, so
+    # that it's visible to the `mirrord preview` family of commands for inspection. The workload itself is deleted as
+    # soon as failure is detected.
+    #
+    # "Failed" in this case means an operator-side error, such as failing to create the necessary kubernetes resources,
+    # failing to create DB branches, etc.
+    #
+    # Application-side failures such as crashes and evictions are handled automatically by kubernetes through pod
+    # restarts and the underlying Deployment, this configuration doesn't change that.
+    cleanupAfterMins: 15
+
+    # Bounds on the traffic an idle or waking preview session buffers while its pods boot.
+    #
+    # Sessions with idle mode enabled hold incoming traffic instead of failing it while their pods scale up from zero.
+    # These cap that buffer (per session): when either limit is reached the buffer is flushed and the held requests
+    # fail with 502 instead. `idleHoldBufferMessages` counts mirrord protocol frames (a whole HTTP request, one body
+    # chunk of a streamed request, or one data segment of a plain TCP connection — not necessarily one HTTP request);
+    # `idleHoldBufferBytes` bounds the actual payload memory, since a single frame can carry a large body.
+    idleHoldBufferMessages: 512
+    idleHoldBufferBytes: 8388608
+
+    # The pull policy to use for preview environment's images.
+    # imagePullPolicy: "Always"
+
+  # dbBranching:
+  #   # Size of the init volume that stages the copy. On emptyDir
+  #   # (`dbPod.storage.kind: emptyDir`, or the automatic fallback on clusters without a
+  #   # default StorageClass) this is the size limit; on the default PVC backing it sizes
+  #   # the claim, unless `initPvcSize` below is also set.
+  #   initPodVolumeLimit: "100Mi"
+  #   # Size of the volume holding the actual branch database. Same scope as above
+  #   # (`databasePvcSize` wins on the PVC path).
+  #   databasePodVolumeLimit: "1G"
+  #   # Requested size of the per-branch data PVC (the default storage backing).
+  #   # Provisioned per branch and deleted with it. Defaults to `databasePodVolumeLimit`
+  #   # if set, else 20Gi.
+  #   databasePvcSize: "20Gi"
+  #   # Requested size of the per-branch init (dump) PVC. The staged dump is roughly the
+  #   # size of the copied data. Defaults to `initPodVolumeLimit` if set, else 20Gi.
+  #   initPvcSize: "20Gi"
+  # When set to `true`, the operator will use a custom strategy when restarting target workloads.
+  # This strategy can be used if standard restart procedure is not working for the target workload.
+  isolatePodsRestart: true
+  # Enable prometheus metrics endpoint
+  metrics: false
+
+  # When enabled, operator will inject a `mirrord-key` header with the
+  # value of the current session key into redirected HTTP requests,
+  # responses to said requests, and the queue-splitting messages routed to
+  # a session. For queues it uses a native metadata field where the broker
+  # has one (SQS, Google Pub/Sub, RabbitMQ, Kafka, Azure Service Bus, NATS,
+  # and Temporal activity tasks), otherwise the JSON payload (BullMQ, Redis
+  # Pub/Sub); non-JSON payloads are left untouched.
+  injectSessionKeyHeader: true
+
+  # Depth of the single, global `mirrord subscribe` event buffer (shared across all sessions).
+  # If a subscriber lags by more than this many events, the oldest are dropped and it is sent a
+  # "lagged" notice. Raise for bursty, slow-consumer cases.
+  subscribeEventBufferSize: 2048
+
+  # Multi-cluster configuration (Envoy)
+  # Enable this on the PRIMARY cluster only
+  #
+  # ## How it works
+  #
+  # Clusters are discovered from Secrets with label `operator.metalbear.co/remote-cluster-credentials=true`.
+  # Each Secret contains credentials for a remote cluster:
+  #   - name: Logical cluster name (e.g., "staging-us-east")
+  #   - server: Kubernetes API server URL
+  #   - caData: CA certificate (base64 encoded)
+  #   - bearerToken: ServiceAccount token
+  #   - isDefault: "true" for the default cluster (stateful operations)
+  #
+  # Tokens are auto-refreshed using the TokenRequest API every 45 minutes.
+  #
+  # ## Setup
+  #
+  # 1. Create a ServiceAccount on each remote cluster (see remoteClusterSetup below)
+  # 2. Get the token and CA from each remote cluster
+  # 3. Create a Secret on the primary cluster for each remote cluster
+  # 4. Enable multiCluster.enabled = true on the primary cluster
+  #
+  multiCluster:
+    # Set to true to enable multi-cluster session orchestration and make this operator
+    # the primary one.
+    enabled: false
+
+    # CLUSTER NAME: Name of this cluster (optional, defaults to "primary")
+    # Used for logging and session tracking
+    # clusterName: "primary"
+
+    # DEFAULT CLUSTER: Where stateful operations happen (REQUIRED when multi-cluster enabled)
+    # - DB branches are created here
+    # - File operations read/write from here
+    # - Outgoing traffic originates from here
+    # Must match the `name` of one of your cluster Secrets
+    defaultCluster: ""
+
+    # Whether the primary cluster is management-only (no workloads)
+    # When true: Primary only runs Envoy, all sessions go to remote clusters
+    # When false: Primary is also a workload cluster
+    managementOnly: true
+
+    # These three are commented out on purpose. `remoteSessionTimeoutSeconds` and
+    # `sessionTtlSeconds` replace `remoteSessionTimeoutSecs` and `sessionTtlSecs`, and both
+    # spellings are honored. Shipping a value here would make the new name always set, so a values
+    # file still using the old name would be ignored on upgrade. The defaults below live in the
+    # ConfigMap template instead.
+
+    # Timeout for waiting for remote sessions to become ready (seconds). Defaults to 300.
+    # remoteSessionTimeoutSeconds: 300
+
+    # TTL for multi-cluster sessions (seconds). Defaults to 60.
+    # Sessions are deleted when no client has been connected for this duration.
+    # Only applies once a client has connected; until then sessionSetupDeadlineSeconds applies.
+    # sessionTtlSeconds: 60
+
+    # How long a multi-cluster session may wait for its first client connection (seconds).
+    # Defaults to 180.
+    # Sessions are created on every cluster before any client connects, and setting them up can
+    # take a while when queue splitting waits for target pods to roll. Deleting a session also
+    # deletes its child sessions on every cluster, so this must outlast setup.
+    # sessionSetupDeadlineSeconds: 180
+
+    # Preview environment behavior across the fleet.
+    preview:
+      # Where a preview's pods run.
+      #
+      #   default-cluster (default) - pods on the DEFAULT cluster only
+      #   replicas                  - a full replica on EVERY workload cluster: own pods,
+      #                               own local HTTP steal, own local queue split
+      #
+      # Queue-splitting previews apply their splits on every cluster in BOTH modes - so
+      # matched messages from anywhere keep reaching the preview either way; the modes only
+      # differ in where pods run.
+      #
+      # Use `replicas` when:
+      #   - previews must catch baggage-tagged HTTP arriving through your load balancer,
+      #     which can land on ANY cluster - with default-cluster, matched requests landing
+      #     on other clusters are served by the deployed app instead of the preview
+      #   - previews should survive a cluster outage (the LB fails over onto replicas
+      #     that already exist and are already serving)
+      # Stay on `default-cluster` when:
+      #   - previews are exercised via their share link or requests you steer yourself -
+      #     that traffic enters one cluster anyway, so extra replicas would sit unused
+      #   - queue splitting is the main feature (its coverage is identical either way)
+      #   - you want the smallest footprint: one pod, no DB tunnel
+      mode: default-cluster
+
+      # Max concurrent branch-DB connections one workload cluster's replicas may hold open
+      # through the branch tunnel. Only applies with `mode: replicas` AND database branching:
+      # replicas on non-default clusters reach branch DBs over the tunnel, and each live
+      # connection holds one stream plus one port-forward on the default cluster's apiserver.
+      #
+      # This caps CONNECTIONS, never previews or branches. Size it as
+      #   concurrently running branching previews x their app's DB pool size
+      # (an idle preview holds none - its pods, and so its connections, are gone). Excess
+      # opens are rejected and surface as DB connect failures the drivers retry.
+      #
+      # The default suits roughly 25-50 concurrently connected replicas per cluster with
+      # typical pool sizes. Raising it trades more concurrent port-forwards on the default
+      # cluster's apiserver.
+      maxTunnelStreams: 256
+
+    # Remote cluster configuration
+    #
+    # Each cluster requires `authType` to specify how it authenticates:
+    #
+    #   authType: eks — AWS IAM authentication for EKS clusters
+    #       → Tokens generated locally using the operator's IAM role (IRSA/Pod Identity)
+    #       → Auto-refreshed every 10 min (15-min token lifetime)
+    #       → No secrets to manage — safe to commit to Git
+    #       → Requires `region` field and EKS Access Entry on each remote cluster
+    #       → The cluster key name must match the EKS cluster name
+    #
+    #   authType: bearerToken — ServiceAccount token
+    #       → Auto-refreshed via TokenRequest API
+    #       → No manual rotation needed
+    #
+    #   authType: mtls — mTLS client certificate auth
+    #       → NOT auto-refreshed (certs typically valid for months/years)
+    #       → You must manually rotate before expiry
+    #
+    # Example with EKS IAM auth (cluster key = EKS cluster name):
+    # clusters:
+    #   my-eks-cluster:                    # ← must match the EKS cluster name
+    #     authType: eks
+    #     server: https://ABCDEF.gr7.us-east-1.eks.amazonaws.com
+    #     region: us-east-1
+    #     # caData is optional for EKS — EKS uses Amazon-signed certs trusted by default.
+    #     # caData: LS0tLS1CRUdJTi...
+    #     isDefault: true
+    #
+    # EKS IAM setup on each remote cluster:
+    #   1. Install mirrord operator on the remote cluster with:
+    #          --set operator.multiClusterMember=true \
+    #          --set operator.multiClusterMemberIamGroup=mirrord-operator-envoy
+    #      This creates both the ClusterRole and ClusterRoleBinding for the IAM group.
+    #   2. Create EKS Access Entry:
+    #      Via AWS Console:
+    #        EKS → select remote cluster → Access tab → Create access entry
+    #        → IAM principal: select the IAM role from sa.roleArn → Type: Standard
+    #        → Groups: mirrord-operator-envoy → Next → skip access policies → Create
+    #      Via AWS CLI:
+    #        aws eks create-access-entry --cluster-name <EKS_CLUSTER> \
+    #          --principal-arn <sa.roleArn value> \
+    #          --type STANDARD --kubernetes-groups mirrord-operator-envoy
+    #
+    # Example with AKS Workload Identity auth:
+    # clusters:
+    #   remote-aks:
+    #     authType: aks
+    #     server: https://remote-aks-xxxxx.hcp.eastus.azmk8s.io:443
+    #     # caData is required for AKS (each cluster has its own self-signed CA).
+    #     # Get it from: az aks get-credentials --name <cluster> -g <rg> --file /dev/stdout | grep certificate-authority-data
+    #     caData: LS0tLS1CRUdJTi...
+    #     # tenantId and clientId are optional -- defaults to env vars injected by webhook
+    #     # tenantId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    #     # clientId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    #
+    # AKS` Workload Identity setup:
+    #   1. Create a User-Assigned Managed Identity in Azure
+    #   2. Create a Federated Identity Credential linking the operator's SA to the identity:
+    #        az identity federated-credential create \
+    #          --name mirrord-operator-federation \
+    #          --identity-name <managed-identity-name> \
+    #          --resource-group <rg> \
+    #          --issuer $(az AKS show -n <primary-cluster> -g <rg> --query oidcIssuerProfile.issuerUrl -o tsv) \
+    #          --subject "system:serviceaccount:mirrord:mirrord-operator" \
+    #          --audiences "api://AzureADTokenExchange"
+    #   3. Grant the identity access on each remote AKS cluster (Azure RBAC or K8s RBAC)
+    #   4. Set sa.azureClientId to the Managed Identity's client ID
+    #   5. Install mirrord on each remote cluster with:
+    #          --set operator.multiClusterMember=true \
+    #          --set operator.multiClusterMemberAzureGroup=mirrord-operator-envoy
+    #
+    # Example with bearer token:
+    # clusters:
+    #   staging-us-east:
+    #     authType: bearerToken
+    #     server: https://staging-us-east.example.com:6443
+    #     caData: LS0tLS1CRUdJTi...  # base64 encoded CA cert
+    #     isDefault: true
+    #     bearerToken: eyJhbGci...   # initial token (will be auto-refreshed)
+    #
+    # Example with mTLS:
+    # clusters:
+    #   secure-cluster:
+    #     authType: mtls
+    #     server: https://secure.example.com:6443
+    #     caData: LS0tLS1CRUdJTi...  # CA cert
+    #     tlsCrt: LS0tLS1CRUdJ...    # client cert PEM
+    #     tlsKey: LS0tLS1CRUdJ...    # client private key PEM
+    clusters: {}
+
+  # Set to `true` if installing the mirrord-operator on a cluster that is part of a connected
+  # multi-cluster setup, and this one is not the primary.
+  multiClusterMember: false
+
+  # When using IAM auth for multi-cluster, set this to the Kubernetes group name
+  # used in the EKS Access Entry. This creates a ClusterRoleBinding that grants
+  # the IAM group the same permissions as the ServiceAccount-based setup.
+  # Only used when multiClusterMember is true.
+  # multiClusterMemberIamGroup: "mirrord-operator-envoy"
+
+  # When using AKS Workload Identity for multi-cluster, set this to the Azure AD
+  # group or object ID used for the ClusterRoleBinding on each remote AKS cluster.
+  # This creates a ClusterRoleBinding that grants the Azure identity the same
+  # permissions as the ServiceAccount-based setup.
+  # Only used when multiClusterMember is true.
+  # multiClusterMemberAzureGroup: "mirrord-operator-envoy"
+
+  # imagePullSecrets:
+  #   - name: value
+
+  ## stop using container args for agent config, as now you can just use agent.extraConfig
+  ## also imagePullSecrets is re-used from operator.imagePullSecrets
+  # containerArgs:
+  #   - '--agent-config'
+  #   - '{"image_pull_secrets":[{"name":"docker"}]}'
+
+  ## You can use this only if using Enterprise license.
+  disableTelemetries: false
+
+  # Sets log level for the logs printed to `stdout` by the operator container.
+  #
+  # See reference: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives.
+  logLevel: mirrord=info,operator=info,kube_runtime=warn
+
+  ## Sets the verbosity of everything the operator exports over OTel: the logs sent to
+  ## `otelLogExportUrl` and the traces sent to `otelTraceExportUrl`. Defaults to `info`.
+  ## This is independent of the logs printed to `stdout` (controlled by `logLevel`).
+  ##
+  ## See reference: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives.
+  # otelLogLevel: mirrord=info
+
+  ## The URL for OTel logs to be exported to in the cluster. If unset, logs will not be exported.
+  ## This is independent of the logs printed to `stdout` (controlled by `logLevel`).
+  ## This value may reference values in `operator.extraEnv`, as it appears later in the manifest.
+  # otelLogExportUrl: https://loki:3100/loki/app/v1/push
+
+  ## The URL for OTel traces to be exported to in the cluster. If unset, traces will not be exported.
+  ## This value may reference values in `operator.extraEnv`, as it appears later in the manifest.
+  # otelTraceExportUrl: https://tempo:4318/v1/traces
+
+  ## Controls how long (in seconds) a session is allowed to live for.
+  # maxSessionTimeSeconds: 3600
+
+  ## Controls how long (in seconds) a session that a client has already connected to may go
+  ## unused before it is closed. Defaults to 30 seconds.
+  ## Raise this when clients are disconnected by slow or unreliable networks. The cost is that
+  ## agents and patched workloads are held longer after a client really does go away.
+  # sessionUnusedTtlSeconds: 30
+
+  ## Controls how long (in seconds) a session may wait for its first client connection before it
+  ## is closed. Defaults to 180 seconds.
+  ## Raise this when setting up a session takes longer than the default, for example when queue
+  ## splitting waits for slow-rolling target pods, or when multi-cluster sessions are created
+  ## well before a client reaches each cluster.
+  # sessionSetupDeadlineSeconds: 180
+
+  ## Controls how long (in milliseconds) either side of a connected session - the client and the
+  ## agent - may go without sending a message before the session is closed. The two are timed
+  ## separately, so this is the budget per side, not a combined one. Defaults to 60000 (60 seconds).
+  ## Raise this when developers work over slow or unreliable networks, where a laptop sleeping or
+  ## changing network costs them a running session. The cost is that agents and patched workloads
+  ## are held longer after a client really does go away.
+  # communicationTimeoutMillis: 60000
+
+  ## Controls how long (in milliseconds) a session can live when there are no pods ready to be targeted.
+  ## When this value is not set when installing the chart, the default value of 60000 (60 seconds) is used.
+  # noPodTargetsSessionTimeoutMillis: 60000
+
+  ## Default TTL (in milliseconds) for idle Kafka splits.
+  ## For any given topic, starting the first Kafka splitting session requires patching the target workload.
+  ## Similarly, stopping the last Kafka splitting session requires another patch, that reverts the first one.
+  ## If the target workload takes a long time to restart, it may be desirable to keep the Kafka splits alive longer,
+  ## so that the next Kafka splitting session will not have to patch the workload again.
+  ##
+  ## This value can be overridden per topic with the `spec.splitTtl` field in the `MirrordKafkaTopicsConsumer` custom resource.
+  # idleKafkaSplitTtlMillis: 30000
+
+  ##  You can adjust the format of the created kafka topic names to suit your needs. The default value is:
+  ## `mirrord-tmp-{{RANDOM}}{{FALLBACK}}{{ORIGINAL_TOPIC}}`
+  ## see docs here https://metalbear.co/mirrord/docs/using-mirrord/queue-splitting/#customizing-mirrord-created-kafka-topic-names
+  # kafkaSplittingTopicFormat: "mirrord-tmp-{{RANDOM}}{{FALLBACK}}{{ORIGINAL_TOPIC}}"
+
+  kafkaSplittingSidecar:
+    # Enables a sidecar container responsible for Java Kafka clients.
+    # This enables Kafka splitting with Kafka Streams consumers.
+    enabled: false
+    image: ghcr.io/metalbear-co/operator-kafka-proxy
+    # Port for the sidecar to listen on.
+    # The operator communicates with the sidecar through a REST API served on localhost.
+    port: 33000
+    # CPU and memory requests for the sidecar.
+    # Set any of these, or the whole `requests` block, to `null` to leave it out of the pod spec.
+    requests:
+      cpu: 100m
+      memory: 100Mi
+    # CPU and memory limits for the sidecar.
+    # Set any of these, or the whole `limits` block, to `null` to leave it out of the pod spec.
+    limits:
+      cpu: 200m
+      memory: 200Mi
+
+  # Linger timeout for legacy SQS splits (in milliseconds).
+  # Applies only to old MirrordWorkloadQueueRegistry objects: once their last SQS
+  # session ends, the split lingers, keeping the target patched to read from the
+  # temporary queue until that queue is empty. This caps how long it lingers.
+  # With MirrordSplitConfig, set spec.drainTimeout on the config instead.
+  sqsSplittingLingerTimeout: 60000
+
+  ## Control whether the operator waits for patched pods to become ready when starting Kafka/SQS splitting sessions.
+  ## This option defaults to true (maintaining existing behavior) but can be set to false to speed up
+  ## session start time in environments where pod readiness waiting is not necessary or causes delays due to cluster conditions.
+  queueSplittingWaitForReadyTarget: true
+
+  ## CPU and memory requests and limits for the operator container.
+  ## These defaults should be enough for around 200~ concurrent sessions.
+  ##
+  ## Every quantity is optional. Set one to `null` (`operator.limits.cpu: null`), or a whole block to
+  ## `null` (`operator.limits: null`), and it is left out of the pod spec entirely - for clusters
+  ## that set container resources themselves through a LimitRange or a VPA, or that run the operator
+  ## without a CPU limit so it is never throttled.
+  requests:
+    cpu: 100m
+    memory: 100Mi
+
+  limits:
+    cpu: 500m
+    memory: 200Mi
+
+  ## Allow to specify tolerations for operator deployment
+  # tolerations:
+  #   - key: "key1"
+  #     operator: "Equal"
+  #     value: "value1"
+  #     effect: "NoSchedule"
+
+  # affinity:
+  #   podAntiAffinity:
+  #     requiredDuringSchedulingIgnoredDuringExecution:
+  #       - topologyKey: kubernetes.io/hostname
+  #         labelSelector:
+  #           matchLabels:
+  #             k8s-app: mirrord
+
+  # nodeSelector:
+  #   kubernetes.io/os: linux
+
+  # Port for operator to listen on. If you can't listen on 443 due to privilege issues
+  # you can change this to 3000/8443 or whatever you want - just make sure that nodes
+  # can communicate on that port if it doesn't work then.
+  # The operator binds the kube API on IPv6 (`[::]`) by default, with an IPv4
+  # (`0.0.0.0`) fallback on the same port — set `OPERATOR_ADDR` /
+  # `OPERATOR_FALLBACK_ADDR` directly if you need to override either side.
+  port: 443
+
+  copyTarget:
+    # by default, the operator will create a dummy container using the agent image
+    # as it is guaranteed to have a sleep binary. If you want the operator
+    # to use the target's image, set this value to false and make sure it has sleep binary
+    useAgentImage: true
+
+  ## The URL of the Jira webhook to enable integration with the mirrord for Jira app.
+  ## If this is set, the operator will attempt to send session duration metrics to the Jira app
+  ## every time a user session ends.
+  # jiraWebhookUrl: "https://example.atlassian-dev.net/x1/random-hash"
+
+  # mysqlBranchConfig:
+  ## example
+  ##
+  ## dbPod:
+  ##   image:
+  ##     registry: "custom-mysql-registry"
+  ##   migrationImages:
+  ##     # Registry per schema-migration tool, used by the matching `migrations.flavor`.
+  ##     # When unset, each defaults to its upstream image; when set, the registry is used
+  ##     # with that tool's pinned tag. The per-branch `migrations` config in mirrord.json
+  ##     # can override the full image.
+  ##     flyway:
+  ##       # Defaults to `flyway/flyway:12`; a registry here is used with the tag `12`.
+  ##       registry: "custom-flyway-registry"
+  ##     liquibase:
+  ##       # Defaults to `liquibase/liquibase:4.33`; a registry here is used with the tag `4.33`.
+  ##       registry: "custom-liquibase-registry"
+  ##   imagePullSecrets:
+  ##     - name: "mysql-registry-secret"
+  ##   imagePullPolicy: "IfNotPresent"
+  ##   labels: { "role": "database" }
+  ##   annotations: { "db.branch/owner-team": "platform" }
+  ##   # An explicit volume overrides the default per-branch PVC backing; see `storage`
+  ##   # under pgBranchConfig (available on every `<db>BranchConfig`).
+  ##   volume:
+  ##     name: "mysql-data"
+  ##     emptyDir:
+  ##       sizeLimit: "1Gi"
+  ##   resources:
+  ##     requests:
+  ##       cpu: "500m"
+  ##       memory: "512Mi"
+  ##     limits:
+  ##       cpu: "1"
+  ##       memory: "1Gi"
+  ##   # Extra flags for the branch's mysqld, passed as the container's args. The official
+  ##   # image's entrypoint hands them to the server, so an image that replaces that entrypoint
+  ##   # may not pick them up. Keep the listener on 3306 - the seeding init container, schema
+  ##   # migrations, and the operator all connect there.
+  ##   dbServerArgs:
+  ##     - "--default-authentication-plugin=mysql_native_password"
+
+  # mariadbBranchConfig:
+  ## example
+  ##
+  ## dbPod:
+  ##   image:
+  ##     # Registry for the MariaDB branch container.
+  ##     # Defaults to `docker.io/library/mariadb` with tag `12`.
+  ##     registry: "custom-mariadb-registry"
+  ##   migrationImages:
+  ##     # Registry per schema-migration tool, used by the matching `migrations.flavor`.
+  ##     # When unset, each defaults to its upstream image; when set, the registry is used
+  ##     # with that tool's pinned tag. The per-branch `migrations` config in mirrord.json
+  ##     # can override the full image.
+  ##     flyway:
+  ##       # Defaults to `flyway/flyway:12`; a registry here is used with the tag `12`.
+  ##       registry: "custom-flyway-registry"
+  ##     liquibase:
+  ##       # Defaults to `liquibase/liquibase:4.33`; a registry here is used with the tag `4.33`.
+  ##       registry: "custom-liquibase-registry"
+  ##   imagePullSecrets:
+  ##     - name: "mariadb-registry-secret"
+  ##   imagePullPolicy: "IfNotPresent"
+  ##   labels: { "role": "database" }
+  ##   annotations: { "db.branch/owner-team": "platform" }
+  ##   # An explicit volume overrides the default per-branch PVC backing; see `storage`
+  ##   # under pgBranchConfig (available on every `<db>BranchConfig`).
+  ##   volume:
+  ##     name: "mariadb-data"
+  ##     emptyDir:
+  ##       sizeLimit: "1Gi"
+  ##   resources:
+  ##     requests:
+  ##       cpu: "500m"
+  ##       memory: "512Mi"
+  ##     limits:
+  ##       cpu: "1"
+  ##       memory: "1Gi"
+  ##   # Extra flags for the branch's mariadbd, passed as the container's args. The official
+  ##   # image's entrypoint hands them to the server, so an image that replaces that entrypoint
+  ##   # may not pick them up. Keep the listener on 3306 - the seeding init container, schema
+  ##   # migrations, and the operator all connect there.
+  ##   dbServerArgs:
+  ##     - "--character-set-server=utf8mb4"
+  ##     - "--collation-server=utf8mb4_unicode_ci"
+
+  # pgBranchConfig:
+  ## example
+  ##
+  ## dbPod:
+  ##   image:
+  ##     # Registry for the PostgreSQL branch container.
+  ##     # Defaults to `docker.io/library/postgres`.
+  ##     # Tag can be specified by the user when requesting a new branch, defaulting to `17`.
+  ##     registry: "custom-postgres-registry"
+  ##   initImage:
+  ##     # Registry for the PostgreSQL branch initContainer image.
+  ##     # Defaults to `docker.io/library/postgres`.
+  ##     # Tag can be specified by the user when requesting a new branch, defaulting to `17`.
+  ##     registry: "custom-postgres-registry"
+  ##   migrationImages:
+  ##     # Registry per schema-migration tool, used by the matching `migrations.flavor`.
+  ##     # When unset, each defaults to its upstream image; when set, the registry is used
+  ##     # with that tool's pinned tag. The per-branch `migrations` config in mirrord.json
+  ##     # can override the full image.
+  ##     flyway:
+  ##       # Defaults to `flyway/flyway:12`; a registry here is used with the tag `12`.
+  ##       registry: "custom-flyway-registry"
+  ##     liquibase:
+  ##       # Defaults to `liquibase/liquibase:4.33`; a registry here is used with the tag `4.33`.
+  ##       registry: "custom-liquibase-registry"
+  ##   # Environment for container-flavor migration Jobs. `inherit` (default true) hands the
+  ##   # Job the target container's env and envFrom, so an app image boots the same way its
+  ##   # real pods do; `env`/`envFrom` are admin extras in plain Kubernetes shapes, so
+  ##   # `valueFrom`/`secretRef` keep secret values in-cluster. Admin entries override
+  ##   # inherited ones by name, but never the operator's redirect of the declared connection
+  ##   # vars to the branch; the per-branch `migrations.env` in mirrord.json overrides
+  ##   # everything. Available on every `<db>BranchConfig`.
+  ##   migrationEnv:
+  ##     inherit: true
+  ##     env:
+  ##       - name: RAILS_ENV
+  ##         value: development
+  ##     envFrom:
+  ##       - configMapRef:
+  ##           name: shared-migration-config
+  ##   # Glob patterns of images users may run as branch pods via the per-branch `image`
+  ##   # field in mirrord.json (which overrides the registry configured above). When this
+  ##   # list is absent, all images are allowed. Available on every `<db>BranchConfig`.
+  ##   allowedImages:
+  ##     - "registry.example.com/postgresql:*"
+  ##     - "docker.io/library/postgres:*"
+  ##   # Image pull secrets for the PostgreSQL branch pod.
+  ##   # The pod will use following images:
+  ##   # * .pgBranchConfig.dbPod.image
+  ##   # * .pgBranchConfig.dbPod.initImage
+  ##   # * .pgBranchConfig.dbPod.migrationImages.flyway
+  ##   # * .pgBranchConfig.dbPod.migrationImages.liquibase
+  ##   # * .operator.image
+  ##   imagePullSecrets:
+  ##     - name: "postgres-registry-secret"
+  ##   # Image pull policy for all .pgBranchConfig.dbPod images (db, init, and migration).
+  ##   imagePullPolicy: "IfNotPresent"
+  ##   labels: { "role": "database" }
+  ##   annotations: { "db.branch/owner-team": "platform" }
+  ##   # How the branch pod's data and init (dump) volumes are backed. By default each
+  ##   # branch gets its own PersistentVolumeClaims on the cluster's default StorageClass,
+  ##   # deleted together with the branch; on clusters without a default StorageClass,
+  ##   # branches fall back to node-local emptyDir. Available on every `<db>BranchConfig`.
+  ##   storage:
+  ##     # `pvc` (default) or `emptyDir` (node-local scratch space, capped by
+  ##     # `operator.dbBranching.*PodVolumeLimit`).
+  ##     kind: "pvc"
+  ##     # StorageClass for the branch PVCs. Unset means the cluster's default.
+  ##     storageClassName: "fast-ssd"
+  ##     # Requested per-branch PVC sizes. Default to `operator.dbBranching.databasePvcSize`
+  ##     # / `initPvcSize` (20Gi each). The dump staged on the init volume is roughly the
+  ##     # size of the copied data.
+  ##     dataSize: "50Gi"
+  ##     initSize: "50Gi"
+  ##     # PVC access modes, defaulting to ReadWriteOnce.
+  ##     accessModes: ["ReadWriteOnce"]
+  ##   # An explicit volume overrides `storage` entirely and is used as given.
+  ##   volume:
+  ##     name: "pg-data"
+  ##     emptyDir:
+  ##       sizeLimit: "1Gi"
+  ##   resources:
+  ##     requests:
+  ##       cpu: "500m"
+  ##       memory: "512Mi"
+  ##     limits:
+  ##       cpu: "1"
+  ##       memory: "1Gi"
+  ##   # How branch pods recreate the source database's roles.
+  ##   # `empty` (default): NOLOGIN shell roles, just enough for the schema restore.
+  ##   # `full`: real role attributes (LOGIN, ...) and role memberships, and the data copy
+  ##   # keeps table ownership and grants, so the branch enforces the same permissions as
+  ##   # the source. The user declared in the branch's connection config keeps its real
+  ##   # password on the branch (as a salted hash); PostgreSQL never exposes other roles'
+  ##   # passwords, so those restore without one.
+  ##   roles: "empty"
+  ##   # Client authentication on branches whose source uses IAM auth.
+  ##   # `trust` (default): the branch accepts any credentials - IAM apps present
+  ##   # cloud-minted tokens a plain postgres branch cannot verify, and trust is what
+  ##   # lets them connect unchanged.
+  ##   # `password`: regular password auth; IAM apps must then read the branch
+  ##   # password from an env var mirrord injects (the `password` connection param).
+  ##   # Branches without `iam_auth` always use password auth.
+  ##   iamBranchAuth: "trust"
+  ##   # Extra flags for the branch's postgres server, passed as the container's args. The
+  ##   # official image's entrypoint hands them to the server, so an image that replaces that
+  ##   # entrypoint may not pick them up. Any file a flag points at (TLS certs below) must
+  ##   # exist in the image, and the entrypoint's temporary server that restores the copied
+  ##   # data runs with the same flags. Keep the listener on 5432 - the seeding init
+  ##   # container, schema migrations, and the operator all connect there.
+  ##   dbServerArgs:
+  ##     - "-c"
+  ##     - "ssl=on"
+  ##     - "-c"
+  ##     - "ssl_cert_file=/etc/ssl/certs/server.pem"
+  ##     - "-c"
+  ##     - "ssl_key_file=/etc/ssl/private/server.key"
+  ##
+  ## Named profiles: alternative complete baselines next to the default `dbPod` above,
+  ## selected per branch with `"profile": "<name>"` in mirrord.json. A profile accepts
+  ## the same fields as `dbPod` (registries, migrationImages, allowedImages, pull
+  ## secrets, resources, ...) and is not an overlay - fields left unset get the built-in
+  ## defaults, not the values from the default `dbPod`. Available on every
+  ## `<db>BranchConfig`.
+  ##
+  ## `allowedImages` is the one field a profile inherits when it does not set its own
+  ## list, because an unset list means "any image is allowed" and a profile added for an
+  ## unrelated reason should not quietly widen your image policy. Set
+  ## `allowedImages: ["*"]` in a profile to allow anything on purpose, or `[]` to allow
+  ## no user-supplied images at all.
+  ##
+  ## profiles:
+  ##   team-analytics:
+  ##     dbPod:
+  ##       image:
+  ##         registry: "pgvector/pgvector"
+  ##       initImage:
+  ##         registry: "pgvector/pgvector"
+  ##       migrationImages:
+  ##         flyway:
+  ##           registry: "custom-flyway-registry"
+  ##         liquibase:
+  ##           registry: "custom-liquibase-registry"
+  ##       allowedImages: ["pgvector/*"]
+  ##       imagePullSecrets:
+  ##         - name: "analytics-registry-secret"
+
+  # mongodbBranchConfig:
+  ## example
+  ##
+  ## dbPod:
+  ##   image:
+  ##     registry: "docker.io/library/mongo"
+  ##   imagePullSecrets:
+  ##     - name: "mongo-registry-secret"
+  ##   imagePullPolicy: "IfNotPresent"
+  ##   labels: { "role": "database" }
+  ##   annotations: { "db.branch/owner-team": "platform" }
+  ##   # An explicit volume overrides the default per-branch PVC backing; see `storage`
+  ##   # under pgBranchConfig (available on every `<db>BranchConfig`).
+  ##   volume:
+  ##     name: "mongo-data"
+  ##     emptyDir:
+  ##       sizeLimit: "1Gi"
+  ##   resources:
+  ##     requests:
+  ##       cpu: "500m"
+  ##       memory: "512Mi"
+  ##     limits:
+  ##       cpu: "1"
+  ##       memory: "1Gi"
+
+  # redisBranchConfig:
+  ## example
+  ##
+  ## dbPod:
+  ##   image:
+  ##     registry: "docker.io/library/redis"
+  ##   imagePullSecrets:
+  ##     - name: "redis-registry-secret"
+  ##   imagePullPolicy: "IfNotPresent"
+  ##   labels: { "role": "database" }
+  ##   annotations: { "db.branch/owner-team": "platform" }
+  ##   # An explicit volume overrides the default per-branch PVC backing; see `storage`
+  ##   # under pgBranchConfig (available on every `<db>BranchConfig`).
+  ##   volume:
+  ##     name: "redis-data"
+  ##     emptyDir:
+  ##       sizeLimit: "1Gi"
+  ##   resources:
+  ##     requests:
+  ##       cpu: "500m"
+  ##       memory: "512Mi"
+  ##     limits:
+  ##       cpu: "1"
+  ##       memory: "1Gi"
+  ##
+  ## For a custom image with TLS baked in, keep the TLS listener on 6379 and
+  ## disable the plaintext one; `tls: true` makes the operator (seeding and the
+  ## connection URL handed to the app) use rediss://.
+  ##
+  ##   dbServerArgs:
+  ##     - "--tls-port"
+  ##     - "6379"
+  ##     - "--port"
+  ##     - "0"
+  ##     - "--tls-cert-file"
+  ##     - "/certs/tls.crt"
+  ##     - "--tls-key-file"
+  ##     - "/certs/tls.key"
+  ##     - "--tls-auth-clients"
+  ##     - "no"
+  ##   tls: true
+  ##
+  ## Named profiles let one cluster hold several complete pod baselines at once
+  ## (e.g. a TLS setup and a plain one). Users select one per branch with
+  ## `"profile": "<name>"` in their mirrord config; without it, the top-level
+  ## dbPod applies. A profile is a complete dbPod (same fields as above), not an
+  ## overlay - fields left unset get the built-in defaults, never the top-level
+  ## values. The exception is `allowedImages`, which a profile inherits unless it
+  ## sets its own list, so adding a profile never quietly widens your image policy;
+  ## use `allowedImages: ["*"]` to allow anything on purpose, or `[]` to allow no
+  ## user-supplied images. Every <db>BranchConfig supports `profiles`, not just Redis.
+  ##
+  ## profiles:
+  ##   tls-baseline:
+  ##     dbPod:
+  ##       allowedImages:
+  ##         - "registry.example.com/team/redis-tls:*"
+  ##       dbServerArgs:
+  ##         - "--tls-port"
+  ##         - "6379"
+  ##         - "--port"
+  ##         - "0"
+  ##         - "--tls-cert-file"
+  ##         - "/certs/tls.crt"
+  ##         - "--tls-key-file"
+  ##         - "/certs/tls.key"
+  ##       tls: true
+  ##
+  ## Profile settings live under the profile's `dbPod` key. A key placed beside
+  ## `dbPod` (e.g. `profiles.tls-baseline.tls`) is not a valid setting, and a
+  ## branch selecting that profile fails with an error naming the misplaced key.
+  ##
+  ## For `copy.mode: all` against a source Redis that only accepts TLS, provide
+  ## the certificates via a `MirrordPropertyList` named `redis-source-tls` in the
+  ## target's namespace - not via chart values - with the same properties as
+  ## `cockroachdb-source-tls` under cockroachdbBranchConfig below. The object
+  ## name can be overridden with `dbPod.sourceTlsPropertyList: "my-name"`.
+  ##
+  ## `dbPod.sourceSslmode` sets how strictly the copy verifies the source's certificate:
+  ## `verify-full` (chain and hostname, the default) or `verify-ca` (chain only). Use
+  ## `verify-ca` when the source certificate has no subjectAltName covering the host the
+  ## branch dials, where `verify-full` can never pass and `#insecure` in the URL would skip
+  ## the chain check too. It only applies to TLS connections (the property list or a
+  ## `rediss://` URL decide that) and `#insecure` still wins over it:
+  ##
+  ##   dbPod:
+  ##     sourceSslmode: "verify-ca"
+
+  # spannerBranchConfig:
+  ## example
+  ##
+  ## dbPod:
+  ##   image:
+  ##     registry: "gcr.io/cloud-spanner-emulator/emulator"
+  ##   imagePullSecrets:
+  ##     - name: "spanner-registry-secret"
+  ##   imagePullPolicy: "IfNotPresent"
+  ##   labels: { "role": "database" }
+  ##   annotations: { "db.branch/owner-team": "platform" }
+  ##   # An explicit volume overrides the default per-branch PVC backing; see `storage`
+  ##   # under pgBranchConfig (available on every `<db>BranchConfig`).
+  ##   volume:
+  ##     name: "spanner-data"
+  ##     emptyDir:
+  ##       sizeLimit: "1Gi"
+  ##   resources:
+  ##     requests:
+  ##       cpu: "500m"
+  ##       memory: "512Mi"
+  ##     limits:
+  ##       cpu: "1"
+  ##       memory: "1Gi"
+
+  # clickhouseBranchConfig:
+  ## example
+  ##
+  ## dbPod:
+  ##   image:
+  ##     # Registry for the ClickHouse branch container.
+  ##     # Defaults to `docker.io/clickhouse/clickhouse-server`.
+  ##     # Tag can be specified by the user when requesting a new branch, defaulting to `24.8`.
+  ##     registry: "custom-clickhouse-registry"
+  ##   initImage:
+  ##     # Registry for the ClickHouse branch initContainer image.
+  ##     # Defaults to `docker.io/clickhouse/clickhouse-server`.
+  ##     registry: "custom-clickhouse-registry"
+  ##   imagePullSecrets:
+  ##     - name: "clickhouse-registry-secret"
+  ##   imagePullPolicy: "IfNotPresent"
+  ##   labels: { "role": "database" }
+  ##   annotations: { "db.branch/owner-team": "platform" }
+  ##   # An explicit volume overrides the default per-branch PVC backing; see `storage`
+  ##   # under pgBranchConfig (available on every `<db>BranchConfig`).
+  ##   volume:
+  ##     name: "clickhouse-data"
+  ##     emptyDir:
+  ##       sizeLimit: "1Gi"
+  ##   resources:
+  ##     requests:
+  ##       cpu: "500m"
+  ##       memory: "512Mi"
+  ##     limits:
+  ##       cpu: "1"
+  ##       memory: "1Gi"
+
+  # cockroachdbBranchConfig:
+  ## example
+  ##
+  ## dbPod:
+  ##   image:
+  ##     # Registry for the CockroachDB branch container.
+  ##     # Defaults to `docker.io/cockroachdb/cockroach`.
+  ##     # Tag can be specified by the user when requesting a new branch, defaulting to `latest-v26.2`.
+  ##     registry: "custom-cockroachdb-registry"
+  ##   initImage:
+  ##     # Registry for the CockroachDB branch initContainer image.
+  ##     # Defaults to `docker.io/cockroachdb/cockroach`.
+  ##     registry: "custom-cockroachdb-registry"
+  ##   imagePullSecrets:
+  ##     - name: "cockroachdb-registry-secret"
+  ##   imagePullPolicy: "IfNotPresent"
+  ##   labels: { "role": "database" }
+  ##   annotations: { "db.branch/owner-team": "platform" }
+  ##   # An explicit volume overrides the default per-branch PVC backing; see `storage`
+  ##   # under pgBranchConfig (available on every `<db>BranchConfig`).
+  ##   volume:
+  ##     name: "cockroachdb-data"
+  ##     emptyDir:
+  ##       sizeLimit: "1Gi"
+  ##   resources:
+  ##     requests:
+  ##       cpu: "500m"
+  ##       memory: "512Mi"
+  ##     limits:
+  ##       cpu: "1"
+  ##       memory: "1Gi"
+  ##
+  ## Sources behind certificate verification (sslmode=verify-ca/verify-full against a
+  ## private CA) or mTLS are supported via a `MirrordPropertyList` named
+  ## `cockroachdb-source-tls` in the target's namespace - not via chart values - so each
+  ## namespace can point at its own cert Secret. The object name can be overridden with
+  ## `dbPod.sourceTlsPropertyList: "my-name"`. tlsClientCert/tlsClientKey must be set
+  ## together and are omitted when the source only needs a trusted CA (tlsCaCert):
+  ##
+  ##   apiVersion: mirrord.metalbear.co/v1
+  ##   kind: MirrordPropertyList
+  ##   metadata:
+  ##     name: cockroachdb-source-tls
+  ##     namespace: my-app-namespace
+  ##   spec:
+  ##     properties:
+  ##       - name: tlsCaCert
+  ##         valueFrom:
+  ##           secretKeyRef: { name: my-db-certs, key: ca.crt }
+  ##       - name: tlsClientCert
+  ##         valueFrom:
+  ##           secretKeyRef: { name: my-db-certs, key: client.myservice.crt }
+  ##       - name: tlsClientKey
+  ##         valueFrom:
+  ##           secretKeyRef: { name: my-db-certs, key: client.myservice.key }
+  ##
+  ## `dbPod.sourceSslmode` sets a cluster-wide default sslmode for the copy connection to
+  ## the source. An explicit sslmode in a session's connection URL or params still wins.
+  ## Without it the default is verify-full when the property list provides certs, disable
+  ## otherwise. Note verify-ca/verify-full still need the property list - without a CA the
+  ## copy fails rather than silently downgrading:
+  ##
+  ##   dbPod:
+  ##     sourceSslmode: "verify-full"
+  ##
+  ## `dbPod.sourceConfigMap` sets the ConfigMap that `configmap` connection param sources
+  ## read when a session's param names none itself: a `configMap` volume of the target
+  ## pod (`volume`) or a ConfigMap name (`name`), plus an optional data `key`. Developers
+  ## then write only the selector per param. Works on the default `dbPod` and on profiles:
+  ##
+  ##   profiles:
+  ##     app-config:
+  ##       dbPod:
+  ##         sourceConfigMap:
+  ##           volume: app-config
+  ##           key: config.yml
+
+  # genericBranchConfig:
+  ## example
+  ##
+  ## Generic branches always run a user-supplied image (see the `genericBranching` flag
+  ## note above), so `allowedImages` is the main lever here. `image`/`initImage`
+  ## registries, `dbServerArgs`, `tls`, and default volumes are not consulted for generic
+  ## branches - the user's image, command, and args are used as given.
+  ##
+  ## dbPod:
+  ##   allowedImages:
+  ##     - "valkey/*"
+  ##     - "influxdb:*"
+  ##   imagePullSecrets:
+  ##     - name: "generic-registry-secret"
+  ##   imagePullPolicy: "IfNotPresent"
+  ##   labels: { "role": "database" }
+  ##   annotations: { "db.branch/owner-team": "platform" }
+  ##   resources:
+  ##     requests:
+  ##       cpu: "250m"
+  ##       memory: "256Mi"
+  ##     limits:
+  ##       cpu: "1"
+  ##       memory: "1Gi"
+  ##
+  ## Named profiles work here like for every other database type: keep the default
+  ## locked with `allowedImages: []` and grant each team its own images, pull secrets,
+  ## and resource budget. Users select one per branch with `"profile": "<name>"`.
+  ## A profile that does not set `allowedImages` inherits the default's, so with a
+  ## locked default a profile only ever runs the images it lists itself.
+  ##
+  ## A profile can additionally carry the whole engine setup, so a user's mirrord.json
+  ## shrinks to type/id/profile/connection:
+  ##
+  ## - `dbPod.branch` supplies branch-container defaults (image, port, command, args,
+  ##   env, readiness). A value set in the user's mirrord.json wins per field.
+  ## - `dbPod.copy` supplies a one-shot copy Job: an image you author that copies
+  ##   schema/data from the source into the branch before it turns Ready. The Job's env
+  ##   carries the same `MIRRORD_PARAM_*` vars as the branch container (the source
+  ##   connection) plus `MIRRORD_BRANCH_HOST`/`MIRRORD_BRANCH_PORT` (where to write).
+  ##   A `copy` in the user's mirrord.json wins over the profile's, and the copy runs at
+  ##   most once per branch. The copy image also goes through `allowedImages`. If your
+  ##   cluster uses NetworkPolicies, the Job (in the target's namespace) must be able to
+  ##   reach both the source database and the branch pod's IP.
+  ##
+  ## Both fields are engine-specific, so they are only honored inside a named profile -
+  ## a generic branch that uses no profile fails when the default-level `dbPod` sets
+  ## them (users wanting an empty branch would have no opt-out otherwise).
+  ##
+  ## profiles:
+  ##   team-search:
+  ##     dbPod:
+  ##       allowedImages:
+  ##         - "registry.example.com/search/*"
+  ##       imagePullSecrets:
+  ##         - name: "search-registry-secret"
+  ##       resources:
+  ##         limits:
+  ##           memory: "2Gi"
+  ##   opensearch-full:
+  ##     dbPod:
+  ##       allowedImages:
+  ##         - "opensearchproject/*"
+  ##         - "registry.example.com/dbtools/*"
+  ##       branch:
+  ##         image: "opensearchproject/opensearch:2.19.1"
+  ##         port: 9200
+  ##         env: { "discovery.type": "single-node" }
+  ##       copy:
+  ##         image: "registry.example.com/dbtools/opensearch-copy:1.0"
+  ##         command: ["./copy.sh"]
+  ##         args: ["--mode=all"]
+
+agent:
+  ## example
+  ##
+  ## image:
+  ##   registry: "your-internal.registry.io/metalbear-co/agent"
+  ##   tag: "latest"
+  ##
+  ## or
+  ##
+  ## image: "your-internal.registry.io/metalbear-co/agent:latest"
+  ##
+  # image:
+  # registry: "ghcr.io/metalbear-co/mirrord"
+  # tag: "latest"
+
+  # If you want the operator to secure agent connections with TLS, set this value to true.
+  # This option requires agent version at least 3.97.0.
+  tls: false
+
+  # Configure whether the agent should inject headers by default.
+  # If `agent.extraConfig.inject_headers` is set, it takes precedence.
+  # Agent headers mark whether request went thru the agent or not,
+  # and if they were stolen or handled by original pod
+  injectHeaders: true
+
+  # If you want the agents to accept operator connections on some predefined port,
+  # you can set it here. If you don't set anything, each agent will be assigned with a random high port.
+  # port: 9999
+
+  ## CPU and memory requests and limits for agent pods (not applied to ephemeral agents).
+  ## These defaults match the agent's own built-in defaults; when this block is set it replaces
+  ## them entirely. If `agent.extraConfig.resources` is set, it takes precedence over this block.
+  ##
+  ## Every quantity is optional. Set one to `null` (`agent.resources.limits.cpu: null`), or a whole
+  ## block to `null` (`agent.resources.limits: null`), and it is left out of the agent pod spec
+  ## entirely - for example to run agents without a CPU limit so they are never throttled.
+  # resources:
+  #   requests:
+  #     cpu: 1m
+  #     memory: 1Mi
+  #   limits:
+  #     cpu: 300m
+  #     memory: 100Mi
+
+  # Define additional environment variables for agent pods.
+  extraEnv: {}
+
+  priorityClass:
+    # Whether to create a PriorityClass for agent pods.
+    create: true
+    # PriorityClass name to create/use for agent pods.
+    # When empty and create=true, defaults to "mirrord-agent-pod".
+    # When empty and create=false, no priority class is set on the agent.
+    name: mirrord-agent-pod
+    # Integer priority value assigned to the class.
+    value: 1000000000
+    # Whether this class should be the cluster default.
+    globalDefault: false
+    # Pod preemption policy for this class.
+    preemptionPolicy: PreemptLowerPriority
+    # Description shown on the class object.
+    description: "Priority class for mirrord agent pods."
+
+  ## use this if you want to add settings that aren't covered by the values.yaml
+  ## see possible settings here: https://mirrord.dev/docs/reference/configuration/#root-agent
+  extraConfig:
+  #  json_log: false
+  #  labels: { "user": "meow" }
+  #  annotations: { "cats.io/inject": "enabled" }
+  #  tolerations:
+  #    - operator: Exists
+  #  privileged: true
+
+license:
+  ## ID of a Google Secret Manager secret containing the license PEM file.
+  ##
+  ## If provided, the operator will fetch the license file from this secret.
+  ##
+  ## To access the secret, the operator will use Application Default Credentials.
+  ## The easiest way to provide credentials is by allowing the operator's
+  ## Kubernetes ServiceAccount to impersonate a GCP service account.
+  ## This can be done with `.sa.gcpSa` setting.
+  # pemGsmRef: "projects/PROJECT_ID/secrets/SECRET_NAME/versions/SECRET_VERSION"
+
+  ## ID of a Google Secret Manager secret containing the license key.
+  ##
+  ## If provided, the operator will fetch the license key from this secret.
+  ##
+  ## Uses the same authentication behavior described for `pemGsmRef` above.
+  # keyGsmRef: "projects/PROJECT_ID/secrets/SECRET_NAME/versions/SECRET_VERSION"
+
+  key: ""
+
+  file:
+    secret: mirrord-operator-license
+    # data:
+    #   license.pem:
+  keyRef: ""
+  pemRef: ""
+
+  # For air-gapped systems there is an option to use a license-server for enterprise licenses.
+  # This must be an accessible endpoint from where the operator is installed
+  # (can be in cluster or not and via any ingress or node-port as long as communication is possible via http/https)
+  #
+  # licenseServer: http://mirrord-operator-license-server.mirrord.svc
+
+  # For enterprise licenses the operator can allow usage for more than the max amount of seats.
+  #
+  # Set this value to `false` to disable this allowance to go over the max seats count.
+  allowSeatOverages: true
+
+# Cloud API key — the default credential the operator uses to authenticate to the mirrord cloud
+# (RFC 0008). The operator exchanges it (via app.metalbear.com) for a short-lived token and uses
+# that token to obtain its license and make its other cloud calls over the API. It is intended to
+# replace the standalone license key as the primary credential; existing installs that set only
+# `license.*` keep working via license-key authentication.
+#
+# Not used when `license.licenseServer` is set: such an operator authenticates only against that
+# license server, never against the cloud, so the key is ignored and a license source is required.
+#
+# Provide the key through exactly one of the following:
+cloud:
+  apiKey:
+    ## Direct value (simplest for dev/test; the value lands as plaintext in the pod spec).
+    key: ""
+    ## Reference to an existing Kubernetes secret holding the key under the `apiKey` data key.
+    keyRef: ""
+    ## ID of a secret in Google Secret Manager (used by us and by customers on GCP). Accessed
+    ## via Application Default Credentials, like `license.gsmRef` (see `.sa.gcpSa`).
+    # gsmRef: "projects/PROJECT_ID/secrets/SECRET_NAME/versions/SECRET_VERSION"
+    gsmRef: ""
+
+  ## When true, the operator keeps sending only anonymized telemetry to the mirrord cloud even
+  ## when its cloud API key carries identity consent.
+  anonymizeData: false
+
+service:
+  name: mirrord-operator
+
+sa:
+  ## Whether the chart should create the operator ServiceAccount.
+  ## Set to `false` to use an existing ServiceAccount named by `sa.name`.
+  create: true
+
+  ## Name of the ServiceAccount used by the operator Deployment and RBAC bindings.
+  name: mirrord-operator
+
+  ## AWS role ARN to use for IAM role assumption.
+  # roleArn: arn:aws:iam::111122223333:role/mirrord-operator-role
+  ## GCP service account to impersonate.
+  # gcpSa: <iam-sa-name>@<iam-sa-project-id>.iam.gserviceaccount.com
+  ## Azure Managed Identity client ID for AKS Workload Identity.
+  ## When set, the operator pod gets the azure.workload.identity/use label.
+  ## If `sa.create` is true, the ServiceAccount also gets the
+  ## azure.workload.identity/client-id annotation. The Workload Identity webhook
+  ## then injects Azure credentials (AZURE_CLIENT_ID, AZURE_TENANT_ID,
+  ## AZURE_FEDERATED_TOKEN_FILE) into the operator pod automatically.
+  # azureClientId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+tls:
+  secret: mirrord-operator-tls
+
+  # Set to `true` to mount the secret named by `tls.secret` without the chart
+  # creating it. Use this when the TLS secret is provisioned out-of-band (e.g. by
+  # an ExternalSecret or another controller). When `true`, `tls.data` and
+  # `tls.certManager` are ignored.
+  useExistingSecret: false
+
+  # if you're using a verified certificate, set this value to false.
+  apiService:
+    insecureSkipTLSVerify: true
+
+  # if certmanager is disabled and no tls.key and tls.crt is set,
+  # the operator will generate a self-signed certificate.
+  certManager:
+    enabled: false
+    createIssuer: true
+
+    issuer: mirrord-operator-issuer
+    certificate: mirrord-operator-tls
+
+  data:
+    tls.key: ""
+    tls.crt: ""
+
+# if you run on OpenShift, set this value to true to get a SCC in the yaml.
+openshift: false

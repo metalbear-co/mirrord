@@ -777,6 +777,13 @@
         "name"
       ]
     },
+    "AllSplitConfigDbBranches": {
+      "description": "<!--${internal}-->\nThe literal `\"*\"`.",
+      "type": "string",
+      "enum": [
+        "*"
+      ]
+    },
     "AppleVariablesConfig": {
       "type": "object",
       "additionalProperties": false
@@ -2653,11 +2660,20 @@
       ]
     },
     "DatabaseBranchesConfig": {
-      "description": "A list of configurations for database branches.\n\nUsing a connection URL:\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\n      {\n        \"type\": \"mysql\",\n        \"connection\": {\n          \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" }\n        }\n      }\n    ]\n  }\n}\n```\n\nUsing individual connection params:\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\n      {\n        \"type\": \"mysql\",\n        \"connection\": {\n          \"type\": \"env\",\n          \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"database\": \"DB_NAME\" }\n        }\n      }\n    ]\n  }\n}\n```",
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/DatabaseBranchConfig"
-      }
+      "description": "The branch databases a session runs with. Either defined here, or taken from the\n`dbBranches` entries a cluster admin put on the target's `MirrordSplitConfig`, so `mirrord\nexec` and `mirrord up` use one definition that does not drift.\n\nInline, using a connection URL:\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\n      {\n        \"type\": \"mysql\",\n        \"connection\": {\n          \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" }\n        }\n      }\n    ]\n  }\n}\n```\n\nInline, using individual connection params:\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\n      {\n        \"type\": \"mysql\",\n        \"connection\": {\n          \"type\": \"env\",\n          \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"database\": \"DB_NAME\" }\n        }\n      }\n    ]\n  }\n}\n```\n\nEvery `dbBranches` entry of the target's `MirrordSplitConfig`:\n```json\n{\n  \"feature\": {\n    \"db_branches\": \"*\"\n  }\n}\n```\n\nOnly the entries with these ids:\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\"orders-pg\", \"sessions-redis\"]\n  }\n}\n```\n\nWith `\"*\"` or a list of ids the operator resolves the entries, and sessions started under\nthe same key that point at the same entry share one branch (its id is the entry id plus the\nkey). An id that matches no entry fails the session, naming the ids the workload has; a\nworkload with no `dbBranches` gives no branches and the session continues. An operator\nthat cannot resolve entries fails the session before it starts. Inline definitions always\nwin: with them, any `dbBranches` on the workload are ignored with a warning.",
+      "anyOf": [
+        {
+          "description": "Branches defined in this config.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DatabaseBranchConfig"
+          }
+        },
+        {
+          "description": "`\"*\"` or a list of entry ids, resolved by the operator against the target's\n`MirrordSplitConfig`.",
+          "$ref": "#/$defs/SplitConfigDbBranches"
+        }
+      ]
     },
     "DbBranchingConnectionSource": {
       "description": "Different ways of connecting to the source database.\n\nAccepts three formats:\n\nLegacy URL (backward compatible):\n```json\n{ \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } }\n```\n\nFlat URL:\n```json\n{ \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" }\n```\n\nIndividual connection params:\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } }\n```\n\nIndividual connection params with password from a Kubernetes Secret:\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"password\": { \"secret\": \"my-secret\", \"key\": \"password\" }, \"database\": \"DB_NAME\" } }\n```\n\nIndividual connection params read from a ConfigMap, for apps whose connection details live\nin a mounted config file. `configmap` is the ConfigMap's name, or `{ \"volume\": ... }` to\nfollow a `configMap` volume of the target pod (survives ConfigMaps renamed per release).\n`key` is the data key; `value_selector` (a `.a.b` path into the JSON/YAML entry) or\n`value_pattern` (a regex over the raw text) picks the value out of it, and `env_var_name`\nhands the branch's value to the local app under that name:\n```json\n{\n  \"params\": {\n    \"host\": { \"configmap\": { \"volume\": \"app-config\" }, \"key\": \"config.yml\", \"value_selector\": \".database.host\", \"env_var_name\": \"DB_HOST\" },\n    \"database\": { \"configmap\": \"app-config\", \"key\": \"config.yml\", \"value_pattern\": \"name: '(?P<database>[^']+)'\", \"env_var_name\": \"DB_NAME\" },\n    \"user\": \"DB_USER\",\n    \"password\": \"DB_PASSWORD\"\n  }\n}\n```\n\nWhen the operator's branch config (or the branch's `profile`) sets `dbPod.sourceConfigMap`,\n`configmap` and `key` may be omitted and are filled from there, so a param can be just the\nselector. A param with only `value_pattern` and `env_var_name` is the env var pattern\nsource instead, so a pattern against the profile's ConfigMap keeps `key`:\n```json\n{ \"params\": { \"host\": { \"value_selector\": \".database.host\", \"env_var_name\": \"DB_HOST\" } } }\n```",
@@ -5722,6 +5738,22 @@
           "required": [
             "mode"
           ]
+        }
+      ]
+    },
+    "SplitConfigDbBranches": {
+      "description": "<!--${internal}-->\nWhich `dbBranches` entries of the target's `MirrordSplitConfig` a session asks for:\n`\"*\"` for all of them, or a list of entry ids.",
+      "anyOf": [
+        {
+          "description": "Every entry.",
+          "$ref": "#/$defs/AllSplitConfigDbBranches"
+        },
+        {
+          "description": "The entries with these ids.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       ]
     },

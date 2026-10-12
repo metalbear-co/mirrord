@@ -56,7 +56,7 @@ mirrord is configured using a JSON or YAML configuration file. The CLI reads its
 mirrord exec -f my-config.json --target pod/app-pod python main.py
 ```
 
-Configuration options are documented in the [configuration reference](https://metalbear.com/mirrord/docs/config).
+Configuration options are documented in the [configuration reference](https://metalbear.com/mirrord/docs/config). For a user-wide Operator preference, see [Global Configuration](global-configuration.md). Other settings in the global file are not yet applied to sessions.
 
 ## Interactive Setup
 

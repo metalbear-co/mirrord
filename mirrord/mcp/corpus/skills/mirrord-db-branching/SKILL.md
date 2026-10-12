@@ -3,7 +3,7 @@ name: mirrord-db-branching
 description: Helps users configure mirrord.json for database branching, enabling isolated database copies for safe development and testing. Use when the user wants to set up MySQL, MariaDB, PostgreSQL, MSSQL, MongoDB, Redis, DynamoDB, ClickHouse, Google Spanner, Amazon S3, turbopuffer, or generic branches, configure copy modes, connection sources, schema migrations, IAM authentication, or manage database branches.
 metadata:
   author: MetalBear
-  version: "2.8"
+  version: "2.9"
 ---
 
 # Mirrord DB Branching Skill
@@ -42,14 +42,12 @@ Authoritative docs (fetch sub-pages for engine-specific detail):
 ## Critical First Steps
 
 **Step 0: Load References**
-Read the reference files from this skill's `references/` directory:
-- `references/db-branches-schema.json` — authoritative JSON Schema for `db_branches` (extracted from the mirrord schema). Config lives under `feature.db_branches`.
-- `references/troubleshooting.md` — common issues and solutions
+Read the reference file from this skill's `references/` directory:
+- `references/troubleshooting.md`: common issues and solutions
 
-The schema is derived from the official mirrord schema at:
-https://raw.githubusercontent.com/metalbear-co/mirrord/main/mirrord-schema.json
+Config lives under `feature.db_branches`. To look up a field, call `explain_config_option` if the mirrord MCP server is connected; otherwise use `references/configuration.md` in the mirrord-config skill.
 
-If using absolute paths, search for the schema using patterns like `**/mirrord-db-branching/references/*`.
+If using absolute paths, search for it using patterns like `**/mirrord-db-branching/references/*`.
 
 **Step 1: Verify Prerequisites**
 Each engine has minimum operator, mirrord CLI, and Helm chart versions, and a per-engine Helm value that must be enabled. See [Version Requirements](#version-requirements) below. DB branching needs the operator with a Teams/Enterprise license; on a cluster with no license, an AI agent can offer the user a seven-day Enterprise trial and start it once they agree (see the `mirrord-operator` skill, "Agent-started trial").
@@ -58,16 +56,17 @@ Each engine has minimum operator, mirrord CLI, and Helm chart versions, and a pe
 The app must read its DB connection from environment variables (or Kubernetes Secrets). mirrord overrides those variables with the branch's connection details for the session. Confirm the exact variable name(s) the app uses.
 
 **Step 3: Validate Configuration**
-After generating any config, ALWAYS run:
+After generating any config, ALWAYS validate it. If the mirrord MCP server is connected, call `validate_config` on the config; otherwise, if the mirrord CLI is installed, save it to a file and run:
 ```bash
 mirrord verify-config /path/to/config.json
 ```
+If neither is available, validate against `references/schema.json` in the mirrord-config skill, after parsing the config as strict JSON: read only the schema's top level (root `properties`, `required`, `additionalProperties`) and the definitions for the options the config uses (search the file for each key), not the whole file.
 
 ## Configuration Structure
 
 `db_branches` is an array **under the top-level `feature` object**:
 
-```json
+```json mirrord
 {
   "feature": {
     "db_branches": [
@@ -114,8 +113,8 @@ mirrord verify-config /path/to/config.json
 | Field | Applies to | Description |
 |-------|-----------|-------------|
 | `type` | all | Database engine (see table above). |
-| `connection` | all (optional for DynamoDB) | How mirrord locates the source connection details. See [Connection Modes](#connection-modes). |
-| `id` | all | Reuse/share a branch: same `id` reattaches to an existing branch while its TTL hasn't expired. Use a unique value (e.g. a UUID) to avoid reusing someone else's branch. Ignored for local Redis. |
+| `connection` | all | How mirrord locates the source connection details. See [Connection Modes](#connection-modes). |
+| `id` | all | Reuse/share a branch: same `id` reattaches to an existing branch while its TTL hasn't expired. Use a unique value (e.g. a UUID) to avoid reusing someone else's branch. Give two entries of the same `type` their own `id`s — from CLI **3.267.0+**, entries that would resolve to the same branch make mirrord refuse to start the session instead of silently colliding. All `generic` entries count as one type for this check. Ignored for local Redis. |
 | `name` | most | Source database name to clone. The override URL becomes `.../<name>`. If omitted, the URL points at the server and the app must select the DB. For **Redis**, `name` is the numeric DB **index** (default `0`). Required when using `migrations`. Not accepted for **S3** — a bucket isn't a server hosting several databases. |
 | `version` | all except generic, s3 | Engine image version (e.g. `"8.0"`, `"16"`). For generic, the tag lives in `image` and `version` is not allowed. Not accepted for S3 — there's no container to run. |
 | `provider` | s3 | Storage service hosting the branch bucket. Only `"AWS"` (default). |
@@ -127,6 +126,7 @@ mirrord verify-config /path/to/config.json
 | `migrations` | mysql, mariadb, pg, mssql | Run schema migrations on the branch at creation. See [Schema Migrations](#schema-migrations). |
 | `connection_settings` | pg | PostgreSQL session settings applied while reading the source (e.g. for RLS). |
 | `query_params` | pg | Query parameters on the **branch** connection the app receives (e.g. `sslmode`). See [Branch Query Parameters](#branch-query-parameters-postgresql). |
+| `additional_databases` | pg | More databases from the same source server, copied into the same branch pod alongside the branch's own database. See [Several Databases in One Branch](#several-databases-in-one-branch-postgresql). |
 | `emulator_host` | spanner | Name of the env var mirrord sets to the emulator address (default `SPANNER_EMULATOR_HOST`). |
 | `location` | redis | `"remote"` (default) or `"local"`. |
 | `local` | redis | Local Redis runtime config (see [Redis](#redis)). |
@@ -154,6 +154,8 @@ Enable the matching Helm value on the operator chart, and meet the minimum versi
 | Schema migrations: inherited target env (`container` flavor) | 3.191.0 | 3.238.0 | 3.191.0 | (per engine above) |
 | Schema migrations: Liquibase (`liquibase` flavor) | 3.207.0 | 3.257.0 | 3.207.0 | (per engine above) |
 | Branch query params (`query_params`, pg only) | 3.197.0 | 3.250.0 | 3.197.0 | `operator.pgBranching: true` |
+| `additional_databases` (pg only) | 3.214.0 | 3.267.0 | 3.214.0 | `operator.pgBranching: true` |
+| Branch pod inherits target's `imagePullSecrets` for a custom `image` | 3.216.0 | — | 3.216.0 | (per engine above) |
 | ConfigMap connection source | 3.205.0 | 3.255.0 | 3.205.0 | (per engine above) |
 | MySQL/MariaDB copy carries over views, triggers, routines & server settings | 3.210.0 | — | — | (per engine above) |
 | `url` connection param as a base for other params | 3.212.0 | 3.264.0 | 3.212.0 | (per engine above) |
@@ -166,7 +168,7 @@ Since operator **3.194.0**, each branch (other than local Redis, which runs on y
 
 Cluster admins tune this in the operator's Helm values:
 
-```yaml
+```yaml helm-values
 operator:
   dbBranching:
     # Cluster-wide default PVC sizes, per branch.
@@ -200,7 +202,7 @@ Also cluster-admin Helm config, not a `db_branches` field: `pgBranchConfig.dbPod
 
 The simplest form — an env var name holding the full connection string:
 
-```json
+```json mirrord=feature.db_branches[]
 { "connection": { "url": "DATABASE_URL" } }
 ```
 
@@ -210,7 +212,7 @@ Equivalent explicit forms (all valid): `{ "url": { "type": "env", "variable": "D
 
 When the app stores host/port/user/password/database separately:
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "connection": {
     "params": {
@@ -230,7 +232,7 @@ Each param is individually optional; mirrord fills engine defaults for any not s
 
 `params` also accepts a `url` entry: a complete connection URL that every other parameter layers onto. Each component the URL carries (host, port, user, password, database) becomes that parameter's value, and a parameter declared alongside `url` overrides that component. This suits an app that keeps one connection string (often read out of a mounted config file) while credentials come from separate env vars:
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "connection": {
     "params": {
@@ -263,7 +265,7 @@ Any param (and, where noted, the `url`) can be sourced beyond a plain env var:
 - **Multiple sources** (array): both `url` and each param accept an array. The **first** entry is used to locate/clone the source; **every** entry is rewritten to point at the branch (e.g. separate write/read URLs).
 - **Custom params**: beyond the fixed slots, `params` accepts any key an engine needs — Google Spanner's `project`/`instance`/`database_id`, PostgreSQL's and CockroachDB's `sslmode` (for the copy connection to the source), or (for [generic branches](#generic-branches)) any key like `token`/`org`/`vhost`. Custom params support the same value sources as the fixed slots (see the `value_pattern` naming exception above).
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "connection": {
     "params": {
@@ -281,7 +283,7 @@ The connection the app receives points at the **branch** pod, not the source, so
 
 To override the automatic values or add other driver parameters, set `query_params` on the branch config (sibling of `connection`, not nested under it):
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "type": "pg",
   "connection": { "url": "DATABASE_URL" },
@@ -292,6 +294,39 @@ To override the automatic values or add other driver parameters, set `query_para
 Cluster admins can set the same overrides for everyone via `pgBranchConfig.dbPod.queryParams` in the operator Helm values, or on a branch config `profile`. Layers merge per key: mirrord's derived default, then the admin's `queryParams`, then the session's own `query_params` — each layer overrides the previous one only for the keys it sets.
 
 `query_params` only affects the branch connection; the copy connection to the source keeps the source's own parameters. Requires operator/Helm chart **3.197.0+** and CLI **3.250.0+** — on older operators, a branch that sets `query_params` (or an `sslmode` connection param) fails with a clear error instead of being silently ignored.
+
+### Several Databases in One Branch (PostgreSQL)
+
+`additional_databases` copies more databases from the same source **PostgreSQL** server into the same branch pod — useful when the app talks to several databases on one server, so they all keep using a single host on the branch, the same as against the source:
+
+```json mirrord=feature.db_branches[]
+{
+  "type": "pg",
+  "name": "app",
+  "connection": { "url": { "type": "env", "variable": "DATABASE_URL" } },
+  "copy": { "mode": "all" },
+  "additional_databases": [
+    {
+      "name": "analytics",
+      "connection": { "url": { "type": "env", "variable": "ANALYTICS_DATABASE_URL" } },
+      "copy": { "mode": "schema", "tables": { "events": { "filter": "created_at > now() - interval '1 day'" } } }
+    },
+    { "name": "audit" }
+  ]
+}
+```
+
+Each entry takes:
+
+| Field | Required | Description |
+|-------|----------|--------------|
+| `name` | yes | Database name on the source server; the branch creates a database with the same name. Must be unique, differ from the branch's own `name`, fit PostgreSQL's 63-byte identifier limit, and not be `template0`/`template1`. |
+| `connection` | no | Same shape as the branch's own `connection`; mirrord points it at the branch pod with this database's name. Without it, the database is only created and copied — the app has to switch to it on the branch host itself. Needs its own URL or database variable (a URL can only name one database); host/port/user/password variables may be shared across entries since every database lives on the same branch pod. |
+| `copy` | no | Same shape as the branch's own `copy`. Defaults to `empty`. |
+
+Every additional database is read over the branch's own source connection — same host, port, user, password, TLS settings, `iam_auth`, and `connection_settings` — only the database name differs, so all of them must live on the server the branch's `connection` points at. With `dbPod.roles: full`, only the branch's own connection user gets a login on the branch; an additional connection sharing the same user/password variables keeps them, one with its own user/password variables is pointed at the branch superuser instead — sharing only one of the two is rejected. Branches are reused by `id` only when the additional databases' names and connections also match; their `copy` is not part of that match, so a reused branch keeps the data it was first copied with.
+
+Requires operator and Helm chart **3.214.0+** and CLI **3.267.0+**; an operator that doesn't support it refuses the config rather than creating a branch without the extra databases.
 
 ## Copy Modes
 
@@ -311,7 +346,7 @@ Requires operator **3.210.0+** (earlier operators copy tables and data only, and
 
 Copy schema plus filtered rows per table. Combine with `"empty"` to copy **only** the listed tables. **Not compatible with `"all"`** (the `tables` map is ignored if `mode` is `all`).
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "copy": {
     "mode": "schema",
@@ -329,7 +364,7 @@ MongoDB and DynamoDB use `collections` instead of `tables` and support only `emp
 - MongoDB filter is a MongoDB query as an escaped JSON string: `"{\"name\": {\"$in\": [\"alice\", \"bob\"]}}"`.
 - DynamoDB filter is a `Scan` `FilterExpression` string, e.g. `"active = true"`. It **cannot** use `ExpressionAttributeValues`/`Names` placeholders. An empty `{}` copies the table in full.
 
-```json
+```json mirrord=feature.db_branches[]
 { "copy": { "mode": "all", "collections": { "users": { "filter": "active = true" }, "orders": {} } } }
 ```
 
@@ -339,8 +374,8 @@ With `"empty"` + filters, only the listed collections/tables are created.
 
 Redis supports `empty` / `all` (remote only; local always starts empty). Narrow `all` with `SCAN MATCH` glob patterns:
 
-```json
-{ "copy": { "mode": "all", "patterns": ["user:*", "session:*"] } }
+```json mirrord=feature.db_branches[]
+{ "location": "remote", "copy": { "mode": "all", "patterns": ["user:*", "session:*"] } }
 ```
 
 ### Custom dump arguments (`dump_args`) — MySQL & PostgreSQL only
@@ -349,7 +384,7 @@ Customize `mysqldump` / `pg_dump`. Available in all copy modes. **MSSQL, MongoDB
 - MySQL: default passes no args (tool uses its `--opt` defaults). Listed args are passed as-is; `[]` removes defaults.
 - PostgreSQL: setting `dump_args` **replaces** defaults entirely (defaults are `--no-owner --no-acl`); include them if you want to keep them; `[]` removes all.
 
-```json
+```json mirrord=feature.db_branches[]
 { "copy": { "mode": "schema", "dump_args": ["--no-owner", "--no-acl", "--exclude-table=audit_logs"] } }
 ```
 
@@ -361,19 +396,19 @@ Customize `mysqldump` / `pg_dump`. Available in all copy modes. **MSSQL, MongoDB
 
 `"copy": { "mode": "schema" }` copies table definitions only, not rows — including the table (or tables) your migration tool records applied migrations in. To carry that history onto the branch (e.g. so Flyway's `flyway_schema_history` doesn't look empty), name the table under `copy.tables` so its rows come along with its definition:
 
-```json
+```json mirrord=feature.db_branches[]
 { "copy": { "mode": "schema", "tables": { "flyway_schema_history": {} } } }
 ```
 
 Liquibase keeps two history tables, and both have to come across:
 
-```json
+```json mirrord=feature.db_branches[]
 { "copy": { "mode": "schema", "tables": { "DATABASECHANGELOG": {}, "DATABASECHANGELOGLOCK": {} } } }
 ```
 
 ### Flyway flavor
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "migrations": {
     "flavor": "flyway",
@@ -393,7 +428,7 @@ Exactly one of `path` or `locations` is required.
 
 Runs [Liquibase](https://docs.liquibase.com) changelogs (XML, YAML, JSON, or formatted SQL). Liquibase records applied changesets in a `DATABASECHANGELOG` table, so re-runs apply only what's new. It starts from a single root changelog rather than scanning a directory, so `changelog_file` is always required:
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "migrations": {
     "flavor": "liquibase",
@@ -412,7 +447,7 @@ Exactly one of `path` or `search_path` is required.
 
 ### Container flavor
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "migrations": {
     "flavor": "container",
@@ -438,13 +473,13 @@ IAM only authenticates against the **real** cloud database — the branch is a p
 
 ### AWS RDS
 
-```json
+```json mirrord=feature.db_branches[]
 { "iam_auth": { "type": "aws_rds" } }
 ```
 
 Default env vars from the target pod: `AWS_REGION`/`AWS_DEFAULT_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`. Override only for non-standard names:
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "iam_auth": {
     "type": "aws_rds",
@@ -461,7 +496,7 @@ Default env vars from the target pod: `AWS_REGION`/`AWS_DEFAULT_REGION`, `AWS_AC
 
 **Requires TLS** — the connection URL must include `sslmode=require`. This only applies to the **source**: the branch connection the app receives carries the branch pod's own TLS mode (`sslmode=disable` for a regular branch pod), so the app doesn't demand TLS the branch can't serve. Override that with [`query_params`](#branch-query-parameters-postgresql) if needed.
 
-```json
+```json mirrord=feature.db_branches[]
 { "iam_auth": { "type": "gcp_cloud_sql" } }
 ```
 
@@ -475,10 +510,10 @@ Redis is the only engine that runs remotely **or** locally.
 
 ### Remote (default)
 
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
-    "type": "redis", "version": "7.2", "name": "0",
+    "type": "redis", "location": "remote", "version": "7.2", "name": "0",
     "connection": { "url": "REDIS_URL" },
     "copy": { "mode": "empty" }
   } ] }
@@ -491,7 +526,7 @@ Redis is the only engine that runs remotely **or** locally.
 
 Spawns a Redis instance on your machine and redirects the app's Redis traffic to it. Always starts empty; copy modes don't apply; `id` is ignored.
 
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "type": "redis",
@@ -518,7 +553,7 @@ With `copy.mode: "all"`, the branch pod connects to the **source** Redis to read
 
 Unlike every other engine, an S3 branch is **not a pod**: the operator has the storage provider create a new bucket in your own cloud account (named `mirrord-<10 random letters>-<source bucket name>`, in the source bucket's region), clones the source bucket's settings and (optionally) its objects into it, and rewrites your target's bucket env var(s) to point at the clone. Objects never pass through the cluster or your machine — the clone runs entirely inside the provider, using the operator's own cloud credentials.
 
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "id": "uploads-bucket",
@@ -543,7 +578,7 @@ If the operator doesn't support S3 branching, the session fails immediately: an 
 
 Like S3, a [turbopuffer](https://turbopuffer.com) branch is **not a pod**: the operator asks turbopuffer to branch your source namespace into a copy-on-write clone in your own turbopuffer account, and points the target at the clone. There's no `image`, `version`, `profile`, or migrations.
 
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "id": "docs-turbopuffer",
@@ -584,11 +619,13 @@ You declare the params your service needs under `connection.params` (the fixed s
 | `copy` | No | One-shot Job that populates the branch before it turns Ready. See [Copying Data into the Branch](#copying-data-into-the-branch). |
 | `profile` | No | Name of an admin-defined profile supplying branch defaults and/or a `copy` Job. See [Admin Profiles](#admin-profiles). |
 
+With operator **3.216.0+**, a branch `image` in a private registry is pulled with the target's `imagePullSecrets` automatically. For a registry the target has no pull secret for, or on older operators, a cluster admin sets `imagePullSecrets` in the generic branch config.
+
 Readiness types: `{ "type": "tcp" }` (default), `{ "type": "http_get", "path": "/health", "port": 8086 }`, `{ "type": "exec", "command": ["redis-cli", "ping"] }`. Prefer a probe that proves the service is *usable*, not just that the process started.
 
 Connection must use **params mode** (URL mode is rejected; extract `host`/`port` from URL-shaped vars with `value_pattern`). `gcp_secret_manager` and `aws_secrets_manager` sources are not supported for generic branches. Declaring only a `host` param (no `port`) redirects every port on the branch pod — useful for multi-port services that derive URLs from one hostname var.
 
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "type": "generic",
@@ -612,7 +649,7 @@ Connection must use **params mode** (URL mode is rejected; extract `host`/`port`
 
 By default a generic branch starts empty. Add a `copy` config to populate it: once the empty branch boots and its readiness probe passes, the operator runs a one-shot Job from your copy image, and the branch stays **not Ready** until the Job succeeds. What "copy" means (full data, schema only, a filtered subset) is entirely up to your image — mirrord only wires the connections and gates readiness.
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "copy": {
     "image": "ghcr.io/my-org/valkey-copy:1.0",
@@ -631,12 +668,12 @@ Things to know: the copy runs **at most once per branch** — reusing a Ready br
 
 A named profile in the operator's Helm config (`operator.genericBranchConfig.profiles.<name>`) can carry the branch container defaults (`image`, `port`, `command`, `args`, `env`, `readiness`) and a `copy` Job — this is usually an admin's setup work, not every developer's. Reference it with `profile` so a `mirrord.json` branch shrinks to `type`/`id`/`profile`/`connection`:
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "type": "generic",
   "id": "my-opensearch-branch",
   "profile": "opensearch-full",
-  "connection": { "params": { "...": "..." } }
+  "connection": { "params": { "host": "OPENSEARCH_HOST", "port": "OPENSEARCH_PORT" } }
 }
 ```
 
@@ -698,7 +735,7 @@ Otherwise, provide safe defaults and note assumptions.
 ## Example Scenarios
 
 ### MySQL branch for testing migrations (schema copy)
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "id": "migration-test",
@@ -713,7 +750,7 @@ Otherwise, provide safe defaults and note assumptions.
 ```
 
 ### PostgreSQL with Flyway migrations applied to an empty branch
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "type": "pg",
@@ -727,7 +764,7 @@ Otherwise, provide safe defaults and note assumptions.
 ```
 
 ### PostgreSQL with AWS RDS IAM
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "type": "pg",
@@ -741,7 +778,7 @@ Otherwise, provide safe defaults and note assumptions.
 ```
 
 ### Filtered data — only test users
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "id": "test-data-branch",
@@ -758,7 +795,7 @@ Otherwise, provide safe defaults and note assumptions.
 ```
 
 ### MongoDB branch copying specific users
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "type": "mongodb",
@@ -774,12 +811,13 @@ Otherwise, provide safe defaults and note assumptions.
 ```
 
 ### DynamoDB full clone (IAM required)
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "id": "users-dynamodb",
     "type": "dynamodb",
     "version": "latest",
+    "connection": { "url": "AWS_ENDPOINT_URL_DYNAMODB" },
     "iam_auth": { "type": "aws_rds" },
     "copy": {
       "mode": "all",
@@ -790,7 +828,7 @@ Otherwise, provide safe defaults and note assumptions.
 ```
 
 ### Google Spanner schema branch
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "id": "users-spanner-db",
@@ -809,7 +847,7 @@ Otherwise, provide safe defaults and note assumptions.
 ```
 
 ### Local Redis for development
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "type": "redis",
@@ -821,7 +859,7 @@ Otherwise, provide safe defaults and note assumptions.
 ```
 
 ### S3 bucket branch with fixtures copied
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "id": "uploads-bucket",
@@ -833,7 +871,7 @@ Otherwise, provide safe defaults and note assumptions.
 ```
 
 ### turbopuffer namespace branch with a full clone
-```json
+```json mirrord
 {
   "feature": { "db_branches": [ {
     "id": "docs-turbopuffer",
@@ -858,4 +896,4 @@ Otherwise, provide safe defaults and note assumptions.
 - **Correct type**: Use the exact engine `type` string.
 - **Safe defaults**: Default to `"empty"` copy mode to avoid long creation times.
 - **No inline secrets**: Reference env vars / Secrets / Secret Manager; never invent credential values.
-- **Actionable feedback**: Explain what each field does when relevant, and always run `mirrord verify-config`.
+- **Actionable feedback**: Explain what each field does when relevant, and always validate: `validate_config` when the mirrord MCP server is connected, otherwise `mirrord verify-config` when the CLI is installed, otherwise the mirrord-config skill's `references/schema.json` (only its top level and the definitions the config uses).

@@ -117,7 +117,9 @@ pub(crate) async fn terminate_processes(pids: HashSet<i32>) -> Result<(), Proces
 mod tests {
     #[cfg(unix)]
     use std::collections::HashSet;
-    use std::{process::Command, time::Duration};
+    use std::time::Duration;
+
+    use mirrord_command::resolve_command;
 
     use super::terminate_processes;
     #[cfg(unix)]
@@ -150,7 +152,7 @@ mod tests {
             process::Stdio,
         };
 
-        let mut child = Command::new("sh")
+        let mut child = resolve_command("sh")
             .arg("-c")
             .arg(script)
             .stdout(Stdio::piped())
@@ -169,11 +171,11 @@ mod tests {
     fn spawn_blocking_child() -> std::process::Child {
         #[cfg(unix)]
         {
-            Command::new("sleep").arg("30").spawn().unwrap()
+            resolve_command("sleep").arg("30").spawn().unwrap()
         }
         #[cfg(windows)]
         {
-            Command::new("cmd")
+            resolve_command("cmd")
                 .args(["/C", "ping", "-n", "30", "127.0.0.1"])
                 .spawn()
                 .unwrap()

@@ -63,7 +63,7 @@ When `kind: MSK_IAM`, two properties are auto-merged:
 ## Authentication patterns
 
 ### Plain/no auth (dev clusters)
-```yaml
+```yaml crd
 spec:
   properties:
   - name: bootstrap.servers
@@ -74,7 +74,7 @@ spec:
 
 > **Security:** Never inline `sasl.password` (or any credential) as a literal value in generated YAML. Reference a Kubernetes Secret in the operator's namespace via `loadFromSecret`. The user creates the Secret themselves; the agent must not handle the password value.
 
-```yaml
+```yaml crd
 spec:
   # Secret in the operator namespace with keys: sasl.username, sasl.password
   loadFromSecret: mirrord/kafka-sasl-creds
@@ -98,7 +98,7 @@ kubectl create secret generic kafka-sasl-creds \
 ```
 
 ### SSL/mTLS (via secret)
-```yaml
+```yaml crd
 spec:
   loadFromSecret: mirrord/kafka-ssl-creds
   properties:
@@ -109,7 +109,7 @@ spec:
 ```
 
 ### MSK IAM (AWS)
-```yaml
+```yaml crd
 spec:
   authenticationExtra:
     kind: MSK_IAM
@@ -120,7 +120,7 @@ spec:
 ```
 
 ### Inheritance example
-```yaml
+```yaml crd
 # Parent
 apiVersion: queues.mirrord.metalbear.co/v1alpha
 kind: MirrordKafkaClientConfig

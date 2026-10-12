@@ -4,22 +4,19 @@ use std::sync::{
 };
 
 use crate::{
-    IPTables,
+    IPTablesBackend,
     error::{IPTablesError, IPTablesResult},
 };
 
 #[derive(Debug)]
-pub struct IPTableChain<IPT: IPTables> {
-    inner: Arc<IPT>,
+pub struct IPTableChain {
+    inner: Arc<IPTablesBackend>,
     chain_name: String,
     chain_size: AtomicI32,
 }
 
-impl<IPT> IPTableChain<IPT>
-where
-    IPT: IPTables,
-{
-    pub fn create(inner: Arc<IPT>, chain_name: String) -> IPTablesResult<Self> {
+impl IPTableChain {
+    pub fn create(inner: Arc<IPTablesBackend>, chain_name: String) -> IPTablesResult<Self> {
         inner.create_chain(&chain_name)?;
 
         // Start with 1 because the chain will always have at least `-A <chain name>` as a rule
@@ -32,7 +29,7 @@ where
         })
     }
 
-    pub fn load(inner: Arc<IPT>, chain_name: String) -> IPTablesResult<Self> {
+    pub fn load(inner: Arc<IPTablesBackend>, chain_name: String) -> IPTablesResult<Self> {
         let existing_rules = inner.list_rules(&chain_name)?.len();
 
         if existing_rules == 0 {
@@ -55,7 +52,7 @@ where
         &self.chain_name
     }
 
-    pub fn inner(&self) -> &IPT {
+    pub fn inner(&self) -> &IPTablesBackend {
         &self.inner
     }
 
@@ -87,10 +84,7 @@ where
     }
 }
 
-impl<IPT> Drop for IPTableChain<IPT>
-where
-    IPT: IPTables,
-{
+impl Drop for IPTableChain {
     fn drop(&mut self) {
         let _ = self.inner.remove_chain(&self.chain_name);
     }

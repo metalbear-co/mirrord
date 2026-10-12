@@ -43,6 +43,7 @@ hyper = { workspace = true, features = ["client", "http1", "http2"] }
 hyper-util.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true
+actix-codec.workspace = true
 rand.workspace = true
 rustls.workspace = true
 strum.workspace = true
@@ -74,6 +75,7 @@ tokio-seqpacket.workspace = true
 rcgen.workspace = true
 rstest.workspace = true
 mirrord-session-monitor-client.workspace = true
+mirrord-command = { path = "../command" }
 futures.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }

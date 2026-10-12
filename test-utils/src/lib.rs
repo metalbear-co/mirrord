@@ -14,10 +14,11 @@ use std::{
 
 use chrono::{Timelike, Utc};
 use fancy_regex::Regex;
+use mirrord_command::resolve_tokio_command;
 use tempfile::TempDir;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
-    process::{Child, Command},
+    process::Child,
     sync::RwLock,
     task::JoinHandle,
 };
@@ -484,7 +485,7 @@ impl TestProcess {
         env: HashMap<String, String>,
     ) -> TestProcess {
         println!("EXECUTING: {executable}");
-        let child = Command::new(executable)
+        let child = resolve_tokio_command(executable)
             .args(args)
             .envs(env)
             .stdout(Stdio::piped())
@@ -506,7 +507,7 @@ impl Drop for TestProcess {
         // Ensure clean process termination, especially on Windows
         if let Some(pid) = self.child.id() {
             // Use Windows taskkill for more aggressive cleanup of process tree
-            let _ = std::process::Command::new("taskkill")
+            let _ = mirrord_command::resolve_command("taskkill")
                 .args(["/F", "/T", "/PID", &pid.to_string()])
                 .output();
         }

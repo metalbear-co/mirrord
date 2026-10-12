@@ -362,7 +362,7 @@ mod tests {
     /// The parent lookup has to agree with the kernel about a process this test actually owns.
     #[test]
     fn a_real_child_reports_this_process_as_its_parent() {
-        let mut child = std::process::Command::new("/bin/sh")
+        let mut child = mirrord_command::resolve_command("/bin/sh")
             .args(["-c", "exec sleep 30"])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -497,7 +497,7 @@ mod tests {
 
         // A real child, so the attribution walks the kernel's tree rather than matching the pid
         // it was handed outright.
-        let mut child = std::process::Command::new("/bin/sh")
+        let mut child = mirrord_command::resolve_command("/bin/sh")
             .args(["-c", "exec sleep 30"])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())

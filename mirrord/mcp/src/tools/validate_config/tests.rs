@@ -598,6 +598,16 @@ fn top_level_array() {
     assert_eq!(issue.path, "");
 }
 
+/// `db_branches` also takes `"*"` or a list of entry ids, resolved against the target's
+/// `MirrordSplitConfig`; both forms pass as they are.
+#[rstest]
+#[case::all(r#"{ "feature": { "db_branches": "*" } }"#)]
+#[case::ids(r#"{ "feature": { "db_branches": ["orders-pg", "users-pg"] } }"#)]
+fn split_config_db_branches_forms(#[case] content: &str) {
+    let output = validate(ConfigFormat::MirrordJson, content);
+    assert!(output.issues.is_empty(), "{:?}", output.issues);
+}
+
 /// A database branch with a typo is reported for the typo, not as the one kind of branch that
 /// takes any field (Redis), whose `type` it doesn't have.
 #[rstest]

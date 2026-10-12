@@ -83,6 +83,7 @@ crypto
 runtime
 goroutine
 plaintext
+keyless
 [vV]endor(?:ed|ing)?
 
 # Linux syscalls and C API

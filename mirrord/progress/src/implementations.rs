@@ -1,3 +1,5 @@
+#[cfg(target_os = "windows")]
+use std::ops::Not;
 use std::{collections::HashSet, time::Duration};
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -167,6 +169,9 @@ pub struct SpinnerProgress {
     fail_on_drop: bool,
     root_progress: MultiProgress,
     progress: ProgressBar,
+    /// What the task finishes as without a message: `warning` and `info` replace the bar's
+    /// message, and the task would otherwise finish as its last one.
+    title: String,
     indent: usize,
     message_buffer: Vec<String>,
 }
@@ -185,6 +190,7 @@ impl SpinnerProgress {
             indent: 0,
             root_progress,
             progress,
+            title: text.to_owned(),
             message_buffer: vec![],
         }
     }
@@ -203,6 +209,7 @@ impl Progress for SpinnerProgress {
             root_progress: self.root_progress.clone(),
             indent,
             progress,
+            title: text.to_owned(),
             message_buffer: vec![],
         }
     }
@@ -213,12 +220,14 @@ impl Progress for SpinnerProgress {
             self.progress.finish_with_message(format!("✓ {msg}"));
         } else {
             self.progress
-                .finish_with_message(format!("✓ {}", self.progress.message()));
+                .finish_with_message(format!("✓ {}", self.title));
         }
         // On Windows, we need to print a final line break to avoid having exec process's stdout
         // begin the same line as the "Ready"
         #[cfg(target_os = "windows")]
-        println!();
+        if self.indent == 0 && self.root_progress.is_hidden().not() {
+            eprintln!();
+        }
         self.message_buffer.iter().for_each(|msg| println!("{msg}"));
     }
 
