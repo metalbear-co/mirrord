@@ -21,7 +21,7 @@ import {
   emitUserBlocked,
   emitUserSucceeded,
 } from './analytics'
-import { api } from './api'
+import { api, type KillResult } from './api'
 import { selectKubeContext, useKubeContexts } from './contextStore'
 import { collectEvents } from './eventsStore'
 import { useTelemetryPref } from './hooks/useTelemetryPref'
@@ -37,6 +37,18 @@ import { withPreviewSessions } from './utils'
 const LOCAL_POLL_INTERVAL = 2000
 const OPERATOR_POLL_INTERVAL = 5000
 const EXTENSION_POLL_INTERVAL = 4000
+const HTTP_NOT_FOUND = 404
+
+/**
+ * Turns a failed stop into something a reader can act on. A 404 means the server never had the
+ * session, which the poll is about to drop from the list anyway; no status at all means the
+ * request never reached the server.
+ */
+function killReason(result: Extract<KillResult, { ok: false }>): string {
+  if (result.status === HTTP_NOT_FOUND) return strings.sidebar.killGone
+  if (result.status === undefined) return strings.sidebar.killUnreachable
+  return result.error
+}
 
 /**
  * Theme is owned by the `mirrord-ui` shell (so a single top-right toggle controls both tabs). The
@@ -80,6 +92,7 @@ export default function App({
   })
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [killError, setKillError] = useState<string | null>(null)
   const [telemetryPref, setTelemetryPref] = useTelemetryPref()
 
   // Context/namespace selection. `selectedContext === null` means "follow the kubeconfig's current
@@ -337,14 +350,26 @@ export default function App({
   }, [])
 
   const handleKill = useCallback(async (id: string) => {
-    await api.killSession(id)
+    const result = await api.killSession(id)
+    if (result.ok) {
+      setKillError(null)
+      setSessions((prev) => prev.filter((s) => s.session_id !== id))
+      return
+    }
+    setKillError(strings.sidebar.killFailed(killReason(result)))
   }, [])
 
   const handleKillAll = useCallback(async () => {
     trackEvent('session_monitor_kill_all', { count: sessions.length })
+    const killed = new Set<string>()
+    let failed = 0
     for (const s of sessions) {
-      await api.killSession(s.session_id)
+      const result = await api.killSession(s.session_id)
+      if (result.ok) killed.add(s.session_id)
+      else failed += 1
     }
+    setSessions((prev) => prev.filter((s) => !killed.has(s.session_id)))
+    setKillError(failed === 0 ? null : strings.sidebar.killAllFailed(failed))
   }, [sessions])
 
   const handleSelectLocal = useCallback((id: string) => {
@@ -458,6 +483,8 @@ export default function App({
           joinedKey={extensionState.joinedKey ?? null}
           query={searchQuery}
           onQueryChange={setSearchQuery}
+          killError={killError}
+          onDismissKillError={() => setKillError(null)}
         />
         <div className="flex-1 overflow-hidden">
           {selectedLocal ? (

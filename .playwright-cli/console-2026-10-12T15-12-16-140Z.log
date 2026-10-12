@@ -1,0 +1,8 @@
+[     107ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:7311/api/v2/operator/license:0
+[    2008ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:7311/api/v2/operator/license?context=docker-desktop:0
+[    2096ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:7311/api/v2/local/sessions/sess-aaa/events:0
+[    2101ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:7311/api/v2/local/sessions/sess-aaa/events:0
+[    2222ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:7311/api/v2/local/sessions/sess-aaa/events:0
+[   13118ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:7311/api/v2/local/sessions/sess-aaa:0
+[   23964ms] [ERROR] Failed to load resource: net::ERR_EMPTY_RESPONSE @ http://127.0.0.1:7311/api/v2/local/sessions/sess-aaa:0
+[   34012ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:7311/api/v2/local/sessions/sess-aaa:0
