@@ -48,6 +48,16 @@ pub enum ConfigFormat {
     MirrordUpYaml,
 }
 
+impl ConfigFormat {
+    /// The file name, which is also how the format is written in tool arguments.
+    pub(crate) fn file_name(self) -> &'static str {
+        match self {
+            Self::MirrordJson => "mirrord.json",
+            Self::MirrordUpYaml => "mirrord-up.yaml",
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ValidateConfigArgs {
     /// Which kind of config file `content` is.

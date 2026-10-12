@@ -37,7 +37,8 @@ const CORPORA: &[Corpus] = &[
         repo: "metalbear-co/docs",
         root: "docs",
         extensions: &["md"],
-        exclude: &[],
+        // GitBook's navigation, not a page.
+        exclude: &["SUMMARY.md"],
     },
     Corpus {
         name: "skills",
