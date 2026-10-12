@@ -51,7 +51,7 @@ use mirrord_kube::{
 use mirrord_operator_websocket::{connection::OperatorConnection, upgrade};
 use mirrord_progress::Progress;
 use semver::Version;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 
@@ -663,37 +663,44 @@ where
             values,
         };
 
-        let body = serde_json::to_vec(&request_body)
-            .map_err(|e| OperatorApiError::CredentialSecretCreation(format!("serialize: {e}")))?;
+        let response: CreateCredentialSecretResponse = self
+            .post_in_namespace(namespace, "branchcredentials", &request_body)
+            .await
+            .map_err(|e| OperatorApiError::CredentialSecretCreation(e.to_string()))?;
 
+        Ok(response.secret_name)
+    }
+
+    /// POSTs `body` to the operator's `resource` in `namespace`, falling back to the
+    /// cluster-scoped route on operators that do not serve the namespaced one.
+    async fn post_in_namespace<T: DeserializeOwned>(
+        &self,
+        namespace: &str,
+        resource: &str,
+        body: &impl Serialize,
+    ) -> kube::Result<T> {
+        let body = serde_json::to_vec(body).map_err(kube::Error::SerdeError)?;
         let request = |uri: String| {
             http::Request::builder()
                 .method("POST")
                 .uri(uri)
                 .header("content-type", "application/json")
                 .body(body.clone())
-                .map_err(|e| {
-                    OperatorApiError::CredentialSecretCreation(format!("build request: {e}"))
-                })
+                .map_err(kube::Error::HttpError)
         };
 
         let namespaced = request(format!(
-            "/apis/operator.metalbear.co/v1/namespaces/{namespace}/branchcredentials"
+            "/apis/operator.metalbear.co/v1/namespaces/{namespace}/{resource}"
         ))?;
 
-        let response: CreateCredentialSecretResponse =
-            match self.client.request(namespaced).await {
-                Err(kube::Error::Api(status)) if status.code == 404 => {
-                    let cluster =
-                        request("/apis/operator.metalbear.co/v1/branchcredentials".to_owned())?;
+        match self.client.request(namespaced).await {
+            Err(kube::Error::Api(status)) if status.code == 404 => {
+                let cluster = request(format!("/apis/operator.metalbear.co/v1/{resource}"))?;
 
-                    self.client.request(cluster).await
-                }
-                result => result,
+                self.client.request(cluster).await
             }
-            .map_err(|e| OperatorApiError::CredentialSecretCreation(e.to_string()))?;
-
-        Ok(response.secret_name)
+            result => result,
+        }
     }
 
     /// Ask the operator to create the Secret holding a preview session's `secret_mounts` file
@@ -715,21 +722,8 @@ where
             values,
         };
 
-        let body = serde_json::to_vec(&request_body)
-            .map_err(|e| OperatorApiError::PreviewSecretMountCreation(format!("serialize: {e}")))?;
-
-        let request = http::Request::builder()
-            .method("POST")
-            .uri("/apis/operator.metalbear.co/v1/previewsecretmounts")
-            .header("content-type", "application/json")
-            .body(body)
-            .map_err(|e| {
-                OperatorApiError::PreviewSecretMountCreation(format!("build request: {e}"))
-            })?;
-
         let response: CreatePreviewSecretMountsResponse = self
-            .client
-            .request(request)
+            .post_in_namespace(namespace, "previewsecretmounts", &request_body)
             .await
             .map_err(|e| OperatorApiError::PreviewSecretMountCreation(e.to_string()))?;
 
@@ -802,42 +796,37 @@ where
             .unwrap_or(self.client.default_namespace())
             .to_owned();
 
-        let body = serde_json::to_vec(&ResolveSplitConfigDbBranchesRequest {
-            namespace,
+        let body = ResolveSplitConfigDbBranchesRequest {
+            namespace: namespace.clone(),
             target: kube_target,
             request: request.clone(),
-        })?;
-        let http_request = http::Request::builder()
-            .method("POST")
-            .uri("/apis/operator.metalbear.co/v1/splitconfigdbbranches")
-            .header("content-type", "application/json")
-            .body(body)
-            .map_err(|error| {
-                OperatorApiError::SplitConfigDbBranches(format!("build request: {error}"))
-            })?;
-        let response: ResolveSplitConfigDbBranchesResponse =
-            match (self.client.request(http_request).await, &request) {
-                (Ok(response), _) => response,
-                // Inline entries need nothing from the answer; a lookup that fails only costs
-                // the warning naming the configs the session ignores.
-                (Err(error), None) => {
-                    tracing::warn!(
-                        %error,
-                        "Could not check which MirrordSplitConfig dbBranches the inline \
-                         db_branches ignore"
-                    );
-                    return Ok(ResolvedSplitConfigBranches::default());
-                }
-                // The operator's answer says what is wrong with the request (an unknown id,
-                // a config conflict) in its own words; it is shown as it is, not inside kube's
-                // wrapping of the response.
-                (Err(kube::Error::Api(response)), Some(_)) => {
-                    return Err(OperatorApiError::SplitConfigDbBranches(response.message));
-                }
-                (Err(error), Some(_)) => {
-                    return Err(OperatorApiError::SplitConfigDbBranches(error.to_string()));
-                }
-            };
+        };
+        let response: ResolveSplitConfigDbBranchesResponse = match (
+            self.post_in_namespace(&namespace, "splitconfigdbbranches", &body)
+                .await,
+            &request,
+        ) {
+            (Ok(response), _) => response,
+            // Inline entries need nothing from the answer; a lookup that fails only costs
+            // the warning naming the configs the session ignores.
+            (Err(error), None) => {
+                tracing::warn!(
+                    %error,
+                    "Could not check which MirrordSplitConfig dbBranches the inline \
+                     db_branches ignore"
+                );
+                return Ok(ResolvedSplitConfigBranches::default());
+            }
+            // The operator's answer says what is wrong with the request (an unknown id,
+            // a config conflict) in its own words; it is shown as it is, not inside kube's
+            // wrapping of the response.
+            (Err(kube::Error::Api(response)), Some(_)) => {
+                return Err(OperatorApiError::SplitConfigDbBranches(response.message));
+            }
+            (Err(error), Some(_)) => {
+                return Err(OperatorApiError::SplitConfigDbBranches(error.to_string()));
+            }
+        };
 
         for warning in &response.warnings {
             progress.warning(warning);
