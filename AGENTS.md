@@ -63,6 +63,8 @@ cargo xtask test-ut
 cargo xtask test-ut -- resolve_url_happy_path -- --nocapture
 ```
 
+Never write unit tests unless explicitly asked. Run the existing tests to verify a change.
+
 ### Styling
 
 ```bash

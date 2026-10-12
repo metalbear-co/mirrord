@@ -1,11 +1,12 @@
-use std::{env, io::IsTerminal, path::Path, process::Command};
+use std::{env, io::IsTerminal, path::Path};
 
 use anyhow::{Context, Result, bail};
+use mirrord_command::resolve_command;
 
 /// Runs a command inside the CI runner image, which carries every toolchain the suites need and
 /// stages the prebuilt test apps into the checkout on start.
 pub fn run(image: String, command: Vec<String>) -> Result<()> {
-    let mut docker = Command::new("docker");
+    let mut docker = resolve_command("docker");
 
     docker.args(["run", "--rm", "-i"]);
 

@@ -25,7 +25,7 @@ use tracing::Level;
 
 use crate::{
     context::Context,
-    helpers::{centered, ellipsize},
+    helpers::{centered, ellipsize, wrap},
     screens::Screen,
     theme,
 };
@@ -265,7 +265,7 @@ impl QueuesScreen {
         let [text_area, scrollbar_area] =
             Layout::horizontal([Constraint::Fill(1), Constraint::Length(1)]).areas(area);
 
-        let lines = details_lines(split);
+        let lines = details_lines(split, text_area.width.into());
         let max_scroll =
             u16::try_from(lines.len().saturating_sub(text_area.height.into())).unwrap_or(u16::MAX);
         // The details shrink as the split progresses, so the scroll offset can
@@ -702,6 +702,9 @@ const COLUMN_SPACING: u16 = 1;
 /// Width of the label column of the details view, indentation included.
 const LABEL_WIDTH: usize = 20;
 
+/// Indentation of a target pod's reason under the pod's line in the details view.
+const REASON_INDENT: usize = 4;
+
 /// Builds one `<label> <value>` line of the details view.
 fn field(indent: usize, label: &str, value: impl Into<String>, style: Style) -> Line<'static> {
     let label = format!("{blank:indent$}{label}", blank = "");
@@ -727,8 +730,8 @@ fn phase_style(phase: Option<&str>) -> Style {
     }
 }
 
-/// Builds every line of the details view of the given split.
-fn details_lines(split: &QueueSplit) -> Vec<Line<'static>> {
+/// Builds every line of the details view of the given split, `width` columns wide.
+fn details_lines(split: &QueueSplit, width: usize) -> Vec<Line<'static>> {
     let spec = &split.spec;
     let status = split.status.as_ref();
     let phase = status.map(|status| status.phase.as_str());
@@ -902,6 +905,18 @@ fn details_lines(split: &QueueSplit) -> Vec<Line<'static>> {
             Span::raw(format!("  {:<width$} ", pod.name, width = LABEL_WIDTH - 2)),
             Span::styled(state, style),
         ]));
+        if let Some(reason) = &pod.reason {
+            lines.extend(
+                wrap(reason, width.saturating_sub(REASON_INDENT))
+                    .into_iter()
+                    .map(|line| {
+                        Line::styled(
+                            format!("{blank:REASON_INDENT$}{line}", blank = ""),
+                            theme::muted(),
+                        )
+                    }),
+            );
+        }
     }
 
     lines

@@ -17,87 +17,81 @@
         system:
         let
           pkgs = inputs.nixpkgs.legacyPackages.${system};
-
-          rustToolchain =
-            let
-              fenix = inputs.fenix.packages.${system};
-
-              toolchainName = {
-                name = (lib.importTOML ./rust-toolchain.toml).toolchain.channel;
-                sha256 = "sha256-Ki4L7dIE4vXNJE2vTI+REJQ/cYSehBASKPocAFeDkQk=";
-              };
-
-              toolchain = fenix.fromToolchainName toolchainName;
-
-              components = toolchain.withComponents [
-                "cargo"
-                "clippy"
-                "rust-src"
-                "rustc"
-                "rustfmt"
-              ];
-
-              # Getting rust-analyzer from nixpkgs allows us to update it without updating the toolchain
-              rust-analyzer = pkgs.rust-analyzer.override {
-                rustSrc = "${toolchain.rust-src}/lib/rustlib/src/rust/library";
-              };
-            in
-            # On darwin we need both x86 and arm toolchains in order to compile universal binaries
-            # as well as a linux toolchain in order to work on the agent, which is linux-only
-            if pkgs.stdenv.hostPlatform.isDarwin then
-              let
-                crossComponents =
-                  map
-                    (
-                      target:
-                      (fenix.targets.${target}.fromToolchainName toolchainName).withComponents [
-                        # Fewer components are required for the cross-compilation toolchains because we don't need IDE functionality
-                        "rustc"
-                        "rust-src"
-                      ]
-                    )
-                    [
-                      "x86_64-apple-darwin"
-                      "x86_64-unknown-linux-gnu"
-                    ];
-              in
-              {
-                components = fenix.combine ([ components ] ++ crossComponents);
-                inherit rust-analyzer;
-              }
-            else
-              {
-                inherit components rust-analyzer;
-              };
         in
         {
-          default = pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
-            packages = with pkgs; [
-              # Toolchain
-              rustToolchain.components
-              rustToolchain.rust-analyzer
-              rustPlatform.bindgenHook
-              protobuf # Required by `containerd-client`
+          default = pkgs.mkShell {
+            packages =
+              with pkgs;
+              let
+                # Packages required to build the rust workspace
+                rustPackages =
+                  let
+                    rust-toolchain =
+                      let
+                        fenix = inputs.fenix.packages.${system};
 
-              # Frontends
-              nodejs
-              pnpm
+                        toolchainName = {
+                          name = "nightly-2026-08-13";
+                          sha256 = "sha256-Ki4L7dIE4vXNJE2vTI+REJQ/cYSehBASKPocAFeDkQk=";
+                        };
 
-              # Integration tests
-              cargo-nextest
-              go
-              (python3.withPackages (
-                pypkgs: with pypkgs; [
-                  fastapi
-                  flask
-                  uvicorn
-                ]
-              ))
+                        components = with fenix.fromToolchainName toolchainName; [
+                          cargo
+                          clippy
+                          rust-src
+                          rustc
+                          rustfmt
+                        ];
 
-              # CI stuff
-              python3Packages.towncrier
-              cargo-deny
-            ];
+                        # On darwin we need the standard library for x86 too in order to compile universal binaries,
+                        # as well as the one for linux in order to work on the agent, which is linux-only
+                        crossComponents =
+                          let
+                            crossTargets = lib.optionals stdenv.hostPlatform.isDarwin [
+                              "x86_64-apple-darwin"
+                              "x86_64-unknown-linux-gnu"
+                            ];
+                          in
+                          lib.map (target: (fenix.targets.${target}.fromToolchainName toolchainName).rust-std) crossTargets;
+                      in
+                      fenix.combine (components ++ crossComponents);
+                  in
+                  [
+                    rust-toolchain
+                    # The wrapper points `RUST_SRC_PATH` to nixpkgs' rust toolchain, but we use a custom toolchain,
+                    # so let rust-analyzer find out where it is on its own with `rustc --print sysroot`.
+                    rust-analyzer-unwrapped
+                    rustPlatform.bindgenHook
+                    # Required to build `containerd-client`
+                    protobuf
+                  ];
+
+                # Packages required to build the frontends
+                uiPackages = [
+                  nodejs
+                  pnpm
+                ];
+
+                # Packages to run tests locally
+                testsPackages = [
+                  cargo-nextest
+                  go
+                  (python3.withPackages (
+                    pypkgs: with pypkgs; [
+                      fastapi
+                      flask
+                      uvicorn
+                    ]
+                  ))
+                ];
+
+                # Miscellaneous packages to run CI checks locally
+                miscPackages = [
+                  cargo-deny
+                  python3Packages.towncrier
+                ];
+              in
+              rustPackages ++ uiPackages ++ testsPackages ++ miscPackages;
 
             env =
               with pkgs;

@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     iter,
     time::Duration,
 };
@@ -553,7 +553,7 @@ impl DatabaseBranchParams {
         let mut mongodb = HashMap::new();
         let mut mysql = HashMap::new();
         let mut pg = HashMap::new();
-        for branch_db_config in config.0.iter() {
+        for branch_db_config in config.iter() {
             match branch_db_config {
                 DatabaseBranchConfig::Mongodb(mongodb_config) => {
                     let id = if let Some(id) = mongodb_config.base.id.clone() {
@@ -990,7 +990,7 @@ impl MongodbBranchParams {
 /// Returns a label selector fragment that scopes queries to branches owned by the current
 /// operator isolation context. When `OPERATOR_ISOLATION_MARKER` is set, matches branches
 /// with that marker; otherwise matches branches without any ownership label.
-fn ownership_label_selector() -> String {
+pub(crate) fn ownership_label_selector() -> String {
     match std::env::var(OPERATOR_ISOLATION_MARKER_ENV) {
         Ok(marker) => format!("{}={}", OPERATOR_OWNERSHIP_LABEL, marker),
         Err(_) => format!("!{}", OPERATOR_OWNERSHIP_LABEL),
@@ -1412,12 +1412,15 @@ impl UnifiedDatabaseBranchParams {
     /// Create unified branch database parameters from user config.
     ///
     /// When no branch `id` is provided, the session key is used as the branch ID so that
-    /// sessions sharing the same key automatically reuse the same branch.
+    /// sessions sharing the same key automatically reuse the same branch. `shared_ids` are the
+    /// ids of entries resolved from a `MirrordSplitConfig`, whose branch is shared by every
+    /// service under the key on the id alone.
     pub fn new<P: Progress>(
         config: &mut DatabaseBranchesConfig,
         target: &Target,
         target_namespace: &str,
         session_key: &str,
+        shared_ids: &HashSet<String>,
         progress: &P,
     ) -> Result<Self, OperatorApiError> {
         let mut target_with_container = target.clone();
@@ -1439,7 +1442,13 @@ impl UnifiedDatabaseBranchParams {
         let mut branches = HashMap::new();
         // Where each branch was configured, and whether that entry set an `id`.
         let mut entries = HashMap::new();
-        for (position, branch_db_config) in config.0.iter_mut().enumerate() {
+        // An unresolved `"*"` / ids request never gets here: `prepare_branch_dbs` resolves it
+        // into inline entries first.
+        let inline = config
+            .inline_mut()
+            .map(Vec::as_mut_slice)
+            .unwrap_or_default();
+        for (position, branch_db_config) in inline.iter_mut().enumerate() {
             // Local Redis branches are run by the CLI itself and never reach the operator,
             // and they are the only branches without the shared base.
             let Some(base) = branch_db_config.base() else {
@@ -1500,6 +1509,7 @@ impl UnifiedDatabaseBranchParams {
                     &session_target,
                     literal_values,
                     migrations,
+                    shared_ids.contains(id.as_ref()),
                 ),
                 DatabaseBranchConfig::Mysql(c) => UnifiedBranchParams::from_mysql(
                     id.as_ref(),
@@ -1830,6 +1840,9 @@ pub struct UnifiedBranchParams {
 }
 
 impl UnifiedBranchParams {
+    /// `shared` is a branch resolved from a `MirrordSplitConfig` entry: every service under the
+    /// key lands on it by id alone, whatever additional databases its own entry lists.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_pg(
         id: &str,
         config: &PgBranchConfig,
@@ -1837,13 +1850,18 @@ impl UnifiedBranchParams {
         session_target: &KubeResourceTarget,
         literal_values: HashMap<String, String>,
         migrations: Option<MigrationsSpec>,
+        shared: bool,
     ) -> Self {
         let additional_databases = config
             .additional_databases
             .iter()
             .map(convert_additional_database)
             .collect::<Vec<_>>();
-        let reuse_key = pg_reuse_key(id, &additional_databases);
+        let reuse_key = if shared {
+            id.to_owned()
+        } else {
+            pg_reuse_key(id, &additional_databases)
+        };
         let deterministic_name = deterministic_branch_name("pg", target_namespace, &reuse_key);
         let connection_source = convert_connection_source(&config.database.connection);
         let iam_auth: Option<CrdIamAuthConfig> = config.iam_auth.as_ref().map(Into::into);
@@ -2508,7 +2526,7 @@ impl UnifiedBranchParams {
 #[cfg(test)]
 mod test {
     use std::{
-        collections::{BTreeMap, HashMap},
+        collections::{BTreeMap, HashMap, HashSet},
         time::Duration,
     };
 
@@ -2557,6 +2575,7 @@ mod test {
             &target,
             "default",
             "session-key",
+            &HashSet::new(),
             &NullProgress,
         )
     }
@@ -2600,6 +2619,7 @@ mod test {
             migrations: None,
             copy: None,
             conditions: Vec::new(),
+            source: None,
         });
         let branch = BranchDatabase {
             metadata: ObjectMeta {

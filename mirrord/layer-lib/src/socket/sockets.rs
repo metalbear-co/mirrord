@@ -122,11 +122,12 @@ pub fn socket_kind_from_type(socket_type: i32) -> Result<SocketKind, String> {
 ///
 /// This is used when a descriptor is no longer tracked in [`SOCKETS`] (for example,
 /// after the bind detour decided the socket was uninteresting and removed it), but we still
-/// need its domain/type/protocol to proceed. Callers typically fall back to this helper in a
-/// `match` similar to:
+/// need its domain/type/protocol to proceed. Remove the socket from [`SOCKETS`] in a separate
+/// statement before you call this helper, so that the lock is released before its system calls:
 ///
 /// ```ignore
-/// let user_socket = match SOCKETS.lock()?.remove(&sockfd) {
+/// let removed = SOCKETS.lock()?.remove(&sockfd);
+/// let user_socket = match removed {
 ///     Some(socket) => socket,
 ///     None => reconstruct_user_socket(sockfd)?,
 /// };

@@ -14,6 +14,8 @@ use drain::Watch;
 use fs4::tokio::AsyncFileExt;
 use mirrord_analytics::NullReporter;
 use mirrord_auth::credentials::CiApiKey;
+#[cfg(not(target_os = "windows"))]
+use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
     LayerConfig, ci::CiConfig, config::ConfigContext, container::ContainerRuntime,
 };
@@ -40,10 +42,13 @@ pub(crate) mod error;
 pub(super) mod start;
 pub(crate) mod stop;
 
-/// Env var that the user has to set in order to execute `mirrord ci start` and `mirrord ci stop`
-/// commands when the operator is available.
+/// Optional CI credentials for operator-backed `mirrord ci start` and `mirrord ci container`.
 ///
-/// Should be set in their CI to the value they got from [`generate_ci_api_key`].
+/// Free operators that advertise keyless CI accept automatic ordinary credentials when this is
+/// unset. Other installations require a key from [`generate_ci_api_key`]. The operator enforces its
+/// license policy.
+/// Without the operator, no API key is required. Local `mirrord ci stop` uses saved process
+/// state and requires no operator credentials.
 pub(crate) const MIRRORD_CI_API_KEY: &str = "MIRRORD_CI_API_KEY";
 
 /// Alias for mirrord-for-ci results.
@@ -287,13 +292,17 @@ fn spawn_background_user_command(
     Ok(child)
 }
 
-/// mirrord-for-ci operations require a [`CiApiKey`] to run.
+/// Retains explicit CI metadata independently of the optional [`CiApiKey`].
+///
+/// Operator-backed sessions use automatic ordinary credentials when the key is absent and the
+/// operator advertises keyless CI, so paid or older installations reject missing keys before
+/// credential issuance or session preparation. The operator also enforces its license policy.
 ///
 /// `mirrord ci start` stores the process group of the background user command and the pid of our
 /// intproxy so that we can stop these processes on `mirrord ci stop`.
 #[derive(Debug)]
 pub(super) struct MirrordCi {
-    /// Used as the `Credentials` (certificate) for the `mirrord ci` operations.
+    /// Overrides automatic ordinary credentials for operator-backed CI sessions.
     ci_api_key: Option<CiApiKey>,
 
     /// Arguments for the mirrord for CI operations that involve starting something:
@@ -387,7 +396,7 @@ impl MirrordCi {
         )
         .await?;
 
-        let mut command = Command::new(binary_path);
+        let mut command = resolve_tokio_command(binary_path);
         command
             .args(binary_args.iter().skip(1))
             .envs(env_vars)
@@ -492,7 +501,7 @@ impl MirrordCi {
         // to delete them with `mirrord ci stop` even if the following code fails.
         mirrord_ci_store.write_to_file().await?;
 
-        let mut command = Command::new(binary_path);
+        let mut command = resolve_tokio_command(binary_path);
         command.args(binary_args).kill_on_drop(false);
 
         // If `--foreground` don't write stdio to file.
@@ -630,13 +639,13 @@ mod tests {
         collections::HashSet, os::unix::process::ExitStatusExt, process::Stdio, time::Duration,
     };
 
+    use mirrord_command::resolve_tokio_command;
     use nix::{
         sys::signal::{Signal, killpg},
         unistd::{Pid, getpgid},
     };
     use tokio::{
         io::{AsyncBufReadExt, BufReader},
-        process::Command,
         time::timeout,
     };
 
@@ -717,7 +726,7 @@ mod tests {
     #[tokio::test]
     async fn ci_process_group_background_spawn_records_leader_and_owns_descendant() {
         let mut store = MirrordCiStore::default();
-        let mut command = Command::new("sh");
+        let mut command = resolve_tokio_command("sh");
         command
             .args(["-c", "sh -c 'sleep 30 & echo $!; wait' & wait"])
             .stdout(Stdio::piped())

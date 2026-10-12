@@ -9,11 +9,12 @@ use std::{
     sync::Arc,
 };
 
+use mirrord_command::resolve_tokio_command;
 use mirrord_config::MIRRORD_TEST_INTPROXY_ADDR;
 pub use mirrord_layer_tests::intproxy::TestIntProxy;
 pub use mirrord_test_utils::{TestProcess, run_command::run_exec};
 use rstest::fixture;
-use tokio::{io::AsyncWriteExt, net::TcpListener, process::Command};
+use tokio::{io::AsyncWriteExt, net::TcpListener};
 use tracing::subscriber::DefaultGuard;
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
@@ -217,7 +218,7 @@ impl Application {
             "python3"
         };
 
-        let mut python = Command::new(python_exec)
+        let mut python = resolve_tokio_command(python_exec)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -450,15 +451,13 @@ impl Application {
                 String::from("--app-dir=tests/apps/"),
                 String::from("app_fastapi:app"),
             ],
-            Application::PythonIssue864 => {
-                vec![
-                    String::from("--reload"),
-                    String::from("--port=9999"),
-                    String::from("--host=0.0.0.0"),
-                    String::from("--app-dir=tests/apps/"),
-                    String::from("shared_sockets:app"),
-                ]
-            }
+            Application::PythonIssue864 => vec![
+                "--reload".to_owned(),
+                "--port=18064".to_owned(),
+                "--host=0.0.0.0".to_owned(),
+                "--app-dir=tests/apps/".to_owned(),
+                "shared_sockets:app".to_owned(),
+            ],
             Application::NodeHTTP => {
                 app_path.push("app_node.js");
                 vec![app_path.to_string_lossy().to_string()]
@@ -608,8 +607,11 @@ impl Application {
             | Application::RustIssue1054
             | Application::PythonFlaskHTTP
             | Application::DupListen => 80,
-            // mapped from 9999 in `configs/port_mapping.json`
-            Application::PythonFastApiHTTP | Application::PythonIssue864 => 1234,
+            // Mapped from 9999 in `configs/port_mapping.json`.
+            Application::PythonFastApiHTTP => 1234,
+            // A separate local port prevents reload startup from racing other test listeners.
+            // Mapped from 18064 in `configs/port_mapping_shared_sockets.toml`.
+            Application::PythonIssue864 => 1234,
             Application::RustIssue1123 => 41222,
             Application::PythonListen => 21232,
             Application::PythonDontLoad

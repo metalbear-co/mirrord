@@ -7,7 +7,13 @@ use crate::logger::SipLoggerGuard;
 /// If an executed binary is located in one of these, we try to find it in the bundle.
 pub const BUNDLED_DIRS: [&str; 4] = ["/bin", "/sbin", "/usr/bin", "/usr/sbin"];
 
-/// Fins a non-protected version of the given binary in the pre-built SIP util bundle.
+pub(super) fn lookup_suffix(binary: &Path) -> Option<&Path> {
+    BUNDLED_DIRS
+        .into_iter()
+        .find_map(|dir| binary.strip_prefix(dir).ok())
+}
+
+/// Finds a non-protected version of the given binary in the pre-built SIP util bundle.
 ///
 /// The bundle ships non-protected binaries commonly found in [`BUNDLED_DIRS`].
 /// If the binary to be executed is located in one of these, we try to find it in the bundle.
@@ -26,9 +32,7 @@ pub fn find_in_bundle(
     bundle: &Path,
     logger: &mut SipLoggerGuard<'_>,
 ) -> Option<PathBuf> {
-    let mut binary_suffix = BUNDLED_DIRS
-        .into_iter()
-        .find_map(|dir| binary.strip_prefix(dir).ok())?;
+    let mut binary_suffix = lookup_suffix(binary)?;
     if binary_suffix == "sh" {
         binary_suffix = Path::new("bash");
     }

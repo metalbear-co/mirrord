@@ -55,7 +55,7 @@ This skill helps AI agents:
 
 ## Quick example
 
-```json
+```json mirrord
 {
   "feature": {
     "db_branches": [
@@ -89,7 +89,7 @@ mirrord db-branches connections
 ## References
 
 This skill uses local reference files:
-- `references/db-branches-schema.json` — JSON Schema for `db_branches`, extracted from the authoritative mirrord schema
+- [`../mirrord-config/references/schema.json`](../mirrord-config/references/schema.json): mirrord JSON Schema, synced from upstream; `db_branches` lives under `feature`. The fence tag check validates config examples against it; read it only as a last resort, when neither `validate_config` (mirrord MCP server) nor `mirrord verify-config` is available
 - `references/troubleshooting.md` — common issues and solutions
 
 ## Learn more

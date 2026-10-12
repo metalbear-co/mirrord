@@ -79,7 +79,7 @@ use std::{
         unix::process::parent_id,
     },
     panic,
-    sync::{Arc, MutexGuard, OnceLock, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError},
     time::Duration,
 };
 
@@ -123,6 +123,27 @@ pub(crate) use crate::macros::*;
 use crate::{
     common::make_proxy_request_with_response, load::LoadType, socket::hooks::MANAGED_ADDRINFO,
 };
+
+#[cfg(target_os = "macos")]
+fn collect_sip_x64_fallback() {
+    let Some(binary_path) = std::env::var_os(mirrord_sip::MIRRORD_SIP_X64_FALLBACK_ENV) else {
+        return;
+    };
+    // SAFETY: the layer constructor runs before user threads start, env mutation won't cause races.
+    unsafe { std::env::remove_var(mirrord_sip::MIRRORD_SIP_X64_FALLBACK_ENV) };
+
+    let _detour_guard = DetourGuard::new();
+    let result = mirrord_sip::rosetta::current_macos_version().and_then(|os_version| {
+        mirrord_sip::rosetta::record_rosetta_fallback(
+            binary_path.to_string_lossy().into_owned(),
+            os_version,
+        )
+    });
+
+    if let Err(error) = result {
+        tracing::warn!(%error, "Failed to collect the SIP x86_64 fallback");
+    }
+}
 
 /// Silences `deny(unused_crate_dependencies)`.
 ///
@@ -239,7 +260,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
                 load_type: Some(load_type),
             });
 
-        if let Ok(Some(binary)) = mirrord_sip::sip_patch(
+        if let Ok(Some(result)) = mirrord_sip::sip_patch(
             path,
             mirrord_sip::SipPatchOptions {
                 patch: &patch_binaries,
@@ -251,7 +272,17 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
             },
             log_info,
         ) {
-            let err = exec::execvp(binary, args);
+            if let Some(fallback) = result.x64_fallback.as_ref() {
+                // SAFETY: the layer constructor runs before user threads start, so environment
+                // mutation cannot race another thread.
+                unsafe {
+                    std::env::set_var(
+                        mirrord_sip::MIRRORD_SIP_X64_FALLBACK_ENV,
+                        fallback.as_os_str(),
+                    )
+                };
+            }
+            let err = exec::execvp(result.path, args);
             tracing::error!("Couldn't execute {:?}", err);
             return Err(LayerError::ExecFailed(err));
         }
@@ -298,6 +329,9 @@ fn load_only_layer_start(config: &LayerConfig) {
     if config.experimental.guard_std_fds {
         guard_std_fds();
     }
+
+    #[cfg(target_os = "macos")]
+    collect_sip_x64_fallback();
 
     // Check if we're in trace only mode (no agent)
     if is_trace_only_mode() {
@@ -399,6 +433,9 @@ fn layer_start(config: LayerConfig) {
     register_atfork_handlers();
 
     let _detour_guard = DetourGuard::new();
+
+    #[cfg(target_os = "macos")]
+    collect_sip_x64_fallback();
 
     // remove resolved encoded config from env vars when logging them
     let env_vars_print_only: Vec<_> = std::env::vars()
@@ -690,18 +727,63 @@ fn enable_hooks(state: &LayerSetup) {
     }
 }
 
+/// Keeps a `fork` out of the middle of a close.
+///
+/// [`close_layer_fd`], `closedir` of a remote directory, and the calls that put a new fd on top of
+/// a remote file (`dup2`, `dup3`, and `dup`, `fcntl(F_DUPFD)`, `open` or `openat` on an fd number
+/// that still has an entry) hold this lock from the change of [`SOCKETS`], [`OPEN_FILES`] or
+/// `OPEN_DIRS` until they have sent the close requests to the intproxy. [`atfork_prepare`] takes it
+/// too. Without it, a `fork` on another thread can happen after the layer removed the fd but before
+/// it sent the close request. When the child connects, the intproxy copies the port subscriptions,
+/// remote files and remote directories of the parent to the child. The child does not have the fd,
+/// so nothing closes its copy until the child exits.
+///
+/// `listen` takes it for a moment before it sends `PortSubscribe`, so that the subscription of a
+/// new listener does not reach the intproxy before the `PortUnsubscribe` of an earlier listener on
+/// the same address.
+///
+/// This lock is separate from [`SOCKETS`] and [`OPEN_FILES`], so that the close code can release
+/// these locks before its I/O, and other hooks do not wait for that I/O. Also, [`close_layer_fd`]
+/// takes it only for an fd that is in one of these maps, so a close of another fd does not wait.
+pub(crate) static CLOSE_FORK_LOCK: Mutex<()> = Mutex::new(());
+
 /// Shared code for closing `fd` in our data structures.
 ///
 /// Callers should call their respective close before calling this.
 ///
 /// ## Details
 ///
-/// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
+/// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`], and sends the close requests
+/// to the intproxy, while it holds [`CLOSE_FORK_LOCK`]. It does nothing for an fd that is in
+/// neither map.
 /// **DON'T ADD LOGS HERE SINCE CALLER MIGHT CLOSE STDOUT/STDERR CAUSING THIS TO CRASH**
 #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()))]
 pub(crate) fn close_layer_fd(fd: c_int) {
-    // Remove from sockets.
-    match SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) {
+    // Most fds are not in the maps, so look first, and only take the lock for an fd that is. If
+    // another thread adds `fd` to a map after this check, the entry is for its own new resource,
+    // and this close must keep it.
+    let in_sockets = SOCKETS
+        .lock()
+        .expect("SOCKETS lock failed")
+        .contains_key(&fd);
+    let in_open_files = setup().fs_config().is_active()
+        && OPEN_FILES
+            .lock()
+            .expect("OPEN_FILES lock failed")
+            .contains_key(&fd);
+    if !in_sockets && !in_open_files {
+        return;
+    }
+
+    let _fork_guard = CLOSE_FORK_LOCK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+
+    // Remove from sockets in a separate statement, so that the `SOCKETS` guard is dropped before
+    // the requests to the intproxy below: `UserSocket::close`, and the drop of a `RemoteFile`. A
+    // guard in the `match` scrutinee stays alive until the end of the `match`.
+    let removed = SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd);
+    match removed {
         Some(socket) => {
             // Closed file is a socket, so if it's already bound to a port - notify agent to stop
             // mirroring/stealing that port.
@@ -725,10 +807,12 @@ pub(crate) fn close_layer_fd(fd: c_int) {
         }
         _ => {
             if setup().fs_config().is_active() {
-                OPEN_FILES
+                // Dropped after the `OPEN_FILES` guard, see [`OPEN_FILES`].
+                let removed_file = OPEN_FILES
                     .lock()
                     .expect("OPEN_FILES lock failed")
                     .remove(&fd);
+                drop(removed_file);
             }
         }
     }
@@ -755,6 +839,7 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 
 /// The layer's global mutexes, locked by [`atfork_prepare`] and released by [`atfork_release`].
 struct ForkGuards {
+    _close: MutexGuard<'static, ()>,
     _sockets: MutexGuard<'static, HashMap<RawFd, Arc<UserSocket>>>,
     _open_files: MutexGuard<'static, HashMap<RawFd, Arc<RemoteFile>>>,
     _addr_info: MutexGuard<'static, HashSet<usize>>,
@@ -788,7 +873,11 @@ thread_local! {
 /// user app starts so our handler runs after user apps' handlers.
 extern "C" fn atfork_prepare() {
     // Poisoning doesn't matter here, we want the lock and not the data.
+    // `CLOSE_FORK_LOCK` comes first, because the code that takes it locks the maps after it.
     let guards = ForkGuards {
+        _close: CLOSE_FORK_LOCK
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner),
         _sockets: SOCKETS.lock().unwrap_or_else(PoisonError::into_inner),
         _open_files: OPEN_FILES.lock().unwrap_or_else(PoisonError::into_inner),
         _addr_info: MANAGED_ADDRINFO

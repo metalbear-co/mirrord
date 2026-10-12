@@ -147,6 +147,12 @@ Also include instructions for reviewers:
 
 When your frontend calls a backend, and the backend calls other services (databases, APIs, queues), the preview header must be propagated so downstream traffic is routed correctly. In many stacks, the best first step is to enable W3C context propagation in the observability or tracing library you already use, since most modern frameworks and OpenTelemetry-based integrations can forward `baggage` and `tracestate` automatically.
 
+{% hint style="info" %}
+**Let your AI agent set this up.** The [`mirrord-header-propagation`](https://github.com/metalbear-co/skills/tree/main/skills/mirrord-header-propagation) skill finds every HTTP, gRPC, and queue flow in your services and enables `baggage` propagation in the tracing library you already use (OpenTelemetry, Datadog). If you don't have one, it adds a small propagation layer. It ends with a report of any hop that still drops the header, and it only forwards `baggage` to internal services, never to third-party APIs. [Install the mirrord skills](../using-mirrord-with-ai/ai-skills-plugin.md), then ask your agent to *"propagate the mirrord session header across my services."*
+
+To set it up by hand, follow the steps below.
+{% endhint %}
+
 ### 1. Configure the Header Filter in mirrord
 
 In your `mirrord-preview.json`, set the HTTP filter to match on a header of your choice so only requests with the matching value hit the preview pod. The example below uses the W3C `baggage` header, but any header works:
@@ -255,4 +261,4 @@ The `--force` flag makes repeat runs with the same key replace the existing prev
 | The preview fails or times out and the reason is in the application, not mirrord | `preview start` prints the last output from the preview pods alongside the error, which usually names the cause — a missing config file, a failed connection, a stack trace. If the job's log has scrolled away, `mirrord preview logs --key <key>` prints the same output for as long as the failed session is retained. |
 | Preview pod never shows `Ready` | Intentional — mirrord inserts a readiness gate that never passes, so the target's Service doesn't route unfiltered traffic to the preview pod. See [Readiness](preview-environments.md#readiness). Use `mirrord preview status` to check the session's actual state. |
 | Preview worked, then disappeared before the PR closed | The session's TTL elapsed. Re-run the workflow to recreate it, and consider a longer `ttl_mins`. |
-| Requests with the header still hit the regular deployment | The header value must match the running session's key exactly — check `mirrord preview status` and make sure the config's `header_filter` uses the `{{ key }}` template rather than a hardcoded key. For requests made by backends (not the browser), confirm the header is [propagated](#header-propagation-for-backend-testing). |
+| Requests with the header still hit the regular deployment | The header value must match the running session's key exactly — check `mirrord preview status` and make sure the config's `header_filter` uses the `{{ key }}` template rather than a hardcoded key. For requests made by backends (not the browser), confirm the header is [propagated](#header-propagation-for-backend-testing). The [`mirrord-header-propagation`](https://github.com/metalbear-co/skills/tree/main/skills/mirrord-header-propagation) skill reports which hops drop it. |

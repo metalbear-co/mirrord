@@ -57,9 +57,57 @@ pub fn ellipsize(text: &str, max: usize) -> String {
     }
 }
 
+/// Splits `text` into lines at most `width` characters long, breaking between words where it can.
+pub fn wrap(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut line = String::new();
+
+    for word in text.split_whitespace() {
+        let mut word = word;
+
+        loop {
+            let line_len = line.chars().count();
+            let separator = usize::from(line_len > 0);
+
+            if line_len + separator + word.chars().count() <= width {
+                if separator > 0 {
+                    line.push(' ');
+                }
+                line.push_str(word);
+
+                break;
+            }
+
+            if line_len > 0 {
+                lines.push(std::mem::take(&mut line));
+
+                continue;
+            }
+
+            let split_at = word
+                .char_indices()
+                .nth(width)
+                .map_or(word.len(), |(index, _)| index);
+            lines.push(word[..split_at].to_owned());
+            word = &word[split_at..];
+
+            if word.is_empty() {
+                break;
+            }
+        }
+    }
+
+    if !line.is_empty() {
+        lines.push(line);
+    }
+
+    lines
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ellipsize;
+    use super::{ellipsize, wrap};
 
     #[test]
     fn ellipsize_clamps_and_marks_cuts() {
@@ -68,5 +116,15 @@ mod tests {
         assert_eq!(ellipsize("a-very-long-deployment-name", 10), "a-very-lo…");
         assert_eq!(ellipsize("anything", 0), "");
         assert_eq!(ellipsize("ab", 1), "…");
+    }
+
+    #[test]
+    fn wrap_breaks_between_words_and_splits_long_ones() {
+        assert_eq!(
+            wrap("container `app` is waiting: ContainerCreating", 20),
+            ["container `app` is", "waiting:", "ContainerCreating"]
+        );
+        assert_eq!(wrap("abcdefgh", 3), ["abc", "def", "gh"]);
+        assert!(wrap("", 10).is_empty());
     }
 }

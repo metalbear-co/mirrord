@@ -5,21 +5,18 @@ use mirrord_agent_env::envs;
 use nix::unistd::getgid;
 use tracing::warn;
 
-use crate::{IPTables, Redirect, chain::IPTableChain, error::IPTablesResult};
+use crate::{IPTablesBackend, Redirect, chain::IPTableChain, error::IPTablesResult};
 
-pub struct OutputRedirect<const USE_INSERT: bool, IPT: IPTables> {
-    managed: IPTableChain<IPT>,
+pub struct OutputRedirect<const USE_INSERT: bool> {
+    managed: IPTableChain,
 }
 
-impl<const USE_INSERT: bool, IPT> OutputRedirect<USE_INSERT, IPT>
-where
-    IPT: IPTables,
-{
+impl<const USE_INSERT: bool> OutputRedirect<USE_INSERT> {
     const ENTRYPOINT: &'static str = "OUTPUT";
 
     #[tracing::instrument(level = tracing::Level::TRACE, skip(ipt), err)]
     pub fn create(
-        ipt: Arc<IPT>,
+        ipt: Arc<IPTablesBackend>,
         chain_name: String,
         pod_ips: Option<&str>,
     ) -> IPTablesResult<Self> {
@@ -59,7 +56,7 @@ where
         Ok(OutputRedirect { managed })
     }
 
-    pub fn load(ipt: Arc<IPT>, chain_name: String) -> IPTablesResult<Self> {
+    pub fn load(ipt: Arc<IPTablesBackend>, chain_name: String) -> IPTablesResult<Self> {
         let managed = IPTableChain::load(ipt, chain_name)?;
 
         Ok(OutputRedirect { managed })
@@ -69,10 +66,7 @@ where
 /// This wrapper adds a new rule to the NAT OUTPUT chain to redirect "localhost" traffic as well
 /// Note: OUTPUT chain is only traversed for packets produced by local applications
 #[async_trait]
-impl<const USE_INSERT: bool, IPT> Redirect for OutputRedirect<USE_INSERT, IPT>
-where
-    IPT: IPTables + Send + Sync,
-{
+impl<const USE_INSERT: bool> Redirect for OutputRedirect<USE_INSERT> {
     async fn mount_entrypoint(&self) -> IPTablesResult<()> {
         if USE_INSERT {
             self.managed.inner().insert_rule(

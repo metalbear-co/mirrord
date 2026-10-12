@@ -12,7 +12,7 @@ use std::{
     },
     path::PathBuf,
     ptr::{self, copy_nonoverlapping},
-    sync::{Arc, OnceLock},
+    sync::{Arc, OnceLock, PoisonError},
 };
 
 use libc::{AF_UNIX, c_int, c_void, hostent, sockaddr, socklen_t};
@@ -50,7 +50,10 @@ use tracing::Level;
 use tracing::{error, trace, warn};
 
 use super::{hooks::*, *};
-use crate::file::{self, OPEN_FILES};
+use crate::{
+    CLOSE_FORK_LOCK,
+    file::{self, OPEN_FILES},
+};
 
 /// Hostname initialized from the agent with [`gethostname`].
 pub(crate) static HOSTNAME: OnceLock<CString> = OnceLock::new();
@@ -356,6 +359,17 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                 .get_by_left(&requested_address.port())
                 .copied()
                 .unwrap_or_else(|| requested_address.port());
+
+            // A close on another thread can still be sending the `PortUnsubscribe` of an earlier
+            // listener on the same address. The intproxy must get that request first, or it loses
+            // track of the subscription and never removes it. That close holds `CLOSE_FORK_LOCK`
+            // until it has sent its request, so wait for it here. Do not hold the lock during the
+            // request: `fork` and the closes would then wait for the agent.
+            drop(
+                CLOSE_FORK_LOCK
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner),
+            );
 
             make_proxy_request_with_response(PortSubscribe {
                 listening_on: address.into(),
@@ -721,26 +735,44 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
 /// Extra relevant for node on macos.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
-    let mut sockets = SOCKETS.lock()?;
-    if let Some(socket) = sockets.get(&fd).cloned() {
-        sockets.insert(dup_fd as RawFd, socket);
+    // The copy can go on an fd that is still in `OPEN_FILES`: with `dup2` or `dup3` onto a remote
+    // file, or when the layer did not see the close of an earlier fd with the same number. Then the
+    // old `RemoteFile` can be dropped, which sends its close request, and a `fork` must not split
+    // that, see [`CLOSE_FORK_LOCK`].
+    let replaces_remote_file = OPEN_FILES.lock()?.contains_key(&dup_fd);
+    let _fork_guard = replaces_remote_file.then(|| {
+        CLOSE_FORK_LOCK
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    });
 
-        if SWITCH_MAP {
-            OPEN_FILES.lock()?.remove(&dup_fd);
+    // The block gives back the replaced remote file, so that it is dropped after the `SOCKETS` and
+    // `OPEN_FILES` guards (see [`OPEN_FILES`]).
+    let replaced_file = {
+        let mut sockets = SOCKETS.lock()?;
+        if let Some(socket) = sockets.get(&fd).cloned() {
+            sockets.insert(dup_fd as RawFd, socket);
+
+            if SWITCH_MAP {
+                OPEN_FILES.lock()?.remove(&dup_fd)
+            } else {
+                None
+            }
+        } else {
+            let mut open_files = OPEN_FILES.lock()?;
+            match open_files.get(&fd).cloned() {
+                Some(file) => {
+                    if SWITCH_MAP {
+                        sockets.remove(&dup_fd);
+                    }
+
+                    open_files.insert(dup_fd as RawFd, file)
+                }
+                None => None,
+            }
         }
-
-        return Ok(());
-    }
-
-    let mut open_files = OPEN_FILES.lock()?;
-    if let Some(file) = open_files.get(&fd) {
-        let cloned_file = file.clone();
-        open_files.insert(dup_fd as RawFd, cloned_file);
-
-        if SWITCH_MAP {
-            sockets.remove(&dup_fd);
-        }
-    }
+    };
+    drop(replaced_file);
 
     Ok(())
 }

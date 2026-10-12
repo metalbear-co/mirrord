@@ -19,6 +19,7 @@ workspace = true
 [dependencies]
 mirrord-config = { path = "../config" }
 mirrord-intproxy = { path = "../intproxy" }
+mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec-async"] }
 mirrord-protocol = { path = "../protocol" }
 
 actix-codec.workspace = true
@@ -36,6 +37,7 @@ tracing-subscriber.workspace = true
 
 libc.workspace = true
 mirrord-intproxy = { path = "../intproxy" }
+mirrord-command = { path = "../command", features = ["tokio"] }
 rand.workspace = true
 tracing.workspace = true
 mirrord-test-utils = { path = "../../test-utils" }

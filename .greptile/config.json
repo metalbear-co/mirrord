@@ -1,4 +1,5 @@
 {
+  "effort": "apex",
   "disabledLabels": ["no-greptile"],
   "rules": [
     {

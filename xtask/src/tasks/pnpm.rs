@@ -5,10 +5,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use mirrord_command::resolve_command;
+
 use crate::relative_to_root;
 
 pub fn workspace_command() -> Command {
-    let mut command = Command::new(command_name());
+    let mut command = resolve_command("pnpm");
     command.current_dir(relative_to_root(Path::new(".")));
     command
 }
@@ -25,14 +27,11 @@ pub fn available_with_corepack_warning() -> bool {
         )
     }
 
-    command_succeeds_with_timeout(Command::new(command_name()).arg("--version"), PROBE_TIMEOUT)
+    command_succeeds_with_timeout(resolve_command("pnpm").arg("--version"), PROBE_TIMEOUT)
 }
 
 fn corepack_available() -> bool {
-    command_succeeds_with_timeout(
-        Command::new(corepack_command_name()).arg("--version"),
-        PROBE_TIMEOUT,
-    )
+    command_succeeds_with_timeout(resolve_command("corepack").arg("--version"), PROBE_TIMEOUT)
 }
 
 fn command_succeeds_with_timeout(command: &mut Command, timeout: Duration) -> bool {
@@ -60,24 +59,5 @@ fn command_succeeds_with_timeout(command: &mut Command, timeout: Duration) -> bo
             }
             Err(_) => return false,
         }
-    }
-}
-
-/// Pnpm is installed via `corepack` as a batch script on windows, so `Command::new("pnpm")`
-/// fails - [`std::process::Command`] on windows doesn't apply `PATHEXT` (see
-/// <https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/start>)
-/// and only looks for `pnpm.exe`. Use the `.cmd` shim explicitly there.
-fn command_name() -> &'static str {
-    if cfg!(windows) { "pnpm.cmd" } else { "pnpm" }
-}
-
-/// Corepack itself ships as a batch script on windows (node installs `corepack.cmd`), so the
-/// probe needs the same `.cmd` treatment as [`command_name`] or it always reports corepack as
-/// missing there.
-fn corepack_command_name() -> &'static str {
-    if cfg!(windows) {
-        "corepack.cmd"
-    } else {
-        "corepack"
     }
 }

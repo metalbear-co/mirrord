@@ -139,7 +139,9 @@ pub(crate) unsafe extern "C" fn execve_detour(
     envp: *const *const c_char,
 ) -> c_int {
     unsafe {
-        match patch_sip_for_new_process(path, argv, envp) {
+        let result = patch_sip_for_new_process(path, argv, envp);
+
+        match result {
             Detour::Success((path, argv, envp)) => {
                 match prepare_execve_envp(Detour::Success(envp.clone())) {
                     Detour::Success(envp) => {

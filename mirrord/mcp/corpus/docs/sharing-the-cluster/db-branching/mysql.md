@@ -99,7 +99,7 @@ If both are specified, mirrord ignores the `tables` configuration.
 
 The `dump_args` field lets you customize the arguments passed to `mysqldump`, the tool mirrord uses to copy the source database. It is available in all three copy modes (`empty`, `schema`, and `all`).
 
-By default, mirrord passes no arguments to `mysqldump`, which then runs with its own built-in defaults (the [`--opt`](https://dev.mysql.com/doc/refman/8.4/en/mysqldump.html#option_mysqldump_opt) option group). Arguments listed in `dump_args` are passed to the tool as-is. An empty list (`[]`) removes `mysqldump`'s built-in defaults.
+By default, mirrord passes no arguments to `mysqldump`, which then runs with its own built-in defaults (the [`--opt`](https://dev.mysql.com/doc/refman/8.4/en/mysqldump.html#option_mysqldump_opt) option group). Arguments listed in `dump_args` are passed to the tool as-is and can leave out what the copy mode copies, such as stored routines with `--skip-routines`.
 
 ### Example - single transaction and no table locking
 

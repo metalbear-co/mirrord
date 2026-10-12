@@ -656,6 +656,19 @@ fn intended_branch<'e>(
         return Some(branch);
     }
 
+    // Several alternatives take a list (branch entries, or the ids of entries to take from the
+    // cluster): the one meant is the one that does not reject the items for their type.
+    if error.instance().is_array() {
+        let by_items: Vec<&Vec<ValidationError>> = plausible
+            .into_iter()
+            .filter(|branch| rejects_items(branch, path).not())
+            .collect();
+        return match by_items.as_slice() {
+            [branch] => Some(branch),
+            _ => None,
+        };
+    }
+
     let fields = error.instance().as_object()?.len();
     let mut ranked: Vec<(usize, &Vec<ValidationError>)> = plausible
         .into_iter()
@@ -669,6 +682,30 @@ fn intended_branch<'e>(
         }
         _ => None,
     }
+}
+
+/// Whether an alternative taking the list at `path` rejects its items for their JSON type, like a
+/// list of entry ids (strings) given a list of branch objects: the list was meant for another
+/// alternative. Looks through nested `anyOf`/`oneOf`s at `path`.
+fn rejects_items(branch: &[ValidationError<'_>], path: &Location) -> bool {
+    branch.iter().any(|error| {
+        let location = error.instance_path();
+        if location == path {
+            return match error.kind() {
+                ValidationErrorKind::AnyOf { context }
+                | ValidationErrorKind::OneOfNotValid { context } => context
+                    .iter()
+                    .all(|nested| is_wrong_type(nested, path) || rejects_items(nested, path)),
+                _ => false,
+            };
+        }
+        let is_item = location
+            .as_str()
+            .strip_prefix(path.as_str())
+            .and_then(|rest| rest.strip_prefix('/'))
+            .is_some_and(|rest| rest.contains('/').not());
+        is_item && is_wrong_type(std::slice::from_ref(error), location)
+    })
 }
 
 /// Whether an alternative rejects the value of one of the object's fields at `path` for not being

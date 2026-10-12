@@ -3,21 +3,18 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    ChainNames, IPTables, Redirect, error::IPTablesResult, output::OutputRedirect,
+    ChainNames, IPTablesBackend, Redirect, error::IPTablesResult, output::OutputRedirect,
     prerouting::PreroutingRedirect,
 };
 
-pub struct StandardRedirect<IPT: IPTables> {
-    prerouting: PreroutingRedirect<IPT>,
-    output: OutputRedirect<false, IPT>,
+pub struct StandardRedirect {
+    prerouting: PreroutingRedirect,
+    output: OutputRedirect<false>,
 }
 
-impl<IPT> StandardRedirect<IPT>
-where
-    IPT: IPTables,
-{
+impl StandardRedirect {
     pub fn create(
-        ipt: Arc<IPT>,
+        ipt: Arc<IPTablesBackend>,
         chain_names: &ChainNames,
         pod_ips: Option<&str>,
     ) -> IPTablesResult<Self> {
@@ -27,7 +24,7 @@ where
         Ok(StandardRedirect { prerouting, output })
     }
 
-    pub fn load(ipt: Arc<IPT>, chain_names: &ChainNames) -> IPTablesResult<Self> {
+    pub fn load(ipt: Arc<IPTablesBackend>, chain_names: &ChainNames) -> IPTablesResult<Self> {
         let prerouting = PreroutingRedirect::load(ipt.clone(), chain_names.prerouting.clone())?;
         let output = OutputRedirect::load(ipt, chain_names.standard.clone())?;
 
@@ -38,10 +35,7 @@ where
 /// This wrapper adds a new rule to the NAT OUTPUT chain to redirect "localhost" traffic as well
 /// Note: OUTPUT chain is only traversed for packets produced by local applications
 #[async_trait]
-impl<IPT> Redirect for StandardRedirect<IPT>
-where
-    IPT: IPTables + Send + Sync,
-{
+impl Redirect for StandardRedirect {
     async fn mount_entrypoint(&self) -> IPTablesResult<()> {
         self.prerouting.mount_entrypoint().await?;
         self.output.mount_entrypoint().await?;

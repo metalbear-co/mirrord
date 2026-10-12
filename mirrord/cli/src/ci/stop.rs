@@ -5,6 +5,7 @@ use std::{collections::HashSet, path::PathBuf};
 
 #[cfg(not(target_os = "windows"))]
 use futures::{StreamExt, stream};
+use mirrord_command::resolve_tokio_command;
 use mirrord_progress::{Progress, ProgressTracker};
 #[cfg(not(target_os = "windows"))]
 use nix::{
@@ -12,7 +13,6 @@ use nix::{
     sys::signal::{Signal, kill, killpg},
     unistd::Pid,
 };
-use tokio::process::Command;
 use tracing::Level;
 
 use super::CiResult;
@@ -179,7 +179,7 @@ async fn runtime_remove_container(container: crate::ci::MirrordCiManagedContaine
     let runtime = container.runtime.command();
     let command = format!("{runtime} rm -f {}", container.container_id);
 
-    let output = Command::new(runtime)
+    let output = resolve_tokio_command(runtime)
         .args(["rm", "-f", container.container_id.as_str()])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -300,14 +300,15 @@ mod tests {
         time::Duration,
     };
 
+    use mirrord_command::resolve_tokio_command;
     use mirrord_config::container::ContainerRuntime;
     use mirrord_progress::ProgressTracker;
     #[cfg(not(target_os = "linux"))]
-    use nix::{errno::Errno, sys::signal::kill};
-    use nix::{sys::signal::Signal, unistd::Pid};
+    use nix::sys::signal::kill;
+    use nix::{errno::Errno, sys::signal::Signal, unistd::Pid};
     use tokio::{
         io::{AsyncBufReadExt, BufReader},
-        process::{Child, ChildStdout, Command},
+        process::{Child, ChildStdout},
         time::timeout,
     };
 
@@ -325,7 +326,7 @@ mod tests {
         script: &str,
         store: &mut MirrordCiStore,
     ) -> (Child, BufReader<ChildStdout>) {
-        let mut command = Command::new("sh");
+        let mut command = resolve_tokio_command("sh");
         command
             .args(["-c", script])
             .stdin(Stdio::null())
@@ -356,6 +357,9 @@ mod tests {
                         .rsplit_once(") ")
                         .is_some_and(|(_, fields)| fields.starts_with("Z ")),
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+                    // A process that disappears between opening and reading its procfs stat file
+                    // can yield ESRCH.
+                    Err(error) if error.raw_os_error() == Some(Errno::ESRCH as i32) => true,
                     Err(error) => panic!("failed to inspect process {pid}: {error}"),
                 };
                 #[cfg(not(target_os = "linux"))]
@@ -481,7 +485,7 @@ mod tests {
     #[tokio::test]
     async fn ci_stop_succeeds_for_already_exited_targets() {
         let mut store = MirrordCiStore::default();
-        let mut command = Command::new("sh");
+        let mut command = resolve_tokio_command("sh");
         command.args(["-c", "exit 0"]).kill_on_drop(true);
         let mut child =
             spawn_background_user_command(&mut command, &mut store).expect("failed to spawn");
