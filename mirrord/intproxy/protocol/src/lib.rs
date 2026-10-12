@@ -421,6 +421,11 @@ pub trait IsLayerRequestWithResponse: IsLayerRequest {
 }
 
 impl_request!(
+    req = HooksInstalled,
+    req_path = LayerToProxyMessage::HooksInstalled,
+);
+
+impl_request!(
     req = OpenFileRequest,
     res = RemoteResult<OpenFileResponse>,
     req_path = LayerToProxyMessage::File => FileRequest::Open,

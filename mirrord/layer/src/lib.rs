@@ -98,14 +98,14 @@ use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, feature::env::mapper::EnvVarsRemapper,
 };
-use mirrord_intproxy_protocol::{HooksInstalled, LayerToProxyMessage, NewSessionRequest};
+use mirrord_intproxy_protocol::{HooksInstalled, NewSessionRequest};
 #[cfg(doc)]
 use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_lib::{
     detour::DetourGuard,
     error::{LayerError, Result},
     logging::init_tracing,
-    proxy_connection::{PROXY_CONNECTION, ProxyConnection},
+    proxy_connection::{PROXY_CONNECTION, ProxyConnection, make_proxy_request_no_response},
     setup::{LayerSetup, init_layer_setup, setup},
     socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING,
     trace_only::is_trace_only_mode,
@@ -616,16 +616,11 @@ fn sip_only_layer_start(
 ///
 /// Best effort, and a no-op when there is no internal proxy to talk to.
 fn report_hook_outcomes(outcomes: HookOutcomes) {
-    #[allow(static_mut_refs)]
-    let Some(connection) = (unsafe { PROXY_CONNECTION.get() }) else {
-        return;
-    };
-
     let report = HooksInstalled {
         installed: outcomes.installed,
         failed: outcomes.failed,
     };
-    if let Err(error) = connection.send(LayerToProxyMessage::HooksInstalled(report)) {
+    if let Err(error) = make_proxy_request_no_response(report) {
         tracing::debug!(%error, "failed to report installed hooks to the internal proxy");
     }
 }

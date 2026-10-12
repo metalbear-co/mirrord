@@ -165,7 +165,7 @@ pub async fn proxy(
     // Hook reports arrive on the connections of the internal proxy, which are served by their
     // own tasks. The sender kept here keeps the channel open while no connection exists.
     let (hook_reports_tx, mut hook_reports_rx) = mpsc::channel(HOOK_REPORTS_CHANNEL_SIZE);
-    let hook_usage = HookUsage::default();
+    let mut hook_usage = HookUsage::default();
 
     loop {
         tokio::select! {

@@ -4,10 +4,7 @@
 //! platform. Counting, per symbol, how many layers installed the hook and how many failed to
 //! shows which hooks never install on a given platform and can be dropped there.
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex, PoisonError},
-};
+use std::collections::HashMap;
 
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use mirrord_intproxy_protocol::HooksInstalled;
@@ -38,14 +35,13 @@ struct HookCounts {
     failed: u32,
 }
 
-/// Shared handle to the counts, so that they can be read after the proxy that fills them is
-/// consumed by its run loop.
-#[derive(Debug, Default, Clone)]
-pub struct HookUsage(Arc<Mutex<HashMap<String, HookCounts>>>);
+/// Per symbol, how many layers installed its hook and how many failed to.
+#[derive(Debug, Default)]
+pub struct HookUsage(HashMap<String, HookCounts>);
 
 impl HookUsage {
-    pub fn record(&self, report: HooksInstalled) {
-        let mut counts = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+    pub fn record(&mut self, report: HooksInstalled) {
+        let counts = &mut self.0;
 
         let installed = report.installed.into_iter().map(|symbol| (symbol, true));
         let failed = report.failed.into_iter().map(|symbol| (symbol, false));
@@ -70,9 +66,7 @@ impl HookUsage {
 
 impl CollectAnalytics for &HookUsage {
     fn collect_analytics(&self, analytics: &mut Analytics) {
-        let counts = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-
-        for (symbol, counts) in counts.iter() {
+        for (symbol, counts) in &self.0 {
             let mut hook = Analytics::default();
             hook.add("installed", counts.installed);
             hook.add("failed", counts.failed);

@@ -414,12 +414,6 @@ impl IntProxy {
         }
     }
 
-    /// Returns a handle to the hook counts of this session, which stays readable after this proxy
-    /// is consumed by its run loop.
-    pub fn hook_usage(&self) -> HookUsage {
-        self.hook_usage.clone()
-    }
-
     /// Check if any layer connections are still alive
     fn has_layer_connections(&self) -> bool {
         !self.task_txs.layers.is_empty()
@@ -437,6 +431,7 @@ impl IntProxy {
     ) -> Result<(), ProxyStartupError> {
         self.run_with_shutdown(first_timeout, idle_timeout, CancellationToken::new())
             .await
+            .0
     }
 
     /// Runs the proxy until its normal exit conditions are met or `shutdown` is cancelled.
@@ -444,20 +439,26 @@ impl IntProxy {
     /// Cancellation terminates every process with a currently registered layer before dropping
     /// the layer connections. This prevents idle injected processes from surviving solely because
     /// they have not made another hooked call that would observe the closed connection.
+    ///
+    /// Returns, next to the result, the hooks the layers reported before the proxy exited or
+    /// failed.
     pub async fn run_with_shutdown(
         self,
         first_timeout: Duration,
         idle_timeout: Duration,
         shutdown: CancellationToken,
-    ) -> Result<(), ProxyStartupError> {
-        match self.run_inner(first_timeout, idle_timeout, &shutdown).await {
+    ) -> (Result<(), ProxyStartupError>, HookUsage) {
+        let (flow, hook_usage) = self.run_inner(first_timeout, idle_timeout, &shutdown).await;
+        let result = match flow {
             ControlFlow::Break(result) => result,
             ControlFlow::Continue(failover_strategy) => {
                 failover_strategy
                     .run(idle_timeout, idle_timeout, &shutdown)
                     .await
             }
-        }
+        };
+
+        (result, hook_usage)
     }
 
     /// Runs the main event loop of this proxy.
@@ -476,7 +477,10 @@ impl IntProxy {
         first_timeout: Duration,
         idle_timeout: Duration,
         shutdown: &CancellationToken,
-    ) -> ControlFlow<Result<(), ProxyStartupError>, FailoverStrategy> {
+    ) -> (
+        ControlFlow<Result<(), ProxyStartupError>, FailoverStrategy>,
+        HookUsage,
+    ) {
         self.agent_tx
             .send(ClientMessage::SwitchProtocolVersion(
                 mirrord_protocol::VERSION.clone(),
@@ -505,7 +509,8 @@ impl IntProxy {
                     }
                     if let Err(error) = proxy.handle_task_update(task_id, task_update).await {
                         tracing::error!(%error, "Proxy encountered a critical error, and is entering the failover state...");
-                        return ControlFlow::Continue(FailoverStrategy::from_failed_proxy(proxy, error));
+                        let hook_usage = std::mem::take(&mut proxy.hook_usage);
+                        return (ControlFlow::Continue(FailoverStrategy::from_failed_proxy(proxy, error)), hook_usage);
                     }
                 }
 
@@ -563,7 +568,7 @@ impl IntProxy {
             );
         }
 
-        ControlFlow::Break(match exit_result {
+        let result = match exit_result {
             Some(Err(error)) => Err(error),
             _ => match shutdown_error {
                 Some(error) => Err(error),
@@ -571,7 +576,9 @@ impl IntProxy {
                     Err(ProxyStartupError::ProcessTermination(error.0))
                 }),
             },
-        })
+        };
+
+        (ControlFlow::Break(result), proxy.hook_usage)
     }
 
     /// Routes a [`ProxyMessage`] to the correct background task.
@@ -1477,7 +1484,8 @@ mod test {
                 ),
             )
             .await
-            .expect("proxy timeout did not drain queued registration");
+            .expect("proxy timeout did not drain queued registration")
+            .0;
             if first_timeout {
                 assert!(matches!(
                     result,
@@ -1616,6 +1624,7 @@ mod test {
             .await
             .expect("intproxy did not shut down after cancellation")
             .unwrap()
+            .0
             .unwrap();
 
         let status = tokio::time::timeout(Duration::from_secs(5), async {
