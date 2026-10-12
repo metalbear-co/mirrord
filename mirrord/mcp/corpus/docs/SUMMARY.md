@@ -74,6 +74,7 @@
   * [More](sharing-the-cluster/queue-splitting/more.md)
     * [Migrating to MirrordSplitConfig](sharing-the-cluster/queue-splitting/migrating-to-mirrordsplitconfig.md)
   * [Queue Splitting Status](sharing-the-cluster/queue-splitting/status.md)
+* [Header Propagation](sharing-the-cluster/header-propagation.md)
 * [DB Branching](sharing-the-cluster/db-branching.md)
   * [MySQL](sharing-the-cluster/db-branching/mysql.md)
   * [MariaDB](sharing-the-cluster/db-branching/mariadb.md)
