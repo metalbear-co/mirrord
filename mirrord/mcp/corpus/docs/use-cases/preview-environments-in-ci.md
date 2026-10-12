@@ -209,6 +209,8 @@ ctx := metadata.NewOutgoingContext(c, md)
 
 If you (or your observability library) don't propagate the header, downstream services won't know which preview environment the request belongs to, and traffic may not reach the correct preview pods.
 
+For per-language OpenTelemetry setup, custom headers and troubleshooting, see [Header Propagation](../sharing-the-cluster/header-propagation.md).
+
 ## Registry Authentication
 
 The preview image must be pullable **from inside the cluster**. The preview pod is a copy of the target's pod spec with the image swapped, so it pulls with the same credentials as the target — there is no separate registry configuration for previews.

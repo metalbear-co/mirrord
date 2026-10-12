@@ -53,6 +53,8 @@ When executing a task Turbo strips most of the existing process environment, inc
 
 This could happen because the local process is listening on a different port than the remote target. You can either change the local process to listen on the same port as the remote target (don't worry about the port being used locally by other processes), or use the [`port_mapping` configuration ](https://metalbear.com/mirrord/docs/config#feature.network.incoming)to map the local port to a remote port.
 
+If you're filtering by HTTP header and the service you run with mirrord isn't the first one a request reaches, the services in front of it may be dropping the header. See [Header Propagation](../sharing-the-cluster/header-propagation.md).
+
 ## The remote target stops receiving remote traffic, but it doesn't reach my local process either
 
 This can happen in some clusters using a service mesh when stealing incoming traffic. You can use this configuration to fix it:

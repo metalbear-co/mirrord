@@ -8,6 +8,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.272.1](https://github.com/metalbear-co/mirrord/tree/3.272.1) - 2026-10-12
+
+
+### Fixed
+
+- Users bound to `mirrord-operator-user` by a `RoleBinding` can use literal
+  `db_branches` connection values.
+
 ## [3.272.0](https://github.com/metalbear-co/mirrord/tree/3.272.0) - 2026-10-11
 
 
