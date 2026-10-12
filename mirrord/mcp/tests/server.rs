@@ -8,8 +8,8 @@ use mirrord_mcp::{INSTRUCTIONS, McpServer, McpTelemetry};
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{
-        CallToolRequestParams, ClientConfig, ProtocolVersion, ReadResourceRequestParams,
-        ResourceContents,
+        CallToolRequestParams, ClientConfig, GetPromptRequestParams, ProtocolVersion,
+        ReadResourceRequestParams, ResourceContents,
     },
     service::RunningService,
 };
@@ -60,9 +60,8 @@ async fn connect(
     (client, signal)
 }
 
-fn validate_config_call(arguments: Value) -> CallToolRequestParams {
-    CallToolRequestParams::new("validate_config")
-        .with_arguments(arguments.as_object().unwrap().clone())
+fn tool_call(name: &'static str, arguments: Value) -> CallToolRequestParams {
+    CallToolRequestParams::new(name).with_arguments(arguments.as_object().unwrap().clone())
 }
 
 #[rstest]
@@ -84,10 +83,13 @@ async fn serves_validate_config(#[case] protocol_version: ProtocolVersion) {
     assert!(tool.output_schema.is_some());
 
     let result = client
-        .call_tool(validate_config_call(json!({
-            "format": "mirrord.json",
-            "content": r#"{ "feature": { "network": { "incoming": { "mode": "foo" } } } }"#,
-        })))
+        .call_tool(tool_call(
+            "validate_config",
+            json!({
+                "format": "mirrord.json",
+                "content": r#"{ "feature": { "network": { "incoming": { "mode": "foo" } } } }"#,
+            }),
+        ))
         .await
         .unwrap();
     assert_ne!(result.is_error, Some(true));
@@ -99,10 +101,13 @@ async fn serves_validate_config(#[case] protocol_version: ProtocolVersion) {
     );
 
     let result = client
-        .call_tool(validate_config_call(json!({
-            "format": "mirrord-up.yaml",
-            "content": "services:\n  app:\n    run:\n      command: [\"true\"]\n",
-        })))
+        .call_tool(tool_call(
+            "validate_config",
+            json!({
+                "format": "mirrord-up.yaml",
+                "content": "services:\n  app:\n    run:\n      command: [\"true\"]\n",
+            }),
+        ))
         .await
         .unwrap();
     assert_eq!(
@@ -123,14 +128,10 @@ async fn serves_explain_config_option() {
     );
 
     let result = client
-        .call_tool(
-            CallToolRequestParams::new("explain_config_option").with_arguments(
-                json!({ "path": "feature.network.incoming.mode" })
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            ),
-        )
+        .call_tool(tool_call(
+            "explain_config_option",
+            json!({ "path": "feature.network.incoming.mode" }),
+        ))
         .await
         .unwrap();
     let output = result.structured_content.unwrap();
@@ -145,10 +146,13 @@ async fn survives_bad_calls() {
     let (client, _signal) = connect(ProtocolVersion::V_2025_11_25).await;
 
     let result = client
-        .call_tool(validate_config_call(json!({
-            "format": "mirrord.toml",
-            "content": "",
-        })))
+        .call_tool(tool_call(
+            "validate_config",
+            json!({
+                "format": "mirrord.toml",
+                "content": "",
+            }),
+        ))
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(true));
@@ -159,10 +163,13 @@ async fn survives_bad_calls() {
         .unwrap_err();
 
     let result = client
-        .call_tool(validate_config_call(json!({
-            "format": "mirrord.json",
-            "content": "{}",
-        })))
+        .call_tool(tool_call(
+            "validate_config",
+            json!({
+                "format": "mirrord.json",
+                "content": "{}",
+            }),
+        ))
         .await
         .unwrap();
     assert_eq!(result.structured_content.unwrap()["valid"], json!(true));
@@ -196,4 +203,58 @@ async fn serves_info_resource() {
         assert_eq!(info[corpus]["commit"].as_str().unwrap().len(), 40);
         assert!(info[corpus]["synced_at"].is_string());
     }
+}
+
+/// Every skill `get_skill` lists is also served as a prompt and a resource, all from the same
+/// `SKILL.md`.
+#[tokio::test]
+async fn serves_skills() {
+    let (client, _signal) = connect(ProtocolVersion::V_2025_11_25).await;
+
+    let call_text = async |arguments: Value| {
+        let result = client
+            .call_tool(tool_call("get_skill", arguments))
+            .await
+            .unwrap();
+        assert!(result.structured_content.is_none());
+        let [content] = result.content.as_slice() else {
+            panic!("expected one content block: {:?}", result.content);
+        };
+        (result.is_error, content.as_text().unwrap().text.clone())
+    };
+
+    let (_, listed) = call_text(json!({})).await;
+    let prompts = client.list_all_prompts().await.unwrap();
+    let resources = client.list_all_resources().await.unwrap();
+    assert!(prompts.iter().any(|prompt| prompt.name == "mirrord-up"));
+    for prompt in &prompts {
+        let name = prompt.name.as_str();
+        assert!(listed.contains(&format!("- `{name}`: ")), "{name}");
+
+        let (_, skill) = call_text(json!({ "name": name })).await;
+        let prompt = client
+            .get_prompt(GetPromptRequestParams::new(name))
+            .await
+            .unwrap();
+        assert_eq!(prompt.messages[0].content.as_text().unwrap().text, skill);
+
+        let uri = format!("mirrord://skills/{name}");
+        assert!(
+            resources.iter().any(|resource| resource.uri == uri),
+            "{name}"
+        );
+        let result = client
+            .read_resource(ReadResourceRequestParams::new(&uri))
+            .await
+            .unwrap();
+        let [ResourceContents::TextResourceContents { text, .. }] = result.contents.as_slice()
+        else {
+            panic!("unexpected contents: {:?}", result.contents);
+        };
+        assert!(skill.starts_with(text.as_str()), "{name}");
+    }
+
+    let (is_error, text) = call_text(json!({ "name": "no-such-skill" })).await;
+    assert_eq!(is_error, Some(true));
+    assert!(text.contains("`mirrord-up`"), "{text}");
 }
