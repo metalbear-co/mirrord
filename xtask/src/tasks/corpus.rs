@@ -46,13 +46,14 @@ const CORPORA: &[Corpus] = &[
         // Skills point the agent at the files bundled with them, such as Helm values, so those are
         // served too.
         extensions: &["md", "json", "yaml", "yml"],
-        // Copies of the config schema and of the config reference generated from it, which lag
-        // behind the schema compiled into `mirrord mcp` and served by its config tools.
+        // Copies of the config schemas and of the config reference generated from them, which lag
+        // behind the schemas compiled into `mirrord mcp` and served by its config tools.
         exclude: &[
             "mirrord-config/references/configuration.md",
             "mirrord-config/references/schema.json",
             "mirrord-ci/references/schema.json",
             "mirrord-db-branching/references/db-branches-schema.json",
+            "mirrord-up/references/schema.json",
         ],
     },
 ];
