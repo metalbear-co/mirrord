@@ -666,19 +666,31 @@ where
         let body = serde_json::to_vec(&request_body)
             .map_err(|e| OperatorApiError::CredentialSecretCreation(format!("serialize: {e}")))?;
 
-        let request = http::Request::builder()
-            .method("POST")
-            .uri("/apis/operator.metalbear.co/v1/branchcredentials")
-            .header("content-type", "application/json")
-            .body(body)
-            .map_err(|e| {
-                OperatorApiError::CredentialSecretCreation(format!("build request: {e}"))
-            })?;
+        let request = |uri: String| {
+            http::Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("content-type", "application/json")
+                .body(body.clone())
+                .map_err(|e| {
+                    OperatorApiError::CredentialSecretCreation(format!("build request: {e}"))
+                })
+        };
 
-        let response: CreateCredentialSecretResponse = self
-            .client
-            .request(request)
-            .await
+        let namespaced = request(format!(
+            "/apis/operator.metalbear.co/v1/namespaces/{namespace}/branchcredentials"
+        ))?;
+
+        let response: CreateCredentialSecretResponse =
+            match self.client.request(namespaced).await {
+                Err(kube::Error::Api(status)) if status.code == 404 => {
+                    let cluster =
+                        request("/apis/operator.metalbear.co/v1/branchcredentials".to_owned())?;
+
+                    self.client.request(cluster).await
+                }
+                result => result,
+            }
             .map_err(|e| OperatorApiError::CredentialSecretCreation(e.to_string()))?;
 
         Ok(response.secret_name)
@@ -3089,9 +3101,9 @@ impl OperatorApi<PreparedClientCert> {
 mod test {
     use std::collections::{BTreeMap, HashMap};
 
-    use http::{HeaderName, HeaderValue};
+    use http::{HeaderName, HeaderValue, Request, Response, StatusCode};
     use k8s_openapi::api::apps::v1::Deployment;
-    use kube::{Config, api::ObjectMeta};
+    use kube::{Client, Config, api::ObjectMeta, client::Body};
     use mirrord_config::{
         LayerFileConfig,
         config::{ConfigContext, MirrordConfig},
@@ -3105,12 +3117,12 @@ mod test {
     use rstest::rstest;
 
     use super::{
-        BAGGAGE_HEADER, NewOperatorFeature, OperatorApi, add_baggage_header,
+        BAGGAGE_HEADER, NewOperatorFeature, NoClientCert, OperatorApi, add_baggage_header,
         disable_unsupported_auto_splits,
     };
     use crate::{
         client::connect_params::{BranchDbNames, ConnectParams},
-        crd::session::SessionCiInfo,
+        crd::{MirrordOperatorCrd, session::SessionCiInfo},
     };
 
     #[test]
@@ -3708,5 +3720,81 @@ mod test {
         }]);
 
         assert_eq!(disable_unsupported_auto_splits(&config, &[]), None);
+    }
+
+    const NAMESPACED_CREDENTIALS: &str =
+        "/apis/operator.metalbear.co/v1/namespaces/team/branchcredentials";
+    const CLUSTER_CREDENTIALS: &str = "/apis/operator.metalbear.co/v1/branchcredentials";
+
+    /// Only a 404 from the namespaced route sends the request on to the cluster-scoped route.
+    #[rstest]
+    #[case::served(StatusCode::OK, &[NAMESPACED_CREDENTIALS], true)]
+    #[case::not_served(
+        StatusCode::NOT_FOUND,
+        &[NAMESPACED_CREDENTIALS, CLUSTER_CREDENTIALS],
+        true,
+    )]
+    #[case::forbidden(StatusCode::FORBIDDEN, &[NAMESPACED_CREDENTIALS], false)]
+    #[tokio::test]
+    async fn credential_secret_falls_back_only_without_namespaced_route(
+        #[case] namespaced_status: StatusCode,
+        #[case] expected_paths: &[&str],
+        #[case] succeeds: bool,
+    ) {
+        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let spec = serde_json::from_value(serde_json::json!({
+            "operator_version": "3.218.0",
+            "default_namespace": "default",
+            "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
+        }))
+        .unwrap();
+        let api = OperatorApi {
+            client: Client::new(service, "default"),
+            client_cert: NoClientCert {
+                base_config: Config::new("https://127.0.0.1:9669".parse().unwrap()),
+            },
+            operator: MirrordOperatorCrd::new("operator", spec),
+            kube_context: None,
+        };
+
+        let values = HashMap::from([("password".to_owned(), "secret".to_owned())]);
+        let mut paths = Vec::new();
+        let mut bodies = Vec::new();
+        let result = tokio::select! {
+            result = api.create_credential_secret("team", "branch", values) => result,
+            () = async {
+                while let Some((request, send)) = handle.next_request().await {
+                    let path = request.uri().path().to_owned();
+                    let status = if path == NAMESPACED_CREDENTIALS {
+                        namespaced_status
+                    } else {
+                        StatusCode::OK
+                    };
+                    let body = request.into_body().collect_bytes().await.unwrap();
+
+                    paths.push(path);
+                    bodies.push(serde_json::from_slice::<serde_json::Value>(&body).unwrap());
+                    send.send_response(
+                        Response::builder()
+                            .status(status)
+                            .body(Body::from(br#"{"secret_name":"creds"}"#.to_vec()))
+                            .unwrap(),
+                    );
+                }
+            } => unreachable!("the mock service lives as long as the client"),
+        };
+
+        let expected_body = serde_json::json!({
+            "namespace": "team",
+            "branch_id": "branch",
+            "values": {"password": "secret"},
+        });
+
+        assert_eq!(paths, expected_paths);
+        assert!(
+            bodies.iter().all(|body| *body == expected_body),
+            "{bodies:?}"
+        );
+        assert_eq!(result.is_ok(), succeeds, "{result:?}");
     }
 }
