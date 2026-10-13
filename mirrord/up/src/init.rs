@@ -445,34 +445,46 @@ async fn detect_ports(
         .collect())
 }
 
-/// Asks which of the `detected` ports to intercept, and returns the others,
-/// which go to `ignore_ports`. Asks for the ports to ignore as text when no
-/// ports were detected.
+/// Asks which of the `detected` ports to intercept, and then for other ports
+/// to ignore. Returns the detected ports that the user did not select and the
+/// other ports, which go to `ignore_ports`.
+///
+/// `ignore_ports` only names the ports to leave alone: every other port that
+/// the local process listens on is intercepted. A port that the target does
+/// not declare, like a metrics port, can only be left alone with the second
+/// question.
 fn prompt_ignore_ports(detected: BTreeSet<u16>) -> Result<BTreeSet<u16>, inquire::InquireError> {
-    if detected.is_empty() {
-        let s = Text::new("Ports to ignore (comma-separated, blank for none):")
-            .with_validator(|s: &str| match parse_ports(s) {
-                Ok(_) => Ok(Validation::Valid),
-                Err(e) => Ok(Validation::Invalid(e.into())),
-            })
-            .prompt()?;
-        return Ok(parse_ports(&s).expect("validated above"));
-    }
+    let mut ignored = BTreeSet::new();
 
-    let intercepted = MultiSelect::new(
-        "Ports to intercept (detected on the target):",
-        detected.iter().copied().collect(),
-    )
-    .with_all_selected_by_default()
-    .with_help_message(
-        "↑↓ to move, space to select, enter to confirm. The detected ports that you do not select are ignored.",
-    )
-    .prompt()?;
+    let message = if detected.is_empty() {
+        "Ports to ignore (comma-separated, blank for none):"
+    } else {
+        let intercepted = MultiSelect::new(
+            "Ports to intercept (detected on the target):",
+            detected.iter().copied().collect(),
+        )
+        .with_all_selected_by_default()
+        .with_help_message(
+            "↑↓ to move, space to select, enter to confirm. The detected ports that you do not select are ignored.",
+        )
+        .prompt()?;
+        ignored.extend(
+            detected
+                .into_iter()
+                .filter(|port| intercepted.contains(port).not()),
+        );
+        "Other ports to ignore (comma-separated, blank for none):"
+    };
 
-    Ok(detected
-        .into_iter()
-        .filter(|port| intercepted.contains(port).not())
-        .collect())
+    let s = Text::new(message)
+        .with_validator(|s: &str| match parse_ports(s) {
+            Ok(_) => Ok(Validation::Valid),
+            Err(e) => Ok(Validation::Invalid(e.into())),
+        })
+        .prompt()?;
+    ignored.extend(parse_ports(&s).expect("validated above"));
+
+    Ok(ignored)
 }
 
 /// The run type is not asked: `exec` fits most services, and the docs tell
