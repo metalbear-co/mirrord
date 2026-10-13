@@ -134,7 +134,8 @@ jobs:
           IFS=: read -ra dirs <<< "$PATH"
           for dir in "${dirs[@]}"; do
             for tool in "$dir"/*; do
-              [ -x "$tool" ] || continue
+              # A directory is "executable" too; linking one shadows the real tool of that name.
+              [ -f "$tool" ] && [ -x "$tool" ] || continue
               name=$(basename "$tool")
               [ "$name" = "${{ matrix.hide }}" ] && continue
               [ -e "$tools/$name" ] || ln -s "$tool" "$tools/$name"
