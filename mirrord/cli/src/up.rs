@@ -204,6 +204,7 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::Kube(_))
             | UpCliError::Up(UpError::Inquire(_))
             | UpCliError::Up(UpError::Exited)
+            | UpCliError::Up(UpError::NoWorkloads(_))
             | UpCliError::Up(UpError::YamlPatch(_))
             | UpCliError::Up(UpError::YamlQuery(_))
             | UpCliError::Init(_) => Self::InternalError,

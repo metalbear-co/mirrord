@@ -159,6 +159,10 @@ pub enum UpError {
     #[error("exited")]
     Exited,
 
+    /// The only namespace that the user can pick has no workload to pick.
+    #[error("no workloads found in namespace \"{0}\"")]
+    NoWorkloads(String),
+
     /// Failed to patch the `mirrord-up.yaml` when saving a chosen target.
     #[error("failed to update config file: {0}")]
     YamlPatch(#[from] yamlpatch::Error),
@@ -428,9 +432,21 @@ async fn list_namespaces(client: &kube::Client) -> Result<Vec<String>, UpError> 
         .list_all_clusterwide::<Namespace>(None)
         .try_filter_map(|namespace| std::future::ready(Ok(namespace.metadata.name)))
         .try_collect()
-        .await
-        .map_err(KubeApiError::KubeError)?;
-    Ok(namespaces)
+        .await;
+
+    match namespaces {
+        Ok(namespaces) => Ok(namespaces),
+        // Users whose permissions are limited to some namespaces can't list
+        // namespaces, but can still pick a workload in their default one.
+        Err(kube::Error::Api(status)) if status.code == 403 => {
+            let namespace = client.default_namespace().to_owned();
+            println!(
+                "You can't list the namespaces of the cluster, using namespace \"{namespace}\"."
+            );
+            Ok(vec![namespace])
+        }
+        Err(error) => Err(KubeApiError::KubeError(error).into()),
+    }
 }
 
 /// First path in `workloads` whose workload name matches `name` (paths look
@@ -494,6 +510,10 @@ async fn prompt_for_target(
 /// Lets the user pick one of `namespaces`, starting at the namespace of the
 /// kube context, and then a workload of one of the `kinds` in it. Returns the
 /// workload and its namespace.
+///
+/// When a namespace has nothing to pick, or the user can't list its
+/// workloads, the user picks another namespace. When it is the only
+/// namespace, there is nothing else to pick, so that is an error.
 async fn pick_workload(
     client: &kube::Client,
     namespaces: &[String],
@@ -503,6 +523,7 @@ async fn pick_workload(
         .iter()
         .position(|namespace| namespace == client.default_namespace())
         .unwrap_or_default();
+    let can_pick_another = namespaces.len() > 1;
 
     loop {
         let namespace = {
@@ -515,10 +536,22 @@ async fn pick_workload(
             .await?
         };
 
-        let workloads = list_workloads(client, &namespace, kinds).await?;
+        let workloads = match list_workloads(client, &namespace, kinds).await {
+            Ok(workloads) => workloads,
+            Err(UpError::Kube(KubeApiError::KubeError(kube::Error::Api(status))))
+                if status.code == 403 && can_pick_another =>
+            {
+                println!("You can't list the workloads in namespace \"{namespace}\".");
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         if workloads.is_empty() {
-            println!("No workloads found in namespace \"{namespace}\".");
-            continue;
+            if can_pick_another {
+                println!("No workloads found in namespace \"{namespace}\".");
+                continue;
+            }
+            return Err(UpError::NoWorkloads(namespace));
         }
 
         let path = {
