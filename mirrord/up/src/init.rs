@@ -181,18 +181,27 @@ async fn prompt_service(
 ) -> Result<(Arc<str>, ServiceConfig), InitError> {
     let default_mode = prompt(prompt_mode).await?;
     let (name, picked) = prompt_target(cluster, default_mode, existing).await?;
-    let target = match picked {
-        PickedTarget::Targetless => TargetConfig::Targetless,
-        // `mirrord up` uses the namespace of the kube context when the field
-        // is absent.
-        PickedTarget::Workload { target, namespace } => SpecifiedTarget {
-            path: Some(target),
-            namespace: (namespace != cluster.client.default_namespace()).then(|| namespace.into()),
+    // A targetless service has no incoming traffic, so it is not asked about
+    // filters and ports.
+    let (target, http_filter, ignore_ports) = match picked {
+        PickedTarget::Targetless => (
+            TargetConfig::Targetless,
+            Default::default(),
+            Default::default(),
+        ),
+        PickedTarget::Workload { target, namespace } => {
+            let (http_filter, ignore_ports) = prompt_traffic(default_mode).await?;
+            // `mirrord up` uses the namespace of the kube context when the
+            // field is absent.
+            let namespace =
+                (namespace != cluster.client.default_namespace()).then(|| namespace.into());
+            let target = SpecifiedTarget {
+                path: Some(target),
+                namespace,
+            };
+            (target.into(), http_filter, ignore_ports)
         }
-        .into(),
     };
-    let http_filter = prompt(move || prompt_http_filter(&default_mode)).await?;
-    let ignore_ports = prompt(prompt_ignore_ports).await?;
     let run = prompt(prompt_run).await?;
 
     Ok((
@@ -330,26 +339,43 @@ fn prompt_mode() -> Result<ServiceMode, inquire::InquireError> {
     Ok(choice.0)
 }
 
-fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, inquire::InquireError> {
-    match mode {
-        ServiceMode::Split | ServiceMode::Mirror => {
-            let s = Text::new("HTTP header filter (regex; blank for auto session-key filter):")
-                .with_help_message("Example: `session-id: my-session-identifier`")
-                .prompt()?;
-
-            let filter = match s.trim() {
-                "" => HttpFilterConfig::default(),
-                hf => HttpFilterConfig {
-                    header_filter: Some(hf.to_owned()),
-                    ..Default::default()
-                },
-            };
-
-            Ok(filter)
-        }
-
-        ServiceMode::Replace => Ok(HttpFilterConfig::default()),
+/// Asks for the HTTP filter and the ports to ignore, only when the user wants
+/// to set them. The defaults fit most services, so the question defaults to
+/// no.
+async fn prompt_traffic(mode: ServiceMode) -> Result<(HttpFilterConfig, BTreeSet<u16>), InitError> {
+    // `replace` ignores the HTTP filter.
+    let message = match mode {
+        ServiceMode::Replace => "Configure ports?",
+        ServiceMode::Split | ServiceMode::Mirror => "Configure traffic filtering and ports?",
+    };
+    if prompt(move || Confirm::new(message).with_default(false).prompt())
+        .await?
+        .not()
+    {
+        return Ok(Default::default());
     }
+
+    let http_filter = match mode {
+        ServiceMode::Replace => HttpFilterConfig::default(),
+        ServiceMode::Split | ServiceMode::Mirror => prompt(prompt_http_filter).await?,
+    };
+    let ignore_ports = prompt(prompt_ignore_ports).await?;
+
+    Ok((http_filter, ignore_ports))
+}
+
+fn prompt_http_filter() -> Result<HttpFilterConfig, inquire::InquireError> {
+    let s = Text::new("HTTP header filter (regex; blank for auto session-key filter):")
+        .with_help_message("Example: `session-id: my-session-identifier`")
+        .prompt()?;
+
+    Ok(match s.trim() {
+        "" => HttpFilterConfig::default(),
+        hf => HttpFilterConfig {
+            header_filter: Some(hf.to_owned()),
+            ..Default::default()
+        },
+    })
 }
 
 /// Parses a comma-separated list of u16 ports. Whitespace and empty entries
