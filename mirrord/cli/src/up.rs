@@ -1,12 +1,17 @@
 //! The `mirrord up` command - runs multiple mirrord sessions from a `mirrord-up.yaml` file.
 
-use std::{io::ErrorKind, sync::Arc};
+use std::{collections::HashMap, io::ErrorKind, ops::Not, sync::Arc};
 
 use miette::Diagnostic;
-use mirrord_analytics::{Analytics, AnalyticsReporter, CollectAnalytics, Reporter};
+use mirrord_analytics::{
+    AnalyticValue, Analytics, AnalyticsReporter, CollectAnalytics, Reporter, SanitizedString,
+    UpSessionDbBranch,
+};
 use mirrord_config::config::EnvKey;
 use mirrord_operator::crd::session::UpSessionInfo;
-use mirrord_up::{InitError, ReadyTracker, SERVICE_NAME_ENV, UpError, load_up_config, run_wizard};
+use mirrord_up::{
+    InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, UpError, load_up_config, run_wizard,
+};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -173,8 +178,18 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
 
     let mut services =
         mirrord_up::resolve_services(up_config, &args.config_file, args.context, &key).await?;
-    db_branches::check_db_branches(&mut services).await?;
+    let requesting = db_branches::check_db_branches(&mut services).await?;
+    let modes = services
+        .iter()
+        .map(|service| (service.service_name.clone(), service.mode))
+        .collect::<Vec<_>>();
+
     let result = mirrord_up::launch(services, correlation_id, ready.clone()).await;
+
+    analytics.get_mut().add(
+        "services",
+        service_analytics(&modes, &requesting, &ready.db_branches()),
+    );
 
     // Recorded whenever all sessions reached readiness, even if `run` then
     // failed, left absent otherwise (e.g. a session crashed before startup).
@@ -185,6 +200,52 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     }
 
     Ok(result?)
+}
+
+/// One entry per service, in no particular order and without names: its mode, whether it requested
+/// DB branching, and whether its session created a branch, attached to an existing one, and shares
+/// one with another service of the run.
+fn service_analytics(
+    modes: &[(Arc<str>, ServiceMode)],
+    requesting: &[Arc<str>],
+    db_branches: &HashMap<Arc<str>, Vec<UpSessionDbBranch>>,
+) -> Vec<AnalyticValue> {
+    // Branch names are unique within a cluster only.
+    let mut users: HashMap<(&str, &str), usize> = HashMap::new();
+    for branch in db_branches.values().flatten() {
+        *users
+            .entry((branch.cluster.as_str(), branch.name.as_str()))
+            .or_default() += 1;
+    }
+
+    modes
+        .iter()
+        .map(|(name, mode)| {
+            let branches = db_branches.get(name).map(Vec::as_slice).unwrap_or_default();
+            let mut service = Analytics::default();
+            service.add("mode", SanitizedString::new_plaintext(&mode.to_string()));
+            service.add("db_branching_requested", requesting.contains(name));
+            service.add(
+                "db_branch_created",
+                branches.iter().any(|branch| branch.created),
+            );
+            service.add(
+                "db_branch_attached",
+                branches.iter().any(|branch| branch.created.not()),
+            );
+            service.add(
+                "db_branch_shared",
+                branches.iter().any(|branch| {
+                    users
+                        .get(&(branch.cluster.as_str(), branch.name.as_str()))
+                        .copied()
+                        .unwrap_or_default()
+                        > 1
+                }),
+            );
+            service.into()
+        })
+        .collect()
 }
 
 /// Coarse bucket assigned to a failed `mirrord up` invocation for analytics.

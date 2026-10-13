@@ -11,6 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use mirrord_analytics::{UP_DB_BRANCHES_REPORT_PREFIX, UpSessionDbBranch};
 use mirrord_progress::messages::SESSION_READY_MESSAGE;
 #[cfg(unix)]
 use nix::sys::signal::killpg;
@@ -421,7 +422,7 @@ async fn wait_for_first_exit(
 }
 
 /// Prints each line of `stream` prefixed with the service's name. On a session's stdout, also
-/// picks up the readiness marker.
+/// picks up the readiness marker and the branch databases report, which is not printed.
 async fn forward_output(
     stream: impl AsyncRead + Unpin,
     name: Arc<str>,
@@ -437,6 +438,17 @@ async fn forward_output(
                         counted = true;
                         session.started.store(true, Ordering::Relaxed);
                         session.readiness.mark();
+                    } else if let Some(report) = line.strip_prefix(UP_DB_BRANCHES_REPORT_PREFIX) {
+                        // Only analytics read the report, so one that doesn't parse is dropped
+                        // rather than shown.
+                        if let Ok(branches) = serde_json::from_str::<Vec<UpSessionDbBranch>>(report)
+                        {
+                            session
+                                .readiness
+                                .tracker
+                                .record_db_branches(name.clone(), branches);
+                        }
+                        continue;
                     }
                 }
                 println!("{name}: {line}");
