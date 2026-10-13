@@ -66,6 +66,9 @@ impl EnvFilter {
                 WildMatch::new("MIRRORD_LOG"),
                 WildMatch::new("RUST_LOG"),
                 WildMatch::new("_JAVA_OPTIONS"),
+                WildMatch::new("TEMP"),
+                WildMatch::new("TMP"),
+                WildMatch::new("TMPDIR"),
             ];
 
             for selector in &filter_env_vars {
@@ -186,5 +189,22 @@ mod tests {
         assert!(filter.matches("BAR_STOOL"));
 
         assert!(!filter.matches("FOOBAR_TEST"));
+    }
+
+    #[test]
+    fn temp_dir_not_selected_by_default() {
+        let full_env = parse_raw_env([
+            "TMPDIR=/backstage/var/tmp",
+            "TMP=/backstage/var/tmp",
+            "TEMP=/backstage/var/tmp",
+            "APP_SETTING=from-remote",
+        ]);
+
+        let selected = select_env_vars(&full_env, Default::default(), Default::default()).unwrap();
+
+        assert_eq!(
+            selected.0,
+            HashMap::from([("APP_SETTING".to_owned(), "from-remote".to_owned())])
+        );
     }
 }

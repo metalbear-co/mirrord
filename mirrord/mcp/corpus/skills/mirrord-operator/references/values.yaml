@@ -8,10 +8,37 @@ namespace: mirrord
 ## If you set this to false, you must create the namespace manually
 createNamespace: true
 
-## For each namespace you'd like a namespaced role to be created in, add here.
-## The chart will create a role that is required to use mirrord in the namespace
-## and it can be bound via rolebinding (That you need to create yourself).
-roleNamespaces: []
+## Use a list to create one unbound mirrord role in each namespace.
+## Use a mapping to create a role and binding for each target and its users or groups.
+## Target names must match the operator API name, for example deployment.api.
+roleNamespaces:
+# roleNamespaces:
+#   my-namespace:
+#     deployment.api:
+#       - type: User
+#         subject: developer@example.com
+#       - type: Group
+#         subject: api-team@example.com
+
+## Limit the operator's own permissions to some namespaces.
+##
+## By default (`false`), the `mirrord-operator` ClusterRole lets the operator work in all
+## namespaces. When `true`, the ClusterRole keeps only the rules for cluster-scoped resources
+## (for example nodes, SubjectAccessReviews, MutatingWebhookConfigurations and the mirrord
+## `MirrordCluster*` resources). The rules for namespaced resources (for example pods, deployments
+## and secrets) go in a `mirrord-operator-namespaced` Role and RoleBinding in each namespace of
+## `allowedNamespaces` and in the operator namespace (`namespace`).
+##
+## The operator then refuses sessions and copy targets in other namespaces. The namespaces must
+## exist before you install the chart. These namespaces must also be in the list:
+## - the agent namespace, if you set `agent.extraConfig.namespace`;
+## - the Argo CD namespace, if you set `operator.applicationPauseAutoSync`;
+## - the Flux namespaces, if you set `operator.suspendFluxControllers`.
+##
+## Not supported with `operator.multiCluster.enabled` or `operator.multiClusterMember`.
+namespaced: false
+## The namespaces where the operator can work when `namespaced` is `true`.
+allowedNamespaces: []
 
 ## Additional Kubernetes resources to create with the chart. Entries are rendered as templates,
 ## so they can reference chart values and release information.
@@ -83,6 +110,11 @@ operator:
   # clusterName: "staging-us-east"
 
   jsonLog: true
+  # Leave the full HTTP request headers (`request_headers`) and queue message properties
+  # (`message_properties`) out of the operator's `Message Processing` logs. Set this to `true` when
+  # headers or properties can contain secrets. The logs still show the trace and correlation
+  # values (`traceparent`, `tracestate`, `baggage`, `correlation_id`).
+  hideHeadersAndProperties: false
   # Require Kubernetes front-proxy client certificates on operator API routes.
   # The operator validates the certificate chain using the front-proxy CA from the cluster's
   # extension-apiserver-authentication configmap. Disable this only for environments where
@@ -143,7 +175,9 @@ operator:
 
   # Has to be set to `true` in order to use the suspend flux controllers feature.
   suspendFluxControllers: false
-  # Has to be set to `true` in order to let the operator pause KEDA scale-in.
+  # Has to be set to `true` in order to let the operator modify KEDA ScaledObjects.
+  manageKedaScaledObjects: false
+  # Deprecated: use `manageKedaScaledObjects`, which this still enables.
   pauseKedaScaleIn: false
   # Has to be set to `true` in order to use the MySQL database branching feature.
   mysqlBranching: false

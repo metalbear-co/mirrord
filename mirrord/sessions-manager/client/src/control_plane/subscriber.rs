@@ -15,12 +15,14 @@
 
 use std::sync::Arc;
 
+use mirrord_sessions_manager_protocol::ServiceScope;
 use tokio::{sync::Mutex, time::Instant};
 
 use crate::{
-    control_plane::{ControlPlaneEvent, ControlPlaneEventStream, HttpControlPlaneClient},
+    control_plane::{ControlPlaneEvent, ControlPlaneEventStream},
     error::SessionsManagerClientError,
     retry::RetryBudget,
+    transport::SessionsManagerTransport,
 };
 
 /// A single control-plane feed: what to subscribe to, and how to interpret its events.
@@ -35,13 +37,14 @@ pub(crate) trait ControlPlaneSubscription {
     /// Static label identifying this feed in logs and errors.
     fn name(&self) -> &'static str;
 
-    /// Opens the event stream.
+    /// Opens the event stream for `scope` over `transport`.
     ///
     /// Called once per connection attempt, reconnects included, so it must be safe to re-issue
     /// against a registration the server already knows about.
-    async fn subscribe(
+    async fn subscribe<T: SessionsManagerTransport>(
         &self,
-        client: &HttpControlPlaneClient,
+        transport: &T,
+        scope: &ServiceScope,
     ) -> Result<ControlPlaneEventStream, SessionsManagerClientError>;
 
     /// Maps a wire event to the caller-facing output.
@@ -63,28 +66,31 @@ pub(crate) trait ControlPlaneSubscription {
 ///
 /// Nothing here needs to be shut down: it drives no task of its own, so a caller that no longer
 /// wants an event just stops polling and drops the subscriber.
-pub(crate) struct ControlPlaneSubscriber<S> {
-    state: Arc<Mutex<ControlPlaneSubscriptionDriver<S>>>,
+pub(crate) struct ControlPlaneSubscriber<S, T> {
+    state: Arc<Mutex<ControlPlaneSubscriptionDriver<S, T>>>,
     retry: RetryBudget,
     /// Latches once the subscription is over for good, so later calls report that instead of
     /// reopening a stream the server or the caller is already done with.
     closed: bool,
 }
 
-impl<S> ControlPlaneSubscriber<S>
+impl<S, T> ControlPlaneSubscriber<S, T>
 where
     S: ControlPlaneSubscription,
+    T: SessionsManagerTransport,
 {
     /// `retry_initial_open` decides whether a failure to open the *first* stream is retried;
     /// reconnects after a successful open are always retried when the error allows it.
     pub(crate) fn new(
-        client: HttpControlPlaneClient,
+        transport: T,
+        scope: ServiceScope,
         subscription: S,
         retry_initial_open: bool,
     ) -> Self {
         Self {
             state: Arc::new(Mutex::new(ControlPlaneSubscriptionDriver {
-                client,
+                transport,
+                scope,
                 subscription,
                 stream: None,
                 retry_initial_open,
@@ -152,8 +158,9 @@ where
 ///
 /// Kept apart from [`ControlPlaneSubscriber`] because [`RetryBudget::run_until`] may invoke its
 /// operation many times, so anything an attempt mutates has to live outside the closure it calls.
-struct ControlPlaneSubscriptionDriver<S> {
-    client: HttpControlPlaneClient,
+struct ControlPlaneSubscriptionDriver<S, T> {
+    transport: T,
+    scope: ServiceScope,
     subscription: S,
     /// The open stream, or [`None`] when the next attempt has to (re)open one.
     stream: Option<ControlPlaneEventStream>,
@@ -170,9 +177,10 @@ struct ControlPlaneSubscriptionDriver<S> {
     opened_once: bool,
 }
 
-impl<S> ControlPlaneSubscriptionDriver<S>
+impl<S, T> ControlPlaneSubscriptionDriver<S, T>
 where
     S: ControlPlaneSubscription,
+    T: SessionsManagerTransport,
 {
     /// Runs one attempt: opens the stream if it isn't open, then waits for a single event.
     ///
@@ -193,7 +201,7 @@ where
             let retry_initial_open = self.opened_once || self.retry_initial_open;
             let stream = self
                 .subscription
-                .subscribe(&self.client)
+                .subscribe(&self.transport, &self.scope)
                 .await
                 .map_err(|error| ControlPlaneAttemptError::Opening {
                     error,
@@ -277,22 +285,23 @@ impl From<SessionsManagerClientError> for ControlPlaneAttemptError {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::VecDeque, sync::Arc, time::Duration};
+    use std::{collections::VecDeque, time::Duration};
 
     use futures::stream;
+    use mirrord_operator_websocket::connection::OperatorConnection;
+    use mirrord_protocol_io::ProtocolEndpoint;
+    use mirrord_sessions_manager_protocol::{AssignmentSubscription, ConnectionAssignment};
     use tokio::{
         sync::{Mutex, watch},
         time::Instant,
     };
-    use url::Url;
 
     use super::{ControlPlaneSubscriber, ControlPlaneSubscription};
     use crate::{
         ServiceScope,
-        config::SessionsManagerConfig,
-        control_plane::{ControlPlaneEvent, ControlPlaneEventStream, HttpControlPlaneClient},
-        credentials::NoCredentials,
+        control_plane::{ControlPlaneEvent, ControlPlaneEventStream},
         error::SessionsManagerClientError,
+        transport::SessionsManagerTransport,
     };
 
     type StreamFactory =
@@ -317,9 +326,10 @@ mod tests {
             "test subscription"
         }
 
-        async fn subscribe(
+        async fn subscribe<T: SessionsManagerTransport>(
             &self,
-            _client: &HttpControlPlaneClient,
+            _transport: &T,
+            _scope: &ServiceScope,
         ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
             // Built lazily, at the moment it's actually handed out, so its `last_activity`
             // baseline matches production (where the watch channel starts ticking exactly when
@@ -344,15 +354,36 @@ mod tests {
         }
     }
 
-    fn client() -> HttpControlPlaneClient {
-        let config = SessionsManagerConfig {
-            scope: ServiceScope {
-                environment: "test".to_owned(),
-                service: "test".to_owned(),
-            },
-            base_url: Url::parse("https://sessions.example.com").unwrap(),
+    /// [`TestSubscription`] supplies its own streams, so the transport is never reached.
+    #[derive(Clone)]
+    struct TestTransport;
+
+    impl SessionsManagerTransport for TestTransport {
+        async fn subscribe_assignments(
+            &self,
+            _scope: &ServiceScope,
+            _subscription: &AssignmentSubscription,
+        ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
+            unreachable!("TestSubscription opens its own streams")
+        }
+
+        async fn connect_data_plane<E: ProtocolEndpoint + Send + Unpin + 'static>(
+            &self,
+            _assignment: ConnectionAssignment,
+        ) -> Result<OperatorConnection<E>, SessionsManagerClientError> {
+            unreachable!("subscriber tests never connect a data plane")
+        }
+    }
+
+    fn subscriber(
+        subscription: TestSubscription,
+        retry_initial_open: bool,
+    ) -> ControlPlaneSubscriber<TestSubscription, TestTransport> {
+        let scope = ServiceScope {
+            environment: "test".to_owned(),
+            service: "test".to_owned(),
         };
-        HttpControlPlaneClient::new(&config, Arc::new(NoCredentials)).unwrap()
+        ControlPlaneSubscriber::new(TestTransport, scope, subscription, retry_initial_open)
     }
 
     fn assignment_event() -> Result<ControlPlaneEvent, SessionsManagerClientError> {
@@ -383,7 +414,7 @@ mod tests {
             Box::new(|| Err(SessionsManagerClientError::SseStreamEnded("temporary"))),
             Box::new(|| Ok(events(vec![assignment_event()]))),
         ]);
-        let mut subscriber = ControlPlaneSubscriber::new(client(), subscription, true);
+        let mut subscriber = subscriber(subscription, true);
 
         assert!(matches!(subscriber.next(None).await, Ok(())));
     }
@@ -394,7 +425,7 @@ mod tests {
             Box::new(|| Ok(events(Vec::new()))),
             Box::new(|| Ok(events(vec![assignment_event()]))),
         ]);
-        let mut subscriber = ControlPlaneSubscriber::new(client(), subscription, false);
+        let mut subscriber = subscriber(subscription, false);
 
         assert!(
             subscriber
@@ -410,7 +441,7 @@ mod tests {
             Box::new(|| Ok(stalled_events())),
             Box::new(|| Ok(events(vec![assignment_event()]))),
         ]);
-        let mut subscriber = ControlPlaneSubscriber::new(client(), subscription, false);
+        let mut subscriber = subscriber(subscription, false);
 
         // Without a caller deadline, a stalled connection must be reconnected rather than
         // surfaced as a fatal `OperationTimeout`.
@@ -422,7 +453,7 @@ mod tests {
         let subscription = TestSubscription::new(vec![Box::new(|| {
             Err(SessionsManagerClientError::SseStreamEnded("temporary"))
         })]);
-        let mut subscriber = ControlPlaneSubscriber::new(client(), subscription, false);
+        let mut subscriber = subscriber(subscription, false);
 
         assert!(matches!(
             subscriber
@@ -443,7 +474,7 @@ mod tests {
                 activity_rx,
             ))
         })]);
-        let mut subscriber = ControlPlaneSubscriber::new(client(), subscription, false);
+        let mut subscriber = subscriber(subscription, false);
 
         tokio::spawn(async move {
             let mut ticks = tokio::time::interval(Duration::from_secs(15));
@@ -470,7 +501,7 @@ mod tests {
                 activity_rx,
             ))
         })]);
-        let mut subscriber = ControlPlaneSubscriber::new(client(), subscription, false);
+        let mut subscriber = subscriber(subscription, false);
 
         // The caller deadline (10s) is well inside EVENT_READ_TIMEOUT (60s), so this must fail
         // with the caller's own deadline rather than waiting out the staleness watchdog.
