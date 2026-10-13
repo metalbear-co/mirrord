@@ -105,13 +105,29 @@ jobs:
   # a pinned one, and the binary lands where MIRRORD_INSTALL_DIR says, without sudo. This is the
   # path CI installs (metalbear-co/setup-mirrord) build on.
   verified:
-    name: verified install (linux x86_64)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    name: verified install (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "linux x86_64", os: blacksmith-4vcpu-ubuntu-2404, asset: mirrord_linux_x86_64 }
+          # PATH is cut down to the system directories so a Homebrew `sha256sum` cannot stand in
+          # for the `shasum -a 256` fallback the script uses on macOS.
+          - { name: "mac aarch64 / shasum", os: blacksmith-6vcpu-macos-latest, asset: mirrord_mac_universal, path: "/usr/bin:/bin:/usr/sbin:/sbin" }
+    env:
+      ASSET: ${{ matrix.asset }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: scripts/install.sh
           sparse-checkout-cone-mode: false
+
+      - name: Limit PATH to the system tools
+        if: ${{ matrix.path != '' }}
+        run: |
+          echo "PATH=${{ matrix.path }}" >> "$GITHUB_ENV"
+          ! command -v sha256sum || { echo "sha256sum must be unreachable on this leg"; exit 1; }
 
       - name: Install into a directory, checked against the published checksum
         run: |
@@ -136,7 +152,7 @@ jobs:
       - name: The published checksum, pinned, installs
         run: |
           set -euo pipefail
-          sums="https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord_linux_x86_64.shasum256"
+          sums="https://github.com/metalbear-co/mirrord/releases/download/$version/$ASSET.shasum256"
           pinned=$(curl -fsSL "$sums" | cut -d' ' -f1)
           MIRRORD_CHECKSUM="$pinned" MIRRORD_INSTALL_DIR="$DIR" sh scripts/install.sh "$version"
           [ "$("$DIR/mirrord" --version)" = "mirrord $version" ]
