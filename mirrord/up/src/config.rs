@@ -15,6 +15,9 @@ use mirrord_config::{
     config::{ConfigContext, ConfigError, EnvKey, MirrordConfig},
     feature::{
         copy_target::CopyTargetConfig,
+        database_branches::{
+            AllSplitConfigDbBranches, DatabaseBranchesConfig, SplitConfigDbBranches,
+        },
         env::{EnvConfig, EnvFileConfig},
         network::incoming::{
             IncomingMode,
@@ -600,6 +603,26 @@ impl ServiceConfig {
                 ),
             },
         };
+
+        // The operator resolves `"*"` against the `MirrordSplitConfig` of one targeted
+        // workload, so a targetless or label-selected service has nothing to ask for. Every
+        // service of a run shares the key, so services pointing at one entry land on one branch.
+        // Branches set in the base config, or by `config_patch` below, take precedence.
+        let single_workload = cfg.target.path.as_ref().is_some_and(|path| {
+            matches!(
+                path,
+                Target::Targetless | Target::Serverless(_) | Target::Label(_)
+            )
+            .not()
+        });
+        if matches!(self.default_mode, ServiceMode::Split | ServiceMode::Mirror)
+            && single_workload
+            && cfg.feature.db_branches.is_empty()
+        {
+            cfg.feature.db_branches = DatabaseBranchesConfig::FromSplitConfig(
+                SplitConfigDbBranches::All(AllSplitConfigDbBranches::All),
+            );
+        }
 
         if let Some(patch) = self.config_patch {
             cfg = apply_config_patch(cfg, patch, &key)?;
