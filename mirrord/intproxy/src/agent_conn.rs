@@ -218,7 +218,7 @@ impl AgentConnection {
                     .max_delay(Duration::from_secs(3))
                     .take(3);
 
-                let (conn, reports) = Retry::start(retry_strategy, || async {
+                let (conn, to_external_proxy) = Retry::start(retry_strategy, || async {
                     let stream = if config.container.host_gateway_detection {
                         // The sidecar container is always started with
                         // `--add-host mirrord-external-proxy:host-gateway`, so this resolves
@@ -249,7 +249,7 @@ impl AgentConnection {
                     Ok::<_, AgentConnectionError>(conn)
                 })
                 .await?;
-                layer_messages = reports;
+                layer_messages = to_external_proxy;
 
                 (conn, ReconnectFlow::Break(kind))
             }
