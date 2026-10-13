@@ -16,7 +16,7 @@ use std::{
     collections::{BTreeSet, HashMap},
     fmt,
     ops::Not,
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
 };
@@ -29,17 +29,25 @@ use mirrord_config::{
 };
 use thiserror::Error;
 
-use crate::config::{
-    CommonConfig, RunConfig, RunType, ServiceConfig, ServiceMode, SpecifiedTarget, TargetConfig,
-    UpConfig,
+use crate::{
+    UpError,
+    config::{
+        CommonConfig, RunConfig, RunType, ServiceConfig, ServiceMode, SpecifiedTarget,
+        TargetConfig, UpConfig,
+    },
+    prompt,
 };
 
 /// Errors produced by the `mirrord up init` wizard.
 #[derive(Debug, Error, Diagnostic)]
 pub enum InitError {
-    /// Interactive prompt failed or was cancelled.
-    #[error("wizard prompt failed: {0}")]
-    Inquire(#[from] inquire::InquireError),
+    /// Prompting the user failed.
+    ///
+    /// Boxed because [`UpError`] is large, and the error type of the CLI has a
+    /// variant for each of the two.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Up(Box<UpError>),
 
     /// Failed to write the generated config file.
     #[error("failed to write config file: {0}")]
@@ -54,18 +62,27 @@ pub enum InitError {
     YamlSer(#[from] serde_saphyr::ser::Error),
 }
 
+impl From<UpError> for InitError {
+    fn from(error: UpError) -> Self {
+        Self::Up(Box::new(error))
+    }
+}
+
 /// Run the wizard end-to-end: prompt, render, preview, write.
-pub fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
+pub async fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
     println!("Welcome to `mirrord up init`. This wizard generates a skeleton mirrord-up.yaml.\n");
 
     let mut services: HashMap<Arc<str>, ServiceConfig> = HashMap::new();
     loop {
-        let (name, svc) = prompt_service(&services)?;
+        let (name, svc) = prompt_service(&services).await?;
         services.insert(name, svc);
-        if Confirm::new("Add another service?")
-            .with_default(false)
-            .prompt()?
-            .not()
+        if prompt(|| {
+            Confirm::new("Add another service?")
+                .with_default(false)
+                .prompt()
+        })
+        .await?
+        .not()
         {
             break;
         }
@@ -79,16 +96,28 @@ pub fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
 
     println!("\n--- Preview ---\n{rendered}");
 
+    let Some(path) = prompt(move || prompt_output_path(&default_output)).await? else {
+        println!("No file written.");
+        return Ok(());
+    };
+
+    std::fs::write(&path, &rendered)?;
+    println!("Wrote {}.", path.display());
+    Ok(())
+}
+
+/// Asks whether to save the config and where. Returns `None` when the user
+/// does not want to save it.
+fn prompt_output_path(default_output: &Path) -> Result<Option<PathBuf>, inquire::InquireError> {
     if Confirm::new("Save configuration to a file?")
         .with_default(true)
         .prompt()?
         .not()
     {
-        println!("No file written.");
-        return Ok(());
+        return Ok(None);
     }
 
-    let path = loop {
+    loop {
         let path: PathBuf = Text::new("Enter filename:")
             .with_default(&default_output.to_string_lossy())
             .prompt()?
@@ -104,39 +133,39 @@ pub fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
             continue;
         }
 
-        break path;
-    };
-
-    std::fs::write(&path, &rendered)?;
-    println!("Wrote {}.", path.display());
-    Ok(())
+        return Ok(Some(path));
+    }
 }
 
-fn prompt_service(
+async fn prompt_service(
     existing: &HashMap<Arc<str>, ServiceConfig>,
 ) -> Result<(Arc<str>, ServiceConfig), InitError> {
-    let name = Text::new("Service name:")
-        .with_validator(|s: &str| {
-            let t = s.trim();
-            if t.is_empty() {
-                Ok(Validation::Invalid("name cannot be empty".into()))
-            } else if existing.contains_key(t) {
-                Ok(Validation::Invalid(
-                    "a service with that name already exists".into(),
-                ))
-            } else {
-                Ok(Validation::Valid)
-            }
-        })
-        .prompt()?
-        .trim()
-        .into();
+    let existing: Vec<Arc<str>> = existing.keys().cloned().collect();
+    let name = prompt(move || {
+        Text::new("Service name:")
+            .with_validator(move |s: &str| {
+                let t = s.trim();
+                if t.is_empty() {
+                    Ok(Validation::Invalid("name cannot be empty".into()))
+                } else if existing.iter().any(|name| name.as_ref() == t) {
+                    Ok(Validation::Invalid(
+                        "a service with that name already exists".into(),
+                    ))
+                } else {
+                    Ok(Validation::Valid)
+                }
+            })
+            .prompt()
+    })
+    .await?
+    .trim()
+    .into();
 
-    let default_mode = prompt_mode()?;
-    let target = prompt_target(&default_mode)?;
-    let http_filter = prompt_http_filter(&default_mode)?;
-    let ignore_ports = prompt_ignore_ports()?;
-    let run = prompt_run()?;
+    let default_mode = prompt(prompt_mode).await?;
+    let target = prompt(move || prompt_target(&default_mode)).await?;
+    let http_filter = prompt(move || prompt_http_filter(&default_mode)).await?;
+    let ignore_ports = prompt(prompt_ignore_ports).await?;
+    let run = prompt(prompt_run).await?;
 
     Ok((
         name,
@@ -154,7 +183,7 @@ fn prompt_service(
     ))
 }
 
-fn prompt_target(mode: &ServiceMode) -> Result<TargetConfig, InitError> {
+fn prompt_target(mode: &ServiceMode) -> Result<TargetConfig, inquire::InquireError> {
     const INFER: &str = "Infer from the service name";
     const SPECIFY: &str = "Specify a target";
     const TARGETLESS: &str = "Run without a target (outgoing traffic only)";
@@ -242,7 +271,7 @@ impl fmt::Display for ModeChoice {
     }
 }
 
-fn prompt_mode() -> Result<ServiceMode, InitError> {
+fn prompt_mode() -> Result<ServiceMode, inquire::InquireError> {
     let choices = [
         ServiceMode::Split,
         ServiceMode::Mirror,
@@ -257,7 +286,7 @@ fn prompt_mode() -> Result<ServiceMode, InitError> {
     Ok(choice.0)
 }
 
-fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, InitError> {
+fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, inquire::InquireError> {
     match mode {
         ServiceMode::Split | ServiceMode::Mirror => {
             let s = Text::new("HTTP header filter (regex; blank for auto session-key filter):")
@@ -293,7 +322,7 @@ fn parse_ports(s: &str) -> Result<BTreeSet<u16>, String> {
         .collect()
 }
 
-fn prompt_ignore_ports() -> Result<BTreeSet<u16>, InitError> {
+fn prompt_ignore_ports() -> Result<BTreeSet<u16>, inquire::InquireError> {
     let presets: [(&str, &[u16]); _] = [
         ("None", &[]),
         ("Istio sidecar (9090, 9091, 15090)", &[9090, 9091, 15090]),
@@ -327,7 +356,7 @@ fn prompt_ignore_ports() -> Result<BTreeSet<u16>, InitError> {
 
 /// The run type is not asked: `exec` fits most services, and the docs tell
 /// container users to set `run.type`.
-fn prompt_run() -> Result<RunConfig, InitError> {
+fn prompt_run() -> Result<RunConfig, inquire::InquireError> {
     let command_str = Text::new("Local command (e.g. `go run ./cmd/api`):")
         .with_validator(|s: &str| {
             if s.split_whitespace().next().is_none() {

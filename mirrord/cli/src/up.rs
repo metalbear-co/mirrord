@@ -69,7 +69,7 @@ pub(crate) async fn up_command(
     user_data: &UserData,
 ) -> Result<(), UpCliError> {
     if let Some(UpSubcommand::Init { output }) = args.command {
-        return Ok(run_wizard(output)?);
+        return Ok(run_wizard(output).await?);
     }
 
     // We don't yet know whether the user has opted out of telemetry,

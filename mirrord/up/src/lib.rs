@@ -151,8 +151,9 @@ pub enum UpError {
     #[error("failed to query the cluster: {0}")]
     Kube(#[from] KubeApiError),
 
-    /// An interactive target-resolution prompt failed or was cancelled.
-    #[error("target resolution prompt failed: {0}")]
+    /// An interactive prompt (of `mirrord up init` or of target resolution) failed or was
+    /// cancelled.
+    #[error("prompt failed: {0}")]
     Inquire(#[from] inquire::InquireError),
 
     /// The user chose to exit from the target-resolution wizard.
