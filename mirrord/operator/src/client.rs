@@ -67,8 +67,8 @@ use crate::{
         },
         queue_split_progress::{QueueSplitProgress, mirror_requested},
         split_config_branches::{
-            MIRRORD_SESSION_KEY_LABEL, ResolvedSplitConfigBranches, check_attach_copy_mode,
-            entries_from_response, same_source_warnings,
+            MIRRORD_SESSION_KEY_LABEL, ResolvedSplitConfigBranches, UP_SERVICE_ANNOTATION,
+            check_attach_copy_mode, entries_from_response, same_source_warnings,
         },
     },
     crd::{
@@ -76,7 +76,7 @@ use crate::{
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
-            branch_database::{BranchDatabase, BranchDatabaseSpec},
+            branch_database::{BranchDatabase, BranchDatabaseSpec, DatabaseDialect},
             mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase,
             pg::PgBranchDatabase,
@@ -965,7 +965,8 @@ where
     /// 2. Create new ones if any missing.
     /// 3. Wait for all new databases to be ready.
     ///
-    /// `up_service` is the `mirrord up` service this session runs, if any.
+    /// `up_service` is the `mirrord up` service this session runs, if any. It is recorded on the
+    /// branches the session creates from a `MirrordSplitConfig`.
     #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
     pub async fn prepare_branch_dbs<P: Progress>(
         &self,
@@ -1246,6 +1247,11 @@ where
                         MIRRORD_SESSION_KEY_LABEL.to_owned(),
                         EnvKey::to_hashed_label_value(layer_config.key.as_str()),
                     );
+                    if let Some(service) = up_service {
+                        params
+                            .annotations
+                            .insert(UP_SERVICE_ANNOTATION.to_owned(), service.to_owned());
+                    }
                 }
             }
 
@@ -1385,11 +1391,37 @@ where
                         .map(|branch| (branch, "created by another session meanwhile, reused")),
                 );
             for (branch, origin) in origins {
-                subtask.info(&format!(
-                    "using branch database {} for id {}: {origin}",
-                    branch.name_any(),
-                    branch.spec.id
-                ));
+                let name = branch.name_any();
+                let created = created_branches.contains_key(&name);
+                // A branch resolved from a `MirrordSplitConfig` is shared by the sessions under
+                // the key, so its line names the database and, under `mirrord up`, the service
+                // that created it.
+                if split_config_specs.contains_key(&name) {
+                    let dialect = branch
+                        .spec
+                        .dialect()
+                        .map(|dialect| DatabaseDialect::from(dialect).to_string())
+                        .unwrap_or_default();
+                    if created {
+                        subtask.info(&format!("new {dialect} branch database ready ({name})"));
+                    } else {
+                        let creator = branch
+                            .annotations()
+                            .get(UP_SERVICE_ANNOTATION)
+                            .filter(|creator| Some(creator.as_str()) != up_service);
+                        subtask.info(&match creator {
+                            Some(creator) => format!(
+                                "reusing {dialect} branch database ({name}, shared with {creator})"
+                            ),
+                            None => format!("reusing {dialect} branch database ({name})"),
+                        });
+                    }
+                } else {
+                    subtask.info(&format!(
+                        "using branch database {name} for id {}: {origin}",
+                        branch.spec.id
+                    ));
+                }
                 relay_source_compatibility_warnings(branch, &subtask);
             }
 

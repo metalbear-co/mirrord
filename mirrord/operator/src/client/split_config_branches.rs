@@ -31,6 +31,10 @@ use crate::{
 /// same source database.
 pub const MIRRORD_SESSION_KEY_LABEL: &str = "mirrord-session-key";
 
+/// Annotation naming the `mirrord up` service whose session created a branch resolved from a
+/// `MirrordSplitConfig`, so the services attaching to it can say whom they share it with.
+pub const UP_SERVICE_ANNOTATION: &str = "mirrord.metalbear.co/up-service";
+
 /// The branches a `"*"` / ids request resolved to, as this session's inline entries.
 #[derive(Debug, Default)]
 pub struct ResolvedSplitConfigBranches {
