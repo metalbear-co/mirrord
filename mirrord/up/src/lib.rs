@@ -55,12 +55,12 @@ mod init;
 mod kube_context;
 mod process;
 
-/// Shared slot that [`run`] fills with the time it took for **all** child
+/// Shared slot that [`launch`] fills with the time it took for **all** child
 /// sessions to become ready, measured from process spawn.
 ///
-/// The caller constructs one, passes a clone to [`run`], and reads
+/// The caller constructs one, passes a clone to [`launch`], and reads
 /// [`ReadyTracker::time_to_ready`] afterwards (the value is captured even if
-/// `run` later returns an error, as long as readiness was reached first).
+/// `launch` later returns an error, as long as readiness was reached first).
 #[derive(Clone, Default)]
 pub struct ReadyTracker {
     elapsed: Arc<OnceLock<Duration>>,
@@ -591,23 +591,15 @@ fn save_target(
     Ok(())
 }
 
-/// Genererate [`mirrord_config::LayerConfig`]s based on the provided [`UpConfig`] and
-/// [`EnvKey`] and spawn child mirrord processes. Stdout/stderr from
-/// children will be printed to the console, prefixed with the name of
-/// the session.
-///
-/// `ready` is filled with the time-to-ready once every session has signalled
-/// readiness (see [`ReadyTracker`]).
-///
-/// Returns when the user stops the session or one of the child sessions exits.
-pub async fn run(
+/// Generate the [`mirrord_config::LayerConfig`] of every service based on the provided
+/// [`UpConfig`] and [`EnvKey`], resolving the targets left to the cluster. The configs are
+/// handed to [`launch`], after the caller checked what needs the operator.
+pub async fn resolve_services(
     up_config: UpConfig,
     config_path: &Path,
     kube_context_arg: Option<Arc<str>>,
-    key: EnvKey,
-    correlation_id: Uuid,
-    ready: ReadyTracker,
-) -> Result<(), UpError> {
+    key: &EnvKey,
+) -> Result<Vec<SubprocessCfg>, UpError> {
     let invocation_directory = std::env::current_dir()?;
     let config_directory = std::fs::canonicalize(
         config_path
@@ -638,7 +630,7 @@ pub async fn run(
         resolve_unresolved_workloads(&up_config, config_path, up_context.clone()).await?;
 
     let service_configs = up_config.service_configs(
-        &key,
+        key,
         &mut resolved_targets,
         up_context,
         &mut ConfigContext::default(),
@@ -646,6 +638,22 @@ pub async fn run(
 
     validate_targets(&service_configs)?;
 
+    Ok(service_configs)
+}
+
+/// Spawn a child mirrord process for each of `service_configs`. Stdout/stderr from
+/// children will be printed to the console, prefixed with the name of
+/// the session.
+///
+/// `ready` is filled with the time-to-ready once every session has signalled
+/// readiness (see [`ReadyTracker`]).
+///
+/// Returns when the user stops the session or one of the child sessions exits.
+pub async fn launch(
+    service_configs: Vec<SubprocessCfg>,
+    correlation_id: Uuid,
+    ready: ReadyTracker,
+) -> Result<(), UpError> {
     let commands: Vec<_> = service_configs
         .into_iter()
         .map(|config| {

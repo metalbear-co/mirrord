@@ -154,15 +154,9 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         });
     }
 
-    let result = mirrord_up::run(
-        up_config,
-        &args.config_file,
-        args.context,
-        key,
-        correlation_id,
-        ready.clone(),
-    )
-    .await;
+    let services =
+        mirrord_up::resolve_services(up_config, &args.config_file, args.context, &key).await?;
+    let result = mirrord_up::launch(services, correlation_id, ready.clone()).await;
 
     // Recorded whenever all sessions reached readiness, even if `run` then
     // failed, left absent otherwise (e.g. a session crashed before startup).
