@@ -948,10 +948,13 @@ where
     /// 1. List reusable branch databases.
     /// 2. Create new ones if any missing.
     /// 3. Wait for all new databases to be ready.
+    ///
+    /// `up_service` is the `mirrord up` service this session runs, if any.
     #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
     pub async fn prepare_branch_dbs<P: Progress>(
         &self,
         layer_config: &mut LayerConfig,
+        up_service: Option<&str>,
         progress: &P,
     ) -> OperatorApiResult<BranchDbNames> {
         use database_branches::TARGET_NAMESPACE_ANNOTATION;
@@ -1870,6 +1873,7 @@ impl OperatorApi<PreparedClientCert> {
         ),
         err
     )]
+    #[allow(clippy::too_many_arguments)]
     pub async fn prepare_session<P>(
         &self,
         target: ResolvedTarget<false>,
@@ -1878,6 +1882,7 @@ impl OperatorApi<PreparedClientCert> {
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
         up_session_info: Option<&UpSessionInfo>,
+        up_service: Option<&str>,
     ) -> OperatorApiResult<PreparedSession>
     where
         P: Progress,
@@ -1907,7 +1912,8 @@ impl OperatorApi<PreparedClientCert> {
             .contains(&NewOperatorFeature::ProxyApi);
 
         let branch_db_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_branch_dbs(layer_config, progress).await?
+            self.prepare_branch_dbs(layer_config, up_service, progress)
+                .await?
         } else {
             BranchDbNames::default()
         };
@@ -2059,6 +2065,7 @@ impl OperatorApi<PreparedClientCert> {
         ret,
         err
     )]
+    #[allow(clippy::too_many_arguments)]
     pub async fn connect_in_new_session<P>(
         &self,
         target: ResolvedTarget<false>,
@@ -2067,6 +2074,7 @@ impl OperatorApi<PreparedClientCert> {
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
         up_session_info: Option<UpSessionInfo>,
+        up_service: Option<&str>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
@@ -2084,6 +2092,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name.clone(),
                 session_ci_info.clone(),
                 up_session_info.as_ref(),
+                up_service,
             )
             .await?;
 
@@ -2199,6 +2208,7 @@ impl OperatorApi<PreparedClientCert> {
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
         up_session_info: Option<UpSessionInfo>,
+        up_service: Option<&str>,
     ) -> OperatorApiResult<OperatorSession>
     where
         P: Progress,
@@ -2251,7 +2261,8 @@ impl OperatorApi<PreparedClientCert> {
         //   happens locally. If Primary != Default, a sync controller copies CRDs to Default where
         //   actual branching happens, then syncs status back.
         let branch_db_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_branch_dbs(layer_config, progress).await?
+            self.prepare_branch_dbs(layer_config, up_service, progress)
+                .await?
         } else {
             BranchDbNames::default()
         };
@@ -2338,6 +2349,7 @@ impl OperatorApi<PreparedClientCert> {
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
         up_session_info: Option<UpSessionInfo>,
+        up_service: Option<&str>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
@@ -2349,6 +2361,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name,
                 session_ci_info,
                 up_session_info,
+                up_service,
             )
             .await?;
 
