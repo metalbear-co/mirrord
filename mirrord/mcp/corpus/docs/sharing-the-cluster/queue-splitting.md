@@ -423,6 +423,8 @@ Both forms take the same filter fields (`queue_type`, `filter`, `message_filter`
 
 {% hint style="info" %}
 When choosing which SQS attributes, Kafka headers or Pub/Sub attributes to filter on, first check whether your framework, messaging client, or observability library already propagates message metadata for you. Many modern stacks can forward tracing-related context out of the box, especially for Kafka headers. Prefer enabling that before adding manual propagation code.
+
+To have your AI agent do this, use the [`mirrord-header-propagation`](https://github.com/metalbear-co/skills/tree/main/skills/mirrord-header-propagation) skill. It adds `baggage` to every message your services publish, restores it in each consumer, and covers Kafka, SQS/SNS, RabbitMQ, GCP Pub/Sub, Azure Service Bus, NATS, Redis Pub/Sub, BullMQ, and Temporal.
 {% endhint %}
 
 {% hint style="info" %}

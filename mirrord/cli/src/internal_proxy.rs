@@ -532,14 +532,12 @@ pub(crate) async fn connect_and_ping(
 mod tests {
     use std::{env, os::unix::process::ExitStatusExt, process::Stdio, time::Duration};
 
+    use mirrord_command::resolve_tokio_command;
     use nix::{
         sys::signal::{Signal, kill},
         unistd::Pid,
     };
-    use tokio::{
-        io::{AsyncBufReadExt, BufReader},
-        process::Command,
-    };
+    use tokio::io::{AsyncBufReadExt, BufReader};
 
     use super::{arm_ci_shutdown_watchdog, install_ci_shutdown_handler};
 
@@ -571,7 +569,7 @@ mod tests {
     /// waiting for the watchdog's forced termination.
     #[tokio::test]
     async fn ci_shutdown_signal_cancels_intproxy() {
-        let mut child = Command::new(env::current_exe().unwrap())
+        let mut child = resolve_tokio_command(env::current_exe().unwrap())
             .args([
                 "--exact",
                 "internal_proxy::tests::ci_shutdown_signal_worker",
@@ -606,7 +604,7 @@ mod tests {
 
     #[tokio::test]
     async fn ci_shutdown_watchdog_kills_stalled_intproxy() {
-        let mut child = Command::new(env::current_exe().unwrap())
+        let mut child = resolve_tokio_command(env::current_exe().unwrap())
             .args([
                 "--exact",
                 "internal_proxy::tests::ci_shutdown_watchdog_worker",

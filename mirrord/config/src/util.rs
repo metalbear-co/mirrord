@@ -4,11 +4,11 @@ use std::{
     hash::Hash,
     marker::PhantomData,
     ops::{Deref, Not},
-    process::Command,
     str::FromStr,
     sync::LazyLock,
 };
 
+use mirrord_command::resolve_command;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, de};
 
@@ -375,7 +375,7 @@ pub static GIT_BRANCH: LazyLock<Option<String>> = LazyLock::new(|| {
         return Some(branch_name);
     }
 
-    match Command::new("git")
+    match resolve_command("git")
         .args(["branch", "--show-current"])
         .output()
     {

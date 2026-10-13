@@ -49,6 +49,10 @@ Run your process with mirrord using the steal configuration, then send a request
 
 For HTTP-based traffic, the recommended way to isolate requests is to match on the W3C trace propagation headers: `baggage` or `tracestate`. Custom headers still work, but `baggage` and `tracestate` are usually the clearest option because many browsers, gateways, service meshes, and tracing libraries already know how to preserve them across service boundaries.
 
+{% hint style="info" %}
+A filter on `baggage` only matches past the first service if every service forwards the header. To have your AI agent set that up, use the [`mirrord-header-propagation`](https://github.com/metalbear-co/skills/tree/main/skills/mirrord-header-propagation) skill.
+{% endhint %}
+
 For incoming HTTP traffic (including HTTP2 and gRPC), mirrord also supports filtering a subset of the remote target's traffic. You can do this by specifying a filter on either an HTTP header or path. To control whether traffic is duplicated (mirror) or redirected (steal), set the mode field:
 `mirror`: the remote target still handles the request, and your local process gets a copy.
 `steal`: the request is redirected to your local process, and the remote target does not handle it.

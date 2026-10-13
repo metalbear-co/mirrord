@@ -16,3 +16,5 @@ Here are some ways you can connect mirrord to your AI coding workflow:
 - **[Configure AI Agents to Use mirrord](./the-meta-prompt.md)** - A prompt generator that creates project-specific `AGENTS.md` files and configurations automatically, saving hours of manual setup across multiple services.
 - **[metalbear.com/agents.md](https://metalbear.com/agents.md)** - A short operational reference written for agents rather than people: install commands, finding targets, running code through mirrord, configuration, and etiquette on a shared cluster. Point an agent at the URL directly when you want it to pick mirrord up without any repository setup.
 - **[Agent-Started Trials](./agent-started-trials.md)** - On a cluster with no mirrord for Teams license, an agent can start a trial itself and hand you a link to claim the organization it created.
+
+For the setup steps for each coding agent (Claude Code, Codex, GitHub Copilot, Cline, and others), see [mirrord integrations](https://metalbear.com/mirrord/integrations/).

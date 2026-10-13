@@ -179,7 +179,7 @@ By default, opening a Preview Environment as a recipient requires the mirrord br
 
 `mirrord-share-ingress` moves that header injection off the client and onto a server-side component, so a plain HTTPS link works on its own with nothing to install on the recipient's side. Each shareable preview is reachable at its own host, `<slug>.<shareDomain>`, printed by `mirrord preview start` as the `preview URL`.
 
-The `slug` mirrors the preview's key with a random suffix (for example `pr-myrepo-a1b2c3`), so the link is recognizable but unguessable; [stable share hosts](#stable-share-hosts) drop the suffix. When the session's TTL expires the host stops resolving, and the link falls through to a "preview not found" page that redirects to your app domain.
+The `slug` mirrors the preview's key with a random suffix (for example `pr-myrepo-a1b2c3`), so the link is recognizable but unguessable; [stable share hosts](#stable-share-hosts) drop the suffix. When the session's TTL expires the host stops resolving, and the link falls through to a "preview not found" page. By default that page redirects to your app domain after a few seconds; with `shareIngress.notFound.redirect: false` it is a plain 404 (see [Setup](#setup)).
 
 {% hint style="info" %}
 The preview URL works with any HTTP filter. A preview with a custom filter (a path filter, a different header, composed filters) additionally routes requests carrying the share link's injected baggage header, so its own filter keeps working for regular traffic while the link always reaches the preview.
@@ -211,7 +211,15 @@ TLS and the public-facing ingress are owned by your platform team. You put an In
       --set shareIngress.appDomain=example.com
     ```
 
-    `appDomain` is where visitors land when a share link no longer resolves.
+    `appDomain` is where visitors land when a share link no longer resolves. A host with no live preview, such as an expired link or a mistyped host, gets a 404 page that redirects there after five seconds.
+
+    To handle missing previews yourself instead, turn the redirect off (share-ingress chart 3.215.0 or later). The 404 page then only says "Preview not found", with no redirect, refresh, or JavaScript, and `appDomain` is not needed:
+
+    ```bash
+    helm install mirrord-share-ingress metalbear/mirrord-operator-share-ingress \
+      --set shareIngress.shareDomain=preview.example.com \
+      --set shareIngress.notFound.redirect=false
+    ```
 
 3.  Point a wildcard DNS record `*.preview.example.com` at your ingress, and create an Ingress with a wildcard certificate that routes to the share-ingress Service. A reference manifest (NGINX Ingress preserves the `Host` header by default):
 
@@ -405,6 +413,109 @@ variable parameters work.
 Requires operator 3.205.0 or later and CLI 3.256.0 or later, plus `create`, `delete`, and
 `patch` on `batch/cronjobs` and `create` on `batch/jobs` for the operator, which the Helm chart
 grants when `operator.previewEnv` is enabled.
+
+***
+
+### Building a Preview From Your Manifests
+
+By default the preview pod is a copy of the target's live pod spec. Pass `--resource` to build
+it from the Kubernetes manifests you already keep for the service instead. This is useful when
+a pull request changes the Deployment or its ConfigMaps along with the code, and the preview
+should run with those changes before they are deployed:
+
+```bash
+mirrord preview start -t deployment/app -i myrepo/app:pr-123 -k pr-123 --resource ./k8s/
+```
+
+`--resource` takes a file or a directory (only the `*.yaml` and `*.yml` files directly in it
+are read) and can be repeated. The same list can live in the config as
+`feature.preview.spec_resources`:
+
+```json
+{
+  "target": "deployment/app",
+  "key": "pr-123",
+  "feature": {
+    "preview": {
+      "image": "myrepo/app:pr-123",
+      "spec_resources": ["./k8s/app-deployment.yaml", "./k8s/configmap.yaml"]
+    }
+  }
+}
+```
+
+mirrord only takes what can affect the preview pod from the files:
+
+1. **The target itself.** Its pod template becomes the preview pod's spec, with your image.
+   When the files do not define the target, the live one is used.
+2. **The ConfigMaps and Secrets the pod uses**, through `env`, `envFrom`, or volumes.
+
+Everything else in the files, such as an Ingress or another Deployment, is skipped, even when
+it changed. Objects that are identical to what is live are skipped too:
+
+```
+Using deployment/app from ./k8s/app-deployment.yaml as the preview pod spec.
+Applying 2 of 3 in-scope resources from ./k8s/ (1 unchanged, skipped):
+deployment/app changed
+configmap/app-config new
+secret/app-tls unchanged, skipped
+```
+
+Live objects are never changed. A changed or new ConfigMap or Secret is created as a copy that
+belongs to the preview, the preview pod uses the copy, and the copy is deleted when the preview
+ends. The real app keeps using the originals. Secret values are sent to the operator the same
+way as `secret_mounts`: they are stored in a Secret owned by the session, never on the
+`PreviewSession` resource.
+
+Before creating anything, mirrord checks the files:
+
+* A file that is not valid YAML fails with its line and column, before the cluster is contacted.
+* Every changed object is validated by the cluster with a dry run, which creates nothing. If
+  the cluster rejects one, the command stops with the API server's reason and nothing is
+  created. A preview that is already running with the same key is left as it is.
+
+The comparison and the dry runs use your own credentials, not the operator's, so the operator
+never reads your Secrets. For the full check you need:
+
+* `get` on the target and on the ConfigMaps and Secrets its pod uses, to compare them.
+* `create` on the target's kind, ConfigMaps, and Secrets, for the dry runs (they create
+  nothing).
+
+A CI identity that deploys the service usually has both. The `mirrord-operator-user` role alone
+has neither. `--resource` still works without them: mirrord says which objects it could not
+read or validate, uses the version from your files for those, and an object the cluster rejects
+fails the preview when the operator creates it, instead of before anything is created.
+
+Running `mirrord preview start` again with the same key replaces the preview, built from the
+current files.
+
+#### Comparing Your Manifests With the Cluster
+
+`mirrord preview diff` runs the same checks and prints what differs for each object, without
+creating anything:
+
+```bash
+mirrord preview diff -t deployment/app --resource ./k8s/
+```
+
+```
+deployment/app from ./k8s/app-deployment.yaml: changed
+  ~ spec.template.spec.containers[app].env[LOG_LEVEL].value
+      - "info"
+      + "debug"
+configmap/app-config from ./k8s/configmap.yaml: new
+  + data.FEATURE_FLAG: "on"
+secret/app-tls from ./k8s/secret.yaml: changed
+  ~ data.tls.key: (value hidden, changed)
+ingress/web from ./k8s/ingress.yaml: outside the target's scope, skipped
+```
+
+Secret values are never printed, only whether each one changed.
+
+`--resource` is not supported with a management-only multi-cluster operator yet, because the
+target lives in another cluster than the one the CLI talks to. It requires CLI 3.266.0 or later
+and operator 3.213.0 or later; with an older operator the CLI refuses `--resource` instead of
+starting a preview from the live spec.
 
 ***
 

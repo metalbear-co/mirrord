@@ -88,7 +88,7 @@ Note: Filtering is not compatible with `"mode": "all"`.
 If both are specified, mirrord ignores the `tables` configuration.
 
 {% hint style="info" %}
-The `dump_args` field is not supported for CockroachDB. Only MySQL and PostgreSQL branches accept custom dump arguments.
+The `dump_args` field is not supported for CockroachDB. Only MySQL, MariaDB, and PostgreSQL branches accept custom dump arguments.
 {% endhint %}
 
 ## Source TLS and mutual TLS

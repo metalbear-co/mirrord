@@ -1,10 +1,10 @@
 use std::{
     env,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use anyhow::{Context, Result, bail};
+use mirrord_command::resolve_command;
 
 use super::layer::{self, CargoOptions, Target};
 
@@ -45,7 +45,7 @@ pub fn run(
         mirrord_layer.display()
     );
 
-    let mut cmd = Command::new("cargo");
+    let mut cmd = resolve_command("cargo");
 
     cmd.args(["nextest", "run"]);
 
@@ -155,7 +155,7 @@ fn canonicalize_built_artifact(path: &Path, description: &str) -> Result<PathBuf
 pub fn run_unit(cargo_args: Vec<String>) -> Result<()> {
     let assets = create_dummy_cli_artifacts()?;
 
-    let mut cmd = Command::new("cargo");
+    let mut cmd = resolve_command("cargo");
     cmd.args(["nextest", "run", "-p", "mirrord"]);
     cmd.args(cargo_args);
     cmd.env("MIRRORD_LAYER_FILE", &assets.layer);

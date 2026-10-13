@@ -86,5 +86,5 @@ Note: Filtering is not compatible with `"mode": "all"`.
 If both are specified, mirrord ignores the `tables` configuration.
 
 {% hint style="info" %}
-The `dump_args` field is not supported for MSSQL. MSSQL branches use their own internal dump mechanism, so only MySQL and PostgreSQL branches accept custom dump arguments.
+The `dump_args` field is not supported for MSSQL. MSSQL branches use their own internal dump mechanism, so only MySQL, MariaDB, and PostgreSQL branches accept custom dump arguments.
 {% endhint %}

@@ -3,7 +3,7 @@ name: mirrord-operator
 description: Help users install and configure the mirrord Operator for team/enterprise environments. Use when users ask about operator setup, Helm installation, cloud API key or license configuration, air-gapped/offline licensing, enabling features (queue splitting, DB branching, preview environments, multi-cluster), internal registries, OpenShift/GKE Autopilot, RBAC, or multi-user mirrord deployments. Also use when an AI agent hits a Team or Enterprise feature on a cluster with no license and needs to offer the user a trial (agent-started trial; the trial is Enterprise tier).
 metadata:
   author: MetalBear
-  version: "2.15"
+  version: "2.16"
 ---
 
 # Mirrord Operator Skill
@@ -82,7 +82,7 @@ The operator needs credentials to obtain its license. Pick **one** path:
 **A. Cloud API key (default, recommended).** The operator authenticates to the mirrord cloud with a **cloud API key** and obtains its license over the API. Generate the key in the dashboard under **Settings** at [app.metalbear.com](https://app.metalbear.com) — it's shown **only once**. When generating it, an org admin also chooses **identity sharing** (ticked by default): with it on, usage metrics sent to the mirrord cloud include developer usernames and session targets so the usage dashboard can show them by name; with it off, metrics stay anonymized. Set `cloud.anonymizeData: true` in Helm values to keep metrics anonymized regardless of the key's setting. Provide the key one of three ways:
 
 - **Kubernetes Secret (recommended)** — the user creates the Secret; the key never lives in `values.yaml`. Point the chart at the secret name now (this doesn't require the secret to exist yet):
-  ```yaml
+  ```yaml helm-values
   cloud:
     apiKey:
       keyRef: mirrord-operator-cloud-api-key
@@ -132,7 +132,7 @@ Most features are **off by default** and gated behind a Helm value under `operat
 | RabbitMQ / GCP Pub/Sub / Azure Service Bus / Redis Pub/Sub / Temporal / BullMQ splitting | `operator.rmqSplitting` / `gcpPubsubSplitting` / `azureServiceBusSplitting` / `redisPubsubSplitting` / `temporalSplitting` / `bullmqSplitting` |
 | DB branching (per engine) | `operator.mysqlBranching`, `pgBranching`, `mariadbBranching`, `mongodbBranching`, `mssqlBranching`, `redisBranching`, `dynamodbBranching`, `clickhouseBranching`, `cockroachdbBranching`, `spannerBranching` |
 | Generic DB branching (user-supplied images) | `operator.genericBranching: true` (⚠️ lets branch creators run arbitrary images; restrict with `genericBranchConfig.dbPod.allowedImages`) |
-| Preview environments | `operator.previewEnv: true` (+ `operator.shareIngress.shareDomain` and the `mirrord-share-ingress` chart for link sharing) |
+| Preview environments | `operator.previewEnv: true` — default on recent chart versions, so only needs setting explicitly on older ones (+ `operator.shareIngress.shareDomain` and the `mirrord-share-ingress` chart for link sharing) |
 | Multi-cluster orchestration | `operator.multiCluster.enabled: true` on the **primary** cluster; `operator.multiClusterMember: true` on members |
 | Preview environments as multi-cluster replicas | `operator.multiCluster.preview.mode: replicas` on **every** cluster (default `default-cluster`; needs operator/chart `3.193.0`+ and mirrord `3.247.0`+) |
 | Prometheus metrics | `operator.metrics: true` |
@@ -144,23 +144,48 @@ Most features are **off by default** and gated behind a Helm value under `operat
 If the cluster has no mirrord for Teams license, an agent can offer the user a seven-day Enterprise trial instead of stopping. Run `mirrord operator status` first: if it succeeds, the cluster already runs the Operator (possibly from a trial an earlier session started), so don't sign up again. Otherwise, once the user agrees:
 
 ```bash
+mirrord operator install --no-browser
+```
+
+This runs against the cluster of the current kubecontext, or the one named with `--context`. No authentication, no credit card, and no API key for the agent to handle. In a terminal, the command first asks you to confirm the kubecontext and namespace before it starts the trial or changes the cluster — `--yes` skips the question; an agent usually runs without a terminal, and then it isn't asked either way.
+
+The command starts the trial, installs the Operator from the default Helm chart (no Helm needed), and prints the trial's end date, a `claim_url` for the user to open to take ownership of the organization, and the trial's API key. `--no-browser` keeps it from opening the claim page itself (it's skipped automatically whenever the command isn't running in a terminal). It sends the cluster's ID (the UID of its `default` namespace) as a hint so the user can recognize the cluster on the claim page; `--cluster-hint <name>` sends a different name, `--no-hint` sends none. If an Operator is already installed, or an earlier install left objects behind, the command stops and tells you rather than touching anything.
+
+If the install fails or is stopped half-way, don't start another trial — remove what was installed and retry with the trial's key (the command prints both commands, filled in, when it fails):
+
+```bash
+mirrord operator uninstall
+mirrord operator install --api-key <key>
+```
+
+Give both commands the same `--context` if the first attempt used one.
+
+Treat the returned API key like any other secret material (see Security Boundaries) — don't echo it; if you move the install to Helm later, pass it via a Secret reference, not `--set`.
+
+**Confirm with the user before running `mirrord operator install`** — it creates an external organization and installs into the cluster; treat it with the same care as any other cluster-modifying action.
+
+Because the trial is an Enterprise license, it also covers Preview Environments. The Helm chart enables `operator.previewEnv` by default, so an Operator installed this way supports them as-is — no extra flag needed.
+
+To remove an Operator that `mirrord operator install` set up (also after a half-finished install), run `mirrord operator uninstall`. It first lets the Operator end its sessions so the workloads they changed are restored, then deletes everything the install created, including the mirrord CRDs (so it also deletes the cluster's mirrord policies and profiles). Like install, it takes `--context` and asks for confirmation in a terminal. If the install was later taken over by Helm (via the `helm install` command `mirrord operator install` prints for anything beyond the default setup), use `helm uninstall` instead — `mirrord operator uninstall` detects this and stops rather than acting.
+
+### Without the mirrord CLI
+
+An agent that can't run the CLI can post to the signup endpoint directly instead:
+
+```bash
 curl -fsS -X POST https://app.metalbear.com/api/v1/agent/signup \
   -H 'content-type: application/json' \
   -d '{"agent": "claude-code", "developer_email": "<user email, optional>", "cluster_hint": "<optional>"}'
 ```
 
-This endpoint needs no authentication and no credit card. The response is a provisional organization: an `api_key` to use as the cloud API key in Step 2 above, and a `claim_url` the user has to open to take ownership of that organization — until they do, nobody can administer billing or seats, and the org expires with the trial. Treat the returned `api_key` like any other secret material (see Security Boundaries) — put it in a Kubernetes Secret, don't echo it.
-
-**Confirm with the user before making this request** — it creates an external organization and, if `developer_email` is set, sends mail to that address; treat it with the same care as any other cluster-modifying action.
-
-Because the trial is an Enterprise license, it also covers Preview Environments (`operator.previewEnv: true`) for its duration. Only turn it on if the user wants preview environments: it lets the Operator create and delete Deployments, Services, and CronJobs across the cluster. Enabling it later is a `helm upgrade`.
+This endpoint needs no authentication and no credit card. The response describes the provisional organization: an `api_key` to use as the cloud API key in Step 2 above, and a `claim_url` the user has to open to take ownership of the organization — until they do, nobody can administer billing or seats, and the org expires with the trial. Treat the returned `api_key` like any other secret material — put it in a Kubernetes Secret, don't echo it. **Confirm with the user before making this request** — it creates an external organization and, if `developer_email` is set, sends mail to that address.
 
 ## Air-gapped / offline (Enterprise)
 
 Air-gapped clusters can't reach the cloud to exchange an API key for a license, so they use an offline **license certificate** or a self-hosted **license server**.
 
 - **License PEM inline** — paste the certificate as a YAML literal block under `license.file.secret.data`:
-  ```yaml
+  ```yaml helm-values
   license:
     file:
       secret:
@@ -191,7 +216,7 @@ AGENT_IMAGE_VERSION=$(regctl image config ghcr.io/metalbear-co/operator:$IMAGE_V
 regctl image copy ghcr.io/metalbear-co/mirrord:$AGENT_IMAGE_VERSION your-registry/mirrord:$AGENT_IMAGE_VERSION
 ```
 
-```yaml
+```yaml helm-values
 operator:
   image: your-registry/operator
 agent:
@@ -205,7 +230,7 @@ Feature images are pulled only when the feature is enabled (Kafka sidecar, MSSQL
 
 - **OpenShift** — set `openshift: true` in values (renders a SecurityContextConstraints), covering the `mirrord-operator` and `default` service accounts in the mirrord namespace.
 - **GKE Autopilot** — mirrord is an approved [GKE Autopilot partner](https://docs.cloud.google.com/kubernetes-engine/docs/resources/autopilot-partners), so run the operator as a customer-owned privileged workload by applying an `AllowlistSynchronizer` (**not** a manually-written `WorkloadAllowlist` — Autopilot rejects a manual one with an admission error on standard clusters):
-  ```yaml
+  ```yaml k8s
   apiVersion: auto.gke.io/v1
   kind: AllowlistSynchronizer
   metadata:
@@ -221,7 +246,7 @@ Feature images are pulled only when the feature is enabled (Kafka sidecar, MSSQL
 
 The chart creates the roles users need — you don't hand-write mirrord CRD roles. For each namespace where developers run mirrord, add it to `roleNamespaces` so a namespaced role is created there; then bind users to it with your own RoleBinding:
 
-```yaml
+```yaml helm-values
 roleNamespaces:
   - staging
   - development
@@ -233,7 +258,7 @@ The chart also ships cluster roles: `mirrord-operator-user-basic`, `mirrord-oper
 
 Clients use the operator automatically when it's present. To force operator mode explicitly:
 
-```json
+```json mirrord
 { "operator": true, "target": "pod/my-app" }
 ```
 

@@ -105,7 +105,7 @@ For `MirrordSplitConfig`:
 
 Remind the user once, early, to enable Kafka splitting:
 
-```yaml
+```yaml helm-values
 operator:
   kafkaSplitting: true
   # For Kafka Streams consumers only:
@@ -125,7 +125,7 @@ Rules:
 - For Kafka Streams: set `mirrord.client_implementation: java`.
 - **Default `security.protocol` to `SASL_SSL`** when the user mentions SASL without specifying transport, and flag it: "defaulted to `SASL_SSL` — change to `SASL_PLAINTEXT` if your broker uses plaintext transport."
 
-```yaml
+```yaml crd
 apiVersion: mirrord.metalbear.co/v1
 kind: MirrordPropertyList
 metadata:
@@ -152,7 +152,7 @@ Rules:
 - For slow-restarting workloads (StatefulSets, Rollouts), consider `spec.restart.timeout` (pod readiness wait after a restart), `spec.ttl` (idle window: keeps the split fully live so a reconnecting session resumes instantly, requires operator **3.194.0+**), and `spec.drainTimeout` (drain window that follows: lets the workload finish the already-forwarded backlog before unpatching). On operators older than 3.194.0, `spec.drainTimeout` alone controls how long the workload stays patched after the last session.
 - The operator can only join the original consumer group once every pod of the previous generation has left it, so a temporary-group split (`mirrord.temporary_group_id`) waits for the workload's rollout to finish — 180 seconds by default, then the session fails. For a slow rollout (many replicas, a long termination grace period, a consumer that stays in the group until its session timeout expires), raise it with `mirrord.group_join_timeout` (seconds) on the `MirrordPropertyList` (operator **3.204.0+**; older operators reject it as an unknown `mirrord.` key).
 
-```yaml
+```yaml crd
 apiVersion: queues.mirrord.metalbear.co/v1
 kind: MirrordSplitConfig
 metadata:
@@ -186,7 +186,7 @@ spec:
 Show the developer-facing config referencing the topic IDs. Two filter kinds, and you can combine them:
 
 **Filter on Kafka headers (`message_filter`):**
-```json
+```json mirrord
 {
   "operator": true,
   "target": "deployment/<workload>/container/<container>",
@@ -203,7 +203,7 @@ Show the developer-facing config referencing the topic IDs. Two filter kinds, an
 All specified headers must match. An empty `message_filter: {}` with no `jq_filter` is **match-none** (the local app gets zero messages).
 
 **Composable header filter (`filter`) — NEW, alternative to `message_filter`:**
-```json
+```json mirrord
 {
   "operator": true,
   "target": "deployment/<workload>/container/<container>",
@@ -225,7 +225,7 @@ All specified headers must match. An empty `message_filter: {}` with no `jq_filt
 `filter` takes a single `{ "metadata": "<regex>" }`, or an `any_of`/`all_of` list of them. Each `metadata` regex is matched against every header rendered as `<name>: <value>` — one regex can pin a header by name or match a marker wherever it's propagated. A `message_filter` of `{"tenant": "^blue$"}` is equivalent to `filter: {"metadata": "^tenant: blue$"}`, except `message_filter` requires the header name to match exactly while a `metadata` regex sees the whole `name: value` line. Use either `filter` or `message_filter` on an entry, not both. Requires mirrord **3.264.0+** and operator **3.212.0+**. A `metadata` regex can't be verified against a specific header name, so a topic covered by a `splitQueues` policy rule rejects a lone `metadata` filter the same way it rejects a lone `jq_filter` — use `message_filter` there instead.
 
 **Filter on record content (`jq_filter`) — NEW:**
-```json
+```json mirrord
 {
   "operator": true,
   "target": "deployment/<workload>/container/<container>",
@@ -242,7 +242,7 @@ All specified headers must match. An empty `message_filter: {}` with no `jq_filt
 `jq_filter` runs a jq program over a JSON doc the operator builds per record: `topic`, `partition`, `offset`, `timestamp`, `key`, `payload`, `headers`. `key`/`payload`/header values are UTF-8 strings (or base64 when not valid UTF-8). A record matches if the program outputs `true`; a record whose program errors (e.g. `fromjson` on non-JSON) is treated as **not matching** and stays on the deployed app's path.
 
 **Filter on protobuf payloads (`payload_protobuf`) — NEW:**
-```json
+```json mirrord
 {
   "operator": true,
   "target": "deployment/<workload>/container/<container>",

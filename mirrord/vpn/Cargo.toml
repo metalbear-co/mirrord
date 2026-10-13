@@ -19,6 +19,7 @@ workspace = true
 [dependencies]
 mirrord-protocol = { path = "../protocol" }
 mirrord-protocol-io = { path = "../protocol-io" }
+mirrord-command = { path = "../command", features = ["tokio"] }
 
 futures.workspace = true
 k8s-openapi.workspace = true
