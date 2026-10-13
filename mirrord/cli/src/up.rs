@@ -182,6 +182,7 @@ enum ErrorCategory {
     ConfigValidation = 1,
     ServiceCrash = 2,
     InternalError = 3,
+    PreCommandFailed = 4,
 }
 
 impl From<&UpCliError> for ErrorCategory {
@@ -199,6 +200,7 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::Mode(_))
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
+            UpCliError::Up(UpError::PreCommandFailed { .. }) => Self::PreCommandFailed,
             UpCliError::Up(UpError::Io(_))
             | UpCliError::Up(UpError::Panic(_))
             | UpCliError::Up(UpError::Kube(_))

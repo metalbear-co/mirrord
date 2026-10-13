@@ -262,8 +262,17 @@ async fn receive_second_signal(
         .map_err(|_| io::Error::other("shutdown signal task stopped"))?
 }
 
+/// The processes `mirrord up` runs for one service.
+pub(super) struct ServiceCommands {
+    pub(super) name: Arc<str>,
+    /// `run.pre_command`, run to completion without mirrord before `session`.
+    pub(super) pre: Option<Command>,
+    /// The `mirrord exec`/`mirrord container` child that runs `run.command`.
+    pub(super) session: Command,
+}
+
 pub(super) async fn run(
-    commands: Vec<(Arc<str>, Command)>,
+    commands: Vec<ServiceCommands>,
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
     let shutdown = shutdown_signals()?;
@@ -330,7 +339,7 @@ async fn forward_output(
 
 #[cfg(all(test, unix))]
 async fn supervise(
-    commands: Vec<(Arc<str>, Command)>,
+    commands: Vec<ServiceCommands>,
     ready: ReadyTracker,
     shutdown: impl Future<Output = io::Result<ShutdownSignal>>,
     grace: Duration,
@@ -341,7 +350,7 @@ async fn supervise(
 }
 
 async fn supervise_with_second_signal(
-    commands: Vec<(Arc<str>, Command)>,
+    commands: Vec<ServiceCommands>,
     ready: ReadyTracker,
     shutdown: impl Future<Output = io::Result<ShutdownSignal>>,
     second_shutdown: impl Future<Output = io::Result<SignalDelivery>>,
@@ -358,7 +367,12 @@ async fn supervise_with_second_signal(
     let mut services = Vec::with_capacity(total);
     let mut spawn_error = None;
 
-    for (name, command) in commands {
+    for ServiceCommands {
+        name,
+        session: command,
+        ..
+    } in commands
+    {
         // Terminal Ctrl-C must reach the supervisor first so child signal exits
         // cannot race it and become spurious service-crash telemetry.
         let mut command = CommandWrap::from(command);
@@ -487,7 +501,7 @@ mod tests {
 
     const TEST_GRACE: Duration = Duration::from_millis(200);
 
-    fn command(script: &str, directory: &Path) -> (Arc<str>, Command) {
+    fn command(script: &str, directory: &Path) -> ServiceCommands {
         let mut command = resolve_tokio_command("sh");
         command
             .args(["-c", script])
@@ -497,7 +511,11 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        (Arc::from("test"), command)
+        ServiceCommands {
+            name: Arc::from("test"),
+            pre: None,
+            session: command,
+        }
     }
 
     async fn wait_for_file(path: &Path) {
@@ -695,10 +713,11 @@ mod tests {
     async fn spawn_failure_is_returned_instead_of_panicking() {
         let directory = TempDir::new().unwrap();
         let valid = command("exec sleep 60", directory.path());
-        let missing = (
-            Arc::from("missing"),
-            resolve_tokio_command(directory.path().join("missing")),
-        );
+        let missing = ServiceCommands {
+            name: Arc::from("missing"),
+            pre: None,
+            session: resolve_tokio_command(directory.path().join("missing")),
+        };
         let result = supervise(
             vec![valid, missing],
             ReadyTracker::default(),
