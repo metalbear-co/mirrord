@@ -370,7 +370,7 @@ async fn resolve_unresolved_workloads(
             .as_deref()
             .unwrap_or(client.default_namespace());
 
-        let workloads = list_workloads(client, namespace).await?;
+        let workloads = list_workloads(client, namespace, &INFERRED_TARGET_TYPES).await?;
         let resolved = match find_by_name(&workloads, name) {
             Some(path) => {
                 println!("{name}: using {path}");
@@ -399,9 +399,12 @@ async fn resolve_unresolved_workloads(
 }
 
 /// Lists workload paths (`deployment/foo`, `pod/bar/container/baz`, ...) of
-/// the kinds in [`INFERRED_TARGET_TYPES`] living in `namespace`, in priority
-/// order.
-async fn list_workloads(client: &kube::Client, namespace: &str) -> Result<Vec<String>, UpError> {
+/// the `kinds` living in `namespace`, in the order of `kinds`.
+async fn list_workloads(
+    client: &kube::Client,
+    namespace: &str,
+    kinds: &[TargetType],
+) -> Result<Vec<String>, UpError> {
     let seeker = KubeResourceSeeker {
         client,
         namespace,
@@ -411,9 +414,7 @@ async fn list_workloads(client: &kube::Client, namespace: &str) -> Result<Vec<St
     // `operator_active: true` only lifts the seeker's restriction on listing
     // operator-only kinds (statefulsets); the listing itself is plain
     // Kubernetes API access.
-    Ok(seeker
-        .filtered(INFERRED_TARGET_TYPES.to_vec(), true)
-        .await?)
+    Ok(seeker.filtered(kinds.to_vec(), true).await?)
 }
 
 async fn list_namespaces(client: &kube::Client) -> Result<Vec<String>, UpError> {
@@ -478,13 +479,32 @@ async fn prompt_for_target(
     }
 
     let namespaces = list_namespaces(client).await?;
+    let (target, namespace) = pick_workload(client, &namespaces, &INFERRED_TARGET_TYPES).await?;
+
+    offer_to_save_target(config_path, service_name, &target.to_string(), &namespace).await?;
+
+    Ok(ResolvedTarget {
+        resolved: SpecifiedTarget {
+            path: Some(target),
+            namespace: Some(namespace.into()),
+        },
+    })
+}
+
+/// Lets the user pick one of `namespaces`, and then a workload of one of the
+/// `kinds` in it. Returns the workload and its namespace.
+async fn pick_workload(
+    client: &kube::Client,
+    namespaces: &[String],
+    kinds: &[TargetType],
+) -> Result<(Target, String), UpError> {
     loop {
         let namespace = {
-            let namespaces = namespaces.clone();
+            let namespaces = namespaces.to_vec();
             prompt(move || Select::new("Select a namespace:", namespaces).prompt()).await?
         };
 
-        let workloads = list_workloads(client, &namespace).await?;
+        let workloads = list_workloads(client, &namespace, kinds).await?;
         if workloads.is_empty() {
             println!("No workloads found in namespace \"{namespace}\".");
             continue;
@@ -495,14 +515,7 @@ async fn prompt_for_target(
             prompt(move || Select::new(&message, workloads).prompt()).await?
         };
 
-        offer_to_save_target(config_path, service_name, &path, &namespace).await?;
-
-        return Ok(ResolvedTarget {
-            resolved: SpecifiedTarget {
-                path: Some(Target::from_str(&path)?),
-                namespace: Some(namespace.into()),
-            },
-        });
+        return Ok((Target::from_str(&path)?, namespace));
     }
 }
 
