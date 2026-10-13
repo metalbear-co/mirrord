@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
     str::FromStr,
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 
@@ -28,7 +28,7 @@ pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
 use k8s_openapi::api::core::v1::Namespace;
 use miette::Diagnostic;
-use mirrord_analytics::MIRRORD_UP_CORRELATION_ID_ENV;
+use mirrord_analytics::{MIRRORD_UP_CORRELATION_ID_ENV, UpSessionDbBranch};
 use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
     config::{ConfigContext, ConfigError, EnvKey},
@@ -55,21 +55,38 @@ mod init;
 mod kube_context;
 mod process;
 
-/// Shared slot that [`launch`] fills with the time it took for **all** child
-/// sessions to become ready, measured from process spawn.
+/// Shared slot that [`launch`] fills with what the child sessions report while starting: the
+/// time it took for **all** of them to become ready, measured from process spawn, and the
+/// branch databases each one uses.
 ///
-/// The caller constructs one, passes a clone to [`launch`], and reads
-/// [`ReadyTracker::time_to_ready`] afterwards (the value is captured even if
-/// `launch` later returns an error, as long as readiness was reached first).
+/// The caller constructs one, passes a clone to [`launch`], and reads it afterwards (the values
+/// are captured even if `launch` later returns an error, as long as they were reported first).
 #[derive(Clone, Default)]
 pub struct ReadyTracker {
     elapsed: Arc<OnceLock<Duration>>,
+    db_branches: Arc<Mutex<HashMap<Arc<str>, Vec<UpSessionDbBranch>>>>,
 }
 
 impl ReadyTracker {
     /// The time from spawn until every session became ready, if that happened.
     pub fn time_to_ready(&self) -> Option<Duration> {
         self.elapsed.get().copied()
+    }
+
+    /// The branch databases each service's session reported, by service name. A service
+    /// missing here reported none.
+    pub fn db_branches(&self) -> HashMap<Arc<str>, Vec<UpSessionDbBranch>> {
+        self.db_branches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn record_db_branches(&self, service: Arc<str>, branches: Vec<UpSessionDbBranch>) {
+        self.db_branches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(service, branches);
     }
 }
 
@@ -658,7 +675,7 @@ pub async fn resolve_services(
 /// the session.
 ///
 /// `ready` is filled with the time-to-ready once every session has signalled
-/// readiness (see [`ReadyTracker`]).
+/// readiness, and with the branch databases the sessions report (see [`ReadyTracker`]).
 ///
 /// Returns when the user stops the session or one of the child sessions exits.
 pub async fn launch(

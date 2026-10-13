@@ -18,7 +18,10 @@ use kube::{
     api::{ListParams, PostParams},
     client::ClientBuilder,
 };
-use mirrord_analytics::{AnalyticsOperatorProperties, Reporter, SanitizedString};
+use mirrord_analytics::{
+    AnalyticsOperatorProperties, Reporter, SanitizedString, UP_DB_BRANCHES_REPORT_PREFIX,
+    UpSessionDbBranch,
+};
 use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
@@ -907,7 +910,8 @@ where
     /// 3. Wait for all new databases to be ready.
     ///
     /// `up_service` is the `mirrord up` service this session runs, if any. It is recorded on the
-    /// branches the session creates from a `MirrordSplitConfig`.
+    /// branches the session creates from a `MirrordSplitConfig`, and the branches used are
+    /// reported for `mirrord up` (see [`UP_DB_BRANCHES_REPORT_PREFIX`]).
     #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
     pub async fn prepare_branch_dbs<P: Progress>(
         &self,
@@ -1331,6 +1335,7 @@ where
                         .values()
                         .map(|branch| (branch, "created by another session meanwhile, reused")),
                 );
+            let mut up_report = Vec::new();
             for (branch, origin) in origins {
                 let name = branch.name_any();
                 let created = created_branches.contains_key(&name);
@@ -1364,6 +1369,15 @@ where
                     ));
                 }
                 relay_source_compatibility_warnings(branch, &subtask);
+                up_report.push(UpSessionDbBranch { name, created });
+            }
+            if up_service.is_some() {
+                // `mirrord up` reads this line off the session's stdout, so it is printed as is.
+                progress.print(&format!(
+                    "{UP_DB_BRANCHES_REPORT_PREFIX}{}",
+                    serde_json::to_string(&up_report)
+                        .expect("a branch report always serializes to JSON")
+                ));
             }
 
             // Two shared branches under this key copied from one database are usually one

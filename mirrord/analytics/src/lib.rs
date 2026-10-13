@@ -28,6 +28,22 @@ pub fn read_correlation_id_from_env() -> Option<Uuid> {
         .and_then(|value| value.parse().ok())
 }
 
+/// Prefix of the stdout line on which a session started by `mirrord up` reports the branch
+/// databases it uses, as a JSON list of [`UpSessionDbBranch`]. `mirrord up` reads it from the
+/// session's output for its own analytics and doesn't show it.
+pub const UP_DB_BRANCHES_REPORT_PREFIX: &str = "mirrord-up-db-branches:";
+
+/// One branch database a session started by `mirrord up` uses (see
+/// [`UP_DB_BRANCHES_REPORT_PREFIX`]).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpSessionDbBranch {
+    /// Resource name of the branch. Services of one run that use the same branch report the
+    /// same name.
+    pub name: String,
+    /// The session created the branch, rather than attaching to one that existed.
+    pub created: bool,
+}
+
 /// Environment variables carrying the connected cluster's Kubernetes
 /// apiserver version from the CLI down to the proxy that reports
 /// session analytics.
