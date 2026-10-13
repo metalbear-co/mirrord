@@ -232,8 +232,12 @@ async fn prompt_target(
     mode: ServiceMode,
     existing: &HashMap<Arc<str>, ServiceConfig>,
 ) -> Result<(Arc<str>, PickedTarget), InitError> {
-    // `replace` copies the workload and scales it down, which only these
-    // kinds support (see `TargetType::compatible_with`).
+    // `replace` copies the workload and scales the original down. Of the kinds
+    // that a service name can resolve to, `mirrord up` allows that only for
+    // these (see `validate_targets`). A replicaset, which the operator can
+    // also scale down through its owner, can still be written in the YAML by
+    // hand. The picker does not list replicasets, because a deployment keeps
+    // its old ones, and their names change with every rollout.
     let kinds: &[TargetType] = match mode {
         ServiceMode::Replace => &[TargetType::Deployment, TargetType::StatefulSet],
         ServiceMode::Split | ServiceMode::Mirror => &INFERRED_TARGET_TYPES,
