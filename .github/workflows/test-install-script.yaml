@@ -134,6 +134,7 @@ jobs:
           IFS=: read -ra dirs <<< "$PATH"
           for dir in "${dirs[@]}"; do
             for tool in "$dir"/*; do
+              [ -x "$tool" ] || continue
               name=$(basename "$tool")
               [ "$name" = "${{ matrix.hide }}" ] && continue
               [ -e "$tools/$name" ] || ln -s "$tool" "$tools/$name"
