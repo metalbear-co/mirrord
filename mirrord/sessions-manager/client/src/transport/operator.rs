@@ -89,9 +89,9 @@ impl SessionsManagerTransport for OperatorTransport {
     }
 }
 
-/// Builds the operator's per-role assignment request URI. The scope is slugified the same way
-/// the standalone sessions-manager's path segments are, so both deployments register a scope
-/// under the same key.
+/// Builds the operator's per-role assignment request URI, in the namespace of the scope's
+/// environment and named by its service. Both are slugified the same way the standalone
+/// sessions-manager's path segments are, so both deployments register a scope under the same key.
 fn operator_assignments_uri(
     scope: &ServiceScope,
     subscription: &AssignmentSubscription,
@@ -105,7 +105,7 @@ fn operator_assignments_uri(
     let subscription = serde_urlencoded::to_string(subscription)?;
 
     Ok(format!(
-        "/apis/operator.metalbear.co/v1alpha1/proxy/{resource}/{environment}.{service}?{subscription}"
+        "/apis/operator.metalbear.co/v1alpha1/proxy/namespaces/{environment}/{resource}/{service}?{subscription}"
     ))
 }
 
@@ -176,7 +176,7 @@ mod tests {
             assert_eq!(request.headers()[ACCEPT], "text/event-stream");
             assert_eq!(
                 request.uri(),
-                "/apis/operator.metalbear.co/v1alpha1/proxy/serverlessagentassignments/staging-eu.payments?role=agent&replica_id=pod-a&agent_instance_id=00000000-0000-0000-0000-000000000000"
+                "/apis/operator.metalbear.co/v1alpha1/proxy/namespaces/staging-eu/serverlessagentassignments/payments?role=agent&replica_id=pod-a&agent_instance_id=00000000-0000-0000-0000-000000000000"
             );
             Ok::<_, Infallible>(
                 Response::builder()
@@ -425,7 +425,7 @@ mod tests {
 
         assert_eq!(
             operator_assignments_uri(&scope, &subscription).unwrap(),
-            "/apis/operator.metalbear.co/v1alpha1/proxy/serverlessclientassignments/staging-eu.payments\
+            "/apis/operator.metalbear.co/v1alpha1/proxy/namespaces/staging-eu/serverlessclientassignments/payments\
              ?role=intproxy&user_session_id=session-a&intproxy_connection_id=connection-a\
              &agent_replica_filter=pod-a"
         );
@@ -444,7 +444,7 @@ mod tests {
 
         assert_eq!(
             operator_assignments_uri(&scope, &subscription).unwrap(),
-            "/apis/operator.metalbear.co/v1alpha1/proxy/serverlessagentassignments/staging-eu.api-1\
+            "/apis/operator.metalbear.co/v1alpha1/proxy/namespaces/staging-eu/serverlessagentassignments/api-1\
              ?role=agent&replica_id=pod-a&agent_instance_id=00000000-0000-0000-0000-000000000000"
         );
     }
