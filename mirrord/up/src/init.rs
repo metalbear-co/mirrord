@@ -276,14 +276,6 @@ fn prompt_ignore_ports() -> Result<BTreeSet<u16>, InitError> {
 /// The run type is not asked: `exec` fits most services, and the docs tell
 /// container users to set `run.type`.
 fn prompt_run() -> Result<RunConfig, InitError> {
-    let directory = match Text::new("Working directory (blank to inherit the current directory):")
-        .prompt()?
-        .trim()
-    {
-        "" => None,
-        path => Some(path.into()),
-    };
-
     let command_str = Text::new("Local command (e.g. `go run ./cmd/api`):")
         .with_validator(|s: &str| {
             if s.split_whitespace().next().is_none() {
@@ -297,6 +289,17 @@ fn prompt_run() -> Result<RunConfig, InitError> {
         .split_whitespace()
         .map(ToOwned::to_owned)
         .collect();
+
+    let directory = match Text::new("Working directory (blank for the current directory):")
+        .with_help_message(
+            "Relative to the directory of mirrord-up.yaml. Set it when the service is in a subdirectory, e.g. in a monorepo.",
+        )
+        .prompt()?
+        .trim()
+    {
+        "" => None,
+        path => Some(path.into()),
+    };
 
     Ok(RunConfig {
         r#type: RunType::Exec,
