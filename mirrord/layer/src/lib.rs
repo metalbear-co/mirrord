@@ -93,6 +93,7 @@ use hooks::{HookManager, HookOutcomes};
 use libc::c_char;
 use libc::{c_int, pid_t};
 use load::ExecuteArgs;
+use mirrord_analytics::platform::{self, Arch};
 #[cfg(doc)]
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
@@ -617,6 +618,8 @@ fn sip_only_layer_start(
 /// Best effort, and a no-op when there is no internal proxy to talk to.
 fn report_hook_outcomes(outcomes: HookOutcomes) {
     let report = HooksInstalled {
+        arch: Arch::current() as u32,
+        os_version: platform::os_version(),
         installed: outcomes.installed,
         failed: outcomes.failed,
     };

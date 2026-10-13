@@ -5506,6 +5506,7 @@ dependencies = [
  "exec",
  "futures",
  "libc",
+ "mirrord-analytics",
  "mirrord-config",
  "mirrord-intproxy",
  "mirrord-intproxy-protocol",

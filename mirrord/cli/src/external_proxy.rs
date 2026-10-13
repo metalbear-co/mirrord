@@ -42,9 +42,9 @@ use mirrord_config::{LayerConfig, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM
 use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
     hook_usage::HookUsage,
-    sidecar_protocol::{ExternalProxyCodec, HooksReport, SidecarMessage},
+    sidecar_protocol::{ExternalProxyCodec, SidecarMessage},
 };
-use mirrord_intproxy_protocol::HooksInstalled;
+use mirrord_intproxy_protocol::{HooksInstalled, LayerToProxyMessage};
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -277,18 +277,8 @@ pub async fn proxy(
             }
 
             Some(report) = hook_reports_rx.recv() => {
-                let HooksReport { arch, os_version, installed, failed } = report;
-
-                // The layers run in the container, whose platform the report of this process
-                // does not otherwise describe.
-                analytics.get_mut().add("container_arch", arch);
-                if let Some((major, minor)) = os_version {
-                    analytics.get_mut().add("container_os_version_major", major);
-                    analytics.get_mut().add("container_os_version_minor", minor);
-                }
-
-                hook_usage.record(HooksInstalled { installed, failed });
-                analytics.get_mut().add("hooks", &hook_usage);
+                hook_usage.record(report);
+                (&hook_usage).collect_analytics(analytics.get_mut());
             }
 
             _ = ping_pong_ticker.tick() => {
@@ -320,7 +310,7 @@ async fn handle_connection(
     peer_addr: SocketAddr,
     mut agent_conn: AgentConnection,
     cancellation_token: CancellationToken,
-    hook_reports: mpsc::Sender<HooksReport>,
+    hook_reports: mpsc::Sender<HooksInstalled>,
 ) {
     let mut stream = actix_codec::Framed::new(stream, ExternalProxyCodec::default());
 
@@ -328,10 +318,13 @@ async fn handle_connection(
         tokio::select! {
             client_message = stream.next() => {
                 match client_message {
-                    Some(Ok(SidecarMessage::HooksInstalled(report))) => {
+                    Some(Ok(SidecarMessage::Layer(LayerToProxyMessage::HooksInstalled(report)))) => {
                         if hook_reports.try_send(report).is_err() {
                             tracing::debug!(?peer_addr, "dropping a hook report");
                         }
+                    }
+                    Some(Ok(SidecarMessage::Layer(message))) => {
+                        tracing::debug!(?peer_addr, ?message, "ignoring a layer message");
                     }
                     Some(Ok(SidecarMessage::Agent(client_message))) => {
                         agent_conn.connection.send(client_message).await;

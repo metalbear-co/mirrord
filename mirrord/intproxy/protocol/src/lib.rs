@@ -61,8 +61,15 @@ pub enum LayerToProxyMessage {
 /// The layer tries the same list of symbols on every platform, so some hooks fail on every
 /// load. Knowing which ones also succeed somewhere is what tells those apart from hooks that can
 /// be removed.
-#[derive(Encode, Decode, Debug, Default, PartialEq, Eq)]
+///
+/// Carries the platform of the layer's process, which can differ from that of the proxies: a
+/// container can run an emulated architecture, and the CLI runs outside of it.
+#[derive(Encode, Decode, Debug, Default, PartialEq, Eq, Clone)]
 pub struct HooksInstalled {
+    /// CPU architecture, in the numeric form used in analytics.
+    pub arch: u32,
+    /// Major and minor version of the operating system, when known.
+    pub os_version: Option<(u32, u32)>,
     pub installed: Vec<String>,
     pub failed: Vec<String>,
 }

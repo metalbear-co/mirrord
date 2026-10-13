@@ -38,7 +38,7 @@ use tracing::Level;
 use crate::{
     background_tasks::{BackgroundTask, MessageBus, RestartableBackgroundTask},
     main_tasks::{ConnectionRefresh, ProxyMessage},
-    sidecar_protocol::{self, HooksReport},
+    sidecar_protocol,
 };
 
 mod portforward;
@@ -169,7 +169,8 @@ pub struct AgentConnection {
     pub reconnect: ReconnectFlow,
     /// Present when the other end is an external proxy that collects the hook reports of the
     /// layers.
-    pub hook_reports: Option<tokio::sync::mpsc::Sender<HooksReport>>,
+    pub hook_reports:
+        Option<tokio::sync::mpsc::Sender<mirrord_intproxy_protocol::LayerToProxyMessage>>,
 }
 
 impl AgentConnection {

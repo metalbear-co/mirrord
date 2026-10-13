@@ -37,11 +37,17 @@ struct HookCounts {
 
 /// Per symbol, how many layers installed its hook and how many failed to.
 #[derive(Debug, Default)]
-pub struct HookUsage(HashMap<String, HookCounts>);
+pub struct HookUsage {
+    counts: HashMap<String, HookCounts>,
+    /// Architecture and operating system version of the layer that reported last. The layers of
+    /// one session normally share them.
+    platform: Option<(u32, Option<(u32, u32)>)>,
+}
 
 impl HookUsage {
     pub fn record(&mut self, report: HooksInstalled) {
-        let counts = &mut self.0;
+        self.platform = Some((report.arch, report.os_version));
+        let counts = &mut self.counts;
 
         let installed = report.installed.into_iter().map(|symbol| (symbol, true));
         let failed = report.failed.into_iter().map(|symbol| (symbol, false));
@@ -66,11 +72,23 @@ impl HookUsage {
 
 impl CollectAnalytics for &HookUsage {
     fn collect_analytics(&self, analytics: &mut Analytics) {
-        for (symbol, counts) in &self.0 {
+        let Some((arch, os_version)) = self.platform else {
+            return;
+        };
+
+        analytics.add("layer_arch", arch);
+        if let Some((major, minor)) = os_version {
+            analytics.add("layer_os_version_major", major);
+            analytics.add("layer_os_version_minor", minor);
+        }
+
+        let mut hooks = Analytics::default();
+        for (symbol, counts) in &self.counts {
             let mut hook = Analytics::default();
             hook.add("installed", counts.installed);
             hook.add("failed", counts.failed);
-            analytics.add(symbol, hook);
+            hooks.add(symbol, hook);
         }
+        analytics.add("hooks", hooks);
     }
 }

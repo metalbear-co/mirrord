@@ -13,7 +13,6 @@ use futures::FutureExt;
 use layer_conn::LayerConnection;
 use layer_initializer::{LayerInitializer, LayerInitializerShutdown};
 use main_tasks::{FromLayer, LayerForked, MainTaskId, NewLayer, ProxyMessage, ToLayer};
-use mirrord_analytics::platform::{self, Arch};
 use mirrord_config::{
     experimental::ExperimentalConfig, feature::network::incoming::tls_delivery::LocalTlsDelivery,
 };
@@ -53,7 +52,6 @@ use crate::{
     hook_usage::HookUsage,
     main_tasks::{ConnectionRefresh, LayerClosed},
     session_monitor::{MonitorEvent, MonitorTx, RedactedVarNames, chaos::ChaosWatcherRx},
-    sidecar_protocol::HooksReport,
 };
 
 pub mod agent_conn;
@@ -168,7 +166,7 @@ pub struct IntProxy {
     hook_usage: HookUsage,
     /// Where to pass the hook reports of the layers on, when the agent connection goes through
     /// an external proxy that collects them.
-    hook_reports: Option<mpsc::Sender<HooksReport>>,
+    hook_reports: Option<mpsc::Sender<LayerToProxyMessage>>,
 }
 
 /// Timing configuration for [`IntProxy`] maintenance tasks.
@@ -930,16 +928,12 @@ impl IntProxy {
                     .await
             }
             LayerToProxyMessage::HooksInstalled(report) => {
-                if let Some(hook_reports) = &self.hook_reports {
-                    let report = HooksReport {
-                        arch: Arch::current() as u32,
-                        os_version: platform::os_version(),
-                        installed: report.installed.clone(),
-                        failed: report.failed.clone(),
-                    };
-                    if hook_reports.try_send(report).is_err() {
-                        tracing::debug!("dropping a hook report for the external proxy");
-                    }
+                if let Some(hook_reports) = &self.hook_reports
+                    && hook_reports
+                        .try_send(LayerToProxyMessage::HooksInstalled(report.clone()))
+                        .is_err()
+                {
+                    tracing::debug!("dropping a hook report for the external proxy");
                 }
                 self.hook_usage.record(report);
             }

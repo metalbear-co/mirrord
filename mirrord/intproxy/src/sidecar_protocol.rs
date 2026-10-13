@@ -8,10 +8,10 @@
 //! Only the direction from the internal proxy is framed. A stream starts with [`PREAMBLE`] and
 //! continues with frames, each a tag byte followed by a payload:
 //!
-//! | tag             | payload                                    |
-//! |-----------------|--------------------------------------------|
-//! | [`AGENT_FRAME`] | one encoded [`ClientMessage`] for the agent |
-//! | [`HOOKS_FRAME`] | one encoded [`HooksReport`]                 |
+//! | tag             | payload                                                         |
+//! |-----------------|-----------------------------------------------------------------|
+//! | [`AGENT_FRAME`] | one encoded [`ClientMessage`] for the agent                     |
+//! | [`LAYER_FRAME`] | big-endian `u32` length, then one encoded [`LayerToProxyMessage`] |
 //!
 //! The direction from the external proxy carries plain [`DaemonMessage`]s.
 //!
@@ -25,9 +25,11 @@
 use std::io;
 
 use actix_codec::{Decoder, Encoder, Framed};
-use bincode::{Decode, Encode, error::DecodeError};
 use bytes::{Buf, BufMut, BytesMut};
-use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, ProtocolCodec};
+use mirrord_intproxy_protocol::LayerToProxyMessage;
+use mirrord_protocol::{
+    ClientMessage, DaemonCodec, DaemonMessage, ProtocolCodec, codec::DecodeCtx,
+};
 use mirrord_protocol_io::{AsyncIO, Client, Connection};
 use tokio::sync::mpsc;
 
@@ -40,50 +42,38 @@ const PREAMBLE: [u8; 8] = *b"\xFFmirrord";
 /// Tag of a frame that holds a [`ClientMessage`] to pass on to the agent.
 const AGENT_FRAME: u8 = 0;
 
-/// Tag of a frame that holds a [`HooksReport`].
-const HOOKS_FRAME: u8 = 1;
+/// Tag of a frame that holds a [`LayerToProxyMessage`] meant for the external proxy.
+const LAYER_FRAME: u8 = 1;
 
-/// Upper bound on the encoded size of a [`HooksReport`], far above that of the layer's whole
-/// hook list. Decoding a report that claims to be larger fails instead of buffering it.
-const HOOKS_REPORT_LIMIT: usize = 64 * 1024;
+/// Upper bound on the encoded size of a [`LayerToProxyMessage`] in a frame. A frame that claims
+/// a larger one is rejected instead of buffered.
+const LAYER_MESSAGE_LIMIT: usize = 64 * 1024;
 
-/// How many [`HooksReport`]s can wait to be written to the external proxy.
-const REPORTS_CHANNEL_SIZE: usize = 64;
-
-/// Which libc hooks one layer of a container session installed, and the platform it runs on.
-///
-/// The external proxy sends the analytics of the session, and runs on the container host,
-/// whose platform can differ from the container's.
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct HooksReport {
-    /// CPU architecture, in the numeric form used in analytics.
-    pub arch: u32,
-    /// Major and minor version of the operating system, when known.
-    pub os_version: Option<(u32, u32)>,
-    /// Symbols whose hook was installed.
-    pub installed: Vec<String>,
-    /// Symbols whose hook could not be installed.
-    pub failed: Vec<String>,
-}
+/// How many [`LayerToProxyMessage`]s can wait to be written to the external proxy.
+const LAYER_MESSAGES_CHANNEL_SIZE: usize = 64;
 
 /// Message of an internal proxy to the external proxy.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SidecarMessage {
     /// Message to pass on to the agent.
     Agent(ClientMessage),
-    /// Report for the external proxy itself.
-    HooksInstalled(HooksReport),
+    /// Message of a layer that the external proxy handles itself, as it is the one that sends
+    /// the analytics of the session.
+    Layer(LayerToProxyMessage),
 }
 
 /// Makes the agent connection of an internal proxy over `io`, a stream to the external proxy.
 ///
 /// `sidecar_protocol` tells whether the external proxy expects this protocol or plain
-/// `mirrord-protocol`. With this protocol, the returned sender delivers [`HooksReport`]s to the
-/// external proxy.
+/// `mirrord-protocol`. With this protocol, the returned sender delivers messages of the layers
+/// to the external proxy.
 pub fn connect<IO>(
     io: IO,
     sidecar_protocol: bool,
-) -> (Connection<Client>, Option<mpsc::Sender<HooksReport>>)
+) -> (
+    Connection<Client>,
+    Option<mpsc::Sender<LayerToProxyMessage>>,
+)
 where
     IO: AsyncIO + Unpin,
 {
@@ -91,15 +81,15 @@ where
         return (Connection::from_stream(io), None);
     }
 
-    let (reports_tx, reports) = mpsc::channel(REPORTS_CHANNEL_SIZE);
+    let (layer_messages_tx, layer_messages) = mpsc::channel(LAYER_MESSAGES_CHANNEL_SIZE);
     let codec = InternalProxyCodec {
         preamble_sent: false,
-        reports,
+        layer_messages,
     };
 
     (
         Connection::from_channel(Framed::new(io, codec)),
-        Some(reports_tx),
+        Some(layer_messages_tx),
     )
 }
 
@@ -110,8 +100,8 @@ where
 struct InternalProxyCodec {
     preamble_sent: bool,
     /// Written ahead of the next message for the agent. The proxy keeps pinging the agent, so
-    /// a report never waits long.
-    reports: mpsc::Receiver<HooksReport>,
+    /// none of them waits long.
+    layer_messages: mpsc::Receiver<LayerToProxyMessage>,
 }
 
 impl Encoder<Vec<u8>> for InternalProxyCodec {
@@ -123,10 +113,12 @@ impl Encoder<Vec<u8>> for InternalProxyCodec {
             self.preamble_sent = true;
         }
 
-        while let Ok(report) = self.reports.try_recv() {
-            dst.put_u8(HOOKS_FRAME);
-            bincode::encode_into_std_write(report, &mut dst.writer(), bincode::config::standard())
+        while let Ok(message) = self.layer_messages.try_recv() {
+            let message = bincode::encode_to_vec(message, bincode::config::standard())
                 .map_err(io::Error::other)?;
+            dst.put_u8(LAYER_FRAME);
+            dst.put_u32(message.len() as u32);
+            dst.put_slice(&message);
         }
 
         dst.reserve(client_message.len() + 1);
@@ -189,7 +181,7 @@ impl Decoder for ExternalProxyCodec {
         let message = match (self.peer, src.first()) {
             (Peer::Plain, _) => agent_codec.decode(src)?.map(SidecarMessage::Agent),
             (_, None) => None,
-            (_, Some(&tag @ (AGENT_FRAME | HOOKS_FRAME))) => {
+            (_, Some(&tag @ (AGENT_FRAME | LAYER_FRAME))) => {
                 // The tag stays in the buffer until its whole payload has arrived.
                 let mut payload = src.split_off(1);
                 let decoded = if tag == AGENT_FRAME {
@@ -197,7 +189,7 @@ impl Decoder for ExternalProxyCodec {
                         .decode(&mut payload)
                         .map(|message| message.map(SidecarMessage::Agent))
                 } else {
-                    decode_hooks_report(&mut payload)
+                    decode_layer_message(&mut payload)
                 };
                 if matches!(decoded, Ok(Some(_))) {
                     src.clear();
@@ -217,17 +209,25 @@ impl Decoder for ExternalProxyCodec {
     }
 }
 
-fn decode_hooks_report(payload: &mut BytesMut) -> io::Result<Option<SidecarMessage>> {
-    let config = bincode::config::standard().with_limit::<HOOKS_REPORT_LIMIT>();
-
-    match bincode::decode_from_slice(payload.as_ref(), config) {
-        Ok((report, consumed)) => {
-            payload.advance(consumed);
-            Ok(Some(SidecarMessage::HooksInstalled(report)))
-        }
-        Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
-        Err(error) => Err(io::Error::other(error)),
+fn decode_layer_message(payload: &mut BytesMut) -> io::Result<Option<SidecarMessage>> {
+    let Some(length) = payload.first_chunk().copied().map(u32::from_be_bytes) else {
+        return Ok(None);
+    };
+    let length = length as usize;
+    if length > LAYER_MESSAGE_LIMIT {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("layer message of {length} bytes from the internal proxy is too large"),
+        ));
     }
+    if payload.len() - 4 < length {
+        return Ok(None);
+    }
+
+    payload.advance(4);
+    DecodeCtx::decode_from_bytes(payload.split_to(length).freeze())
+        .map(|message| Some(SidecarMessage::Layer(message)))
+        .map_err(io::Error::other)
 }
 
 impl Encoder<DaemonMessage> for ExternalProxyCodec {
@@ -242,9 +242,10 @@ impl Encoder<DaemonMessage> for ExternalProxyCodec {
 mod tests {
     use actix_codec::{Decoder, Encoder};
     use bytes::BytesMut;
+    use mirrord_intproxy_protocol::{HooksInstalled, LayerToProxyMessage};
     use mirrord_protocol::{ClientCodec, ClientMessage, GetEnvVarsRequest, VERSION};
 
-    use super::{ExternalProxyCodec, HooksReport, InternalProxyCodec, PREAMBLE, SidecarMessage};
+    use super::{ExternalProxyCodec, InternalProxyCodec, PREAMBLE, SidecarMessage};
 
     fn client_messages() -> Vec<ClientMessage> {
         vec![
@@ -292,18 +293,20 @@ mod tests {
 
     #[test]
     fn external_proxy_decodes_sidecar_protocol() {
-        let (reports_tx, reports) = tokio::sync::mpsc::channel(1);
+        let (layer_messages_tx, layer_messages) = tokio::sync::mpsc::channel(1);
         let mut codec = InternalProxyCodec {
             preamble_sent: false,
-            reports,
+            layer_messages,
         };
-        let report = HooksReport {
+        let report = HooksInstalled {
             arch: 2,
             os_version: Some((6, 8)),
             installed: vec!["open".to_owned(), "connect".to_owned()],
             failed: vec!["open64".to_owned()],
         };
-        reports_tx.try_send(report.clone()).unwrap();
+        layer_messages_tx
+            .try_send(LayerToProxyMessage::HooksInstalled(report.clone()))
+            .unwrap();
 
         let mut stream = BytesMut::new();
         for message in client_messages() {
@@ -313,7 +316,10 @@ mod tests {
         }
 
         let mut expected = expected();
-        expected.insert(0, SidecarMessage::HooksInstalled(report));
+        expected.insert(
+            0,
+            SidecarMessage::Layer(LayerToProxyMessage::HooksInstalled(report)),
+        );
 
         assert!(stream.starts_with(&PREAMBLE));
         for chunk_size in [1, 2, 3, 7, PREAMBLE.len(), stream.len()] {

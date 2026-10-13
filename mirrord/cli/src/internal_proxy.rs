@@ -449,11 +449,7 @@ pub(crate) async fn proxy(
     let res = res.map_err(From::from);
 
     if tokio::time::timeout(Duration::from_secs(1), async {
-        chaos_reporter
-            .write()
-            .await
-            .analytics_mut()
-            .add("hooks", &hook_usage);
+        (&hook_usage).collect_analytics(chaos_reporter.write().await.analytics_mut());
     })
     .await
     .is_err()
