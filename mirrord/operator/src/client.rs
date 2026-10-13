@@ -3752,15 +3752,13 @@ mod test {
             operator: MirrordOperatorCrd::new("operator", spec),
             kube_context: None,
         };
-        let secret = api
-            .create_credential_secret(
-                &namespace,
-                "client-test",
-                HashMap::from([("DATABASE_NAME".to_owned(), "test_database".to_owned())]),
-            )
-            .await
-            .unwrap();
-        println!("Created credential Secret through Teleport: {secret}");
+        api.create_credential_secret(
+            &namespace,
+            "client-test",
+            HashMap::from([("DATABASE_NAME".to_owned(), "test_database".to_owned())]),
+        )
+        .await
+        .unwrap();
     }
 
     /// Only a 404 from the namespaced route sends the request on to the cluster-scoped route.
