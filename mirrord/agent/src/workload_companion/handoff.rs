@@ -146,7 +146,7 @@ impl ConnectionHandoffServer {
             .unwrap_or(accepted.request.local_address);
         let connection = Redirected::new(
             original_stream,
-            accepted.request.peer_address,
+            accepted.peer_address,
             destination,
             Some(accepted.passthrough_stream),
         );
@@ -176,6 +176,8 @@ struct Handoff {
 struct AcceptedConnection {
     original_stream: StdTcpStream,
     request: ConnectionHandoffRequest,
+    /// Read from the transferred socket, falling back to the address the remote layer reported.
+    peer_address: SocketAddr,
     passthrough_stream: TokioTcpStream,
 }
 
@@ -195,9 +197,10 @@ impl Handoff {
         let (request, accepted_fd) = self.receive_request().await?;
         let original_stream: StdTcpStream = accepted_fd.into();
         let local_address = original_stream.local_addr()?;
+        let peer_address = Self::observed_peer_address(&request, &original_stream);
         tracing::Span::current()
             .record("accept_id", request.accept_id)
-            .record("peer_address", field::display(request.peer_address))
+            .record("peer_address", field::display(peer_address))
             .record("local_address", field::display(local_address));
         Self::log_local_address_mismatch(&request, local_address);
 
@@ -209,6 +212,7 @@ impl Handoff {
                 placeholder_address,
             },
             local_address,
+            peer_address,
         )
         .await?;
         let (passthrough_stream, _) = listener.accept().await?;
@@ -216,6 +220,7 @@ impl Handoff {
         Ok(AcceptedConnection {
             original_stream,
             request,
+            peer_address,
             passthrough_stream,
         })
     }
@@ -262,13 +267,14 @@ impl Handoff {
         request: &ConnectionHandoffRequest,
         verdict: ConnectionHandoffVerdict,
         local_address: SocketAddr,
+        peer_address: SocketAddr,
     ) -> Result<()> {
         let frame = encode_handoff_message(&ConnectionHandoffResponse {
             accept_id: request.accept_id,
             verdict,
             listener_address: request.listener_address,
             local_address,
-            peer_address: request.peer_address,
+            peer_address,
         })?;
 
         let sent = self.stream.send(&frame).await?;
@@ -291,6 +297,36 @@ impl Handoff {
         };
 
         Ok(TcpListener::bind(SocketAddr::new(localhost, 0)).await?)
+    }
+
+    /// The transferred socket is authoritative for the connection's source, since the request only
+    /// carries what the remote layer reports. Reading it fails only once the client is gone, in
+    /// which case the reported address still identifies the connection.
+    fn observed_peer_address(
+        request: &ConnectionHandoffRequest,
+        original_stream: &StdTcpStream,
+    ) -> SocketAddr {
+        match original_stream.peer_addr() {
+            Ok(observed) => {
+                if observed != request.peer_address {
+                    tracing::warn!(
+                        accept_id = request.accept_id,
+                        expected_peer_address = %request.peer_address,
+                        observed_peer_address = %observed,
+                        "connection handoff peer address differs from transferred metadata"
+                    );
+                }
+                observed
+            }
+            Err(error) => {
+                tracing::debug!(
+                    accept_id = request.accept_id,
+                    %error,
+                    "failed to read the transferred socket's peer address, using the reported one"
+                );
+                request.peer_address
+            }
+        }
     }
 
     fn log_local_address_mismatch(request: &ConnectionHandoffRequest, observed: SocketAddr) {
@@ -472,6 +508,31 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(&byte, b"b");
+    }
+
+    /// The connection's source comes from the transferred socket, not from the address the remote
+    /// layer reported, both towards the incoming pipeline and in the response to the layer.
+    #[tokio::test]
+    async fn handoff_uses_observed_peer_address() {
+        let (handoff, client, original, peer, frame) = fixture().await;
+        let mut request: ConnectionHandoffRequest = decode_handoff_message(&frame).unwrap();
+        request.peer_address = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 1), 9));
+        let frame = encode_handoff_message(&request).unwrap();
+        send_fd(&client, &original, &frame).await;
+        drop(original);
+        let task = tokio::spawn(handoff.negotiate());
+        let response = response(&client).await;
+        let observed = peer.local_addr().unwrap();
+        assert_eq!(response.peer_address, observed);
+        let ConnectionHandoffVerdict::Accepted {
+            placeholder_address,
+        } = response.verdict
+        else {
+            panic!("handoff rejected");
+        };
+        let _placeholder = TokioTcpStream::connect(placeholder_address).await.unwrap();
+        let accepted = timeout(TEST_TIMEOUT, task).await.unwrap().unwrap().unwrap();
+        assert_eq!(accepted.peer_address, observed);
     }
 
     #[tokio::test]
