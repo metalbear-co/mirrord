@@ -3,11 +3,11 @@
 //! The wizard prompts for a small, curated subset of the full schema and
 //! writes the result as YAML.
 //!
-//! Keep the prompt set deliberately small. The values that go *into* each
-//! prompt (enum variants, defaults) must always come from the authoritative
-//! type definitions in `config.rs` (via `strum::VariantArray`, `Default`,
-//! etc.), so adding a new variant downstream never requires editing this
-//! file.
+//! Keep the prompt set deliberately small: ask only for what has no good
+//! default. The values that go *into* each prompt (enum variants, defaults)
+//! must always come from the authoritative type definitions in `config.rs`
+//! (via `strum::VariantArray`, `Default`, etc.), so adding a new variant
+//! downstream never requires editing this file.
 //!
 //! The generated YAML is produced by serializing the assembled [`UpConfig`]
 //! with `serde_yaml` and then dropping the entries that are left at their
@@ -60,10 +60,6 @@ pub enum InitError {
 pub fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
     println!("Welcome to `mirrord up init`. This wizard generates a skeleton mirrord-up.yaml.\n");
 
-    println!("--- Step 1: Common settings (apply to all services) ---");
-    let common = prompt_common()?;
-
-    println!("\n--- Step 2: Services ---");
     let mut services: HashMap<Arc<str>, ServiceConfig> = HashMap::new();
     loop {
         let (name, svc) = prompt_service(&services)?;
@@ -77,10 +73,13 @@ pub fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
         }
     }
 
-    let cfg = UpConfig { common, services };
+    let cfg = UpConfig {
+        common: CommonConfig::default(),
+        services,
+    };
     let rendered = render_yaml(&cfg)?;
 
-    println!("\n--- Step 3: Preview ---\n{rendered}");
+    println!("\n--- Preview ---\n{rendered}");
 
     if Confirm::new("Save configuration to a file?")
         .with_default(true)
@@ -115,30 +114,6 @@ pub fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
     Ok(())
 }
 
-fn prompt_common() -> Result<CommonConfig, InitError> {
-    let use_operator = Confirm::new("Use the mirrord operator?")
-        .with_default(true)
-        .with_help_message("Required for splitting traffic between services.")
-        .prompt()?;
-
-    let accept_invalid_certs = Confirm::new("Accept invalid TLS certificates for the operator?")
-        .with_default(false)
-        .with_help_message("Skip TLS verification. Useful for self-signed certs.")
-        .prompt()?;
-
-    let telemetry = Confirm::new("Enable anonymous telemetry?")
-        .with_default(true)
-        .with_help_message("Sends anonymous usage data to help improve mirrord.")
-        .prompt()?;
-
-    Ok(CommonConfig {
-        operator: (!use_operator).then_some(false),
-        accept_invalid_certificates: accept_invalid_certs.then_some(true),
-        telemetry: (!telemetry).then_some(false),
-        context: None,
-    })
-}
-
 fn prompt_service(
     existing: &HashMap<Arc<str>, ServiceConfig>,
 ) -> Result<(Arc<str>, ServiceConfig), InitError> {
@@ -163,17 +138,13 @@ fn prompt_service(
     let target = prompt_target(&default_mode)?;
     let http_filter = prompt_http_filter(&default_mode)?;
     let ignore_ports = prompt_ignore_ports()?;
-    let env = EnvConfig {
-        r#override: prompt_env_overrides()?,
-        ..Default::default()
-    };
     let run = prompt_run()?;
 
     Ok((
         name,
         ServiceConfig {
             target,
-            env,
+            env: EnvConfig::default(),
             default_mode,
             http_filter,
             ignore_ports,
@@ -302,43 +273,15 @@ fn prompt_ignore_ports() -> Result<BTreeSet<u16>, InitError> {
     Ok(ports.iter().copied().collect())
 }
 
-fn prompt_env_overrides() -> Result<Option<HashMap<String, String>>, InitError> {
-    let mut map: HashMap<String, String> = HashMap::new();
-    while Confirm::new("Add an env-var override for the local process?")
-        .with_default(false)
-        .prompt()?
-    {
-        let key = Text::new("  Variable name:")
-            .with_validator(|s: &str| {
-                if s.trim().is_empty() {
-                    Ok(Validation::Invalid("name cannot be empty".into()))
-                } else {
-                    Ok(Validation::Valid)
-                }
-            })
-            .prompt()?
-            .trim()
-            .to_owned();
-        let value = Text::new("  Value:").prompt()?;
-        map.insert(key, value);
-    }
-
-    Ok((map.is_empty().not()).then_some(map))
-}
-
+/// The run type is not asked: `exec` fits most services, and the docs tell
+/// container users to set `run.type`.
 fn prompt_run() -> Result<RunConfig, InitError> {
-    let r#type = prompt_run_type()?;
-
-    let directory = if matches!(r#type, RunType::Exec) {
-        match Text::new("Working directory (blank to inherit the current directory):")
-            .prompt()?
-            .trim()
-        {
-            "" => None,
-            path => Some(path.into()),
-        }
-    } else {
-        None
+    let directory = match Text::new("Working directory (blank to inherit the current directory):")
+        .prompt()?
+        .trim()
+    {
+        "" => None,
+        path => Some(path.into()),
     };
 
     let command_str = Text::new("Local command (e.g. `go run ./cmd/api`):")
@@ -356,26 +299,10 @@ fn prompt_run() -> Result<RunConfig, InitError> {
         .collect();
 
     Ok(RunConfig {
-        r#type,
+        r#type: RunType::Exec,
         directory,
         command,
     })
-}
-
-fn prompt_run_type() -> Result<RunType, InitError> {
-    #[cfg(target_os = "windows")]
-    {
-        Ok(RunType::Exec)
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        Ok(Select::new(
-            "Run with `mirrord exec` or `mirrord container`?",
-            RunType::VARIANTS.to_vec(),
-        )
-        .prompt()?)
-    }
 }
 
 /// Serializes the wizard's [`UpConfig`] to a minimal YAML skeleton.
@@ -529,12 +456,6 @@ mod tests {
             context: Some("popper-deskpop".into()),
             config_patch: None,
         }
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn windows_run_type_defaults_to_exec_without_prompting() {
-        assert_eq!(prompt_run_type().unwrap(), RunType::Exec);
     }
 
     #[test]
