@@ -21,13 +21,16 @@ use std::{
     sync::Arc,
 };
 
-use inquire::{Confirm, Select, Text, validator::Validation};
+use inquire::{Confirm, MultiSelect, Select, Text, validator::Validation};
 use miette::Diagnostic;
 use mirrord_config::{
     feature::{env::EnvConfig, network::incoming::http_filter::HttpFilterConfig},
-    target::{TargetDisplay, TargetType},
+    target::{Target, TargetDisplay, TargetType},
 };
-use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError};
+use mirrord_kube::{
+    api::kubernetes::create_kube_config, error::KubeApiError,
+    resolved::ResolvedTarget as KubeResolvedTarget,
+};
 use thiserror::Error;
 
 use crate::{
@@ -190,7 +193,8 @@ async fn prompt_service(
             Default::default(),
         ),
         PickedTarget::Workload { target, namespace } => {
-            let (http_filter, ignore_ports) = prompt_traffic(default_mode).await?;
+            let (http_filter, ignore_ports) =
+                prompt_traffic(&cluster.client, default_mode, &target, &namespace).await?;
             // `mirrord up` uses the namespace of the kube context when the
             // field is absent.
             let namespace =
@@ -342,7 +346,12 @@ fn prompt_mode() -> Result<ServiceMode, inquire::InquireError> {
 /// Asks for the HTTP filter and the ports to ignore, only when the user wants
 /// to set them. The defaults fit most services, so the question defaults to
 /// no.
-async fn prompt_traffic(mode: ServiceMode) -> Result<(HttpFilterConfig, BTreeSet<u16>), InitError> {
+async fn prompt_traffic(
+    client: &kube::Client,
+    mode: ServiceMode,
+    target: &Target,
+    namespace: &str,
+) -> Result<(HttpFilterConfig, BTreeSet<u16>), InitError> {
     // `replace` ignores the HTTP filter.
     let message = match mode {
         ServiceMode::Replace => "Configure ports?",
@@ -359,7 +368,20 @@ async fn prompt_traffic(mode: ServiceMode) -> Result<(HttpFilterConfig, BTreeSet
         ServiceMode::Replace => HttpFilterConfig::default(),
         ServiceMode::Split | ServiceMode::Mirror => prompt(prompt_http_filter).await?,
     };
-    let ignore_ports = prompt(prompt_ignore_ports).await?;
+
+    let detected = match detect_ports(client, target, namespace).await {
+        Ok(ports) => {
+            if ports.is_empty() {
+                println!("No ports were detected on the target.");
+            }
+            ports
+        }
+        Err(error) => {
+            println!("Could not detect the ports of {target} ({error}).");
+            BTreeSet::new()
+        }
+    };
+    let ignore_ports = prompt(move || prompt_ignore_ports(detected)).await?;
 
     Ok((http_filter, ignore_ports))
 }
@@ -392,22 +414,39 @@ fn parse_ports(s: &str) -> Result<BTreeSet<u16>, String> {
         .collect()
 }
 
-fn prompt_ignore_ports() -> Result<BTreeSet<u16>, inquire::InquireError> {
-    let presets: [(&str, &[u16]); _] = [
-        ("None", &[]),
-        ("Istio sidecar (9090, 9091, 15090)", &[9090, 9091, 15090]),
-        ("Linkerd sidecar (4140, 4143, 4191)", &[4140, 4143, 4191]),
-        ("Custom...", &[]),
-    ];
+/// The ports that the containers of `target` declare. Like `detected_ports`
+/// in the server of `mirrord ui`, which the `mirrord wizard` GUI uses, these
+/// are the container ports in the pod template of the target. When the target
+/// names a container, only the ports of that container count.
+async fn detect_ports(
+    client: &kube::Client,
+    target: &Target,
+    namespace: &str,
+) -> Result<BTreeSet<u16>, UpError> {
+    let resolved = KubeResolvedTarget::new(client, target, Some(namespace)).await?;
+    let Some(pod_spec) = resolved.resolve_pod_spec(client).await? else {
+        return Ok(BTreeSet::new());
+    };
 
-    let choice = Select::new(
-        "Ports to ignore (sidecar ports, etc.):",
-        presets.iter().map(|(label, _)| *label).collect(),
-    )
-    .prompt()?;
+    Ok(pod_spec
+        .containers
+        .iter()
+        .filter(|container| {
+            resolved
+                .container()
+                .is_none_or(|name| container.name == name)
+        })
+        .flat_map(|container| container.ports.iter().flatten())
+        .filter_map(|port| u16::try_from(port.container_port).ok())
+        .collect())
+}
 
-    if choice == "Custom..." {
-        let s = Text::new("Comma-separated ports:")
+/// Asks which of the `detected` ports to intercept, and returns the others,
+/// which go to `ignore_ports`. Asks for the ports to ignore as text when no
+/// ports were detected.
+fn prompt_ignore_ports(detected: BTreeSet<u16>) -> Result<BTreeSet<u16>, inquire::InquireError> {
+    if detected.is_empty() {
+        let s = Text::new("Ports to ignore (comma-separated, blank for none):")
             .with_validator(|s: &str| match parse_ports(s) {
                 Ok(_) => Ok(Validation::Valid),
                 Err(e) => Ok(Validation::Invalid(e.into())),
@@ -416,12 +455,20 @@ fn prompt_ignore_ports() -> Result<BTreeSet<u16>, inquire::InquireError> {
         return Ok(parse_ports(&s).expect("validated above"));
     }
 
-    let ports = presets
-        .iter()
-        .find(|(label, _)| *label == choice)
-        .map(|(_, ports)| *ports)
-        .unwrap_or(&[]);
-    Ok(ports.iter().copied().collect())
+    let intercepted = MultiSelect::new(
+        "Ports to intercept (detected on the target):",
+        detected.iter().copied().collect(),
+    )
+    .with_all_selected_by_default()
+    .with_help_message(
+        "↑↓ to move, space to select, enter to confirm. The detected ports that you do not select are ignored.",
+    )
+    .prompt()?;
+
+    Ok(detected
+        .into_iter()
+        .filter(|port| intercepted.contains(port).not())
+        .collect())
 }
 
 /// The run type is not asked: `exec` fits most services, and the docs tell
