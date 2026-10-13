@@ -547,8 +547,9 @@ enum PickedTarget {
 ///
 /// When a namespace has nothing that the user can list, the user picks
 /// another namespace. When it is the only namespace, there is nothing else to
-/// pick, so that is an error. The one exception is when `targetless` is set:
-/// the workload prompt still offers to run without a target.
+/// pick, so that is an error. When `targetless` is set, running without a
+/// target needs no workload, so the workload prompt still offers it, together
+/// with picking another namespace when there is one.
 async fn pick_workload(
     client: &kube::Client,
     namespaces: &[String],
@@ -556,6 +557,7 @@ async fn pick_workload(
     targetless: bool,
 ) -> Result<PickedTarget, UpError> {
     const TARGETLESS: &str = "Run without a target (outgoing traffic only)";
+    const PICK_ANOTHER: &str = "Pick another namespace";
 
     let starting_cursor = namespaces
         .iter()
@@ -574,32 +576,38 @@ async fn pick_workload(
             .await?
         };
 
-        let mut workloads = list_workloads(client, &namespace, kinds).await?;
-        if workloads.is_empty() {
-            if can_pick_another {
-                println!("Found no workloads that you can list in namespace \"{namespace}\".");
+        let mut options = list_workloads(client, &namespace, kinds).await?;
+        if options.is_empty() {
+            if targetless.not() && can_pick_another.not() {
+                return Err(UpError::NoWorkloads(namespace));
+            }
+            println!("Found no workloads that you can list in namespace \"{namespace}\".");
+            if targetless.not() {
                 continue;
             }
-            if targetless.not() {
-                return Err(UpError::NoWorkloads(namespace));
+            if can_pick_another {
+                options.push(PICK_ANOTHER.to_owned());
             }
         }
         if targetless {
-            workloads.push(TARGETLESS.to_owned());
+            options.push(TARGETLESS.to_owned());
         }
 
         let path = {
             let message = format!("Select a workload in \"{namespace}\":");
-            prompt(move || Select::new(&message, workloads).prompt()).await?
+            prompt(move || Select::new(&message, options).prompt()).await?
         };
 
-        if path == TARGETLESS {
-            return Ok(PickedTarget::Targetless);
+        match path.as_str() {
+            TARGETLESS => return Ok(PickedTarget::Targetless),
+            PICK_ANOTHER => continue,
+            _ => {
+                return Ok(PickedTarget::Workload {
+                    target: Target::from_str(&path)?,
+                    namespace,
+                });
+            }
         }
-        return Ok(PickedTarget::Workload {
-            target: Target::from_str(&path)?,
-            namespace,
-        });
     }
 }
 
