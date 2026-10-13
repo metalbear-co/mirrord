@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     client_connection::TlsSetupError, http::filter::FilterCreationError,
     incoming::RedirectorTaskError, namespace::NamespaceError, runtime,
-    util::error::AgentRuntimeError,
+    util::error::AgentRuntimeError, workload_companion::RemoteIncomingHandoffError,
 };
 
 #[derive(Debug, Error)]
@@ -72,6 +72,9 @@ pub(crate) enum AgentError {
 
     #[error("Failed to create connection from sessions-manager: {0}")]
     SessionsManagerClientError(#[from] SessionsManagerClientError),
+
+    #[error("Connection handoff failed: {0}")]
+    RemoteIncomingHandoffError(#[from] RemoteIncomingHandoffError),
 }
 
 pub(crate) type AgentResult<T, E = AgentError> = std::result::Result<T, E>;
