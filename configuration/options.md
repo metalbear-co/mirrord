@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-10-11T00:00:00.000Z
+lastmod: 2026-10-13T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -2445,7 +2445,8 @@ Variable names can be matched using `*` and `?` where `?` matches exactly one oc
 any character and `*` matches arbitrary many (including zero) occurrences of any character.
 
 Some of the variables that are excluded by default:
-`PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`.
+`PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`, `TMPDIR`,
+`TMP`, `TEMP`.
 
 Can be passed as a list or as a semicolon-delimited string (e.g. `"VAR;OTHER_VAR"`).
 
