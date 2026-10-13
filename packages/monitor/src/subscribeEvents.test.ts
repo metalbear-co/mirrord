@@ -39,6 +39,7 @@ describe('toEventRow', () => {
     expect(row).toMatchObject({
       seq: 7,
       sessionKey: '73b63',
+      cluster: '',
       serviceName: 'metal-mart-frontend',
       timestamp: '2026-08-23T12:57:01.740537Z',
     })
