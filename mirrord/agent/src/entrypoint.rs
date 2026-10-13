@@ -13,16 +13,23 @@ use std::{
 use async_pidfd::AsyncPidFd;
 use client_connection::AgentTlsConnector;
 use dns::{ClientGetAddrInfoRequest, DnsCommand};
-use futures::{TryFutureExt, future::OptionFuture};
+use futures::{
+    TryFutureExt,
+    future::{BoxFuture, OptionFuture},
+};
 use metrics::{CLIENT_COUNT, start_metrics};
-use mirrord_agent_env::envs;
+use mirrord_agent_env::{checked_env::CheckedEnv, envs};
 use mirrord_agent_iptables::{
     ChainNames, IPTablesWrapper, SafeIpTables,
     error::{IPTablesError, IPTablesResult},
 };
+use mirrord_cluster_auth::{AuthMethod, ClusterClientFactory, ClusterCredentials, eks_region};
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use mirrord_protocol_io::{Agent, Connection};
-use mirrord_sessions_manager_client::{AgentClient, ServiceScope, SessionsManagerClientError};
+use mirrord_sessions_manager_client::{
+    AgentClient, DirectTransport, OperatorTransport, ReplicaId, SESSIONS_MANAGER_URL_ENV,
+    ServiceScope, SessionsManagerClientError,
+};
 use socket2::SockRef;
 use tokio::{
     net::{TcpListener, TcpSocket, TcpStream},
@@ -1186,6 +1193,74 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
+/// Registers the workload companion with the operator-hosted sessions-manager when
+/// [`envs::OPERATOR_API_URL`] is set, and with a standalone one at [`SESSIONS_MANAGER_URL_ENV`]
+/// otherwise.
+///
+/// The operator is reached through the EKS API server, authenticated as the companion's AWS
+/// identity. The caller must poll the token-refresh future alongside the companion loop so a
+/// permanent authentication failure stops the companion with an error.
+async fn start_control_plane(
+    scope: ServiceScope,
+    replica_id: ReplicaId,
+    cancellation_token: CancellationToken,
+) -> AgentResult<(
+    AgentClient,
+    Option<BoxFuture<'static, mirrord_cluster_auth::Result<()>>>,
+)> {
+    let required = |env: &CheckedEnv<String>| {
+        env.try_from_env()
+            .expect("String environment variables are infallible")
+            .ok_or(AgentError::MissingOperatorConfig(env.name))
+    };
+
+    let Some(api_url) = envs::OPERATOR_API_URL
+        .try_from_env()
+        .expect("String environment variables are infallible")
+    else {
+        return Ok((
+            AgentClient::start(
+                scope,
+                replica_id,
+                DirectTransport::from_env()?,
+                cancellation_token,
+            )?,
+            None,
+        ));
+    };
+
+    if std::env::var_os(SESSIONS_MANAGER_URL_ENV).is_some() {
+        return Err(AgentError::ConflictingSessionsManagerEndpoints);
+    }
+
+    let cluster_name = required(&envs::OPERATOR_EKS_CLUSTER_NAME)?;
+    let region = eks_region(&api_url).ok_or(AgentError::MissingOperatorRegion)?;
+    let factory = ClusterClientFactory::new()?;
+    let connection = factory
+        .connect_eks(ClusterCredentials {
+            name: cluster_name.clone(),
+            server: api_url,
+            namespace: "default".to_owned(),
+            ca_data: Some(required(&envs::OPERATOR_API_CA_DATA)?),
+            auth_method: AuthMethod::AwsIam {
+                region,
+                cluster_name,
+            },
+            token: None,
+            client_cert_pem: None,
+            client_key_pem: None,
+        })
+        .await?;
+    let transport = OperatorTransport::new(connection.client.clone());
+
+    let token_refresh = Box::pin(async move { factory.run_token_refresh(connection).await });
+
+    Ok((
+        AgentClient::start(scope, replica_id, transport, cancellation_token)?,
+        Some(token_refresh),
+    ))
+}
+
 /// The remote workload-companion version of `start_agent` used in Serverless.
 ///
 /// It simultaneously:
@@ -1237,15 +1312,17 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
     let replica_id = resolve_replica_id()
         .await
         .ok_or::<AgentError>(SessionsManagerClientError::MissingAgentReplicaID.into())?;
-    let mut control_plane = AgentClient::new(
-        ServiceScope {
-            environment,
-            service,
-        },
-        replica_id.into(),
-        cancellation_token.clone(),
-    )?
-    .start_control_plane()?;
+    let (mut control_plane, mut token_refresh) = select! {
+        _ = cancellation_token.cancelled() => return Ok(()),
+        result = start_control_plane(
+            ServiceScope {
+                environment,
+                service,
+            },
+            replica_id.into(),
+            cancellation_token.clone(),
+        ) => result?,
+    };
 
     let mut join_set: JoinSet<()> = JoinSet::new();
 
@@ -1253,6 +1330,12 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
         select! {
             // Stop accepting work once the workload companion is asked to shut down.
             _ = cancellation_token.cancelled() => break Ok(()),
+
+            refresh_result = async {
+                token_refresh.as_mut().expect("guarded by is_some").await
+            }, if token_refresh.is_some() => {
+                break refresh_result.map_err(AgentError::from);
+            }
 
             // The remote ingress is required for workload-companion operation, so its unexpected
             // termination shuts down connected clients and fails the agent.

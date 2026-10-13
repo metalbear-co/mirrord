@@ -1,0 +1,63 @@
+[package]
+name = "mirrord-cluster-auth"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+mirrord-nightly-polyfill = { path = "../nightly-polyfill" }
+
+base64.workspace = true
+hyper-rustls.workspace = true
+hyper-util = { workspace = true, features = ["client-legacy", "http1", "tokio"] }
+kube.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time"] }
+tokio-retry.workspace = true
+tower.workspace = true
+tracing.workspace = true
+webpki-roots.workspace = true
+
+aws-config = { workspace = true, optional = true, features = [
+  "behavior-version-latest",
+  "default-https-client",
+  "rt-tokio",
+] }
+aws-credential-types = { workspace = true, optional = true }
+aws-sigv4 = { workspace = true, optional = true, features = ["sign-http", "http1"] }
+http = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+
+[features]
+# EKS IAM authentication: `iam_token` and the connections that refresh it.
+eks = ["dep:aws-config", "dep:aws-credential-types", "dep:aws-sigv4", "dep:http", "dep:url"]
+
+[dev-dependencies]
+mirrord-operator-websocket = { path = "../operator-websocket" }
+futures.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["server", "http1"] }
+rcgen.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "net"] }
+tokio-rustls.workspace = true
+tokio-tungstenite.workspace = true
+
+[lib]
+doctest = false

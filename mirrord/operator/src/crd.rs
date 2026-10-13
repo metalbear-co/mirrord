@@ -857,6 +857,8 @@ pub enum NewOperatorFeature {
     /// whether a primary streams the whole setup or just its own cluster.
     MultiClusterSubscribe,
 
+    ServerlessSessionsManager,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -951,6 +953,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchesFromSplitConfig => {
                 "db_branches resolved from the target's MirrordSplitConfig"
             }
+            NewOperatorFeature::ServerlessSessionsManager => "serverless sessions-manager",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

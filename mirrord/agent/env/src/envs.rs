@@ -79,6 +79,34 @@ pub const REMOTE_SERVICE_REPLICA: CheckedEnv<String> =
 /// This is distinct from `MIRRORD_TARGET_NAMESPACE`, which configures a local mirrord process.
 pub const REMOTE_ENVIRONMENT: CheckedEnv<String> = CheckedEnv::new("MIRRORD_REMOTE_ENVIRONMENT");
 
+/// Makes the workload companion register with the sessions-manager hosted by the mirrord
+/// operator, through this Kubernetes API server, instead of a standalone sessions-manager at
+/// `MIRRORD_SESSIONS_MANAGER_URL`. Setting both is an error.
+///
+/// The value is the EKS cluster's API server endpoint, e.g.
+/// `https://ABC123.gr7.us-east-1.eks.amazonaws.com`. The companion authenticates as its AWS
+/// identity (the task role, on ECS), which the cluster must map to a Kubernetes identity with an
+/// access entry, and RBAC must grant that identity `proxy` on `serverlessagentassignments` and
+/// `get` on `serverlessdataplanes` in `operator.metalbear.co`.
+///
+/// Tokens are signed for the cluster's region, read from this endpoint's hostname. When it isn't
+/// an EKS endpoint hostname (e.g. a proxy in front of the API server), `AWS_REGION` or
+/// `AWS_DEFAULT_REGION` must name the cluster's region.
+///
+/// Requires [`OPERATOR_EKS_CLUSTER_NAME`] and [`OPERATOR_API_CA_DATA`].
+/// The operator deployment must support these routes and enable `operator.sessionsManager`.
+pub const OPERATOR_API_URL: CheckedEnv<String> = CheckedEnv::new("MIRRORD_OPERATOR_API_URL");
+
+/// Name of the EKS cluster at [`OPERATOR_API_URL`]. It's signed into the bearer token, and EKS
+/// rejects tokens signed for another cluster.
+pub const OPERATOR_EKS_CLUSTER_NAME: CheckedEnv<String> =
+    CheckedEnv::new("MIRRORD_OPERATOR_EKS_CLUSTER_NAME");
+
+/// Certificate authority of the API server at [`OPERATOR_API_URL`], as base64-encoded PEM (the
+/// `certificateAuthority.data` of `aws eks describe-cluster`).
+pub const OPERATOR_API_CA_DATA: CheckedEnv<String> =
+    CheckedEnv::new("MIRRORD_OPERATOR_API_CA_DATA");
+
 /// Provides the agent with a steal TLS configuration.
 pub const STEAL_TLS_CONFIG: CheckedEnv<Vec<StealPortTlsConfig>> =
     CheckedEnv::new("MIRRORD_AGENT_STEAL_TLS_CONFIG");
