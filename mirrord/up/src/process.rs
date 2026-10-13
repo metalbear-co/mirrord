@@ -369,6 +369,10 @@ async fn wait_for_first_exit(
                     })
                 };
             };
+            // Only the leader has exited. Anything it left running in its tree
+            // would outlive `mirrord up`, because shutdown only reaches the
+            // trees of services still supervised here.
+            service.force_stop().await?;
             if status.success() {
                 println!("{}: `run.pre_command` succeeded, starting", service.name);
                 *service = Service::spawn(service.name.clone(), session, None, readiness, output)?;
