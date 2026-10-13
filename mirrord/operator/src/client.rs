@@ -3752,13 +3752,25 @@ mod test {
             operator: MirrordOperatorCrd::new("operator", spec),
             kube_context: None,
         };
-        api.create_credential_secret(
-            &namespace,
-            "client-test",
-            HashMap::from([("DATABASE_NAME".to_owned(), "test_database".to_owned())]),
+        tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            api.create_credential_secret(
+                &namespace,
+                "client-test",
+                HashMap::from([("DATABASE_NAME".to_owned(), "test_database".to_owned())]),
+            ),
         )
         .await
-        .unwrap();
+        .unwrap_or_else(|_| {
+            panic!(
+                "Credential creation through Teleport timed out after 60 seconds in namespace {namespace}"
+            )
+        })
+        .unwrap_or_else(|error| {
+            panic!(
+                "Credential creation through Teleport failed in namespace {namespace}: {error}"
+            )
+        });
     }
 
     /// Only a 404 from the namespaced route sends the request on to the cluster-scoped route.
