@@ -1,11 +1,11 @@
 //! The `mirrord up` command - runs multiple mirrord sessions from a `mirrord-up.yaml` file.
 
-use std::io::ErrorKind;
+use std::{io::ErrorKind, sync::Arc};
 
 use miette::Diagnostic;
 use mirrord_analytics::{Analytics, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::config::EnvKey;
-use mirrord_operator::crd::session::UpSessionInfo;
+use mirrord_operator::{client::error::OperatorApiError, crd::session::UpSessionInfo};
 use mirrord_up::{InitError, ReadyTracker, SERVICE_NAME_ENV, UpError, load_up_config, run_wizard};
 use thiserror::Error;
 use uuid::Uuid;
@@ -15,6 +15,8 @@ use crate::{
     data::UserData,
     ui::ui_command,
 };
+
+mod db_branches;
 
 /// Context for sessions started by `mirrord up`.
 #[derive(Clone, Debug)]
@@ -58,6 +60,14 @@ pub enum UpCliError {
         "
     ))]
     ConfigNotFound,
+
+    /// The operator couldn't tell what a service's DB branching request resolves to, or
+    /// rejected it. Its message is shown as it is.
+    #[error("{service}: {error}")]
+    DbBranches {
+        service: Arc<str>,
+        error: Box<OperatorApiError>,
+    },
 
     #[error("failed to acquire OS username for key")]
     #[diagnostic(help(
@@ -158,8 +168,9 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         });
     }
 
-    let services =
+    let mut services =
         mirrord_up::resolve_services(up_config, &args.config_file, args.context, &key).await?;
+    db_branches::check_db_branches(&mut services).await?;
     let result = mirrord_up::launch(services, correlation_id, ready.clone()).await;
 
     // Recorded whenever all sessions reached readiness, even if `run` then
@@ -182,6 +193,7 @@ enum ErrorCategory {
     InternalError = 3,
     PreCommandFailed = 4,
     ServiceStartFailed = 5,
+    DbBranching = 6,
 }
 
 impl From<&UpCliError> for ErrorCategory {
@@ -200,6 +212,7 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::ServiceFailedToStart { .. }) => Self::ServiceStartFailed,
+            UpCliError::DbBranches { .. } => Self::DbBranching,
             UpCliError::Up(UpError::PreCommandFailed { .. })
             | UpCliError::Up(UpError::PreCommandSpawn { .. }) => Self::PreCommandFailed,
             UpCliError::Up(UpError::Io(_))
