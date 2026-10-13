@@ -3,7 +3,7 @@ name: mirrord-operator
 description: Help users install and configure the mirrord Operator for team/enterprise environments. Use when users ask about operator setup, Helm installation, cloud API key or license configuration, air-gapped/offline licensing, enabling features (queue splitting, DB branching, preview environments, multi-cluster), internal registries, OpenShift/GKE Autopilot, RBAC, or multi-user mirrord deployments. Also use when an AI agent hits a Team or Enterprise feature on a cluster with no license and needs to offer the user a trial (agent-started trial; the trial is Enterprise tier).
 metadata:
   author: MetalBear
-  version: "2.16"
+  version: "2.17"
 ---
 
 # Mirrord Operator Skill
