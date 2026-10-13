@@ -773,20 +773,17 @@ where
         Ok(response.secret_name)
     }
 
-    /// Resolves `feature.db_branches: "*"` / `["id", ...]` into inline entries through the
-    /// operator, which looks the ids up on the target's `MirrordSplitConfig`s, and writes them
-    /// back into `layer_config` so every later reader (branch creation, portforwards, the
-    /// internal proxy) sees concrete entries. Each entry's branch id is the entry id plus the
-    /// session key, so services started under one key share the branches.
+    /// Asks the operator which `MirrordSplitConfig` `dbBranches` entries `layer_config`'s
+    /// `feature.db_branches: "*"` / `["id", ...]` stands for. The operator looks them up on the
+    /// `MirrordSplitConfig`s of the target workload; nothing is created.
     ///
     /// With inline entries the operator is still asked, when it can answer, which
-    /// `MirrordSplitConfig`s the session is ignoring; its warnings are printed as they are.
-    /// Returns the ids of the resolved branches, empty when nothing was resolved.
-    async fn resolve_split_config_db_branches<P: Progress>(
+    /// `MirrordSplitConfig`s the session is ignoring, and the answer carries only warnings.
+    /// Returns `None` when there is nothing to ask, or when that inline-entries lookup failed.
+    pub async fn lookup_split_config_db_branches(
         &self,
-        layer_config: &mut LayerConfig,
-        progress: &P,
-    ) -> OperatorApiResult<ResolvedSplitConfigBranches> {
+        layer_config: &LayerConfig,
+    ) -> OperatorApiResult<Option<ResolveSplitConfigDbBranchesResponse>> {
         let supported = self
             .operator
             .spec
@@ -809,7 +806,7 @@ where
             // Inline entries win over the workload's `dbBranches`; the operator names the configs
             // this session ignores. An operator without the lookup has nothing to say.
             None if supported && layer_config.feature.db_branches.is_empty().not() => None,
-            None => return Ok(ResolvedSplitConfigBranches::default()),
+            None => return Ok(None),
         };
 
         let target = layer_config
@@ -830,7 +827,7 @@ where
                      workload"
                 )));
             }
-            _ => return Ok(ResolvedSplitConfigBranches::default()),
+            _ => return Ok(None),
         };
         let namespace = layer_config
             .target
@@ -844,12 +841,12 @@ where
             target: kube_target,
             request: request.clone(),
         };
-        let response: ResolveSplitConfigDbBranchesResponse = match (
+        match (
             self.post_in_namespace(&namespace, "splitconfigdbbranches", &body)
                 .await,
             &request,
         ) {
-            (Ok(response), _) => response,
+            (Ok(response), _) => Ok(Some(response)),
             // Inline entries need nothing from the answer; a lookup that fails only costs
             // the warning naming the configs the session ignores.
             (Err(error), None) => {
@@ -858,25 +855,53 @@ where
                     "Could not check which MirrordSplitConfig dbBranches the inline \
                      db_branches ignore"
                 );
-                return Ok(ResolvedSplitConfigBranches::default());
+                Ok(None)
             }
             // The operator's answer says what is wrong with the request (an unknown id,
             // a config conflict) in its own words; it is shown as it is, not inside kube's
             // wrapping of the response.
             (Err(kube::Error::Api(response)), Some(_)) => {
-                return Err(OperatorApiError::SplitConfigDbBranches(response.message));
+                Err(OperatorApiError::SplitConfigDbBranches(response.message))
             }
             (Err(error), Some(_)) => {
-                return Err(OperatorApiError::SplitConfigDbBranches(error.to_string()));
+                Err(OperatorApiError::SplitConfigDbBranches(error.to_string()))
             }
+        }
+    }
+
+    /// Resolves `feature.db_branches: "*"` / `["id", ...]` into inline entries through the
+    /// operator (see [`Self::lookup_split_config_db_branches`]), and writes them back into
+    /// `layer_config` so every later reader (branch creation, portforwards, the internal proxy)
+    /// sees concrete entries. Each entry's branch id is the entry id plus the session key, so
+    /// services started under one key share the branches.
+    ///
+    /// The operator's warnings are printed as they are. Returns the ids of the resolved
+    /// branches, empty when nothing was resolved.
+    async fn resolve_split_config_db_branches<P: Progress>(
+        &self,
+        layer_config: &mut LayerConfig,
+        progress: &P,
+    ) -> OperatorApiResult<ResolvedSplitConfigBranches> {
+        let Some(response) = self.lookup_split_config_db_branches(layer_config).await? else {
+            return Ok(ResolvedSplitConfigBranches::default());
         };
 
         for warning in &response.warnings {
             progress.warning(warning);
         }
-        if request.is_none() {
+        if layer_config
+            .feature
+            .db_branches
+            .split_config_request()
+            .is_none()
+        {
             return Ok(ResolvedSplitConfigBranches::default());
         }
+        let target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
 
         let resolved = entries_from_response(&response, layer_config.key.as_str())?;
         if resolved.entries.is_empty() {
