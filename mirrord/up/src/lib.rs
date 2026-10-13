@@ -137,13 +137,21 @@ pub enum UpError {
     #[diagnostic(transparent)]
     WindowsUnsupported(#[from] WindowsSupportError),
 
-    /// A child mirrord service exited with a non-zero status.
+    /// A service's process, launched by its child mirrord session, exited with a non-zero
+    /// status.
     #[error("Service {name} crashed with exit status {status}")]
     ServiceCrashed {
         /// Name of the service that crashed.
         name: Arc<str>,
         /// Exit status of the crashed service.
         status: ExitStatus,
+    },
+
+    /// A child mirrord session failed before launching the service's process.
+    #[error("Service {name} failed to start")]
+    ServiceFailedToStart {
+        /// Name of the service whose session failed.
+        name: Arc<str>,
     },
 
     /// The `run.pre_command` of the only service left to start exited with a non-zero status.
