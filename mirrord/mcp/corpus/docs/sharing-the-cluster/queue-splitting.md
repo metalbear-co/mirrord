@@ -422,7 +422,7 @@ For multiple queues, use the **array** form, which moves the ID into each entry 
 Both forms take the same filter fields (`queue_type`, `filter`, `message_filter`, `jq_filter`, `payload_protobuf`). Unlike the object form, the array form also lets the **same** queue ID be split on more than one broker, since the ID is not a unique key.
 
 {% hint style="info" %}
-When choosing which SQS attributes, Kafka headers or Pub/Sub attributes to filter on, first check whether your framework, messaging client, or observability library already propagates message metadata for you. Many modern stacks can forward tracing-related context out of the box, especially for Kafka headers. Prefer enabling that before adding manual propagation code.
+When choosing which SQS attributes, Kafka headers or Pub/Sub attributes to filter on, first check whether your framework, messaging client, or observability library already propagates message metadata for you. Many modern stacks can forward tracing-related context out of the box, especially for Kafka headers. Prefer enabling that before adding manual propagation code. See [Header Propagation](header-propagation.md).
 
 To have your AI agent do this, use the [`mirrord-header-propagation`](https://github.com/metalbear-co/skills/tree/main/skills/mirrord-header-propagation) skill. It adds `baggage` to every message your services publish, restores it in each consumer, and covers Kafka, SQS/SNS, RabbitMQ, GCP Pub/Sub, Azure Service Bus, NATS, Redis Pub/Sub, BullMQ, and Temporal.
 {% endhint %}

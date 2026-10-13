@@ -1,1 +1,0 @@
-Added internal support for the workload companion to register with the operator-hosted sessions-manager through an EKS API server, authenticated as its AWS identity, when `MIRRORD_OPERATOR_API_URL` is set.

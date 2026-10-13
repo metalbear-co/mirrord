@@ -3,7 +3,7 @@ name: mirrord-config
 description: Helps users generate, edit, and validate mirrord.json configuration files for mirrord (MetalBear). Use when the user wants to connect their local process to a Kubernetes environment, configure features (env/fs/network), or needs feedback on an existing mirrord.json. Always ensures output JSON is valid and schema-conformant.
 metadata:
   author: MetalBear
-  version: "1.26"
+  version: "1.27"
 ---
 
 # Mirrord Configuration Skill
