@@ -1,7 +1,8 @@
 //! Interactive wizard that generates a skeleton `mirrord-up.yaml`.
 //!
 //! The wizard prompts for a small, curated subset of the full schema and
-//! writes the result as YAML.
+//! writes the result as YAML. It picks each service's target from the
+//! cluster of the current kube context.
 //!
 //! Keep the prompt set deliberately small: ask only for what has no good
 //! default. The flow and the wording are meant to be the same as in the
@@ -17,7 +18,6 @@ use std::{
     fmt,
     ops::Not,
     path::{Path, PathBuf},
-    str::FromStr,
     sync::Arc,
 };
 
@@ -25,23 +25,24 @@ use inquire::{Confirm, Select, Text, validator::Validation};
 use miette::Diagnostic;
 use mirrord_config::{
     feature::{env::EnvConfig, network::incoming::http_filter::HttpFilterConfig},
-    target::Target,
+    target::{TargetDisplay, TargetType},
 };
+use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError};
 use thiserror::Error;
 
 use crate::{
-    UpError,
+    INFERRED_TARGET_TYPES, PickedTarget, UpError,
     config::{
         CommonConfig, RunConfig, RunType, ServiceConfig, ServiceMode, SpecifiedTarget,
         TargetConfig, UpConfig,
     },
-    prompt,
+    list_namespaces, pick_workload, prompt,
 };
 
 /// Errors produced by the `mirrord up init` wizard.
 #[derive(Debug, Error, Diagnostic)]
 pub enum InitError {
-    /// Prompting the user failed.
+    /// Querying the cluster or prompting the user failed.
     ///
     /// Boxed because [`UpError`] is large, and the error type of the CLI has a
     /// variant for each of the two.
@@ -68,14 +69,51 @@ impl From<UpError> for InitError {
     }
 }
 
+/// The cluster that the wizard picks targets from.
+struct Cluster {
+    client: kube::Client,
+    namespaces: Vec<String>,
+}
+
+impl Cluster {
+    /// Connects to the cluster of the current kube context. The namespaces are
+    /// listed here, so that an unreachable cluster stops the wizard before it
+    /// asks anything.
+    async fn connect() -> Result<Self, UpError> {
+        let kube_config = create_kube_config(None, None::<&str>, None).await?;
+        let client = kube::Client::try_from(kube_config).map_err(KubeApiError::from)?;
+        let namespaces = list_namespaces(&client).await?;
+        Ok(Self { client, namespaces })
+    }
+}
+
 /// Run the wizard end-to-end: prompt, render, preview, write.
 pub async fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
     println!("Welcome to `mirrord up init`. This wizard generates a skeleton mirrord-up.yaml.\n");
 
+    let cluster = Cluster::connect().await?;
+
     let mut services: HashMap<Arc<str>, ServiceConfig> = HashMap::new();
     loop {
-        let (name, svc) = prompt_service(&services).await?;
-        services.insert(name, svc);
+        match prompt_service(&cluster, &services).await {
+            Ok((name, svc)) => {
+                services.insert(name, svc);
+            }
+            // A service can end with nothing to pick, or with Esc. That must
+            // not throw away the services that are done, so the user goes on
+            // to the next question. Ctrl-C still ends the wizard.
+            Err(InitError::Up(error))
+                if services.is_empty().not()
+                    && matches!(
+                        *error,
+                        UpError::Inquire(inquire::InquireError::OperationInterrupted)
+                    )
+                    .not() =>
+            {
+                println!("The service was not added: {error}");
+            }
+            Err(error) => return Err(error),
+        }
         if prompt(|| {
             Confirm::new("Add another service?")
                 .with_default(false)
@@ -138,31 +176,21 @@ fn prompt_output_path(default_output: &Path) -> Result<Option<PathBuf>, inquire:
 }
 
 async fn prompt_service(
+    cluster: &Cluster,
     existing: &HashMap<Arc<str>, ServiceConfig>,
 ) -> Result<(Arc<str>, ServiceConfig), InitError> {
-    let existing: Vec<Arc<str>> = existing.keys().cloned().collect();
-    let name = prompt(move || {
-        Text::new("Service name:")
-            .with_validator(move |s: &str| {
-                let t = s.trim();
-                if t.is_empty() {
-                    Ok(Validation::Invalid("name cannot be empty".into()))
-                } else if existing.iter().any(|name| name.as_ref() == t) {
-                    Ok(Validation::Invalid(
-                        "a service with that name already exists".into(),
-                    ))
-                } else {
-                    Ok(Validation::Valid)
-                }
-            })
-            .prompt()
-    })
-    .await?
-    .trim()
-    .into();
-
     let default_mode = prompt(prompt_mode).await?;
-    let target = prompt(move || prompt_target(&default_mode)).await?;
+    let (name, picked) = prompt_target(cluster, default_mode, existing).await?;
+    let target = match picked {
+        PickedTarget::Targetless => TargetConfig::Targetless,
+        // `mirrord up` uses the namespace of the kube context when the field
+        // is absent.
+        PickedTarget::Workload { target, namespace } => SpecifiedTarget {
+            path: Some(target),
+            namespace: (namespace != cluster.client.default_namespace()).then(|| namespace.into()),
+        }
+        .into(),
+    };
     let http_filter = prompt(move || prompt_http_filter(&default_mode)).await?;
     let ignore_ports = prompt(prompt_ignore_ports).await?;
     let run = prompt(prompt_run).await?;
@@ -183,46 +211,62 @@ async fn prompt_service(
     ))
 }
 
-fn prompt_target(mode: &ServiceMode) -> Result<TargetConfig, inquire::InquireError> {
-    const INFER: &str = "Infer from the service name";
-    const SPECIFY: &str = "Specify a target";
-    const TARGETLESS: &str = "Run without a target (outgoing traffic only)";
+/// Picks the target of a service from the cluster, and names the service
+/// after it. A targetless service has nothing to be named after, so the user
+/// names it.
+async fn prompt_target(
+    cluster: &Cluster,
+    mode: ServiceMode,
+    existing: &HashMap<Arc<str>, ServiceConfig>,
+) -> Result<(Arc<str>, PickedTarget), InitError> {
+    // `replace` copies the workload and scales it down, which only these
+    // kinds support (see `TargetType::compatible_with`).
+    let kinds: &[TargetType] = match mode {
+        ServiceMode::Replace => &[TargetType::Deployment, TargetType::StatefulSet],
+        ServiceMode::Split | ServiceMode::Mirror => &INFERRED_TARGET_TYPES,
+    };
+    // Without a target there is no incoming traffic to split, mirror or
+    // replace, so only `split` offers it.
+    let targetless = matches!(mode, ServiceMode::Split);
 
-    // `replace` copies the target workload, so there has to be one.
-    let mut options = vec![INFER, SPECIFY];
-    if matches!(mode, ServiceMode::Split) {
-        options.push(TARGETLESS);
-    }
+    let picked = pick_workload(&cluster.client, &cluster.namespaces, kinds, targetless).await?;
 
-    let choice = Select::new("Target:", options)
-        .with_help_message(
-            "`Infer` looks the service name up in the cluster when you run `mirrord up`.",
-        )
-        .prompt()?;
-
-    if choice == TARGETLESS {
-        return Ok(TargetConfig::Targetless);
-    }
-
-    let path = (choice == SPECIFY)
-        .then(|| {
-            let path_str = Text::new("Target (e.g. `deployment/foo`, `pod/bar`):")
-                .with_validator(|s: &str| match Target::from_str(s.trim()) {
-                    Ok(_) => Ok(Validation::Valid),
-                    Err(e) => Ok(Validation::Invalid(e.to_string().into())),
-                })
-                .prompt();
-            path_str.map(|s| Target::from_str(s.trim()).expect("validated above"))
-        })
-        .transpose()?;
-
-    let namespace_str = Text::new("Namespace (blank for cluster default):").prompt()?;
-    let namespace = match namespace_str.trim() {
-        "" => None,
-        n => Some(n.into()),
+    let name = match &picked {
+        PickedTarget::Workload { target, .. } => {
+            let mut name = target.name().to_owned();
+            let mut n = 1;
+            while existing.contains_key(name.as_str()) {
+                n += 1;
+                name = format!("{}-{n}", target.name());
+            }
+            println!("Service name: {name}");
+            name
+        }
+        PickedTarget::Targetless => {
+            let existing: Vec<Arc<str>> = existing.keys().cloned().collect();
+            prompt(move || {
+                Text::new("Service name:")
+                    .with_validator(move |s: &str| {
+                        let t = s.trim();
+                        if t.is_empty() {
+                            Ok(Validation::Invalid("name cannot be empty".into()))
+                        } else if existing.iter().any(|name| name.as_ref() == t) {
+                            Ok(Validation::Invalid(
+                                "a service with that name already exists".into(),
+                            ))
+                        } else {
+                            Ok(Validation::Valid)
+                        }
+                    })
+                    .prompt()
+            })
+            .await?
+            .trim()
+            .to_owned()
+        }
     };
 
-    Ok(SpecifiedTarget { path, namespace }.into())
+    Ok((name.into(), picked))
 }
 
 /// A [`ServiceMode`] as an option of the mode prompt, with its label and its
@@ -513,6 +557,10 @@ fn is_scalar(value: &serde_yaml::Value) -> bool {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing)]
 mod tests {
+    use std::str::FromStr;
+
+    use mirrord_config::target::Target;
+
     use super::*;
 
     fn sample_service() -> ServiceConfig {

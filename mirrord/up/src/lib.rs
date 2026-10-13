@@ -496,7 +496,11 @@ async fn prompt_for_target(
     }
 
     let namespaces = list_namespaces(client).await?;
-    let (target, namespace) = pick_workload(client, &namespaces, &INFERRED_TARGET_TYPES).await?;
+    let PickedTarget::Workload { target, namespace } =
+        pick_workload(client, &namespaces, &INFERRED_TARGET_TYPES, false).await?
+    else {
+        unreachable!("targetless is not offered");
+    };
 
     offer_to_save_target(config_path, service_name, &target.to_string(), &namespace).await?;
 
@@ -508,18 +512,36 @@ async fn prompt_for_target(
     })
 }
 
+/// What the user picked with [`pick_workload`].
+enum PickedTarget {
+    /// A workload and its namespace.
+    Workload { target: Target, namespace: String },
+
+    /// No target. Only offered when [`pick_workload`] is asked to.
+    Targetless,
+}
+
 /// Lets the user pick one of `namespaces`, starting at the namespace of the
-/// kube context, and then a workload of one of the `kinds` in it. Returns the
-/// workload and its namespace.
+/// kube context, and then a workload of one of the `kinds` in it. When
+/// `targetless` is set, the workload prompt also offers to run without a
+/// target.
+///
+/// Both `mirrord up init` and the fallback wizard of `mirrord up` pick
+/// workloads with this, so that they look the same.
 ///
 /// When a namespace has nothing to pick, or the user can't list its
 /// workloads, the user picks another namespace. When it is the only
-/// namespace, there is nothing else to pick, so that is an error.
+/// namespace, there is nothing else to pick, so that is an error. The one
+/// exception is an empty namespace when `targetless` is set: the workload
+/// prompt still offers to run without a target.
 async fn pick_workload(
     client: &kube::Client,
     namespaces: &[String],
     kinds: &[TargetType],
-) -> Result<(Target, String), UpError> {
+    targetless: bool,
+) -> Result<PickedTarget, UpError> {
+    const TARGETLESS: &str = "Run without a target (outgoing traffic only)";
+
     let starting_cursor = namespaces
         .iter()
         .position(|namespace| namespace == client.default_namespace())
@@ -537,7 +559,7 @@ async fn pick_workload(
             .await?
         };
 
-        let workloads = match list_workloads(client, &namespace, kinds).await {
+        let mut workloads = match list_workloads(client, &namespace, kinds).await {
             Ok(workloads) => workloads,
             Err(UpError::Kube(KubeApiError::KubeError(kube::Error::Api(status))))
                 if status.code == 403 && can_pick_another =>
@@ -552,7 +574,12 @@ async fn pick_workload(
                 println!("No workloads found in namespace \"{namespace}\".");
                 continue;
             }
-            return Err(UpError::NoWorkloads(namespace));
+            if targetless.not() {
+                return Err(UpError::NoWorkloads(namespace));
+            }
+        }
+        if targetless {
+            workloads.push(TARGETLESS.to_owned());
         }
 
         let path = {
@@ -560,7 +587,13 @@ async fn pick_workload(
             prompt(move || Select::new(&message, workloads).prompt()).await?
         };
 
-        return Ok((Target::from_str(&path)?, namespace));
+        if path == TARGETLESS {
+            return Ok(PickedTarget::Targetless);
+        }
+        return Ok(PickedTarget::Workload {
+            target: Target::from_str(&path)?,
+            namespace,
+        });
     }
 }
 
