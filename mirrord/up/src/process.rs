@@ -441,12 +441,25 @@ async fn supervise_with_second_signal(
     let mut output = JoinSet::new();
     let mut services = Vec::with_capacity(total);
     let mut spawn_error = None;
+    let mut pre_command_spawn_error = None;
 
     for ServiceCommands { name, pre, session } in commands {
         let spawned = match pre {
             Some(pre) => {
                 println!("{name}: running `run.pre_command`");
-                Service::spawn(name, pre, Some(session), &readiness, &mut output)
+                // Like a failing pre-command, one that can't start (e.g. its
+                // program is not on PATH) only drops its own service.
+                match Service::spawn(name.clone(), pre, Some(session), &readiness, &mut output) {
+                    Err(error) => {
+                        eprintln!("{name}: `run.pre_command` failed to start: {error}");
+                        pre_command_spawn_error = Some(UpError::PreCommandSpawn {
+                            name,
+                            source: error,
+                        });
+                        continue;
+                    }
+                    spawned => spawned,
+                }
             }
             None => Service::spawn(name, session, None, &readiness, &mut output),
         };
@@ -464,6 +477,9 @@ async fn supervise_with_second_signal(
         // signal as unaccepted before cleanup begins.
         drop(shutdown);
         (Err(UpError::Io(error)), None)
+    } else if let Some(error) = pre_command_spawn_error.filter(|_| services.is_empty()) {
+        drop(shutdown);
+        (Err(error), None)
     } else {
         {
             let exits = wait_for_first_exit(&mut services, &readiness, &mut output);

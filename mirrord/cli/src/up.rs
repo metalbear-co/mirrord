@@ -200,7 +200,8 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::Mode(_))
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
-            UpCliError::Up(UpError::PreCommandFailed { .. }) => Self::PreCommandFailed,
+            UpCliError::Up(UpError::PreCommandFailed { .. })
+            | UpCliError::Up(UpError::PreCommandSpawn { .. }) => Self::PreCommandFailed,
             UpCliError::Up(UpError::Io(_))
             | UpCliError::Up(UpError::Panic(_))
             | UpCliError::Up(UpError::Kube(_))
