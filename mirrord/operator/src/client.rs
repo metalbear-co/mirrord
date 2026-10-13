@@ -3756,7 +3756,7 @@ mod test {
             .create_credential_secret(
                 &namespace,
                 "client-test",
-                HashMap::from([("DATABASE_NAME".to_owned(), "coralogix".to_owned())]),
+                HashMap::from([("DATABASE_NAME".to_owned(), "test_database".to_owned())]),
             )
             .await
             .unwrap();
