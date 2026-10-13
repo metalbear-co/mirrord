@@ -17,6 +17,7 @@ use tokio::{
 };
 use tokio_seqpacket::{UnixSeqpacket, UnixSeqpacketListener, ancillary::OwnedAncillaryMessage};
 use tokio_util::sync::CancellationToken;
+use tracing::{Instrument, Level, field};
 
 use super::{error::Result, incoming::IncomingConnectionSender};
 use crate::incoming::Redirected;
@@ -61,6 +62,11 @@ impl ConnectionHandoffServer {
         })
     }
 
+    #[tracing::instrument(
+        level = Level::DEBUG,
+        skip_all,
+        fields(socket_path = %self.socket_path.display()),
+    )]
     pub(super) async fn run(mut self, cancellation_token: CancellationToken) -> Result<()> {
         let mut connections = JoinSet::new();
 
@@ -76,30 +82,57 @@ impl ConnectionHandoffServer {
                 // waiting for the remote layer to connect its placeholder socket.
                 accepted = self.listener.accept() => {
                     let stream = accepted?;
-                    tracing::trace!("accepted connection handoff connection");
                     self.spawn_connection(&mut connections, stream);
                 }
                 // Reap completed connection tasks so panics and cancellations remain visible
                 // without allowing the join set to grow for the server's lifetime.
                 joined = connections.join_next(), if !connections.is_empty() => {
+                    // The task id matches the one logged by `spawn_connection`, whose span
+                    // identifies the remote layer process that handed off the connection.
                     if let Some(Err(error)) = joined {
-                        tracing::error!(%error, "connection handoff task failed to join");
+                        tracing::error!(
+                            %error,
+                            task_id = %error.id(),
+                            "connection handoff task failed to join"
+                        );
                     }
                 }
             }
         }
     }
 
+    /// The span identifies the remote layer process by its pid and stays open until the spawned
+    /// handoff task finishes, so everything logged while serving the handoff carries it.
+    #[tracing::instrument(
+        level = Level::DEBUG,
+        skip_all,
+        fields(layer_pid = stream.peer_cred().ok().and_then(|cred| cred.pid())),
+    )]
     fn spawn_connection(&self, connections: &mut JoinSet<()>, stream: UnixSeqpacket) {
         let sender = self.sender.clone();
 
-        connections.spawn(async move {
-            if let Err(error) = Self::serve_connection(stream, sender).await {
-                tracing::warn!(%error, "connection handoff failed");
+        let task = connections.spawn(
+            async move {
+                // `serve_connection` logs its own failure, inside its span.
+                let _ = Self::serve_connection(stream, sender).await;
             }
-        });
+            .in_current_span(),
+        );
+        tracing::trace!(task_id = %task.id(), "accepted connection handoff connection");
     }
 
+    /// The connection fields stay empty until the handoff request is decoded, so a failure before
+    /// that point is identified only by the parent span's `layer_pid`.
+    #[tracing::instrument(
+        level = Level::DEBUG,
+        skip_all,
+        fields(
+            accept_id = field::Empty,
+            peer_address = field::Empty,
+            local_address = field::Empty,
+        ),
+        err(level = Level::WARN),
+    )]
     async fn serve_connection(
         stream: UnixSeqpacket,
         sender: IncomingConnectionSender,
@@ -162,6 +195,10 @@ impl Handoff {
         let (request, accepted_fd) = self.receive_request().await?;
         let original_stream: StdTcpStream = accepted_fd.into();
         let local_address = original_stream.local_addr()?;
+        tracing::Span::current()
+            .record("accept_id", request.accept_id)
+            .record("peer_address", field::display(request.peer_address))
+            .record("local_address", field::display(local_address));
         Self::log_local_address_mismatch(&request, local_address);
 
         let listener = Self::create_placeholder_listener(request.listener_address).await?;

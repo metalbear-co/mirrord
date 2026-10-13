@@ -1,7 +1,7 @@
 use std::{error::Error, fmt, io, sync::Arc};
 
 use tokio::sync::mpsc;
-use tracing::{debug, trace};
+use tracing::{Level, debug};
 
 use crate::incoming::{PortRedirector, Redirected};
 
@@ -13,12 +13,15 @@ pub(super) struct IncomingConnectionSender {
 
 impl IncomingConnectionSender {
     /// The failed connection is not recoverable by callers, so expose only channel closure.
-    pub(super) async fn send(&self, connection: Redirected) -> Result<(), ()> {
-        trace!(
+    #[tracing::instrument(
+        level = Level::TRACE,
+        skip_all,
+        fields(
             source = %connection.source(),
             destination = %connection.destination(),
-            "queue bridged incoming connection"
-        );
+        ),
+    )]
+    pub(super) async fn send(&self, connection: Redirected) -> Result<(), ()> {
         self.tx
             .send(connection)
             .await

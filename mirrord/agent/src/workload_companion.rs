@@ -37,10 +37,15 @@ pub(crate) struct WorkloadCompanionIngress {
 }
 
 impl WorkloadCompanionIngress {
-    pub(crate) async fn start(
+    pub(crate) fn start(
         runtime: &BgTaskRuntime,
         cancellation_token: CancellationToken,
     ) -> AgentResult<Self> {
+        // IMPORTANT: this makes tokio tasks spawn on `runtime`, and registers the handoff
+        // listener with `runtime`'s reactor, which is the one that polls it.
+        // Do not remove this.
+        let _rt = runtime.handle().enter();
+
         let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
         let tls_handler_store =
             StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::from_root());

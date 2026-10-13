@@ -1211,7 +1211,7 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
     }
 
     let ingress =
-        WorkloadCompanionIngress::start(&state.network_runtime, cancellation_token.clone()).await?;
+        WorkloadCompanionIngress::start(&state.network_runtime, cancellation_token.clone())?;
     let ingress_status = ingress.status();
     let stealer = setup::start_stealer(
         &state.network_runtime,
