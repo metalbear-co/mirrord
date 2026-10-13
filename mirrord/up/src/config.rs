@@ -57,6 +57,10 @@ pub enum ServiceMode {
     /// Uses the service's `http_filter` if set. Otherwise, requests with a header matching the
     /// regex `baggage: .*mirrord-session={key}.*` go to the local service, where `{key}` is the
     /// session key.
+    ///
+    /// With a workload target and no `db_branches` of its own, the service requests DB branching
+    /// (`db_branches: "*"`): it runs against branches of the databases defined on the workload's
+    /// `MirrordSplitConfig`, shared with the other services of the run that use the same ones.
     #[default]
     Split,
 
@@ -73,7 +77,11 @@ pub enum ServiceMode {
     ///
     /// Uses the service's `http_filter` if set. Otherwise, requests with a header matching the
     /// regex `baggage: .*mirrord-session={key}.*` are mirrored, where `{key}` is the session key.
-    // The fallback filter is built in `ServiceConfig::assemble`.
+    ///
+    /// With a workload target and no `db_branches` of its own, the service requests DB branching
+    /// (`db_branches: "*"`): it runs against branches of the databases defined on the workload's
+    /// `MirrordSplitConfig`, shared with the other services of the run that use the same ones.
+    // The fallback filter and the DB branching request are built in `ServiceConfig::assemble`.
     Mirror,
 }
 
