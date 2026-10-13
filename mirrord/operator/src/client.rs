@@ -15,7 +15,7 @@ use k8s_openapi::{
 };
 use kube::{
     Api, Client, Config, Resource, ResourceExt,
-    api::{ListParams, PostParams},
+    api::{ApiResource, DynamicObject, GroupVersionKind, ListParams, PostParams},
     client::ClientBuilder,
 };
 use mirrord_analytics::{AnalyticsOperatorProperties, Reporter, SanitizedString};
@@ -662,6 +662,19 @@ where
             branch_id: branch_name.to_owned(),
             values,
         };
+
+        // API-aware proxies decode create requests as Kubernetes objects before forwarding.
+        // Keep the payload flat so operators accepting the original request can still read it.
+        let resource = ApiResource::from_gvk(&GroupVersionKind::gvk(
+            "operator.metalbear.co",
+            "v1",
+            "BranchCredential",
+        ));
+        let request_body = DynamicObject::new(branch_name, &resource)
+            .within(namespace)
+            .data(serde_json::to_value(request_body).map_err(|e| {
+                OperatorApiError::CredentialSecretCreation(format!("serialize: {e}"))
+            })?);
 
         let response: CreateCredentialSecretResponse = self
             .post_in_namespace(namespace, "branchcredentials", &request_body)
@@ -3715,6 +3728,51 @@ mod test {
         "/apis/operator.metalbear.co/v1/namespaces/team/branchcredentials";
     const CLUSTER_CREDENTIALS: &str = "/apis/operator.metalbear.co/v1/branchcredentials";
 
+    /// Exercises the production request through a local Teleport connected to staging.
+    /// The reproduction harness owns the temporary namespace and cleans up the Secret.
+    #[tokio::test]
+    #[ignore = "requires the branchcredentials staging/Teleport reproduction harness"]
+    async fn credential_secret_through_staging_teleport() {
+        let namespace = std::env::var("BRANCHCREDENTIALS_TEST_NAMESPACE").unwrap();
+        assert!(namespace.starts_with("branchcreds-repro-"));
+        let config = Config::infer().await.unwrap();
+        assert_eq!(config.cluster_url.host(), Some("localhost"));
+        let client = Client::try_from(config.clone()).unwrap();
+        let spec = serde_json::from_value(serde_json::json!({
+            "operator_version": "3.219.0",
+            "default_namespace": "default",
+            "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
+        }))
+        .unwrap();
+        let api = OperatorApi {
+            client,
+            client_cert: NoClientCert {
+                base_config: config,
+            },
+            operator: MirrordOperatorCrd::new("operator", spec),
+            kube_context: None,
+        };
+        tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            api.create_credential_secret(
+                &namespace,
+                "client-test",
+                HashMap::from([("DATABASE_NAME".to_owned(), "test_database".to_owned())]),
+            ),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "Credential creation through Teleport timed out after 60 seconds in namespace {namespace}"
+            )
+        })
+        .unwrap_or_else(|error| {
+            panic!(
+                "Credential creation through Teleport failed in namespace {namespace}: {error}"
+            )
+        });
+    }
+
     /// Only a 404 from the namespaced route sends the request on to the cluster-scoped route.
     #[rstest]
     #[case::served(StatusCode::OK, &[NAMESPACED_CREDENTIALS], true)]
@@ -3729,6 +3787,7 @@ mod test {
         #[case] namespaced_status: StatusCode,
         #[case] expected_paths: &[&str],
         #[case] succeeds: bool,
+        #[values(false, true)] typed_response: bool,
     ) {
         let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
         let spec = serde_json::from_value(serde_json::json!({
@@ -3763,10 +3822,20 @@ mod test {
 
                     paths.push(path);
                     bodies.push(serde_json::from_slice::<serde_json::Value>(&body).unwrap());
+                    let response = if typed_response {
+                        serde_json::json!({
+                            "apiVersion": "operator.metalbear.co/v1",
+                            "kind": "BranchCredential",
+                            "metadata": {"name": "branch", "namespace": "team"},
+                            "secret_name": "creds",
+                        })
+                    } else {
+                        serde_json::json!({"secret_name": "creds"})
+                    };
                     send.send_response(
                         Response::builder()
                             .status(status)
-                            .body(Body::from(br#"{"secret_name":"creds"}"#.to_vec()))
+                            .body(Body::from(serde_json::to_vec(&response).unwrap()))
                             .unwrap(),
                     );
                 }
@@ -3774,6 +3843,9 @@ mod test {
         };
 
         let expected_body = serde_json::json!({
+            "apiVersion": "operator.metalbear.co/v1",
+            "kind": "BranchCredential",
+            "metadata": {"name": "branch", "namespace": "team"},
             "namespace": "team",
             "branch_id": "branch",
             "values": {"password": "secret"},
