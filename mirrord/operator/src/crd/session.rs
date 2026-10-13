@@ -449,4 +449,10 @@ pub struct UpSessionInfo {
     /// Queue splitting was generated automatically by `mirrord up`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_queue_splitting: Option<bool>,
+
+    /// Name of the `mirrord up` service the session runs. Only the CLI reads it (see
+    /// `OperatorApi::prepare_branch_dbs`); it is never sent to the operator.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub service: Option<String>,
 }

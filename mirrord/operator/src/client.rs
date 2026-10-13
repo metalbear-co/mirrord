@@ -905,10 +905,13 @@ where
     /// 1. List reusable branch databases.
     /// 2. Create new ones if any missing.
     /// 3. Wait for all new databases to be ready.
+    ///
+    /// `up_service` is the `mirrord up` service this session runs, if any.
     #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
     pub async fn prepare_branch_dbs<P: Progress>(
         &self,
         layer_config: &mut LayerConfig,
+        up_service: Option<&str>,
         progress: &P,
     ) -> OperatorApiResult<BranchDbNames> {
         use database_branches::TARGET_NAMESPACE_ANNOTATION;
@@ -1864,7 +1867,11 @@ impl OperatorApi<PreparedClientCert> {
             .contains(&NewOperatorFeature::ProxyApi);
 
         let branch_db_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_branch_dbs(layer_config, progress).await?
+            let up_service = up_session_info
+                .as_ref()
+                .and_then(|info| info.service.as_deref());
+            self.prepare_branch_dbs(layer_config, up_service, progress)
+                .await?
         } else {
             BranchDbNames::default()
         };
@@ -2204,7 +2211,11 @@ impl OperatorApi<PreparedClientCert> {
         //   happens locally. If Primary != Default, a sync controller copies CRDs to Default where
         //   actual branching happens, then syncs status back.
         let branch_db_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_branch_dbs(layer_config, progress).await?
+            let up_service = up_session_info
+                .as_ref()
+                .and_then(|info| info.service.as_deref());
+            self.prepare_branch_dbs(layer_config, up_service, progress)
+                .await?
         } else {
             BranchDbNames::default()
         };

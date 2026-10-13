@@ -76,6 +76,10 @@ impl ReadyTracker {
 /// Environment variable used to pass the resolved configuration to child mirrord processes.
 pub const RESOLVED_CONFIG_ENV: &str = "MIRRORD_UP_RESOLVED_CONFIG";
 
+/// Environment variable holding the name of the service a `mirrord up` session runs, so the
+/// session can name the service on the branch databases it creates.
+pub const SERVICE_NAME_ENV: &str = "MIRRORD_UP_SERVICE";
+
 /// Errors produced by `mirrord up` command.
 #[derive(Debug, Error, Diagnostic)]
 pub enum UpError {
@@ -676,6 +680,7 @@ pub async fn launch(
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
+                .env(SERVICE_NAME_ENV, &*service_name)
                 .arg(Into::<&'static str>::into(r#type))
                 .arg("--")
                 .args(command)

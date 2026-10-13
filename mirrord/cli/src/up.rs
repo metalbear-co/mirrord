@@ -6,7 +6,7 @@ use miette::Diagnostic;
 use mirrord_analytics::{Analytics, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::config::EnvKey;
 use mirrord_operator::crd::session::UpSessionInfo;
-use mirrord_up::{InitError, ReadyTracker, UpError, load_up_config, run_wizard};
+use mirrord_up::{InitError, ReadyTracker, SERVICE_NAME_ENV, UpError, load_up_config, run_wizard};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -17,23 +17,27 @@ use crate::{
 };
 
 /// Context for sessions started by `mirrord up`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct MirrordUp {
     pub(crate) auto_queue_splitting: bool,
+    /// The service the session runs.
+    pub(crate) service: Option<String>,
 }
 
 impl MirrordUp {
     pub(crate) fn from_env() -> Option<Self> {
         std::env::var_os(mirrord_up::RESOLVED_CONFIG_ENV)
             .is_some()
-            .then_some(Self {
+            .then(|| Self {
                 auto_queue_splitting: true,
+                service: std::env::var(SERVICE_NAME_ENV).ok(),
             })
     }
 
     pub(crate) fn info(&self) -> UpSessionInfo {
         UpSessionInfo {
             auto_queue_splitting: self.auto_queue_splitting.then_some(true),
+            service: self.service.clone(),
         }
     }
 }
