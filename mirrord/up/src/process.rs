@@ -87,6 +87,45 @@ struct Service {
 }
 
 impl Service {
+    /// Spawns `command` in its own process tree and forwards its output.
+    fn spawn(
+        name: Arc<str>,
+        command: Command,
+        readiness: &Arc<Readiness>,
+        output: &mut JoinSet<()>,
+    ) -> io::Result<Self> {
+        // Terminal Ctrl-C must reach the supervisor first so child signal exits
+        // cannot race it and become spurious service-crash telemetry.
+        let mut command = CommandWrap::from(command);
+        command.wrap(KillOnDrop);
+        #[cfg(unix)]
+        command.wrap(ProcessGroup::leader());
+        #[cfg(windows)]
+        command.wrap(JobObject);
+        let mut child = command.spawn()?;
+        #[cfg(unix)]
+        let group = child
+            .id()
+            .map(|pid| Pid::from_raw(pid as i32))
+            .ok_or_else(|| io::Error::other("spawned child has no process ID"))?;
+        if let Some(stdout) = child.stdout().take() {
+            output.spawn(forward_output(
+                stdout,
+                name.clone(),
+                Some(readiness.clone()),
+            ));
+        }
+        if let Some(stderr) = child.stderr().take() {
+            output.spawn(forward_output(stderr, name.clone(), None));
+        }
+        Ok(Self {
+            name,
+            child,
+            #[cfg(unix)]
+            group,
+        })
+    }
+
     /// Gracefully signals the Unix process group, escalating after `grace`.
     ///
     /// The group is checked independently of the direct child because a
@@ -367,48 +406,14 @@ async fn supervise_with_second_signal(
     let mut services = Vec::with_capacity(total);
     let mut spawn_error = None;
 
-    for ServiceCommands {
-        name,
-        session: command,
-        ..
-    } in commands
-    {
-        // Terminal Ctrl-C must reach the supervisor first so child signal exits
-        // cannot race it and become spurious service-crash telemetry.
-        let mut command = CommandWrap::from(command);
-        command.wrap(KillOnDrop);
-        #[cfg(unix)]
-        command.wrap(ProcessGroup::leader());
-        #[cfg(windows)]
-        command.wrap(JobObject);
-        let mut child = match command.spawn() {
-            Ok(child) => child,
+    for ServiceCommands { name, session, .. } in commands {
+        match Service::spawn(name, session, &readiness, &mut output) {
+            Ok(service) => services.push(service),
             Err(error) => {
                 spawn_error = Some(error);
                 break;
             }
-        };
-        #[cfg(unix)]
-        let Some(group) = child.id().map(|pid| Pid::from_raw(pid as i32)) else {
-            spawn_error = Some(io::Error::other("spawned child has no process ID"));
-            break;
-        };
-        if let Some(stdout) = child.stdout().take() {
-            output.spawn(forward_output(
-                stdout,
-                name.clone(),
-                Some(readiness.clone()),
-            ));
         }
-        if let Some(stderr) = child.stderr().take() {
-            output.spawn(forward_output(stderr, name.clone(), None));
-        }
-        services.push(Service {
-            name,
-            child,
-            #[cfg(unix)]
-            group,
-        });
     }
 
     let (result, received_signal) = if let Some(error) = spawn_error {
