@@ -41,7 +41,9 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 /// Records when every service has emitted its session-ready marker.
 ///
 /// Stdout forwarding happens concurrently, so readiness is shared by all
-/// forwarding tasks and must publish the elapsed time exactly once.
+/// forwarding tasks and must publish the elapsed time exactly once. The
+/// measured time includes `run.pre_command`s, and it is never published when a
+/// service is dropped because its pre-command failed.
 struct Readiness {
     /// Number of distinct service stdout streams that have reported readiness.
     count: AtomicUsize,
@@ -79,6 +81,10 @@ impl Readiness {
 struct Service {
     /// Name used when reporting an unexpected service exit.
     name: Arc<str>,
+    /// The mirrord session to spawn once `child`, the service's
+    /// `run.pre_command`, exits successfully. `None` once `child` is the
+    /// session itself.
+    then: Option<Command>,
     /// Wrapped child retained so supervision and teardown use tree-aware operations.
     child: Box<dyn ChildWrapper>,
     /// Unix process-group ID retained to probe surviving descendants.
@@ -88,9 +94,13 @@ struct Service {
 
 impl Service {
     /// Spawns `command` in its own process tree and forwards its output.
+    ///
+    /// Only a session child's stdout carries the readiness marker, so a
+    /// pre-command (one with a `then`) doesn't count toward `readiness`.
     fn spawn(
         name: Arc<str>,
         command: Command,
+        then: Option<Command>,
         readiness: &Arc<Readiness>,
         output: &mut JoinSet<()>,
     ) -> io::Result<Self> {
@@ -112,7 +122,7 @@ impl Service {
             output.spawn(forward_output(
                 stdout,
                 name.clone(),
-                Some(readiness.clone()),
+                then.is_none().then(|| readiness.clone()),
             ));
         }
         if let Some(stderr) = child.stderr().take() {
@@ -120,6 +130,7 @@ impl Service {
         }
         Ok(Self {
             name,
+            then,
             child,
             #[cfg(unix)]
             group,
@@ -331,10 +342,24 @@ pub(super) async fn run(
     result
 }
 
-async fn wait_for_first_exit(services: &mut [Service]) -> Result<(), UpError> {
+/// Returns when the first session child exits.
+///
+/// A pre-command exiting is not such an exit: on success the service's session
+/// is spawned in its place, and on failure only that service is dropped, unless
+/// it was the last one left.
+async fn wait_for_first_exit(
+    services: &mut Vec<Service>,
+    readiness: &Arc<Readiness>,
+    output: &mut JoinSet<()>,
+) -> Result<(), UpError> {
     loop {
-        for service in &mut *services {
-            if let Some(status) = service.child.try_wait()? {
+        let mut index = 0;
+        while let Some(service) = services.get_mut(index) {
+            let Some(status) = service.child.try_wait()? else {
+                index += 1;
+                continue;
+            };
+            let Some(session) = service.then.take() else {
                 return if status.success() {
                     Ok(())
                 } else {
@@ -343,6 +368,17 @@ async fn wait_for_first_exit(services: &mut [Service]) -> Result<(), UpError> {
                         status,
                     })
                 };
+            };
+            if status.success() {
+                println!("{}: `run.pre_command` succeeded, starting", service.name);
+                *service = Service::spawn(service.name.clone(), session, None, readiness, output)?;
+                index += 1;
+            } else {
+                let name = services.swap_remove(index).name;
+                if services.is_empty() {
+                    return Err(UpError::PreCommandFailed { name, status });
+                }
+                eprintln!("{name}: `run.pre_command` failed with {status}, not starting");
             }
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -406,8 +442,15 @@ async fn supervise_with_second_signal(
     let mut services = Vec::with_capacity(total);
     let mut spawn_error = None;
 
-    for ServiceCommands { name, session, .. } in commands {
-        match Service::spawn(name, session, &readiness, &mut output) {
+    for ServiceCommands { name, pre, session } in commands {
+        let spawned = match pre {
+            Some(pre) => {
+                println!("{name}: running `run.pre_command`");
+                Service::spawn(name, pre, Some(session), &readiness, &mut output)
+            }
+            None => Service::spawn(name, session, None, &readiness, &mut output),
+        };
+        match spawned {
             Ok(service) => services.push(service),
             Err(error) => {
                 spawn_error = Some(error);
@@ -423,7 +466,7 @@ async fn supervise_with_second_signal(
         (Err(UpError::Io(error)), None)
     } else {
         {
-            let exits = wait_for_first_exit(&mut services);
+            let exits = wait_for_first_exit(&mut services, &readiness, &mut output);
             tokio::select! {
                 // A deliberate signal wins a same-poll tie so the session remains
                 // successful for telemetry regardless of a coincident child exit.
