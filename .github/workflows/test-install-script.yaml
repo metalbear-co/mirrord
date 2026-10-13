@@ -112,9 +112,9 @@ jobs:
       matrix:
         include:
           - { name: "linux x86_64", os: blacksmith-4vcpu-ubuntu-2404, asset: mirrord_linux_x86_64 }
-          # PATH is cut down to the system directories so a Homebrew `sha256sum` cannot stand in
-          # for the `shasum -a 256` fallback the script uses on macOS.
-          - { name: "mac aarch64 / shasum", os: blacksmith-6vcpu-macos-latest, asset: mirrord_mac_universal, path: "/usr/bin:/bin:/usr/sbin:/sbin" }
+          # Runs without `sha256sum` on PATH, so the `shasum -a 256` fallback the script uses on
+          # macOS is the one hashing.
+          - { name: "mac aarch64 / shasum", os: blacksmith-6vcpu-macos-latest, asset: mirrord_mac_universal, hide: sha256sum }
     env:
       ASSET: ${{ matrix.asset }}
     steps:
@@ -123,11 +123,25 @@ jobs:
           sparse-checkout: scripts/install.sh
           sparse-checkout-cone-mode: false
 
-      - name: Limit PATH to the system tools
-        if: ${{ matrix.path != '' }}
+      # A PATH of links to every tool on the runner except the hidden one; the system may ship
+      # it (macOS has /sbin/sha256sum), so trimming directories is not enough.
+      - name: Hide ${{ matrix.hide }} from PATH
+        if: ${{ matrix.hide != '' }}
         run: |
-          echo "PATH=${{ matrix.path }}" >> "$GITHUB_ENV"
-          ! command -v sha256sum || { echo "sha256sum must be unreachable on this leg"; exit 1; }
+          set -euo pipefail
+          tools="$RUNNER_TEMP/tools"
+          mkdir -p "$tools"
+          IFS=: read -ra dirs <<< "$PATH"
+          for dir in "${dirs[@]}"; do
+            for tool in "$dir"/*; do
+              name=$(basename "$tool")
+              [ "$name" = "${{ matrix.hide }}" ] && continue
+              [ -e "$tools/$name" ] || ln -s "$tool" "$tools/$name"
+            done
+          done
+          echo "PATH=$tools" >> "$GITHUB_ENV"
+          PATH="$tools" command -v ${{ matrix.hide }} && { echo "${{ matrix.hide }} is still reachable"; exit 1; }
+          PATH="$tools" command -v shasum curl unzip sh
 
       - name: Install into a directory, checked against the published checksum
         run: |
