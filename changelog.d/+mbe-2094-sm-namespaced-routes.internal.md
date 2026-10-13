@@ -1,0 +1,1 @@
+Register on the operator-hosted sessions-manager's namespaced assignment routes, with the environment as the namespace and the service as the name, falling back to the cluster-scoped `{environment}.{service}` routes of older operators.
