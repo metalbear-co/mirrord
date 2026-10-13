@@ -4,10 +4,8 @@
 //! writes the result as YAML.
 //!
 //! Keep the prompt set deliberately small: ask only for what has no good
-//! default. The values that go *into* each prompt (enum variants, defaults)
-//! must always come from the authoritative type definitions in `config.rs`
-//! (via `strum::VariantArray`, `Default`, etc.), so adding a new variant
-//! downstream never requires editing this file.
+//! default. The flow and the wording are meant to be the same as in the
+//! `mirrord wizard` GUI, so keep the two in sync.
 //!
 //! The generated YAML is produced by serializing the assembled [`UpConfig`]
 //! with `serde_yaml` and then dropping the entries that are left at their
@@ -16,6 +14,7 @@
 
 use std::{
     collections::{BTreeSet, HashMap},
+    fmt,
     ops::Not,
     path::PathBuf,
     str::FromStr,
@@ -28,7 +27,6 @@ use mirrord_config::{
     feature::{env::EnvConfig, network::incoming::http_filter::HttpFilterConfig},
     target::Target,
 };
-use strum::VariantArray;
 use thiserror::Error;
 
 use crate::config::{
@@ -198,11 +196,65 @@ fn prompt_target(mode: &ServiceMode) -> Result<TargetConfig, InitError> {
     Ok(SpecifiedTarget { path, namespace }.into())
 }
 
-fn prompt_mode() -> Result<ServiceMode, InitError> {
-    if ServiceMode::VARIANTS.len() <= 1 {
-        return Ok(ServiceMode::default());
+/// A [`ServiceMode`] as an option of the mode prompt, with its label and its
+/// description. The `mirrord wizard` GUI must show the same ones for the
+/// three modes, so that both wizards present the same choice.
+///
+/// The description goes on indented lines under the label. They are wrapped
+/// at a fixed width, so that a terminal of 80 columns does not break words.
+struct ModeChoice(ServiceMode);
+
+impl ModeChoice {
+    const INDENT: &str = "    ";
+    const WIDTH: usize = 76;
+}
+
+impl fmt::Display for ModeChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (label, description) = match self.0 {
+            ServiceMode::Split => (
+                "Split (recommended)",
+                "Your requests reach your local process. Everyone else's keep hitting the deployed service, so you can work in a shared cluster without disrupting anyone.",
+            ),
+            ServiceMode::Mirror => (
+                "Mirror",
+                "A copy of your session's traffic is sent to your local process. The deployed service still handles every request, including yours.",
+            ),
+            ServiceMode::Replace => (
+                "Replace",
+                "Every request reaches your local process. The deployed workload is scaled to zero for the session and restored when it ends.",
+            ),
+        };
+        write!(f, "{label}")?;
+        // Start as if the line is full, so that the description starts on its
+        // own indented line.
+        let mut line_width = Self::WIDTH;
+        for word in description.split(' ') {
+            if line_width + 1 + word.len() > Self::WIDTH {
+                write!(f, "\n{}{word}", Self::INDENT)?;
+                line_width = Self::INDENT.len() + word.len();
+            } else {
+                write!(f, " {word}")?;
+                line_width += 1 + word.len();
+            }
+        }
+        Ok(())
     }
-    Ok(Select::new("Mode:", ServiceMode::VARIANTS.to_vec()).prompt()?)
+}
+
+fn prompt_mode() -> Result<ServiceMode, InitError> {
+    let choices = [
+        ServiceMode::Split,
+        ServiceMode::Mirror,
+        ServiceMode::Replace,
+    ]
+    .map(ModeChoice)
+    .into();
+
+    let choice = Select::new("How do you want to interact with remote traffic?", choices)
+        .with_formatter(&|choice| choice.value.0.to_string())
+        .prompt()?;
+    Ok(choice.0)
 }
 
 fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, InitError> {
