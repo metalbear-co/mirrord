@@ -164,9 +164,9 @@ pub struct IntProxy {
 
     /// Hooks installed by the layers of this session.
     hook_usage: HookUsage,
-    /// Where to pass the hook reports of the layers on, when the agent connection goes through
-    /// an external proxy that collects them.
-    hook_reports: Option<mpsc::Sender<LayerToProxyMessage>>,
+    /// Where to pass on layer messages that the external proxy handles itself, when the agent
+    /// connection goes through one.
+    layer_messages: Option<mpsc::Sender<LayerToProxyMessage>>,
 }
 
 /// Timing configuration for [`IntProxy`] maintenance tasks.
@@ -367,7 +367,7 @@ impl IntProxy {
         );
 
         let agent_tx = agent_conn.connection.tx_handle();
-        let hook_reports = agent_conn.hook_reports.take();
+        let layer_messages = agent_conn.layer_messages.take();
 
         let agent = background_tasks.register_restartable(
             agent_conn,
@@ -408,7 +408,7 @@ impl IntProxy {
             agent_tx,
             monitor_tx,
             hook_usage: Default::default(),
-            hook_reports,
+            layer_messages,
         }
     }
 
@@ -928,8 +928,8 @@ impl IntProxy {
                     .await
             }
             LayerToProxyMessage::HooksInstalled(report) => {
-                if let Some(hook_reports) = &self.hook_reports
-                    && hook_reports
+                if let Some(layer_messages) = &self.layer_messages
+                    && layer_messages
                         .try_send(LayerToProxyMessage::HooksInstalled(report.clone()))
                         .is_err()
                 {
@@ -1141,7 +1141,7 @@ mod test {
         let (connection, proxy_tx, proxy_rx) = Connection::dummy();
 
         let agent_conn = AgentConnection {
-            hook_reports: None,
+            layer_messages: None,
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
@@ -1265,7 +1265,7 @@ mod test {
         let (connection, proxy_tx, _proxy_rx) = Connection::dummy();
 
         let agent_conn = AgentConnection {
-            hook_reports: None,
+            layer_messages: None,
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
@@ -1364,7 +1364,7 @@ mod test {
         let (connection, _proxy_tx, _proxy_rx) = Connection::dummy();
 
         let agent_conn = AgentConnection {
-            hook_reports: None,
+            layer_messages: None,
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };
@@ -1405,7 +1405,7 @@ mod test {
             let proxy_addr = listener.local_addr().unwrap();
             let (connection, _proxy_tx, _proxy_rx) = Connection::dummy();
             let agent_conn = AgentConnection {
-                hook_reports: None,
+                layer_messages: None,
                 connection,
                 reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
             };
@@ -1515,7 +1515,7 @@ mod test {
 
         let (connection, proxy_tx, proxy_rx) = Connection::dummy();
         let agent_conn = AgentConnection {
-            hook_reports: None,
+            layer_messages: None,
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
         };

@@ -44,7 +44,7 @@ use mirrord_intproxy::{
     hook_usage::HookUsage,
     sidecar_protocol::{ExternalProxyCodec, SidecarMessage},
 };
-use mirrord_intproxy_protocol::{HooksInstalled, LayerToProxyMessage};
+use mirrord_intproxy_protocol::LayerToProxyMessage;
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -65,9 +65,9 @@ use crate::{
     util::create_listen_socket,
 };
 
-/// How many hook reports can wait to be counted. A report beyond that is dropped, which only
-/// makes the counts in analytics lower.
-const HOOK_REPORTS_CHANNEL_SIZE: usize = 256;
+/// How many layer messages forwarded by internal proxies can wait to be handled. A message
+/// beyond that is dropped, which only makes analytics less complete.
+const LAYER_MESSAGES_CHANNEL_SIZE: usize = 256;
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
@@ -162,9 +162,9 @@ pub async fn proxy(
 
     let mut ping_pong_ticker = tokio::time::interval(Duration::from_secs(30));
 
-    // Hook reports arrive on the connections of the internal proxy, which are served by their
+    // Layer messages arrive on the connections of the internal proxy, which are served by their
     // own tasks. The sender kept here keeps the channel open while no connection exists.
-    let (hook_reports_tx, mut hook_reports_rx) = mpsc::channel(HOOK_REPORTS_CHANNEL_SIZE);
+    let (layer_messages_tx, mut layer_messages_rx) = mpsc::channel(LAYER_MESSAGES_CHANNEL_SIZE);
     let mut hook_usage = HookUsage::default();
 
     loop {
@@ -183,7 +183,7 @@ pub async fn proxy(
                     let connections = connections.clone();
                     let cancellation_token = cancellation_token.clone();
                     let connection_cancelation_token = cancellation_token.child_token();
-                    let hook_reports_tx = hook_reports_tx.clone();
+                    let layer_messages_tx = layer_messages_tx.clone();
 
                     let agent_conn = connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await.inspect_err(|_| cancellation_token.cancel())?;
                     connections.fetch_add(1, Ordering::Relaxed);
@@ -194,7 +194,7 @@ pub async fn proxy(
                             None => Either::Left(stream)
                         };
 
-                        handle_connection(stream, peer_addr, agent_conn, connection_cancelation_token, hook_reports_tx).await;
+                        handle_connection(stream, peer_addr, agent_conn, connection_cancelation_token, layer_messages_tx).await;
 
                         tracing::debug!(?peer_addr, "closed connection");
 
@@ -276,9 +276,14 @@ pub async fn proxy(
                 }
             }
 
-            Some(report) = hook_reports_rx.recv() => {
-                hook_usage.record(report);
-                (&hook_usage).collect_analytics(analytics.get_mut());
+            Some(message) = layer_messages_rx.recv() => {
+                match message {
+                    LayerToProxyMessage::HooksInstalled(report) => {
+                        hook_usage.record(report);
+                        (&hook_usage).collect_analytics(analytics.get_mut());
+                    }
+                    other => tracing::debug!(message = ?other, "ignoring a layer message"),
+                }
             }
 
             _ = ping_pong_ticker.tick() => {
@@ -304,13 +309,13 @@ pub async fn proxy(
     Ok(())
 }
 
-#[tracing::instrument(level = Level::TRACE, skip(agent_conn, hook_reports))]
+#[tracing::instrument(level = Level::TRACE, skip(agent_conn, layer_messages))]
 async fn handle_connection(
     stream: Either<TcpStream, TlsStream<TcpStream>>,
     peer_addr: SocketAddr,
     mut agent_conn: AgentConnection,
     cancellation_token: CancellationToken,
-    hook_reports: mpsc::Sender<HooksInstalled>,
+    layer_messages: mpsc::Sender<LayerToProxyMessage>,
 ) {
     let mut stream = actix_codec::Framed::new(stream, ExternalProxyCodec::default());
 
@@ -318,13 +323,10 @@ async fn handle_connection(
         tokio::select! {
             client_message = stream.next() => {
                 match client_message {
-                    Some(Ok(SidecarMessage::Layer(LayerToProxyMessage::HooksInstalled(report)))) => {
-                        if hook_reports.try_send(report).is_err() {
-                            tracing::debug!(?peer_addr, "dropping a hook report");
-                        }
-                    }
                     Some(Ok(SidecarMessage::Layer(message))) => {
-                        tracing::debug!(?peer_addr, ?message, "ignoring a layer message");
+                        if layer_messages.try_send(message).is_err() {
+                            tracing::debug!(?peer_addr, "dropping a layer message");
+                        }
                     }
                     Some(Ok(SidecarMessage::Agent(client_message))) => {
                         agent_conn.connection.send(client_message).await;

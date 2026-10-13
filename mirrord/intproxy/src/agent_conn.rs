@@ -167,9 +167,9 @@ pub enum AgentConnectionMessage {
 pub struct AgentConnection {
     pub connection: Connection<Client>,
     pub reconnect: ReconnectFlow,
-    /// Present when the other end is an external proxy that collects the hook reports of the
-    /// layers.
-    pub hook_reports:
+    /// Present when the other end is an external proxy, for the layer messages it handles
+    /// itself.
+    pub layer_messages:
         Option<tokio::sync::mpsc::Sender<mirrord_intproxy_protocol::LayerToProxyMessage>>,
 }
 
@@ -183,7 +183,7 @@ impl AgentConnection {
         analytics: &mut R,
     ) -> Result<Self, AgentConnectionError> {
         let kind = connect_info.discriminant();
-        let mut hook_reports = None;
+        let mut layer_messages = None;
 
         let (connection, reconnect) = match connect_info {
             AgentConnectInfo::Operator(session) => {
@@ -249,7 +249,7 @@ impl AgentConnection {
                     Ok::<_, AgentConnectionError>(conn)
                 })
                 .await?;
-                hook_reports = reports;
+                layer_messages = reports;
 
                 (conn, ReconnectFlow::Break(kind))
             }
@@ -290,7 +290,7 @@ impl AgentConnection {
         Ok(Self {
             connection,
             reconnect,
-            hook_reports,
+            layer_messages,
         })
     }
 
@@ -304,7 +304,7 @@ impl AgentConnection {
         Ok(Self {
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
-            hook_reports: None,
+            layer_messages: None,
         })
     }
 
