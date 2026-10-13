@@ -491,17 +491,28 @@ async fn prompt_for_target(
     })
 }
 
-/// Lets the user pick one of `namespaces`, and then a workload of one of the
-/// `kinds` in it. Returns the workload and its namespace.
+/// Lets the user pick one of `namespaces`, starting at the namespace of the
+/// kube context, and then a workload of one of the `kinds` in it. Returns the
+/// workload and its namespace.
 async fn pick_workload(
     client: &kube::Client,
     namespaces: &[String],
     kinds: &[TargetType],
 ) -> Result<(Target, String), UpError> {
+    let starting_cursor = namespaces
+        .iter()
+        .position(|namespace| namespace == client.default_namespace())
+        .unwrap_or_default();
+
     loop {
         let namespace = {
             let namespaces = namespaces.to_vec();
-            prompt(move || Select::new("Select a namespace:", namespaces).prompt()).await?
+            prompt(move || {
+                Select::new("Select a namespace:", namespaces)
+                    .with_starting_cursor(starting_cursor)
+                    .prompt()
+            })
+            .await?
         };
 
         let workloads = list_workloads(client, &namespace, kinds).await?;
