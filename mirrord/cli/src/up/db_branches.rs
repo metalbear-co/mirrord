@@ -1,0 +1,232 @@
+//! What `mirrord up` checks before it starts the services that request DB branching
+//! (`feature.db_branches: "*"`, the default of the modes that branch). The operator is asked what
+//! each service's request resolves to, so an operator that can't serve it, or rejects it, stops
+//! the run before any session starts, and what the services will get is printed up front.
+//!
+//! The sessions still resolve the request themselves: the lookup here creates nothing, and each
+//! session's resolution is what marks the branches as shared under the run's key.
+
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    ops::Not,
+    sync::Arc,
+};
+
+use mirrord_analytics::NullReporter;
+use mirrord_config::{
+    LayerConfig, config::ConfigContext, feature::database_branches::DatabaseBranchesConfig,
+};
+use mirrord_operator::client::{
+    NoClientCert, OperatorApi, error::OperatorApiError,
+    split_config_branches::entries_from_response,
+};
+use mirrord_progress::NullProgress;
+use mirrord_up::SubprocessCfg;
+
+use super::UpCliError;
+use crate::error::CliError;
+
+/// Asks the operator what each service requesting DB branching gets, printing it, before any
+/// service starts.
+///
+/// Services whose cluster has no usable operator (not installed, disabled, or with an expired
+/// license) run without branching, unless the config insists on the operator (`operator: true`),
+/// in which case the run stops with the error the session would give. A service that gets no
+/// entries back runs without branching too.
+///
+/// Services that define their branches inline (e.g. through `config_patch`) have nothing to look
+/// up; they are only announced.
+///
+/// Returns the services that requested DB branching: those asking the operator, including those
+/// that got no entries, and those with inline branches.
+pub(super) async fn check_db_branches(
+    services: &mut [SubprocessCfg],
+) -> Result<Vec<Arc<str>>, UpCliError> {
+    let mut apis: HashMap<OperatorKey, Option<OperatorApi<NoClientCert>>> = HashMap::new();
+    for service in services.iter_mut() {
+        if service
+            .config
+            .feature
+            .db_branches
+            .split_config_request()
+            .is_none()
+        {
+            continue;
+        }
+        let key = operator_key(&service.config);
+        if apis.contains_key(&key).not() {
+            let api =
+                usable_operator(&service.config)
+                    .await
+                    .map_err(|error| UpCliError::DbBranches {
+                        service: service.service_name.clone(),
+                        error: Box::new(error),
+                    })?;
+            apis.insert(key.clone(), api);
+        }
+        if apis.get(&key).is_some_and(Option::is_none) {
+            println!(
+                "{}: no mirrord operator, running against the source DB",
+                service.service_name
+            );
+            service.config.feature.db_branches = DatabaseBranchesConfig::default();
+        }
+    }
+
+    let inline = services
+        .iter()
+        .filter(|service| service.config.feature.db_branches.inline().is_empty().not())
+        .map(|service| service.service_name.clone())
+        .collect::<Vec<_>>();
+    let requesting = services
+        .iter_mut()
+        .filter(|service| {
+            service
+                .config
+                .feature
+                .db_branches
+                .split_config_request()
+                .is_some()
+        })
+        .collect::<Vec<_>>();
+    let requested = requesting
+        .iter()
+        .map(|service| service.service_name.clone())
+        .collect::<Vec<_>>();
+    for service in &requested {
+        println!("{service}: requesting DB branching");
+    }
+    for service in &inline {
+        println!("{service}: using its own DB branch definitions");
+    }
+
+    // Entry id -> the (cluster, namespace) pairs it resolved in, and the services in each. A
+    // branch is named for its namespace and lives in its cluster, so each pair is one branch. The
+    // cluster is the API server URL, since two kube contexts can name one cluster.
+    let mut entry_namespaces: BTreeMap<String, BTreeMap<_, Vec<Arc<str>>>> = BTreeMap::new();
+    for service in requesting {
+        let Some(Some(api)) = apis.get(&operator_key(&service.config)) else {
+            continue;
+        };
+        let lookup = async {
+            let Some(response) = api.lookup_split_config_db_branches(&service.config).await? else {
+                return Ok(None);
+            };
+            let resolved = entries_from_response(&response, service.config.key.as_str())?;
+            // The session runs the config's branch checks again once it holds the resolved
+            // entries (e.g. an env override clashing with a branch's connection variable); a
+            // service that would fail them fails here instead, before any session starts.
+            let mut config = service.config.clone();
+            config.feature.db_branches.set_inline(resolved.entries);
+            config
+                .verify_db_branches(&mut ConfigContext::default())
+                .map_err(OperatorApiError::ResolvedDbBranchesInvalid)?;
+            Ok::<_, OperatorApiError>(Some(response))
+        };
+        let Some(response) = lookup.await.map_err(|error| UpCliError::DbBranches {
+            service: service.service_name.clone(),
+            error: Box::new(error.into()),
+        })?
+        else {
+            continue;
+        };
+
+        if response.entries.is_empty() {
+            println!(
+                "{}: no DB branch definitions, running against the source DB",
+                service.service_name
+            );
+            service.config.feature.db_branches = DatabaseBranchesConfig::default();
+            continue;
+        }
+
+        let namespace = service
+            .config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(api.client().default_namespace())
+            .to_owned();
+        for entry in &response.entries {
+            entry_namespaces
+                .entry(entry.id.clone())
+                .or_default()
+                .entry((api.cluster_url().to_owned(), namespace.clone()))
+                .or_default()
+                .push(service.service_name.clone());
+        }
+    }
+
+    for (entry, namespaces) in entry_namespaces {
+        if namespaces.len() < 2 {
+            continue;
+        }
+        // The cluster only tells the pairs apart when they span more than one.
+        let several_clusters = namespaces
+            .keys()
+            .map(|(cluster, _)| cluster)
+            .collect::<BTreeSet<_>>()
+            .len()
+            > 1;
+        let services_by_namespace = namespaces
+            .iter()
+            .map(|((cluster, namespace), services)| {
+                if several_clusters {
+                    format!(
+                        "{} in `{namespace}` of cluster `{cluster}`",
+                        services.join(", ")
+                    )
+                } else {
+                    format!("{} in `{namespace}`", services.join(", "))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        println!(
+            "DB branch `{entry}` is requested from more than one namespace ({services_by_namespace}); \
+             each namespace gets its own branch, so those branches are not shared"
+        );
+    }
+
+    Ok(requested.into_iter().chain(inline).collect())
+}
+
+/// The settings that decide which operator a session finds and whether it has to use it, so
+/// services that agree on them share one [`usable_operator`] answer.
+type OperatorKey = (Option<String>, Option<String>, Option<bool>, Option<bool>);
+
+fn operator_key(config: &LayerConfig) -> OperatorKey {
+    (
+        config.kubeconfig.clone(),
+        config.kube_context.clone(),
+        config.accept_invalid_certificates,
+        config.operator,
+    )
+}
+
+/// The operator a session with `config` would use for branching, if any. Mirrors how the
+/// sessions decide to use the operator (see `try_connect_using_operator`), so a service only
+/// requests branching when its session will be able to, and an operator the config requires
+/// but can't be used fails here, before any session starts, with the session's error.
+async fn usable_operator(
+    config: &LayerConfig,
+) -> Result<Option<OperatorApi<NoClientCert>>, CliError> {
+    let required = config.operator == Some(true);
+    if config.operator == Some(false) {
+        return Ok(None);
+    }
+    let Some(api) =
+        OperatorApi::try_new(config, &mut NullReporter::default(), &NullProgress).await?
+    else {
+        return if required {
+            Err(CliError::OperatorNotInstalled)
+        } else {
+            Ok(None)
+        };
+    };
+    match api.check_license_validity(&NullProgress) {
+        Ok(()) => Ok(Some(api)),
+        Err(error) if required => Err(error.into()),
+        Err(_) => Ok(None),
+    }
+}

@@ -802,8 +802,8 @@ pub struct SubprocessCfg {
     pub service_name: Arc<str>,
     /// How to run this service (exec vs container, and the command).
     pub run: RunConfig,
-    /// Mode this service was assembled for. Used only to name it in
-    /// [`validate_targets`] errors; its effects are already in `config`.
+    /// Mode this service was assembled for. Its effects are already in `config`; it names the
+    /// mode in [`validate_targets`] errors and in what `mirrord up` reports about the service.
     pub mode: ServiceMode,
 }
 

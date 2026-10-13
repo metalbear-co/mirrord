@@ -286,6 +286,9 @@ pub struct OperatorApi<C> {
     operator: MirrordOperatorCrd,
     /// Named kubeconfig context used to create [`Self::client`].
     kube_context: Option<String>,
+    /// URL of the API server [`Self::client`] talks to. Unlike [`Self::kube_context`], it tells
+    /// clusters apart: two contexts can name one cluster.
+    cluster_url: String,
 }
 
 impl<C> fmt::Debug for OperatorApi<C>
@@ -329,6 +332,7 @@ impl OperatorApi<NoClientCert> {
         P: Progress,
     {
         let (base_config, kube_context) = Self::base_client_config(config).await?;
+        let cluster_url = base_config.cluster_url.to_string();
 
         let client = progress
             .suspend(|| ClientBuilder::try_from(base_config.clone()))
@@ -359,6 +363,7 @@ impl OperatorApi<NoClientCert> {
                     client_cert: NoClientCert { base_config },
                     operator,
                     kube_context,
+                    cluster_url,
                 }));
             }
 
@@ -460,6 +465,7 @@ impl OperatorApi<NoClientCert> {
                 },
                 operator: self.operator,
                 kube_context: self.kube_context,
+                cluster_url: self.cluster_url,
             },
 
             Err(error) => OperatorApi {
@@ -469,6 +475,7 @@ impl OperatorApi<NoClientCert> {
                 },
                 operator: self.operator,
                 kube_context: self.kube_context,
+                cluster_url: self.cluster_url,
             },
         }
     }
@@ -517,6 +524,7 @@ impl OperatorApi<NoClientCert> {
         let previous_client = self.client.clone();
         let operator_crd = self.operator.clone();
         let kube_context = self.kube_context.clone();
+        let cluster_url = self.cluster_url.clone();
 
         let result = async move {
             let certificate = self.get_client_certificate().await?;
@@ -547,6 +555,7 @@ impl OperatorApi<NoClientCert> {
                 },
                 operator: operator_crd,
                 kube_context,
+                cluster_url,
             },
         }
     }
@@ -567,6 +576,7 @@ impl OperatorApi<MaybeClientCert> {
             client_cert: PreparedClientCert { cert },
             operator: self.operator,
             kube_context: self.kube_context,
+            cluster_url: self.cluster_url,
         })
     }
 }
@@ -580,6 +590,12 @@ where
     /// In-cluster clients do not have a named kubeconfig context.
     pub fn kube_context(&self) -> Option<&str> {
         self.kube_context.as_deref()
+    }
+
+    /// Returns the URL of the API server this API's client talks to, which identifies the
+    /// cluster where context names don't.
+    pub fn cluster_url(&self) -> &str {
+        &self.cluster_url
     }
 
     pub fn check_license_validity<P>(&self, progress: &P) -> OperatorApiResult<()>
@@ -3230,6 +3246,7 @@ mod test {
             let config = Config::new("http://127.0.0.1:9669".parse().unwrap());
             let api = OperatorApi {
                 client: kube::Client::try_from(config.clone()).unwrap(),
+                cluster_url: config.cluster_url.to_string(),
                 client_cert: NoClientCert { base_config: config },
                 operator: serde_json::from_value(serde_json::json!({
                     "apiVersion": "operator.metalbear.co/v1",
@@ -3870,6 +3887,7 @@ mod test {
         .unwrap();
         let api = OperatorApi {
             client,
+            cluster_url: config.cluster_url.to_string(),
             client_cert: NoClientCert {
                 base_config: config,
             },
@@ -3927,6 +3945,7 @@ mod test {
             },
             operator: MirrordOperatorCrd::new("operator", spec),
             kube_context: None,
+            cluster_url: "https://127.0.0.1:9669/".to_owned(),
         };
 
         let values = HashMap::from([("password".to_owned(), "secret".to_owned())]);
