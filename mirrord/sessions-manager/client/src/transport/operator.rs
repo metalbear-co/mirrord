@@ -41,16 +41,12 @@ impl OperatorTransport {
     pub fn new(client: kube::Client) -> Self {
         Self { client }
     }
-}
 
-impl SessionsManagerTransport for OperatorTransport {
-    async fn subscribe_assignments(
+    async fn request_assignments(
         &self,
-        scope: &ServiceScope,
-        subscription: &AssignmentSubscription,
-    ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
-        let deadline = Instant::now() + RESPONSE_HEADER_TIMEOUT;
-        let uri = operator_assignments_uri(scope, subscription)?;
+        uri: String,
+        deadline: Instant,
+    ) -> Result<hyper::Response<kube::client::Body>, SessionsManagerClientError> {
         tracing::debug!(
             %uri,
             "requesting operator-hosted sessions-manager assignments"
@@ -58,7 +54,28 @@ impl SessionsManagerTransport for OperatorTransport {
         let request = Request::get(uri)
             .header(ACCEPT, "text/event-stream")
             .body(kube::client::Body::empty())?;
-        let response = with_deadline(Some(deadline), self.client.send(request)).await??;
+        Ok(with_deadline(Some(deadline), self.client.send(request)).await??)
+    }
+}
+
+impl SessionsManagerTransport for OperatorTransport {
+    /// Tries the namespaced route first, then the cluster-scoped one. An operator that predates
+    /// the namespaced routes doesn't serve them (`404`/`501`), and RBAC written for it may grant
+    /// only the cluster-scoped names (`403`).
+    async fn subscribe_assignments(
+        &self,
+        scope: &ServiceScope,
+        subscription: &AssignmentSubscription,
+    ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
+        let deadline = Instant::now() + RESPONSE_HEADER_TIMEOUT;
+        let [namespaced, legacy] = operator_assignments_uris(scope, subscription)?;
+        let mut response = self.request_assignments(namespaced, deadline).await?;
+        if matches!(
+            response.status(),
+            StatusCode::NOT_FOUND | StatusCode::NOT_IMPLEMENTED | StatusCode::FORBIDDEN
+        ) {
+            response = self.request_assignments(legacy, deadline).await?;
+        }
         if matches!(
             response.status(),
             StatusCode::NOT_FOUND | StatusCode::NOT_IMPLEMENTED
@@ -89,13 +106,14 @@ impl SessionsManagerTransport for OperatorTransport {
     }
 }
 
-/// Builds the operator's per-role assignment request URI, in the namespace of the scope's
-/// environment and named by its service. Both are slugified the same way the standalone
+/// Builds the operator's per-role assignment request URIs, in the order to try them: in the
+/// namespace of the scope's environment and named by its service, then the cluster-scoped
+/// `{environment}.{service}`. Both parts are slugified the same way the standalone
 /// sessions-manager's path segments are, so both deployments register a scope under the same key.
-fn operator_assignments_uri(
+fn operator_assignments_uris(
     scope: &ServiceScope,
     subscription: &AssignmentSubscription,
-) -> Result<String, SessionsManagerClientError> {
+) -> Result<[String; 2], SessionsManagerClientError> {
     let resource = match subscription {
         AssignmentSubscription::Agent(_) => "serverlessagentassignments",
         AssignmentSubscription::Intproxy { .. } => "serverlessclientassignments",
@@ -104,9 +122,14 @@ fn operator_assignments_uri(
     let service = slug::slugify(&scope.service);
     let subscription = serde_urlencoded::to_string(subscription)?;
 
-    Ok(format!(
-        "/apis/operator.metalbear.co/v1alpha1/proxy/namespaces/{environment}/{resource}/{service}?{subscription}"
-    ))
+    Ok([
+        format!(
+            "/apis/operator.metalbear.co/v1alpha1/proxy/namespaces/{environment}/{resource}/{service}?{subscription}"
+        ),
+        format!(
+            "/apis/operator.metalbear.co/v1alpha1/proxy/{resource}/{environment}.{service}?{subscription}"
+        ),
+    ])
 }
 
 /// Builds the data-plane upgrade request for `assignment`.
@@ -167,17 +190,22 @@ mod tests {
         .unwrap()
     }
 
-    fn mock_transport(
-        status: StatusCode,
-        content_type: &'static str,
-        body: &'static str,
-    ) -> OperatorTransport {
+    const NAMESPACED_URI: &str = "/apis/operator.metalbear.co/v1alpha1/proxy/namespaces/staging-eu/serverlessagentassignments/payments?role=agent&replica_id=pod-a&agent_instance_id=00000000-0000-0000-0000-000000000000";
+    const LEGACY_URI: &str = "/apis/operator.metalbear.co/v1alpha1/proxy/serverlessagentassignments/staging-eu.payments?role=agent&replica_id=pod-a&agent_instance_id=00000000-0000-0000-0000-000000000000";
+
+    /// Status, content type and body of a mocked response.
+    type MockResponse = (StatusCode, &'static str, &'static str);
+
+    /// Answers the namespaced assignments route with `namespaced` and the cluster-scoped one with
+    /// `legacy`.
+    fn routed_transport(namespaced: MockResponse, legacy: MockResponse) -> OperatorTransport {
         let service = tower::service_fn(move |request: Request<kube::client::Body>| async move {
             assert_eq!(request.headers()[ACCEPT], "text/event-stream");
-            assert_eq!(
-                request.uri(),
-                "/apis/operator.metalbear.co/v1alpha1/proxy/namespaces/staging-eu/serverlessagentassignments/payments?role=agent&replica_id=pod-a&agent_instance_id=00000000-0000-0000-0000-000000000000"
-            );
+            let (status, content_type, body) = match request.uri().to_string().as_str() {
+                NAMESPACED_URI => namespaced,
+                LEGACY_URI => legacy,
+                uri => panic!("unexpected assignments URI {uri}"),
+            };
             Ok::<_, Infallible>(
                 Response::builder()
                     .status(status)
@@ -188,6 +216,23 @@ mod tests {
         });
         OperatorTransport::new(kube::Client::new(service, "default"))
     }
+
+    /// Answers both assignments routes the same way.
+    fn mock_transport(
+        status: StatusCode,
+        content_type: &'static str,
+        body: &'static str,
+    ) -> OperatorTransport {
+        routed_transport((status, content_type, body), (status, content_type, body))
+    }
+
+    const ASSIGNMENT_EVENTS: &str = concat!(
+        ": keep-alive\n\n",
+        "event: assignment\ndata: {\"assignment_id\":\"assignment-1\",",
+        "\"data_plane_endpoint\":\"/apis/operator.metalbear.co/v1alpha1/serverlessdataplanes/00000000-0000-0000-0000-000000000000\",",
+        "\"authorization\":\"Bearer secret\"}\n\n",
+        "event: superseded\ndata: {}\n\n"
+    );
 
     async fn subscribe(
         transport: &OperatorTransport,
@@ -206,18 +251,12 @@ mod tests {
             .await
     }
 
+    /// The namespaced route is used when the operator serves it, without trying the legacy one.
     #[tokio::test]
     async fn subscription_decodes_mocked_kube_response() {
-        let transport = mock_transport(
-            StatusCode::OK,
-            "text/event-stream",
-            concat!(
-                ": keep-alive\n\n",
-                "event: assignment\ndata: {\"assignment_id\":\"assignment-1\",",
-                "\"data_plane_endpoint\":\"/apis/operator.metalbear.co/v1alpha1/serverlessdataplanes/00000000-0000-0000-0000-000000000000\",",
-                "\"authorization\":\"Bearer secret\"}\n\n",
-                "event: superseded\ndata: {}\n\n"
-            ),
+        let transport = routed_transport(
+            (StatusCode::OK, "text/event-stream", ASSIGNMENT_EVENTS),
+            (StatusCode::FORBIDDEN, "application/json", "{}"),
         );
         let mut stream = subscribe(&transport).await.unwrap();
         assert!(matches!(
@@ -231,6 +270,29 @@ mod tests {
         assert!(stream.next().await.unwrap().is_none());
     }
 
+    /// An operator that predates the namespaced routes only serves the cluster-scoped one, and RBAC
+    /// written for it may only grant that one.
+    #[tokio::test]
+    async fn subscription_falls_back_to_cluster_scoped_route() {
+        for status in [
+            StatusCode::NOT_FOUND,
+            StatusCode::NOT_IMPLEMENTED,
+            StatusCode::FORBIDDEN,
+        ] {
+            let transport = routed_transport(
+                (status, "application/json", "{}"),
+                (StatusCode::OK, "text/event-stream", ASSIGNMENT_EVENTS),
+            );
+            let mut stream = subscribe(&transport).await.unwrap();
+            assert!(matches!(
+                stream.next().await.unwrap(),
+                Some(Ok(crate::control_plane::ControlPlaneEvent::Assignment(_)))
+            ));
+        }
+    }
+
+    /// Both routes answer the same here, so this is the status of the legacy route for `403`,
+    /// `404` and `501`, and of the namespaced one otherwise.
     #[tokio::test]
     async fn subscription_classifies_mocked_kube_statuses() {
         for status in [
@@ -410,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn operator_assignments_uri_carries_slugified_scope_and_subscription() {
+    fn operator_assignments_uris_carry_slugified_scope_and_subscription() {
         let scope = ServiceScope {
             environment: "Staging EU".to_owned(),
             service: "payments".to_owned(),
@@ -424,15 +486,20 @@ mod tests {
         };
 
         assert_eq!(
-            operator_assignments_uri(&scope, &subscription).unwrap(),
-            "/apis/operator.metalbear.co/v1alpha1/proxy/namespaces/staging-eu/serverlessclientassignments/payments\
-             ?role=intproxy&user_session_id=session-a&intproxy_connection_id=connection-a\
-             &agent_replica_filter=pod-a"
+            operator_assignments_uris(&scope, &subscription).unwrap(),
+            [
+                "/apis/operator.metalbear.co/v1alpha1/proxy/namespaces/staging-eu/serverlessclientassignments/payments\
+                 ?role=intproxy&user_session_id=session-a&intproxy_connection_id=connection-a\
+                 &agent_replica_filter=pod-a",
+                "/apis/operator.metalbear.co/v1alpha1/proxy/serverlessclientassignments/staging-eu.payments\
+                 ?role=intproxy&user_session_id=session-a&intproxy_connection_id=connection-a\
+                 &agent_replica_filter=pod-a",
+            ]
         );
     }
 
     #[test]
-    fn operator_assignments_uri_selects_agent_resource() {
+    fn operator_assignments_uris_select_agent_resource() {
         let scope = ServiceScope {
             environment: "Staging EU".to_owned(),
             service: "API #1".to_owned(),
@@ -443,9 +510,13 @@ mod tests {
         });
 
         assert_eq!(
-            operator_assignments_uri(&scope, &subscription).unwrap(),
-            "/apis/operator.metalbear.co/v1alpha1/proxy/namespaces/staging-eu/serverlessagentassignments/api-1\
-             ?role=agent&replica_id=pod-a&agent_instance_id=00000000-0000-0000-0000-000000000000"
+            operator_assignments_uris(&scope, &subscription).unwrap(),
+            [
+                "/apis/operator.metalbear.co/v1alpha1/proxy/namespaces/staging-eu/serverlessagentassignments/api-1\
+                 ?role=agent&replica_id=pod-a&agent_instance_id=00000000-0000-0000-0000-000000000000",
+                "/apis/operator.metalbear.co/v1alpha1/proxy/serverlessagentassignments/staging-eu.api-1\
+                 ?role=agent&replica_id=pod-a&agent_instance_id=00000000-0000-0000-0000-000000000000",
+            ]
         );
     }
 
