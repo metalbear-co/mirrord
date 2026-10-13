@@ -1,1 +1,1 @@
-The workload picker of `mirrord up` offers the namespace of the kube context when the user can't list all namespaces, and asks for another namespace when the user can't read the workloads of the one they pick.
+The workload picker of `mirrord up` offers the namespace of the kube context when the user can't list all namespaces, and lists the workloads of the kinds that the user can read. When the user can't read any workload of a namespace, it asks for another namespace.

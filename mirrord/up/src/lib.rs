@@ -160,8 +160,8 @@ pub enum UpError {
     #[error("exited")]
     Exited,
 
-    /// The only namespace that the user can pick has no workload to pick.
-    #[error("no workloads found in namespace \"{0}\"")]
+    /// The only namespace that the user can pick has no workload that the user can list.
+    #[error("found no workloads that you can list in namespace \"{0}\"")]
     NoWorkloads(String),
 
     /// Failed to patch the `mirrord-up.yaml` when saving a chosen target.
@@ -405,6 +405,10 @@ async fn resolve_unresolved_workloads(
 
 /// Lists workload paths (`deployment/foo`, `pod/bar/container/baz`, ...) of
 /// the `kinds` living in `namespace`, in the order of `kinds`.
+///
+/// A kind that the user is not allowed to list counts as having no
+/// workloads, so that the user can still pick from the other kinds. The
+/// seeker already does this for every kind but pods.
 async fn list_workloads(
     client: &kube::Client,
     namespace: &str,
@@ -419,7 +423,19 @@ async fn list_workloads(
     // `operator_active: true` only lifts the seeker's restriction on listing
     // operator-only kinds (statefulsets); the listing itself is plain
     // Kubernetes API access.
-    Ok(seeker.filtered(kinds.to_vec(), true).await?)
+    let listings =
+        futures::future::join_all(kinds.iter().map(|&kind| seeker.filtered(vec![kind], true)))
+            .await;
+
+    let mut workloads = Vec::new();
+    for listing in listings {
+        match listing {
+            Ok(found) => workloads.extend(found),
+            Err(KubeApiError::KubeError(kube::Error::Api(status))) if status.code == 403 => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(workloads)
 }
 
 async fn list_namespaces(client: &kube::Client) -> Result<Vec<String>, UpError> {
@@ -529,11 +545,10 @@ enum PickedTarget {
 /// Both `mirrord up init` and the fallback wizard of `mirrord up` pick
 /// workloads with this, so that they look the same.
 ///
-/// When a namespace has nothing to pick, or the user can't list its
-/// workloads, the user picks another namespace. When it is the only
-/// namespace, there is nothing else to pick, so that is an error. The one
-/// exception is an empty namespace when `targetless` is set: the workload
-/// prompt still offers to run without a target.
+/// When a namespace has nothing that the user can list, the user picks
+/// another namespace. When it is the only namespace, there is nothing else to
+/// pick, so that is an error. The one exception is when `targetless` is set:
+/// the workload prompt still offers to run without a target.
 async fn pick_workload(
     client: &kube::Client,
     namespaces: &[String],
@@ -559,19 +574,10 @@ async fn pick_workload(
             .await?
         };
 
-        let mut workloads = match list_workloads(client, &namespace, kinds).await {
-            Ok(workloads) => workloads,
-            Err(UpError::Kube(KubeApiError::KubeError(kube::Error::Api(status))))
-                if status.code == 403 && can_pick_another =>
-            {
-                println!("You can't list the workloads in namespace \"{namespace}\".");
-                continue;
-            }
-            Err(error) => return Err(error),
-        };
+        let mut workloads = list_workloads(client, &namespace, kinds).await?;
         if workloads.is_empty() {
             if can_pick_another {
-                println!("No workloads found in namespace \"{namespace}\".");
+                println!("Found no workloads that you can list in namespace \"{namespace}\".");
                 continue;
             }
             if targetless.not() {
