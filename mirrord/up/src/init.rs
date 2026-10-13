@@ -10,8 +10,9 @@
 //! file.
 //!
 //! The generated YAML is produced by serializing the assembled [`UpConfig`]
-//! with `serde_yaml` and then dropping null/empty entries (see [`prune`]), so
-//! the skeleton contains only the fields the user actually set.
+//! with `serde_yaml` and then dropping the entries that are left at their
+//! default (see [`remove_defaults`]), so the skeleton contains only the
+//! fields the user actually set.
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -380,17 +381,33 @@ fn prompt_run_type() -> Result<RunType, InitError> {
 /// Serializes the wizard's [`UpConfig`] to a minimal YAML skeleton.
 ///
 /// `serde_yaml` emits every field, including `null` for the many unset
-/// `Option`s in the shared `EnvConfig`/`HttpFilterConfig` types. [`prune`]
-/// strips those so the output only contains what the user actually set. We
-/// can't suppress them at the type level: those types are shared with the rest
-/// of `mirrord-config` (config sent to child processes, analytics, schema), so
-/// a `skip_serializing_if` there would have far wider reach than this wizard.
+/// `Option`s in the shared `EnvConfig`/`HttpFilterConfig` types, and fields
+/// left at their default, like `skip: false`. [`remove_defaults`] strips those
+/// so the output only contains what the user actually set. We can't suppress
+/// them at the type level: the `Option`s are in types shared with the rest of
+/// `mirrord-config` (config sent to child processes, analytics, schema), and a
+/// `skip_serializing_if` on a defaulted field also drops its `default` from
+/// the JSON schema.
 ///
 /// The `command` and `ignore_ports` lists are rendered inline (`[a, b]`)
 /// rather than as block sequences - see [`inline_lists`].
 fn render_yaml(cfg: &UpConfig) -> Result<String, InitError> {
     let mut value = serde_yaml::to_value(cfg)?;
-    prune(&mut value);
+
+    // What serde fills in for the absent fields of the file, and of a service
+    // that sets only its required field.
+    let defaults = serde_yaml::to_value(UpConfig {
+        common: CommonConfig::default(),
+        services: HashMap::new(),
+    })?;
+    remove_defaults(&mut value, &defaults);
+    let service_defaults =
+        serde_yaml::to_value(serde_yaml::from_str::<ServiceConfig>("run: {command: []}")?)?;
+    if let Some(serde_yaml::Value::Mapping(services)) = value.get_mut("services") {
+        for (_, service) in services.iter_mut() {
+            remove_defaults(service, &service_defaults);
+        }
+    }
 
     let mut flows = Vec::new();
     inline_lists(&mut value, &mut flows);
@@ -402,24 +419,23 @@ fn render_yaml(cfg: &UpConfig) -> Result<String, InitError> {
     Ok(yaml)
 }
 
-/// Recursively removes `null` mapping entries and entries that become empty
-/// maps/sequences, so the generated skeleton omits defaulted fields. Every
-/// field dropped here is `Option`-or-defaulted on [`UpConfig`], so the result
-/// still round-trips through [`crate::load_up_config`].
-fn prune(value: &mut serde_yaml::Value) {
-    let serde_yaml::Value::Mapping(map) = value else {
+/// Recursively removes the mapping entries of `value` that are equal to the
+/// entry at the same place in `defaults`. Deserializing fills the removed
+/// entries back in, so the result still round-trips through
+/// [`crate::load_up_config`].
+fn remove_defaults(value: &mut serde_yaml::Value, defaults: &serde_yaml::Value) {
+    let (serde_yaml::Value::Mapping(map), serde_yaml::Value::Mapping(defaults)) = (value, defaults)
+    else {
         return;
     };
 
-    for (_, v) in map.iter_mut() {
-        prune(v);
-    }
-
-    map.retain(|_, v| match v {
-        serde_yaml::Value::Null => false,
-        serde_yaml::Value::Mapping(m) => m.is_empty().not(),
-        serde_yaml::Value::Sequence(s) => s.is_empty().not(),
-        _ => true,
+    map.retain(|key, v| match defaults.get(key) {
+        Some(default) if default == v => false,
+        Some(default) => {
+            remove_defaults(v, default);
+            true
+        }
+        None => true,
     });
 }
 
@@ -563,7 +579,7 @@ mod tests {
 
     /// A service that sets only a header filter and a command must not leak the
     /// many defaulted `Option`s of the shared config types as `null`s, nor emit
-    /// empty `env`/`ignore_ports`/`target` blocks.
+    /// empty `env`/`ignore_ports`/`target` blocks or fields left at their default.
     #[test]
     fn no_nulls_or_empty_blocks() {
         let svc = ServiceConfig {
@@ -603,6 +619,12 @@ mod tests {
         assert!(!out.contains("target:"), "no empty target block:\n{out}");
         assert!(out.contains("header_filter"), "filter retained:\n{out}");
         assert!(!out.contains("context:"), "no empty context:\n{out}");
+        assert!(!out.contains("skip:"), "no default skip:\n{out}");
+        assert!(
+            !out.contains("default_mode:"),
+            "no default default_mode:\n{out}"
+        );
+        assert!(!out.contains("type:"), "no default run type:\n{out}");
 
         let parsed: UpConfig = serde_saphyr::from_str(&out).unwrap();
         assert_eq!(parsed.services["svc"], svc);
