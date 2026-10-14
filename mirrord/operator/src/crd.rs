@@ -859,6 +859,12 @@ pub enum NewOperatorFeature {
 
     ServerlessSessionsManager,
 
+    /// This operator runs a session's Kafka queues against an isolated per-key broker
+    /// (`feature.kafka_branch`), sent in the `kafka_branch` connect param and the preview
+    /// session's `kafkaBranch` field. Gated so the CLI fails fast: an older operator ignores both
+    /// and would leave the app on the cluster's Kafka.
+    KafkaBranching,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -954,6 +960,7 @@ impl Display for NewOperatorFeature {
                 "db_branches resolved from the target's MirrordSplitConfig"
             }
             NewOperatorFeature::ServerlessSessionsManager => "serverless sessions-manager",
+            NewOperatorFeature::KafkaBranching => "Kafka branching",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

@@ -3352,6 +3352,15 @@
           ],
           "x-mirrord-plan": "oss"
         },
+        "kafka_branch": {
+          "title": "feature.kafka_branch {#feature-kafka_branch}",
+          "description": "Point the target's Kafka clients at an isolated broker shared by every session with the\nsame key, instead of splitting topics on the cluster's Kafka.\n\nCovers every Kafka queue in the target's `MirrordSplitConfig`, which must name where the\napp reads its bootstrap servers from. Messages produced in the session never leave the\nbranch, and idle preview environments wake when a message waits on a topic they consume.\nKafka entries in [`feature.split_queues`](#feature-split_queues) are not allowed alongside\nit.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "x-mirrord-plan": "team"
+        },
         "magic": {
           "title": "feature.magic {#feature-magic}",
           "description": "Sensible defaults that improve the experience for most users. Each flag can be disabled\nindividually if it conflicts with your setup.",
