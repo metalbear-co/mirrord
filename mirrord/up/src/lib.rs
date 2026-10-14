@@ -407,14 +407,16 @@ async fn resolve_unresolved_workloads(
 /// the `kinds` living in `namespace`, in the order of `kinds`.
 ///
 /// A kind that the user is not allowed to list counts as having no
-/// workloads, so that the user can still pick from the other kinds. The
-/// seeker already does this for every kind but pods.
+/// workloads, so that the user can still pick from the other kinds. Each kind
+/// is listed on its own, because `KubeResourceSeeker::filtered` fails as a
+/// whole when one kind fails, and it returns the errors of pods. It returns
+/// no error for the other kinds.
 async fn list_workloads(
     client: &kube::Client,
     namespace: &str,
     kinds: &[TargetType],
 ) -> Result<Vec<String>, UpError> {
-    let seeker = KubeResourceSeeker {
+    let seeker = &KubeResourceSeeker {
         client,
         namespace,
         copy_target: false,
@@ -423,19 +425,17 @@ async fn list_workloads(
     // `operator_active: true` only lifts the seeker's restriction on listing
     // operator-only kinds (statefulsets); the listing itself is plain
     // Kubernetes API access.
-    let listings =
-        futures::future::join_all(kinds.iter().map(|&kind| seeker.filtered(vec![kind], true)))
-            .await;
-
-    let mut workloads = Vec::new();
-    for listing in listings {
-        match listing {
-            Ok(found) => workloads.extend(found),
-            Err(KubeApiError::KubeError(kube::Error::Api(status))) if status.code == 403 => {}
-            Err(error) => return Err(error.into()),
+    let listings = futures::future::try_join_all(kinds.iter().map(|&kind| async move {
+        match seeker.filtered(vec![kind], true).await {
+            Err(KubeApiError::KubeError(kube::Error::Api(status))) if status.code == 403 => {
+                Ok(Vec::new())
+            }
+            listing => listing,
         }
-    }
-    Ok(workloads)
+    }))
+    .await?;
+
+    Ok(listings.concat())
 }
 
 async fn list_namespaces(client: &kube::Client) -> Result<Vec<String>, UpError> {
