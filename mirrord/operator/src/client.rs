@@ -2142,8 +2142,12 @@ impl OperatorApi<PreparedClientCert> {
             layer_config.baggage.clone(),
         )?;
 
+        // The fresh copy's split is reported here and nowhere else: `copy_target` leaves that to
+        // the connect that follows, and this is that connect.
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let conn = self.connect_to_session(&session).await?;
+        let conn = self
+            .connect_reporting_split(&session, layer_config, &connection_subtask)
+            .await?;
         connection_subtask.success(Some("connected to the target"));
 
         Ok((conn, session))
@@ -2843,8 +2847,8 @@ impl OperatorApi<PreparedClientCert> {
         subtask.success(Some("target copy created"));
 
         // A fresh copy's split is also visible to the connect that follows, under the same
-        // session id, and that connect reports it. Reporting it here too would name each Temporal
-        // queue twice.
+        // session id, and every caller connects through `connect_reporting_split`, which reports
+        // it. Reporting it here too would name each Temporal queue twice.
         self.wait_for_copy_ready(copied, BTreeSet::new(), progress)
             .await
     }

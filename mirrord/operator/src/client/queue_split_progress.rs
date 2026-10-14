@@ -3,7 +3,7 @@
 use std::{collections::BTreeSet, future::Future, ops::Not, time::Duration};
 
 use kube::{Api, Client, api::ListParams};
-use mirrord_config::feature::split_queues::{QueueMode, SplitQueuesConfig};
+use mirrord_config::feature::split_queues::{QueueKind, QueueMode, SplitQueuesConfig};
 use mirrord_progress::Progress;
 use tokio::time::Instant;
 
@@ -30,7 +30,7 @@ pub(crate) struct QueueSplitProgress<'a, P: Progress> {
     message: Option<String>,
     waiting_since: Option<Instant>,
     warned: bool,
-    /// Queue ids the user asked to mirror, see [`mirror_requested`].
+    /// Temporal queue ids the user asked to mirror, see [`mirror_requested`].
     mirror_requested: BTreeSet<String>,
     /// Temporal task queues already warned about, so each is named once.
     warned_temporal: BTreeSet<String>,
@@ -175,26 +175,31 @@ impl<'a, P: Progress> QueueSplitProgress<'a, P> {
         }
     }
 
-    /// Reads the split one last time, then completes the open task, if any.
+    /// Completes the open task, if any, after one last read of the split when a Temporal
+    /// warning may still be due.
     ///
     /// The caller finishes once the session is ready, and the local process starts receiving
     /// queue messages right after. A session that becomes ready between two polls would
-    /// otherwise skip whatever the split has to say about it, such as the Temporal warning.
+    /// otherwise skip the Temporal warning. A session that asked to mirror nothing has nothing
+    /// to hear, so it is not held for the extra read.
     pub(crate) async fn finish(mut self) {
-        self.poll().await;
+        if !self.mirror_requested.is_empty() {
+            self.poll().await;
+        }
         if let Some(mut task) = self.task.take() {
             task.success(None);
         }
     }
 }
 
-/// Ids of the queues `config` asks to mirror. `mirrord up` in mirror mode sends one `*` entry,
-/// which covers every queue the operator resolves.
+/// Ids of the Temporal task queues `config` asks to mirror. `mirrord up` in mirror mode sends one
+/// `*` entry per broker, and the Temporal one covers every Temporal queue the operator resolves.
+/// A `*` entry for another broker says nothing about Temporal queues, so it does not count.
 pub(crate) fn mirror_requested(config: &SplitQueuesConfig) -> BTreeSet<String> {
     config
-        .queue_modes()
-        .filter(|(_, mode)| *mode == QueueMode::Mirror)
-        .map(|(id, _)| id.to_owned())
+        .of_kind(QueueKind::Temporal)
+        .filter(|split| split.queue_mode == QueueMode::Mirror)
+        .map(|split| split.queue_id.to_owned())
         .collect()
 }
 
@@ -386,8 +391,9 @@ mod tests {
         ids.into_iter().map(ToOwned::to_owned).collect()
     }
 
-    /// Only queues whose mode is `mirror` need a warning; the default `steal` is what Temporal
-    /// runs anyway, so it must not show up in the requested set.
+    /// Only Temporal queues whose mode is `mirror` need a warning: the default `steal` is what
+    /// Temporal runs anyway, and a `*` mirror entry for another broker says nothing about
+    /// Temporal queues, so neither shows up in the requested set.
     #[test]
     fn mirror_requested_skips_steal_queues() {
         let config = SplitQueuesConfig::from_splits([
@@ -396,6 +402,10 @@ mod tests {
                 ..QueueSplitConfig::new("tasks", QueueKind::Temporal)
             },
             QueueSplitConfig::new("orders", QueueKind::Kafka),
+            QueueSplitConfig {
+                queue_mode: QueueMode::Mirror,
+                ..QueueSplitConfig::new("*", QueueKind::Kafka)
+            },
         ]);
         assert_eq!(mirror_requested(&config), ids(["tasks"]));
 
