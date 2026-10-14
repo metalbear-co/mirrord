@@ -8,6 +8,33 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.273.0](https://github.com/metalbear-co/mirrord/tree/3.273.0) - 2026-10-13
+
+
+### Added
+
+- Added the `get_skill` tool to `mirrord mcp`, and served every vendored skill
+  as an MCP prompt and a `mirrord://skills/<name>` resource.
+- Added the `search_docs` and `read_doc` tools to `mirrord mcp`, for keyword
+  search and reading of the docs, skills, and config options shipped with
+  mirrord, and served every docs page as a `mirrord://docs/<path>` resource.
+- `mirrord subscribe` streams every session without a key and names each
+  event's cluster.
+
+
+### Fixed
+
+- Include Kubernetes type and object metadata when submitting literal database
+  branch credentials, allowing Kubernetes access proxies to decode the request.
+- Preview `secret_mounts` and `db_branches` from a `MirrordSplitConfig` work
+  for users bound to `mirrord-operator-user` by a `RoleBinding`.
+- The `TMPDIR`, `TMP` and `TEMP` environment variables of the target are now
+  not copied to the local process by default, because their directory often
+  does not exist on the local machine. For example, `yarn run` failed with
+  `ENOENT: no such file or directory, lstat` on the remote temporary directory.
+- Users bound to `mirrord-operator-user` by a `RoleBinding` can use literal
+  `db_branches` connection values.
+
 ## [3.272.0](https://github.com/metalbear-co/mirrord/tree/3.272.0) - 2026-10-11
 
 
