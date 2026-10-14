@@ -39,13 +39,13 @@ use mirrord_config::{
             LocalTlsDelivery, TlsClientCertSource, TlsDeliveryProtocol,
         },
         preview::{ConfigMount, ConfigMountType},
-        split_queues::{QueueKind, QueueMode},
+        split_queues::{QueueKind, QueueMode, SplitQueuesConfig},
     },
     target::{Target, TargetDisplay, label::LabelTarget},
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
-    client::{NoClientCert, OperatorApi, connect_params::BranchDbNames},
+    client::{NoClientCert, OperatorApi, connect_params::BranchDbNames, temporal_mirror_warning},
     crd::{
         MirrordOperatorSpec, NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
@@ -395,10 +395,7 @@ async fn preview_start(
     // The config already names the Temporal queues it asked to mirror (including `*` from
     // `mirrord up`), so warn from that before the session is created.
     for id in temporal_mirror_requested(&layer_config.feature.split_queues) {
-        subtask.warning(&format!(
-            "queue `{id}` is a Temporal task queue, and Temporal supports steal only: \
-             matching tasks are stolen from the deployed worker instead of mirrored"
-        ));
+        subtask.warning(&temporal_mirror_warning(&id));
     }
 
     let session_spec = PreviewSessionSpec {
@@ -1684,17 +1681,9 @@ async fn fetch_preview_logs(
         .map(|view: PreviewEnv| view.status.map(|status| status.logs).unwrap_or_default())
 }
 
-/// The best-effort form, for the paths that are already reporting a different failure.
-///
-/// A start that is going to fail anyway must not have its own error replaced by one about
-/// reading logs, so an unreachable route, a lost connection, or pods that are simply gone all
-/// resolve to no logs here. `mirrord preview logs` does NOT use this: there, a failed read is
-/// the only thing worth saying.
 /// Temporal queue ids `config` asks to mirror. Preview start has no queue split view, so `*`
 /// stays `*` and the warning names that instead of the operator-resolved queue.
-fn temporal_mirror_requested(
-    config: &mirrord_config::feature::split_queues::SplitQueuesConfig,
-) -> Vec<String> {
+fn temporal_mirror_requested(config: &SplitQueuesConfig) -> Vec<String> {
     config
         .of_kind(QueueKind::Temporal)
         .filter(|split| split.queue_mode == QueueMode::Mirror)
@@ -1702,6 +1691,12 @@ fn temporal_mirror_requested(
         .collect()
 }
 
+/// The best-effort form, for the paths that are already reporting a different failure.
+///
+/// A start that is going to fail anyway must not have its own error replaced by one about
+/// reading logs, so an unreachable route, a lost connection, or pods that are simply gone all
+/// resolve to no logs here. `mirrord preview logs` does NOT use this: there, a failed read is
+/// the only thing worth saying.
 async fn fetch_preview_logs_best_effort(
     client: &Client,
     namespace: &str,

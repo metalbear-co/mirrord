@@ -167,10 +167,7 @@ impl<'a, P: Progress> QueueSplitProgress<'a, P> {
             .flat_map(|status| &status.queues);
         for id in temporal_mirror_requests(&self.mirror_requested, queues) {
             if self.warned_temporal.insert(id.to_owned()) {
-                self.progress.warning(&format!(
-                    "queue `{id}` is a Temporal task queue, and Temporal supports steal only: \
-                     matching tasks are stolen from the deployed worker instead of mirrored"
-                ));
+                self.progress.warning(&temporal_mirror_warning(id));
             }
         }
     }
@@ -190,6 +187,14 @@ impl<'a, P: Progress> QueueSplitProgress<'a, P> {
             task.success(None);
         }
     }
+}
+
+/// Warning printed when a Temporal queue the user asked to mirror runs as `steal`.
+pub fn temporal_mirror_warning(id: &str) -> String {
+    format!(
+        "queue `{id}` is a Temporal task queue, and Temporal supports steal only: \
+         matching tasks are stolen from the deployed worker instead of mirrored"
+    )
 }
 
 /// Ids of the Temporal task queues `config` asks to mirror. `mirrord up` in mirror mode sends one

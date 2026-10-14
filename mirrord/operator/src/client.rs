@@ -102,6 +102,7 @@ mod queue_split_progress;
 pub mod split_config_branches;
 
 pub use discovery::operator_installed;
+pub use queue_split_progress::temporal_mirror_warning;
 
 const BAGGAGE_HEADER: &str = "baggage";
 
