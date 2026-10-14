@@ -82,17 +82,17 @@ use winapi::{
         winbase::STD_ERROR_HANDLE,
         winnt::{
             EXCEPTION_POINTERS, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, GENERIC_WRITE, HANDLE,
-            RtlCaptureStackBackTrace,
         },
     },
     vc::excpt::EXCEPTION_CONTINUE_SEARCH,
 };
-use windows_sys::Win32::System::Diagnostics::Debug::MINIDUMP_EXCEPTION_INFORMATION;
+use windows_sys::Win32::System::Diagnostics::Debug::{CONTEXT, MINIDUMP_EXCEPTION_INFORMATION};
 
 use self::codes::{code_name, exception_code, is_severe};
 use super::{
     monitor::{MonitorChannel, Registration},
     report::is_native_fault,
+    stack::{self, Frame},
 };
 use crate::{fixed_buf::FixedBuf, modules::ModuleTable};
 
@@ -100,8 +100,8 @@ mod codes;
 
 /// Stack reserved for the handler so a stack overflow still has room to run it.
 const HANDLER_STACK_GUARANTEE: DWORD = 64 * 1024;
-/// Frame count captured for the short stack.
-const STACK_FRAMES: usize = 32;
+/// Frame count walked for the record's stack.
+const STACK_FRAMES: usize = 64;
 
 /// The installed crash state. Read-only once set, from the handler.
 ///
@@ -452,7 +452,7 @@ unsafe fn write_crash_record(state: &CrashState, info: *mut EXCEPTION_POINTERS) 
         return false;
     }
 
-    let mut storage = [0u8; 4096];
+    let mut storage = [0u8; 8192];
     let mut record = FixedBuf::new(&mut storage);
 
     let exception = unsafe { (*info).ExceptionRecord };
@@ -493,27 +493,33 @@ unsafe fn write_crash_record(state: &CrashState, info: *mut EXCEPTION_POINTERS) 
         }
     }
 
-    let mut frames = [std::ptr::null_mut::<c_void>(); STACK_FRAMES];
-    let captured = unsafe {
-        RtlCaptureStackBackTrace(
-            0,
-            STACK_FRAMES as DWORD,
-            frames.as_mut_ptr(),
-            std::ptr::null_mut(),
-        )
+    // The faulting thread's stack, from the context the fault left, so the handler's own frames
+    // stay out of it. The size column is what each frame used: for a stack overflow, that names
+    // whoever used the stack up, not just whoever ran out of it.
+    let mut frames = [Frame::default(); STACK_FRAMES];
+    let context = unsafe { (*info).ContextRecord } as *const CONTEXT;
+    let walked = match unsafe { context.as_ref() } {
+        // The handler runs on the faulting thread, so its stack base is the one to stay under.
+        Some(context) => unsafe { stack::walk(context, stack::current_stack_base(), &mut frames) },
+        None => 0,
     };
-    let _ = writeln!(record, "stack:");
-    for frame in frames.iter().take(captured as usize) {
-        let frame = *frame as usize;
+    let frames = frames.get(..walked).unwrap_or_default();
+    let _ = writeln!(record, "stack (bytes used by each frame, then address):");
+    for (index, frame) in frames.iter().enumerate() {
+        let size = stack::frame_size(frames, index);
         match MODULES
             .get()
-            .and_then(|modules| modules.resolve_offset(frame))
+            .and_then(|modules| modules.resolve_offset(frame.ip))
         {
             Some((module, offset)) => {
-                let _ = writeln!(record, "  {frame:#018x} {module}+{offset:#x}");
+                let _ = writeln!(
+                    record,
+                    "  {size:>9} {:#018x} {module}+{offset:#x}",
+                    frame.ip
+                );
             }
             None => {
-                let _ = writeln!(record, "  {frame:#018x}");
+                let _ = writeln!(record, "  {size:>9} {:#018x}", frame.ip);
             }
         }
     }
@@ -532,11 +538,6 @@ unsafe fn write_crash_record(state: &CrashState, info: *mut EXCEPTION_POINTERS) 
 /// * `recorded` - whether [`write_crash_record`] wrote the record, so the notice never points at a
 ///   file that does not exist.
 unsafe fn write_stderr_stub(info: *mut EXCEPTION_POINTERS, recorded: bool) {
-    let stderr = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
-    if stderr.is_null() || stderr == INVALID_HANDLE_VALUE {
-        return;
-    }
-
     let exception = unsafe { (*info).ExceptionRecord };
     let code = unsafe { (*exception).ExceptionCode };
     let address = unsafe { (*exception).ExceptionAddress } as usize;
@@ -558,7 +559,7 @@ unsafe fn write_stderr_stub(info: *mut EXCEPTION_POINTERS, recorded: bool) {
             "mirrord: crashed ({code:#010x}) in {module}; the crash record could not be written",
         )
     };
-    unsafe { write_all(stderr as HANDLE, line.filled()) };
+    unsafe { write_stderr(line.filled()) };
 }
 
 /// Signals the out-of-process monitor and waits for it to finish the dump.
@@ -601,11 +602,6 @@ unsafe fn write_in_process_dump(state: &CrashState, info: *mut EXCEPTION_POINTER
 
 /// Logs a severe first-chance exception to stderr.
 unsafe fn log_first_chance(code: DWORD) {
-    let stderr = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
-    if stderr.is_null() || stderr == INVALID_HANDLE_VALUE {
-        return;
-    }
-
     let mut storage = [0u8; 128];
     let mut line = FixedBuf::new(&mut storage);
     let _ = writeln!(
@@ -613,7 +609,19 @@ unsafe fn log_first_chance(code: DWORD) {
         "mirrord: first-chance {code:#010x} ({})",
         code_name(code)
     );
-    unsafe { write_all(stderr as HANDLE, line.filled()) };
+    unsafe { write_stderr(line.filled()) };
+}
+
+/// Writes to stderr with raw `WriteFile`. Allocation-free and lock-free.
+///
+/// Rust's `stderr()` takes a lock, which a crashed thread may be holding, so crash-time output
+/// goes around it.
+pub(super) unsafe fn write_stderr(bytes: &[u8]) {
+    let stderr = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
+    if stderr.is_null() || stderr == INVALID_HANDLE_VALUE {
+        return;
+    }
+    unsafe { write_all(stderr as HANDLE, bytes) };
 }
 
 /// Opens a null-terminated wide path for writing, truncating any existing content.
