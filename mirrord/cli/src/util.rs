@@ -1,6 +1,6 @@
 #[cfg(target_os = "macos")]
 use std::env;
-use std::{io, net::SocketAddr};
+use std::{io, net::SocketAddr, pin::Pin};
 
 #[cfg(not(target_os = "windows"))]
 use io::Write;
@@ -22,6 +22,18 @@ use crate::{
     error::CliResult,
     kube::{ConfigSource, record_run_kube_environment},
 };
+
+/// Builds a future on the heap, in a stack frame of its own, to keep it out of the caller's.
+///
+/// A future is built on the stack of whoever awaits it before it moves into their state machine,
+/// and a debug build gives every such temporary its own slot: a function awaiting a different
+/// large future in each `match` arm needs room for all of them at once, each time it is polled.
+/// `Box::pin(f()).await` keeps that cost, since `f()` is still built in the caller first. Built
+/// here, it lands in this frame instead, which is gone before the future is first polled.
+#[inline(never)]
+pub(crate) fn boxed<F: Future>(make: impl FnOnce() -> F) -> Pin<Box<F>> {
+    Box::pin(make())
+}
 
 /// Address for mirrord-console is listening on.
 pub(crate) const MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
