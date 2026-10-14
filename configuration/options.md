@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-10-13T00:00:00.000Z
+lastmod: 2026-10-14T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -4557,7 +4557,8 @@ Controls what happens to a message that matches this session's filter.
 - `steal` (default): the matched message is delivered only to this session, so the deployed
   application never sees it.
 - `mirror`: the matched message is delivered to this session **and** still delivered to the
-  deployed application, so both process a copy.
+  deployed application, so both process a copy. Temporal supports `steal` only: a `mirror`
+  request on a Temporal task queue runs as `steal`.
 
 Deliver matched messages to this session while the deployed application still gets them.
 
