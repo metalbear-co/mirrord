@@ -151,8 +151,9 @@ pub struct PreviewSessionSpec {
     /// `mirrord preview start` copies the replaced session's `status.shareHost` here when it
     /// starts a new session for the same key and target (typically a new image), so the preview
     /// link stays the same across pushes. The operator keeps this host only when it is one it
-    /// could have minted for this key under its own share domain, and mints a fresh one
-    /// otherwise. `None` (also what older CLIs send) always mints a fresh host.
+    /// could have minted for this key under its own share domain. An absent (what older CLIs
+    /// send) or rejected host goes through the operator's normal host selection: a random
+    /// suffix by default, or the key-derived host with `shareIngress.stableSlugs`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub share_host: Option<String>,
 }

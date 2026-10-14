@@ -318,7 +318,7 @@ async fn preview_start(
         .await
         .inspect_err(|_| subtask.failure(None))?;
 
-    let replaced_sessions = existing_sessions
+    let mut replaced_sessions = existing_sessions
         .into_iter()
         .filter(|session| session.spec.target == session_target)
         .collect::<Vec<_>>();
@@ -326,9 +326,22 @@ async fn preview_start(
     // Same key and target means the same preview, so the new session asks the operator for the
     // host the old one was shared on: links posted in a PR or Slack keep working after a new
     // image. The operator decides whether it can honour the request.
-    let share_host = replaced_sessions
-        .iter()
-        .find_map(|session| session.status.as_ref()?.share_host.clone());
+    //
+    // The newest session is the one the link currently points at, so it is asked first. A
+    // session replaced before the operator stamped its status (two pushes in quick succession)
+    // still carries the host it asked for on its spec, so that is the fallback.
+    replaced_sessions.sort_by(|a, b| {
+        b.metadata
+            .creation_timestamp
+            .cmp(&a.metadata.creation_timestamp)
+    });
+    let share_host = replaced_sessions.iter().find_map(|session| {
+        session
+            .status
+            .as_ref()
+            .and_then(|status| status.share_host.clone())
+            .or_else(|| session.spec.share_host.clone())
+    });
 
     for session in replaced_sessions {
         let name = session.name_any();
