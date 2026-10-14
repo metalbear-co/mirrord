@@ -27,6 +27,7 @@ client = [
   "dep:mirrord-analytics",
   "dep:mirrord-auth",
   "dep:mirrord-kube",
+  "dep:mirrord-macros",
   "dep:mirrord-progress",
   "dep:mirrord-operator-websocket",
   "dep:rand",
@@ -54,7 +55,7 @@ crd = [
 ]
 
 [dependencies]
-mirrord-macros = { path = "../macros" }
+mirrord-macros = { path = "../macros", optional = true }
 mirrord-analytics = { path = "../analytics", optional = true }
 mirrord-auth = { path = "../auth", features = ["client"], optional = true }
 mirrord-config = { path = "../config", optional = true }
