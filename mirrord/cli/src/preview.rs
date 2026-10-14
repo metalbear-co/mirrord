@@ -318,10 +318,19 @@ async fn preview_start(
         .await
         .inspect_err(|_| subtask.failure(None))?;
 
-    for session in existing_sessions
+    let replaced_sessions = existing_sessions
         .into_iter()
         .filter(|session| session.spec.target == session_target)
-    {
+        .collect::<Vec<_>>();
+
+    // Same key and target means the same preview, so the new session asks the operator for the
+    // host the old one was shared on: links posted in a PR or Slack keep working after a new
+    // image. The operator decides whether it can honour the request.
+    let share_host = replaced_sessions
+        .iter()
+        .find_map(|session| session.status.as_ref()?.share_host.clone());
+
+    for session in replaced_sessions {
         let name = session.name_any();
 
         subtask.warning(&format!("replacing existing session '{name}'"));
@@ -424,6 +433,7 @@ async fn preview_start(
         idle,
         cronjob,
         spec_resources,
+        share_host,
     };
 
     let annotations = operator_api
