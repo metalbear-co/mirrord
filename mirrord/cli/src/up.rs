@@ -44,7 +44,7 @@ pub enum UpCliError {
     Up(#[from] UpError),
 
     #[error(transparent)]
-    Init(#[from] InitError),
+    Init(#[from] Box<InitError>),
 
     #[error("mirrord-up.yaml file not found.")]
     #[diagnostic(help(
@@ -69,7 +69,7 @@ pub(crate) async fn up_command(
     user_data: &UserData,
 ) -> Result<(), UpCliError> {
     if let Some(UpSubcommand::Init { output }) = args.command {
-        return Ok(run_wizard(output).await?);
+        return Ok(run_wizard(output).await.map_err(Box::new)?);
     }
 
     // We don't yet know whether the user has opted out of telemetry,

@@ -46,12 +46,9 @@ use crate::{
 #[derive(Debug, Error, Diagnostic)]
 pub enum InitError {
     /// Querying the cluster or prompting the user failed.
-    ///
-    /// Boxed because [`UpError`] is large, and the error type of the CLI has a
-    /// variant for each of the two.
     #[error(transparent)]
     #[diagnostic(transparent)]
-    Up(Box<UpError>),
+    Up(#[from] UpError),
 
     /// Failed to write the generated config file.
     #[error("failed to write config file: {0}")]
@@ -64,12 +61,6 @@ pub enum InitError {
     /// Failed to serialize config YAML.
     #[error("failed to render config: {0}")]
     YamlSer(#[from] serde_saphyr::ser::Error),
-}
-
-impl From<UpError> for InitError {
-    fn from(error: UpError) -> Self {
-        Self::Up(Box::new(error))
-    }
 }
 
 /// The cluster that the wizard picks targets from.
@@ -108,7 +99,7 @@ pub async fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
             Err(InitError::Up(error))
                 if services.is_empty().not()
                     && matches!(
-                        *error,
+                        error,
                         UpError::Inquire(inquire::InquireError::OperationInterrupted)
                     )
                     .not() =>
