@@ -1034,22 +1034,23 @@ pub(super) enum OperatorCommand {
 pub(super) struct OperatorInstallArgs {
     /// Operator API key, the same key the helm chart takes as `cloud.apiKey.key`.
     ///
-    /// Registers the operator under the key's organization instead of starting a trial.
+    /// Without it, the command logs you in to the MetalBear app (like `mirrord login`) and creates
+    /// the operator API key of your organization, which goes into the cluster without being shown.
     #[arg(long, env = "MIRRORD_OPERATOR_API_KEY", hide_env_values = true)]
     pub api_key: Option<String>,
 
-    /// Print the trial claim URL instead of opening it in the browser.
-    #[arg(long)]
+    /// Has no effect. Kept so that scripts written for earlier versions keep working.
+    #[arg(long, hide = true)]
     pub no_browser: bool,
 
-    /// Name shown on the trial claim page to identify this cluster.
+    /// Name of the operator API key the command creates, shown in your organization's settings.
     ///
     /// Defaults to the cluster's ID, the UID of its `default` namespace.
-    #[arg(long, conflicts_with_all = ["api_key", "no_hint"])]
+    #[arg(long, conflicts_with = "api_key")]
     pub cluster_hint: Option<String>,
 
-    /// Do not send a cluster hint to the trial claim page.
-    #[arg(long, conflicts_with = "api_key")]
+    /// Has no effect. Kept so that scripts written for earlier versions keep working.
+    #[arg(long, hide = true)]
     pub no_hint: bool,
 
     /// Kube context to install the operator into, instead of the current one.
@@ -1064,7 +1065,7 @@ pub(super) struct OperatorInstallArgs {
     #[arg(long, env = "MIRRORD_OPERATOR_INSTALL_MANIFEST", hide = true)]
     pub manifest: Option<PathBuf>,
 
-    /// Base URL of the MetalBear app, used for the trial signup.
+    /// Base URL of the MetalBear app, used to log in and create the operator API key.
     #[arg(
         long,
         env = "MIRRORD_OPERATOR_INSTALL_APP_URL",

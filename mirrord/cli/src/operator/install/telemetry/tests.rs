@@ -28,7 +28,7 @@ fn outcome_and_phase() {
         json!({ "outcome": 4, "phase": 8 })
     );
     assert_eq!(
-        properties(Err(&OperatorInstallError::SignupRateLimited), 6),
+        properties(Err(&OperatorInstallError::ApiKeyExists), 6),
         json!({ "outcome": 1, "phase": 6 })
     );
 }

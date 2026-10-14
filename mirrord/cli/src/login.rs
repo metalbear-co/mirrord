@@ -16,7 +16,11 @@
 //! [RFC 7636]: https://www.rfc-editor.org/info/rfc7636/
 //! [RFC 8252]: https://www.rfc-editor.org/info/rfc8252/
 
-use std::{io, time::Duration};
+use std::{
+    io::{self, IsTerminal},
+    ops::Not,
+    time::Duration,
+};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Local, Utc};
@@ -68,9 +72,14 @@ pub(crate) async fn login_command(args: LoginArgs) -> Result<(), LoginError> {
         .append_pair("code_challenge_method", "S256")
         .append_pair("redirect_uri", &callback_uri)
         .append_pair("state", callback.state_param());
-    let mut subtask = progress.subtask(&format!(
+    let approval_message = format!(
         "Approve the login in your browser. If it does not open, visit:\n\n{approval_url}\n"
-    ));
+    );
+    // The progress is not drawn without a terminal, which is how agents run the CLI.
+    if io::stderr().is_terminal().not() {
+        eprintln!("{approval_message}");
+    }
+    let mut subtask = progress.subtask(&approval_message);
     if let Err(error) = opener::open_browser(approval_url.as_str()) {
         warn!(%error, "Failed to open the browser");
     }

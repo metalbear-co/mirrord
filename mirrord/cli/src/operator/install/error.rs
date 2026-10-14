@@ -6,7 +6,7 @@ use mirrord_kube::error::KubeApiError;
 use reqwest::StatusCode;
 use thiserror::Error;
 
-use crate::error::GENERAL_BUG;
+use crate::{error::GENERAL_BUG, login::LoginError};
 
 /// Errors of the `mirrord operator install` and `mirrord operator uninstall` commands.
 #[derive(Debug, Error, Diagnostic)]
@@ -200,19 +200,45 @@ pub(crate) enum OperatorInstallError {
         source: Box<kube::Error>,
     },
 
-    #[error("failed to start a trial")]
-    SignupRequest(#[source] reqwest::Error),
+    #[error("failed to log in to the MetalBear app")]
+    #[diagnostic(help(
+        "Run `mirrord login` and then this command again, or pass an operator API key with \
+        `--api-key`."
+    ))]
+    Login(#[source] Box<LoginError>),
 
-    #[error("too many trials were started from this network recently")]
-    #[diagnostic(help("Try again later, or pass an existing API key with `--api-key`."))]
-    SignupRateLimited,
+    #[error("failed to read the stored login")]
+    LoginStore(#[source] io::Error),
 
-    #[error("starting a trial is currently unavailable")]
-    #[diagnostic(help("Try again later, or pass an existing API key with `--api-key`."))]
-    SignupUnavailable,
+    #[error("no login for the MetalBear app was stored")]
+    #[diagnostic(help("Run `mirrord login` and then this command again."))]
+    NotLoggedIn,
 
-    #[error("failed to start a trial, the server responded with {status}: {body}")]
-    SignupFailed { status: StatusCode, body: String },
+    #[error("the login for the MetalBear app expired or was revoked")]
+    #[diagnostic(help("Run `mirrord login` and then this command again."))]
+    LoginExpired,
+
+    #[error("{email} is not an admin of their mirrord organization")]
+    #[diagnostic(help(
+        "Only admins can create the operator API key. Ask an admin of the organization to run \
+        this command. If you were made an admin since you last logged in, run `mirrord login` \
+        and then this command again."
+    ))]
+    NotAdmin { email: String },
+
+    #[error("your mirrord organization already has an operator API key")]
+    #[diagnostic(help(
+        "Install with that key: `mirrord operator install --api-key <key>`. The key is in the \
+        configuration of any cluster that already runs the operator. If no cluster uses it any \
+        more, revoke it at https://app.metalbear.com/settings and run this command again."
+    ))]
+    ApiKeyExists,
+
+    #[error("failed to create the operator API key")]
+    ApiKeyRequest(#[source] reqwest::Error),
+
+    #[error("failed to create the operator API key, the server responded with {status}: {body}")]
+    ApiKeyFailed { status: StatusCode, body: String },
 
     #[error("the mirrord operator is managed by helm")]
     #[diagnostic(help("Remove it with `{uninstall}`."))]

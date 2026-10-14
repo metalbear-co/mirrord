@@ -41,9 +41,10 @@ const READY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Identifies the cluster by the UID of its `default` namespace, which is stable for the lifetime
 /// of the cluster and is the same ID the operator reports for it.
 ///
-/// Used as the trial's cluster hint in place of the kubecontext name, which can carry the user's
-/// account identity (e.g. EKS context names are ARNs with the AWS account ID, GKE ones name the
-/// project) and must not be sent without consent. `None` if the namespace can't be read.
+/// Used as the default name of the operator API key in place of the kubecontext name, which can
+/// carry the user's account identity (e.g. EKS context names are ARNs with the AWS account ID, GKE
+/// ones name the project) and must not be sent without consent. `None` if the namespace can't be
+/// read.
 pub(super) async fn cluster_id(client: &Client) -> Option<String> {
     Api::<Namespace>::all(client.clone())
         .get("default")

@@ -12,15 +12,14 @@ use mirrord_progress::{Progress, ProgressTracker};
 
 use self::{
     manifest::Manifest,
-    signup::Trial,
     telemetry::{InstallPhase, InstallRun, Outcome},
 };
-use crate::config::OperatorInstallArgs;
+use crate::{config::OperatorInstallArgs, data::StoredLoginToken};
 
+mod api_key;
 mod cluster;
 mod error;
 mod manifest;
-mod signup;
 mod telemetry;
 #[cfg(test)]
 mod tests;
@@ -59,7 +58,7 @@ pub(super) async fn operator_install(
     }
 
     let analytics = reporter.get_mut();
-    analytics.add("trial_started", run.retry.is_some());
+    analytics.add("api_key_created", run.retry.is_some());
     telemetry::add_outcome(
         analytics,
         result.as_ref().map(|()| Outcome::Success),
@@ -75,15 +74,20 @@ async fn install(
 ) -> Result<(), OperatorInstallError> {
     let OperatorInstallArgs {
         api_key,
-        no_browser,
+        no_browser: _,
         cluster_hint,
-        no_hint,
+        no_hint: _,
         context,
         yes,
         manifest: manifest_path,
         app_url,
         ready_timeout,
     } = args;
+
+    let credential = match api_key {
+        Some(api_key) => Credential::ApiKey(api_key),
+        None => Credential::Login(api_key::login_token(&app_url).await?),
+    };
 
     let mut progress = ProgressTracker::from_env("mirrord operator install");
     let Connection {
@@ -127,39 +131,31 @@ async fn install(
     );
     confirm(&progress, yes, &question)?;
 
-    match api_key {
-        Some(api_key) => manifest.set_api_key(&api_key),
-        None => {
-            run.phase = InstallPhase::StartTrial;
-            let mut subtask = progress.subtask("starting a trial");
-            let cluster_hint = match (no_hint, cluster_hint) {
-                (true, _) => None,
-                (false, Some(cluster_hint)) => Some(cluster_hint),
-                (false, None) => cluster::cluster_id(&client).await,
+    let created_key;
+    let api_key = match &credential {
+        Credential::ApiKey(api_key) => api_key.as_str(),
+        Credential::Login(login) => {
+            run.phase = InstallPhase::CreateApiKey;
+            let mut subtask = progress.subtask(&format!(
+                "creating the operator API key of the organization of {}",
+                login.email
+            ));
+            let name = match cluster_hint {
+                Some(cluster_hint) => Some(cluster_hint),
+                None => cluster::cluster_id(&client).await,
             };
-            let trial =
-                signup::start_trial(&http, &app_url, USER_AGENT, cluster_hint.as_deref()).await?;
+            created_key = api_key::create(&http, &app_url, login, name.as_deref()).await?;
             run.retry = Some(format!(
-                "To retry without starting another trial, remove what was installed, then reuse \
-                the API key of the trial:\n\n  mirrord operator uninstall{context_arg}\n  mirrord \
-                operator install{context_arg} --api-key {}\n",
-                trial.api_key
+                "The operator API key of your organization was created for this installation. To \
+                retry, remove what was installed with `mirrord operator uninstall{context_arg}`, \
+                revoke the key at https://app.metalbear.com/settings, then run this command \
+                again.\n"
             ));
             subtask.success(None);
-
-            // Printed right away, so the claim URL and the API key are not lost if the
-            // installation fails or is interrupted, and a retry can reuse the trial.
-            println!("{}", trial_details(&trial));
-            if no_browser.not()
-                && std::io::stdout().is_terminal()
-                && let Err(error) = opener::open(&trial.claim_url)
-            {
-                tracing::debug!(?error, "failed to open the claim URL in the browser");
-            }
-
-            manifest.set_api_key(&trial.api_key);
+            created_key.as_str()
         }
-    }
+    };
+    manifest.set_api_key(api_key);
 
     run.phase = InstallPhase::CreateObjects;
     let mut subtask = progress.subtask("installing the operator");
@@ -188,6 +184,14 @@ async fn install(
     );
 
     Ok(())
+}
+
+/// What the operator is registered with.
+enum Credential {
+    /// An operator API key the user passed.
+    ApiKey(String),
+    /// The login of the user, used to create the operator API key of their organization.
+    Login(StoredLoginToken),
 }
 
 /// What the operator commands need to reach the cluster and the internet.
@@ -260,17 +264,6 @@ fn location(namespace: &str, context: Option<&str>) -> String {
         Some(context) => format!("namespace `{namespace}` of kubecontext `{context}`"),
         None => format!("namespace `{namespace}`"),
     }
-}
-
-/// What the user needs to know about a trial, printed once as soon as it starts.
-fn trial_details(trial: &Trial) -> String {
-    format!(
-        "Started a mirrord Enterprise trial. It ends on {}, after which the license drops to the \
-        Free tier.\nClaim the trial to take ownership of it: {}\nAPI key of the trial: {}\n",
-        trial.trial_ends_at.format("%B %-d, %Y"),
-        trial.claim_url,
-        trial.api_key,
-    )
 }
 
 /// The `flag` that gives a command printed to the user the kubecontext of the run, so that the

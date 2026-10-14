@@ -53,6 +53,12 @@ pub(crate) struct StoredLoginToken {
 #[serde(transparent)]
 pub(crate) struct LoginToken(String);
 
+impl LoginToken {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 impl From<String> for LoginToken {
     fn from(value: String) -> Self {
         Self(value)
@@ -81,6 +87,32 @@ impl AuthStore {
         })?;
 
         Self::save_at(path, issuer, organization_id, token, Utc::now()).await
+    }
+
+    /// The unexpired login token issued by `issuer` that expires last, if there is one.
+    ///
+    /// A user in several organizations has a token for each, and the one that expires last is the
+    /// one they logged in with most recently.
+    pub(crate) async fn login_token(issuer: &str) -> io::Result<Option<StoredLoginToken>> {
+        let Some(path) = AUTH_STORE_PATH.as_deref() else {
+            return Ok(None);
+        };
+
+        let store: Self = match tokio::fs::read(path).await {
+            Ok(contents) => serde_json::from_slice(&contents).unwrap_or_default(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+
+        Ok(store.latest_token(issuer, Utc::now()))
+    }
+
+    fn latest_token(mut self, issuer: &str, now: DateTime<Utc>) -> Option<StoredLoginToken> {
+        self.issuers
+            .remove(issuer)?
+            .into_values()
+            .filter(|token| token.expires_at > now)
+            .max_by_key(|token| token.expires_at)
     }
 
     async fn save_at(
