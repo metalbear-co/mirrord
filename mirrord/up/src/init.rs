@@ -285,14 +285,12 @@ async fn prompt_target(
 /// description. The `mirrord wizard` GUI must show the same ones for the
 /// three modes, so that both wizards present the same choice.
 ///
-/// The description goes on indented lines under the label. They are wrapped
-/// at a fixed width, so that a terminal of 80 columns does not break words.
+/// `Select` shows each option with its `Display`, and it has no field for a
+/// description, so the description goes on indented lines under the label,
+/// like the text under the title of a card in the GUI. A terminal of 80
+/// columns would break the long description in the middle of a word, so it is
+/// wrapped at 76 columns.
 struct ModeChoice(ServiceMode);
-
-impl ModeChoice {
-    const INDENT: &str = "    ";
-    const WIDTH: usize = 76;
-}
 
 impl fmt::Display for ModeChoice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -310,20 +308,10 @@ impl fmt::Display for ModeChoice {
                 "Every request reaches your local process. The deployed workload is scaled to zero for the session and restored when it ends.",
             ),
         };
-        write!(f, "{label}")?;
-        // Start as if the line is full, so that the description starts on its
-        // own indented line.
-        let mut line_width = Self::WIDTH;
-        for word in description.split(' ') {
-            if line_width + 1 + word.len() > Self::WIDTH {
-                write!(f, "\n{}{word}", Self::INDENT)?;
-                line_width = Self::INDENT.len() + word.len();
-            } else {
-                write!(f, " {word}")?;
-                line_width += 1 + word.len();
-            }
-        }
-        Ok(())
+        let options = textwrap::Options::new(76)
+            .initial_indent("    ")
+            .subsequent_indent("    ");
+        write!(f, "{label}\n{}", textwrap::fill(description, options))
     }
 }
 

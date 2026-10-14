@@ -43,6 +43,7 @@ uuid.workspace = true
 yamlpatch.workspace = true
 yamlpath.workspace = true
 tera.workspace = true
+textwrap.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["signal", "process"] }
