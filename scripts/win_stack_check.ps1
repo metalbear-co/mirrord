@@ -47,7 +47,18 @@ if (-not $editbin) { throw 'editbin not found; it comes with the MSVC build tool
 $kubeconfig = Join-Path ([IO.Path]::GetTempPath()) 'mirrord-stack-check-kubeconfig.yaml'
 Set-Content $kubeconfig "apiVersion: v1`nkind: Config`nclusters: []`ncontexts: []`nusers: []"
 
-# Runs a copy of the CLI with the given stack. Returns its combined output and whether it overflowed.
+# Quotes one argument the way CommandLineToArgvW reads it back.
+function ConvertTo-CommandLineArgument([string]$Argument) {
+    if ($Argument -and $Argument -notmatch '[\s"]') { return $Argument }
+    $escaped = $Argument -replace '(\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\+)$', '$1$1'
+    return '"' + $escaped + '"'
+}
+
+# Runs a copy of the CLI with the given stack, and returns its output and whether it overflowed.
+#
+# The output goes through files rather than PowerShell's own stderr handling, which differs between
+# Windows PowerShell and PowerShell 7.
 function Invoke-WithStack([long]$Stack, [string[]]$Arguments) {
     $copy = Join-Path $dir ("mirrord-stack-{0}k.exe" -f ($Stack / 1KB))
     Copy-Item $Exe $copy -Force
@@ -56,25 +67,30 @@ function Invoke-WithStack([long]$Stack, [string[]]$Arguments) {
 
     $env:KUBECONFIG = $kubeconfig
     $env:MIRRORD_PROGRESS_MODE = 'off'
-    # Windows PowerShell turns each stderr line into an error record, which `Stop` would throw on.
-    $ErrorActionPreference = 'Continue'
-    $output = & $copy @Arguments 2>&1 | ForEach-Object {
-        if ($_ -is [System.Management.Automation.ErrorRecord]) { [string]$_.TargetObject } else { "$_" }
-    }
-    $code = $LASTEXITCODE
-    $ErrorActionPreference = 'Stop'
-    Remove-Item $copy -Force -ErrorAction SilentlyContinue
+    $stdout = [IO.Path]::GetTempFileName()
+    $stderr = [IO.Path]::GetTempFileName()
+    $process = Start-Process -FilePath $copy -NoNewWindow -Wait -PassThru `
+        -ArgumentList (($Arguments | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' ') `
+        -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    $output = @(Get-Content $stdout) + @(Get-Content $stderr)
+    Remove-Item $copy, $stdout, $stderr -Force -ErrorAction SilentlyContinue
 
     [pscustomobject]@{
         Output     = $output
-        ExitCode   = $code
+        ExitCode   = $process.ExitCode
         Overflowed = [bool]($output -match 'has overflowed its stack')
     }
 }
 
+# Each run must reach a known end, so a run that printed nothing never passes for one that fit.
 $runs = @(
-    @{ Name = 'exec (offline)'; Arguments = @('exec', '--target', 'targetless', '--', 'cmd.exe', '/c', 'exit 0') },
-    @{ Name = '--help'; Arguments = @('--help') }
+    @{
+        Name      = 'exec (offline)'
+        Arguments = @('exec', '--target', 'targetless', '--', 'cmd.exe', '/c', 'exit 0')
+        # The empty kubeconfig stops it at the cluster connection.
+        Expect    = 'Kubernetes'
+    },
+    @{ Name = '--help'; Arguments = @('--help'); Expect = 'Usage:' }
 )
 $failed = $false
 
@@ -88,7 +104,7 @@ $report = $forced.Output -join "`n"
 $checks = [ordered]@{
     'the run overflowed'               = $forced.Overflowed
     'the report was printed'           = $report -match 'mirrord: stack overflow\. The stack, innermost frame first'
-    'frames are named from the PDB'    = $report -match '\d+\.\d KiB\s+mirrord::'
+    'frames are named'                 = $report -match '\d+\.\d KiB\s+mirrord::'
     'the largest frames are ranked'    = $report -match 'Largest frames:'
 }
 foreach ($check in $checks.GetEnumerator()) {
@@ -107,8 +123,16 @@ foreach ($run in $runs) {
         Write-Host "::group::$($run.Name) overflowed $($Budget / 1KB) KiB"
         $result.Output | ForEach-Object { Write-Host $_ }
         Write-Host '::endgroup::'
-        Write-Host ("::error title=Stack budget::mirrord {0} needs more than {1} KiB of main-thread stack. " +
-            "The report in the group above ranks the frames that used it; see 'Stack usage' in AGENTS.md.") -f $run.Name, ($Budget / 1KB)
+        $message = ("mirrord {0} needs more than {1} KiB of main-thread stack. The report in the group " +
+            "above ranks the frames that used it; see 'Stack Usage' in AGENTS.md.") -f $run.Name, ($Budget / 1KB)
+        Write-Host "::error title=Stack budget::$message"
+        $failed = $true
+    } elseif (-not ($result.Output -match $run.Expect)) {
+        Write-Host "::group::$($run.Name) output"
+        $result.Output | ForEach-Object { Write-Host $_ }
+        Write-Host '::endgroup::'
+        Write-Host ("::error title=Stack budget::mirrord {0} exited {1} without printing '{2}'." -f
+            $run.Name, $result.ExitCode, $run.Expect)
         $failed = $true
     } else {
         Write-Host "ok: $($run.Name) fits in $($Budget / 1KB) KiB"
