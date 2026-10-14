@@ -811,6 +811,13 @@ async fn exec(
     progress: &mut ProgressTracker,
     mirrord_for_ci: Option<MirrordCi>,
 ) -> CliResult<()> {
+    // Showcase only: a frame that outgrows the CI stack budget on purpose. Scoped so it is never
+    // held across an await, which would move it into the future instead of the poll frame.
+    {
+        let scratch = std::hint::black_box([0u8; 600 * 1024]);
+        std::hint::black_box(&scratch);
+    }
+
     ensure_not_nested()?;
 
     if !args.params.disable_version_check {
