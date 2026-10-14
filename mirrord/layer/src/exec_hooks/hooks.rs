@@ -135,6 +135,11 @@ pub(crate) unsafe extern "C" fn execve_detour(
     envp: *const *const c_char,
 ) -> c_int {
     unsafe {
+        let copy = ExecArgsCopy::new(path, argv, envp);
+        let (path, argv, envp) = copy
+            .as_ref()
+            .map_or((path, argv, envp), |copy| (copy.path, copy.argv, copy.envp));
+
         let result = patch_sip_for_new_process(path, argv, envp);
 
         match result {
