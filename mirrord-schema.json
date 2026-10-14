@@ -5229,7 +5229,7 @@
     },
     "QueueMode": {
       "title": "feature.split_queues.{}.queue_mode {#feature-split_queues-queue_id-queue_mode}",
-      "description": "Controls what happens to a message that matches this session's filter.\n\n- `steal` (default): the matched message is delivered only to this session, so the deployed\n  application never sees it.\n- `mirror`: the matched message is delivered to this session **and** still delivered to the\n  deployed application, so both process a copy.",
+      "description": "Controls what happens to a message that matches this session's filter.\n\n- `steal` (default): the matched message is delivered only to this session, so the deployed\n  application never sees it.\n- `mirror`: the matched message is delivered to this session **and** still delivered to the\n  deployed application, so both process a copy. Temporal supports `steal` only: a `mirror`\n  request on a Temporal task queue runs as `steal`.",
       "oneOf": [
         {
           "description": "Take matched messages away from the deployed application (current behavior).",

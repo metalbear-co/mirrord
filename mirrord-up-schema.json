@@ -317,6 +317,13 @@
             "null"
           ]
         },
+        "pre_command": {
+          "description": "A command to run to completion before the service's mirrord session starts, as a list of\nthe program and its arguments, e.g. `[\"npm\", \"run\", \"build\"]`.\n\nRuns locally without mirrord, in the same directory as `command`. The session starts\nonly if it exits successfully; if it fails, this service is not started and the other\nservices keep running.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "type": {
           "description": "Whether to run `command` with `mirrord exec` or `mirrord container`.\n\nDefaults to `exec`.",
           "$ref": "#/$defs/RunType",
