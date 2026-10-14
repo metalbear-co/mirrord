@@ -250,11 +250,15 @@ async fn prompt_target(
 
     let name = match &picked {
         PickedTarget::Workload { target, .. } => {
-            let mut name = target.name().to_owned();
-            let mut n = 1;
+            let workload = target.name();
+            // The services are a map by name, so a second service on the same
+            // workload would replace the first one. It is named `<workload>-2`,
+            // the next one `<workload>-3`, and so on.
+            let mut name = workload.to_owned();
+            let mut suffix = 2;
             while existing.contains_key(name.as_str()) {
-                n += 1;
-                name = format!("{}-{n}", target.name());
+                name = format!("{workload}-{suffix}");
+                suffix += 1;
             }
             println!("Service name: {name}");
             name
