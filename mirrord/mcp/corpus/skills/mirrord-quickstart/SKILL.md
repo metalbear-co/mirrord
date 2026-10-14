@@ -1,6 +1,6 @@
 ---
 name: mirrord-quickstart
-description: Guide users from zero to their first working mirrord session. Use when a user is new to mirrord, wants to install it, or needs help running their first session connecting to a Kubernetes cluster.
+description: Guide users from zero to their first working mirrord session — check system requirements, install mirrord via CLI, VS Code, or IntelliJ, run a first session against a Kubernetes target, and verify the connection. Use when a user is new to mirrord, wants to install it, needs help running their first session, or wants to debug or test a local process against their Kubernetes cluster.
 metadata:
   author: MetalBear
   version: "1.2"
@@ -15,6 +15,8 @@ Help new users get mirrord running quickly:
 - **Install** mirrord (CLI, VS Code, or IntelliJ)
 - **Connect** to their first Kubernetes target
 - **Verify** the connection works
+
+Go one step at a time — don't overwhelm a new user with all options at once, and when they first connect, explain what just happened.
 
 ## Critical First Steps
 
@@ -84,6 +86,8 @@ mirrord exec --target pod/api-server-7c8d9 -- node app.js
 mirrord exec --target pod/backend-abc123 -- python main.py
 ```
 
+If `mirrord ls` returns no targets, check that the kubeconfig context points at the right cluster (`kubectl config current-context`) and list pods in the expected namespace (`kubectl get pods -n <namespace>`).
+
 ### IDE approach
 
 1. Enable mirrord (click status bar icon / toolbar button)
@@ -95,13 +99,17 @@ mirrord exec --target pod/backend-abc123 -- python main.py
 
 After running, verify the connection:
 
-1. **Check logs** - You should see mirrord initialization messages
-2. **Test environment** - Remote env vars should be available locally
-3. **Test network** - Make a request to your remote service; it should reach your local process
-
+1. **Check logs** - mirrord's startup progress (agent started, connected to the target) prints before your app's own output:
 ```bash
-# Quick test: print remote env vars
+mirrord exec --target pod/<pod-name> -- <your-command>
+```
+2. **Test environment** - Remote env vars should be available locally:
+```bash
 mirrord exec --target pod/<pod-name> -- env | grep -i database
+```
+3. **Test network** - Send a request to the remote service; it should reach the local process (check the local process's output):
+```bash
+curl http://<remote-service-url>
 ```
 
 ## What's Next
@@ -120,22 +128,3 @@ Once the first session works, point users to:
 | "No pods found" | Check namespace: `kubectl get pods -n <namespace>` |
 | "Permission denied" | Check RBAC permissions for your kubectl context |
 | "Agent failed to start" | Ensure cluster runs Linux kernel 4.20+ |
-
-## Response Guidelines
-
-1. **Ask about their setup** - OS, IDE preference, existing kubectl access
-2. **Go step by step** - Don't overwhelm with all options at once
-3. **Verify each step** - Confirm installation worked before moving on
-4. **Celebrate success** - When they connect, explain what just happened
-
-## Example Interaction
-
-**User:** "I want to try mirrord"
-
-**Response:**
-1. Ask: macOS/Linux/Windows? CLI or IDE?
-2. Check: `kubectl cluster-info` working?
-3. Install: Follow the official quick-start for their OS (no remote pipe-to-shell installs)
-4. Run: `mirrord ls` to see targets
-5. Connect: `mirrord exec --target pod/X -- <their-app>`
-6. Verify: Show them it's working

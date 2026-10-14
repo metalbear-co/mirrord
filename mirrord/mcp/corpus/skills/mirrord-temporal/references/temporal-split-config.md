@@ -23,7 +23,7 @@ Reference to the workload whose pods poll the task queue:
 
 Sets a default `MirrordPropertyList` per queue kind, so individual queues don't need to repeat `clientConfig`:
 
-```yaml
+```yaml crd
 clientConfigs:
   temporal: temporal-config
 ```
@@ -73,7 +73,7 @@ A `spec.drainTimeout` on the `MirrordSplitConfig` wins over the cluster-wide def
 
 ## Full example
 
-```yaml
+```yaml crd
 apiVersion: queues.mirrord.metalbear.co/v1
 kind: MirrordSplitConfig
 metadata:

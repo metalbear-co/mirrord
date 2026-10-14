@@ -142,6 +142,25 @@ pub enum UpError {
         status: ExitStatus,
     },
 
+    /// The `run.pre_command` of the only service left to start exited with a non-zero status.
+    #[error("`run.pre_command` of service {name} failed with {status}")]
+    PreCommandFailed {
+        /// Name of the service whose pre-command failed.
+        name: Arc<str>,
+        /// Exit status of the pre-command.
+        status: ExitStatus,
+    },
+
+    /// The `run.pre_command` of the only service left to start could not be spawned.
+    #[error("failed to start `run.pre_command` of service {name}")]
+    PreCommandSpawn {
+        /// Name of the service whose pre-command could not be spawned.
+        name: Arc<str>,
+        /// Why spawning the pre-command failed.
+        #[source]
+        source: std::io::Error,
+    },
+
     /// A child process handler task panicked.
     #[error("Child process handler task panicked: {0:?}")]
     Panic(JoinError),
@@ -640,6 +659,7 @@ pub async fn run(
                 r#type,
                 directory,
                 command,
+                pre_command,
             } = run;
 
             let encoded_cfg = config.encode()?;
@@ -655,11 +675,27 @@ pub async fn run(
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
+            let pre = pre_command.split_first().map(|(program, args)| {
+                let mut pre = resolve_tokio_command(program);
+                pre.args(args)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .kill_on_drop(true);
+                if let Some(directory) = &directory {
+                    pre.current_dir(directory);
+                }
+                pre
+            });
             if let Some(directory) = directory {
                 cmd.current_dir(directory);
             }
 
-            Ok((service_name, cmd))
+            Ok(process::ServiceCommands {
+                name: service_name,
+                pre,
+                session: cmd,
+            })
         })
         .collect::<Result<_, UpError>>()?;
 

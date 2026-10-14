@@ -8,6 +8,97 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.273.0](https://github.com/metalbear-co/mirrord/tree/3.273.0) - 2026-10-13
+
+
+### Added
+
+- Added the `get_skill` tool to `mirrord mcp`, and served every vendored skill
+  as an MCP prompt and a `mirrord://skills/<name>` resource.
+- Added the `search_docs` and `read_doc` tools to `mirrord mcp`, for keyword
+  search and reading of the docs, skills, and config options shipped with
+  mirrord, and served every docs page as a `mirrord://docs/<path>` resource.
+- `mirrord subscribe` streams every session without a key and names each
+  event's cluster.
+
+
+### Fixed
+
+- Include Kubernetes type and object metadata when submitting literal database
+  branch credentials, allowing Kubernetes access proxies to decode the request.
+- Preview `secret_mounts` and `db_branches` from a `MirrordSplitConfig` work
+  for users bound to `mirrord-operator-user` by a `RoleBinding`.
+- The `TMPDIR`, `TMP` and `TEMP` environment variables of the target are now
+  not copied to the local process by default, because their directory often
+  does not exist on the local machine. For example, `yarn run` failed with
+  `ENOENT: no such file or directory, lstat` on the remote temporary directory.
+- Users bound to `mirrord-operator-user` by a `RoleBinding` can use literal
+  `db_branches` connection values.
+
+## [3.272.0](https://github.com/metalbear-co/mirrord/tree/3.272.0) - 2026-10-11
+
+
+### Added
+
+- - Added local fallback collection and `mirrord diagnose sip-report` for
+  protected macOS binaries that still require Rosetta.
+- Added the `explain_config_option` tool to `mirrord mcp`, which describes a
+  `mirrord.json` or `mirrord-up.yaml` option (docs, type, allowed values,
+  default and required plan) from the installed version's schema.
+- TLS stealing can present a client certificate matching the identity of the
+  original mTLS client: the agent when passing through unmatched traffic
+  (`agentAsClient.identities` in the TLS steal configuration), and the local
+  delivery when sending stolen and mirrored traffic to the local application
+  (`feature.network.incoming.tls_delivery.client_identities`).
+- Vendored the mirrord docs and skills into the `mirrord mcp` binary from
+  pinned commits, which `mirrord://info` reports and every release PR bumps.
+- `feature.db_branches` accepts `"*"` or entry ids from the target's
+  MirrordSplitConfig.
+- `mirrord-schema.json` and `mirrord-up-schema.json` record the mirrord plan
+  (`oss`, `team` or `enterprise`) each feature option and target kind needs, as
+  `x-mirrord-plan`.
+
+
+### Fixed
+
+- An invalid `feature.network.incoming.http_filter` (a regex, method or jq
+  expression that doesn't compile, or `method_filter`/`header_filter_jq`
+  combined with another filter) is reported when the config is verified,
+  instead of crashing the layer when it starts.
+- Bun users now resolve cluster hostnames, without needing
+  `BUN_FEATURE_FLAG_DISABLE_DNS_CACHE_LIBINFO`.
+- Corrected CI command help: `mirrord ci start` and `mirrord ci container` use
+  automatic ordinary credentials without a CI API key when a supporting Free
+  operator advertises keyless CI; other operator-backed CI sessions require a
+  CI API key. No-operator sessions and local `mirrord ci stop` do not require
+  one.
+- Fixed `unlinkat` relative to an opened remote directory to keep using that
+  directory after it is renamed or its original path is replaced, preventing
+  deletion in a replacement directory.
+- Fixed some calls in mirrord that waited for I/O while they kept an internal
+  lock: `close` on a socket or a remote file, `closedir` on a remote directory,
+  `connect` to a local listener, and `dup2` or `dup3` onto a remote file. Other
+  threads could stall while one of these calls waited, if they made socket or
+  file calls or started a process. Also fixed a remote directory that could
+  stay open after `closedir` when another thread called `fork` at the same
+  time.
+- Fixed the interactive progress spinner on Windows erasing the output of the
+  program started by `mirrord exec`.
+- On Windows, programs that mirrord runs by name (`docker`, `podman`,
+  `redis-server`, `git`, ...) are now also found when they are installed as
+  `.cmd`/`.bat` shims, the same way `cmd.exe` and PowerShell resolve them
+  through `PATHEXT`.
+- Starting a queue-splitting session shows why the target's pods aren't ready
+  yet, and `mirrord queues status` lists each pod's reason.
+- The `validate_config` tool of `mirrord mcp` checks each `mirrord-up.yaml`
+  service the way `mirrord up` assembles it, so it reports services that
+  `mirrord up` would refuse to run, such as a targetless service in `split`
+  mode or a `replace` service with a pod target.
+- The configuration reference describes what MySQL and MariaDB `copy.dump_args`
+  can leave out of a branch.
+- Warnings about a database branch, such as a server version mismatch, show in
+  the session that creates the branch, not only in sessions that reuse it.
+
 ## [3.271.0](https://github.com/metalbear-co/mirrord/tree/3.271.0) - 2026-10-07
 
 

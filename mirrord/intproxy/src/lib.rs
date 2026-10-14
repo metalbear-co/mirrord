@@ -65,6 +65,7 @@ pub mod proxies;
 mod remote_resources;
 mod request_queue;
 pub mod session_monitor;
+pub mod sidecar_protocol;
 
 /// Extracts the primary file path from a [`FileRequest`] variant, if one exists.
 ///

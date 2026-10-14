@@ -97,48 +97,6 @@ A service marked **Discovered** wasn't targeted by any session. The map only kno
 
 Categories come from ports and from which end of a connection a service was on. Service names are never used to guess them, so a Postgres served on a custom port shows up as a plain **Service**. Only the lowest port a workload reached on a Service is kept, so a database that is also reached on a lower port, such as 80, can show up as a plain **Service** too. Click a chip in the legend to hide that category.
 
-### Well-known ports
-
-| Category | Product | Ports |
-| --- | --- | --- |
-| **Data store** | Postgres | 5432 |
-| **Data store** | PgBouncer | 6432 |
-| **Data store** | MySQL | 3306, 33060 |
-| **Data store** | MongoDB | 27017-27019 |
-| **Data store** | Redis | 6379 |
-| **Data store** | Redis Sentinel | 26379 |
-| **Data store** | Memcached | 11211 |
-| **Data store** | Cassandra | 9042 |
-| **Data store** | Elasticsearch | 9200, 9300 |
-| **Data store** | ClickHouse | 8123, 9440 |
-| **Data store** | CockroachDB | 26257 |
-| **Data store** | SQL Server | 1433 |
-| **Data store** | Oracle | 1521 |
-| **Data store** | CouchDB | 5984 |
-| **Data store** | ArangoDB | 8529 |
-| **Data store** | Neo4j | 7687 |
-| **Data store** | InfluxDB | 8086 |
-| **Data store** | Qdrant | 6333 |
-| **Data store** | Milvus | 19530 |
-| **Queue** | Kafka | 9092 |
-| **Queue** | RabbitMQ | 5671, 5672, 15672 |
-| **Queue** | NATS | 4222 |
-| **Queue** | Temporal | 7233 |
-| **Queue** | ActiveMQ | 61616 |
-| **Queue** | MQTT | 1883, 8883 |
-| **Queue** | NSQ | 4150 |
-| **Queue** | Pulsar | 6650 |
-| **Infrastructure** | Vault | 8200 |
-| **Infrastructure** | Consul | 8500 |
-| **Infrastructure** | Prometheus | 9090 |
-| **Infrastructure** | Jaeger | 14250, 14268, 16686 |
-| **Infrastructure** | OpenTelemetry | 4317, 4318 |
-| **Infrastructure** | Zipkin | 9411 |
-| **Infrastructure** | StatsD | 8125 |
-| **Infrastructure** | Datadog APM | 8126 |
-| **Infrastructure** | etcd | 2379 |
-| **Infrastructure** | DNS | 53 |
-
 Other controls:
 
 - **Find a service** searches by name. Press `/` to jump to it.
@@ -171,3 +129,13 @@ Some other cases that leave gaps:
 - On the cloud dashboard, the session ran with identity sharing off or `cloud.anonymizeData: true`.
 
 To see a service's connections, run a session against the workload and exercise the connections you want to inspect.
+
+## Well-known ports
+
+The ports that put a service in the **Data store**, **Queue** or **Infrastructure** category:
+
+| Category | Products (ports) |
+| --- | --- |
+| **Data store** | Postgres (5432), PgBouncer (6432), MySQL (3306, 33060), MongoDB (27017-27019), Redis (6379), Redis Sentinel (26379), Memcached (11211), Cassandra (9042), Elasticsearch (9200, 9300), ClickHouse (8123, 9440), CockroachDB (26257), SQL Server (1433), Oracle (1521), CouchDB (5984), ArangoDB (8529), Neo4j (7687), InfluxDB (8086), Qdrant (6333), Milvus (19530) |
+| **Queue** | Kafka (9092), RabbitMQ (5671, 5672, 15672), NATS (4222), Temporal (7233), ActiveMQ (61616), MQTT (1883, 8883), NSQ (4150), Pulsar (6650) |
+| **Infrastructure** | Vault (8200), Consul (8500), Prometheus (9090), Jaeger (14250, 14268, 16686), OpenTelemetry (4317, 4318), Zipkin (9411), StatsD (8125), Datadog APM (8126), etcd (2379), DNS (53) |

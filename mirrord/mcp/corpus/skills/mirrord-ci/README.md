@@ -54,7 +54,7 @@ mirrord ci stop
 ## References
 
 This skill uses local reference files:
-- `references/schema.json` - mirrord JSON Schema for config validation
+- [`../mirrord-config/references/schema.json`](../mirrord-config/references/schema.json) - mirrord JSON Schema, synced from upstream. The fence tag check validates config examples against it; read it only as a last resort, when neither `validate_config` (mirrord MCP server) nor `mirrord verify-config` is available
 - `references/troubleshooting.md` - Common issues and solutions
 
 ## Learn more

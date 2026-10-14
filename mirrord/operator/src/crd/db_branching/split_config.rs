@@ -1,6 +1,6 @@
 //! Resolving a session's `feature.db_branches: "*"` / `["id", ...]` against the `dbBranches`
-//! entries on the target's `MirrordSplitConfig`: the request the CLI posts to
-//! `POST /apis/operator.metalbear.co/v1/splitconfigdbbranches` and the operator's answer.
+//! entries on the target's `MirrordSplitConfig`: the request the CLI posts to the operator's
+//! `splitconfigdbbranches` route and the operator's answer.
 //!
 //! The CLI keeps creating the branches itself from the resolved entries; the operator only owns
 //! the lookup, since it knows which `MirrordSplitConfig`s belong to a workload and how their

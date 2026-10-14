@@ -34,7 +34,7 @@ Rules:
 
 ### Plaintext self-hosted frontend
 
-```yaml
+```yaml crd
 apiVersion: mirrord.metalbear.co/v1
 kind: MirrordPropertyList
 metadata:
@@ -52,7 +52,7 @@ spec:
 
 Temporal Cloud's certificate is signed by a publicly trusted CA, so only `tls: "true"` and the key are needed:
 
-```yaml
+```yaml crd
 spec:
   properties:
     - name: address
@@ -72,7 +72,7 @@ spec:
 
 For a frontend whose certificate is signed by a private CA (common self-hosted), set `tlsCaCert`. If the frontend requires **mutual TLS** (Temporal Cloud mTLS auth, or an mTLS-protected self-hosted cluster), also set `tlsClientCert` + `tlsClientKey`. Keep all certificate material in a Kubernetes Secret:
 
-```yaml
+```yaml crd
 spec:
   properties:
     - name: address
@@ -113,7 +113,7 @@ A second, separate `MirrordPropertyList` can hold Temporal per-queue options, re
 | --- | --- | :------: | :-----: |
 | `max_buffered_tasks` | Maximum number of tasks the operator buffers per virtual task queue. When the limit is reached, a session queue overflows to the main queue. Positive integer to cap; omit or `0` for unlimited. | No | `0` (unlimited) |
 
-```yaml
+```yaml crd
 apiVersion: mirrord.metalbear.co/v1
 kind: MirrordPropertyList
 metadata:

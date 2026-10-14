@@ -177,6 +177,78 @@ pub enum ExplainConfigOptionError {
 static LAYER_PATHS: LazyLock<Vec<String>> = LazyLock::new(|| known_paths(&LAYER_SCHEMA.raw));
 static UP_PATHS: LazyLock<Vec<String>> = LazyLock::new(|| known_paths(&UP_SCHEMA.raw));
 
+/// A config option as `search_docs` indexes it and `read_doc` serves it, so an agent can find an
+/// option by what it does without knowing its path. The docs corpus has no config reference: the
+/// one on the website is generated from the same doc comments as the schema, which is the
+/// version-accurate copy.
+pub(crate) struct OptionPage {
+    /// `config/<file>/<option>`, e.g. `config/mirrord.json/agent.ttl`.
+    pub(crate) path: String,
+    pub(crate) title: String,
+    pub(crate) resource_uri: String,
+    pub(crate) description: String,
+}
+
+/// Every option of both config files that has a description.
+pub(crate) static OPTION_PAGES: LazyLock<Vec<OptionPage>> = LazyLock::new(|| {
+    [
+        (ConfigFormat::MirrordJson, &*LAYER_PATHS),
+        (ConfigFormat::MirrordUpYaml, &*UP_PATHS),
+    ]
+    .into_iter()
+    .flat_map(|(format, paths)| {
+        paths.iter().filter_map(move |option| {
+            let args = ExplainConfigOptionArgs {
+                path: option.clone(),
+                format: Some(format),
+            };
+            let description = explain_config_option(args).ok()?.description?;
+            let file = format.file_name();
+            Some(OptionPage {
+                path: format!("config/{file}/{option}"),
+                title: format!("`{option}` in `{file}`"),
+                resource_uri: format!("mirrord://config/{file}/{option}"),
+                description,
+            })
+        })
+    })
+    .collect()
+});
+
+/// The option at `path`, an [`OptionPage::path`], as `read_doc` and its resource serve it: what
+/// `explain_config_option` says about it, under the same header as a docs page.
+pub(crate) fn read_option(path: &str) -> Option<String> {
+    let (file, option) = path.strip_prefix("config/")?.split_once('/')?;
+    let format = [ConfigFormat::MirrordJson, ConfigFormat::MirrordUpYaml]
+        .into_iter()
+        .find(|format| format.file_name() == file)?;
+    let args = ExplainConfigOptionArgs {
+        path: option.to_owned(),
+        format: Some(format),
+    };
+    let explained = explain_config_option(args)
+        .ok()
+        .filter(|output| output.found)?;
+    // The website's anchors join an option's segments with `-`, and prefix top-level ones.
+    let source = match format {
+        ConfigFormat::MirrordJson if option.contains('.') => format!(
+            "https://metalbear.com/mirrord/docs/config/options#{}",
+            option.replace('.', "-")
+        ),
+        ConfigFormat::MirrordJson => {
+            format!("https://metalbear.com/mirrord/docs/config/options#root-{option}")
+        }
+        ConfigFormat::MirrordUpYaml => {
+            "https://metalbear.com/mirrord/docs/using-mirrord/multiple-concurrent-sessions/"
+                .to_owned()
+        }
+    };
+    let explained = serde_json::to_string_pretty(&explained).ok()?;
+    Some(format!(
+        "Title: `{option}` in `{file}`\nSource: {source}\n\n```json\n{explained}\n```\n"
+    ))
+}
+
 pub fn explain_config_option(
     ExplainConfigOptionArgs { path, format }: ExplainConfigOptionArgs,
 ) -> Result<ExplainConfigOptionOutput, ExplainConfigOptionError> {
