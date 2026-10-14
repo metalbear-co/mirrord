@@ -199,6 +199,7 @@ impl GlobalConfigError {
 }
 
 /// Handles all `mirrord config` subcommands.
+#[mirrord_macros::boxed_future]
 pub(crate) async fn global_config_command(args: GlobalConfigArgs) -> Result<(), GlobalConfigError> {
     match args.command {
         GlobalConfigCommand::Set(args) => set(args).await,

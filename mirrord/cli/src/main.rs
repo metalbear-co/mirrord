@@ -804,6 +804,7 @@ this session.",
     }
 }
 
+#[mirrord_macros::boxed_future]
 async fn exec(
     args: &ExecArgs,
     watch: drain::Watch,
@@ -924,6 +925,7 @@ async fn exec(
     res
 }
 
+#[mirrord_macros::boxed_future]
 async fn port_forward(
     args: &PortForwardArgs,
     watch: drain::Watch,

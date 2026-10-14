@@ -262,6 +262,7 @@ async fn prepare_proxies(
 /// 1. Spawns the agent (cluster), mirrord-extproxy (natively), and mirrord-intproxy (sidecar).
 /// 2. Adds additional env, volume, and network to the user container command.
 /// 3. Executes the user container command.
+#[mirrord_macros::boxed_future]
 #[cfg_attr(windows, allow(unused))]
 #[tracing::instrument(level = Level::DEBUG, skip(watch, progress), ret, err(level = Level::DEBUG, Debug))]
 pub(crate) async fn container_command(
@@ -381,6 +382,7 @@ pub(crate) async fn container_command(
 /// 3. Outputs the [`ExtensionRuntimeCommand`](command_builder::ExtensionRuntimeCommand) for the
 ///    extension.
 /// 4. Waits for mirrord-extproxy exit.
+#[mirrord_macros::boxed_future]
 #[tracing::instrument(level = Level::DEBUG, skip(watch, progress), ret, err(level = Level::DEBUG, Debug))]
 pub async fn container_ext_command(
     config_file: Option<PathBuf>,
