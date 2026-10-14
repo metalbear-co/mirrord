@@ -103,8 +103,9 @@ The CLI polls its whole runtime on the main thread, and on Windows that thread o
 `mirrord/cli/build.rs`. Debug builds are hit hardest: a function's frame keeps a slot for every future it builds
 before awaiting it, so one `match` with a large future per arm pays for all of them.
 
-- Await large or per-branch futures through `util::boxed(|| f(..))`. `Box::pin(f(..))` still builds `f(..)` in the
-  caller's frame first.
+- Put `#[mirrord_macros::boxed_future]` (above `#[tracing::instrument]`) on an `async fn` with a large future, such as
+  a subcommand or a connection step: it builds its future on the heap, and callers keep writing `f(..).await`.
+  `Box::pin(f(..))` and `.boxed()` don't help in a debug build, since `f(..)` is still built in the caller's frame first.
 - On a stack overflow, the Windows CLI prints every frame with its size, largest first. Windows CI runs
   `scripts/win_stack_check.ps1`, which fails when the CLI outgrows its budget and shows that report.
 - `scripts/win_stack_report.ps1` measures peak stack and large frames locally.
