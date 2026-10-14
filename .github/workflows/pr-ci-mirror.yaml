@@ -1,0 +1,34 @@
+# Not for merge: runs the jobs ci.yaml runs for #5078 while it's a draft (ci.yaml skips drafts,
+# and its change detection finds nothing on workflow_dispatch). This branch is #5078's head plus
+# this file.
+name: "CI mirror for #5078"
+on: push
+permissions:
+  contents: read
+  packages: read
+jobs:
+  lint:
+    uses: ./.github/workflows/check-lint.yaml
+    with:
+      run_markdown: true
+      run_rust: true
+      run_vale: true
+      run_wizard_frontend: false
+      run_ui_frontend: false
+      rust_toolchain: nightly-2026-08-13
+    secrets: inherit
+  windows_tests:
+    uses: ./.github/workflows/test-windows.yaml
+    with:
+      rust_toolchain: nightly-2026-08-13
+  macos_tests:
+    uses: ./.github/workflows/test-macos.yaml
+    with:
+      rust_toolchain: nightly-2026-08-13
+    secrets: inherit
+  integration_tests:
+    uses: ./.github/workflows/test-integration.yaml
+  rust_docs:
+    uses: ./.github/workflows/check-rust-docs.yaml
+    with:
+      rust_toolchain: nightly-2026-08-13
