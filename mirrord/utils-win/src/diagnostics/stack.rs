@@ -394,16 +394,16 @@ fn format_report(frames: &[Frame], names: &[String], requested: usize) -> String
         );
     }
 
-    let mut largest: Vec<usize> = (0..frames.len()).collect();
-    largest.sort_by(|left, right| sizes[*right].cmp(&sizes[*left]));
+    let mut largest: Vec<(usize, &String)> = sizes.iter().copied().zip(names).collect();
+    largest.sort_by(|(left, _), (right, _)| right.cmp(left));
     let _ = writeln!(report, "\nLargest frames:\n");
-    for index in largest.into_iter().take(LARGEST_FRAMES) {
+    for (size, name) in largest.into_iter().take(LARGEST_FRAMES) {
         let _ = writeln!(
             report,
             "{:>12}  {:>3}%  {}",
-            kib(sizes[index]),
-            sizes[index] * 100 / total.max(1),
-            cut(&names[index])
+            kib(size),
+            size * 100 / total.max(1),
+            cut(name)
         );
     }
     report.push('\n');
