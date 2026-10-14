@@ -91,6 +91,8 @@ jobs:
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
         run: cargo build -p mirrord
+      - name: mirrord stack check
+        run: ./scripts/win_stack_check.ps1 -Exe target/debug/mirrord.exe
       - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
         with:
           tool: cargo-nextest
