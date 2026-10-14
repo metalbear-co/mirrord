@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt,
     ops::Not,
     time::Duration,
@@ -65,7 +65,7 @@ use crate::{
             relay_source_compatibility_warnings, reused_branch_connection_sources,
             wait_for_pending_branches,
         },
-        queue_split_progress::QueueSplitProgress,
+        queue_split_progress::{QueueSplitProgress, mirror_requested},
         split_config_branches::{
             MIRRORD_SESSION_KEY_LABEL, ResolvedSplitConfigBranches, check_attach_copy_mode,
             entries_from_response, same_source_warnings,
@@ -2842,7 +2842,11 @@ impl OperatorApi<PreparedClientCert> {
             })?;
         subtask.success(Some("target copy created"));
 
-        self.wait_for_copy_ready(copied, progress).await
+        // A fresh copy's split is also visible to the connect that follows, under the same
+        // session id, and that connect reports it. Reporting it here too would name each Temporal
+        // queue twice.
+        self.wait_for_copy_ready(copied, BTreeSet::new(), progress)
+            .await
     }
 
     async fn try_reuse_copy_target<P: Progress>(
@@ -2881,8 +2885,15 @@ impl OperatorApi<PreparedClientCert> {
                     })
             });
 
+        // A reused copy's split belongs to the session that created the copy, so the connect that
+        // follows (under a new session id) cannot see it; this wait is the only place to report
+        // it.
+        let mirror_requested = mirror_requested(&layer_config.feature.split_queues);
         let existing = match existing {
-            Some(existing) => match self.wait_for_copy_ready(existing, progress).await {
+            Some(existing) => match self
+                .wait_for_copy_ready(existing, mirror_requested, progress)
+                .await
+            {
                 Ok(copied) => Some(copied),
                 Err(OperatorApiError::CopiedTargetFailed { .. }) => None,
                 Err(error) => return Err(error),
@@ -2899,10 +2910,12 @@ impl OperatorApi<PreparedClientCert> {
         Ok(existing)
     }
 
-    /// Polls the given [`CopyTargetCrd`] for readiness.
+    /// Polls the given [`CopyTargetCrd`] for readiness, reporting its queue split meanwhile.
+    /// `mirror_requested` is what [`QueueSplitProgress`] warns about, see [`mirror_requested`].
     async fn wait_for_copy_ready<P: Progress>(
         &self,
         mut copied: CopyTargetCrd,
+        mirror_requested: BTreeSet<String>,
         progress: &P,
     ) -> OperatorApiResult<CopyTargetCrd> {
         let namespace = copied
@@ -2925,7 +2938,13 @@ impl OperatorApi<PreparedClientCert> {
             .then(|| copied.status.as_ref()?.creator_session().id.clone())
             .flatten()
             .map(|session| {
-                QueueSplitProgress::new(self.client.clone(), namespace, session, progress)
+                QueueSplitProgress::new(
+                    self.client.clone(),
+                    namespace,
+                    session,
+                    mirror_requested,
+                    progress,
+                )
             });
 
         loop {
@@ -2938,7 +2957,7 @@ impl OperatorApi<PreparedClientCert> {
                 }
                 Some(CopyTargetPhase::Ready) | None => {
                     if let Some(split_progress) = split_progress {
-                        split_progress.finish();
+                        split_progress.finish().await;
                     }
                     if let Some(mut subtask) = wait_subtask {
                         subtask.success(None);
@@ -3056,6 +3075,7 @@ impl OperatorApi<PreparedClientCert> {
             self.client.clone(),
             namespace,
             format!("{:X}", session.id),
+            mirror_requested(&layer_config.feature.split_queues),
             progress,
         )
         .run(self.connect_to_session(session))
