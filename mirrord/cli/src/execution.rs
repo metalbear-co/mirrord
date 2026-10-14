@@ -56,7 +56,7 @@ use crate::{
     error::CliError,
     extract::extract_library,
     up::MirrordUp,
-    util::remove_proxy_env,
+    util::{self, remove_proxy_env},
 };
 
 #[cfg(target_os = "macos")]
@@ -652,18 +652,20 @@ impl MirrordExecution {
             connector,
             api_version,
             target_container_ports,
-        } = create_and_connect(
-            config,
-            progress,
-            analytics,
-            branch_name,
-            mirrord_for_ci,
-            mirrord_up.as_ref(),
-        )
+        } = util::boxed(|| {
+            create_and_connect(
+                config,
+                progress,
+                analytics,
+                branch_name,
+                mirrord_for_ci,
+                mirrord_up.as_ref(),
+            )
+        })
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let mut client = connector.into_client().await?;
+        let mut client = util::boxed(|| connector.into_client()).await?;
 
         config
             .feature
@@ -675,7 +677,7 @@ impl MirrordExecution {
         let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
         } else {
-            Self::fetch_env_vars(config, &mut client)
+            util::boxed(|| Self::fetch_env_vars(config, &mut client))
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
         };
