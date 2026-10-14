@@ -1,6 +1,133 @@
+use std::fmt;
+
 use chrono::NaiveDate;
+#[cfg(feature = "crd")]
+use chrono::{DateTime, Utc};
+#[cfg(feature = "crd")]
+use kube::core::response::StatusCause;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "crd")]
+use uuid::Uuid;
+
+#[cfg(feature = "crd")]
+use crate::crd::NewOperatorFeature;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RequiredPlan {
+    Team,
+    Enterprise,
+    #[serde(other)]
+    Unknown,
+}
+
+impl fmt::Display for RequiredPlan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Team => "Team",
+            Self::Enterprise => "Enterprise",
+            Self::Unknown => "unknown",
+        })
+    }
+}
+
+/// Identifies known features denied by the license regardless of operator configuration, so clients
+/// can explain paid restrictions even when the features are disabled.
+#[cfg(feature = "crd")]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GatedFeature {
+    pub feature: NewOperatorFeature,
+    pub required_plan: RequiredPlan,
+}
+
+#[cfg(feature = "crd")]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PaidFeatureGate {
+    pub feature_config_key: String,
+    pub required_plan: RequiredPlan,
+}
+
+#[cfg(feature = "crd")]
+impl fmt::Display for PaidFeatureGate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Feature `{}` requires a mirrord {} plan.",
+            self.feature_config_key, self.required_plan
+        )
+    }
+}
+
+#[cfg(feature = "crd")]
+impl PaidFeatureGate {
+    /// Distinguishes license refusals from ordinary Kubernetes authorization errors.
+    pub const STATUS_REASON: &'static str = "FeatureNotLicensed";
+
+    const STATUS_CAUSE_REASON: &'static str = "PaidFeatureGate";
+
+    /// A marked, serialized payload lets clients recognize paid gates without parsing the
+    /// human-readable diagnostic or independently encoding the plan and configuration key.
+    pub fn to_status_cause(&self) -> Result<StatusCause, serde_json::Error> {
+        Ok(StatusCause {
+            reason: Self::STATUS_CAUSE_REASON.to_owned(),
+            message: serde_json::to_string(self)?,
+            field: String::new(),
+        })
+    }
+}
+
+#[cfg(feature = "client")]
+impl PaidFeatureGate {
+    /// Only the structured operator contract identifies a license refusal. Ordinary Kubernetes
+    /// authorization errors and legacy reason-only responses keep their original diagnostics.
+    pub fn from_status(status: &kube::core::Status) -> Option<Self> {
+        if status.code != 403 || status.reason != Self::STATUS_REASON {
+            return None;
+        }
+        let mut causes = status
+            .details
+            .as_ref()?
+            .causes
+            .iter()
+            .filter(|cause| cause.reason == Self::STATUS_CAUSE_REASON);
+        let cause = causes.next()?;
+        if causes.next().is_some() {
+            return None;
+        }
+        let gate: Self = serde_json::from_str(&cause.message).ok()?;
+        // These finite keys also keep billing links independent of arbitrary server input.
+        if matches!(
+            gate.required_plan,
+            RequiredPlan::Team | RequiredPlan::Enterprise
+        ) && matches!(
+            gate.feature_config_key.as_str(),
+            "feature.copy_target"
+                | "feature.split_queues"
+                | "feature.db_branches"
+                | "feature.preview"
+                | "target.path"
+                | "multi_cluster"
+                | "ci"
+        ) {
+            Some(gate)
+        } else {
+            None
+        }
+    }
+}
+
+/// Reporting carries no resource authority or caller-supplied license/user attribution. The
+/// event identity survives transport retries so downstream stores can absorb replays.
+#[cfg(feature = "crd")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureGateHitRequest {
+    pub event_id: Uuid,
+    pub timestamp: DateTime<Utc>,
+    pub feature: NewOperatorFeature,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_id: Option<Uuid>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LicenseInfoOwned {

@@ -44,7 +44,7 @@ use mirrord_config::{
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
-    client::{NoClientCert, OperatorApi, connect_params::BranchDbNames},
+    client::{NoClientCert, OperatorApi, connect_params::BranchDbNames, error::OperatorApiError},
     crd::{
         MirrordOperatorSpec, NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
@@ -137,48 +137,57 @@ async fn preview_start(
 
     let (operator_api, api) =
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
-    operator_api.check_feature_support(&layer_config, false)?;
-
-    if supplied_objects.is_some() {
-        require_spec_resources_support(&operator_api.operator().spec)?;
-    }
-
     let is_cronjob_target = matches!(layer_config.target.path, Some(Target::CronJob(_)));
-    if is_cronjob_target {
-        operator_api
-            .operator()
-            .spec
-            .require_feature(NewOperatorFeature::PreviewCronJobTarget)?;
-    }
-    if let Some(Target::Label(label_target)) = &layer_config.target.path {
-        operator_api
-            .operator()
-            .spec
-            .require_feature(NewOperatorFeature::PreviewLabelTarget)?;
+    let feature_support = || -> CliResult<()> {
+        operator_api.check_feature_support(&layer_config, false)?;
 
-        // Branch preparation reads a single workload out of the target and a label selector
-        // names none, so it would fail later. Refuse here, before the existing session with the
-        // same key is replaced, so a bad config never tears down a running preview.
-        if !layer_config.feature.db_branches.is_empty() {
-            return Err(CliError::UnsupportedTargetConfig(format!(
-                "database branching does not support label target `{label_target}`; remove \
-                 `feature.db_branches` or target a single workload"
-            )));
+        if supplied_objects.is_some() {
+            require_spec_resources_support(&operator_api.operator().spec)?;
         }
-    }
-    // A `"*"` / ids request needs the operator's lookup. Refuse here too, before the existing
-    // session with the same key is replaced, so an older operator never tears down a running
-    // preview and then fails to start its replacement.
-    if layer_config
-        .feature
-        .db_branches
-        .split_config_request()
-        .is_some()
-    {
-        operator_api
-            .operator()
-            .spec
-            .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
+
+        if is_cronjob_target {
+            operator_api
+                .operator()
+                .spec
+                .require_feature(NewOperatorFeature::PreviewCronJobTarget)?;
+        }
+        if let Some(Target::Label(label_target)) = &layer_config.target.path {
+            operator_api
+                .operator()
+                .spec
+                .require_feature(NewOperatorFeature::PreviewLabelTarget)?;
+
+            // Branch preparation reads a single workload out of the target and a label selector
+            // names none, so it would fail later. Refuse here, before the existing session with the
+            // same key is replaced, so a bad config never tears down a running preview.
+            if layer_config.feature.db_branches.is_empty().not() {
+                return Err(CliError::UnsupportedTargetConfig(format!(
+                    "database branching does not support label target `{label_target}`; remove \
+                 `feature.db_branches` or target a single workload"
+                )));
+            }
+        }
+        // A `"*"` / ids request needs the operator's lookup. Refuse here too, before the existing
+        // session with the same key is replaced, so an older operator never tears down a running
+        // preview and then fails to start its replacement.
+        if layer_config
+            .feature
+            .db_branches
+            .split_config_request()
+            .is_some()
+        {
+            operator_api
+                .operator()
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
+        }
+        Ok(())
+    };
+    if let Err(error) = feature_support() {
+        if let CliError::LocalPaidFeatureRequiresPlan { feature, .. } = &error {
+            operator_api.report_feature_gate(*feature).await;
+        }
+        return Err(error);
     }
 
     // Create the `PreviewSession` resource in the cluster. The CR name is derived from
@@ -236,11 +245,19 @@ async fn preview_start(
                     .incoming
                     .https_delivery
                     .as_ref());
-            let (tls_delivery, warnings) = resolve_tls_delivery(
+            let (tls_delivery, warnings) = match resolve_tls_delivery(
                 tls_config,
                 &mut secret_values,
                 &operator_api.operator().spec,
-            )?;
+            ) {
+                Ok(delivery) => delivery,
+                Err(error) => {
+                    if let CliError::LocalPaidFeatureRequiresPlan { feature, .. } = &error {
+                        operator_api.report_feature_gate(*feature).await;
+                    }
+                    return Err(error);
+                }
+            };
             for warning in warnings {
                 subtask.warning(&warning);
             }
@@ -306,9 +323,18 @@ async fn preview_start(
     let branch_db_names = if layer_config.feature.db_branches.is_empty() {
         BranchDbNames::default()
     } else {
-        operator_api
+        match operator_api
             .prepare_branch_dbs(&mut layer_config, &progress)
-            .await?
+            .await
+        {
+            Ok(names) => names,
+            Err(error) => {
+                if let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error {
+                    operator_api.report_feature_gate(*feature).await;
+                }
+                return Err(error.into());
+            }
+        }
     };
 
     // Check for an existing session with the same key+target.
@@ -1614,13 +1640,17 @@ async fn create_preview_api(
 
     operator_api.check_license_validity(progress)?;
 
-    operator_api
+    if let Err(error) = operator_api
         .operator()
         .spec
         .require_feature(NewOperatorFeature::PreviewEnv)
-        .inspect_err(|_| {
-            subtask.failure(None);
-        })?;
+    {
+        subtask.failure(None);
+        if let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error {
+            operator_api.report_feature_gate(*feature).await;
+        }
+        return Err(error.into());
+    }
 
     subtask.success(Some("connected to operator"));
 
