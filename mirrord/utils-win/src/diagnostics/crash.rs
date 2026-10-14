@@ -511,7 +511,11 @@ unsafe fn write_crash_record(state: &CrashState, info: *mut EXCEPTION_POINTERS) 
             .and_then(|modules| modules.resolve_offset(frame.ip))
         {
             Some((module, offset)) => {
-                let _ = writeln!(record, "  {size:>9} {:#018x} {module}+{offset:#x}", frame.ip);
+                let _ = writeln!(
+                    record,
+                    "  {size:>9} {:#018x} {module}+{offset:#x}",
+                    frame.ip
+                );
             }
             None => {
                 let _ = writeln!(record, "  {size:>9} {:#018x}", frame.ip);
