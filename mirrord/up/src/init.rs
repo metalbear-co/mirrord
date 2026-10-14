@@ -142,7 +142,7 @@ pub async fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
         return Ok(());
     };
 
-    std::fs::write(&path, &rendered)?;
+    tokio::fs::write(&path, &rendered).await?;
     println!("Wrote {}.", path.display());
     Ok(())
 }
