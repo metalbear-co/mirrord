@@ -22,9 +22,9 @@ use windows_sys::Win32::{
     System::{
         Diagnostics::Debug::{
             AddVectoredExceptionHandler, CONTEXT, EXCEPTION_CONTINUE_SEARCH, EXCEPTION_POINTERS,
-            RtlLookupFunctionEntry, RtlVirtualUnwind, SYMBOL_INFOW, SYMOPT_DEFERRED_LOADS,
-            SYMOPT_FAIL_CRITICAL_ERRORS, SYMOPT_NO_PROMPTS, SYMOPT_UNDNAME, SymCleanup,
-            SymFromAddrW, SymInitializeW, SymSetOptions, UNW_FLAG_NHANDLER,
+            RtlLookupFunctionEntry, RtlVirtualUnwind, SYMBOL_INFOW, SYMFLAG_PUBLIC_CODE,
+            SYMOPT_DEFERRED_LOADS, SYMOPT_FAIL_CRITICAL_ERRORS, SYMOPT_NO_PROMPTS, SYMOPT_UNDNAME,
+            SymCleanup, SymFromAddrW, SymInitializeW, SymSetOptions, UNW_FLAG_NHANDLER,
         },
         Threading::{
             CreateThread, GetCurrentProcess, STACK_SIZE_PARAM_IS_A_RESERVATION,
@@ -209,7 +209,10 @@ fn symbolize(frames: &[Frame]) -> Vec<String> {
         .map(|dir| dir.encode_wide().chain([0]).collect::<Vec<u16>>());
     let symbols = unsafe {
         SymSetOptions(
-            SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_FAIL_CRITICAL_ERRORS | SYMOPT_NO_PROMPTS,
+            SYMOPT_UNDNAME
+                | SYMOPT_DEFERRED_LOADS
+                | SYMOPT_FAIL_CRITICAL_ERRORS
+                | SYMOPT_NO_PROMPTS,
         );
         SymInitializeW(
             process,
@@ -227,15 +230,29 @@ fn symbolize(frames: &[Frame]) -> Vec<String> {
         .map(|(index, frame)| {
             // A return address points past the call, which may be the next function already.
             let ip = if index == 0 { frame.ip } else { frame.ip - 1 };
-            symbols
-                .then(|| symbol_name(process, ip))
-                .flatten()
-                .or_else(|| {
-                    modules
-                        .resolve_offset(ip)
-                        .map(|(module, offset)| format!("{module}+{offset:#x}"))
-                })
-                .unwrap_or_else(|| format!("{ip:#018x}"))
+            let location = modules
+                .resolve_offset(ip)
+                .map(|(module, offset)| format!("{module}+{offset:#x}"));
+            match (
+                symbols.then(|| symbol_name(process, ip)).flatten(),
+                location,
+            ) {
+                (
+                    Some(Symbol {
+                        name,
+                        public: false,
+                    }),
+                    _,
+                ) => name,
+                (Some(Symbol { name, public: true }), Some(location)) => {
+                    format!("{name} (nearest public symbol, {location})")
+                }
+                (Some(Symbol { name, public: true }), None) => {
+                    format!("{name} (nearest public symbol)")
+                }
+                (None, Some(location)) => location,
+                (None, None) => format!("{ip:#018x}"),
+            }
         })
         .collect();
 
@@ -245,8 +262,19 @@ fn symbolize(frames: &[Frame]) -> Vec<String> {
     names
 }
 
+/// A frame's function name, as `dbghelp` found it.
+struct Symbol {
+    name: String,
+    /// Found among the public symbols only, which is all a PDB without debug info has. A function
+    /// without one of its own then gets the name of the nearest public one before it, so the name
+    /// may be wrong; its module and offset are what a PDB with debug info can resolve exactly.
+    public: bool,
+}
+
 /// The function containing `address`, from loaded symbols.
-fn symbol_name(process: *mut c_void, address: usize) -> Option<String> {
+///
+/// Public symbols hold mangled names, so names are demangled here.
+fn symbol_name(process: *mut c_void, address: usize) -> Option<Symbol> {
     /// `SYMBOL_INFOW` ends in a one-element name array that is really the start of a longer one.
     #[repr(C)]
     struct SymbolInfo {
@@ -267,15 +295,21 @@ fn symbol_name(process: *mut c_void, address: usize) -> Option<String> {
 
     let length = (symbol.info.NameLen as usize).min(MAX_SYMBOL_NAME + 1);
     let name = unsafe { std::slice::from_raw_parts(symbol.info.Name.as_ptr(), length) };
-    Some(String::from_utf16_lossy(name))
+    let name = String::from_utf16_lossy(name);
+    Some(Symbol {
+        // `{:#}` leaves out the crate hashes; anything that isn't a Rust symbol comes back
+        // unchanged.
+        name: format!("{:#}", rustc_demangle::demangle(&name)),
+        public: symbol.info.Flags & SYMFLAG_PUBLIC_CODE != 0,
+    })
 }
 
 /// Formats the report: the stack with sizes, then the largest frames.
 ///
 /// # Arguments
 ///
-/// * `requested` - the overflowing thread's rax, which holds the size of the frame being
-///   allocated when the overflow hit in `__chkstk`.
+/// * `requested` - the overflowing thread's rax, which holds the size of the frame being allocated
+///   when the overflow hit in `__chkstk`.
 fn format_report(frames: &[Frame], names: &[String], requested: usize) -> String {
     let sizes: Vec<usize> = (0..frames.len())
         .map(|index| frame_size(frames, index))

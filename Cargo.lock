@@ -10397,6 +10397,7 @@ dependencies = [
  "embed-resource",
  "mirrord-config",
  "rand 0.10.2",
+ "rustc-demangle",
  "str-win",
  "thiserror 2.0.20",
  "tracing",
