@@ -39,6 +39,7 @@ use mirrord_config::{
             LocalTlsDelivery, TlsClientCertSource, TlsDeliveryProtocol,
         },
         preview::{ConfigMount, ConfigMountType},
+        split_queues::{QueueKind, QueueMode},
     },
     target::{Target, TargetDisplay, label::LabelTarget},
 };
@@ -389,6 +390,16 @@ async fn preview_start(
         sleep_after_secs: idle_config.sleep_after_secs,
         wake_timeout_secs: idle_config.wake_timeout_secs,
     });
+
+    // Preview start never opens an operator websocket, so `QueueSplitProgress` never runs.
+    // The config already names the Temporal queues it asked to mirror (including `*` from
+    // `mirrord up`), so warn from that before the session is created.
+    for id in temporal_mirror_requested(&layer_config.feature.split_queues) {
+        subtask.warning(&format!(
+            "queue `{id}` is a Temporal task queue, and Temporal supports steal only: \
+             matching tasks are stolen from the deployed worker instead of mirrored"
+        ));
+    }
 
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
@@ -1679,6 +1690,18 @@ async fn fetch_preview_logs(
 /// reading logs, so an unreachable route, a lost connection, or pods that are simply gone all
 /// resolve to no logs here. `mirrord preview logs` does NOT use this: there, a failed read is
 /// the only thing worth saying.
+/// Temporal queue ids `config` asks to mirror. Preview start has no queue split view, so `*`
+/// stays `*` and the warning names that instead of the operator-resolved queue.
+fn temporal_mirror_requested(
+    config: &mirrord_config::feature::split_queues::SplitQueuesConfig,
+) -> Vec<String> {
+    config
+        .of_kind(QueueKind::Temporal)
+        .filter(|split| split.queue_mode == QueueMode::Mirror)
+        .map(|split| split.queue_id.to_owned())
+        .collect()
+}
+
 async fn fetch_preview_logs_best_effort(
     client: &Client,
     namespace: &str,
@@ -1982,5 +2005,25 @@ mod tests {
             matches!(&error, CliError::PreviewTlsClientAuthFile { path, .. } if path == Path::new("/definitely/missing.pem")),
             "{error}",
         );
+    }
+
+    /// Preview start never polls the queue split view, so a Temporal `mirror` request has to
+    /// be found on the config itself. A Kafka `*` does not count.
+    #[test]
+    fn temporal_mirror_requested_names_temporal_entries_only() {
+        use mirrord_config::feature::split_queues::{QueueSplit, SplitQueuesConfig};
+
+        let config = SplitQueuesConfig::from_splits([
+            QueueSplit {
+                queue_mode: QueueMode::Mirror,
+                ..QueueSplit::new("tasks", QueueKind::Temporal)
+            },
+            QueueSplit {
+                queue_mode: QueueMode::Mirror,
+                ..QueueSplit::new("*", QueueKind::Kafka)
+            },
+            QueueSplit::new("other", QueueKind::Temporal),
+        ]);
+        assert_eq!(temporal_mirror_requested(&config), ["tasks"]);
     }
 }
