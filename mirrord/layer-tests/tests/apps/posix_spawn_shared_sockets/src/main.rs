@@ -8,6 +8,10 @@ use std::{
 /// bookkeeping, while the socket itself is connected to the local intproxy.
 const PEER: &str = "1.1.1.1:4567";
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "exercises the layer's exec hooks through `Command`'s `posix_spawn` path"
+)]
 fn main() {
     let peer = PEER.parse::<SocketAddr>().unwrap();
 

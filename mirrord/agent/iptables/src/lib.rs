@@ -1,5 +1,9 @@
 #![deny(unused_crate_dependencies)]
 #![cfg(target_os = "linux")]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "Linux-only, the Windows lookup in `mirrord_command::resolve_command` never applies"
+)]
 use std::{fmt::Debug, sync::Arc};
 
 #[cfg(test)]

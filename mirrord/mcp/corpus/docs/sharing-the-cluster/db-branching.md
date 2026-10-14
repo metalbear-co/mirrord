@@ -327,6 +327,67 @@ Profiles work for every engine, each in its own `<engine>BranchConfig` block.
 Branch config profiles require operator and Helm chart `3.190.0` or later, and mirrord CLI `3.244.1` or later. Against an older operator, a branch that sets `profile` fails with a clear error instead of silently running the default settings.
 {% endhint %}
 
+## Branches Defined on the Workload
+
+A cluster admin can define a workload's branches once, on its `MirrordSplitConfig`, and let every session take them from there with `"db_branches": "*"`. This is useful when several services share a database and their branches should match, or when `mirrord exec` and `mirrord up` must not drift: the definition lives next to the workload, not in each developer's `mirrord.json`.
+
+The entries go under `dbBranches` on the workload's `MirrordSplitConfig` (the same resource that defines its queues for [queue splitting](queue-splitting.md); it needs no `queues`). Each entry is a `db_branches` entry with camelCase keys, an `id` sessions refer to, and a `copy` block that also lists the `allowedModes` a session may pick:
+
+An entry differs from an inline `db_branches` entry in three ways, because it lives on the cluster rather than on a developer's machine:
+
+* `location` is not accepted: a split config only branches databases that run in the cluster, never a local Redis.
+* `migrations` need `name` (the source database they run against) and cannot use `path`, a local directory the operator cannot read; bake the files into an image and use `image` with `locations` (flyway) or `searchPath` (liquibase), or the container flavor.
+* `generic` entries have no `copy.mode` or `copy.allowedModes`; a generic branch either runs a copy Job or starts empty.
+
+```yaml
+apiVersion: queues.mirrord.metalbear.co/v1
+kind: MirrordSplitConfig
+metadata:
+  name: cake-maker
+  namespace: bakery
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cake-maker
+  dbBranches:
+    - id: orders-pg
+      type: pg
+      version: "16"
+      ttlSecs: 1800
+      connection:
+        url: DATABASE_URL
+      copy:
+        mode: schema
+        allowedModes: [schema, empty]
+```
+
+The operator checks every entry when the resource is applied and reports the verdict on its `Accepted` condition, so a typo shows up in `kubectl describe` instead of at the first session.
+
+A session asks for every entry with `"*"`, or for some of them by id:
+
+```json
+{
+  "feature": {
+    "db_branches": "*"
+  }
+}
+```
+
+```json
+{
+  "feature": {
+    "db_branches": ["orders-pg", "sessions-redis"]
+  }
+}
+```
+
+* An id that matches no entry fails the session, naming the ids the workload has. A workload with no `dbBranches` gives no branches, and the session continues without them.
+* Inline entries in `mirrord.json` win entirely: with them, the session ignores the workload's `dbBranches` and says which `MirrordSplitConfig` it passed over.
+* The branch id is the entry id plus the session key (`orders-pg-a1b2c3`), so every service started under one key that points at the same entry shares one branch. The first session creates it from its own entry; later ones attach, and only their copy mode is checked: a service whose entry asks for a different mode than the branch was created with fails, naming the service that created it. Two sessions that ask for the same branch at once end up on one branch.
+* Each branch records the source it was copied from (host, port, database) in its status, as far as the operator can see it without reading Secrets. When two branches under one key were copied from the same database, the session that got the second one is told; if they were meant to be one branch, give both entries the same id.
+* The feature needs a mirrord Operator that resolves `dbBranches`; against an older one the session fails before it starts, naming the operator version.
+
 ## Running With DB Branches
 
 1. Run your app with mirrord and set the `db_branches` field in [the mirrord configuration file](https://metalbear.com/mirrord/docs/config).

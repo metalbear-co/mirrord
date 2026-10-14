@@ -3,6 +3,7 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
     pin::Pin,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
     time::Duration,
 };
@@ -62,6 +63,11 @@ pub struct ConnectionInfo {
     /// Set from [`EXTERNAL_IP_FIX`](mirrord_agent_env::envs::EXTERNAL_IP_FIX). See
     /// [`Self::pass_through_connect`].
     pub passthrough_original_dst: bool,
+    /// Optional prepared stream for passthrough connections.
+    ///
+    /// [`Self::pass_through_connect`] consumes this stream once and otherwise opens a new
+    /// connection to [`Self::pass_through_address`].
+    pub(crate) passthrough_stream: Arc<Mutex<Option<TcpStream>>>,
 }
 
 impl ConnectionInfo {
@@ -89,6 +95,9 @@ impl ConnectionInfo {
 
     /// Makes the passthrough TCP connection to [`Self::pass_through_address`].
     ///
+    /// If a prepared stream was provided for this connection, such as the workload-companion
+    /// handoff stream, we consume and return it the first time this method is called.
+    ///
     /// When passing through to the original destination IP (the `external_ip_fix` feature), the
     /// socket is marked with [`envs::PASSTHROUGH_FWMARK`] before connecting, so the redirect
     /// iptables rules `RETURN` it instead of looping it back into the agent.
@@ -97,6 +106,15 @@ impl ConnectionInfo {
     /// socket, so delaying small writes here just adds latency to the relayed connection.
     /// Failing to set it costs latency, not correctness, so it does not fail the connection.
     pub async fn pass_through_connect(&self) -> io::Result<TcpStream> {
+        if let Some(prepared_stream) = {
+            self.passthrough_stream
+                .lock()
+                .map_err(|_| io::Error::other("connection passthrough stream state is poisoned"))?
+                .take()
+        } {
+            return Ok(prepared_stream);
+        }
+
         let address = self.pass_through_address();
 
         if self.passthrough_original_dst.not() {
@@ -232,6 +250,7 @@ impl MaybeHttp {
 
         let original_destination = redirected.destination;
         let peer_addr = redirected.source;
+        let passthrough_stream = redirected.passthrough_stream;
         let local_addr = redirected
             .stream
             .local_addr()
@@ -256,6 +275,7 @@ impl MaybeHttp {
                     peer_addr,
                     tls_connector: None,
                     passthrough_original_dst,
+                    passthrough_stream: Arc::new(Mutex::new(passthrough_stream)),
                 },
             });
         };
@@ -313,6 +333,7 @@ impl MaybeHttp {
                 peer_addr,
                 tls_connector: Some(tls_connector),
                 passthrough_original_dst,
+                passthrough_stream: Arc::new(Mutex::new(passthrough_stream)),
             },
         })
     }

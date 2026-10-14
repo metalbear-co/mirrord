@@ -140,7 +140,7 @@ status:
 * `phase` - `Pending`, `Ready`, or `Failed` (see [Phases](status.md#phases)).
 * `message` - a human-friendly detail, such as a failure reason (present only when there is one).
 * `queues[]` - the queues the operator actually resolved from the target. There can be more than one per filter (for example when an `envLike` regex matches several environment variables). Each entry has an `id`, a `type`, and only the broker-specific names that apply: `queue` (SQS, RabbitMQ, Azure Service Bus, Temporal task queue), `topic` (Kafka, Azure Service Bus, Redis Pub/Sub channel, NATS stream, core NATS subject), `consumerGroup` (Kafka), or `subscription` (GCP Pub/Sub, Azure Service Bus, NATS durable consumer).
-* `targetPods[]` - the target pods seen for the session, each with `patched` (carries the split's env-var patch) and `ready` (running with all containers ready).
+* `targetPods[]` - the target pods seen for the session, each with `patched` (carries the split's env-var patch), `ready` (running with all containers ready), and, for a pod that is not ready, `reason` (what keeps it from being ready).
 
 ### Phases
 

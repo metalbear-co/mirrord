@@ -29,6 +29,7 @@ use inquire::{Confirm, Select};
 use k8s_openapi::api::core::v1::Namespace;
 use miette::Diagnostic;
 use mirrord_analytics::MIRRORD_UP_CORRELATION_ID_ENV;
+use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
     config::{ConfigContext, ConfigError, EnvKey},
     target::{Target, TargetType},
@@ -42,7 +43,7 @@ use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use serde_saphyr::{DefaultMessageFormatter, MessageFormatter};
 use tera::Tera;
 use thiserror::Error;
-use tokio::{process::Command, task::JoinError};
+use tokio::task::JoinError;
 use uuid::Uuid;
 use yamlpatch::{Op, Patch, apply_yaml_patches};
 use yamlpath::{Document, route};
@@ -139,6 +140,25 @@ pub enum UpError {
         name: Arc<str>,
         /// Exit status of the crashed service.
         status: ExitStatus,
+    },
+
+    /// The `run.pre_command` of the only service left to start exited with a non-zero status.
+    #[error("`run.pre_command` of service {name} failed with {status}")]
+    PreCommandFailed {
+        /// Name of the service whose pre-command failed.
+        name: Arc<str>,
+        /// Exit status of the pre-command.
+        status: ExitStatus,
+    },
+
+    /// The `run.pre_command` of the only service left to start could not be spawned.
+    #[error("failed to start `run.pre_command` of service {name}")]
+    PreCommandSpawn {
+        /// Name of the service whose pre-command could not be spawned.
+        name: Arc<str>,
+        /// Why spawning the pre-command failed.
+        #[source]
+        source: std::io::Error,
     },
 
     /// A child process handler task panicked.
@@ -639,11 +659,12 @@ pub async fn run(
                 r#type,
                 directory,
                 command,
+                pre_command,
             } = run;
 
             let encoded_cfg = config.encode()?;
 
-            let mut cmd = Command::new(std::env::current_exe()?);
+            let mut cmd = resolve_tokio_command(std::env::current_exe()?);
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
@@ -654,11 +675,27 @@ pub async fn run(
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
+            let pre = pre_command.split_first().map(|(program, args)| {
+                let mut pre = resolve_tokio_command(program);
+                pre.args(args)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .kill_on_drop(true);
+                if let Some(directory) = &directory {
+                    pre.current_dir(directory);
+                }
+                pre
+            });
             if let Some(directory) = directory {
                 cmd.current_dir(directory);
             }
 
-            Ok((service_name, cmd))
+            Ok(process::ServiceCommands {
+                name: service_name,
+                pre,
+                session: cmd,
+            })
         })
         .collect::<Result<_, UpError>>()?;
 

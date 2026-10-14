@@ -18,6 +18,7 @@ workspace = true
 
 [dependencies]
 mirrord-analytics = { path = "../analytics" }
+mirrord-command = { path = "../command", features = ["tokio"] }
 mirrord-config = { path = "../config" }
 mirrord-kube = { path = "../kube" }
 mirrord-operator = { path = "../operator", default-features = false, features = [

@@ -11,12 +11,18 @@ use rmcp::{
     tool, tool_router,
 };
 
-use crate::McpServer;
+use crate::{McpServer, corpus::SKILLS};
 
 pub mod explain_config_option;
+pub mod get_skill;
+pub mod read_doc;
+pub mod search_docs;
 pub mod validate_config;
 
 use explain_config_option::{ExplainConfigOptionArgs, ExplainConfigOptionOutput};
+use get_skill::GetSkillArgs;
+use read_doc::ReadDocArgs;
+use search_docs::{SearchDocsArgs, SearchDocsOutput};
 use validate_config::{ValidateConfigArgs, ValidateConfigOutput};
 
 #[tool_router(vis = "pub(crate)")]
@@ -59,6 +65,62 @@ impl McpServer {
     ) -> Result<Json<ExplainConfigOptionOutput>, CallToolResult> {
         explain_config_option::explain_config_option(args)
             .map(Json)
+            .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
+    }
+
+    /// List the vendored skills, or get one of them or a file bundled with it.
+    #[tool(
+        name = "get_skill",
+        description = "Get the mirrord skills: step-by-step guides for mirrord tasks such as \
+        configuring a session, running several services with `mirrord up`, installing the \
+        Operator, splitting queues or branching databases. Call it without arguments to list \
+        every skill with what it is for, then with the `name` of the skill that matches the task \
+        to get its `SKILL.md`, and follow it. Pass `file` as well to get one of the files the \
+        skill bundles, which are listed after its `SKILL.md`.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    fn get_skill(
+        &self,
+        Parameters(args): Parameters<GetSkillArgs>,
+    ) -> Result<String, CallToolResult> {
+        get_skill::get_skill(&SKILLS, args)
+            .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
+    }
+
+    /// Keyword search over the vendored docs and skills.
+    #[tool(
+        name = "search_docs",
+        description = "Search the mirrord docs, skills and config options of the installed \
+        mirrord version by keywords, e.g. `steal http filter` or `db branching postgres`. Returns \
+        the best matching pages first, each with its title, the `path` to read it with `read_doc`, its \
+        resource URI and the line that best matches. `limit` is the number of hits, 5 by default \
+        and from 1 to 20. Search the docs before answering a question about mirrord from memory.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    fn search_docs(
+        &self,
+        Parameters(args): Parameters<SearchDocsArgs>,
+    ) -> Result<Json<SearchDocsOutput>, CallToolResult> {
+        search_docs::search_docs(args)
+            .map(Json)
+            .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
+    }
+
+    /// Serve one page of the vendored docs and skills, or list them.
+    #[tool(
+        name = "read_doc",
+        description = "Read one page of the mirrord docs or skills, or one config option, of the \
+        installed mirrord version, by the `path` `search_docs` returns. Returns the page's title \
+        and the URL it is published at, followed by its full markdown. Without a `path`, lists \
+        every docs and skills page with its title. An unknown path returns the closest known \
+        paths.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    fn read_doc(
+        &self,
+        Parameters(args): Parameters<ReadDocArgs>,
+    ) -> Result<String, CallToolResult> {
+        read_doc::read_doc(args)
             .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
     }
 }

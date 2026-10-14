@@ -1,5 +1,4 @@
 use eventsource_stream::Event;
-pub use mirrord_sessions_manager_protocol::AssignmentSubscription;
 use mirrord_sessions_manager_protocol::{ControlPlaneEventName, ServiceScope};
 use url::Url;
 
@@ -39,6 +38,10 @@ impl ControlPlaneApi {
         }
     }
 
+    pub(crate) fn base_url(&self) -> &Url {
+        &self.base_url
+    }
+
     pub(crate) fn endpoint(
         &self,
         endpoint: ControlPlaneEndpoint<'_>,
@@ -53,30 +56,18 @@ impl ControlPlaneApi {
 
             match endpoint {
                 ControlPlaneEndpoint::Assignments { scope } => {
-                    segments.extend([
-                        "env",
-                        &scope.environment,
-                        "service",
-                        &scope.service,
-                        "assignments",
-                    ]);
+                    let environment = slug::slugify(&scope.environment);
+                    let service = slug::slugify(&scope.service);
+                    segments.extend(["env", &environment, "service", &service, "assignments"]);
                 }
             }
         }
         Ok(url)
     }
 
+    /// Decodes one SSE event. Standalone and operator-hosted sessions-managers both emit the v1
+    /// event format, so decoding doesn't depend on which endpoint the stream came from.
     pub(crate) fn decode_event(
-        &self,
-        event: Event,
-    ) -> Result<Option<ControlPlaneEvent>, SessionsManagerClientError> {
-        match self.version {
-            ApiVersion::V1 => self.decode_v1_event(event),
-        }
-    }
-
-    fn decode_v1_event(
-        &self,
         event: Event,
     ) -> Result<Option<ControlPlaneEvent>, SessionsManagerClientError> {
         match event.event.parse::<ControlPlaneEventName>() {
@@ -99,10 +90,12 @@ impl ControlPlaneApi {
 mod tests {
     use std::collections::HashMap;
 
-    use mirrord_sessions_manager_protocol::{AgentIdentity, IntproxyIdentity, ServiceScope};
+    use mirrord_sessions_manager_protocol::{
+        AgentIdentity, AssignmentSubscription, IntproxyIdentity, ServiceScope,
+    };
     use uuid::Uuid;
 
-    use super::{AssignmentSubscription, ControlPlaneApi, ControlPlaneEndpoint};
+    use super::{ControlPlaneApi, ControlPlaneEndpoint};
     use crate::control_plane::ControlPlaneEvent;
 
     fn intproxy_identity() -> IntproxyIdentity {
@@ -169,10 +162,20 @@ mod tests {
     }
 
     #[test]
-    fn assignments_endpoint_escapes_dynamic_segments() {
+    fn assignments_endpoint_slugifies_dynamic_segments() {
         assert_eq!(
-            assignments_endpoint("https://sessions.example.com", "prod/eu", "api #1").as_str(),
-            "https://sessions.example.com/v1/env/prod%2Feu/service/api%20%231/assignments"
+            assignments_endpoint("https://sessions.example.com", "prod/eu", "API #1").as_str(),
+            "https://sessions.example.com/v1/env/prod-eu/service/api-1/assignments"
+        );
+    }
+
+    /// Scopes are identified by their slug, so case and punctuation variants of a name share an
+    /// endpoint with each other and with the operator-hosted deployment.
+    #[test]
+    fn assignments_endpoint_treats_case_variants_as_one_scope() {
+        assert_eq!(
+            assignments_endpoint("https://sessions.example.com", "staging", "API"),
+            assignments_endpoint("https://sessions.example.com", "staging", "api"),
         );
     }
 
@@ -230,29 +233,28 @@ mod tests {
 
     #[test]
     fn decodes_assignment_event() {
-        let api = ControlPlaneApi::new(url::Url::parse("https://sessions.example.com").unwrap());
         let event = event(
             "assignment",
             r#"{"assignment_id":"assignment-1","data_plane_endpoint":"/sm/ws/123","authorization":"Bearer secret"}"#,
         );
 
         assert!(matches!(
-            api.decode_event(event).unwrap(),
+            ControlPlaneApi::decode_event(event).unwrap(),
             Some(ControlPlaneEvent::Assignment(_))
         ));
     }
 
     #[test]
     fn ignores_unknown_event() {
-        let api = ControlPlaneApi::new(url::Url::parse("https://sessions.example.com").unwrap());
-
-        assert!(api.decode_event(event("other", "{}")).unwrap().is_none());
+        assert!(
+            ControlPlaneApi::decode_event(event("other", "{}"))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn rejects_malformed_assignment_event() {
-        let api = ControlPlaneApi::new(url::Url::parse("https://sessions.example.com").unwrap());
-
-        assert!(api.decode_event(event("assignment", "not json")).is_err());
+        assert!(ControlPlaneApi::decode_event(event("assignment", "not json")).is_err());
     }
 }

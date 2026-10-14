@@ -145,6 +145,17 @@ pub struct PreviewSessionSpec {
     /// user's files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec_resources: Option<PreviewSpecResources>,
+
+    /// Share host of the session this one replaces.
+    ///
+    /// `mirrord preview start` copies the replaced session's `status.shareHost` here when it
+    /// starts a new session for the same key and target (typically a new image), so the preview
+    /// link stays the same across pushes. The operator keeps this host only when it is one it
+    /// could have minted for this key under its own share domain. An absent (what older CLIs
+    /// send) or rejected host goes through the operator's normal host selection: a random
+    /// suffix by default, or the key-derived host with `shareIngress.stableSlugs`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_host: Option<String>,
 }
 
 /// The user's versions of the target and the ConfigMaps and Secrets its pod uses.
@@ -952,7 +963,34 @@ mod tests {
             serde_json::from_value(old.clone()).expect("spec from an older CLI should deserialize");
 
         assert_eq!(spec.spec_resources, None);
+        assert_eq!(spec.share_host, None);
         assert_eq!(serde_json::to_value(&spec).unwrap(), old);
+    }
+
+    /// The carried-over host travels as `spec.shareHost`, the same spelling as the status field
+    /// it is copied from, so a CR written by hand reads naturally next to `kubectl get` output.
+    #[test]
+    fn share_host_round_trips_in_camel_case() {
+        let json = json!({
+            "image": "nginx",
+            "key": "pr-123",
+            "target": {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "name": "app",
+                "container": "app",
+            },
+            "ttlSecs": 3600,
+            "replicas": 1,
+            "shareHost": "pr-123-abc123.preview.example.com",
+        });
+        let spec: PreviewSessionSpec = serde_json::from_value(json.clone()).unwrap();
+
+        assert_eq!(
+            spec.share_host.as_deref(),
+            Some("pr-123-abc123.preview.example.com")
+        );
+        assert_eq!(serde_json::to_value(&spec).unwrap(), json);
     }
 
     #[test]

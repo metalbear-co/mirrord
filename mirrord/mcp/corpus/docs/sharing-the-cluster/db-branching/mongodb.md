@@ -107,5 +107,5 @@ All collections are copied, but the `users` collection includes only documents f
 Only the `users` collection is created, containing documents for alice and bob. All other collections are not created. This is useful when you only need a subset of reference data and your application handles the rest through migrations.
 
 {% hint style="info" %}
-The `dump_args` field is not supported for MongoDB. MongoDB branches use their own internal dump mechanism, so only MySQL and PostgreSQL branches accept custom dump arguments.
+The `dump_args` field is not supported for MongoDB. MongoDB branches use their own internal dump mechanism, so only MySQL, MariaDB, and PostgreSQL branches accept custom dump arguments.
 {% endhint %}

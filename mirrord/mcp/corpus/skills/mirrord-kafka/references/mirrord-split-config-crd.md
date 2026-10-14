@@ -55,7 +55,7 @@ Each `appConfig.topic` / `groupId` / `appId` is a list of source entries. Fields
 
 Requires operator **3.198.0+**. Useful when the consumer keeps its topic/group name in a config file (e.g. a Spring-style `application.yaml` in a centrally managed ConfigMap) instead of an environment variable:
 
-```yaml
+```yaml crd
 appConfig:
   topic:
     - volume:
@@ -81,7 +81,7 @@ Things to know:
 
 Requires operator **3.201.0+**. Useful when the topic/group name is rendered into a file that exists only inside the running pods — no ConfigMap or Secret behind it — for example `vault-agent-injector` writing to `/vault/secrets/` or a secrets-store CSI driver projecting a file at mount time:
 
-```yaml
+```yaml crd
 appConfig:
   topic:
     - podFile:
@@ -117,7 +117,7 @@ When the **last** Kafka session on a workload ends, the operator does not tear t
 
 ## Full example (standard consumer)
 
-```yaml
+```yaml crd
 apiVersion: queues.mirrord.metalbear.co/v1
 kind: MirrordSplitConfig
 metadata:
@@ -146,7 +146,7 @@ spec:
 
 ## Kafka Streams example
 
-```yaml
+```yaml crd
 spec:
   targetRef:
     apiVersion: apps/v1

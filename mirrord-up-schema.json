@@ -317,6 +317,13 @@
             "null"
           ]
         },
+        "pre_command": {
+          "description": "A command to run to completion before the service's mirrord session starts, as a list of\nthe program and its arguments, e.g. `[\"npm\", \"run\", \"build\"]`.\n\nRuns locally without mirrord, in the same directory as `command`. The session starts\nonly if it exits successfully; if it fails, this service is not started and the other\nservices keep running.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "type": {
           "description": "Whether to run `command` with `mirrord exec` or `mirrord container`.\n\nDefaults to `exec`.",
           "$ref": "#/$defs/RunType",
@@ -396,7 +403,7 @@
               ]
             },
             "exclude": {
-              "description": "Include the remote environment variables in the local process that are **NOT** specified by\nthis option.\nVariable names can be matched using `*` and `?` where `?` matches exactly one occurrence of\nany character and `*` matches arbitrary many (including zero) occurrences of any character.\n\nSome of the variables that are excluded by default:\n`PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`.\n\nCan be passed as a list or as a semicolon-delimited string (e.g. `\"VAR;OTHER_VAR\"`).",
+              "description": "Include the remote environment variables in the local process that are **NOT** specified by\nthis option.\nVariable names can be matched using `*` and `?` where `?` matches exactly one occurrence of\nany character and `*` matches arbitrary many (including zero) occurrences of any character.\n\nSome of the variables that are excluded by default:\n`PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`, `TMPDIR`,\n`TMP`, `TEMP`.\n\nCan be passed as a list or as a semicolon-delimited string (e.g. `\"VAR;OTHER_VAR\"`).",
               "anyOf": [
                 {
                   "$ref": "#/$defs/VecOrSingle"

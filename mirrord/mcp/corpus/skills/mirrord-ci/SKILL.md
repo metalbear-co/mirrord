@@ -33,20 +33,20 @@ Trigger on questions like:
 ## Critical First Steps
 
 **Step 1: Load references**
-Read the reference files from this skill's `references/` directory:
-- `references/schema.json` - Authoritative mirrord JSON Schema
+Read the reference file from this skill's `references/` directory:
 - `references/troubleshooting.md` - Common issues and solutions
 
-The schema defines all valid configuration options for mirrord, including CI-specific settings.
 The troubleshooting guide helps diagnose and fix common mirrord issues.
+To look up a config option, call `explain_config_option` if the mirrord MCP server is connected; otherwise use `references/configuration.md` in the mirrord-config skill.
 
 If using absolute paths, search for them using patterns like `**/mirrord-ci/references/*`.
 
 **Step 2: Validate configs before presenting**
-When generating mirrord configuration files for CI, ALWAYS validate against the schema:
+When generating mirrord configuration files for CI, ALWAYS validate them. If the mirrord MCP server is connected, call `validate_config` on the config; otherwise, if the mirrord CLI is installed, save it to a file and run:
 ```bash
 mirrord verify-config /path/to/config.json
 ```
+If neither is available, validate against `references/schema.json` in the mirrord-config skill, after parsing the config as strict JSON: read only the schema's top level (root `properties`, `required`, `additionalProperties`) and the definitions for the options the config uses (search the file for each key), not the whole file.
 
 ## Key Benefits of mirrord for CI
 
@@ -133,7 +133,7 @@ Store this as a **secret** environment variable named `MIRRORD_CI_API_KEY` in yo
 
 ### CI-specific config options
 
-```json
+```json mirrord
 {
   "target": "deployment/my-app",
   "ci": {
@@ -157,7 +157,7 @@ By default, application stdout/stderr are saved to:
 
 ### GitHub Actions
 
-```yaml
+```yaml workflow
 name: Integration Tests
 
 on: [push, pull_request]
@@ -195,7 +195,7 @@ jobs:
 
 ### GitLab CI
 
-```yaml
+```yaml workflow
 integration-tests:
   stage: test
   image: node:20
@@ -219,7 +219,7 @@ integration-tests:
 
 ### CircleCI
 
-```yaml
+```yaml workflow
 version: 2.1
 
 jobs:
@@ -296,7 +296,7 @@ The CI runner must have access to your Kubernetes cluster. Common approaches:
 
 Create a dedicated service account for CI:
 
-```yaml
+```yaml k8s
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -370,7 +370,7 @@ For detailed troubleshooting, refer to `references/troubleshooting.md`.
 ### Framework-Specific Issues
 
 **Turbo (monorepo):**
-```json
+```json other
 // turbo.json
 {
   "globalPassThroughEnv": ["MIRRORD_*", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES"]
@@ -378,7 +378,7 @@ For detailed troubleshooting, refer to `references/troubleshooting.md`.
 ```
 
 **Remix/Vite/Next.js** - Override NODE_ENV to avoid production config:
-```json
+```json mirrord
 {
   "feature": {
     "env": {
@@ -391,7 +391,7 @@ For detailed troubleshooting, refer to `references/troubleshooting.md`.
 ```
 
 **Next.js with Nx** - Exclude conflicting variables:
-```json
+```json mirrord
 {
   "feature": {
     "env": {
@@ -404,11 +404,10 @@ For detailed troubleshooting, refer to `references/troubleshooting.md`.
 ### Multi-Container Pods
 
 If your pod has multiple containers, specify the target container explicitly:
-```json
+```json mirrord
 {
   "target": {
-    "path": "pod/my-pod",
-    "container": "my-app-container"
+    "path": "pod/my-pod/container/my-app-container"
   }
 }
 ```

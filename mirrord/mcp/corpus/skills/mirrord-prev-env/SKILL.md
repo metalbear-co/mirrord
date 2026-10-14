@@ -3,7 +3,7 @@ name: mirrord-prev-env
 description: Help users create and manage mirrord preview environments — running a modified service as an isolated pod in a shared Kubernetes cluster, scoped by an environment key and HTTP/queue traffic filtering, so teams can validate and review changes against real traffic without affecting live services. Use when a developer wants to run "mirrord preview" ad hoc, share a preview via a link (mirrord-share-ingress), or wire preview environments into CI with the metalbear-co/mirrord-preview GitHub Action (e.g. per-PR previews, least-privilege cluster access).
 metadata:
   author: MetalBear
-  version: "2.6"
+  version: "2.7"
 ---
 
 # Mirrord Preview Environment Skill
@@ -67,11 +67,10 @@ Preview environments **deploy an image into a shared cluster and route live traf
 | **Cluster access** | A valid kubeconfig reachable from wherever you run preview (laptop or CI runner). |
 | **A built, pushed image** | Preview deploys an *image*, not local source. The preview pod is a copy of the **target's pod spec with the image swapped**, so it pulls with the **same credentials as the target** — there is no separate registry config for previews. Push the preview tag to the **same registry and repository the target already pulls from**, or it fails with `ErrImagePull`. |
 
-Enable the feature in the operator's Helm values:
+`operator.previewEnv` must be `true` in the operator's Helm values. Recent chart versions default it to `true`; older chart versions default to `false`, so set it explicitly when installing one of those:
 
-```yaml
+```yaml helm-values
 operator:
-  # Has to be set to `true` in order to use the preview environments feature.
   previewEnv: true
 ```
 
@@ -126,7 +125,7 @@ The `preview URL` line only appears when [link sharing](#sharing-a-preview-via-a
 
 The config sets the **target** and the **traffic filter**; the image and key come from flags. Preview-specific settings live under `feature.preview`:
 
-```json
+```json mirrord
 {
   "target": {
     "path": "deployment/my-backend",
@@ -162,10 +161,13 @@ Key fields:
 
 > You can also set the image in config via `feature.preview.image` instead of `-i`; the CI Action does exactly this. The CLI `-i` flag is the convenient ad-hoc path.
 
-Validate before running:
+To look up any other config option, call `explain_config_option` if the mirrord MCP server is connected; otherwise use `references/configuration.md` in the mirrord-config skill.
+
+Validate before running. If the mirrord MCP server is connected, call `validate_config` on the config; otherwise, if the mirrord CLI is installed, run:
 ```bash
 mirrord verify-config mirrord.json
 ```
+If neither is available, validate against `references/schema.json` in the mirrord-config skill, after parsing the config as strict JSON: read only the schema's top level (root `properties`, `required`, `additionalProperties`) and the definitions for the options the config uses (search the file for each key), not the whole file.
 
 ### Sending traffic to your preview
 
@@ -219,7 +221,7 @@ Right after creating it, the operator triggers the CronJob once (a Job named `<c
 
 Override the inherited schedule with `feature.preview.cronjob.schedule` (Kubernetes CronJob syntax):
 
-```json
+```json mirrord
 {
   "target": "cronjob/nightly-scan",
   "feature": {
@@ -248,7 +250,7 @@ By default, reaching a preview requires injecting the `baggage: mirrord-session=
 
 1. Configure the operator with the domain share hosts are minted under (must match the chart's `shareDomain`):
 
-   ```yaml
+   ```yaml helm-values
    operator:
      previewEnv: true
      shareIngress:
@@ -275,7 +277,7 @@ By default, reaching a preview requires injecting the `baggage: mirrord-session=
 
 By default the slug carries a random suffix, so the link only exists once `mirrord preview start` prints it. A cluster admin can set `operator.shareIngress.stableSlugs: true` when the link needs to exist before that — for example a PR bot that posts the preview URL built from the PR number before the preview even starts:
 
-```yaml
+```yaml helm-values
 operator:
   previewEnv: true
   shareIngress:
@@ -299,7 +301,7 @@ Set it up in three steps:
 
 1. **Create an identity and grant it the role** — a `ServiceAccount` (the identity), a `ClusterRoleBinding` attaching `mirrord-operator-ci` to it, and a `kubernetes.io/service-account-token` Secret to mint a token:
 
-   ```yaml
+   ```yaml k8s
    apiVersion: v1
    kind: ServiceAccount
    metadata: { name: preview-ci, namespace: staging }
@@ -328,7 +330,7 @@ Set it up in three steps:
 2. **Build a kubeconfig** from the API server address, cluster CA, and the token (`.data.token` from `preview-ci-token`, base64-decoded).
 3. **Store it as a CI secret** (e.g. base64-encode into `KUBECONFIG_DATA`), then decode it and point `KUBECONFIG` at it before any `mirrord preview` step:
 
-   ```yaml
+   ```yaml workflow
    - name: Configure cluster access
      env: { KUBECONFIG_DATA: "${{ secrets.KUBECONFIG_DATA }}" }
      run: |
@@ -360,7 +362,7 @@ A token with only this ClusterRole can manage preview environments but can't rea
 
 The runner needs a valid kubeconfig before the action runs (cloud auth + get-credentials).
 
-```yaml
+```yaml workflow
 name: Preview Environment
 on:
   pull_request:
@@ -395,7 +397,7 @@ jobs:
 
 Recommended concurrency so rapid pushes don't overlap:
 
-```yaml
+```yaml workflow
 concurrency:
   group: preview-env-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -422,7 +424,7 @@ mirrord preview stop -k "pr-${{ github.event.pull_request.number }}" || true
 
 A handy pattern is to set the key once and reuse it:
 
-```yaml
+```yaml workflow
 env:
   PREVIEW_KEY: "pr-${{ github.event.pull_request.number }}"
 ```
@@ -436,7 +438,7 @@ The typical flow: on PR open/push, CI builds the image(s), pushes to a registry,
 
 ### Using `extra_config` for anything the Action doesn't expose
 
-```yaml
+```yaml workflow
 - uses: metalbear-co/mirrord-preview@main
   with:
     action: start
@@ -464,7 +466,7 @@ The typical flow: on PR open/push, CI builds the image(s), pushes to a registry,
 
 | Issue | Solution |
 |-------|----------|
-| Preview feature unavailable / operator error | Need Operator 3.142.0+ with `operator.previewEnv: true`, CLI 3.189.0+, and the **Enterprise** plan. See `mirrord-operator` skill. |
+| Preview feature unavailable / operator error | Need Operator 3.142.0+ with `operator.previewEnv: true` (default on recent chart versions, but must be set explicitly on older ones), CLI 3.189.0+, and the **Enterprise** plan. See `mirrord-operator` skill. |
 | Traffic never reaches the preview pod | Check the `header_filter` regex matches the header you send, the env key matches, and that intermediate services **propagate the header** on outgoing calls. On a service mesh other than Istio/Linkerd, the sidecar may be rejecting the operator's inbound connection — see [Service meshes](#how-preview-environments-work). |
 | `ErrImagePull` / `401 Unauthorized` on the preview pod | The preview pulls with the **target's** credentials (no separate registry config). Push the preview tag to the same registry and repository the target already pulls from. Common trap: a brand-new `ghcr.io` package created by a workflow's `GITHUB_TOKEN` starts **private**. |
 | `preview start` refuses — session already exists | A previous run's session for that key+target is still alive. Pass `--force` to replace it. |

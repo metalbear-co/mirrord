@@ -39,12 +39,13 @@ use mirrord_config::{
             LocalTlsDelivery, TlsClientCertSource, TlsDeliveryProtocol,
         },
         preview::{ConfigMount, ConfigMountType},
+        split_queues::{QueueKind, QueueMode, SplitQueuesConfig},
     },
     target::{Target, TargetDisplay, label::LabelTarget},
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
-    client::{NoClientCert, OperatorApi, connect_params::BranchDbNames},
+    client::{NoClientCert, OperatorApi, connect_params::BranchDbNames, temporal_mirror_warning},
     crd::{
         MirrordOperatorSpec, NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
@@ -318,10 +319,32 @@ async fn preview_start(
         .await
         .inspect_err(|_| subtask.failure(None))?;
 
-    for session in existing_sessions
+    let mut replaced_sessions = existing_sessions
         .into_iter()
         .filter(|session| session.spec.target == session_target)
-    {
+        .collect::<Vec<_>>();
+
+    // Same key and target means the same preview, so the new session asks the operator for the
+    // host the old one was shared on: links posted in a PR or Slack keep working after a new
+    // image. The operator decides whether it can honour the request.
+    //
+    // The newest session is the one the link currently points at, so it is asked first. A
+    // session replaced before the operator stamped its status (two pushes in quick succession)
+    // still carries the host it asked for on its spec, so that is the fallback.
+    replaced_sessions.sort_by(|a, b| {
+        b.metadata
+            .creation_timestamp
+            .cmp(&a.metadata.creation_timestamp)
+    });
+    let share_host = replaced_sessions.iter().find_map(|session| {
+        session
+            .status
+            .as_ref()
+            .and_then(|status| status.share_host.clone())
+            .or_else(|| session.spec.share_host.clone())
+    });
+
+    for session in replaced_sessions {
         let name = session.name_any();
 
         subtask.warning(&format!("replacing existing session '{name}'"));
@@ -390,6 +413,13 @@ async fn preview_start(
         wake_timeout_secs: idle_config.wake_timeout_secs,
     });
 
+    // Preview start never opens an operator websocket, so `QueueSplitProgress` never runs.
+    // The config already names the Temporal queues it asked to mirror (including `*` from
+    // `mirrord up`), so warn from that before the session is created.
+    for id in temporal_mirror_requested(&layer_config.feature.split_queues) {
+        subtask.warning(&temporal_mirror_warning(&id));
+    }
+
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
@@ -424,6 +454,7 @@ async fn preview_start(
         idle,
         cronjob,
         spec_resources,
+        share_host,
     };
 
     let annotations = operator_api
@@ -1673,6 +1704,16 @@ async fn fetch_preview_logs(
         .map(|view: PreviewEnv| view.status.map(|status| status.logs).unwrap_or_default())
 }
 
+/// Temporal queue ids `config` asks to mirror. Preview start has no queue split view, so `*`
+/// stays `*` and the warning names that instead of the operator-resolved queue.
+fn temporal_mirror_requested(config: &SplitQueuesConfig) -> Vec<String> {
+    config
+        .of_kind(QueueKind::Temporal)
+        .filter(|split| split.queue_mode == QueueMode::Mirror)
+        .map(|split| split.queue_id.to_owned())
+        .collect()
+}
+
 /// The best-effort form, for the paths that are already reporting a different failure.
 ///
 /// A start that is going to fail anyway must not have its own error replaced by one about
@@ -1982,5 +2023,25 @@ mod tests {
             matches!(&error, CliError::PreviewTlsClientAuthFile { path, .. } if path == Path::new("/definitely/missing.pem")),
             "{error}",
         );
+    }
+
+    /// Preview start never polls the queue split view, so a Temporal `mirror` request has to
+    /// be found on the config itself. A Kafka `*` does not count.
+    #[test]
+    fn temporal_mirror_requested_names_temporal_entries_only() {
+        use mirrord_config::feature::split_queues::{QueueSplit, SplitQueuesConfig};
+
+        let config = SplitQueuesConfig::from_splits([
+            QueueSplit {
+                queue_mode: QueueMode::Mirror,
+                ..QueueSplit::new("tasks", QueueKind::Temporal)
+            },
+            QueueSplit {
+                queue_mode: QueueMode::Mirror,
+                ..QueueSplit::new("*", QueueKind::Kafka)
+            },
+            QueueSplit::new("other", QueueKind::Temporal),
+        ]);
+        assert_eq!(temporal_mirror_requested(&config), ["tasks"]);
     }
 }

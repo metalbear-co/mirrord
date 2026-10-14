@@ -11,6 +11,7 @@ use clap::ValueEnum;
 pub use command_display::CommandDisplay;
 use command_display::CommandExt;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, ExecutionKind, Reporter};
+use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, config::ConfigContext,
     external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME,
@@ -18,7 +19,6 @@ use mirrord_config::{
 use mirrord_progress::{Progress, ProgressTracker, messages::SESSION_READY_MESSAGE};
 use mirrord_tls_util::SecureChannelSetup;
 pub use sidecar::IntproxySidecarError;
-use tokio::process::Command;
 use tracing::Level;
 
 use crate::{
@@ -340,7 +340,7 @@ pub(crate) async fn container_command(
         None => {
             progress.success(Some(SESSION_READY_MESSAGE));
 
-            let mut runtime_command = Command::new(&binary);
+            let mut runtime_command = resolve_tokio_command(&binary);
             runtime_command
                 .args(&binary_args)
                 .stdin(Stdio::inherit())

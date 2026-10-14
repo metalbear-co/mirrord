@@ -1,6 +1,7 @@
-use std::{env, path::PathBuf, process::Command};
+use std::{env, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
+use mirrord_command::resolve_command;
 
 /// Runs `cargo doc --document-private-items --no-deps`, providing dummy layer files so the CLI
 /// build script doesn't error out. The resulting docs are for reading only — the dummy files mean
@@ -8,7 +9,7 @@ use anyhow::{Context, Result, bail};
 pub fn run(extra_args: Vec<String>) -> Result<()> {
     let dummy = create_dummy_layer()?;
 
-    let mut cmd = Command::new("cargo");
+    let mut cmd = resolve_command("cargo");
     cmd.args(["doc", "--document-private-items", "--no-deps"]);
     cmd.args(extra_args);
     cmd.env("MIRRORD_LAYER_FILE", &dummy);

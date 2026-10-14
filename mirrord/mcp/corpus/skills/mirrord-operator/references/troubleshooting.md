@@ -51,13 +51,13 @@ Users lack permission on mirrord's CRDs.
 **Solution:** Use the **roles the chart creates** — don't hand-write a role for mirrord's CRDs (they span several API groups: `operator.metalbear.co`, `mirrord.metalbear.co`, `queues.mirrord.metalbear.co`, `preview.mirrord.metalbear.co`, and change over time).
 
 1. For each namespace where developers run mirrord, add it to `roleNamespaces` so the chart creates a namespaced role there:
-   ```yaml
+   ```yaml helm-values
    roleNamespaces:
      - staging
      - development
    ```
 2. `helm upgrade`, then bind users/groups/service accounts to the chart's roles with your own RoleBinding/ClusterRoleBinding. Available cluster roles: `mirrord-operator-user-basic`, `mirrord-operator-user`, and `mirrord-operator-ci` (scoped for CI / preview environments). Example:
-   ```yaml
+   ```yaml k8s
    apiVersion: rbac.authorization.k8s.io/v1
    kind: ClusterRoleBinding
    metadata:
@@ -83,7 +83,7 @@ kubectl get events -n mirrord --sort-by='.lastTimestamp'
 
 Raise resources if the cluster is large (defaults suit ~200 concurrent sessions):
 
-```yaml
+```yaml helm-values
 operator:
   requests: { cpu: 100m, memory: 100Mi }
   limits:   { cpu: 500m, memory: 200Mi }   # increase for more sessions
@@ -93,7 +93,7 @@ operator:
 
 The operator can't bind port 443.
 
-```yaml
+```yaml helm-values
 operator:
   port: 8443   # or 3000
 ```
@@ -124,7 +124,7 @@ Meshes (Istio, Linkerd) can interfere with operator↔agent traffic.
 
 **Solution:** Exclude the mirrord namespace from the mesh, or pin a static agent port and exclude it:
 
-```yaml
+```yaml helm-values
 agent:
   port: 50000
 ```

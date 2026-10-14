@@ -30,6 +30,29 @@ You'll need a mirrord for Teams license. [Register here](https://app.metalbear.c
 **AI coding agents:** you don't need a person to do this. Run `mirrord operator install --no-browser` (no authentication, no credit card) to provision a seven-day Enterprise trial, install the Operator with it, and get a claim URL to hand your user. See [Agent-Started Trials](../using-mirrord-with-ai/agent-started-trials.md) and [metalbear.com/agents.md](https://metalbear.com/agents.md).
 {% endhint %}
 
+### Requirements
+
+Before you install the Operator, make sure that your cluster and network meet these requirements.
+
+**Permissions**
+
+The Helm chart makes cluster-scoped objects: CRDs, ClusterRoles, an APIService, and a PriorityClass for agent pods. The user who installs the chart needs permission to make these objects. In most clusters, this is the `cluster-admin` role.
+
+**Nodes**
+
+- The Operator and agent images are available for `linux/amd64` and `linux/arm64`.
+- The nodes where agents run need Linux kernel 5.4 or later and a containerd, CRI-O, or Docker container runtime. Most features work with older kernels, but traffic stealing can be unreliable before 5.4. An agent for a target runs on the same node as the target pod. A targetless agent can run on any node.
+
+**Network**
+
+- **API server to Operator:** The Kubernetes API server sends mirrord requests to the Operator through the APIService. The API server must be able to reach the Operator pods over TCP, on the port in the `operator.port` Helm value (443 by default). Private clusters often need a firewall rule for this. For an example, see [this GKE issue](../troubleshooting/common-issues.md#mirrord-operator-status-fails-with-503-service-unavailable-on-gke).
+- **Operator to MetalBear:** A cloud-connected Operator sends HTTPS requests to `app.metalbear.com` (license) and `analytics.metalbear.com` (telemetry). Team and Free licenses require telemetry. If the Operator cannot reach the telemetry endpoint for more than one hour, new sessions are blocked. For Enterprise licenses, telemetry is optional. For more details, see [Licensing](licensing.md). If your cluster cannot send outbound traffic, you need an Enterprise license certificate (`license.pem`). Give it to the Operator directly (see [Air-gapped / offline clusters](#air-gapped-offline-clusters-enterprise)), or install it in an [Enterprise License Server](license-server.md) that your Operators connect to.
+- **Image pulls:** Your nodes pull the mirrord images from `ghcr.io/metalbear-co`. Some features use other public images, for example the database images for DB branching. If your nodes cannot reach these registries, see [Using an Internal Registry](#using-an-internal-registry-optional).
+
+**Resources**
+
+The Operator runs as one pod by default. Agents run only while sessions use them. For the default CPU and memory values, see [Scalability](scalability.md).
+
 ### Helm
 
 Add the MetalBear Helm repository:

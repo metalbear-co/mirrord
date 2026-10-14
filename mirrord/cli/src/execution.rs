@@ -13,6 +13,7 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, MIRRORD_KUBE_VERSION_MAJOR_ENV,
     MIRRORD_KUBE_VERSION_MINOR_ENV, Reporter,
 };
+use mirrord_command::resolve_tokio_command;
 #[cfg(any(windows, test))]
 use mirrord_config::MIRRORD_LAYER_CRASH_REPORTING;
 use mirrord_config::{
@@ -38,7 +39,7 @@ use mirrord_tls_util::SecureChannelSetup;
 use serde::Serialize;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::{Child, ChildStderr, Command},
+    process::{Child, ChildStderr},
     select,
     sync::mpsc::{self, UnboundedReceiver},
 };
@@ -427,7 +428,7 @@ impl MirrordExecution {
     /// [`session_log_directory`].
     #[cfg(windows)]
     async fn spawn_crash_monitor(env_vars: &mut HashMap<String, String>) -> Option<Child> {
-        let mut command = Command::new(std::env::current_exe().ok()?);
+        let mut command = resolve_tokio_command(std::env::current_exe().ok()?);
         // No `kill_on_drop`: the monitor must outlive this CLI while a crash dialog is on screen.
         // It self-exits when it sees the root (this process) die — see
         // `monitor::watch_root`.
@@ -534,7 +535,7 @@ impl MirrordExecution {
         let encoded_config = config.encode()?;
 
         let mut proxy_command =
-            Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+            resolve_tokio_command(std::env::current_exe().map_err(CliError::CliPathError)?);
         proxy_command
             .arg("extproxy")
             // Start of debug args. Don't add real args after this point,
@@ -599,7 +600,7 @@ impl MirrordExecution {
                 .clone()
                 .map(|unset| unset.to_vec())
                 .unwrap_or_default(),
-            uses_operator: matches!(connect_info, AgentConnectInfo::Operator(..)),
+            uses_operator: connect_info.is_operator(),
         };
 
         Ok((execution, proxy_addr))
@@ -707,7 +708,7 @@ impl MirrordExecution {
         let encoded_config = config.encode()?;
 
         let mut proxy_command =
-            Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+            resolve_tokio_command(std::env::current_exe().map_err(CliError::CliPathError)?);
         proxy_command.arg("intproxy");
 
         if mirrord_for_ci.is_some() {
@@ -742,7 +743,10 @@ impl MirrordExecution {
         // session ID chosen during connection setup or fall back to a local UUID.
         let session_id = match &connect_info {
             AgentConnectInfo::Operator(session) => format!("{:X}", session.id()),
-            AgentConnectInfo::SessionsManager(connect_info) => connect_info.user_session_id.clone(),
+            AgentConnectInfo::SessionsManager(connect_info)
+            | AgentConnectInfo::OperatorSessionsManager(connect_info) => {
+                connect_info.user_session_id.clone()
+            }
             _ => uuid::Uuid::new_v4().to_string(),
         };
         proxy_command.env("MIRRORD_SESSION_ID", &session_id);
@@ -807,11 +811,7 @@ impl MirrordExecution {
             intproxy_address.to_string(),
         );
 
-        Ok((
-            env_vars,
-            Some(proxy_process),
-            matches!(connect_info, AgentConnectInfo::Operator(..)),
-        ))
+        Ok((env_vars, Some(proxy_process), connect_info.is_operator()))
     }
 
     /// Construct filter and retrieve remote environment from the connected agent using

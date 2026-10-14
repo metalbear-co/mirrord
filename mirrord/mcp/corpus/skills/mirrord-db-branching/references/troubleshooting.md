@@ -11,13 +11,13 @@ Often caused by using `"mode": "all"` on a large database. The `all` mode copies
 
 **Solution:** Use `"mode": "schema"` or `"mode": "empty"` instead:
 
-```json
+```json mirrord=feature.db_branches[]
 { "copy": { "mode": "schema" } }
 ```
 
 If you need specific data, use filtered copying (SQL engines):
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "copy": {
     "mode": "schema",
@@ -55,7 +55,7 @@ If you expect a branch to persist and be reused but a new one is created each ti
 1. The `id` field must be set and identical between sessions.
 2. The branch TTL hasn't expired. TTL is counted from when no session is using the branch. Default is 5 minutes and it **caps at 15 minutes**. Set `ttl_secs` or `ttl_mins` (mutually exclusive).
 
-```json
+```json mirrord
 {
   "feature": {
     "db_branches": [
@@ -79,7 +79,7 @@ mirrord exec --target pod/<pod-name> -- env | grep -iE 'database|postgres|mysql|
 
 Then match your config to it:
 
-```json
+```json mirrord=feature.db_branches[]
 { "connection": { "url": "DATABASE_URL" } }
 ```
 
@@ -109,7 +109,7 @@ DynamoDB has no password-based auth. `"copy": { "mode": "all" }` **requires** `i
 
 **Solution:**
 
-```json
+```json mirrord=feature.db_branches[]
 { "type": "dynamodb", "iam_auth": { "type": "aws_rds" }, "copy": { "mode": "all" } }
 ```
 
@@ -119,7 +119,7 @@ Also note: DynamoDB `filter` strings can't use `ExpressionAttributeValues`/`Name
 
 MongoDB uses JSON-based filter syntax, not SQL. Filters must be valid MongoDB query documents as escaped JSON strings, and MongoDB supports only `empty` / `all` (no `schema`).
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "copy": {
     "mode": "all",
@@ -141,13 +141,13 @@ MongoDB uses JSON-based filter syntax, not SQL. Filters must be valid MongoDB qu
 
 **Solution:** Name the history table(s) under `copy.tables` so their rows are copied along with their definitions:
 
-```json
+```json mirrord=feature.db_branches[]
 { "copy": { "mode": "schema", "tables": { "flyway_schema_history": {} } } }
 ```
 
 Liquibase keeps two history tables, and both have to come across:
 
-```json
+```json mirrord=feature.db_branches[]
 { "copy": { "mode": "schema", "tables": { "DATABASECHANGELOG": {}, "DATABASECHANGELOGLOCK": {} } } }
 ```
 
@@ -163,7 +163,7 @@ An interrupted Liquibase run can leave a lock row held in `DATABASECHANGELOGLOCK
 
 **Solution:** Set `env_var_name` on that connection source, e.g.:
 
-```json
+```json mirrord=feature.db_branches[]
 {
   "connection": {
     "params": {
@@ -181,7 +181,7 @@ A plain TCP readiness probe can pass before the service is actually usable (e.g.
 
 **Solution:** Use an `http_get` or `exec` probe that proves usability:
 
-```json
+```json mirrord=feature.db_branches[]
 { "readiness": { "type": "http_get", "path": "/health" } }
 ```
 
@@ -210,7 +210,7 @@ docker info
 
 Check the local Redis configuration:
 
-```json
+```json mirrord
 {
   "feature": {
     "db_branches": [

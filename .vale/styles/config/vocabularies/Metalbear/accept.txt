@@ -186,6 +186,7 @@ devshell
 
 # Cloud services
 SNS
+serverless
 
 # Kafka
 rebalance

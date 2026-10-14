@@ -463,6 +463,15 @@ pub(crate) enum CliError {
     ))]
     FeatureDisabledInOperatorError { feature: String },
 
+    #[error("mirrord operator does not serve the operator-hosted sessions-manager.")]
+    #[diagnostic(help(
+        "Serverless targets with `operator: true` connect through the sessions-manager hosted by \
+        the mirrord operator. Ask your cluster administrator to enable it with \
+        `operator.sessionsManager=true` in the operator Helm chart, or set `operator: false` to \
+        use a standalone sessions-manager.{GENERAL_HELP}"
+    ))]
+    ServerlessSessionsManagerNotServed,
+
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorBranchCreationFailed(OperatorOperation, String),
@@ -930,6 +939,13 @@ pub(crate) enum CliError {
     ))]
     SubscribeError(String),
 
+    #[error("Cannot stream every session's events from this operator: {0}")]
+    #[diagnostic(help(
+        "Pass `--key <key>` to stream one session, or upgrade the operator to 3.210.0 or newer \
+        to stream them all.{GENERAL_HELP}"
+    ))]
+    SubscribeAllSessionsUnsupported(String),
+
     #[error(transparent)]
     ProtocolError(#[from] mirrord_protocol_api::client::ClientError),
 
@@ -997,6 +1013,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::FeatureDisabled { feature } => Self::FeatureDisabledInOperatorError {
                 feature: feature.to_string(),
             },
+            OperatorApiError::ServerlessSessionsManagerNotServed => {
+                Self::ServerlessSessionsManagerNotServed
+            }
             OperatorApiError::CreateKubeClient(e) => {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }

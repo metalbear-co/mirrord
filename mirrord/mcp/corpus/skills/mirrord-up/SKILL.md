@@ -7,7 +7,7 @@ description: >
   or managing multiple mirrord sessions' lifecycle in one command.
 metadata:
   author: MetalBear
-  version: "1.5"
+  version: "1.6"
 ---
 
 # mirrord up Skill
@@ -73,7 +73,7 @@ mirrord up -f mirrord-up-custom.yaml
 
 ## Getting started (official minimal example)
 
-```yaml
+```yaml mirrord-up
 services:
   user-auth-service:
     run:
@@ -94,7 +94,7 @@ You may omit `target.path` (or the whole `target`); `mirrord up` can infer the t
 
 Set per service with `default_mode` in the config file, or for the whole run with `-m`/`--mode` (overrides every service's `default_mode`).
 
-```yaml
+```yaml mirrord-up
 services:
   user-auth-service:
     default_mode: replace
@@ -118,7 +118,7 @@ services:
 
 `mirrord up` can run each service against a different Kubernetes context. Set it via the `--context` flag, or `context` in the config file (`common.context` for all services, `services.*.context` to override a specific one).
 
-```yaml
+```yaml mirrord-up
 common:
   context: kind
 services:
@@ -168,23 +168,23 @@ Omitting `target` entirely is equivalent to an empty mapping: path is inferred f
 
 Examples from the docs:
 
-```yaml
+```yaml mirrord-up=services.*
 target:
   path: deployment/test-app
   namespace: test-namespace
 ```
 
-```yaml
+```yaml mirrord-up=services.*
 target:
   path: deployment/test-app
 ```
 
-```yaml
+```yaml mirrord-up=services.*
 target:
   namespace: test-namespace
 ```
 
-```yaml
+```yaml mirrord-up=services.*
 target: none
 ```
 
@@ -208,7 +208,7 @@ Maps to `feature.network.incoming.ignore_ports`.
 
 Escape hatch for `mirrord.json` options not yet exposed as dedicated `mirrord-up.yaml` fields. Deep-merged into the service's generated config. Prefer the dedicated fields above whenever one exists.
 
-```yaml
+```yaml mirrord-up=services.*
 config_patch:
   feature:
     split_queues:
@@ -221,9 +221,13 @@ config_patch:
 
 The Kubernetes context to run this service in. See [Context](#context) above for precedence rules against `common.context` and `--context`.
 
+#### `services.*.skip`
+
+When `true`, `mirrord up` doesn't launch this service unless it is named on the `mirrord up` command line. Defaults to `false`.
+
 ### Queue Splitting
 
-`mirrord up` supports queue splitting automatically for **every** service, in `split`, `replace`, and `mirror` mode — there is no dedicated `services.*.messages` field in `mirrord-up.yaml`. Instead:
+`mirrord up` supports queue splitting automatically for every service in `split` and `mirror` mode — there is no dedicated `services.*.messages` field in `mirrord-up.yaml`. Instead:
 
 1. Set up queue splitting for the target and enable the relevant queue-splitting feature in the mirrord operator, per the target's `MirrordSplitConfig` (see the Queue Splitting guide, linked from the official docs).
 2. Start `mirrord up` with a session key, e.g. `mirrord up --key checkout-debug`.
@@ -235,18 +239,20 @@ Supported brokers: Kafka, Amazon SQS, RabbitMQ, Google Cloud Pub/Sub, Azure Serv
 
 Only messages containing the session key are routed to the local session; all other messages continue to the deployed target.
 
+A service in **`replace` mode doesn't use queue splitting**: the deployed workload is scaled down, so the local process consumes every message from its queues directly instead.
+
 #### `services.*.run`
 
 - `command`: array of strings (binary + args)
 - `type`: `exec` or `container` (default `exec`) — runs via `mirrord exec` or `mirrord container`
 
-```yaml
+```yaml mirrord-up=services.*
 run:
   type: container
   command: ["docker", "run", "my-app"]
 ```
 
-```yaml
+```yaml mirrord-up=services.*
 run:
   command: ["node", "app.js"]
 ```
@@ -260,7 +266,7 @@ The whole `mirrord-up.yaml` file is rendered with [Tera](https://keats.github.io
 
 Useful for injecting the session key into env var overrides or commands, or pulling per-developer config (namespace, tokens) from the environment instead of hardcoding it:
 
-```yaml
+```yaml mirrord-up
 services:
   my-service:
     target:
@@ -300,7 +306,7 @@ Workload inference and cluster prompts happen later when running `mirrord up`, n
 
 | Issue | Guidance |
 |-------|----------|
-| Want queue splitting in `mirrord-up.yaml` | No config-file field needed — it's automatic (`split`, `replace`, and `mirror` modes all) once `MirrordSplitConfig` + the operator feature are set up and the session runs with a `--key`. Kafka, Amazon SQS, RabbitMQ, Google Cloud Pub/Sub, Azure Service Bus, Redis Pub/Sub, Temporal, and BullMQ are supported; RabbitMQ splitting needs an operator that supports it, otherwise the session still runs with RabbitMQ splitting disabled and a warning |
+| Want queue splitting in `mirrord-up.yaml` | No config-file field needed — it's automatic for services in `split` or `mirror` mode once `MirrordSplitConfig` + the operator feature are set up and the session runs with a `--key`. Kafka, Amazon SQS, RabbitMQ, Google Cloud Pub/Sub, Azure Service Bus, Redis Pub/Sub, Temporal, and BullMQ are supported; RabbitMQ splitting needs an operator that supports it, otherwise the session still runs with RabbitMQ splitting disabled and a warning. `replace` mode doesn't use queue splitting — the deployed workload is scaled down, so the local process consumes everything itself |
 | Need a `mirrord.json` option not exposed as a `mirrord-up.yaml` field | Use `services.*.config_patch` to deep-merge raw `mirrord.json` under that service |
 | Traffic isolation | Default split filter uses session key; set `--key` / `MIRRORD_KEY` and/or explicit `http_filter` when sharing a cluster |
 | Considering `replace` mode | It scales the real workload to zero for **everyone** for the session's duration; only suggest it on non-shared clusters/environments, and confirm the target is a deployment/statefulset/replicaset |
@@ -312,7 +318,7 @@ Workload inference and cluster prompts happen later when running `mirrord up`, n
 1. Prefer **`mirrord up init`** for new users; hand-edit YAML for known stacks.
 2. Stay within documented fields only — do not invent keys beyond the official page.
 3. Default to **`split`** mode in examples; only suggest `replace` (or `--mode replace`) when the user explicitly wants full local takeover of a service, and pair it with the shared-cluster warning. Suggest `mirror` when they want to observe traffic without affecting the deployed service.
-4. Queue splitting (including RabbitMQ) works automatically for supported brokers, no `mirrord-up.yaml` field required — note that RabbitMQ splitting needs an operator version that supports it.
+4. Queue splitting (including RabbitMQ) works automatically for supported brokers in `split`/`mirror` mode, no `mirrord-up.yaml` field required — note that RabbitMQ splitting needs an operator version that supports it, and that `replace` mode doesn't use queue splitting at all.
 5. For single-process or `mirrord.json`-only work, point them to **mirrord-config** / **mirrord-quickstart**; this skill is multi-service compose via `mirrord up`.
 6. For operator / Teams concurrent use on the cluster side, use **mirrord-operator** when relevant (`common.operator`).
 
