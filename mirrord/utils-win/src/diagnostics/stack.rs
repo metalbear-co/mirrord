@@ -14,7 +14,10 @@ use std::{
     ffi::c_void,
     fmt::Write as _,
     os::windows::ffi::OsStrExt,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use windows_sys::Win32::{
@@ -55,6 +58,16 @@ const MAX_SYMBOL_NAME: usize = 1024;
 static ARMED: AtomicBool = AtomicBool::new(false);
 /// Set by the first overflow, so a process reports once.
 static REPORTED: AtomicBool = AtomicBool::new(false);
+/// The overflowing thread's registers and stack base, for the report thread.
+///
+/// A copy, so the report never reads the exception's own context record, which is gone once the
+/// handler returns.
+static OVERFLOW: OnceLock<Overflow> = OnceLock::new();
+
+struct Overflow {
+    context: CONTEXT,
+    stack_base: usize,
+}
 
 /// One frame of a walked stack.
 #[derive(Clone, Copy, Default)]
@@ -65,25 +78,44 @@ pub struct Frame {
     pub sp: usize,
 }
 
+/// The highest address of the calling thread's stack, from its thread environment block.
+///
+/// Everything between a thread's stack pointer and this is committed, so a walk that stays in that
+/// range never reads unmapped memory.
+pub fn current_stack_base() -> usize {
+    let base: usize;
+    // SAFETY: on x64 Windows, `gs` points at the current thread's TEB, and `NT_TIB.StackBase` is at
+    // offset 8.
+    unsafe {
+        std::arch::asm!("mov {}, gs:[0x08]", out(reg) base, options(nostack, readonly, preserves_flags));
+    }
+    base
+}
+
 /// Walks the stack that `context` describes, innermost frame first, into `frames`.
 ///
 /// Allocation-free. Stops at the outermost frame, when `frames` is full, or where the unwind data
-/// leads somewhere a caller cannot be.
+/// leads somewhere a caller cannot be: below the previous frame, or past `stack_base`. The stack
+/// a crash walks may be corrupt, and these bounds keep the walk from faulting on it.
 ///
 /// # Safety
 ///
 /// `context` must describe a stack of this process that does not change during the walk: the
-/// calling thread's own, or that of a thread blocked until the walk is done.
+/// calling thread's own, or that of a thread blocked until the walk is done. `stack_base` must be
+/// that thread's, from [`current_stack_base`].
 ///
 /// # Returns
 ///
 /// How many frames were written.
-pub unsafe fn walk(context: &CONTEXT, frames: &mut [Frame]) -> usize {
+pub unsafe fn walk(context: &CONTEXT, stack_base: usize, frames: &mut [Frame]) -> usize {
     let mut context = *context;
     let mut count = 0;
 
     for slot in frames.iter_mut() {
-        if context.Rip == 0 {
+        let in_stack = (context.Rsp as usize)
+            .checked_add(8)
+            .is_some_and(|end| end <= stack_base);
+        if context.Rip == 0 || !in_stack {
             break;
         }
         *slot = Frame {
@@ -162,14 +194,19 @@ unsafe extern "system" fn overflow_handler(info: *mut EXCEPTION_POINTERS) -> i32
         return EXCEPTION_CONTINUE_SEARCH;
     }
 
-    // This thread is out of stack, so the report is made on a fresh one. The context record and
-    // the stack it describes stay put while this thread waits.
+    let _ = OVERFLOW.set(Overflow {
+        context: unsafe { *(*info).ContextRecord },
+        stack_base: current_stack_base(),
+    });
+
+    // This thread is out of stack, so the report is made on a fresh one. The stack it walks stays
+    // put while this thread waits.
     unsafe {
         let thread = CreateThread(
             std::ptr::null(),
             REPORT_THREAD_STACK,
             Some(report_thread),
-            (*info).ContextRecord as *const c_void,
+            std::ptr::null(),
             STACK_SIZE_PARAM_IS_A_RESERVATION,
             std::ptr::null_mut(),
         );
@@ -183,15 +220,17 @@ unsafe extern "system" fn overflow_handler(info: *mut EXCEPTION_POINTERS) -> i32
 }
 
 /// Walks, names and prints the overflowing thread's stack.
-unsafe extern "system" fn report_thread(context: *mut c_void) -> u32 {
-    let context = unsafe { &*(context as *const CONTEXT) };
+unsafe extern "system" fn report_thread(_: *mut c_void) -> u32 {
+    let Some(overflow) = OVERFLOW.get() else {
+        return 0;
+    };
 
     let mut frames = vec![Frame::default(); REPORT_FRAMES];
-    let count = unsafe { walk(context, &mut frames) };
+    let count = unsafe { walk(&overflow.context, overflow.stack_base, &mut frames) };
     frames.truncate(count);
 
     let names = symbolize(&frames);
-    let report = format_report(&frames, &names, context.Rax as usize);
+    let report = format_report(&frames, &names, overflow.context.Rax as usize);
     unsafe { super::crash::write_stderr(report.as_bytes()) };
     0
 }
