@@ -35,7 +35,6 @@ use crate::{
     connector::{AgentConnector, DirectConnector, OperatorConnector, SessionsManagerConnector},
     data::GlobalConfig,
     up::MirrordUp,
-    util,
 };
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
@@ -73,6 +72,7 @@ fn send_upgrade_ide_message<P: Progress>(
 /// without sessions-manager support is an error rather than a fallback, since the user asked for
 /// the operator explicitly. The client carries only the user's kubeconfig credentials, with no
 /// operator session certificate: the hosted routes are authorized by Kubernetes RBAC.
+#[mirrord_macros::boxed_future]
 async fn operator_sessions_manager_client<P, R>(
     layer_config: &LayerConfig,
     progress: &P,
@@ -100,6 +100,7 @@ where
 ///    the caller falls back to the OSS flow.
 /// 3. Otherwise, attempts to use the mirrord-operator and returns [`None`] in case mirrord-operator
 ///    is not found or its license is invalid.
+#[mirrord_macros::boxed_future]
 async fn try_connect_using_operator<P, R>(
     layer_config: &mut LayerConfig,
     progress: &P,
@@ -118,7 +119,7 @@ where
         return Ok(None);
     }
 
-    let api = match util::boxed(|| OperatorApi::try_new(layer_config, analytics, progress)).await? {
+    let api = match OperatorApi::try_new(layer_config, analytics, progress).await? {
         Some(api) => api,
         None if layer_config.operator == Some(true) => {
             send_upgrade_ide_message(
@@ -168,10 +169,12 @@ where
     let mut user_cert_subtask = operator_subtask.subtask("preparing user credentials");
     let api = match mirrord_for_ci.and_then(MirrordCi::api_key) {
         Some(key) => {
-            util::boxed(|| api.with_ci_api_key(analytics, progress, layer_config, key)).await
+            api.with_ci_api_key(analytics, progress, layer_config, key)
+                .await
         }
         None => {
-            util::boxed(|| api.with_client_certificate(analytics, progress, layer_config)).await
+            api.with_client_certificate(analytics, progress, layer_config)
+                .await
         }
     }
     .into_certified()?;
@@ -250,30 +253,25 @@ where
             );
         }
 
-        util::boxed(|| {
-            api.connect_in_multi_cluster_session(
-                layer_config,
-                &session_subtask,
-                branch_name,
-                ci_info,
-                up_info,
-            )
-        })
+        api.connect_in_multi_cluster_session(
+            layer_config,
+            &session_subtask,
+            branch_name,
+            ci_info,
+            up_info,
+        )
         .await?
     } else {
         // Single-cluster: CLI resolves the target of the connected cluster.
-        let target_path = layer_config
-            .target
-            .path
-            .clone()
-            .unwrap_or(Target::Targetless);
-        let target = util::boxed(|| {
-            ResolvedTarget::new(
-                api.client(),
-                &target_path,
-                layer_config.target.namespace.as_deref(),
-            )
-        })
+        let target = ResolvedTarget::new(
+            api.client(),
+            &layer_config
+                .target
+                .path
+                .clone()
+                .unwrap_or(Target::Targetless),
+            layer_config.target.namespace.as_deref(),
+        )
         .await
         .map_err(CliError::OperatorTargetResolution)?;
 
@@ -281,16 +279,14 @@ where
             apply_auto_mount_for_target(layer_config, &target, api.client(), progress).await;
         }
 
-        util::boxed(|| {
-            api.connect_in_new_session(
-                target,
-                layer_config,
-                &session_subtask,
-                branch_name,
-                ci_info,
-                up_info,
-            )
-        })
+        api.connect_in_new_session(
+            target,
+            layer_config,
+            &session_subtask,
+            branch_name,
+            ci_info,
+            up_info,
+        )
         .await?
     };
 
@@ -342,6 +338,7 @@ pub(crate) struct ConnectData {
 ///    mirrord-operator is not found or its license is invalid.
 ///
 /// Here is where we start interactions with the kubernetes API.
+#[mirrord_macros::boxed_future]
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
 pub(crate) async fn create_and_connect<R: Reporter>(
     config: &mut LayerConfig,
@@ -370,10 +367,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         };
         let (operator_client, agent_connect_info) = if config.operator == Some(true) {
             (
-                Some(
-                    util::boxed(|| operator_sessions_manager_client(config, progress, analytics))
-                        .await?,
-                ),
+                Some(operator_sessions_manager_client(config, progress, analytics).await?),
                 AgentConnectInfo::OperatorSessionsManager(connect_info.clone()),
             )
         } else {
@@ -396,16 +390,14 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         });
     }
 
-    if let Some(connect_data) = util::boxed(|| {
-        try_connect_using_operator(
-            config,
-            progress,
-            analytics,
-            branch_name,
-            mirrord_for_ci,
-            mirrord_up,
-        )
-    })
+    if let Some(connect_data) = try_connect_using_operator(
+        config,
+        progress,
+        analytics,
+        branch_name,
+        mirrord_for_ci,
+        mirrord_up,
+    )
     .await?
     {
         return Ok(connect_data);
@@ -413,7 +405,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
 
     process_config_oss(config, progress)?;
 
-    let k8s_api = util::boxed(|| KubernetesAPI::create(config, progress))
+    let k8s_api = KubernetesAPI::create(config, progress)
         .await
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
@@ -437,13 +429,11 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         .filter(|target| matches!(target, Target::Targetless).not());
 
     if let Some(target_path) = auto_mount_target {
-        match util::boxed(|| {
-            ResolvedTarget::new(
-                k8s_api.client(),
-                &target_path,
-                config.target.namespace.as_deref(),
-            )
-        })
+        match ResolvedTarget::new(
+            k8s_api.client(),
+            &target_path,
+            config.target.namespace.as_deref(),
+        )
         .await
         {
             Ok(target) => {
@@ -460,17 +450,15 @@ pub(crate) async fn create_and_connect<R: Reporter>(
     let CreatedAgent {
         connect_info: agent_connect_info,
         runtime_data,
-    } = util::boxed(|| {
-        tokio::time::timeout(
-            Duration::from_secs(config.agent.startup_timeout),
-            k8s_api.create_agent(
-                progress,
-                &config.target,
-                Some(&mut config.feature.network),
-                agent_container_config,
-            ),
-        )
-    })
+    } = tokio::time::timeout(
+        Duration::from_secs(config.agent.startup_timeout),
+        k8s_api.create_agent(
+            progress,
+            &config.target,
+            Some(&mut config.feature.network),
+            agent_container_config,
+        ),
+    )
     .await
     .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
     .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;

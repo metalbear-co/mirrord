@@ -63,6 +63,7 @@ pub enum UpCliError {
 }
 
 /// The `mirrord up` command handler.
+#[mirrord_macros::boxed_future]
 pub(crate) async fn up_command(
     args: UpArgs,
     watch: drain::Watch,

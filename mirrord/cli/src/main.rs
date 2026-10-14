@@ -804,6 +804,7 @@ this session.",
     }
 }
 
+#[mirrord_macros::boxed_future]
 async fn exec(
     args: &ExecArgs,
     watch: drain::Watch,
@@ -924,6 +925,7 @@ async fn exec(
     res
 }
 
+#[mirrord_macros::boxed_future]
 async fn port_forward(
     args: &PortForwardArgs,
     watch: drain::Watch,
@@ -1136,15 +1138,15 @@ fn main() -> miette::Result<()> {
                         })),
                     };
                     windows_unsupported!(args, "ci", {
-                        util::boxed(|| ci::ci_command(ci_args, watch, &mut user_data)).await?
+                        ci::ci_command(ci_args, watch, &mut user_data).await?
                     });
                 } else {
                     let mut progress = ProgressTracker::from_env("mirrord exec");
-                    util::boxed(|| exec(&args, watch, &mut user_data, &mut progress, None)).await?
+                    exec(&args, watch, &mut user_data, &mut progress, None).await?
                 }
             }
             Commands::Dump(args) => windows_unsupported!(args, "dump", {
-                util::boxed(|| dump_command(&args, watch, &user_data)).await?
+                dump_command(&args, watch, &user_data).await?
             }),
             Commands::Extract { path } => {
                 extract_library(
@@ -1159,13 +1161,13 @@ fn main() -> miette::Result<()> {
                     .and_then(|value| value.parse::<bool>().ok())
                     .unwrap_or_default();
 
-                util::boxed(|| list::print_targets(*args, rich_output)).await?
+                list::print_targets(*args, rich_output).await?
             }
             Commands::Operator(args) => {
-                util::boxed(|| operator_command(*args, watch, &user_data)).await?;
+                operator_command(*args, watch, &user_data).await?;
             }
             Commands::ExtensionExec(args) => {
-                util::boxed(|| extension_exec(*args, watch, &user_data)).await?;
+                extension_exec(*args, watch, &user_data).await?;
             }
             Commands::InternalProxy {
                 port,
@@ -1176,45 +1178,38 @@ fn main() -> miette::Result<()> {
                 let shutdown_handler = internal_proxy::install_ci_shutdown_handler(mirrord_for_ci)?;
 
                 if mirrord_for_ci {
-                    util::boxed(|| MirrordCi::prepare_intproxy(&shutdown_handler)).await?;
+                    MirrordCi::prepare_intproxy(&shutdown_handler).await?;
                 }
 
-                util::boxed(|| logging::init_intproxy_tracing_registry(&config)).await?;
-                util::boxed(|| {
-                    internal_proxy::proxy(config, port, watch, &user_data, shutdown_handler)
-                })
-                .await?
+                logging::init_intproxy_tracing_registry(&config).await?;
+                internal_proxy::proxy(config, port, watch, &user_data, shutdown_handler).await?
             }
             #[cfg(windows)]
             Commands::CrashMonitor { port, root_pid, .. } => {
-                util::boxed(|| crash_monitor::monitor(port, root_pid)).await?
+                crash_monitor::monitor(port, root_pid).await?
             }
-            Commands::VerifyConfig(args) => util::boxed(|| verify_config(args)).await?,
+            Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {
                 let mut cmd = Cli::command_for_completions();
                 generate(args.shell, &mut cmd, "mirrord", &mut std::io::stdout());
             }
             Commands::Teams => {
-                windows_unsupported!((), "teams", { util::boxed(teams::navigate_to_intro).await })
+                windows_unsupported!((), "teams", { teams::navigate_to_intro().await })
             }
-            Commands::Diagnose(args) => {
-                util::boxed(|| diagnose_command(*args, watch, &user_data)).await?
-            }
+            Commands::Diagnose(args) => diagnose_command(*args, watch, &user_data).await?,
             Commands::Container(args) => windows_unsupported!(args, "container", {
                 let mut progress = ProgressTracker::from_env("mirrord container");
 
                 let (runtime_args, exec_params) = args.into_parts();
 
-                let exit_code = util::boxed(|| {
-                    container_command(
-                        runtime_args,
-                        exec_params,
-                        watch,
-                        &user_data,
-                        &mut progress,
-                        None,
-                    )
-                })
+                let exit_code = container_command(
+                    runtime_args,
+                    exec_params,
+                    watch,
+                    &user_data,
+                    &mut progress,
+                    None,
+                )
                 .await?;
 
                 if exit_code != 0 {
@@ -1225,48 +1220,38 @@ fn main() -> miette::Result<()> {
                 let mut progress = ProgressTracker::try_from_env("mirrord preparing to launch")
                     .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
 
-                util::boxed(|| {
-                    container_ext_command(
-                        args.config_file,
-                        args.target,
-                        watch,
-                        &user_data,
-                        &mut progress,
-                        None,
-                    )
-                })
+                container_ext_command(
+                    args.config_file,
+                    args.target,
+                    watch,
+                    &user_data,
+                    &mut progress,
+                    None,
+                )
                 .await?
             }),
             Commands::ExternalProxy { port, .. } => windows_unsupported!(port, "extproxy", {
                 let config = mirrord_config::util::read_resolved_config()?;
 
-                util::boxed(|| logging::init_extproxy_tracing_registry(&config)).await?;
-                util::boxed(|| external_proxy::proxy(config, port, watch, &user_data)).await?
+                logging::init_extproxy_tracing_registry(&config).await?;
+                external_proxy::proxy(config, port, watch, &user_data).await?
             }),
-            Commands::PortForward(args) => {
-                util::boxed(|| port_forward(&args, watch, &user_data)).await?
-            }
+            Commands::PortForward(args) => port_forward(&args, watch, &user_data).await?,
             Commands::Vpn(args) => {
-                windows_unsupported!(args, "vpn", {
-                    util::boxed(|| vpn::vpn_command(*args)).await?
-                })
+                windows_unsupported!(args, "vpn", { vpn::vpn_command(*args).await? })
             }
-            Commands::Newsletter => util::boxed(newsletter::newsletter_command).await,
+            Commands::Newsletter => newsletter::newsletter_command().await,
             Commands::Ci(args) => windows_unsupported!(args, "ci", {
-                util::boxed(|| ci::ci_command(*args, watch, &mut user_data)).await?
+                ci::ci_command(*args, watch, &mut user_data).await?
             }),
-            Commands::GlobalConfig(args) => util::boxed(|| global_config_command(*args)).await?,
-            Commands::Preview(args) => {
-                util::boxed(|| preview::preview_command(*args, watch, &user_data)).await?
-            }
-            Commands::Subscribe(args) => {
-                util::boxed(|| subscribe::subscribe_command(*args)).await?
-            }
-            Commands::Up(args) => util::boxed(|| up::up_command(*args, watch, &user_data)).await?,
-            Commands::DbBranches(args) => util::boxed(|| db_branches_command(*args)).await?,
-            Commands::Queues(args) => util::boxed(|| queues::queues_command(*args)).await?,
-            Commands::Fix(args) => util::boxed(|| fix::fix_command(args)).await?,
-            Commands::Login(args) => util::boxed(|| login::login_command(*args)).await?,
+            Commands::GlobalConfig(args) => global_config_command(*args).await?,
+            Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
+            Commands::Subscribe(args) => subscribe::subscribe_command(*args).await?,
+            Commands::Up(args) => up::up_command(*args, watch, &user_data).await?,
+            Commands::DbBranches(args) => db_branches_command(*args).await?,
+            Commands::Queues(args) => queues::queues_command(*args).await?,
+            Commands::Fix(args) => fix::fix_command(args).await?,
+            Commands::Login(args) => login::login_command(*args).await?,
             #[cfg(windows)]
             Commands::Attach(args) => {
                 let progress = ProgressTracker::from_env("mirrord attach");
@@ -1275,18 +1260,16 @@ fn main() -> miette::Result<()> {
             #[cfg(windows)]
             Commands::Pitm(args) => pitm::pitm_command(args)?,
             Commands::Tui => windows_unsupported!((), "tui", {
-                util::boxed(|| tui::tui_command(watch.clone(), &user_data)).await?
+                tui::tui_command(watch.clone(), &user_data).await?
             }),
-            Commands::Mcp => util::boxed(|| mcp::mcp_command(watch.clone(), &user_data)).await?,
-            Commands::Ui { args, command } => {
-                util::boxed(|| ui::ui_command(*args, command, "/")).await?
-            }
+            Commands::Mcp => mcp::mcp_command(watch.clone(), &user_data).await?,
+            Commands::Ui { args, command } => ui::ui_command(*args, command, "/").await?,
             Commands::Wizard { args, no_telemetry } => {
-                util::boxed(|| ui::wizard_command(args, no_telemetry, watch, &user_data)).await?
+                ui::wizard_command(args, no_telemetry, watch, &user_data).await?
             }
-            Commands::Chaos(args) => util::boxed(|| ui::chaos_command(args)).await?,
-            Commands::Session(args) => util::boxed(|| session::session_command(*args)).await?,
-            Commands::Kill(args) => util::boxed(|| session::kill_command(*args)).await?,
+            Commands::Chaos(args) => ui::chaos_command(args).await?,
+            Commands::Session(args) => session::session_command(*args).await?,
+            Commands::Kill(args) => session::kill_command(*args).await?,
             #[cfg(unix)]
             Commands::CleanupGuardian {
                 watch_pid,

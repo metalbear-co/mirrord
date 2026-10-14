@@ -77,6 +77,7 @@ mod multicluster;
 pub(crate) mod resources;
 
 /// Handle commands related to preview environments: `mirrord preview ...`
+#[mirrord_macros::boxed_future]
 pub(crate) async fn preview_command(
     args: PreviewArgs,
     watch: drain::Watch,

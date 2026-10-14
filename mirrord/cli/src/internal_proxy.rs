@@ -283,6 +283,7 @@ async fn start_session_monitor(
 
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
+#[mirrord_macros::boxed_future]
 #[tracing::instrument(level = Level::INFO, skip_all, err)]
 pub(crate) async fn proxy(
     config: LayerConfig,

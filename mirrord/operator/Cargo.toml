@@ -54,6 +54,7 @@ crd = [
 ]
 
 [dependencies]
+mirrord-macros = { path = "../macros" }
 mirrord-analytics = { path = "../analytics", optional = true }
 mirrord-auth = { path = "../auth", features = ["client"], optional = true }
 mirrord-config = { path = "../config", optional = true }

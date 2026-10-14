@@ -56,7 +56,7 @@ use crate::{
     error::CliError,
     extract::extract_library,
     up::MirrordUp,
-    util::{self, remove_proxy_env},
+    util::remove_proxy_env,
 };
 
 #[cfg(target_os = "macos")]
@@ -276,14 +276,8 @@ impl MirrordExecution {
             match std::env::var(MIRRORD_TEST_INTPROXY_ADDR) {
                 Ok(addr) => (Self::setup_existing_intproxy(addr, config)?, None, false),
                 _ => {
-                    // Box the large future to reduce the stack frame of start_internal.
-                    Box::pin(Self::spawn_agent_and_intproxy(
-                        config,
-                        progress,
-                        analytics,
-                        mirrord_for_ci,
-                    ))
-                    .await?
+                    Self::spawn_agent_and_intproxy(config, progress, analytics, mirrord_for_ci)
+                        .await?
                 }
             };
 
@@ -638,6 +632,7 @@ impl MirrordExecution {
     /// fetches remote env vars (unless configured to load from process), and starts the
     /// internal proxy as a child process. Returns the environment map, child
     /// intproxy process handle, and whether the run uses the operator.
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn spawn_agent_and_intproxy(
         config: &mut LayerConfig,
@@ -652,20 +647,18 @@ impl MirrordExecution {
             connector,
             api_version,
             target_container_ports,
-        } = util::boxed(|| {
-            create_and_connect(
-                config,
-                progress,
-                analytics,
-                branch_name,
-                mirrord_for_ci,
-                mirrord_up.as_ref(),
-            )
-        })
+        } = create_and_connect(
+            config,
+            progress,
+            analytics,
+            branch_name,
+            mirrord_for_ci,
+            mirrord_up.as_ref(),
+        )
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let mut client = util::boxed(|| connector.into_client()).await?;
+        let mut client = connector.into_client().await?;
 
         config
             .feature
@@ -677,7 +670,7 @@ impl MirrordExecution {
         let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
         } else {
-            util::boxed(|| Self::fetch_env_vars(config, &mut client))
+            Self::fetch_env_vars(config, &mut client)
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
         };
@@ -818,6 +811,7 @@ impl MirrordExecution {
 
     /// Construct filter and retrieve remote environment from the connected agent using
     /// `MirrordExecution::get_remote_env`.
+    #[mirrord_macros::boxed_future]
     async fn fetch_env_vars(
         config: &LayerConfig,
         connection: &mut MirrordClient,
