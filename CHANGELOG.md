@@ -8,6 +8,13 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.274.0](https://github.com/metalbear-co/mirrord/tree/3.274.0) - 2026-10-14
+
+
+### Changed
+
+- Warn when a Temporal task queue requested in `mirror` mode runs as `steal`.
+
 ## [3.273.0](https://github.com/metalbear-co/mirrord/tree/3.273.0) - 2026-10-13
 
 

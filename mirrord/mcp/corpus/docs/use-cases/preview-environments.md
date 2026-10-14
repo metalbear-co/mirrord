@@ -539,6 +539,21 @@ On mesh-injected targets the preview pod gets a sidecar like any other pod, and 
 
 Only Istio and Linkerd are handled automatically. On another mesh (for example Kuma), the preview pod's sidecar still captures the operator's incoming connections and preview-matched requests fail. If you run a mesh we don't handle yet, please [reach out](https://metalbear.com/slack) so we can add support for it. In the meantime, if your mesh has an inbound-port-exclusion annotation, a cluster administrator can set it for all preview pods through the operator's preview pod configuration, pointing it at the ports your previews serve.
 
+#### Pod Labels and Annotations
+
+Preview pods start from the target's pod template, so they keep its labels and annotations. Cluster admins can add their own to every preview pod with `operator.preview.labels` and `operator.preview.annotations` in the operator's Helm values. This is useful when a cluster-wide tool reads pod metadata - for example Karpenter, which otherwise deletes a preview pod while it consolidates an underutilized node:
+
+```yaml
+operator:
+  preview:
+    annotations:
+      karpenter.sh/do-not-disrupt: "true"
+    labels:
+      team: platform
+```
+
+A value set here wins over the same key from the target's template. Previews started after the change pick them up; the operator reads these values when it starts, so restart it after changing them. Database branches a preview creates take their metadata from the branch config instead - see [Branch Pod Labels and Annotations](../sharing-the-cluster/db-branching.md#branch-pod-labels-and-annotations).
+
 #### Resources
 
 Preview Environments consist of a Deployment, to manage and maintain the underlying pods, and a [Headless Service](https://kubernetes.io/docs/concepts/services-networking/service/#headless-services), to route traffic to the dynamic set of pods. Because the Service doesn't have a Cluster IP, exhaustion of IP addresses when deploying a large number of Preview Environments is not a concern.

@@ -157,7 +157,7 @@ The "Connection config" column is how the branch's `connection` is declared in t
 
 The `postgres` superuser login with mirrord's branch password is available in every configuration.
 
-When a branch does not behave the way you expect, check identity first: have the app log `SELECT current_user`, or compare the host it connected to against the branch pod's IP. Most surprises turn out to be the app connecting as a different user - or to a different database - than assumed (for example, a `DATABASE_URL` exported in your local shell shadowing the overridden variables).
+When a branch does not behave the way you expect, check identity first: have the app log `SELECT current_user`, or compare the host it connected to against the branch's Service IP, the address in the overridden variables (the operator fronts every branch pod with a Service that survives [pod replacement](../db-branching.md#pod-replacement)). Most surprises turn out to be the app connecting as a different user - or to a different database - than assumed (for example, a `DATABASE_URL` exported in your local shell shadowing the overridden variables).
 
 ### Limits
 
