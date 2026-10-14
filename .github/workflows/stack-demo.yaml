@@ -1,0 +1,10 @@
+# Showcase only, never merged: runs the Windows job on push to this branch.
+name: Stack demo
+on: push
+permissions:
+  contents: read
+jobs:
+  windows:
+    uses: ./.github/workflows/test-windows.yaml
+    with:
+      rust_toolchain: nightly-2026-08-13

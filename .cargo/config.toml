@@ -18,5 +18,5 @@ incremental = false
 
 [target.'cfg(windows)']
 rustflags = [
-    "-C", "link-args=/STACK:8388608", # STACKSIZE=8MB
+    "-C", "link-args=/STACK:1048576", # Showcase only: the 1 MiB Windows default
 ]
