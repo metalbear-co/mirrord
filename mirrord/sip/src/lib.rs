@@ -679,6 +679,9 @@ mod main {
         false
     }
 
+    /// macOS's command line client for the keychain.
+    const KEYCHAIN_CLIENT: &str = "/usr/bin/security";
+
     /// SIP check for binaries.
     fn is_binary_sip(path: &Path, data: &[u8], opts: SipPatchOptions) -> Result<bool> {
         // Skip patching binary if it is in the list of binaries to skip.
@@ -689,6 +692,13 @@ mod main {
         // Patch binary if it is in the list of binaries to patch.
         if opts.patch.iter().any(|x| path.ends_with(x)) {
             return Ok(true);
+        }
+        // The keychain only answers the copy of `security` that Apple signed, so a patched copy
+        // makes macOS ask for the user's password on every run of a tool that keeps its
+        // credentials there. It only talks to the local keychain, which mirrord has no part in.
+        if path == Path::new(KEYCHAIN_CLIENT) {
+            trace!("Skipping SIP patch for {:?}", path);
+            return Ok(false);
         }
 
         let is_restricted =

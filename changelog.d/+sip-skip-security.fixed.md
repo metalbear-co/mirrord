@@ -1,0 +1,1 @@
+mirrord no longer patches `/usr/bin/security` for SIP, so tools that read their credentials from the keychain through it, such as Claude Code, no longer make macOS ask for the keychain password on every run.
