@@ -160,11 +160,35 @@ operator:
 
 A branch whose `image` matches no pattern is rejected and the session fails with an error. When `allowedImages` is **absent**, all images are allowed - restricting is an explicit, opt-in choice per cluster and engine. Each engine has its own `<engine>BranchConfig` block (`pgBranchConfig`, `mysqlBranchConfig`, `genericBranchConfig`, and so on); the list only affects branches that supply a custom `image`, so branches that rely on the default image are always allowed.
 
+## Branch Pod Labels and Annotations
+
+Cluster admins can put labels and annotations on every branch pod of an engine with `dbPod.labels` and `dbPod.annotations` in the operator's Helm values. This is useful when a cluster-wide tool reads pod metadata - for example Karpenter, which otherwise deletes a branch pod while it consolidates an underutilized node, ending the session's database mid-run:
+
+```yaml
+operator:
+  pgBranchConfig:
+    dbPod:
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+      labels:
+        team: platform
+```
+
+The operator puts them on the branch database pod and, from operator 3.219.0 on, on the pods of the branch's [schema migration](db-branching/migrations.md) and copy Jobs, so the whole branch falls under the same rules; earlier versions set them on the database pod only. Each engine has its own `<engine>BranchConfig` block, and a [profile](#branch-config-profiles) is a complete `dbPod`, so set them again in each profile that needs them. Only branches created after the change pick them up.
+
 ## Branch Storage
 
 By default, each branch stores its database on its own PersistentVolumeClaims: one for the data directory and one for staging the dump during the copy, 20Gi each. The claims are provisioned with the cluster's default StorageClass when the branch is created and deleted together with it, so branching a large database does not depend on how much spare disk the node happens to have.
 
 On clusters without a default StorageClass, branches automatically fall back to node-local `emptyDir` volumes, capped at 1Gi for data and 100Mi for the dump.
+
+### Pod replacement
+
+A branch pod can be deleted out from under a branch: a Karpenter consolidation, a node drain, an eviction under memory pressure. When the branch's data lives on its PersistentVolumeClaim (the default), the operator starts a new pod on that claim, so a PostgreSQL, MySQL, MariaDB, ClickHouse or MongoDB branch keeps everything written to it and comes back `Ready` on a new pod; only the copy from the source is redone during the restart. A branch on node-local `emptyDir` storage (a cluster without a default StorageClass, or an explicit `emptyDir` opt-out) loses its data with the pod and is marked `Failed` instead.
+
+Sessions reach such a branch through a per-branch Service rather than the pod's address, so a session attached before the replacement stays attached and finds the branch at the same address once it is `Ready`. Branches that cannot be rebuilt (below) keep the pod's address, which reaches every port the image serves. Open database connections do not survive the pod: the application has to reconnect or retry, as it would after any database restart.
+
+Engines whose setup copies the source again on every start (Redis, DynamoDB, CockroachDB, MSSQL, Spanner) and generic branches cannot be rebuilt without losing what the branch holds, so such a branch is marked `Failed` with the reason, and a new session creates a fresh one.
 
 ### Upgrading from older versions
 

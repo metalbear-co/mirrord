@@ -8,6 +8,29 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.274.0](https://github.com/metalbear-co/mirrord/tree/3.274.0) - 2026-10-14
+
+
+### Added
+
+- `mirrord up` services can set `run.pre_command` to run a build step without
+  mirrord before their session starts.
+
+
+### Changed
+
+- Warn when a Temporal task queue requested in `mirror` mode runs as `steal`.
+
+
+### Fixed
+
+- Fixed a crash on macOS when a process passes its own environment to `execve`
+  and starts a binary in an app bundle that mirrord patches for SIP.
+- `mirrord preview start` keeps the preview URL when replacing a session for
+  the same key and target.
+- `mirrord up` errors show their help again, such as the list of available
+  services, and YAML parse errors no longer print their snippet twice.
+
 ## [3.273.0](https://github.com/metalbear-co/mirrord/tree/3.273.0) - 2026-10-13
 
 

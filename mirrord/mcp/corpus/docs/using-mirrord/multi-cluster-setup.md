@@ -18,9 +18,10 @@ This guide covers how to set up multi-cluster mirrord. At a glance, the setup is
 Before you start, make sure you have:
 
 1. The mirrord operator `3.141.0+` Helm chart `1.50.0+` ready to install on all clusters.
-2. `kubectl` access to all clusters.
-3. For EKS IAM authentication: AWS CLI and `eksctl` installed.
-4. For AKS Workload Identity authentication: Azure CLI (`az`) installed, and the Primary AKS cluster must have [Workload Identity enabled](https://learn.microsoft.com/en-us/azure/aks/workload-identity-deploy-cluster).
+2. Kubernetes `1.30` or later on the Primary cluster, and `1.22` or later on the downstream clusters. The downstream clusters need `1.30` or later if you use [queue splitting](../sharing-the-cluster/queue-splitting.md).
+3. `kubectl` access to all clusters.
+4. For EKS IAM authentication: AWS CLI and `eksctl` installed.
+5. For AKS Workload Identity authentication: Azure CLI (`az`) installed, and the Primary AKS cluster must have [Workload Identity enabled](https://learn.microsoft.com/en-us/azure/aks/workload-identity-deploy-cluster).
 
 ---
 
@@ -556,6 +557,7 @@ operator:
 
 For previews that use database branching:
 
+* **Each workload cluster needs Kubernetes `1.29` or later.** The operator adds a native sidecar container to the preview replicas. Older versions of Kubernetes do not run it correctly.
 * **Upgrade the Primary and workload operators together.** Mismatched versions refuse to establish the branch tunnel; non-branching previews are unaffected.
 * If your workload namespaces restrict egress, **allow traffic to the operator's namespace on port `4980`** (the `db-tunnel` port on the operator Service).
 
