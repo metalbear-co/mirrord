@@ -5032,6 +5032,18 @@
             }
           ]
         },
+        "helm": {
+          "title": "feature.preview.helm {#feature-preview-helm}",
+          "description": "A Helm chart to build the preview from. mirrord renders it on your machine with\n`helm template` and then handles the rendered objects exactly like\n[`spec_resources`](#feature-preview-spec_resources): only the target and the ConfigMaps\nand Secrets its pod uses, and only where they differ from what is live. Same as\n`mirrord preview start --chart <path> --values <path>`, which replaces this block when\ngiven. Can be combined with `spec_resources`.\n\nRendering uses the `helm` binary on your `PATH`, under the target's namespace. The\nfields:\n\n- `chart`: the chart directory or packaged `.tgz`, anything `helm template` accepts.\n- `values`: values files, applied in order like `helm template -f`. Without any, the\n  chart's own `values.yaml` is used, which may not match what is deployed.\n- `release_name`: the release name the chart is rendered under (`.Release.Name`).\n  Defaults to the target's name. Charts usually build object names from it, so set it\n  when your release is not named after the target: otherwise the rendered objects fall\n  outside the target's scope and the preview runs the live spec.\n\n```json\n{\n  \"target\": \"deployment/app\",\n  \"feature\": {\n    \"preview\": {\n      \"image\": \"my-registry/app:pr-318\",\n      \"helm\": {\n        \"chart\": \"./chart\",\n        \"values\": [\"./values-qa.yaml\"]\n      }\n    }\n  }\n}\n```",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewHelmConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "idle": {
           "title": "feature.preview.idle {#feature-preview-idle}",
           "description": "Idle-mode settings: run the preview with zero pods while it receives no traffic,\nand boot them back up when traffic arrives.",
@@ -5121,6 +5133,34 @@
         }
       },
       "additionalProperties": false
+    },
+    "PreviewHelmConfig": {
+      "description": "<!--${internal}-->\nA Helm chart to render into the manifests a preview is built from. Documented on\n`feature.preview.helm`.",
+      "type": "object",
+      "properties": {
+        "chart": {
+          "description": "<!--${internal}-->\nChart directory or packaged `.tgz`.",
+          "type": "string"
+        },
+        "release_name": {
+          "description": "<!--${internal}-->\nRelease name to render under. Defaults to the target's name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "values": {
+          "description": "<!--${internal}-->\nValues files, in `helm template -f` order.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "chart"
+      ]
     },
     "PreviewIdleFileConfig": {
       "description": "Idle-mode settings for preview sessions.\n\nAn idle preview keeps its session, traffic listener, queue splits, and database branches\nalive, but runs zero pods. The first stolen request or routed queue message boots the pods\nback up. HTTP requests arriving while the pods boot are held by the operator until a pod is\nready or the wake timeout expires.",

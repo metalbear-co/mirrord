@@ -257,6 +257,64 @@ pub struct PreviewConfig {
     /// ```
     #[config(default)]
     pub spec_resources: Vec<PathBuf>,
+
+    /// #### feature.preview.helm {#feature-preview-helm}
+    ///
+    /// A Helm chart to build the preview from. mirrord renders it on your machine with
+    /// `helm template` and then handles the rendered objects exactly like
+    /// [`spec_resources`](#feature-preview-spec_resources): only the target and the ConfigMaps
+    /// and Secrets its pod uses, and only where they differ from what is live. Same as
+    /// `mirrord preview start --chart <path> --values <path>`, which replaces this block when
+    /// given. Can be combined with `spec_resources`.
+    ///
+    /// Rendering uses the `helm` binary on your `PATH`, under the target's namespace. The
+    /// fields:
+    ///
+    /// - `chart`: the chart directory or packaged `.tgz`, anything `helm template` accepts.
+    /// - `values`: values files, applied in order like `helm template -f`. Without any, the
+    ///   chart's own `values.yaml` is used, which may not match what is deployed.
+    /// - `release_name`: the release name the chart is rendered under (`.Release.Name`). Defaults
+    ///   to the target's name. Charts usually build object names from it, so set it when your
+    ///   release is not named after the target: otherwise the rendered objects fall outside the
+    ///   target's scope and the preview runs the live spec.
+    ///
+    /// ```json
+    /// {
+    ///   "target": "deployment/app",
+    ///   "feature": {
+    ///     "preview": {
+    ///       "image": "my-registry/app:pr-318",
+    ///       "helm": {
+    ///         "chart": "./chart",
+    ///         "values": ["./values-qa.yaml"]
+    ///       }
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    #[config(default)]
+    pub helm: Option<PreviewHelmConfig>,
+}
+
+/// <!--${internal}-->
+/// A Helm chart to render into the manifests a preview is built from. Documented on
+/// `feature.preview.helm`.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewHelmConfig {
+    /// <!--${internal}-->
+    /// Chart directory or packaged `.tgz`.
+    pub chart: PathBuf,
+
+    /// <!--${internal}-->
+    /// Values files, in `helm template -f` order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<PathBuf>,
+
+    /// <!--${internal}-->
+    /// Release name to render under. Defaults to the target's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_name: Option<String>,
 }
 
 /// A single file to project into the preview pod's container filesystem.
@@ -735,6 +793,7 @@ mod tests {
             config_mounts: vec![],
             secret_mounts: vec![],
             spec_resources: vec![],
+            helm: None,
         }
     }
 
@@ -793,6 +852,7 @@ mod tests {
             config_mounts: vec![mount],
             secret_mounts: vec![],
             spec_resources: vec![],
+            helm: None,
         }
     }
 
@@ -809,6 +869,7 @@ mod tests {
             config_mounts: vec![],
             secret_mounts: vec![mount],
             spec_resources: vec![],
+            helm: None,
         }
     }
 

@@ -20,11 +20,12 @@
 //! can only compare what they could already read.
 //!
 //! Everything after step 1 works on [`SuppliedObject`]s and never looks at where they came
-//! from beyond [`SuppliedObject::source`], the label messages print. Another manifest source
-//! (a Helm chart rendered to documents, for example) plugs in by producing the same objects.
+//! from beyond [`SuppliedObject::source`], the label messages print. `--chart` is the second
+//! source: [`helm::render`] runs `helm template` and produces the same objects.
 
 mod access;
 mod compare;
+mod helm;
 mod manifest;
 mod report;
 mod scope;
@@ -56,6 +57,7 @@ use self::{
     scope::TargetRef,
 };
 pub(crate) use self::{
+    helm::{HelmChart, render as render_chart},
     manifest::load,
     report::{render_diff, summary},
 };
@@ -104,10 +106,61 @@ impl SuppliedObject {
 pub(crate) enum ResourcesError {
     #[error("Path {} does not exist.", .0.display())]
     #[diagnostic(help(
-        "Pass manifest files or directories of them with `--resource`, or fix \
-         `feature.preview.spec_resources` in your mirrord config."
+        "Pass manifest files or directories of them with `--resource`, a Helm chart and its \
+         values files with `--chart` and `--values`, or fix `feature.preview.spec_resources` \
+         or `feature.preview.helm` in your mirrord config."
     ))]
     PathMissing(PathBuf),
+
+    #[error("`helm` was not found on your PATH.\nNothing was created.")]
+    #[diagnostic(help(
+        "`--chart` renders the chart with `helm template`. Install Helm \
+         (https://helm.sh/docs/intro/install/), or render the chart yourself and pass the \
+         output with `--resource`."
+    ))]
+    HelmNotFound,
+
+    #[error("Failed to run `helm`")]
+    HelmRun {
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("Rendering {} failed. `{command}` said:\n{stderr}\nNothing was created.", chart.display())]
+    #[diagnostic(help(
+        "mirrord passes the chart and values files through to `helm template` unchanged, so \
+         the same command fails on its own. Fix the chart or the values and run the command \
+         again."
+    ))]
+    HelmFailed {
+        chart: PathBuf,
+        command: String,
+        stderr: String,
+    },
+
+    #[error("{} rendered no Kubernetes objects.\nNothing was created.", .0.display())]
+    #[diagnostic(help(
+        "Every template rendered empty. Check the values files enable what the preview needs, \
+         or leave out `--chart` to preview the live spec."
+    ))]
+    ChartRenderedNothing(PathBuf),
+
+    #[error(
+        "Template {} rendered invalid YAML: {}{message}\n(the line refers to the rendered \
+         output)\nNothing was created.",
+        template.display(),
+        location.map(|(line, column)| format!("line {line}, column {column}: ")).unwrap_or_default(),
+    )]
+    #[diagnostic(help(
+        "`helm template` does not check its output. Run it with the same release name and \
+         values to see the rendered document, then fix the template."
+    ))]
+    RenderedTemplateInvalid {
+        template: PathBuf,
+        /// Line and column in the rendered document, both starting at 1.
+        location: Option<(u64, u64)>,
+        message: String,
+    },
 
     #[error("No Kubernetes manifests found in {} (looked for *.yaml, *.yml).", .0.display())]
     #[diagnostic(help(
