@@ -34,7 +34,9 @@ impl McpServer {
         `mirrord-up.yaml`) against the schema of the installed mirrord version. Returns every \
         issue found, each with the JSON pointer of the offending value, a message and, where the \
         schema enumerates them, the allowed values. An empty `issues` list means the config is \
-        valid. Call this before writing or changing a mirrord config file.",
+        valid. Call this before writing or changing a mirrord config file. Pass `directory`, the \
+        absolute path of the directory the user runs mirrord from, so that relative protobuf \
+        schema paths in the config resolve as they will when mirrord runs.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     fn validate_config(

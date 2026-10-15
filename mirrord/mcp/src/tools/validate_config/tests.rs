@@ -8,6 +8,7 @@ fn validate(format: ConfigFormat, content: &str) -> ValidateConfigOutput {
         format,
         content: content.to_owned(),
         key: None,
+        directory: None,
     })
     .unwrap()
 }
@@ -129,6 +130,7 @@ services:
         format: ConfigFormat::MirrordUpYaml,
         content: content.to_owned(),
         key: Some("prod".to_owned()),
+        directory: None,
     })
     .unwrap();
     let issue = output.issues.pop().unwrap();
@@ -748,4 +750,90 @@ fn up_yaml_runnable_service(#[case] service: &str) {
         &format!("services:\n  app:\n    {service}\n    run:\n      command: [\"true\"]\n"),
     );
     assert!(output.valid, "{:?}", output.issues);
+}
+
+/// A `mirrord.json` that decodes Kafka payloads with `schemas/record.proto`, which imports from
+/// `protos`. Both are relative to the directory mirrord runs in.
+const PROTOBUF_JSON: &str = r#"{
+    "operator": true,
+    "target": "deployment/consumer",
+    "feature": {
+        "split_queues": {
+            "orders": {
+                "queue_type": "Kafka",
+                "payload_protobuf": {
+                    "schema_file": "schemas/record.proto",
+                    "include_directories": ["protos"],
+                    "message_type": "test.Record"
+                },
+                "jq_filter": ".payload_decoded.id == 1"
+            }
+        }
+    }
+}"#;
+
+/// The same queue split as [`PROTOBUF_JSON`], in a `config_patch` of `mirrord up`.
+const PROTOBUF_UP_YAML: &str = r#"
+services:
+  consumer:
+    target:
+      path: deployment/consumer
+    config_patch:
+      feature:
+        split_queues:
+          orders:
+            queue_type: Kafka
+            payload_protobuf:
+              schema_file: schemas/record.proto
+              include_directories: [protos]
+              message_type: test.Record
+            jq_filter: ".payload_decoded.id == 1"
+    run:
+      command: ["echo"]
+"#;
+
+#[rstest]
+#[case::mirrord_json(ConfigFormat::MirrordJson, PROTOBUF_JSON)]
+#[case::up_yaml(ConfigFormat::MirrordUpYaml, PROTOBUF_UP_YAML)]
+fn relative_schema_file_resolves_from_directory(
+    #[case] format: ConfigFormat,
+    #[case] content: &str,
+) {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir(project.path().join("schemas")).unwrap();
+    std::fs::write(
+        project.path().join("schemas/record.proto"),
+        r#"syntax = "proto3"; package test; import "common.proto"; message Record { int64 id = 1; common.Meta meta = 2; }"#,
+    )
+    .unwrap();
+    std::fs::create_dir(project.path().join("protos")).unwrap();
+    std::fs::write(
+        project.path().join("protos/common.proto"),
+        r#"syntax = "proto3"; package common; message Meta { string origin = 1; }"#,
+    )
+    .unwrap();
+
+    let output = validate_config(ValidateConfigArgs {
+        format,
+        content: content.to_owned(),
+        key: None,
+        directory: Some(project.path().to_owned()),
+    })
+    .unwrap();
+    assert!(output.valid, "{:?}", output.issues);
+}
+
+/// Without a directory, the schema is looked up in the working directory of the process, and the
+/// issue says where.
+#[test]
+fn relative_schema_file_without_directory() {
+    let issue = single_issue(ConfigFormat::MirrordJson, PROTOBUF_JSON);
+    let looked_up = std::path::absolute("schemas/record.proto").unwrap();
+    assert!(
+        issue
+            .message
+            .contains(&format!("`{}`", looked_up.display())),
+        "{}",
+        issue.message
+    );
 }

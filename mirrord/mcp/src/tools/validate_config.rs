@@ -10,7 +10,13 @@
 //! that failed to deserialize, because it reports every problem at once, each with its location
 //! and, where the schema lists them, the allowed values, where serde stops at the first error.
 
-use std::{collections::HashSet, fmt, ops::Not, path::Path, str::FromStr};
+use std::{
+    collections::HashSet,
+    fmt,
+    ops::Not,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use jsonschema::{
     ValidationError,
@@ -69,6 +75,12 @@ pub struct ValidateConfigArgs {
     /// for configs whose templates depend on the key's value; a placeholder is used when omitted.
     #[serde(default)]
     pub key: Option<String>,
+    /// The absolute path of the directory the user runs `mirrord exec` or `mirrord up` from,
+    /// usually the project root. A relative protobuf `schema_file` and `include_directories`
+    /// resolve from it. When omitted, they resolve from the working directory of this MCP server,
+    /// which the MCP client chooses and which is often not the project's.
+    #[serde(default)]
+    pub directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -107,8 +119,13 @@ pub fn validate_config(
         format,
         content,
         key,
+        directory,
     }: ValidateConfigArgs,
 ) -> Result<ValidateConfigOutput, ValidateConfigError> {
+    // Without symlinks, like the working directory `mirrord exec` reads, so that a config that
+    // mixes relative and absolute paths compiles the same way in both.
+    let directory =
+        directory.map(|directory| std::fs::canonicalize(&directory).unwrap_or(directory));
     let issues = match format {
         ConfigFormat::MirrordJson => {
             // Isolated from this process's environment, which is the MCP client's rather than the
@@ -116,7 +133,8 @@ pub fn validate_config(
             // own `key` field or generates one, as `mirrord exec` does.
             let mut context = ConfigContext::default()
                 .strict_env(true)
-                .override_env_opt(MIRRORD_ENV_KEY, key);
+                .override_env_opt(MIRRORD_ENV_KEY, key)
+                .invocation_directory(directory);
             let rendered =
                 LayerFileConfig::render(&content, Path::new("mirrord.json"), &mut context)
                     .map_err(|error| error.to_string());
@@ -172,8 +190,8 @@ pub fn validate_config(
                         }
                         Err(issues) => (issues, None),
                     };
-                    let setting_issues = check_services(&value, &key)?;
-                    match config.map(|config| config.verify_services(&key)) {
+                    let setting_issues = check_services(&value, &key, directory.as_deref())?;
+                    match config.map(|config| config.verify_services(&key, directory.as_deref())) {
                         // A service whose settings or `config_patch` have issues of their own
                         // also fails to assemble; those issues already point at the culprit.
                         Some(Ok(errors)) => {
@@ -450,6 +468,7 @@ fn file_issue(message: String) -> ConfigIssue {
 fn check_services(
     up_config: &Value,
     key: &EnvKey,
+    directory: Option<&Path>,
 ) -> Result<Vec<ConfigIssue>, ValidateConfigError> {
     let Some(services) = up_config.get("services").and_then(Value::as_object) else {
         return Ok(Vec::new());
@@ -460,8 +479,14 @@ fn check_services(
         .unwrap_or_default();
     // Isolated from the environment like the merged config in `mirrord up`, whose
     // environment-derived settings come from the generated config rather than the patch.
-    let check =
-        |config: &Value| check_layer_config(config, ConfigContext::default().strict_env(true));
+    let check = |config: &Value| {
+        check_layer_config(
+            config,
+            ConfigContext::default()
+                .strict_env(true)
+                .invocation_directory(directory.map(Path::to_owned)),
+        )
+    };
 
     let mut service_issues = Vec::new();
     for (service, settings) in services {
