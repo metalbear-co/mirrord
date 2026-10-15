@@ -32,9 +32,9 @@ pub mod serverless;
 pub mod service;
 pub mod stateful_set;
 
-/// Deserialized by hand rather than as an untagged enum: serde discards the error of every variant
-/// of an untagged enum, so a typo in the target path would only be reported as "data did not
-/// match any variant", without saying what is wrong with it.
+/// A target path string is deserialized by hand rather than through the untagged enum: serde
+/// discards the error of every variant of an untagged enum, so a typo in the path would only be
+/// reported as "data did not match any variant", without saying what is wrong with it.
 #[derive(Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
 #[schemars(
@@ -78,29 +78,56 @@ impl<'de> Deserialize<'de> for TargetFileConfig {
     where
         D: Deserializer<'de>,
     {
+        /// The map forms of [`TargetFileConfig`]. These stay untagged: a map is either a target
+        /// object such as `{ "deployment": "my-app" }` or the advanced form, and only trying both
+        /// tells them apart.
         #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Advanced {
-            #[serde(default, deserialize_with = "string_or_struct_option")]
-            path: Option<Target>,
-            #[serde(default)]
-            namespace: Option<String>,
+        #[serde(untagged, deny_unknown_fields, rename = "TargetFileConfig")]
+        enum MapForm {
+            Target(Target),
+            Advanced {
+                #[serde(default, deserialize_with = "string_or_struct_option")]
+                path: Option<Target>,
+                #[serde(default)]
+                namespace: Option<String>,
+            },
         }
 
-        // A map is either the advanced form or a target object such as
-        // `{ "deployment": "my-app" }`, told apart by the advanced form's keys.
-        let value = serde_json::Value::deserialize(deserializer)?;
-        match value {
-            serde_json::Value::Null => Ok(Self::Simple(None)),
-            serde_json::Value::Object(ref map)
-                if map.contains_key("path") || map.contains_key("namespace") =>
-            {
-                Advanced::deserialize(value)
-                    .map(|Advanced { path, namespace }| Self::Advanced { path, namespace })
+        struct Visitor;
+
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = TargetFileConfig;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a target path or a target map")
             }
-            value => string_or_struct_option(value).map(Self::Simple),
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                value
+                    .parse()
+                    .map(|target| TargetFileConfig::Simple(Some(target)))
+                    .map_err(E::custom)
+            }
+
+            fn visit_map<M>(self, map: M) -> Result<Self::Value, M::Error>
+            where
+                M: de::MapAccess<'de>,
+            {
+                Ok(
+                    match MapForm::deserialize(de::value::MapAccessDeserializer::new(map))? {
+                        MapForm::Target(target) => TargetFileConfig::Simple(Some(target)),
+                        MapForm::Advanced { path, namespace } => {
+                            TargetFileConfig::Advanced { path, namespace }
+                        }
+                    },
+                )
+            }
         }
-        .map_err(de::Error::custom)
+
+        deserializer.deserialize_any(Visitor)
     }
 }
 
@@ -840,7 +867,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::config::{ConfigContext, MirrordConfig};
+    use crate::config::ConfigContext;
 
     #[rstest]
     #[case(None, None,
