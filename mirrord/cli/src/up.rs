@@ -61,6 +61,10 @@ pub enum UpCliError {
         "The username is used for automatically generating a session key. Please provide a session key manually or ensure your OS user has a valid username."
     ))]
     UsernameFetch(whoami::Error),
+
+    #[cfg(not(target_os = "windows"))]
+    #[error("`mirrord up --debug` is not supported yet on this platform")]
+    DebugUnsupported,
 }
 
 /// The `mirrord up` command handler.
@@ -86,6 +90,13 @@ pub(crate) async fn up_command(
 }
 
 async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
+    // The extension only drives `--debug` on Windows so far; elsewhere it would wait for a hold
+    // line that never comes.
+    #[cfg(not(target_os = "windows"))]
+    if args.debug.is_some() {
+        return Err(UpCliError::DebugUnsupported);
+    }
+
     let key = match args.key {
         Some(key) => EnvKey::Provided(key),
         None => EnvKey::Generated(whoami::username().map_err(UpCliError::UsernameFetch)?),
@@ -107,7 +118,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         .add("num_selected_services", args.services.len());
 
     up_config
-        .select_services(&args.services)
+        .select_services(&args.services, args.debug.as_deref())
         .map_err(UpError::from)?;
 
     analytics
@@ -161,6 +172,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         args.context,
         key,
         correlation_id,
+        args.debug.as_deref(),
         ready.clone(),
     )
     .await;
@@ -200,6 +212,8 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::Tera(_))
             | UpCliError::Up(UpError::Mode(_))
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
+            #[cfg(not(target_os = "windows"))]
+            UpCliError::DebugUnsupported => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::PreCommandFailed { .. })
             | UpCliError::Up(UpError::PreCommandSpawn { .. }) => Self::PreCommandFailed,

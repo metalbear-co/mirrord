@@ -1983,6 +1983,13 @@ pub(super) struct UpArgs {
     #[arg(long)]
     pub context: Option<Arc<str>>,
 
+    /// Hold this service's program at its entry point until an IDE releases it, so a debugger
+    /// attaches before its first line runs.
+    ///
+    /// For IDE extensions, so hidden from help.
+    #[arg(long, hide = true, value_name = "SERVICE")]
+    pub debug: Option<String>,
+
     /// Subcommand. When absent, `mirrord up` runs the sessions defined in
     /// the config file. With a subcommand, the flags above are ignored.
     #[command(subcommand)]
