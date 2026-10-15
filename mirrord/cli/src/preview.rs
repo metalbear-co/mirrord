@@ -38,13 +38,14 @@ use mirrord_config::{
         network::incoming::tls_delivery::{
             LocalTlsDelivery, TlsClientCertSource, TlsDeliveryProtocol,
         },
-        preview::{ConfigMount, ConfigMountType},
+        preview::{ConfigMount, ConfigMountType, PreviewHelmConfig},
+        split_queues::{QueueKind, QueueMode, SplitQueuesConfig},
     },
     target::{Target, TargetDisplay, label::LabelTarget},
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
-    client::{NoClientCert, OperatorApi, connect_params::BranchDbNames},
+    client::{NoClientCert, OperatorApi, connect_params::BranchDbNames, temporal_mirror_warning},
     crd::{
         MirrordOperatorSpec, NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
@@ -65,8 +66,8 @@ use tracing::Level;
 
 use crate::{
     config::{
-        PreviewArgs, PreviewCommand, PreviewCommonArgs, PreviewDiffArgs, PreviewLogsArgs,
-        PreviewStartArgs, PreviewStatusArgs, PreviewStopArgs,
+        ManifestSourceArgs, PreviewArgs, PreviewCommand, PreviewCommonArgs, PreviewDiffArgs,
+        PreviewLogsArgs, PreviewStartArgs, PreviewStatusArgs, PreviewStopArgs,
     },
     data::UserData,
     error::{CliError, CliResult, format_preview_logs},
@@ -120,11 +121,11 @@ async fn preview_start(
     let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
 
     // Read before contacting the cluster, so a broken manifest fails without side effects.
-    let resource_paths = resource_paths(args.resources, &mut layer_config);
-    let mut supplied_objects = if resource_paths.is_empty() {
+    let sources = manifest_sources(args.manifests, &mut layer_config);
+    let mut supplied_objects = if sources.paths.is_empty() {
         None
     } else {
-        Some(load_manifests(&resource_paths, &progress)?)
+        Some(load_manifests(&sources.paths, &progress)?)
     };
 
     let mut analytics = AnalyticsReporter::only_error(
@@ -139,8 +140,21 @@ async fn preview_start(
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
     operator_api.check_feature_support(&layer_config, false)?;
 
-    if supplied_objects.is_some() {
+    if !sources.is_empty() {
         require_spec_resources_support(&operator_api.operator().spec)?;
+    }
+    // The chart renders under the target's namespace, which the kube client resolves when the
+    // config leaves it out, so this waits for the connection. Rendering still touches nothing
+    // in the cluster.
+    if let Some(chart) = &sources.chart {
+        let rendered = render_chart(
+            chart,
+            &layer_config,
+            target_namespace(&operator_api, &layer_config),
+            &progress,
+        )
+        .await?;
+        supplied_objects.get_or_insert_default().extend(rendered);
     }
 
     let is_cronjob_target = matches!(layer_config.target.path, Some(Target::CronJob(_)));
@@ -276,7 +290,7 @@ async fn preview_start(
             let plan = resources::plan(
                 operator_api.client(),
                 objects,
-                resources::sources_label(&resource_paths),
+                sources.label(),
                 resources_target(&session_target)?,
                 target_namespace(&operator_api, &layer_config),
             )
@@ -284,6 +298,9 @@ async fn preview_start(
             .inspect_err(|_| subtask.failure(None))?;
             for message in resources::summary(&plan) {
                 subtask.info(&message);
+            }
+            if let Some(hint) = release_name_hint(&plan, &sources, &layer_config) {
+                subtask.warning(&hint);
             }
             for note in &plan.notes {
                 subtask.warning(note);
@@ -318,10 +335,32 @@ async fn preview_start(
         .await
         .inspect_err(|_| subtask.failure(None))?;
 
-    for session in existing_sessions
+    let mut replaced_sessions = existing_sessions
         .into_iter()
         .filter(|session| session.spec.target == session_target)
-    {
+        .collect::<Vec<_>>();
+
+    // Same key and target means the same preview, so the new session asks the operator for the
+    // host the old one was shared on: links posted in a PR or Slack keep working after a new
+    // image. The operator decides whether it can honour the request.
+    //
+    // The newest session is the one the link currently points at, so it is asked first. A
+    // session replaced before the operator stamped its status (two pushes in quick succession)
+    // still carries the host it asked for on its spec, so that is the fallback.
+    replaced_sessions.sort_by(|a, b| {
+        b.metadata
+            .creation_timestamp
+            .cmp(&a.metadata.creation_timestamp)
+    });
+    let share_host = replaced_sessions.iter().find_map(|session| {
+        session
+            .status
+            .as_ref()
+            .and_then(|status| status.share_host.clone())
+            .or_else(|| session.spec.share_host.clone())
+    });
+
+    for session in replaced_sessions {
         let name = session.name_any();
 
         subtask.warning(&format!("replacing existing session '{name}'"));
@@ -390,6 +429,13 @@ async fn preview_start(
         wake_timeout_secs: idle_config.wake_timeout_secs,
     });
 
+    // Preview start never opens an operator websocket, so `QueueSplitProgress` never runs.
+    // The config already names the Temporal queues it asked to mirror (including `*` from
+    // `mirrord up`), so warn from that before the session is created.
+    for id in temporal_mirror_requested(&layer_config.feature.split_queues) {
+        subtask.warning(&temporal_mirror_warning(&id));
+    }
+
     let session_spec = PreviewSessionSpec {
         image: image.clone(),
         key: layer_config.key.as_str().to_owned(),
@@ -424,6 +470,7 @@ async fn preview_start(
         idle,
         cronjob,
         spec_resources,
+        share_host,
     };
 
     let annotations = operator_api
@@ -1158,11 +1205,15 @@ async fn preview_diff(
 
     let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
 
-    let resource_paths = resource_paths(args.resources, &mut layer_config);
-    if resource_paths.is_empty() {
+    let sources = manifest_sources(args.manifests, &mut layer_config);
+    if sources.is_empty() {
         return Err(CliError::PreviewResourcesRequired);
     }
-    let mut objects = load_manifests(&resource_paths, &progress)?;
+    let mut objects = if sources.paths.is_empty() {
+        Vec::new()
+    } else {
+        load_manifests(&sources.paths, &progress)?
+    };
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -1177,6 +1228,17 @@ async fn preview_diff(
     // Nothing is sent to the operator, so an operator without `PreviewSpecResources` can still
     // show what would change.
     reject_management_only(&operator_api.operator().spec)?;
+
+    if let Some(chart) = &sources.chart {
+        let rendered = render_chart(
+            chart,
+            &layer_config,
+            target_namespace(&operator_api, &layer_config),
+            &progress,
+        )
+        .await?;
+        objects.extend(rendered);
+    }
 
     let mut subtask = progress.subtask("comparing manifests with the cluster");
 
@@ -1207,13 +1269,16 @@ async fn preview_diff(
     let plan = resources::plan(
         operator_api.client(),
         &objects,
-        resources::sources_label(&resource_paths),
+        sources.label(),
         session_target,
         target_namespace(&operator_api, &layer_config),
     )
     .await
     .inspect_err(|_| subtask.failure(None))?;
 
+    if let Some(hint) = release_name_hint(&plan, &sources, &layer_config) {
+        subtask.warning(&hint);
+    }
     for note in &plan.notes {
         subtask.warning(note);
     }
@@ -1227,16 +1292,47 @@ async fn preview_diff(
     Ok(())
 }
 
-/// The manifest paths for `--resource`. Paths on the command line replace the config's list
-/// instead of adding to it, so a CI job can point one shared config at the manifests of the
-/// change it is previewing.
-fn resource_paths(from_args: Vec<PathBuf>, config: &mut LayerConfig) -> Vec<PathBuf> {
+/// Where the manifests come from: `--resource` paths, a `--chart`, or both.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ManifestSources {
+    paths: Vec<PathBuf>,
+    chart: Option<PreviewHelmConfig>,
+}
+
+impl ManifestSources {
+    fn is_empty(&self) -> bool {
+        self.paths.is_empty() && self.chart.is_none()
+    }
+
+    /// The sources as the user wrote them, for messages (`./k8s/, ./chart`).
+    fn label(&self) -> String {
+        let chart = self.chart.iter().map(|chart| chart.chart.clone());
+        resources::sources_label(&self.paths.iter().cloned().chain(chart).collect::<Vec<_>>())
+    }
+}
+
+/// The manifest sources after the command line replaced the config. `--resource` paths replace
+/// `feature.preview.spec_resources` and `--chart` (with its `--values` and `--release-name`)
+/// replaces `feature.preview.helm`, each as a whole instead of adding to it, so a CI job can
+/// point one shared config at the manifests of the change it is previewing.
+fn manifest_sources(args: ManifestSourceArgs, config: &mut LayerConfig) -> ManifestSources {
     let from_config = std::mem::take(&mut config.feature.preview.spec_resources);
-    if from_args.is_empty() {
+    let paths = if args.resources.is_empty() {
         from_config
     } else {
-        from_args
-    }
+        args.resources
+    };
+
+    let chart = match args.chart {
+        Some(chart) => Some(PreviewHelmConfig {
+            chart,
+            values: args.values,
+            release_name: args.release_name,
+        }),
+        None => config.feature.preview.helm.take(),
+    };
+
+    ManifestSources { paths, chart }
 }
 
 fn load_manifests(
@@ -1252,6 +1348,73 @@ fn load_manifests(
         resources::sources_label(paths),
     )));
     Ok(objects)
+}
+
+/// The release name `--chart` is rendered under: `--release-name`, else the target's name,
+/// which is what `helm install <name>` of a service is usually called. `None` without a target.
+fn chart_release_name<'a>(
+    chart: &'a PreviewHelmConfig,
+    config: &'a LayerConfig,
+) -> Option<&'a str> {
+    chart
+        .release_name
+        .as_deref()
+        .or_else(|| config.target.path.as_ref().map(Target::name))
+}
+
+/// Renders `--chart` for the configured target.
+async fn render_chart(
+    chart: &PreviewHelmConfig,
+    config: &LayerConfig,
+    namespace: &str,
+    progress: &ProgressTracker,
+) -> CliResult<Vec<resources::SuppliedObject>> {
+    let mut subtask = progress.subtask("rendering chart");
+    let release_name = chart_release_name(chart, config).ok_or_else(|| {
+        subtask.failure(None);
+        CliError::PreviewTargetRequired
+    })?;
+
+    if chart.values.is_empty() {
+        subtask.info(&format!(
+            "Rendering {} with its default values.yaml only (no --values given).\n\
+             This may not match what is deployed in your environment.",
+            chart.chart.display()
+        ));
+    }
+
+    let objects = resources::render_chart(chart, release_name, namespace)
+        .await
+        .inspect_err(|_| subtask.failure(None))?;
+    subtask.success(Some(&format!(
+        "rendered {} object{} from {} as release {release_name}",
+        objects.len(),
+        if objects.len() == 1 { "" } else { "s" },
+        chart.chart.display(),
+    )));
+    Ok(objects)
+}
+
+/// A chart whose rendered objects do not include the target was most likely rendered under the
+/// wrong release name: templates build object names from it, so the target comes out under
+/// another name and lands outside the scope. The plan already reports the missing definition;
+/// this names the likely cause and the fix.
+fn release_name_hint(
+    plan: &resources::ResourcePlan<'_>,
+    sources: &ManifestSources,
+    config: &LayerConfig,
+) -> Option<String> {
+    let chart = sources.chart.as_ref()?;
+    if plan.target().is_some() {
+        return None;
+    }
+    let release_name = chart_release_name(chart, config)?;
+    Some(format!(
+        "{} was rendered as release `{release_name}`. If the chart names {} after a different \
+         release, pass `--release-name <name>` or set `feature.preview.helm.release_name`.",
+        chart.chart.display(),
+        plan.target_display,
+    ))
 }
 
 /// `--resource` compares against and builds from objects in the target's cluster, which the
@@ -1276,8 +1439,8 @@ fn resources_target(target: &SessionTarget) -> CliResult<&KubeResourceTarget> {
     match target {
         SessionTarget::KubeResource(target) => Ok(target),
         SessionTarget::PodSet(_) => Err(CliError::UnsupportedTargetConfig(format!(
-            "`--resource` does not support label target `{}`; target a single workload, or leave \
-             out `--resource`",
+            "`--resource` and `--chart` do not support label target `{}`; target a single \
+             workload, or leave them out",
             target.display_name()
         ))),
     }
@@ -1673,6 +1836,16 @@ async fn fetch_preview_logs(
         .map(|view: PreviewEnv| view.status.map(|status| status.logs).unwrap_or_default())
 }
 
+/// Temporal queue ids `config` asks to mirror. Preview start has no queue split view, so `*`
+/// stays `*` and the warning names that instead of the operator-resolved queue.
+fn temporal_mirror_requested(config: &SplitQueuesConfig) -> Vec<String> {
+    config
+        .of_kind(QueueKind::Temporal)
+        .filter(|split| split.queue_mode == QueueMode::Mirror)
+        .map(|split| split.queue_id.to_owned())
+        .collect()
+}
+
 /// The best-effort form, for the paths that are already reporting a different failure.
 ///
 /// A start that is going to fail anyway must not have its own error replaced by one about
@@ -1694,7 +1867,10 @@ async fn fetch_preview_logs_best_effort(
 mod tests {
     use std::path::PathBuf;
 
-    use mirrord_config::feature::network::incoming::tls_delivery::LocalClientIdentity;
+    use mirrord_config::{
+        feature::network::incoming::tls_delivery::LocalClientIdentity,
+        target::deployment::DeploymentTarget,
+    };
 
     use super::*;
 
@@ -1733,6 +1909,75 @@ mod tests {
             "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
         }))
         .unwrap()
+    }
+
+    fn config_with_sources(
+        spec_resources: &[&str],
+        helm: Option<PreviewHelmConfig>,
+    ) -> LayerConfig {
+        let mut config = LayerConfig::resolve(&mut ConfigContext::default()).unwrap();
+        config.feature.preview.spec_resources = spec_resources.iter().map(PathBuf::from).collect();
+        config.feature.preview.helm = helm;
+        config.target.path = Some(Target::Deployment(DeploymentTarget {
+            deployment: "app".to_owned(),
+            container: None,
+        }));
+        config
+    }
+
+    /// `--chart` with its `--values` and `--release-name` stands in for the config's `helm`
+    /// block as a whole, like `--resource` does for `spec_resources`, and each source is
+    /// replaced on its own: a `--chart` on the command line keeps the config's manifest files.
+    #[test]
+    fn command_line_sources_replace_the_config_per_source() {
+        let config_helm = PreviewHelmConfig {
+            chart: PathBuf::from("./config-chart"),
+            values: vec![PathBuf::from("./config-values.yaml")],
+            release_name: Some("config-release".to_owned()),
+        };
+
+        let mut config = config_with_sources(&["./k8s/"], Some(config_helm.clone()));
+        let sources = manifest_sources(ManifestSourceArgs::default(), &mut config);
+        assert_eq!(
+            sources,
+            ManifestSources {
+                paths: vec![PathBuf::from("./k8s/")],
+                chart: Some(PreviewHelmConfig {
+                    chart: PathBuf::from("./config-chart"),
+                    values: vec![PathBuf::from("./config-values.yaml")],
+                    release_name: Some("config-release".to_owned()),
+                }),
+            }
+        );
+        assert_eq!(sources.label(), "./k8s/, ./config-chart");
+        assert!(config.feature.preview.spec_resources.is_empty());
+        assert_eq!(config.feature.preview.helm, None);
+
+        let mut config = config_with_sources(&["./k8s/"], Some(config_helm));
+        let sources = manifest_sources(
+            ManifestSourceArgs {
+                resources: vec![],
+                chart: Some(PathBuf::from("./pr-chart")),
+                values: vec![],
+                release_name: None,
+            },
+            &mut config,
+        );
+        assert_eq!(
+            sources,
+            ManifestSources {
+                paths: vec![PathBuf::from("./k8s/")],
+                chart: Some(PreviewHelmConfig {
+                    chart: PathBuf::from("./pr-chart"),
+                    values: vec![],
+                    release_name: None,
+                }),
+            }
+        );
+        assert_eq!(
+            chart_release_name(sources.chart.as_ref().unwrap(), &config),
+            Some("app")
+        );
     }
 
     /// An operator without `PreviewSpecResources` would have the API server prune
@@ -1982,5 +2227,25 @@ mod tests {
             matches!(&error, CliError::PreviewTlsClientAuthFile { path, .. } if path == Path::new("/definitely/missing.pem")),
             "{error}",
         );
+    }
+
+    /// Preview start never polls the queue split view, so a Temporal `mirror` request has to
+    /// be found on the config itself. A Kafka `*` does not count.
+    #[test]
+    fn temporal_mirror_requested_names_temporal_entries_only() {
+        use mirrord_config::feature::split_queues::{QueueSplit, SplitQueuesConfig};
+
+        let config = SplitQueuesConfig::from_splits([
+            QueueSplit {
+                queue_mode: QueueMode::Mirror,
+                ..QueueSplit::new("tasks", QueueKind::Temporal)
+            },
+            QueueSplit {
+                queue_mode: QueueMode::Mirror,
+                ..QueueSplit::new("*", QueueKind::Kafka)
+            },
+            QueueSplit::new("other", QueueKind::Temporal),
+        ]);
+        assert_eq!(temporal_mirror_requested(&config), ["tasks"]);
     }
 }

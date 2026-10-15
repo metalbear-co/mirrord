@@ -874,8 +874,9 @@ pub(crate) enum CliError {
 
     #[error("No manifests to compare")]
     #[diagnostic(help(
-        "Pass manifest files or directories with `--resource <path>`, or set \
-         `feature.preview.spec_resources` in your mirrord config."
+        "Pass manifest files or directories with `--resource <path>` or a Helm chart with \
+         `--chart <path>`, or set `feature.preview.spec_resources` or `feature.preview.helm` \
+         in your mirrord config."
     ))]
     PreviewResourcesRequired,
 

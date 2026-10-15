@@ -260,10 +260,12 @@ config_patch:
 
 ##### `services.*.run`
 
-Specifies the command that should be run with mirrord. Has 2 fields:
+Specifies the command that should be run with mirrord. Has the following fields:
 
 - `command`: Array of strings containing the command to be run and its CLI arguments.
 - `type`: can be either `exec` or `container`, defaults to `exec`. Specifies how mirrord should be run (i.e. with `mirrord exec` or `mirrord container`)
+- `directory`: Working directory for `command`. Relative paths are resolved against the directory that contains `mirrord-up.yaml`, and the directory must exist. Only supported with `type: exec`. When not set, `command` runs in the directory `mirrord up` was started from.
+- `pre_command`: Array of strings containing a command to run to completion before the service's mirrord session starts, such as a build step. It runs locally without mirrord, in the same directory as `command`. The session starts only if it exits successfully. If it fails, or can't be started, its output and error are shown, this service is not started, and the other services keep running.
 
 Examples:
 
@@ -277,6 +279,14 @@ run:
 run:
   # `type` defaults to `exec`, no need to specify explicitly
   command: ["node", "app.js"]
+```
+
+```yaml
+run:
+  directory: services/api
+  # Built locally without mirrord, before the session starts
+  pre_command: ["npm", "run", "build"]
+  command: ["node", "dist/app.js"]
 ```
 
 ##### `services.*.context`

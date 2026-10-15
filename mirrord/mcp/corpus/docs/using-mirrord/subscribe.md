@@ -36,7 +36,7 @@ Need support for more events? [Open a GitHub issue](https://github.com/metalbear
 
 ### Prerequisites
 
-* A running session started with a known key: `mirrord exec --key <KEY> ...`. If you don't pass `--key`, a random key is generated for the session (`mirrord up` is the exception, it defaults to your OS username).
+* A running session started with a known key: `mirrord exec --key <KEY> ...`. If you don't pass `--key`, a random key is generated for the session (`mirrord up` is the exception, it defaults to your OS username). With CLI `3.272.0` and operator `3.210.0` or newer you can also subscribe without a key and get every session's events.
 
 ### Usage
 
@@ -53,6 +53,12 @@ mirrord subscribe --key my-key
 ```
 
 The key can also come from the `key` field in your mirrord config (e.g. `mirrord subscribe -f mirrord.json`)
+
+To watch every session on the cluster at once, leave the key out (CLI `3.272.0` and operator `3.210.0` or newer; an older CLI insists on a key). Each event then carries a `session_key` field naming the session it belongs to:
+
+```sh
+mirrord subscribe
+```
 
 Events stream to stdout, one compact JSON object per line, as the operator intercepts traffic for that key. Status messages go to stderr, so you can pipe events straight into `jq`:
 
@@ -87,7 +93,7 @@ This covers queue messages only. An HTTP request that matches no filter never re
 
 ### Events
 
-Every event has the same envelope — `service_name` (the intercepted workload), `timestamp`, and a `data` payload:
+Every event has the same envelope — `service_name` (the intercepted workload), `timestamp`, and a `data` payload. On a [multi-cluster](multi-cluster.md) Primary the envelope also has `cluster`, see [Multi-cluster](#multi-cluster) below:
 
 ```json
 {
@@ -285,6 +291,52 @@ For a pattern subscription (`PSUBSCRIBE`), `channel` is the concrete channel the
 
 Lagging takes place whenever the consumer is not able to keep up with the messages and receive them in a timely fashion (e.g. due to a slow network connection). By default, the operator buffers up to 2048 messages (configurable in `values.yaml` through `subscribeEventBufferSize`), and lagging will take place if more than this many messages accumulate in the internal buffer without the consumer receiving them. Note that lagging only affects slow consumers — functioning consumers will continue to receive all events even in the presence of slow peers.
 
+### Multi-cluster
+
+In a [multi-cluster](multi-cluster.md) setup, one `mirrord subscribe` against the Primary cluster streams the events of every cluster, with or without a key. This is useful when a session spans several Workload clusters: you no longer need a subscription per cluster to see which one intercepted a request.
+
+```sh
+mirrord subscribe --key my-key --context primary
+```
+
+Every event names the cluster that intercepted it in `cluster`, using the cluster names from the Primary's `operator.multiCluster.clusters` configuration (the Primary's own events carry its `operator.multiCluster.clusterName`):
+
+```json
+{
+  "cluster": "eu-west-1",
+  "service_name": "my-app",
+  "timestamp": "2026-06-17T12:00:00Z",
+  "data": {
+    "http_request": {
+      "mode": "steal",
+      "method": "GET",
+      "uri": "/health",
+      "headers": {
+        "host": "my-app"
+      },
+      "version": "HTTP/1.1"
+    }
+  }
+}
+```
+
+If the Primary cannot reach a Workload cluster's operator, the stream keeps going with the other clusters' events and reports the missing one once, as a `cluster_unavailable` event. The Primary keeps retrying that cluster in the background, so its events resume on their own once it is reachable again:
+
+```json
+{
+  "cluster": "eu-west-1",
+  "service_name": "",
+  "timestamp": "2026-06-17T12:00:00Z",
+  "data": {
+    "cluster_unavailable": {
+      "message": "opening the event stream failed: ..."
+    }
+  }
+}
+```
+
+This needs operator `3.219.0` or newer on the Primary. Each Workload cluster's operator must let the Primary watch `events`: the chart grants this through the `mirrord-operator-envoy-remote` role as of the same version, so a Workload cluster on an older chart shows up as `cluster_unavailable` with a message naming the missing permission until its chart is upgraded. Subscribing directly to a Workload cluster still works and streams that cluster alone, without a `cluster` field.
+
 ### Direct Kube API access (no mirrord CLI required)
 
 `mirrord subscribe` is a thin wrapper over an operator endpoint that emits [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) (`text/event-stream`). You can access it directly through the Kubernetes API, without requiring the mirrord CLI:
@@ -296,7 +348,9 @@ kubectl get --raw \
 
 The `subscribe` arguments `--session-key-field` and `--unmatched` correspond to the query parameters `include_session_key=true` and `include_unmatched=true`.
 
-Omit `session_key` to receive every session's events on one stream. Such a stream always names the session each event belongs to, regardless of the value of `include_session_key`. `mirrord subscribe` always includes a key; to see events from all sessions, you can also use the [local UI](local-ui.md).
+Omit `session_key` to receive every session's events on one stream. Such a stream always names the session each event belongs to, regardless of the value of `include_session_key`. This is what `mirrord subscribe` without `--key` and the [local UI](local-ui.md) do.
+
+On a multi-cluster Primary, `local_only=true` limits the stream to events the Primary intercepted itself, leaving out the Workload clusters. The Primary sets it on the streams it relays, so you normally never need it.
 
 or with `kubectl proxy` + `curl`:
 
