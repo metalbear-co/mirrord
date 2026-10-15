@@ -270,7 +270,8 @@ pub struct PreviewConfig {
     /// Rendering uses the `helm` binary on your `PATH`, under the target's namespace. The
     /// fields:
     ///
-    /// - `chart`: the chart directory or packaged `.tgz`, anything `helm template` accepts.
+    /// - `chart`: a local chart directory or packaged `.tgz`. Chart repositories and `oci://`
+    ///   references are not fetched; pull them first.
     /// - `values`: values files, applied in order like `helm template -f`. Without any, the
     ///   chart's own `values.yaml` is used, which may not match what is deployed.
     /// - `release_name`: the release name the chart is rendered under (`.Release.Name`). Defaults

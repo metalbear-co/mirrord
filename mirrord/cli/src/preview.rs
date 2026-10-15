@@ -38,7 +38,7 @@ use mirrord_config::{
         network::incoming::tls_delivery::{
             LocalTlsDelivery, TlsClientCertSource, TlsDeliveryProtocol,
         },
-        preview::{ConfigMount, ConfigMountType},
+        preview::{ConfigMount, ConfigMountType, PreviewHelmConfig},
         split_queues::{QueueKind, QueueMode, SplitQueuesConfig},
     },
     target::{Target, TargetDisplay, label::LabelTarget},
@@ -64,7 +64,6 @@ use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{Table, row};
 use tracing::Level;
 
-use self::resources::HelmChart;
 use crate::{
     config::{
         ManifestSourceArgs, PreviewArgs, PreviewCommand, PreviewCommonArgs, PreviewDiffArgs,
@@ -1297,7 +1296,7 @@ async fn preview_diff(
 #[derive(Debug, Default, PartialEq, Eq)]
 struct ManifestSources {
     paths: Vec<PathBuf>,
-    chart: Option<HelmChart>,
+    chart: Option<PreviewHelmConfig>,
 }
 
 impl ManifestSources {
@@ -1325,16 +1324,12 @@ fn manifest_sources(args: ManifestSourceArgs, config: &mut LayerConfig) -> Manif
     };
 
     let chart = match args.chart {
-        Some(chart) => Some(HelmChart {
+        Some(chart) => Some(PreviewHelmConfig {
             chart,
             values: args.values,
             release_name: args.release_name,
         }),
-        None => config.feature.preview.helm.take().map(|helm| HelmChart {
-            chart: helm.chart,
-            values: helm.values,
-            release_name: helm.release_name,
-        }),
+        None => config.feature.preview.helm.take(),
     };
 
     ManifestSources { paths, chart }
@@ -1357,7 +1352,10 @@ fn load_manifests(
 
 /// The release name `--chart` is rendered under: `--release-name`, else the target's name,
 /// which is what `helm install <name>` of a service is usually called. `None` without a target.
-fn chart_release_name<'a>(chart: &'a HelmChart, config: &'a LayerConfig) -> Option<&'a str> {
+fn chart_release_name<'a>(
+    chart: &'a PreviewHelmConfig,
+    config: &'a LayerConfig,
+) -> Option<&'a str> {
     chart
         .release_name
         .as_deref()
@@ -1366,7 +1364,7 @@ fn chart_release_name<'a>(chart: &'a HelmChart, config: &'a LayerConfig) -> Opti
 
 /// Renders `--chart` for the configured target.
 async fn render_chart(
-    chart: &HelmChart,
+    chart: &PreviewHelmConfig,
     config: &LayerConfig,
     namespace: &str,
     progress: &ProgressTracker,
@@ -1870,9 +1868,7 @@ mod tests {
     use std::path::PathBuf;
 
     use mirrord_config::{
-        feature::{
-            network::incoming::tls_delivery::LocalClientIdentity, preview::PreviewHelmConfig,
-        },
+        feature::network::incoming::tls_delivery::LocalClientIdentity,
         target::deployment::DeploymentTarget,
     };
 
@@ -1946,7 +1942,7 @@ mod tests {
             sources,
             ManifestSources {
                 paths: vec![PathBuf::from("./k8s/")],
-                chart: Some(HelmChart {
+                chart: Some(PreviewHelmConfig {
                     chart: PathBuf::from("./config-chart"),
                     values: vec![PathBuf::from("./config-values.yaml")],
                     release_name: Some("config-release".to_owned()),
@@ -1971,7 +1967,7 @@ mod tests {
             sources,
             ManifestSources {
                 paths: vec![PathBuf::from("./k8s/")],
-                chart: Some(HelmChart {
+                chart: Some(PreviewHelmConfig {
                     chart: PathBuf::from("./pr-chart"),
                     values: vec![],
                     release_name: None,

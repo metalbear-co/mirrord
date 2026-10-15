@@ -57,7 +57,7 @@ use self::{
     scope::TargetRef,
 };
 pub(crate) use self::{
-    helm::{HelmChart, render as render_chart},
+    helm::render as render_chart,
     manifest::load,
     report::{render_diff, summary},
 };

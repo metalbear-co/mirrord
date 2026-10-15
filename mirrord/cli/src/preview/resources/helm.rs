@@ -13,6 +13,7 @@ use std::{
 };
 
 use mirrord_command::resolve_tokio_command;
+use mirrord_config::feature::preview::PreviewHelmConfig;
 
 use super::{ResourcesError, SuppliedObject, manifest};
 
@@ -20,23 +21,12 @@ use super::{ResourcesError, SuppliedObject, manifest};
 /// (`mychart/templates/deployment.yaml`).
 const SOURCE_COMMENT: &str = "# Source: ";
 
-/// A chart to render, as the user described it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct HelmChart {
-    /// Chart directory or packaged `.tgz`.
-    pub chart: PathBuf,
-    /// Values files, in `helm template -f` order.
-    pub values: Vec<PathBuf>,
-    /// `.Release.Name`; the target's name when not set.
-    pub release_name: Option<String>,
-}
-
 /// Renders `chart` as release `release_name` in `namespace` into objects.
 ///
 /// The chart and values paths are checked here first, so a typo gets the same message a
 /// missing `--resource` path gets instead of helm's.
 pub(crate) async fn render(
-    chart: &HelmChart,
+    chart: &PreviewHelmConfig,
     release_name: &str,
     namespace: &str,
 ) -> Result<Vec<SuppliedObject>, ResourcesError> {
@@ -72,26 +62,31 @@ pub(crate) async fn render(
     Ok(objects)
 }
 
-/// The `helm template` arguments for `chart`.
-fn template_args(chart: &HelmChart, release_name: &str, namespace: &str) -> Vec<OsString> {
-    let mut args: Vec<OsString> = vec![
-        "template".into(),
-        release_name.into(),
-        chart.chart.as_os_str().to_owned(),
-        "--namespace".into(),
-        namespace.into(),
-    ];
+/// The `helm template` arguments for `chart`. The release name and chart path come after
+/// `--`: they are user input (a shared config can set `release_name`), and without the
+/// separator a value like `--post-renderer=./x` is parsed as a flag and runs that binary.
+fn template_args(chart: &PreviewHelmConfig, release_name: &str, namespace: &str) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec!["template".into(), "--namespace".into(), namespace.into()];
     for values in &chart.values {
         args.push("--values".into());
         args.push(values.as_os_str().to_owned());
     }
+    args.push("--".into());
+    args.push(release_name.into());
+    args.push(chart.chart.as_os_str().to_owned());
     args
 }
 
-/// `helm template my-app ./chart --namespace qa --values ./values.yaml`, for messages.
+/// `helm template --namespace qa --values ./values.yaml -- my-app ./chart`, for messages. Each
+/// argument is shell-quoted so a path with a space pastes back as one argument.
 fn display_command(args: &[OsString]) -> String {
     std::iter::once("helm".to_owned())
-        .chain(args.iter().map(|arg| arg.to_string_lossy().into_owned()))
+        .chain(args.iter().map(|arg| {
+            let arg = arg.to_string_lossy();
+            shlex::try_quote(&arg)
+                .map(|quoted| quoted.into_owned())
+                .unwrap_or_else(|_| arg.into_owned())
+        }))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -103,7 +98,7 @@ fn display_command(args: &[OsString]) -> String {
 /// parsed one at a time.
 fn parse_rendered(chart: &Path, rendered: &str) -> Result<Vec<SuppliedObject>, ResourcesError> {
     let mut objects = Vec::new();
-    for document in split_documents(rendered) {
+    for (first_line, document) in split_documents(rendered) {
         let source = document
             .lines()
             .find_map(|line| line.strip_prefix(SOURCE_COMMENT))
@@ -118,7 +113,9 @@ fn parse_rendered(chart: &Path, rendered: &str) -> Result<Vec<SuppliedObject>, R
                 message,
             } => ResourcesError::RenderedTemplateInvalid {
                 template: path,
-                location,
+                // The parser counts from the document's first line; the user looks at the
+                // whole `helm template` output, so shift to that.
+                location: location.map(|(line, column)| (line + first_line - 1, column)),
                 message,
             },
             other => other,
@@ -128,21 +125,24 @@ fn parse_rendered(chart: &Path, rendered: &str) -> Result<Vec<SuppliedObject>, R
     Ok(objects)
 }
 
-/// The non-empty documents of `rendered`, split at the `---` lines helm puts between them. Only
-/// a line holding just `---` separates: inside a document a `---` is always indented or quoted.
-fn split_documents(rendered: &str) -> Vec<String> {
+/// The non-empty documents of `rendered`, each with the 1-based line in `rendered` where it
+/// starts, split at the `---` lines helm puts between them. Only a line holding just `---`
+/// separates: inside a document a `---` is always indented or quoted.
+fn split_documents(rendered: &str) -> Vec<(u64, String)> {
     let mut documents = Vec::new();
     let mut current = String::new();
-    for line in rendered.lines() {
+    let mut first_line = 1;
+    for (index, line) in rendered.lines().enumerate() {
         if line.trim_end() == "---" {
-            documents.push(std::mem::take(&mut current));
+            documents.push((first_line, std::mem::take(&mut current)));
+            first_line = index as u64 + 2;
             continue;
         }
         current.push_str(line);
         current.push('\n');
     }
-    documents.push(current);
-    documents.retain(|document| !document.trim().is_empty());
+    documents.push((first_line, current));
+    documents.retain(|(_, document)| !document.trim().is_empty());
     documents
 }
 
@@ -159,9 +159,23 @@ fn template_path(chart: &Path, template: &str) -> PathBuf {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing)] // Tests read rendered objects with `objects[0]`; a panic just fails the test.
 mod tests {
-    use std::fs;
+    use std::{fs, time::Duration};
 
     use super::*;
+
+    /// Bounds the real `helm` runs so a stuck binary fails the test instead of hanging the suite.
+    async fn render_bounded(
+        chart: &PreviewHelmConfig,
+        release_name: &str,
+        namespace: &str,
+    ) -> Result<Vec<SuppliedObject>, ResourcesError> {
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            render(chart, release_name, namespace),
+        )
+        .await
+        .expect("helm template did not finish within 60s")
+    }
 
     const RENDERED: &str = "\
 ---
@@ -232,7 +246,7 @@ spec:
         assert!(
             matches!(
                 &error,
-                ResourcesError::RenderedTemplateInvalid { template, location: Some((5, _)), .. }
+                ResourcesError::RenderedTemplateInvalid { template, location: Some((6, _)), .. }
                     if template == Path::new("./chart/templates/bad.yaml")
             ),
             "{error:?}"
@@ -242,7 +256,7 @@ spec:
 
     #[test]
     fn template_args_pass_release_namespace_and_values_in_order() {
-        let chart = HelmChart {
+        let chart = PreviewHelmConfig {
             chart: PathBuf::from("./chart"),
             values: vec![PathBuf::from("./base.yaml"), PathBuf::from("./qa.yaml")],
             release_name: None,
@@ -252,14 +266,51 @@ spec:
 
         assert_eq!(
             display_command(&args),
-            "helm template my-app ./chart --namespace qa --values ./base.yaml --values ./qa.yaml"
+            "helm template --namespace qa --values ./base.yaml --values ./qa.yaml -- my-app ./chart"
+        );
+    }
+
+    /// The failure message tells the user to rerun the command, so a path with a space has to
+    /// paste back as one argument.
+    #[test]
+    fn displayed_command_quotes_arguments_with_spaces() {
+        let chart = PreviewHelmConfig {
+            chart: PathBuf::from("./my chart"),
+            values: vec![PathBuf::from("./values qa.yaml")],
+            release_name: None,
+        };
+
+        assert_eq!(
+            display_command(&template_args(&chart, "my-app", "qa")),
+            "helm template --namespace qa --values './values qa.yaml' -- my-app './my chart'"
+        );
+    }
+
+    /// A later document's parse error points at the line in the whole `helm template` output,
+    /// which is what the help text tells the user to look at.
+    #[test]
+    fn parse_errors_in_later_documents_count_lines_from_the_start_of_the_output() {
+        let rendered = format!(
+            "{RENDERED}---\n# Source: echo/templates/bad.yaml\nkind: ConfigMap\nmetadata:\n  b: c: d\n"
+        );
+        let bad_line = rendered.lines().count() as u64;
+
+        let error = parse_rendered(Path::new("./chart"), &rendered).unwrap_err();
+
+        assert!(
+            matches!(
+                &error,
+                ResourcesError::RenderedTemplateInvalid { location: Some((line, _)), .. }
+                    if *line == bad_line
+            ),
+            "{error:?}"
         );
     }
 
     #[tokio::test]
     async fn missing_values_file_is_reported_before_helm_runs() {
         let dir = tempfile::tempdir().unwrap();
-        let chart = HelmChart {
+        let chart = PreviewHelmConfig {
             chart: dir.path().to_path_buf(),
             values: vec![dir.path().join("nowhere.yaml")],
             release_name: None,
@@ -301,8 +352,8 @@ spec:
         let values = dir.path().join("values-qa.yaml");
         fs::write(&values, "marker: from-values\n").unwrap();
 
-        let defaults = render(
-            &HelmChart {
+        let defaults = render_bounded(
+            &PreviewHelmConfig {
                 chart: chart_dir.clone(),
                 values: vec![],
                 release_name: None,
@@ -321,8 +372,8 @@ spec:
             chart_dir.join("templates/configmap.yaml")
         );
 
-        let overridden = render(
-            &HelmChart {
+        let overridden = render_bounded(
+            &PreviewHelmConfig {
                 chart: chart_dir,
                 values: vec![values],
                 release_name: None,
@@ -356,8 +407,8 @@ spec:
         )
         .unwrap();
 
-        let error = render(
-            &HelmChart {
+        let error = render_bounded(
+            &PreviewHelmConfig {
                 chart: chart_dir.clone(),
                 values: vec![],
                 release_name: None,
@@ -370,7 +421,10 @@ spec:
 
         let rendered = error.to_string();
         assert!(
-            rendered.contains(&format!("helm template my-app {}", chart_dir.display())),
+            rendered.contains(&format!(
+                "helm template --namespace qa -- my-app {}",
+                shlex::try_quote(&chart_dir.to_string_lossy()).unwrap()
+            )),
             "{rendered}"
         );
         assert!(rendered.contains("templates/broken.yaml"), "{rendered}");
