@@ -195,6 +195,17 @@ where
         );
     }
 
+    if layer_config.multi_cluster == Some(true)
+        && let Err(error @ OperatorApiError::LocalFeatureNotLicensed { .. }) = api
+            .operator()
+            .spec
+            .require_feature(NewOperatorFeature::MultiClusterPrimary)
+    {
+        api.report_feature_gate(NewOperatorFeature::MultiClusterPrimary)
+            .await;
+        return Err(error.into());
+    }
+
     let is_multi_cluster = api
         .operator()
         .spec
