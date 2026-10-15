@@ -14,10 +14,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{
-        Block, Cell, Padding, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
-        Table, TableState,
-    },
+    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 use strum::VariantArray;
 use tokio::{sync::Notify, time::MissedTickBehavior};
@@ -25,7 +22,15 @@ use tracing::Level;
 
 use crate::{
     context::Context,
-    helpers::{centered, ellipsize, wrap},
+    helpers::{centered, wrap},
+    kit::{
+        describe::{Describe, DescribeOutcome},
+        hints::Hint,
+        panel,
+        search::{SearchBox, SearchOutcome},
+        state_view::{self, EmptyText, Fetch, Listing},
+        table::{Columns, DataTable},
+    },
     screens::Screen,
     theme,
 };
@@ -38,11 +43,13 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 /// Shows every queue-splitting session the operator reports, one row per split.
 pub struct QueuesScreen {
     data: Arc<RwLock<Data>>,
-    table: TableState,
+    table: DataTable,
     /// Set while the user is looking at the details of a single split.
     details: Option<Details>,
+    /// The resource `y` opened, shown whole as YAML.
+    describe: Option<Describe>,
     /// The `/` search over the list.
-    search: Search,
+    search: SearchBox,
     refresh: Arc<Notify>,
 }
 
@@ -82,8 +89,7 @@ impl QueuesScreen {
 
             {
                 let mut data = data.write().unwrap();
-                data.state = state;
-                data.updated_at = Timestamp::now();
+                data.replace(state);
             }
 
             context.redraw.notify_one();
@@ -132,68 +138,23 @@ impl QueuesScreen {
                 });
                 State::Ready(splits)
             }
-            Err(error) => State::Failed(error.to_string()),
+            Err(error) => State::Failed(state_view::explain(&error, "queue splits")),
         }
     }
 
     /// Draws the table of splits that match the search, or a message explaining
     /// why there is none.
     fn draw_body(&mut self, frame: &mut Frame, area: Rect, state: &State, splits: &[&QueueSplit]) {
-        if splits.is_empty() {
-            let (message, style) = match state {
-                State::Disconnected => {
-                    ("Waiting for a connection to the cluster...", theme::muted())
-                }
-                State::Loading => ("Loading...", theme::muted()),
-                State::Failed(error) => (error.as_str(), theme::error()),
-                State::Ready(_) if !self.search.phrase.is_empty() => (
-                    "No queue-splitting sessions match the search",
-                    theme::muted(),
-                ),
-                State::Ready(_) => ("No active queue-splitting sessions", theme::muted()),
-            };
-            frame.render_widget(
-                Paragraph::new(Span::styled(message, style)).centered(),
-                centered(area, Constraint::Fill(1), Constraint::Length(1)),
-            );
+        let empty = EmptyText {
+            nothing: "No active queue-splitting sessions",
+            no_match: "No queue-splitting sessions match the search",
+        };
+        let searching = !self.search.phrase().is_empty();
+        if state_view::draw(frame, area, state, splits.len(), searching, &empty) {
             return;
         }
 
-        // The list shrinks as sessions end, and as the search narrows it, so the selection can
-        // outlive the row it pointed at.
-        match self.table.selected() {
-            Some(selected) if selected >= splits.len() => self.table.select(Some(splits.len() - 1)),
-            Some(_) => {}
-            None => self.table.select(Some(0)),
-        }
-
-        // The table cuts whatever does not fit off without a trace, so the cells
-        // are truncated here instead, against the very widths it lays out.
-        let widths = Layout::horizontal(Column::VARIANTS.iter().map(|column| column.constraint()))
-            .spacing(COLUMN_SPACING)
-            .split(Rect { height: 1, ..area });
-        let columns = || {
-            Column::VARIANTS
-                .iter()
-                .zip(widths.iter().map(|rect| rect.width))
-        };
-
-        frame.render_stateful_widget(
-            Table::new(
-                splits.iter().map(|split| {
-                    Row::new(columns().map(|(column, width)| column.cell(split, width)))
-                }),
-                Column::VARIANTS.iter().map(|column| column.constraint()),
-            )
-            .column_spacing(COLUMN_SPACING)
-            .header(
-                Row::new(columns().map(|(column, width)| ellipsize(column.title(), width.into())))
-                    .style(theme::table_header()),
-            )
-            .row_highlight_style(theme::selection()),
-            area,
-            &mut self.table,
-        );
+        self.table.draw::<Column>(frame, area, splits);
     }
 
     /// Enters the details of the selected split.
@@ -207,7 +168,7 @@ impl QueuesScreen {
             return;
         };
         // The selection indexes the rows the user can see, not every split.
-        let splits = self.search.matching(splits);
+        let splits = matching(&self.search, splits);
         let Some(split) = self
             .table
             .selected()
@@ -298,62 +259,47 @@ impl Screen for QueuesScreen {
 
         Self {
             data,
-            table: TableState::default(),
+            table: DataTable::default(),
             details: None,
-            search: Search::default(),
+            describe: None,
+            search: SearchBox::default(),
             refresh,
         }
     }
 
     fn draw(&mut self, frame: &mut Frame, area: Rect) {
+        if let Some(describe) = &mut self.describe {
+            describe.draw(frame, area);
+            return;
+        }
+
         let data = self.data.clone();
         let data = data.read().unwrap();
 
         // The search box is only in the way while the user is not searching.
         let search_height = u16::from(self.search.visible() && self.details.is_none());
-        let [body, search, footer] = Layout::vertical([
-            Constraint::Min(3),
-            Constraint::Length(search_height),
-            Constraint::Length(1),
-        ])
-        .areas(area);
+        let [body, search] =
+            Layout::vertical([Constraint::Min(3), Constraint::Length(search_height)]).areas(area);
 
         let matching = match &data.state {
-            State::Ready(splits) => self.search.matching(splits),
+            State::Ready(splits) => matching(&self.search, splits),
             _ => Vec::new(),
         };
 
-        let block = Block::bordered()
-            .border_style(theme::border())
-            .padding(Padding::horizontal(1));
-        // The details view takes over the whole panel, title and hints included.
-        let (block, hint) = match &self.details {
-            Some(details) => (
-                block
-                    .title(Span::styled(" Queue Split ", theme::title()))
-                    .title_top(
-                        Line::styled(format!(" {} ", details.title()), theme::muted())
-                            .right_aligned(),
-                    ),
-                "\u{2191}/\u{2193} scroll  \u{2022}  PgUp/PgDn page  \u{2022}  r refresh  \u{2022}  q back",
+        // The details view takes over the whole panel, title included.
+        let updated = data.updated();
+        let block = match &self.details {
+            Some(details) => panel::block(
+                &format!("split({})", details.title()),
+                None,
+                Some(&updated),
+                None,
             ),
-            None => (
-                block
-                    .title(Span::styled(" Queue Splits ", theme::title()))
-                    .title_top(
-                        Line::styled(
-                            format!(" {} ", data.summary(matching.len())),
-                            theme::muted(),
-                        )
-                        .right_aligned(),
-                    ),
-                if self.search.editing {
-                    "type to filter  \u{2022}  Enter apply  \u{2022}  Esc clear"
-                } else if self.search.phrase.is_empty() {
-                    "\u{2191}/\u{2193} move  \u{2022}  Enter details  \u{2022}  / search  \u{2022}  r refresh"
-                } else {
-                    "\u{2191}/\u{2193} move  \u{2022}  Enter details  \u{2022}  / search  \u{2022}  Esc clear  \u{2022}  r refresh"
-                },
+            None => panel::block(
+                "queues",
+                data.count(matching.len()).as_deref(),
+                Some(&updated),
+                None,
             ),
         };
         let inner = block.inner(body);
@@ -367,24 +313,48 @@ impl Screen for QueuesScreen {
                 self.search.draw(frame, search);
             }
         }
-
-        let [hints, updated] =
-            Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).areas(footer);
-
-        frame.render_widget(
-            Paragraph::new(Span::styled(hint, theme::muted())).left_aligned(),
-            hints,
-        );
-        frame.render_widget(
-            Paragraph::new(Span::styled(data.updated(), theme::muted())).right_aligned(),
-            updated,
-        );
     }
 
     fn handle_event(&mut self, event: Event) -> ControlFlow<(), Event> {
+        if let Some(describe) = &mut self.describe {
+            if let DescribeOutcome::Closed = describe.handle_event(&event) {
+                self.describe = None;
+            }
+            return ControlFlow::Break(());
+        }
+
+        // `y` shows the split under the cursor, or the one whose details are open, as YAML.
+        if let Event::Key(key) = &event
+            && key.code == KeyCode::Char('y')
+            && !self.search.is_editing()
+            && let Some(resource) = self.focused_resource()
+        {
+            self.describe = Some(Describe::new(
+                format!("split {}", resource.name_any()),
+                &resource,
+            ));
+            return ControlFlow::Break(());
+        }
+
+        if self.details.is_none() {
+            match self.search.handle_event(&event) {
+                SearchOutcome::Ignored => {}
+                SearchOutcome::Consumed => return ControlFlow::Break(()),
+                SearchOutcome::Changed => {
+                    // The rows under the selection change with every keystroke.
+                    self.table.select_first();
+                    return ControlFlow::Break(());
+                }
+            }
+        }
+
         let Event::Key(key) = &event else {
             return ControlFlow::Continue(event);
         };
+
+        if self.details.is_none() && self.table.handle_key(key) {
+            return ControlFlow::Break(());
+        }
 
         match &mut self.details {
             Some(details) => match key.code {
@@ -399,39 +369,8 @@ impl Screen for QueuesScreen {
                 KeyCode::Char('q') | KeyCode::Esc => self.details = None,
                 _ => return ControlFlow::Continue(event),
             },
-            // A modal text box: typing "q"/Tab/etc. here must not quit or
-            // switch screens.
-            None if self.search.editing => match key.code {
-                KeyCode::Char(char) => {
-                    self.search.phrase.push(char);
-                    // The rows under the selection change with every keystroke.
-                    self.table.select_first();
-                }
-                KeyCode::Backspace => {
-                    self.search.phrase.pop();
-                    self.table.select_first();
-                }
-                KeyCode::Enter => self.search.editing = false,
-                KeyCode::Esc => {
-                    self.search.editing = false;
-                    self.search.phrase.clear();
-                    self.table.select_first();
-                }
-                _ => {}
-            },
             None => match key.code {
-                KeyCode::Down => self.table.select_next(),
-                KeyCode::Up => self.table.select_previous(),
-                KeyCode::Home => self.table.select_first(),
-                KeyCode::End => self.table.select_last(),
-                KeyCode::PageDown => self.table.scroll_down_by(10),
-                KeyCode::PageUp => self.table.scroll_up_by(10),
                 KeyCode::Enter => self.open_details(),
-                KeyCode::Char('/') => self.search.editing = true,
-                KeyCode::Esc if !self.search.phrase.is_empty() => {
-                    self.search.phrase.clear();
-                    self.table.select_first();
-                }
                 KeyCode::Char('r') => self.refresh.notify_one(),
                 _ => return ControlFlow::Continue(event),
             },
@@ -439,110 +378,71 @@ impl Screen for QueuesScreen {
 
         ControlFlow::Break(())
     }
+
+    fn hints(&self) -> Vec<Hint> {
+        if let Some(describe) = &self.describe {
+            return describe.hints();
+        }
+        if self.details.is_some() {
+            return vec![
+                Hint::new("\u{2191}/\u{2193}", "scroll"),
+                Hint::new("y", "yaml"),
+                Hint::new("pgup/pgdn", "page"),
+                Hint::new("r", "refresh"),
+                Hint::new("q", "back"),
+            ];
+        }
+        if self.search.is_editing() {
+            return self.search.hints();
+        }
+
+        let mut hints = DataTable::hints();
+        hints.push(Hint::new("enter", "details"));
+        hints.push(Hint::new("y", "yaml"));
+        hints.extend(self.search.hints());
+        hints.push(Hint::new("r", "refresh"));
+        hints
+    }
+}
+
+impl QueuesScreen {
+    /// The split whose details are open, or else the one under the cursor.
+    fn focused_resource(&self) -> Option<QueueSplit> {
+        let data = self.data.read().unwrap();
+        let State::Ready(splits) = &data.state else {
+            return None;
+        };
+        let found = match &self.details {
+            Some(details) => splits.iter().find(|item| {
+                item.metadata.name.as_deref() == Some(details.name.as_str())
+                    && item.metadata.namespace == details.namespace
+            }),
+            None => {
+                let index = self.table.selected()?;
+                matching(&self.search, splits).get(index).copied()
+            }
+        };
+        found.cloned()
+    }
+}
+
+/// Returns the splits that match the search, in the order they were given.
+///
+/// A split matches when any one of the searched columns contains the phrase.
+fn matching<'a>(search: &SearchBox, splits: &'a [QueueSplit]) -> Vec<&'a QueueSplit> {
+    splits
+        .iter()
+        .filter(|split| {
+            search.matches_any(Column::SEARCHED.iter().map(|column| column.value(split).0))
+        })
+        .collect()
 }
 
 /// What the background task has found so far.
-#[derive(Default)]
-struct Data {
-    state: State,
-    /// When [`Data::state`] was last replaced.
-    updated_at: Timestamp,
-}
+type Data = Listing<QueueSplit>;
 
-impl Data {
-    /// The right-hand side of the panel title.
-    ///
-    /// `shown` is how many splits the search leaves in the list.
-    fn summary(&self, shown: usize) -> String {
-        match &self.state {
-            State::Ready(splits) if shown < splits.len() => {
-                format!("{shown}/{} splits", splits.len())
-            }
-            State::Ready(splits) if splits.len() == 1 => "1 split".to_owned(),
-            State::Ready(splits) => format!("{} splits", splits.len()),
-            _ => String::new(),
-        }
-    }
-
-    /// Returns a string that informs when [`Data::state`] was last replaced.
-    fn updated(&self) -> String {
-        let updated_at = self.updated_at.to_zoned(TimeZone::UTC);
-        format!("updated at {updated_at:.0}")
-    }
-}
-
-/// The outcome of the last attempt to list the queue splits.
-#[derive(Default, Debug)]
-enum State {
-    /// The application is not connected to the cluster.
-    Disconnected,
-    /// The first attempt is still in flight.
-    #[default]
-    Loading,
-    /// The attempt failed.
-    Failed(String),
-    /// The attempt succeeded.
-    Ready(Vec<QueueSplit>),
-}
-
-/// The `/` search that narrows the list of splits.
-#[derive(Default)]
-struct Search {
-    /// The phrase the list is narrowed by. Empty means every split is listed.
-    phrase: String,
-    /// Set while the user is typing the phrase.
-    editing: bool,
-}
-
-impl Search {
-    /// Whether the search box belongs on the screen.
-    ///
-    /// It stays up after the phrase is applied, so that the list is never
-    /// silently narrowed.
-    fn visible(&self) -> bool {
-        self.editing || !self.phrase.is_empty()
-    }
-
-    /// Returns the splits that match [`Search::phrase`], in the order they were
-    /// given.
-    ///
-    /// A split matches when any one of the searched columns contains the
-    /// phrase, ignoring case.
-    fn matching<'a>(&self, splits: &'a [QueueSplit]) -> Vec<&'a QueueSplit> {
-        if self.phrase.is_empty() {
-            return splits.iter().collect();
-        }
-
-        let phrase = self.phrase.to_lowercase();
-
-        splits
-            .iter()
-            .filter(|split| {
-                Column::SEARCHED.iter().any(|column| {
-                    column
-                        .value(split)
-                        .0
-                        .to_lowercase()
-                        .contains(phrase.as_str())
-                })
-            })
-            .collect()
-    }
-
-    /// Draws the search box.
-    fn draw(&self, frame: &mut Frame, area: Rect) {
-        let mut spans = vec![
-            Span::styled("/", theme::title()),
-            Span::raw(self.phrase.clone()),
-        ];
-        // The cursor only belongs in the box while it takes input.
-        if self.editing {
-            spans.push(Span::styled("\u{2588}", theme::title()));
-        }
-
-        frame.render_widget(Paragraph::new(Line::from_iter(spans)), area);
-    }
-}
+/// The outcome of the last attempt to list the splits.
+type State = Fetch<Vec<QueueSplit>>;
 
 /// The split the user entered from the list, and how far they scrolled in it.
 ///
@@ -591,6 +491,12 @@ impl Column {
         Self::Target,
         Self::Phase,
     ];
+}
+
+impl Columns for Column {
+    type Row = QueueSplit;
+
+    const ALL: &'static [Self] = Self::VARIANTS;
 
     /// The header cell of this column.
     fn title(self) -> &'static str {
@@ -618,14 +524,6 @@ impl Column {
             Self::Pods => Constraint::Length(5),
             Self::Duration => Constraint::Length(8),
         }
-    }
-
-    /// The cell of this column for the given split, truncated to the width the
-    /// table gives the column.
-    fn cell(self, split: &QueueSplit, width: u16) -> Cell<'static> {
-        let (value, style) = self.value(split);
-
-        Cell::from(Span::styled(ellipsize(&value, width.into()), style))
     }
 
     /// The text of this column for the given split, and the style it is drawn
@@ -692,12 +590,6 @@ impl Column {
         }
     }
 }
-
-/// Space the table leaves between two columns.
-///
-/// Set on the table so that the widths used for truncation are the widths the
-/// table lays out.
-const COLUMN_SPACING: u16 = 1;
 
 /// Width of the label column of the details view, indentation included.
 const LABEL_WIDTH: usize = 20;

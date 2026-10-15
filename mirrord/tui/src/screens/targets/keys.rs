@@ -18,10 +18,6 @@ pub const COLLAPSE: char = 'h';
 
 /// Start typing a filter in the target browser.
 pub const FILTER: char = '/';
-/// Cycle through cluster namespaces in the target browser.
-pub const NAMESPACE: char = 'n';
-/// Open the kube context picker (switch clusters).
-pub const CONTEXT: char = 'c';
 /// Refetch targets from the cluster.
 pub const REFRESH: char = 'R';
 
@@ -47,6 +43,3 @@ pub const RUN: char = 'r';
 pub const STOP: char = 'x';
 /// Jump back to following the log tail.
 pub const FOLLOW: char = 'G';
-
-/// Toggle the key binding overlay.
-pub const HELP: char = '?';

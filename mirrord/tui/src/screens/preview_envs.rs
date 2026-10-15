@@ -6,16 +6,20 @@ use std::{
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use kube::{Api, Client, api::DeleteParams, runtime::reflector::Store};
 use mirrord_operator::crd::preview::PreviewSession;
-use ratatui::{
-    Frame,
-    layout::{Constraint, Rect},
-    style::Style,
-    text::Span,
-    widgets::Paragraph,
-};
+use ratatui::{Frame, layout::Rect};
 use tokio::sync::watch;
 
-use crate::{context::Context, helpers::centered, screens::Screen, telemetry::Telemetry};
+use crate::{
+    context::Context,
+    kit::{
+        describe::{Describe, DescribeOutcome},
+        hints::Hint,
+        panel, state_view,
+    },
+    screens::Screen,
+    telemetry::Telemetry,
+    theme,
+};
 
 mod data;
 mod ui;
@@ -34,6 +38,8 @@ pub struct PreviewEnvsScreen {
     /// not something that belongs in the long-running watch loop.
     client: watch::Receiver<Option<anyhow::Result<Client>>>,
     ui: UiState,
+    /// The environment opened with `Enter` or `y`, shown whole as YAML.
+    describe: Option<Describe>,
     telemetry: Telemetry,
 }
 
@@ -86,6 +92,36 @@ impl PreviewEnvsScreen {
     }
 }
 
+impl PreviewEnvsScreen {
+    /// Describes the environment under the cursor. On a namespace or target row, folds or opens
+    /// it instead when `fold_groups` is set (`Enter`), and does nothing otherwise (`y`).
+    fn open_focused(&mut self, fold_groups: bool) {
+        let mut focused = None;
+        self.with_rows(|ui, rows| {
+            let Some(row) = ui.tree.focused(rows) else {
+                return;
+            };
+            match row {
+                view::Row::Env { session, .. } => focused = Some(session.clone()),
+                _ if fold_groups => {
+                    if ui.tree.is_collapsed(&row.selection()) {
+                        ui.expand_or_down(rows);
+                    } else {
+                        ui.collapse_or_up(rows);
+                    }
+                }
+                _ => {}
+            }
+        });
+        if let Some(session) = focused {
+            self.describe = Some(Describe::new(
+                format!("preview {}", session.spec.key),
+                &*session,
+            ));
+        }
+    }
+}
+
 impl Screen for PreviewEnvsScreen {
     fn new(context: Context) -> Self {
         let data = Arc::new(RwLock::new(None));
@@ -98,14 +134,25 @@ impl Screen for PreviewEnvsScreen {
             data,
             client,
             ui: UiState::default(),
+            describe: None,
             telemetry,
         }
     }
 
     fn draw(&mut self, frame: &mut Frame, area: Rect) {
+        if let Some(describe) = &mut self.describe {
+            describe.draw(frame, area);
+            return;
+        }
+
         let guard = self.data.read().unwrap();
         match &*guard {
-            None => draw_message(frame, area, "connecting...", false),
+            None => draw_message(
+                frame,
+                area,
+                "Waiting for a connection to the cluster...",
+                false,
+            ),
             Some(Err(error)) => draw_message(frame, area, &error.to_string(), true),
             Some(Ok(store)) => {
                 let tree = PreviewEnvsTree::build(store.state());
@@ -116,6 +163,13 @@ impl Screen for PreviewEnvsScreen {
     }
 
     fn handle_event(&mut self, event: Event) -> ControlFlow<(), Event> {
+        if let Some(describe) = &mut self.describe {
+            if let DescribeOutcome::Closed = describe.handle_event(&event) {
+                self.describe = None;
+            }
+            return ControlFlow::Break(());
+        }
+
         let Event::Key(key) = &event else {
             return ControlFlow::Continue(event);
         };
@@ -128,17 +182,6 @@ impl Screen for PreviewEnvsScreen {
         // `Mode::default()` (`Browsing`) behind temporarily; every arm below puts a concrete
         // value back into `self.ui.mode` before returning.
         match std::mem::take(&mut self.ui.mode) {
-            // While the help overlay is open it captures all input (only Esc does anything),
-            // so it's actually "in focus" rather than something you could accidentally
-            // navigate or filter behind.
-            Mode::Help => {
-                self.ui.mode = if key.code == KeyCode::Esc {
-                    Mode::Browsing
-                } else {
-                    Mode::Help
-                };
-                ControlFlow::Break(())
-            }
             // A destructive action, so it's confirmed rather than fired immediately from `s`
             // in `Browsing` — see `UiState::request_stop`. A bulk scope (target/namespace)
             // additionally requires typing its `stop_confirmation_word` before `Enter` does
@@ -234,7 +277,7 @@ impl Screen for PreviewEnvsScreen {
                     KeyCode::Enter => self.ui.mode = Mode::Browsing,
                     // Esc restores the exact row focused before `g` was pressed.
                     KeyCode::Esc => {
-                        self.ui.selection = Some(origin);
+                        self.ui.tree.selection = Some(origin);
                         self.ui.mode = Mode::Browsing;
                     }
                     _ => {
@@ -254,12 +297,8 @@ impl Screen for PreviewEnvsScreen {
                         self.ui.mode = Mode::Filtering;
                         ControlFlow::Break(())
                     }
-                    KeyCode::Char('?') => {
-                        self.ui.mode = Mode::Help;
-                        ControlFlow::Break(())
-                    }
                     KeyCode::Char('g') => {
-                        if let Some(origin) = self.ui.selection.clone() {
+                        if let Some(origin) = self.ui.tree.selection.clone() {
                             self.ui.mode = Mode::GoTo {
                                 input: String::new(),
                                 origin,
@@ -316,10 +355,9 @@ impl Screen for PreviewEnvsScreen {
                         self.ui.filter.clear();
                         ControlFlow::Break(())
                     }
-                    // Toggles the focused env card's detail view. Navigating no longer changes
-                    // card size on its own — only an explicit Enter does.
-                    KeyCode::Enter => {
-                        self.with_rows(|ui, rows| ui.toggle_expanded(rows));
+                    // On a group, folds or opens it; on an environment, shows it whole.
+                    KeyCode::Enter | KeyCode::Char('y') => {
+                        self.open_focused(key.code == KeyCode::Enter);
                         ControlFlow::Break(())
                     }
                     _ => ControlFlow::Continue(event),
@@ -327,16 +365,44 @@ impl Screen for PreviewEnvsScreen {
             }
         }
     }
+    fn hints(&self) -> Vec<Hint> {
+        if let Some(describe) = &self.describe {
+            return describe.hints();
+        }
+        match &self.ui.mode {
+            Mode::Filtering => vec![Hint::new("enter", "apply"), Hint::new("esc", "clear")],
+            Mode::GoTo { .. } => vec![Hint::new("enter", "stay here"), Hint::new("esc", "go back")],
+            Mode::ConfirmStop { .. } => {
+                vec![Hint::new("enter", "stop"), Hint::new("esc", "cancel")]
+            }
+            Mode::Browsing => {
+                let mut hints = vec![
+                    Hint::new("enter", "describe/fold"),
+                    Hint::new("y", "yaml"),
+                    Hint::new("s", "stop"),
+                    Hint::new("/", "filter"),
+                    Hint::new("g", "go to"),
+                    Hint::new("\u{2190}/\u{2192}", "fold"),
+                    Hint::new("n/N t/T e/E", "next namespace/target/env"),
+                ];
+                if !self.ui.filter.is_empty() {
+                    hints.push(Hint::new("esc", "clear filter"));
+                }
+                hints
+            }
+        }
+    }
 }
 
+/// Draws the `previews` panel with `message` in place of the table.
 fn draw_message(frame: &mut Frame, area: Rect, message: &str, is_error: bool) {
+    let block = panel::block("previews", None, None, None);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
     let style = if is_error {
-        Style::default().red()
+        theme::error()
     } else {
-        Style::default().gray()
+        theme::muted()
     };
-    frame.render_widget(
-        Paragraph::new(Span::styled(message, style)).centered(),
-        centered(area, Constraint::Fill(1), Constraint::Length(1)),
-    );
+    state_view::draw_message(frame, inner, message, style);
 }

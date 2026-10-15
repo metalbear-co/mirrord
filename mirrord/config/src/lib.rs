@@ -1501,6 +1501,14 @@ impl CollectAnalytics for &LayerConfig {
 }
 
 impl LayerFileConfig {
+    /// The JSON schema of the config file, as published in `mirrord-schema.json`.
+    ///
+    /// Built from these very types, so tools that draw config editors from it (the TUI's Config
+    /// screen) can never offer an option this build does not accept.
+    pub fn schema() -> serde_json::Value {
+        schemars::schema_for!(LayerFileConfig).to_value()
+    }
+
     /// Parses a [`LayerFileConfig`] from a file path, rendering any Tera templates with
     /// [`LayerFileConfig::render`].
     pub fn from_path<P>(path: P, context: &mut ConfigContext) -> Result<Self, FromFileError>

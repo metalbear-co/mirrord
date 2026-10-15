@@ -16,8 +16,10 @@ use ratatui::crossterm::{
 };
 
 mod app;
+mod config_schema;
 mod context;
 mod helpers;
+mod kit;
 mod local_sessions;
 mod scope;
 mod screens;

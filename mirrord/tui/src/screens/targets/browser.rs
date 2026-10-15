@@ -14,19 +14,15 @@ use mirrord_kube::api::kubernetes::seeker::KubeResourceSeeker;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::Style,
+    style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, List, ListItem, ListState},
+    widgets::{List, ListItem, ListState},
 };
 use strum::VariantArray;
 use strum_macros::{Display, IntoStaticStr, VariantArray};
 use tokio::sync::Notify;
 
-use crate::{
-    context::Context,
-    helpers::ellipsize,
-    screens::targets::{keys, theme},
-};
+use crate::{context::Context, helpers::ellipsize, kit::panel, screens::targets::keys, theme};
 
 /// A kind of cluster resource mirrord can target. Declaration order is the
 /// display order in the browser.
@@ -404,10 +400,6 @@ impl Browser {
         true
     }
 
-    pub fn typing(&self) -> bool {
-        self.filter_active
-    }
-
     fn pick(&mut self, rows: &[Row]) -> BrowserOutcome {
         let namespace = self
             .data
@@ -463,11 +455,6 @@ impl Browser {
             .map(|data| (data.namespace.clone(), data.loading))
             .unwrap_or_default();
 
-        let border = if focused {
-            theme::BRAND
-        } else {
-            theme::BORDER_DIM
-        };
         // Cluster switching lives at the app level (the scope watch); the
         // title shows which cluster this listing came from.
         let cluster = self
@@ -477,20 +464,15 @@ impl Browser {
             .context
             .clone()
             .unwrap_or_else(|| current_context_name().to_owned());
-        let mut title = format!(" Targets · {cluster} · {namespace} ");
+        let mut note = format!("{cluster} \u{203a} {namespace}");
         if loading {
-            title.push_str(&format!("{} ", self.spinner()));
+            note.push_str(&format!(" {}", self.spinner()));
         }
-        let block = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border))
-            .title(Span::styled(
-                title,
-                Style::default()
-                    .fg(theme::TEXT_EMPHASIS)
-                    .bg(theme::FILL_HEAVY)
-                    .bold(),
-            ));
+        let count = rows.len().to_string();
+        let block = panel::focus(
+            panel::block("targets", Some(&count), Some(&note), None),
+            focused,
+        );
 
         let mut inner = block.inner(area);
         frame.render_widget(block, area);
@@ -505,19 +487,16 @@ impl Browser {
             };
             frame.render_widget(
                 Line::from_iter([
-                    Span::styled("/", Style::default().fg(theme::BRAND)),
-                    Span::styled(
-                        self.filter.clone(),
-                        Style::default().fg(theme::TEXT_EMPHASIS),
-                    ),
+                    Span::styled("/", Style::default().fg(theme::INDIGO)),
+                    Span::styled(self.filter.clone(), Style::default().fg(theme::LAVENDER)),
                     if self.filter_active {
-                        Span::styled("█", Style::default().fg(theme::BRAND))
+                        Span::styled("█", Style::default().fg(theme::INDIGO))
                     } else {
                         Span::raw("")
                     },
                     Span::styled(
                         format!("  {hits}"),
-                        Style::default().fg(theme::TEXT_MUTED).italic(),
+                        Style::default().fg(theme::GREY).italic(),
                     ),
                 ]),
                 filter_area,
@@ -533,7 +512,7 @@ impl Browser {
                 " Nothing matches the filter.".to_owned()
             };
             frame.render_widget(
-                Line::styled(message, Style::default().fg(theme::TEXT_MUTED)),
+                Line::styled(message, Style::default().fg(theme::GREY)),
                 inner,
             );
             return;
@@ -543,12 +522,8 @@ impl Browser {
             .iter()
             .map(|row| row_item(row, inner.width as usize))
             .collect();
-        let list = List::new(items).highlight_style(
-            Style::default()
-                .bg(theme::FILL_HEAVY)
-                .fg(theme::TEXT_EMPHASIS)
-                .bold(),
-        );
+        let list = List::new(items)
+            .highlight_style(Style::default().bg(theme::INK).fg(theme::LAVENDER).bold());
 
         self.list_state.select(Some(self.selected));
         frame.render_stateful_widget(list, inner, &mut self.list_state);
@@ -577,18 +552,15 @@ fn row_item(row: &Row, width: usize) -> ListItem<'static> {
                 // A filled chip, so the kind column reads as a column.
                 Span::styled(
                     badge,
-                    Style::default()
-                        .fg(theme::kind_color(*kind))
-                        .bg(theme::FILL_HEAVY)
-                        .bold(),
+                    Style::default().fg(kind_color(*kind)).bg(theme::INK).bold(),
                 ),
                 Span::styled(
                     ellipsize(name, name_budget),
-                    Style::default().fg(theme::TEXT_EMPHASIS),
+                    Style::default().fg(theme::LAVENDER),
                 ),
             ];
             if let Some(suffix) = suffix {
-                spans.push(Span::styled(suffix, Style::default().fg(theme::TEXT_MUTED)));
+                spans.push(Span::styled(suffix, Style::default().fg(theme::GREY)));
             }
             Line::from(spans)
         }
@@ -599,29 +571,26 @@ fn row_item(row: &Row, width: usize) -> ListItem<'static> {
                 Span::styled(prefix, Style::default().fg(theme::BORDER_DIM)),
                 Span::styled(
                     ellipsize(name, name_budget),
-                    Style::default().fg(theme::TEXT_EMPHASIS),
+                    Style::default().fg(theme::LAVENDER),
                 ),
             ])
         }
         Row::Targetless => Line::from_iter([
-            Span::styled(" ∅  ", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(
-                "targetless",
-                Style::default().fg(theme::TEXT_MUTED).italic(),
-            ),
+            Span::styled(" ∅  ", Style::default().fg(theme::GREY)),
+            Span::styled("targetless", Style::default().fg(theme::GREY).italic()),
             Span::styled(
                 "  (no target, cluster network only)",
-                Style::default().fg(theme::TEXT_MUTED),
+                Style::default().fg(theme::GREY),
             ),
         ]),
         Row::KindError { kind, message } => {
             let badge = format!(" {} ", kind.badge());
             let message_budget = width.saturating_sub(badge.chars().count() + 13);
             Line::from_iter([
-                Span::styled(badge, Style::default().fg(theme::TEXT_MUTED)),
+                Span::styled(badge, Style::default().fg(theme::GREY)),
                 Span::styled(
                     format!("unavailable: {}", ellipsize(message, message_budget)),
-                    Style::default().fg(theme::TEXT_MUTED).italic(),
+                    Style::default().fg(theme::GREY).italic(),
                 ),
             ])
         }
@@ -672,7 +641,7 @@ async fn fetch_loop(mut context: Context, refresh: Arc<Notify>, data: Arc<RwLock
     }
 }
 
-async fn fetch(client: &kube::Client, namespace: &str) -> BrowserData {
+pub(crate) async fn fetch(client: &kube::Client, namespace: &str) -> BrowserData {
     let kind_futures = TargetKind::VARIANTS.iter().map(|&kind| async move {
         let seeker = KubeResourceSeeker {
             client,
@@ -721,6 +690,23 @@ fn group_paths(kind: TargetKind, paths: Vec<String>) -> Vec<TargetItem> {
         .into_iter()
         .map(|(name, containers)| TargetItem { name, containers })
         .collect()
+}
+
+/// Per-kind badge color so every target kind is distinct at a glance.
+///
+/// Hues share the brand palette's saturation family; yellow stays reserved
+/// for warnings.
+pub fn kind_color(kind: TargetKind) -> Color {
+    match kind {
+        TargetKind::Deployment => theme::INDIGO,
+        TargetKind::Rollout => Color::Rgb(0xF3, 0x6D, 0xD3),
+        TargetKind::StatefulSet => Color::Rgb(0x6D, 0xF3, 0xB1),
+        TargetKind::Pod => Color::Rgb(0x6D, 0xC7, 0xF3),
+        TargetKind::CronJob => Color::Rgb(0xF3, 0xA1, 0x6D),
+        TargetKind::Job => Color::Rgb(0xE8, 0xF3, 0x6D),
+        TargetKind::Service => Color::Rgb(0x6D, 0xF3, 0xEE),
+        TargetKind::ReplicaSet => Color::Rgb(0xB5, 0x6D, 0xF3),
+    }
 }
 
 #[cfg(test)]

@@ -21,8 +21,9 @@ use crate::{
     screens::targets::{
         history, keys,
         model::{HttpFilterSpec, RunSpec, ServiceEntry, ServiceMode, ServiceSpec, TargetSpec},
-        suggest, theme,
+        suggest,
     },
+    theme,
 };
 
 /// One form field: how it renders and how it reads/writes the draft.
@@ -173,14 +174,14 @@ impl Input {
 
         let mut spans = Vec::new();
         if skip > 0 {
-            spans.push(Span::styled("…", Style::default().fg(theme::TEXT_MUTED)));
+            spans.push(Span::styled("…", Style::default().fg(theme::GREY)));
         }
         let take = width.saturating_sub(usize::from(skip > 0));
         for at in skip..total.min(skip + take) {
             let cell = chars.get(at).copied().unwrap_or(' ');
-            let mut style = Style::default().fg(theme::TEXT_EMPHASIS).underlined();
+            let mut style = Style::default().fg(theme::LAVENDER).underlined();
             if selection.is_some_and(|(from, to)| at >= from && at < to) {
-                style = style.bg(theme::FILL_HEAVY);
+                style = style.bg(theme::INK);
             }
             if at == self.cursor {
                 style = style.reversed();
@@ -634,9 +635,9 @@ impl<T> SettingsForm<T> {
             let focused = index == self.cursor;
             let marker = if focused { "› " } else { "  " };
             let label_style = if focused {
-                Style::default().fg(theme::BRAND).bold()
+                Style::default().fg(theme::INDIGO).bold()
             } else {
-                Style::default().fg(theme::TEXT_MUTED)
+                Style::default().fg(theme::GREY)
             };
 
             let value_spans = match (&def.widget, focused, &self.input) {
@@ -644,12 +645,12 @@ impl<T> SettingsForm<T> {
                 (WidgetKind::Text { get, .. }, ..) => {
                     let value = get(&self.draft);
                     let span = if value.is_empty() {
-                        Span::styled("(unset)", Style::default().fg(theme::TEXT_MUTED).italic())
+                        Span::styled("(unset)", Style::default().fg(theme::GREY).italic())
                     } else {
                         // Keep the tail: for paths it is the identifying part.
                         Span::styled(
                             tail_ellipsize(&value, value_width),
-                            Style::default().fg(theme::TEXT_EMPHASIS),
+                            Style::default().fg(theme::LAVENDER),
                         )
                     };
                     vec![span]
@@ -662,7 +663,7 @@ impl<T> SettingsForm<T> {
 
             lines.push(Line::from_iter(
                 [
-                    Span::styled(marker, Style::default().fg(theme::BRAND)),
+                    Span::styled(marker, Style::default().fg(theme::INDIGO)),
                     Span::styled(format!("{:<14}", def.label), label_style),
                 ]
                 .into_iter()
@@ -675,7 +676,7 @@ impl<T> SettingsForm<T> {
         lines.push(Line::styled(
             format!("  [ {} ]", self.finish_label),
             if finish_focused {
-                Style::default().fg(theme::BRAND).bold().reversed()
+                Style::default().fg(theme::INDIGO).bold().reversed()
             } else {
                 Style::default().fg(theme::FILL_DIM)
             },
@@ -707,7 +708,7 @@ impl<T> SettingsForm<T> {
                     })
                     .unwrap_or_default(),
             };
-            let mut spans = vec![Span::styled("  ↹ ", Style::default().fg(theme::TEXT_MUTED))];
+            let mut spans = vec![Span::styled("  ↹ ", Style::default().fg(theme::GREY))];
             for candidate in candidates.iter().take(MAX_SHOWN_CANDIDATES) {
                 let shown = if is_path {
                     short_name(candidate)
@@ -716,9 +717,9 @@ impl<T> SettingsForm<T> {
                 };
                 // The candidate Tab just picked lights up.
                 let style = if *candidate == token {
-                    Style::default().fg(theme::BRAND).bold()
+                    Style::default().fg(theme::INDIGO).bold()
                 } else {
-                    Style::default().fg(theme::TEXT_EMPHASIS)
+                    Style::default().fg(theme::LAVENDER)
                 };
                 spans.push(Span::styled(shown, style));
                 spans.push(Span::raw("  "));
@@ -726,7 +727,7 @@ impl<T> SettingsForm<T> {
             if candidates.len() > MAX_SHOWN_CANDIDATES {
                 spans.push(Span::styled(
                     format!("(+{} more)", candidates.len() - MAX_SHOWN_CANDIDATES),
-                    Style::default().fg(theme::TEXT_MUTED).italic(),
+                    Style::default().fg(theme::GREY).italic(),
                 ));
             }
             footer.push(Line::from_iter(spans));
@@ -734,7 +735,7 @@ impl<T> SettingsForm<T> {
         if let Some(error) = &self.error {
             footer.push(Line::styled(
                 format!("  {error}"),
-                Style::default().fg(theme::WARNING),
+                Style::default().fg(theme::AMBER),
             ));
         }
         let help = match visible.get(self.cursor) {
@@ -761,7 +762,7 @@ impl<T> SettingsForm<T> {
         };
         footer.push(Line::styled(
             format!("  {help}"),
-            Style::default().fg(theme::TEXT_MUTED).italic(),
+            Style::default().fg(theme::GREY).italic(),
         ));
         frame.render_widget(
             Paragraph::new(footer).wrap(Wrap { trim: false }),
@@ -834,9 +835,9 @@ fn return_spans_select(options: &[&'static str], selected: usize, focused: bool)
     Span::styled(
         rendered,
         if focused {
-            Style::default().fg(theme::TEXT_EMPHASIS)
+            Style::default().fg(theme::LAVENDER)
         } else {
-            Style::default().fg(theme::TEXT_MUTED)
+            Style::default().fg(theme::GREY)
         },
     )
 }
@@ -1061,6 +1062,7 @@ pub fn draft_for_target(path: &str, namespace: &str, workload_name: &str) -> Ser
             http_filter: None,
             ignore_ports: Default::default(),
             skip: false,
+            config_patch: None,
             run: RunSpec {
                 dir,
                 command,

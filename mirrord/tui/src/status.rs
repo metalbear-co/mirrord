@@ -27,54 +27,109 @@ const DETAIL_LIMIT: usize = 400;
 /// terminal instead of stretching across it.
 const DETAIL_WIDTH: u16 = 90;
 
-/// Appended to the status bar while a connection attempt has failed. Reserved out of the width the
+/// The chip the top bar starts with.
+const LOGO: &str = " \u{25c6} mirrord ";
+
+/// Fewest columns kept between the breadcrumb and the connection state in the top bar.
+const MIN_GAP: usize = 2;
+
+/// Appended to the top bar while a connection attempt has failed. Reserved out of the width the
 /// error message gets, so the two never fight over the same columns.
-const DETAILS_HINT: &str = "  ·  e for details";
+const DETAILS_HINT: &str = " · <e> details ";
 
-/// Draws the one-line status bar: the scope being connected to, and how that connection is going.
-pub fn draw(frame: &mut Frame, area: Rect, scope: &Scope, client: &Option<anyhow::Result<Client>>) {
+/// Draws the top bar: where the user is, `mirrord  context › namespace › view` on the left, and
+/// how the connection to that cluster is going on the right.
+///
+/// A failed connection's summary takes the room it needs first, cutting the breadcrumb short
+/// rather than the error, since the error is what the user has to act on.
+pub fn draw(
+    frame: &mut Frame,
+    area: Rect,
+    scope: &Scope,
+    client: &Option<anyhow::Result<Client>>,
+    view: &str,
+) {
     let value = Style::default().fg(theme::LAVENDER);
+    let width = usize::from(area.width);
 
-    let mut spans = vec![
-        Span::styled(" context ", theme::muted()),
-        match scope.context.as_deref() {
-            Some(name) => Span::styled(name.to_owned(), value),
-            None => Span::styled("(current)", theme::muted().italic()),
-        },
-        Span::styled("  ·  namespace ", theme::muted()),
-        match scope.namespace.as_deref() {
-            Some(name) => Span::styled(name.to_owned(), value),
-            None => Span::styled("(default)", theme::muted().italic()),
-        },
-        Span::styled("  ·  ", theme::muted()),
-    ];
-
-    match client {
-        Some(Ok(_)) => {
-            spans.push(Span::styled("● ", Style::default().fg(theme::MINT)));
-            spans.push(Span::styled("connected", Style::default().fg(theme::MINT)));
-        }
-        None => {
-            spans.push(Span::styled("◌ ", theme::warning()));
-            spans.push(Span::styled("connecting…", theme::warning()));
-        }
+    let right = match client {
+        Some(Ok(_)) => vec![Span::styled(
+            "\u{25cf} connected ",
+            Style::default().fg(theme::MINT),
+        )],
+        None => vec![Span::styled(
+            "\u{25cc} connecting\u{2026} ",
+            theme::warning(),
+        )],
         Some(Err(error)) => {
-            spans.push(Span::styled("✗ ", theme::error()));
-
-            // Whatever columns are left once the scope, the marker and the hint have taken theirs.
-            // Even summarized, an auth failure outruns a one-line status bar on a narrow terminal.
-            let taken: usize = spans.iter().map(Span::width).sum();
-            let room = (area.width as usize)
-                .saturating_sub(taken)
-                .saturating_sub(DETAILS_HINT.chars().count());
-
-            spans.push(Span::styled(
-                ellipsize(&headline(error), room),
-                theme::error(),
-            ));
-            spans.push(Span::styled(DETAILS_HINT, theme::muted()));
+            // Even summarized, an auth failure outruns the bar on a narrow terminal, so it gets
+            // what the logo and the view name leave.
+            let room = width
+                .saturating_sub(LOGO.chars().count() + view.chars().count() + 8)
+                .saturating_sub(DETAILS_HINT.chars().count() + 2);
+            vec![
+                Span::styled("\u{2717} ", theme::error()),
+                Span::styled(ellipsize(&headline(error), room), theme::error()),
+                Span::styled(DETAILS_HINT, theme::muted()),
+            ]
         }
-    }
+    };
+    let right_width: usize = right.iter().map(Span::width).sum();
+    let room = width.saturating_sub(right_width + MIN_GAP);
+
+    let context = match scope.context.as_deref() {
+        Some(name) => Span::styled(name.to_owned(), value),
+        None => Span::styled("current context", theme::muted().italic()),
+    };
+    // Lists read every namespace until one is picked.
+    let namespace = match scope.namespace.as_deref() {
+        Some(name) => Span::styled(name.to_owned(), value),
+        None => Span::styled("all namespaces", theme::muted().italic()),
+    };
+    let logo = Span::styled(
+        LOGO,
+        Style::default()
+            .fg(theme::LAVENDER)
+            .bg(theme::INDIGO)
+            .add_modifier(Modifier::BOLD),
+    );
+    let separator = || Span::styled(" \u{203a} ", theme::muted());
+    let view = Span::styled(view.to_owned(), theme::title());
+
+    // When the bar is short, the context goes first, then the namespace: the view name is what
+    // says where the user is.
+    let candidates = [
+        vec![
+            logo.clone(),
+            Span::raw(" "),
+            context,
+            separator(),
+            namespace.clone(),
+            separator(),
+            view.clone(),
+        ],
+        vec![
+            logo.clone(),
+            Span::raw(" "),
+            namespace,
+            separator(),
+            view.clone(),
+        ],
+        vec![logo, Span::raw(" "), view],
+    ];
+    let fits = |spans: &Vec<Span>| spans.iter().map(Span::width).sum::<usize>() <= room;
+    let mut spans = candidates
+        .iter()
+        .find(|candidate| fits(candidate))
+        .or(candidates.last())
+        .cloned()
+        .unwrap_or_default();
+    let used: usize = spans.iter().map(Span::width).sum();
+
+    spans.push(Span::raw(
+        " ".repeat(width.saturating_sub(used + right_width)),
+    ));
+    spans.extend(right);
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }

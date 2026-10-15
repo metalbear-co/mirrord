@@ -8,18 +8,19 @@ use ratatui::{
     layout::{Constraint, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, BorderType, List, ListItem, ListState, Paragraph},
+    widgets::{List, ListItem, ListState, Paragraph},
 };
 use strum::VariantArray;
 use strum_macros::{Display, VariantArray};
 
 use crate::{
     helpers::{centered, ellipsize},
+    kit::panel,
     screens::targets::{
         form::{SettingDef, WidgetKind, join_command},
         model::{CommonSpec, ServiceEntry, UpFile},
-        theme,
     },
+    theme,
 };
 
 #[derive(Default)]
@@ -122,37 +123,22 @@ impl PlanPane {
     }
 
     pub fn draw(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
-        let border = if focused {
-            theme::BRAND
-        } else {
-            theme::BORDER_DIM
-        };
-        let title = if self.services.is_empty() {
-            " Session Plan ".to_owned()
-        } else {
-            format!(" Session Plan · {} ", self.services.len())
-        };
-        let block = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border))
-            .title(Span::styled(
-                title,
-                Style::default()
-                    .fg(theme::TEXT_EMPHASIS)
-                    .bg(theme::FILL_HEAVY)
-                    .bold(),
-            ));
+        let count = self.services.len().to_string();
+        let block = panel::focus(
+            panel::block("plan", Some(&count), Some("mirrord"), None),
+            focused,
+        );
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
         if self.services.is_empty() {
             frame.render_widget(
                 Paragraph::new(vec![
-                    Line::styled("No services yet.", Style::default().fg(theme::TEXT_MUTED)),
+                    Line::styled("No services yet.", Style::default().fg(theme::GREY)),
                     Line::raw(""),
                     Line::styled(
                         "Pick a target on the left (Enter) to add one.",
-                        Style::default().fg(theme::TEXT_MUTED).italic(),
+                        Style::default().fg(theme::GREY).italic(),
                     ),
                 ])
                 .centered(),
@@ -178,12 +164,8 @@ impl PlanPane {
             })
             .collect();
 
-        let list = List::new(items).highlight_style(
-            Style::default()
-                .bg(theme::FILL_HEAVY)
-                .fg(theme::TEXT_EMPHASIS)
-                .bold(),
-        );
+        let list = List::new(items)
+            .highlight_style(Style::default().bg(theme::INK).fg(theme::LAVENDER).bold());
         self.list_state.select(Some(self.selected));
         frame.render_stateful_widget(list, inner, &mut self.list_state);
     }
@@ -206,19 +188,16 @@ fn compact_item(index: usize, service: &ServiceEntry, width: usize) -> ListItem<
     let target = ellipsize(&service.spec.target.display(), target_budget);
 
     let mut spans = vec![
-        Span::styled(number, Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(name, Style::default().fg(theme::TEXT_EMPHASIS).bold()),
-        Span::styled(
-            format!("  {target}"),
-            Style::default().fg(theme::TEXT_MUTED),
-        ),
+        Span::styled(number, Style::default().fg(theme::GREY)),
+        Span::styled(name, Style::default().fg(theme::LAVENDER).bold()),
+        Span::styled(format!("  {target}"), Style::default().fg(theme::GREY)),
         // `replace` takes the target's traffic over entirely - worth a
         // louder color than the shared-traffic default.
         Span::styled(
             mode,
             match service.spec.default_mode {
                 crate::screens::targets::model::ServiceMode::Replace => {
-                    Style::default().fg(theme::WARNING)
+                    Style::default().fg(theme::AMBER)
                 }
                 _ => Style::default().fg(theme::FILL_DIM),
             },
@@ -227,7 +206,7 @@ fn compact_item(index: usize, service: &ServiceEntry, width: usize) -> ListItem<
     if service.spec.skip {
         spans.push(Span::styled(
             skip,
-            Style::default().fg(theme::WARNING).italic(),
+            Style::default().fg(theme::AMBER).italic(),
         ));
     }
     ListItem::new(Line::from(spans))
@@ -245,7 +224,7 @@ fn expanded_item(index: usize, service: &ServiceEntry, width: usize) -> ListItem
             ),
             Span::styled(
                 ellipsize(&value, width.saturating_sub(15)),
-                Style::default().fg(theme::TEXT_MUTED),
+                Style::default().fg(theme::GREY),
             ),
         ])
     };
@@ -253,17 +232,17 @@ fn expanded_item(index: usize, service: &ServiceEntry, width: usize) -> ListItem
     let mut header = vec![
         Span::styled(
             format!(" {}. ", index + 1),
-            Style::default().fg(theme::TEXT_MUTED),
+            Style::default().fg(theme::GREY),
         ),
         Span::styled(
             ellipsize(&service.name, width.saturating_sub(12)),
-            Style::default().fg(theme::TEXT_EMPHASIS).bold(),
+            Style::default().fg(theme::LAVENDER).bold(),
         ),
     ];
     if spec.skip {
         header.push(Span::styled(
             "  skip",
-            Style::default().fg(theme::WARNING).italic(),
+            Style::default().fg(theme::AMBER).italic(),
         ));
     }
 
@@ -403,7 +382,7 @@ pub const EXPORT_SETTINGS: &[SettingDef<ExportDraft>] = &[
     },
     SettingDef {
         label: "Format",
-        help: "mirrord up reads yaml; json is for other tooling",
+        help: "mirrord reads yaml; json is for other tooling",
         visible: |_| true,
         suggest: None,
         widget: WidgetKind::Select {
@@ -501,6 +480,7 @@ mod tests {
                     http_filter: None,
                     ignore_ports: Default::default(),
                     skip: false,
+                    config_patch: None,
                     run: RunSpec {
                         command: command.iter().map(|part| (*part).to_owned()).collect(),
                         dir: dir.map(str::to_owned),

@@ -20,16 +20,25 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{
-        Block, Cell, Padding, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
-        Table, TableState,
-    },
+    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 use strum::VariantArray;
 use tokio::{sync::Notify, time::MissedTickBehavior};
 use tracing::Level;
 
-use crate::{context::Context, helpers::centered, screens::Screen, theme};
+use crate::{
+    context::Context,
+    kit::{
+        describe::{Describe, DescribeOutcome},
+        hints::Hint,
+        panel,
+        search::{SearchBox, SearchOutcome},
+        state_view::{self, EmptyText, Fetch, Listing},
+        table::{Columns, DataTable},
+    },
+    screens::Screen,
+    theme,
+};
 
 /// How often the list of branch databases is refreshed.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(5);
@@ -37,21 +46,18 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 /// Placeholder used when a value is missing.
 const DASH: &str = "-";
 
-const ARROW_UP: char = '\u{2191}';
-const ARROW_DOWN: char = '\u{2193}';
-const BULLET: char = '\u{2022}';
-const CURSOR: char = '\u{2588}';
-
 /// The branch databases screen.
 ///
 /// Shows every branch database the operator reports, one row per branch.
 pub struct DatabasesScreen {
     data: Arc<RwLock<Data>>,
-    table: TableState,
+    table: DataTable,
     /// Set while the user is looking at the details of a single branch.
     details: Option<Details>,
+    /// The resource `y` opened, shown whole as YAML.
+    describe: Option<Describe>,
     /// The `/` search over the list.
-    search: Search,
+    search: SearchBox,
     refresh: Arc<Notify>,
 }
 
@@ -83,8 +89,7 @@ impl DatabasesScreen {
 
             {
                 let mut data = data.write().unwrap();
-                data.state = state;
-                data.updated_at = Timestamp::now();
+                data.replace(state);
             }
 
             context.redraw.notify_one();
@@ -137,7 +142,7 @@ impl DatabasesScreen {
                 });
                 State::Ready(branches)
             }
-            Err(error) => State::Failed(error.to_string()),
+            Err(error) => State::Failed(state_view::explain(&error, "branch databases")),
         }
     }
 
@@ -150,45 +155,16 @@ impl DatabasesScreen {
         state: &State,
         branches: &[&BranchDatabase],
     ) {
-        if branches.is_empty() {
-            let ready = if self.search.phrase.is_empty() {
-                ("No active branch databases", theme::muted())
-            } else {
-                ("No branch databases match the search", theme::muted())
-            };
-            let (message, style) = state_message(state, ready);
-            draw_centered_message(frame, area, message, style);
+        let empty = EmptyText {
+            nothing: "No active branch databases",
+            no_match: "No branch databases match the search",
+        };
+        let searching = !self.search.phrase().is_empty();
+        if state_view::draw(frame, area, state, branches.len(), searching, &empty) {
             return;
         }
 
-        // The list shrinks as branches end, and as the search narrows it, so the selection can
-        // outlive the row it pointed at.
-        match self.table.selected() {
-            Some(selected) if selected >= branches.len() => {
-                self.table.select(Some(branches.len() - 1))
-            }
-            Some(_) => {}
-            None => self.table.select(Some(0)),
-        }
-
-        frame.render_stateful_widget(
-            Table::new(
-                branches.iter().map(|branch| {
-                    Row::new(Column::VARIANTS.iter().map(|column| {
-                        let (value, style) = column.value(branch);
-                        Cell::from(Span::styled(value, style))
-                    }))
-                }),
-                Column::VARIANTS.iter().map(|column| column.constraint()),
-            )
-            .header(
-                Row::new(Column::VARIANTS.iter().map(|column| column.title()))
-                    .style(theme::table_header()),
-            )
-            .row_highlight_style(theme::selection()),
-            area,
-            &mut self.table,
-        );
+        self.table.draw::<Column>(frame, area, branches);
     }
 
     /// Enters the details of the selected branch.
@@ -202,7 +178,7 @@ impl DatabasesScreen {
             return;
         };
         // The selection indexes the rows the user can see, not every branch.
-        let branches = self.search.matching(branches);
+        let branches = matching(&self.search, branches);
         let Some(branch) = self
             .table
             .selected()
@@ -242,7 +218,7 @@ impl DatabasesScreen {
         let Some(branch) = branch else {
             let (message, style) =
                 state_message(state, ("This branch database has ended", theme::warning()));
-            draw_centered_message(frame, area, message, style);
+            state_view::draw_message(frame, area, message, style);
             return;
         };
 
@@ -274,42 +250,22 @@ impl DatabasesScreen {
         }
     }
 
-    /// The right-hand hint shown at the bottom of the panel.
-    fn hint(&self) -> String {
-        if self.details.is_some() {
-            format!(
-                "{ARROW_UP}/{ARROW_DOWN} scroll  {BULLET}  PgUp/PgDn page  {BULLET}  r refresh  {BULLET}  q back",
-            )
-        } else if self.search.editing {
-            format!("type to filter  {BULLET}  Enter apply  {BULLET}  Esc clear")
-        } else if self.search.phrase.is_empty() {
-            format!(
-                "{ARROW_UP}/{ARROW_DOWN} move  {BULLET}  Enter details  {BULLET}  / search  {BULLET}  r refresh",
-            )
-        } else {
-            format!(
-                "{ARROW_UP}/{ARROW_DOWN} move  {BULLET}  Enter details  {BULLET}  / search  {BULLET}  Esc clear  {BULLET}  r refresh",
-            )
-        }
-    }
-
     /// The bordered panel that wraps the body, titled for the current mode.
     fn frame_block(&self, data: &Data, matching_len: usize) -> Block<'static> {
-        let block = Block::bordered()
-            .border_style(theme::border())
-            .padding(Padding::horizontal(1));
+        let updated = data.updated();
         match &self.details {
-            Some(details) => block
-                .title(Span::styled(" Branch Database ", theme::title()))
-                .title_top(
-                    Line::styled(format!(" {} ", details.title()), theme::muted()).right_aligned(),
-                ),
-            None => block
-                .title(Span::styled(" Branch Databases ", theme::title()))
-                .title_top(
-                    Line::styled(format!(" {} ", data.summary(matching_len)), theme::muted())
-                        .right_aligned(),
-                ),
+            Some(details) => panel::block(
+                &format!("branch({})", details.title()),
+                None,
+                Some(&updated),
+                None,
+            ),
+            None => panel::block(
+                "dbs",
+                data.count(matching_len).as_deref(),
+                Some(&updated),
+                None,
+            ),
         }
     }
 }
@@ -323,28 +279,30 @@ impl Screen for DatabasesScreen {
 
         Self {
             data,
-            table: TableState::default(),
+            table: DataTable::default(),
             details: None,
-            search: Search::default(),
+            describe: None,
+            search: SearchBox::default(),
             refresh,
         }
     }
 
     fn draw(&mut self, frame: &mut Frame, area: Rect) {
+        if let Some(describe) = &mut self.describe {
+            describe.draw(frame, area);
+            return;
+        }
+
         let data = self.data.clone();
         let data = data.read().unwrap();
 
         // The search box is only in the way while the user is not searching.
         let search_height = u16::from(self.search.visible() && self.details.is_none());
-        let [body, search, footer] = Layout::vertical([
-            Constraint::Min(3),
-            Constraint::Length(search_height),
-            Constraint::Length(1),
-        ])
-        .areas(area);
+        let [body, search] =
+            Layout::vertical([Constraint::Min(3), Constraint::Length(search_height)]).areas(area);
 
         let matching = match &data.state {
-            State::Ready(branches) => self.search.matching(branches),
+            State::Ready(branches) => matching(&self.search, branches),
             _ => Vec::new(),
         };
 
@@ -360,24 +318,48 @@ impl Screen for DatabasesScreen {
                 self.search.draw(frame, search);
             }
         }
-
-        let [hints, updated] =
-            Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).areas(footer);
-
-        frame.render_widget(
-            Paragraph::new(Span::styled(self.hint(), theme::muted())).left_aligned(),
-            hints,
-        );
-        frame.render_widget(
-            Paragraph::new(Span::styled(data.updated(), theme::muted())).right_aligned(),
-            updated,
-        );
     }
 
     fn handle_event(&mut self, event: Event) -> ControlFlow<(), Event> {
+        if let Some(describe) = &mut self.describe {
+            if let DescribeOutcome::Closed = describe.handle_event(&event) {
+                self.describe = None;
+            }
+            return ControlFlow::Break(());
+        }
+
+        // `y` shows the branch under the cursor, or the one whose details are open, as YAML.
+        if let Event::Key(key) = &event
+            && key.code == KeyCode::Char('y')
+            && !self.search.is_editing()
+            && let Some(resource) = self.focused_resource()
+        {
+            self.describe = Some(Describe::new(
+                format!("branch {}", resource.name_any()),
+                &resource,
+            ));
+            return ControlFlow::Break(());
+        }
+
+        if self.details.is_none() {
+            match self.search.handle_event(&event) {
+                SearchOutcome::Ignored => {}
+                SearchOutcome::Consumed => return ControlFlow::Break(()),
+                SearchOutcome::Changed => {
+                    // The rows under the selection change with every keystroke.
+                    self.table.select_first();
+                    return ControlFlow::Break(());
+                }
+            }
+        }
+
         let Event::Key(key) = &event else {
             return ControlFlow::Continue(event);
         };
+
+        if self.details.is_none() && self.table.handle_key(key) {
+            return ControlFlow::Break(());
+        }
 
         match &mut self.details {
             Some(details) => match key.code {
@@ -392,39 +374,8 @@ impl Screen for DatabasesScreen {
                 KeyCode::Char('q') | KeyCode::Esc => self.details = None,
                 _ => return ControlFlow::Continue(event),
             },
-            // A modal text box: typing "q"/Tab/etc. here must not quit or
-            // switch screens.
-            None if self.search.editing => match key.code {
-                KeyCode::Char(char) => {
-                    self.search.phrase.push(char);
-                    // The rows under the selection change with every keystroke.
-                    self.table.select_first();
-                }
-                KeyCode::Backspace => {
-                    self.search.phrase.pop();
-                    self.table.select_first();
-                }
-                KeyCode::Enter => self.search.editing = false,
-                KeyCode::Esc => {
-                    self.search.editing = false;
-                    self.search.phrase.clear();
-                    self.table.select_first();
-                }
-                _ => {}
-            },
             None => match key.code {
-                KeyCode::Down => self.table.select_next(),
-                KeyCode::Up => self.table.select_previous(),
-                KeyCode::Home => self.table.select_first(),
-                KeyCode::End => self.table.select_last(),
-                KeyCode::PageDown => self.table.scroll_down_by(10),
-                KeyCode::PageUp => self.table.scroll_up_by(10),
                 KeyCode::Enter => self.open_details(),
-                KeyCode::Char('/') => self.search.editing = true,
-                KeyCode::Esc if !self.search.phrase.is_empty() => {
-                    self.search.phrase.clear();
-                    self.table.select_first();
-                }
                 KeyCode::Char('r') => self.refresh.notify_one(),
                 _ => return ControlFlow::Continue(event),
             },
@@ -432,110 +383,71 @@ impl Screen for DatabasesScreen {
 
         ControlFlow::Break(())
     }
+
+    fn hints(&self) -> Vec<Hint> {
+        if let Some(describe) = &self.describe {
+            return describe.hints();
+        }
+        if self.details.is_some() {
+            return vec![
+                Hint::new("\u{2191}/\u{2193}", "scroll"),
+                Hint::new("y", "yaml"),
+                Hint::new("pgup/pgdn", "page"),
+                Hint::new("r", "refresh"),
+                Hint::new("q", "back"),
+            ];
+        }
+        if self.search.is_editing() {
+            return self.search.hints();
+        }
+
+        let mut hints = DataTable::hints();
+        hints.push(Hint::new("enter", "details"));
+        hints.push(Hint::new("y", "yaml"));
+        hints.extend(self.search.hints());
+        hints.push(Hint::new("r", "refresh"));
+        hints
+    }
+}
+
+impl DatabasesScreen {
+    /// The branch whose details are open, or else the one under the cursor.
+    fn focused_resource(&self) -> Option<BranchDatabase> {
+        let data = self.data.read().unwrap();
+        let State::Ready(branches) = &data.state else {
+            return None;
+        };
+        let found = match &self.details {
+            Some(details) => branches.iter().find(|item| {
+                item.metadata.name.as_deref() == Some(details.name.as_str())
+                    && item.metadata.namespace == details.namespace
+            }),
+            None => {
+                let index = self.table.selected()?;
+                matching(&self.search, branches).get(index).copied()
+            }
+        };
+        found.cloned()
+    }
+}
+
+/// Returns the branches that match the search, in the order they were given.
+///
+/// A branch matches when any one of the searched columns contains the phrase.
+fn matching<'a>(search: &SearchBox, branches: &'a [BranchDatabase]) -> Vec<&'a BranchDatabase> {
+    branches
+        .iter()
+        .filter(|branch| {
+            search.matches_any(Column::SEARCHED.iter().map(|column| column.value(branch).0))
+        })
+        .collect()
 }
 
 /// What the background task has found so far.
-#[derive(Default)]
-struct Data {
-    state: State,
-    /// When [`Data::state`] was last replaced.
-    updated_at: Timestamp,
-}
-
-impl Data {
-    /// The right-hand side of the panel title.
-    ///
-    /// `shown` is how many branches the search leaves in the list.
-    fn summary(&self, shown: usize) -> String {
-        match &self.state {
-            State::Ready(branches) if shown < branches.len() => {
-                format!("{shown}/{} branches", branches.len())
-            }
-            State::Ready(branches) if branches.len() == 1 => "1 branch".to_owned(),
-            State::Ready(branches) => format!("{} branches", branches.len()),
-            _ => String::new(),
-        }
-    }
-
-    /// Returns a string that informs when [`Data::state`] was last replaced.
-    fn updated(&self) -> String {
-        let updated_at = self.updated_at.to_zoned(TimeZone::UTC);
-        format!("updated at {updated_at:.0}")
-    }
-}
+type Data = Listing<BranchDatabase>;
 
 /// The outcome of the last attempt to list the branch databases.
-#[derive(Default, Debug)]
-enum State {
-    /// The application is not connected to the cluster.
-    Disconnected,
-    /// The first attempt is still in flight.
-    #[default]
-    Loading,
-    /// The attempt failed.
-    Failed(String),
-    /// The attempt succeeded.
-    Ready(Vec<BranchDatabase>),
-}
-
-/// The `/` search that narrows the list of branches.
-#[derive(Default)]
-struct Search {
-    /// The phrase the list is narrowed by. Empty means every branch is listed.
-    phrase: String,
-    /// Set while the user is typing the phrase.
-    editing: bool,
-}
-
-impl Search {
-    /// Whether the search box belongs on the screen.
-    ///
-    /// It stays up after the phrase is applied, so that the list is never
-    /// silently narrowed.
-    fn visible(&self) -> bool {
-        self.editing || !self.phrase.is_empty()
-    }
-
-    /// Returns the branches that match [`Search::phrase`], in the order they
-    /// were given.
-    ///
-    /// A branch matches when any one of the searched columns contains the
-    /// phrase, ignoring case.
-    fn matching<'a>(&self, branches: &'a [BranchDatabase]) -> Vec<&'a BranchDatabase> {
-        if self.phrase.is_empty() {
-            return branches.iter().collect();
-        }
-
-        let phrase = self.phrase.to_lowercase();
-
-        branches
-            .iter()
-            .filter(|branch| {
-                Column::SEARCHED.iter().any(|column| {
-                    column
-                        .value(branch)
-                        .0
-                        .to_lowercase()
-                        .contains(phrase.as_str())
-                })
-            })
-            .collect()
-    }
-
-    /// Draws the search box.
-    fn draw(&self, frame: &mut Frame, area: Rect) {
-        let mut spans = vec![
-            Span::styled("/", theme::title()),
-            Span::raw(self.phrase.clone()),
-        ];
-        // The cursor only belongs in the box while it takes input.
-        if self.editing {
-            spans.push(Span::styled(CURSOR.to_string(), theme::title()));
-        }
-
-        frame.render_widget(Paragraph::new(Line::from_iter(spans)), area);
-    }
-}
+type State = Fetch<Vec<BranchDatabase>>;
 
 /// The branch the user entered from the list, and how far they scrolled in it.
 ///
@@ -584,6 +496,12 @@ impl Column {
         Self::Target,
         Self::Phase,
     ];
+}
+
+impl Columns for Column {
+    type Row = BranchDatabase;
+
+    const ALL: &'static [Self] = Self::VARIANTS;
 
     /// The header cell of this column.
     fn title(self) -> &'static str {
@@ -1138,12 +1056,4 @@ fn state_message<'a>(state: &'a State, ready: (&'a str, Style)) -> (&'a str, Sty
         State::Failed(error) => (error.as_str(), theme::error()),
         State::Ready(_) => ready,
     }
-}
-
-/// Draws a single line of text centered in the given area.
-fn draw_centered_message(frame: &mut Frame, area: Rect, message: &str, style: Style) {
-    frame.render_widget(
-        Paragraph::new(Span::styled(message.to_owned(), style)).centered(),
-        centered(area, Constraint::Fill(1), Constraint::Length(1)),
-    );
 }

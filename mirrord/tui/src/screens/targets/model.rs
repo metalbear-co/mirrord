@@ -199,6 +199,10 @@ pub struct ServiceSpec {
     pub ignore_ports: BTreeSet<u16>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub skip: bool,
+    /// A JSON merge patch `mirrord up` applies to the mirrord config it generates for the
+    /// service, for what the plan has no field of its own for (database branches).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_patch: Option<serde_json::Value>,
     pub run: RunSpec,
 }
 
@@ -360,6 +364,7 @@ mod tests {
             http_filter: None,
             ignore_ports: BTreeSet::new(),
             skip: false,
+            config_patch: None,
             run: RunSpec {
                 run_type: RunType::Exec,
                 command: command.iter().map(|part| (*part).to_owned()).collect(),

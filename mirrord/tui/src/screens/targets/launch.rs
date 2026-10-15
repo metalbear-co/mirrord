@@ -8,18 +8,14 @@ use std::{
 
 use crossterm::event::{KeyCode, KeyEvent};
 use mirrord_command::{resolve_command, resolve_tokio_command};
-use ratatui::{
-    Frame,
-    layout::Rect,
-    style::Style,
-    text::{Line, Span},
-    widgets::{Block, BorderType, Paragraph},
-};
+use ratatui::{Frame, layout::Rect, style::Style, text::Line, widgets::Paragraph};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 
 use crate::{
     context::Context,
-    screens::targets::{keys, model::UpFile, theme},
+    kit::panel,
+    screens::targets::{keys, model::UpFile, suggest},
+    theme,
 };
 
 enum LaunchStatus {
@@ -271,7 +267,11 @@ impl Launch {
         tracing::debug!(binary = %binary.display(), pid, config = %config_path.display(), "spawned mirrord up");
         // Reported once the spawn succeeded, so a session that never started is not counted as one.
         context.telemetry.session_started();
-        let mut first_lines = vec![format!("$ mirrord up -f {}", config_path.display())];
+        // Shown as plain `mirrord`: the subcommand underneath is a detail of how the TUI runs it.
+        let mut first_lines = vec![format!(
+            "$ mirrord  (plan: {})",
+            suggest::compress_home(&config_path.display().to_string())
+        )];
         first_lines.extend(note);
         first_lines.extend(layer_note);
         let logs = Arc::new(RwLock::new(first_lines));
@@ -380,31 +380,29 @@ impl Launch {
     }
 
     pub fn draw(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
-        let border = if focused {
-            theme::BRAND
-        } else {
-            theme::BORDER_DIM
-        };
-
         let (title, title_color) = match self.status.read().as_deref() {
-            Ok(LaunchStatus::Running { pid }) => (
-                format!(" ● mirrord up · running (pid {pid}) "),
-                theme::BRAND,
-            ),
+            Ok(LaunchStatus::Running { pid }) => {
+                (format!(" ● mirrord · running (pid {pid}) "), theme::INDIGO)
+            }
             Ok(LaunchStatus::Exited {
                 message,
                 success: true,
-            }) => (format!(" ✓ mirrord up · {message} "), theme::SUCCESS),
+            }) => (format!(" ✓ mirrord · {message} "), theme::MINT),
             Ok(LaunchStatus::Exited { message, .. }) => {
-                (format!(" ✗ mirrord up · {message} "), theme::WARNING)
+                (format!(" ✗ mirrord · {message} "), theme::AMBER)
             }
-            Err(_) => (" mirrord up ".to_owned(), theme::TEXT_MUTED),
+            Err(_) => (" mirrord ".to_owned(), theme::GREY),
         };
 
-        let block = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border))
-            .title(Span::styled(title, Style::default().fg(title_color).bold()));
+        let block = panel::focus(
+            panel::block(
+                "run",
+                None,
+                None,
+                Some((title.trim(), Style::default().fg(title_color).bold())),
+            ),
+            focused,
+        );
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
@@ -422,10 +420,7 @@ impl Launch {
         let mut rows: Vec<Line> = Vec::new();
         for line in logs.iter().take(bottom).rev() {
             for chunk in wrap_chunks(line, width).into_iter().rev() {
-                rows.push(Line::styled(
-                    chunk,
-                    Style::default().fg(theme::TEXT_EMPHASIS),
-                ));
+                rows.push(Line::styled(chunk, Style::default().fg(theme::LAVENDER)));
             }
             if rows.len() >= height {
                 break;

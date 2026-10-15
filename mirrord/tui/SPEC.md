@@ -48,15 +48,25 @@ MIRRORD_LOG_FILE=/tmp/mirrord-tui.log MIRRORD_LOG=debug cargo run
 
 ## Screen layout
 
-Every frame is laid out vertically with fixed chrome:
+Every frame is laid out vertically, in the style of k9s:
 
 | Region | Height | Content |
 | --- | --- | --- |
-| Tabs bar | 1 line | The list of screens. The active screen is highlighted in reverse video. |
-| Body | remaining | The content of the active screen. |
-| Status bar | 1 line | Current connection scope and status (see below). |
+| Top bar | 1 line | Where the user is and how the connection is going (see below). |
+| Body | remaining | The active view, framed in a panel titled like `sessions[2]`. |
+| Command line | 1 line, only while open | The `:` command line (see below). |
+| Key bar | 1 line | The keys of whatever has the keyboard, as `<key> action`, keys in indigo. It starts with `<?> help` and ends with `<:> go to`, so the way to everything else is never the part cut off on a narrow terminal. |
 
-The tabs bar lists, in order: `Home`, `Targets`, `Sessions`, `Databases`, `Queues`, `Preview Environments`, `Terminal`.
+There is no tab bar. Views are reached by name on the `:` command line: `home`, `run`, `targets`,
+`config`, `sessions`, `dbs`, `queues`, `previews`, `resources`, `terminal`. `Tab` / `Shift+Tab` still step through them
+in that order. The application opens on `run` when it was started inside a project (a `package.json`,
+`Cargo.toml`, `go.mod` or `pyproject.toml` names it, or the folder has a command to run), and on
+`home` anywhere else.
+
+**Panels.** List views are framed in a panel whose top border carries the view's name centered, bold
+indigo, with the number of rows after it in amber brackets (`sessions[2]`, or `[1/3]` while a search
+narrows the list), and when the list was last refreshed on the right (`updated 13:01:02`, local time). A
+short-lived message, such as the outcome of killing a session, sits on the bottom border.
 
 ## Colors
 
@@ -66,27 +76,40 @@ row, mint `#7DD3A8` for healthy states, amber `#FFCB7D` for in-progress states a
 for errors. Only foreground colors and the selection background are painted, so the terminal keeps its own
 background.
 
-## Status bar
+How much of that color reaches the terminal is decided once per process, from the environment, first match
+wins:
 
-The status bar is a single line showing three fields separated by `  ·  `:
+| Environment | Colors drawn |
+| --- | --- |
+| `NO_COLOR` set to anything non-empty | None. Bold, dim and reverse video stay, so the selection and headers still stand out. |
+| `COLORTERM` containing `truecolor` or `24bit` | The 24-bit brand colors. |
+| Anything else | The 16 named terminal colors: each brand color has a hand-picked one (indigo becomes bright magenta, amber bright yellow, mint bright green, coral bright red, the selection background blue), and any other color becomes the nearest named one. |
 
-```
-context <name>  ·  namespace <name>  ·  <state>
-```
+This applies to everything on screen, every screen and dialog and the Terminal screen's shell output
+included, since on a terminal without 24-bit support a 24-bit color is drawn as one flat grey.
 
-- **context** — the Kubernetes context the application is connecting to. Shown as italic `(current)` when no explicit context has been selected (the ambient current context is used).
-- **namespace** — the Kubernetes namespace scope. Shown as italic `(default)` when no explicit namespace has been selected.
-- **state** — one of:
+## Top bar
+
+One line: a `◆ mirrord` chip, then `context › namespace › view` on the left, and the connection state on the
+right.
+
+- **context** — the Kubernetes context the application is connecting to, or italic `current context` when
+  none was picked (the ambient current context is used).
+- **namespace** — the namespace lists are narrowed to, or italic `all namespaces` when none was picked.
+- **view** — the active view, bold indigo.
+- **state**, on the right — one of:
   - `◌ connecting…` (amber) while a connection attempt is in flight and no result has arrived yet;
   - `● connected` (mint) while the most recent connection attempt succeeded;
-  - `✗ <summary>` (coral) followed by `·  e for details` (gray) if the most recent attempt failed.
+  - `✗ <summary>` (coral) followed by `· <e> details` (gray) if the most recent attempt failed.
+
+When the line is too short for everything, the breadcrumb drops the context first, then the namespace,
+keeping the view name and at least two columns before the state.
 
 The summary is a one-line condensation of the failure, never the error verbatim. Errors built around a
 payload are cut back to the classification in front of it — a `kube` auth error quotes the entire failed
 credential-plugin command, `KUBERNETES_EXEC_INFO`'s JSON included, so `auth error: auth exec command
 '<hundreds of characters>' failed with status ...` is shown as `auth error: auth exec command`. Whatever is
-still too wide for the terminal is cut with a trailing `…`, so the status bar never spills onto the screen
-above it.
+still too wide is cut with a trailing `…`, so the bar never spills onto the line below it.
 
 ## Connection error dialog
 
@@ -107,17 +130,78 @@ It shows, in order:
 Everything is wrapped to the width of the dialog, breaking mid-word for runs (like the quoted JSON payload)
 too long to fit a line.
 
+## Help dialog
+
+Pressing `?` opens a centered modal dialog titled `Keys`, drawn like the context and namespace pickers. It
+lists the keys the active screen answers to in its current state under the screen's name (left out for
+screens that list none), then the keys from the table below under `Everywhere`. It captures all input
+while open; `Esc`, `q` and `?` close it. The Preview Environments screen answers `?` with its own help
+dialog instead.
+
+## Command line
+
+Pressing `:` opens a command line above the key bar, with a list of suggestions above it that narrows as
+the user types: view names first by prefix, then by any match, each with what it shows (`queues  queue
+splits`). The rest of the highlighted suggestion is ghosted after the cursor.
+
+| Typed | Does |
+| --- | --- |
+| a view name or alias (`run`/`start`/`go`, `sessions`/`ss`, `queues`/`qs`/`splits`, `dbs`/`databases`/`branches`, `previews`/`pv`, `targets`/`up`/`plan`, `config`/`cfg`, `resources`/`crds`/`api`, `terminal`/`term`/`shell`, `home`) | Switches to that view. |
+| a mirrord resource type, by its plural or its kind in lower case (`mirrordsplitconfigs`, `mirrordsplitconfig`, `branchdatabases` ...) | Opens the Resources view on that type. The types are the ones the connected cluster serves, so the list follows what is installed. |
+| `ctx` / `context`, optionally followed by a context name | Switches to that context, or opens the context picker without one. Context names from the kubeconfig are suggested. |
+| `ns` / `namespace`, optionally followed by a namespace or `all` | Narrows lists to that namespace (`all` for every namespace), or opens the namespace picker without one. The connected cluster's namespaces are suggested, when it lets the application list them. |
+| `help` / `keys`, `error`, `quit` / `q` | Open the help dialog, the connection error dialog, or quit. |
+
+`Up` / `Down` move through the suggestions, `Tab` completes the highlighted one (adding the space before an
+argument when the command takes one), `Enter` runs what was typed or, when it names nothing exactly, the
+highlighted suggestion (`:se` then `Enter` reaches sessions), and `Esc` closes the line. While it is open it
+takes every key.
+
+## Command palette
+
+Pressing `Ctrl+P` opens a filterable pick-one dialog titled `Command`, drawn and driven like the
+context picker: typing narrows the list to entries containing the typed text (ignoring case), `Up` /
+`Down` move, `Enter` runs the selected entry, and `Esc` clears the filter first and then closes. The
+entries are:
+
+| Entry | Does |
+| --- | --- |
+| `Go to <screen>`, one per screen in tab order | Switches to that screen. |
+| `Switch kube context  (c)` | Opens the context picker. |
+| `Switch namespace  (n)` | Opens the namespace picker. |
+| `Show connection error  (e)` | Opens the connection error dialog, if the last connection attempt failed. |
+| `Show keys for this screen  (?)` | Opens the help dialog. |
+| `Quit  (q)` | Quits the application. |
+
+The key in parentheses does the same thing without the palette.
+
+## Quitting with unsaved changes
+
+When `q`, `Ctrl+C` or the palette's `Quit` would leave edits unsaved (the Config screen's, today), a
+centered `Unsaved changes` dialog asks first, listing what would be lost. It captures all input while open:
+
+| Key | Action |
+| --- | --- |
+| `s` | Save, then quit. If a save fails, the dialog stays open and shows why (`Not saved: ...`). A config file mirrord rejects still counts as saved. |
+| `q` / `Ctrl+C` | Quit without saving. |
+| `Esc` | Close the dialog and stay. |
+
 ## Keys
 
 The following keys are handled globally, regardless of which screen is active:
 
 | Key | Action |
 | --- | --- |
-| `q` | Quit the application. |
-| `Ctrl+C` | Quit the application. |
+| `q` | Quit the application, asking first when there are unsaved edits. |
+| `Ctrl+C` | Quit the application, asking first when there are unsaved edits. |
 | `Tab` | Move to the next screen (wraps from the last back to the first). |
 | `Shift+Tab` | Move to the previous screen (wraps from the first back to the last). |
 | `e` | Open the connection error dialog. Does nothing unless the last connection attempt failed. |
+| `c` | Open the kube context picker. |
+| `n` | Open the namespace picker. Does nothing until connected. |
+| `?` | Open the help dialog. |
+| `:` | Open the command line. |
+| `Ctrl+P` | Open the command palette. |
 
 The active screen sees every key first, and the global handling above only runs for keys the screen did not
 consume. Screens that handle keys of their own list them in their own section below. The Terminal screen
@@ -130,10 +214,117 @@ Key releases are ignored; only presses and auto-repeats are acted on.
 
 ### Home
 
-Shows the logo centered in the body, with `Welcome!` on the line below it. The logo is checked in
-at more than one width; the widest one the body can hold is drawn, and if none of them fit, only
-`Welcome!` is. It is drawn in the brand colour and sets no background of its own, so the terminal's
-own background shows through. The screen does not react to input.
+A dashboard of what mirrord is doing in the cluster, in a `home` panel, refreshed every 5 seconds and when
+the connection or the namespace changes (a picked namespace narrows every card; otherwise every namespace
+counts). Each card is read on its own, so a resource the cluster cannot list leaves only its card with the
+explained error (`The mirrord operator is not answering. Is it running?`), and the rest still show.
+
+| Card | Shows |
+| --- | --- |
+| `<1> SESSIONS` | How many mirrord sessions are running (preview sessions left out), and `N yours` (mint) when some belong to the person running the TUI: any part of the session's `username/k8sUsername@hostname` equals their login name (`$USER`). |
+| `<2> PREVIEWS` | How many preview environments there are, and how many in each phase, colored by phase. |
+| `<3> QUEUE SPLITS` | How many queue splits there are, and `N failed` (red) when any have failed. |
+| `<4> DB BRANCHES` | How many branch databases there are, and how many in each phase. |
+| `OPERATOR` | `operator <version>`, then `license <organization> · until <date> (<N> days left)`, amber under 14 days and red (`expired`) past the date. |
+| `RECENT ACTIVITY` | Up to 20 events, newest first, each with how long ago it was (`4m`, `21d`): `<user> started a session on <target>`, `preview <key> · <phase>`, `queue split <name> · <phase>`, `db branch <id> · <phase>`, colored by phase. Events are when each was created, or started for sessions. |
+
+At 70 columns or more the four count cards sit two to a row; narrower, one per row. The activity feed takes
+the rest of the height.
+
+| Key | Action |
+| --- | --- |
+| `1` | Go to Sessions. |
+| `2` | Go to Preview Environments. |
+| `3` | Go to Queues. |
+| `4` | Go to Databases. |
+| `r` | Go to Run. |
+
+### Run
+
+Starts a mirrord session from the folder the application was started in, working out everything it can
+instead of asking. It shows one card per decision, each with the reason for it, so a guess can be checked at
+a glance; `Enter` starts the session, and the key in a card's title changes just that card.
+
+The panel is titled `run`, with the namespace searched (`in staging`, or `in all namespaces`) on the right.
+Its first line says `Looks like <name> (<where the name came from>)` when a project name was found, and `No
+project files here; pick a target and a command.` otherwise.
+
+| Card | Shows | Changed with |
+| --- | --- | --- |
+| `<m> JOB` | `Only my requests` by default: requests with the session's key reach the local process, everyone else's keep going to the cluster. The others are `Take over all traffic` (the original is scaled down) and `No incoming traffic` (no target). Each comes with one sentence on what it does. | `m`, a picker of the three jobs |
+| `<t> TARGET` | The best match among the cluster's targets, then its namespace and the reason it was picked (`test-mirrord · named like echo-app (package.json)`), and `+N more` when there are others. `none` and `not needed for this job` for the no-traffic job. | `t`, a picker of every target, best match first, listed as `path (namespace)` |
+| `<p> COMMAND` | What was last run for that target from this folder (`ran last time`), else the first command the project files point to (`detected - check it`), or `your pick`. | `p`, a picker of past and detected commands plus `type my own command...`, which opens a one-line editor (`Enter` keeps, `Esc` cancels) |
+| `<y> PLAN` | What will run, in five rows: `target`, `traffic` (`only requests with your session key`, `all of it, original scaled down` or `none`), `runs` (the command), `in` (the folder, `~` for the home directory) and `db` (`the originals`, or how many are branched). Or what is still missing. | `y` switches the card to the exact YAML mirrord reads (titled `<y> YAML`), and back |
+| `<b> DATABASES` | Every database the target uses, one checkbox each (`[ ] postgres · ORDERS_DATABASE_URL`) with where its credentials come from under it, and `not branched - b to choose` or `N branched for this session`. Detected Redis databases and URL variables whose engine is unknown are listed with `branch it in :config`. Things that could not be read (a Secret or ConfigMap loaded with `envFrom`, the workload itself) are noted in amber. `none without a target` for the no-traffic job. | `b`, a `Branch databases` checklist: `Up`/`Down` move, `Space` switches one, `a` switches all or none, `Enter` keeps, `Esc` cancels |
+| `QUEUES` | The queues the operator can split for the target (`test-topic · kafka`), and what happens to them with the job: `messages with your session key come to you`, `the copy reads them; nothing is split`, or `not split without a target`. `None registered with the operator.` when there are none. | - |
+
+**Layout.** Cards are as tall as their contents. At an inner width of 90 columns or more they sit two to a
+row (job and target, command and plan, databases and queues); narrower, one per row. When the terminal is
+too short for the boxes, they become a plain list: one row per card with its key and name, then its other
+lines indented underneath, card by card, for as long as there is room. The Ready line follows the cards.
+
+**Databases and queues.** Whenever the view settles on a target, it reads the target from the cluster in the
+background (read-only), and does it again when the target changes, which also clears the databases chosen
+for the previous one.
+
+- *The team's presets come first.* A `MirrordSplitConfig` in the target's namespace that names the target
+  (`targetRef`) or selects it by labels (`targetSelector.matchLabels`) lists databases under `dbBranches`;
+  when any apply, they are the whole list (`pg · orders-db`, `team preset (MirrordSplitConfig)`), and
+  branching them writes their ids.
+- *Otherwise the pod spec is read*: the targeted container (or every container but mesh sidecars), with the
+  keys of Secrets and ConfigMaps it loads through `envFrom`. Secret values are never kept or shown; only key
+  names are used.
+  - A variable ending in `_URL`, `_URI`, `_DSN` or `_CONNECTION_STRING` is a database when its plain value
+    starts with a database scheme (`postgres://`, `jdbc:mysql://`, `mongodb+srv://` ...) or its name names
+    an engine (`PG`, `POSTGRES`, `MYSQL`, `MARIA`, `MONGO`, `MSSQL`, `CLICKHOUSE`, `REDIS`).
+  - Variables sharing a prefix and ending in `HOST`, `PORT`, `USER`, `PASSWORD`, `NAME`/`DB`/`DATABASE`
+    (`ORDERS_DB_HOST` ..., or `PGHOST`, `PGUSER` ...) are one database, when the prefix names an engine or
+    the port is an engine's usual one (5432, 3306, 27017, 1433, 6379 ...). A prefix already covered by a URL
+    variable is not counted twice.
+  - Each database's credentials are shown by source: `url from secret app/url`, `password from configmap
+    db/pass`, `url from secret app-env via envFrom`, or `set in the pod spec` (a plain value is never shown).
+  - When no password was found (no password variable, or a plain URL without one) and the pod has a cloud
+    identity, the branch signs in with it: an IRSA role on the service account, the EKS web-identity
+    variables or static AWS keys mean AWS (`iam_auth: aws_rds`); a GKE Workload Identity annotation or a
+    Cloud SQL proxy sidecar means Google Cloud (`iam_auth: gcp_cloud_sql`). The card says so (`signs in with
+    the pod's AWS role (IRSA)`).
+- *Queues* come from the same split configs (`queues`) and from older `MirrordWorkloadQueueRegistry`
+  resources whose consumer is the target.
+
+Branching writes a `config_patch` with `feature.db_branches` into the plan: the chosen presets' ids, or one
+entry per chosen database with its engine, its connection (`url` with `type: env` or `env_from` and the
+variable, or `params` naming each variable) and `iam_auth` when it signs in with a cloud identity. Queues need
+nothing in the plan: in "only my requests" mode, mirrord splits every queue of the target by session key on
+its own.
+
+**How the guesses are made.**
+
+- *Project names*, most telling first: the `name` in `package.json` (an npm scope such as `@team/` is left
+  off), `[package].name` in `Cargo.toml`, `[project].name` in `pyproject.toml`, the last part of the `module`
+  in `go.mod`, then the folder's own name.
+- *Where to look*: the namespace picked with `:ns`, or, when none is, every namespace except `kube-system`,
+  `kube-public`, `kube-node-lease` and `mirrord`. A cluster with more than 30 such namespaces, or one that does
+  not allow listing them, is searched in its default namespace only.
+- *Targets* are listed the same way the Targets view lists them, and ranked: a target run from this folder
+  before first (`ran from here before`), then one named exactly like a project name (`named like checkout
+  (package.json)`), then one whose name contains a project name or the other way round (`close to`), then
+  one sharing a word with it (`shares a word with`). Deployments and rollouts win ties over
+  statefulsets, services, pods and jobs. Targets matching nothing are still offered, last.
+- *Containers*: in a workload with several, mesh sidecars and mirrord's agent (`istio-proxy`,
+  `linkerd-proxy`, `envoy`, `mirrord-agent`, `cloud-sql-proxy`) are never picked; one named like the
+  project wins, else the first, and the reason says which (`container app, sidecars skipped`).
+- *Commands*: the same detection the Targets view offers (`npm run dev`, `cargo run`, `go run .` ...).
+
+The target card shows `Waiting for the cluster...` or `Looking for targets...` while those are under way,
+the error when listing failed, and `Nothing to target here. Try :ns.` when nothing was found. Discovery runs again whenever the connection or the namespace changes.
+
+The line under the cards says `● Ready - enter to start` once there is a target (when the job needs one)
+and a command, and `Needs a target.` or `Needs a command.` otherwise.
+
+**Running.** `Enter` writes the plan to a temporary file and starts `mirrord up -f` on it, exactly as the
+Targets view does, records the command in the target's history, and replaces the cards with the run's log
+pane, which starts with `$ mirrord  (plan: <file>)`. `x` stops it, `Up`/`Down` scroll, `G` follows the tail, and `Esc` returns to the cards once it has
+stopped. If mirrord cannot be started, the reason is shown under the cards instead.
 
 ### Targets
 
@@ -147,40 +338,148 @@ The plan pane holds the services that make up the `mirrord-up.yaml` the screen e
 the plan can be written to a file, or run directly, which starts `mirrord up` as a child process
 and streams its output into a pane until it exits or is stopped.
 
+The three panes are panels like every other view's: `targets[N]` with the cluster and namespace (and a
+spinner while loading) on the right, `plan[N]` with `mirrord` on the right, and `run` with the run's
+state (`● mirrord · running (pid ...)`, `✓ ...` or `✗ ...`) on its bottom border. The pane that has the
+keyboard has an indigo border. Its keys, adapted to what is selected (`Enter target deployment/api`, `s
+skip` or `s unskip`), are on the key bar, and `?` lists them in the shared help dialog. A status message,
+when there is one, takes up to three lines under the panes.
+
+### Config
+
+Edits the config file under `.mirrord/` in the directory the application was started from: the first of
+`mirrord.json`, `mirrord.yaml`, `mirrord.yml` and `mirrord.toml` that exists, read and written in the format
+its extension names, as `mirrord exec -f` does. With none of them there, a new `mirrord.json` is created on
+save - the file the IDE extensions use. Every option the config file
+accepts is listed, with its documentation and the plan it needs, read from the config schema compiled into
+the binary - the same types the CLI parses - so the screen lists exactly the options this build accepts.
+
+**Layout.** A bordered `Config` panel titled with the file path, how many options have a value, and
+`unsaved` (amber) while there are edits the file does not have yet. On the left, the options as a tree; on
+the right, details of the option under the cursor. Below the panel, the search box while one is in use, a
+status line, and the key hints.
+
+**The tree.** Each row shows the option's key, indented under the section it belongs to, a fold marker
+(`▸` folded, `▾` open) on rows that open into more options, a `team` or `enterprise` badge (amber) on options
+that need that plan, and on the right the value: the value itself (indigo tint, key in bold), `N set` for a
+section holding values, or `-` when the option is not set. The tree starts with every section folded.
+
+A row opens into more options when it is a section, or when the option takes several forms and one of them
+is a set of settings (`feature.network.incoming` is either on/off, a mode, or settings). Such an option opens
+into its settings while it is unset or holds settings, and stays closed while it holds another form.
+
+**Details.** The option's path, what it takes (`one of: mirror, steal, off`, `whole number from 0 to
+65535`, `list of text`, or the forms it takes), the plan it needs (`needs mirrord for Teams`), its current
+value pretty-printed or `not set - mirrord's default applies`, and its documentation. `PageUp` / `PageDown`
+scroll the details.
+
+The documentation is drawn from its markdown: paragraphs re-flowed to the panel's width, headings in bold,
+`-`, `*` and numbered list items with their text indented under the marker, `>` quotes behind a `│`, fenced
+code blocks indented and tinted (cut with `…` rather than wrapped), inline code tinted, `**bold**` and
+`*italic*` styled, and links shown as their underlined label without the URL. `{#anchor}` suffixes on
+headings and `<!-- -->` comments are left out.
+
+**Editing.** What `Enter` does depends on what the option takes:
+
+| Takes | `Enter` |
+| --- | --- |
+| A section | Folds or opens it. |
+| On or off | Flips it; an unset option turns on. `Space` does the same. |
+| One of a fixed set | Opens a `Choose a value` picker. |
+| Several forms, while unset | Opens a `Choose a form` picker; picking one starts the option off as that form (on, the first value, an empty set of settings), or opens the editor when it needs typing. `v` opens this picker at any time. |
+| Anything else | Opens a one-line editor in the details panel, prefilled with the current value. |
+
+The editor takes text, numbers, comma-separated lists (`80, 443`), colon-separated pairs (`80:8080,
+443:8443` for port mappings) and, for anything else, JSON. Its keys are the shared text editing keys
+(see Queues). `Enter` keeps the value, refusing it with the reason in red when it does not fit (`70000 is
+above the highest allowed value, 65535`); `Esc` cancels; an empty value unsets the option. `d` or `Delete`
+unsets the option under the cursor. Unsetting removes the key from the file, and any section left empty by
+that, so the option falls back to mirrord's default.
+
+**Search and filters.** `/` searches option paths (`network.incoming` finds `feature.network.incoming` and
+what is under it). When no path matches, the options' documentation is searched instead. `m` lists only the
+options that have a value, and pressing it again lists them all. While searching or filtering, every section
+with a match inside is shown open.
+
+**Status line.** One to three lines, wrapped to the screen width:
+
+| Situation | Status |
+| --- | --- |
+| The file exists but cannot be read as a map of options in its format (templates mirrord renders before parsing, a syntax error) | `✗ <path> could not be read (...)`, and saving is refused so the file is not replaced. |
+| The options as edited would not parse as a config file (unknown key, wrong type) | `✗` and the reason, red. |
+| Saved, and mirrord accepts the file | `✓ saved to .mirrord/mirrord.json and accepted by mirrord`, green. |
+| Saved, but mirrord rejects the file | `✗ Saved, but mirrord rejects it: ...`, red. |
+| A YAML or TOML file with `#` comments, otherwise valid | `✓ valid · saving rewrites <path> without its comments`, amber. |
+| Otherwise | `✓ valid`, green. |
+
+**Saving.** `Ctrl+S` writes the file, creating `.mirrord/` when needed, in its own format (pretty-printed
+JSON, YAML or TOML) holding only the options that have a value. Keys set to `null` in the file are read as
+not set, and are left out when it is written. It then runs the file through the same resolution and checks as `mirrord
+verify-config` without `--ide`, which catches combinations no single option shows (steal mode without a
+target, for instance). A file that saved but was rejected stays saved.
+
+The screen handles these keys:
+
+| Key | Action |
+| --- | --- |
+| `Down` / `j`, `Up` / `k` | Move the cursor. |
+| `Home` / `End` | First / last option. |
+| `Left` / `h` | Fold the section under the cursor, or move to the enclosing one. |
+| `Right` / `l` | Open the section under the cursor, or move into it. |
+| `Enter` | Edit, as described above. |
+| `Space` | Flip an on/off option. |
+| `v` | Choose which form an option takes. |
+| `d` / `Delete` | Unset the option. |
+| `/` | Search. |
+| `m` | List only options that have a value, or all of them again. |
+| `Ctrl+S` | Save. |
+| `PageUp` / `PageDown` | Scroll the details. |
+
 ### Sessions
 
-Lists the mirrord sessions the operator reports, in a bordered pane, refreshed every five seconds
-and whenever the cluster connection or the selected namespace changes. Preview environment
-sessions are left out; they have their own screen.
+The view the application opens on: the mirrord sessions the operator reports, refreshed every 5 seconds and
+immediately whenever the cluster connection or the selected namespace changes. Preview environment sessions
+are left out; they have their own view. If a namespace is selected, only that namespace is listed;
+otherwise sessions from all namespaces are listed, sorted by namespace and then by name so that a refresh
+never reshuffles rows under the selection.
 
 | Column | Content |
 | --- | --- |
-| `ID` | The session's id. |
+| `NAMESPACE` | Namespace of the session, or `-` (gray). |
+| `ID` | The session's id (lavender). |
 | `USER` | The developer who started it. |
-| `TARGET` | The workload it targets. |
-| `NAMESPACE` | Namespace of the session. |
-| `AGE` | How long it has been running. |
+| `TARGET` | The workload it targets (light indigo). |
+| `PORTS` | The ports the session holds, `(filtered)` after a port with an HTTP filter, in amber; `-` when it holds none. |
+| `KEY` | The session key, or `-` (gray). |
+| `AGE` | How long it has been running, e.g. `45s`, `4m`, `3h25m`, `2d2h` (gray). |
 
-Instead of the table, the body shows `Loading...` (gray) until the first listing arrives, and
-`No active sessions.` once one arrives empty.
+The table, the `/` search box (matching every column) and the messages shown instead of the table work as on
+the Queues view, with `No active sessions` when the listing is empty and `No sessions match the search` when
+the search excludes every row.
+
+| Key | Action |
+| --- | --- |
+| `Enter` | Describe the selected session: the whole resource as YAML (keys tinted), in a panel titled `describe(session <name>)` with the visible line range on the right. `Up`/`Down`/`j`/`k` scroll, `PageUp`/`PageDown`/`Space` page, `g`/`G` jump to the ends, `/` searches (matching lines in bold amber, the view jumping to the first), `n` jumps to the next match, `Esc` clears the search and then goes back. |
+| `Ctrl+D` | Ask to kill the selected session: a red dialog `Kill session <name>?` with its user and target. `Enter` or `y` sends the same request `mirrord session kill` does; `Esc` or `n` cancels. The outcome, `killed session <name>` (mint) or `could not kill <name>: <reason>` (red), stays on the panel's bottom border for 6 seconds. |
+| `r` | Refresh now. |
 
 ### Databases
 
-Lists the branch databases the operator reports, as a table that can be narrowed by search.
-
-Instead of the table, the body shows `Loading...` (gray) until the first listing arrives,
-`No active branch databases` once one arrives empty, and `No branch databases match the search`
-when a search excludes every row.
+Lists the branch databases the operator reports, in a `dbs` panel, as a table that can be narrowed by
+search. The table (its selection keys and cells cut short with `…`), the search box and the messages shown
+instead of the table work exactly as on the Queues view, with `No active branch databases` when the listing
+is empty and `No branch databases match the search` when the search excludes every row. `Enter` opens the
+details of a branch, in a panel titled `branch(<name>)`; `y`, from the list or the details, shows the branch
+whole as YAML in the shared describe view (see Sessions).
 
 ### Queues
 
-Lists every queue-splitting session the mirrord operator reports, in a bordered `Queue Splits` panel. The list is
+Lists every queue-splitting session the mirrord operator reports, in a `queues` panel. The list is
 read from the `queuesplits` resource of the operator's aggregated Kubernetes API — the same live data behind
 `mirrord queues status`.
 
-The panel title carries the number of splits on the right, or `shown/total splits` while a search narrows the
-list. Below the panel, a footer line shows the key hints on
-the left and how long ago the list was last refreshed on the right.
+The panel title carries the number of splits, or `shown/total` while a search narrows the list, and when the
+list was last refreshed. The keys are on the key bar.
 
 Splits are listed in one row each, sorted by namespace and then by name so that a refresh never reshuffles rows
 under the selection. The columns are:
@@ -208,8 +507,10 @@ Instead of the table, the body shows a centered message when there is nothing to
 | Situation | Message |
 | --- | --- |
 | No cluster connection yet | `Waiting for a connection to the cluster...` (gray) |
-| The first listing is still in flight | `Loading...` (gray) |
+| The first listing is still in flight | `Loading...` (gray) after a turning spinner |
 | The cluster answered 404, i.e. it does not serve queue splits | `This cluster does not serve queue splits. Is the mirrord operator installed?` (amber) |
+| The operator's API answered 503, i.e. nothing is serving it | `The mirrord operator is not answering. Is it running?` (red) |
+| The listing was refused with 403 | `Not allowed to list queue splits: <reason>` (red) |
 | The listing failed for any other reason | The error message (red) |
 | The listing succeeded but found nothing | `No active queue-splitting sessions` (gray) |
 | Every split was filtered out by the search | `No queue-splitting sessions match the search` (gray) |
@@ -228,6 +529,7 @@ The list handles the following keys:
 | `End` / `G` | Select the last split. |
 | `PageDown` / `PageUp` | Scroll the list by 10 rows. |
 | `Enter` | Open the details of the selected split. |
+| `y` | Show the selected split whole as YAML, in the shared describe view (see Sessions). |
 | `/` | Start typing a search phrase. |
 | `Esc` | Clear the search phrase. |
 | `r` | Refresh the list now. |
@@ -239,13 +541,22 @@ block cursor. Every keystroke narrows the list right away: a split is listed onl
 `NAMESPACE`, `TARGET` or `PHASE` cell contains the phrase, each matched on its own, ignoring case. The selection
 returns to the first row on every change of the phrase.
 
-While the box takes input, every key goes to it — `q` does not quit and `Tab` does not switch screens — except:
+While the box takes input, every key goes to it — `q` does not quit and `Tab` does not switch screens. The
+phrase is edited like a shell's command line, with the cursor drawn where typing goes:
 
 | Key | Action |
 | --- | --- |
-| `Backspace` | Delete the last character of the phrase. |
+| (any character) | Insert at the cursor. |
+| `Backspace` / `Delete` | Delete the character before / under the cursor. |
+| `Left` / `Right` | Move by a character; with `Alt` or `Ctrl`, by a word. |
+| `Home` / `End`, `Ctrl+A` / `Ctrl+E` | Move to the start / end. |
+| `Alt+B` / `Alt+F` | Move back / forward by a word. |
+| `Ctrl+W` | Delete the word before the cursor. |
+| `Ctrl+U` / `Ctrl+K` | Delete everything before / after the cursor. |
 | `Enter` | Stop typing, keeping the list narrowed. |
 | `Esc` | Stop typing and clear the phrase, listing every split again. |
+
+Pasted text is inserted at the cursor, with line breaks turned into spaces.
 
 The box stays on the screen with the phrase in it, cursor hidden, so that the list is never silently narrowed. It
 is hidden while the split details are open, and the phrase still applies to the list underneath.
@@ -253,7 +564,7 @@ is hidden while the split details are open, and the phrase still applies to the 
 #### Split details
 
 `Enter` replaces the list with a nested view of everything the operator reports about the selected split. The
-panel is titled `Queue Split`, with the `namespace/name` of the split on the right. The details are re-read from
+panel is titled `split(namespace/name)`. The details are re-read from
 the same background refresh as the list, so they keep up with the split while the view is open.
 
 The details are laid out as a label column and a value column, in sections:
@@ -290,48 +601,70 @@ The details view handles the following keys:
 | `Home` | Scroll back to the first line. |
 | `End` | Scroll to the last line. |
 | `r` | Refresh now. |
+| `y` | Show the split whole as YAML, in the shared describe view (see Sessions). |
 | `q` / `Esc` | Go back to the list. Because the screen consumes `q` here, it does not quit the application. |
 
 ### Preview Environments
 
 Displays every preview environment (`PreviewSession` resource) visible on the connected cluster, as a live-updating watch — no polling or manual refresh needed. This reflects only the connected (primary) cluster; multi-cluster replica state is not shown.
 
-While a connection attempt is in flight, the body shows a centered, gray `connecting...` message. If the connection fails, or the watch itself errors, the body shows the error message in light red instead.
+While a connection attempt is in flight, the panel shows `Waiting for a connection to the cluster...`
+(gray). If the connection fails, or the watch itself errors, it shows the error (red) instead.
 
-**Layout.** Environments are grouped into a two-level nesting of colorful, solid-rounded-border rectangles: a namespace box containing one box per target workload (the `kind`/`name` the preview copies its pod spec from — not by container), each in turn containing one card per preview environment. Every namespace box uses the same fixed blue, and every target box the same fixed teal — one color per level, not per box, so the color itself tells you which kind of box you're looking at. Each level's border insets the next, so no manual indentation is drawn. Sibling boxes at every level — env cards within a target, target boxes within a namespace, namespace boxes within the whole list — have one blank row of space between them (never before the first or after the last, which would just look like wasted space inside the parent box). The whole tree scrolls continuously — content can be clipped exactly at the screen edge (a box may be cut off mid-border at the bottom or top), so navigating never leaves a blank gap or jumps a partially-fitting box to a "next page."
+**Layout.** One dense table in a `previews[N]` panel (`[shown/total]` while a filter narrows it), with a
+header row (`NAME`, `PHASE`, `STATUS`, `MODE`, `IMAGE`) and one row per namespace, target and environment,
+in tree order:
 
-Every box — namespace, target, and env card — uses the same border style (solid, rounded corners; never dashed or double-lined, which looked inconsistent on some terminal fonts). The **focused** box (see Keys, below) is distinguished by a bolded border and title, not a different border type; a focused box of any kind — namespace, target, or env card — additionally gets a subtle dark background tint across its whole area (border and interior alike), distinct from its own colored border. Namespace and target headers additionally carry a collapse arrow (`▾`/`▸`) and an env count in their title.
+| Row | Content |
+| --- | --- |
+| Namespace | `▾ <namespace> (<count>)` in bold blue; `▸` while folded. |
+| Target | `  ▾ <kind>/<name> (<count>)` in teal, indented under its namespace: the workload the previews copy their pod spec from. |
+| Environment | Its key (lavender) indented under its target, then its phase colored by phase, its status worded as `mirrord preview status` words it (`running (2h13m remaining)`, `idle (waiting for traffic)`, the failure message ...), `steal` or `mirror` (gray, `-` when it takes no traffic), and its image (gray). |
 
-Each env card's border is colored by its phase: green for `Ready`, yellow for `Idle`, purple for `Waiting`, dim purple for `Initializing`, red for `Failed`, dim yellow for `Paused`, gray for `Unknown`. `Paused` takes `Idle`'s hue dimmed, the same way `Initializing` takes `Waiting`'s: those two pairs are each a phase and its quieter sibling. `Idle` and `Paused` are both scaled to zero, and only `Idle` wakes again on incoming traffic. The namespace/target blue and teal above are deliberately outside this set — MetalBear's brand palette has only three real hues (purple, yellow, mint) plus ink/grey neutrals, and phase already uses all of them, so distinguishing "namespace" and "target" from every phase color (and from each other) needs two colors the brand palette doesn't define.
+Phases are colored green for `Ready`, yellow for `Idle`, purple for `Waiting`, dim purple for `Initializing`,
+red for `Failed`, dim yellow for `Paused`, gray for `Unknown`. `Paused` takes `Idle`'s hue dimmed, the same
+way `Initializing` takes `Waiting`'s: those two pairs are each a phase and its quieter sibling. The
+namespace blue and target teal are deliberately outside this set, so a group row never reads as a phase.
 
-Every one of these colors checks, once per process (cached), whether the terminal appears to support 24-bit truecolor via the `COLORTERM` environment variable (`truecolor`/`24bit` — the same heuristic tools like `bat` and `delta` use). When it does, colors render as the real MetalBear brand hex values (and this screen's own blue/teal choices for namespace/target). When it doesn't — truecolor support isn't guaranteed in every terminal (e.g. tmux without `Tc`/`RGB` in `terminal-overrides`) — every color falls back to ratatui's standard named (4-bit ANSI) palette instead, since on an unsupported terminal `Color::Rgb` was rendering as a flat gray, with bold text falling back to plain white on top of that.
+On a terminal without 24-bit color these colors become named ones as described under Colors, each phase and
+level keeping a named color of its own: `Ready` bright green, `Idle` bright yellow, `Paused` yellow, `Waiting`
+bright magenta, `Initializing` magenta, `Failed` bright red, `Unknown` dark grey, namespaces bright blue,
+targets bright cyan.
 
-A card never repeats its target's kind/name — the containing target box's own title already shows that.
+The selected row is highlighted across its full width. The table scrolls just enough to keep it in view.
+Cells too long for their column are cut with `…`.
 
-An env card's size and level of detail is controlled separately from focus — moving the cursor across cards no longer changes their size (it used to auto-expand the focused card, which shifted every card below it on every navigation step). Instead, `Enter` toggles expanded state for every env card the focused selection covers:
+**Describing.** `Enter` on an environment shows it whole as YAML, in the shared describe view (see Sessions);
+`Enter` on a namespace or target row folds or opens it. `y` describes the environment under the cursor and
+does nothing on a group row.
 
-- On an env card: just that one card.
-- On a target or namespace header: every env card under it, together, as a group — if every one of them is already expanded, `Enter` collapses them all; otherwise it expands whichever aren't yet. A single focused env card is just the one-card case of this same rule.
+**Filtering.** Pressing `/` opens a filter line under the table and enters edit mode. Every keystroke there
+immediately re-filters the visible environments live, keeping only those whose `key` contains the typed text
+as a substring (a namespace/target group with no surviving environments is hidden entirely, not shown
+empty). `Enter` locks in whatever is currently typed and returns to navigation over the filtered set,
+leaving the line showing the filter; `Esc` clears the filter entirely and also returns to navigation.
 
-Collapsed (the default) shows only the env's key (bold, unlabeled — it's the card's primary identity) and a one-line status (e.g. `running (2h13m remaining)`, `idle (waiting for traffic)`, `paused`, `initializing`, or the failure message), worded to match `mirrord preview status`. Expanded additionally shows a set of detail fields: image, replica count, container (if set), share URL (if the operator minted one), incoming-traffic mode (steal/mirror), queue-splitting and database-branching filter counts (if configured), idle configuration (if set, as prose — e.g. `starts idle, sleeps after 5m`), and the full failure message (if `Failed`, in red). Each detail field is shown as a dim, right-aligned, all-caps label (e.g. `IMAGE`, `REPLICAS`) followed by its value with no colon — the label's own visual weight separates it from the value, rather than "label: value" text.
+**Go to.** Pressing `g` opens a `go to` line in the same place (the two are mutually exclusive) and starts an
+incremental search: every keystroke live-jumps the cursor to the nearest namespace or target row whose name
+contains the typed text so far, searching forward from the row that was focused when `g` was pressed and
+wrapping around to the top if nothing matches before reaching the end. Unlike filtering, nothing is hidden.
+The typed text renders in red when it currently matches nothing. `Enter` locks in wherever the search landed;
+`Esc` restores the exact row that was focused before `g` was pressed.
 
-A single-line, always-visible key-hint bar is shown at the bottom of the screen, styled as a row of honey-background/ink-text chips, listing only the keys that currently do something for the active mode (see Keys, below) — so the available actions never have to be memorized.
+**Stopping.** Pressing `s` opens a centered modal confirmation dialog for stopping preview environments —
+nothing is deleted until it's explicitly confirmed. Its scope follows whatever is focused when `s` is
+pressed:
 
-**Filtering.** Pressing `/` replaces the card list's top rows with a bordered `filter` text box and enters edit mode. Every keystroke there immediately re-filters the visible environments live, keeping only those whose `key` contains the typed text as a substring (a namespace/target group with no surviving environments is hidden entirely, not shown empty). `Enter` locks in whatever is currently typed, closes the text box, and returns focus to navigation over the filtered set; `Esc` clears the filter entirely and also returns to navigation.
-
-**Go to.** Pressing `g` replaces the card list's top rows with a bordered `go to` text box (the same slot the filter box uses — the two are mutually exclusive) and starts an incremental search: every keystroke live-jumps the cursor to the nearest namespace or target header whose name contains the typed text so far, searching forward from the row that was focused when `g` was pressed and wrapping around to the top if nothing matches before reaching the end. Unlike filtering, nothing is hidden — the rest of the tree stays visible throughout. The typed text renders in red when it currently matches nothing. `Enter` locks in wherever the search landed and returns to browsing; `Esc` restores the exact row that was focused before `g` was pressed and returns to browsing.
-
-**Stopping.** Pressing `s` opens a centered modal confirmation dialog for stopping preview environments — nothing is deleted until it's explicitly confirmed. Its scope follows whatever is focused when `s` is pressed:
-
-- An environment card focused: just that one environment.
-- A target header focused: every environment under that target.
-- A namespace header focused: every environment in that namespace.
+- An environment focused: just that one environment.
+- A target row focused: every environment under that target.
+- A namespace row focused: every environment in that namespace.
 
 The dialog's headline states the scope explicitly (e.g. `Stop preview environment "pr-123"?` for a single one, or `Stop ALL 4 preview environments under Deployment/checkout-api in namespace "staging"?` for a target/namespace scope), rendered bold and in red whenever it covers more than one environment so a bulk stop never reads the same as stopping a single one. Below the headline, every environment the action would affect is listed by its key and namespace — resolved once when `s` is pressed, so the dialog always shows (and, if confirmed, deletes) the exact list it displayed even if the underlying data changes while it's open. The dialog is bordered in red to signal it's destructive.
 
 A target or namespace scope additionally requires typing the word `target` or `namespace` (matching the scope) into a prompt inside the dialog before `Enter` does anything — a single environment needs no typed confirmation, just `Enter`. The typed text renders in red until it's an exact match, then green. While open the dialog captures all input — every key is a no-op except `Enter` (confirm, once any required word is typed exactly — deletes every listed environment), `Esc` (cancel, no changes), and, for a bulk scope, ordinary characters/`Backspace` toward the required word.
 
-**Help.** Pressing `?` opens a centered modal dialog explaining the screen: what the phase colors on env cards mean, and every key listed in the tables below (namespace/target box colors aren't explained there since they're purely decorative, not meaningful status). While open it captures all input — every key is a no-op except `Esc`, which closes it and returns to normal browsing.
+**Keys.** The keys that do something in the current mode are on the key bar, and `?` lists them in the
+shared help dialog.
 
 #### Keys (Preview Environments only)
 
@@ -342,15 +675,15 @@ While browsing:
 | `/` | Open the filter text box, continuing from the current filter text (if any). |
 | `g` | Open the go-to box and start an incremental namespace/target search. |
 | `s` | Open the stop-confirmation dialog, scoped to whatever is focused. |
-| `?` | Open the help dialog. |
 | `↑` / `k` | Move the cursor to the previous visible row. |
 | `↓` / `j` | Move the cursor to the next visible row. |
-| `←` / `h` | On a header: collapse it. On an already-collapsed header, or on an environment card: move focus to the parent. |
-| `→` / `l` | On a collapsed header: expand it. On an already-expanded header: move focus to its first visible child. No effect on an environment card. |
+| `←` / `h` | On a header: collapse it. On an already-collapsed header, or on an environment: move focus to the parent. |
+| `→` / `l` | On a collapsed header: expand it. On an already-expanded header: move focus to its first visible child. No effect on an environment. |
 | `n` / `N` | Jump to the next / previous namespace header, skipping everything in between. Clamped: no effect past the first or last namespace. |
 | `t` / `T` | Jump to the next / previous target header, skipping everything in between (may cross into an adjacent namespace). Clamped the same way. |
-| `e` / `E` | Jump to the next / previous env card, skipping headers in between (may cross into an adjacent target/namespace). Clamped the same way. |
-| `Enter` | Toggle expanded (detail) state for every environment card the focus covers: just the focused card, or every card under a focused target/namespace header, as a group. |
+| `e` / `E` | Jump to the next / previous environment, skipping headers in between (may cross into an adjacent target/namespace). Clamped the same way. |
+| `Enter` | On an environment, describe it as YAML; on a namespace or target row, fold or open it. |
+| `y` | Describe the environment under the cursor as YAML. |
 | `Esc` | Clear the active filter, if one is set. |
 
 While the filter text box is open (after pressing `/`):
@@ -381,12 +714,39 @@ While the stop-confirmation dialog is open (after pressing `s`):
 | `Esc` | Cancel — nothing is deleted — close the dialog, and return to browsing. |
 | (anything else) | No effect. |
 
-While the help dialog is open (after pressing `?`):
+### Resources
+
+Every mirrord resource type the connected cluster serves, and the objects of any of them, with no code per
+type: a type added to the operator later appears here, and on the `:` command line, on its own.
+
+**Types.** On every new connection the application lists the cluster's API groups, keeps those ending in
+`metalbear.co`, and asks each one, on its own, which types it serves at its preferred version, keeping the
+types that can be listed. A group that does not answer (the operator's own API while the operator is down)
+does not hide the others: it is named on the panel's bottom border, `not answering: operator.metalbear.co`
+(amber).
+
+Without a type open, the view lists the types in a `resources[N]` panel, sorted by plural, with columns
+`TYPE`, `KIND`, `GROUP`, `VERSION` and `SCOPE` (`namespaced` or `cluster`). `Enter` opens the type under the
+cursor.
+
+**Objects.** With a type open, the panel is titled with its plural and count (`mirrordsplitconfigs[5]`) and
+when it was last refreshed. The objects are listed in the API server's table format, the same columns
+`kubectl get` prints for the type (those it always shows, not the wide ones), with dates shown as ages
+(`29d`). When every namespace is listed, a `NAMESPACE` column comes first. A server that does not offer the
+table format gets `NAME` and `AGE`. Each column gets room in proportion to the longest value in it. The list
+is refreshed every 5 seconds, when the type, namespace or connection changes, and on `r`.
 
 | Key | Action |
 | --- | --- |
-| `Esc` | Close the dialog and return to browsing. |
-| (anything else) | No effect. |
+| `Enter` | Describe the object under the cursor: it is fetched whole and shown as YAML in the shared describe view (see Sessions). |
+| `Ctrl+D` | Ask to delete it: a red dialog `Delete <Kind> <name> in <namespace>?`. `Enter` or `y` deletes, `Esc` or `n` cancels. The outcome stays on the bottom border for 6 seconds. |
+| `Esc` | Back to the list of types. |
+| `/` | Search the listed cells. |
+| `r` | Refresh now. |
+
+Messages instead of a table follow the shared rules (`None in this namespace`, `None match the search`, and
+the explained errors such as `The mirrord operator is not answering. Is it running?`).
+
 ### Terminal
 
 Hosts a real interactive shell, as a full terminal emulator with a rounded border, filling the body — with a

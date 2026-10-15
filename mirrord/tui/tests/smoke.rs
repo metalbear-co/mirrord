@@ -47,6 +47,34 @@ fn wait_for(rx: &Receiver<Vec<u8>>, parser: &mut vt100::Parser, needle: &str) ->
     }
 }
 
+/// Feeds the captured stream into an emulator until `needle` is gone from the rendered screen.
+///
+/// Needed after `Esc`: a key sent right behind it would arrive as one `Alt+<key>` press, the way a
+/// terminal encodes Meta, so the test waits for the `Esc` to land first.
+fn wait_for_gone(rx: &Receiver<Vec<u8>>, parser: &mut vt100::Parser, needle: &str) {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        let contents = parser.screen().contents();
+        if !contents.contains(needle) {
+            return;
+        }
+
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match rx.recv_timeout(remaining) {
+            Ok(bytes) => parser.process(&bytes),
+            Err(error) => panic!("{needle:?} never went away ({error}); screen was:\n{contents}"),
+        }
+    }
+}
+
+/// An empty folder to start the TUI in: no project files, so it opens on the dashboard rather
+/// than on the Run view.
+fn empty_dir() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("mt-empty-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
 /// A private `HOME` for one test: the session registry the panel reads lives under it, so this is
 /// what keeps a developer's own mirrord sessions (and shell rc files) out of the assertions.
 ///
@@ -116,6 +144,9 @@ fn shell_is_constrained_to_the_pane_and_the_prefix_takes_the_keyboard_back() {
         .unwrap();
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    // Outside any project, so the TUI opens on the dashboard; tests that need a project set their
+    // own.
+    cmd.cwd(empty_dir());
     cmd.env("TERM", "xterm-256color");
     // A login shell with the developer's rc files would make the assertions non-deterministic.
     cmd.env("SHELL", "/bin/sh");
@@ -138,16 +169,16 @@ fn shell_is_constrained_to_the_pane_and_the_prefix_takes_the_keyboard_back() {
     let mut parser = vt100::Parser::new(ROWS, COLS, 0);
     let mut writer = pair.master.take_writer().unwrap();
 
-    // `Shift+Tab` from the first screen wraps around to the terminal, which is the last one.
-    wait_for(&rx, &mut parser, "Welcome!");
-    writer.write_all(b"\x1b[Z").unwrap();
+    // Outside a project the TUI opens on the dashboard; `:terminal` goes to the shell.
+    wait_for(&rx, &mut parser, "\u{2500} home");
+    writer.write_all(b":terminal\r").unwrap();
     writer.flush().unwrap();
 
     // The border is drawn, and its title advertises the size handed to the shell: the body area
-    // (the frame minus the tabs and status lines) minus the border. Each `wait_for` keeps reading
+    // (the frame minus the top bar and the key bar) minus the border. Each `wait_for` keeps reading
     // until the screen settles, so a half-painted first frame is not a failure.
     // Only the size is asserted on, so that rewording the key hint beside it is not a test change.
-    let screen = wait_for(&rx, &mut parser, "shell 98x24 \u{2014}");
+    let screen = wait_for(&rx, &mut parser, "shell 98x26 \u{2014}");
     wait_for(&rx, &mut parser, "╯");
 
     // This shell has no mirrord session under it, so the session panel takes none of its columns —
@@ -171,17 +202,17 @@ fn shell_is_constrained_to_the_pane_and_the_prefix_takes_the_keyboard_back() {
     // The shell's own view has to agree: the pane's inner rectangle, not the 30x100 outer pty.
     writer.write_all(b"stty size\r").unwrap();
     writer.flush().unwrap();
-    wait_for(&rx, &mut parser, "24 98");
+    wait_for(&rx, &mut parser, "26 98");
 
     // Shrinking the window has to reach the shell, not just the border: the pane re-derives its
     // size, resizes the pty, and the shell reflows. The panel keeps its width — the shell is what
     // gives up the columns.
     resize(&*pair.master, &mut parser, 24, 80);
-    wait_for(&rx, &mut parser, "shell 78x18");
+    wait_for(&rx, &mut parser, "shell 78x20");
 
     writer.write_all(b"stty size\r").unwrap();
     writer.flush().unwrap();
-    wait_for(&rx, &mut parser, "18 78");
+    wait_for(&rx, &mut parser, "20 78");
 
     // `q` belongs to the shell while it has the keyboard, so it has to reach the shell as a
     // keystroke rather than quitting the application. Matched together with the prompt it is typed
@@ -227,6 +258,9 @@ fn a_session_under_the_shell_brings_the_panel_in() {
         .unwrap();
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    // Outside any project, so the TUI opens on the dashboard; tests that need a project set their
+    // own.
+    cmd.cwd(empty_dir());
     cmd.env("TERM", "xterm-256color");
     cmd.env("SHELL", "/bin/sh");
     cmd.env("PS1", "$ ");
@@ -248,12 +282,12 @@ fn a_session_under_the_shell_brings_the_panel_in() {
     let mut parser = vt100::Parser::new(ROWS, COLS, 0);
     let mut writer = pair.master.take_writer().unwrap();
 
-    wait_for(&rx, &mut parser, "Welcome!");
-    writer.write_all(b"\x1b[Z").unwrap();
+    wait_for(&rx, &mut parser, "\u{2500} home");
+    writer.write_all(b":terminal\r").unwrap();
     writer.flush().unwrap();
 
     // No sessions yet, so the shell has the whole body.
-    wait_for(&rx, &mut parser, "shell 98x24 \u{2014}");
+    wait_for(&rx, &mut parser, "shell 98x26 \u{2014}");
 
     // The panel attributes sessions by process tree, so the session has to name a process that
     // really is under this shell — and the shell itself is the one process the test can name.
@@ -300,12 +334,12 @@ fn a_session_under_the_shell_brings_the_panel_in() {
     wait_for(&rx, &mut parser, "╭ mirrord ");
     wait_for(&rx, &mut parser, "deployment/api");
     wait_for(&rx, &mut parser, "steal :8080");
-    wait_for(&rx, &mut parser, "shell 64x24 \u{2014}");
+    wait_for(&rx, &mut parser, "shell 64x26 \u{2014}");
 
     // ...and the shell is told about its new size, not just drawn smaller.
     writer.write_all(b"stty size\r").unwrap();
     writer.flush().unwrap();
-    wait_for(&rx, &mut parser, "24 64");
+    wait_for(&rx, &mut parser, "26 64");
 
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&home);
@@ -371,6 +405,9 @@ fn a_failing_credential_plugin_stays_out_of_the_interface() {
         .unwrap();
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    // Outside any project, so the TUI opens on the dashboard; tests that need a project set their
+    // own.
+    cmd.cwd(empty_dir());
     cmd.env("TERM", "xterm-256color");
     cmd.env("SHELL", "/bin/sh");
     cmd.env("PS1", "$ ");
@@ -408,12 +445,12 @@ fn a_failing_credential_plugin_stays_out_of_the_interface() {
         "the status bar should not spill the exec payload; screen was:\n{screen}",
     );
     assert!(
-        screen.contains("Welcome!"),
-        "the home screen should still be intact; screen was:\n{screen}",
+        screen.contains(" home "),
+        "the dashboard should still be intact; screen was:\n{screen}",
     );
 
     // The summary leaves room for the hint that says where the rest of it went.
-    wait_for(&rx, &mut parser, "e for details");
+    wait_for(&rx, &mut parser, "<e> details");
 
     // `e` is where the detail went, and the plugin's own words are in it - they are the ones that
     // say what to do about the failure.
@@ -440,4 +477,318 @@ fn a_failing_credential_plugin_stays_out_of_the_interface() {
 
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn help_and_command_palette_reach_every_screen() {
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: ROWS,
+            cols: COLS,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    // Outside any project, so the TUI opens on the dashboard; tests that need a project set their
+    // own.
+    cmd.cwd(empty_dir());
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("HOME", temporary_home("keys"));
+    let mut child = pair.slave.spawn_command(cmd).unwrap();
+    drop(pair.slave);
+
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                return;
+            }
+        }
+    });
+
+    let mut parser = vt100::Parser::new(ROWS, COLS, 0);
+    let mut writer = pair.master.take_writer().unwrap();
+    let mut send = |bytes: &[u8]| {
+        writer.write_all(bytes).unwrap();
+        writer.flush().unwrap();
+    };
+
+    // The key bar points every screen at the two ways to discover everything else.
+    wait_for(&rx, &mut parser, "<?> help");
+
+    // `COLORTERM` is not set here, so the brand colors arrive as named colors: the logo chip's
+    // indigo as bright magenta (color 13) rather than a 24-bit value the terminal may not have.
+    let logo = parser.screen().cell(0, 2).map(vt100::Cell::bgcolor);
+    assert_eq!(logo, Some(vt100::Color::Idx(13)));
+
+    // `?` lists the keys that work everywhere, and closes again on `Esc`.
+    send(b"?");
+    let screen = wait_for(&rx, &mut parser, "Everywhere");
+    println!("{screen}");
+    assert!(screen.contains("command palette"), "screen was:\n{screen}");
+    send(b"\x1b");
+    wait_for_gone(&rx, &mut parser, "Everywhere");
+
+    // `Ctrl+P` opens the palette, typing narrows it, and `Esc` closes it.
+    send(&[0x10]);
+    wait_for(&rx, &mut parser, "Go to Queues");
+    send(b"go to queues");
+    wait_for(&rx, &mut parser, "/go to queues");
+    send(b"\x1b");
+    wait_for_gone(&rx, &mut parser, "/go to queues");
+    send(b"\x1b");
+    wait_for_gone(&rx, &mut parser, "Go to Queues");
+
+    // `:` takes a resource name, suggesting as it is typed; `Enter` goes to the suggestion.
+    send(b":");
+    wait_for(&rx, &mut parser, "<tab> complete");
+    send(b"qu");
+    let screen = wait_for(&rx, &mut parser, "queue splits");
+    println!("{screen}");
+    send(b"\r");
+    wait_for(&rx, &mut parser, "\u{2500} queues \u{2500}");
+
+    // On a screen with its own keys, `?` lists them above the global ones.
+    send(b"?");
+    let screen = wait_for(&rx, &mut parser, "Everywhere");
+    println!("{screen}");
+    assert!(screen.contains("details"), "screen was:\n{screen}");
+    send(b"\x1b");
+    wait_for_gone(&rx, &mut parser, "Everywhere");
+
+    // The shared search box: `/` takes the keyboard, so `q` is typed rather than quitting.
+    send(b"/");
+    wait_for(&rx, &mut parser, "<type> to filter");
+    send(b"q");
+    let screen = wait_for(&rx, &mut parser, "/q");
+    println!("{screen}");
+
+    // Sessions is built from the same table, search and footer.
+    send(b"\r");
+    wait_for(&rx, &mut parser, "<esc> clear");
+    send(b"\x1b");
+    wait_for_gone(&rx, &mut parser, "/q");
+    send(b":sessions\r");
+    wait_for(&rx, &mut parser, "\u{2500} sessions");
+    // Read once the frame has finished arriving, rather than asserting on a half-painted one.
+    let screen = wait_for(&rx, &mut parser, "<ctrl-d> kill");
+    println!("{screen}");
+    send(b"/");
+    send(b"q");
+    wait_for(&rx, &mut parser, "/q");
+
+    // Previews and targets share the panel style, and `?` on targets is the shared help.
+    send(b"\r");
+    wait_for(&rx, &mut parser, "<esc> clear");
+    send(b"\x1b");
+    wait_for_gone(&rx, &mut parser, "/q");
+    send(b":previews\r");
+    let screen = wait_for(&rx, &mut parser, "\u{2500} previews");
+    println!("{screen}");
+    send(b":targets\r");
+    let screen = wait_for(&rx, &mut parser, "\u{2500} plan[");
+    println!("{screen}");
+    send(b"?");
+    wait_for(&rx, &mut parser, "Everywhere");
+    send(b"\x1b");
+    wait_for_gone(&rx, &mut parser, "Everywhere");
+    send(b":sessions\r");
+    wait_for(&rx, &mut parser, "<ctrl-d> kill");
+    send(b"/");
+    send(b"q");
+    wait_for(&rx, &mut parser, "/q");
+
+    // `Enter` keeps the phrase and hands the keyboard back, so `Esc` clears it and `q` quits.
+    send(b"\r");
+    wait_for(&rx, &mut parser, "<esc> clear");
+    send(b"\x1b");
+    wait_for_gone(&rx, &mut parser, "/q");
+    send(b"q");
+    child.wait().unwrap();
+}
+
+#[test]
+fn config_screen_edits_and_saves_mirrord_json() {
+    let home = temporary_home("cfg");
+    let project = home.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: ROWS,
+            cols: COLS,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    // Outside any project, so the TUI opens on the dashboard; tests that need a project set their
+    // own.
+    cmd.cwd(empty_dir());
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("HOME", &home);
+    cmd.cwd(&project);
+    let mut child = pair.slave.spawn_command(cmd).unwrap();
+    drop(pair.slave);
+
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                return;
+            }
+        }
+    });
+
+    let mut parser = vt100::Parser::new(ROWS, COLS, 0);
+    let mut writer = pair.master.take_writer().unwrap();
+    let mut send = |bytes: &[u8]| {
+        writer.write_all(bytes).unwrap();
+        writer.flush().unwrap();
+    };
+
+    wait_for(&rx, &mut parser, "<?> help");
+    send(b":config\r");
+    let screen = wait_for(&rx, &mut parser, "\u{2500} config[");
+    println!("{screen}");
+
+    // The search opens every section on the way to a match.
+    send(b"/");
+    send(b"network.incoming");
+    wait_for(&rx, &mut parser, "incoming");
+    send(b"\r");
+    wait_for_gone(&rx, &mut parser, "<type> to filter");
+    send(b"jj");
+    let screen = wait_for(&rx, &mut parser, "feature.network.incoming ");
+    println!("{screen}");
+
+    // `incoming` is unset and takes several forms, so `Enter` asks which one first.
+    send(b"\r");
+    wait_for(&rx, &mut parser, "Choose a form");
+    send(b"steal\r");
+    wait_for_gone(&rx, &mut parser, "Choose a form");
+    send(b"\r");
+    wait_for(&rx, &mut parser, "Choose a value");
+    send(b"mirror\r");
+    wait_for_gone(&rx, &mut parser, "Choose a value");
+    wait_for(&rx, &mut parser, "unsaved");
+
+    // Ctrl+S writes only what was set, then has mirrord check it.
+    send(&[0x13]);
+    let screen = wait_for(&rx, &mut parser, "saved to .mirrord/mirrord.json");
+    println!("{screen}");
+
+    let mirrord_json = project.join(".mirrord").join("mirrord.json");
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&mirrord_json).unwrap()).unwrap();
+    assert_eq!(
+        saved,
+        serde_json::json!({ "feature": { "network": { "incoming": "mirror" } } })
+    );
+
+    // mirrord's own checks run on save: stealing needs a target, and this config has none.
+    send(b"\r");
+    wait_for(&rx, &mut parser, "Choose a value");
+    send(b"steal\r");
+    wait_for_gone(&rx, &mut parser, "Choose a value");
+    send(&[0x13]);
+    let screen = wait_for(&rx, &mut parser, "Saved, but mirrord rejects it");
+    println!("{screen}");
+
+    // Quitting with unsaved edits asks first: `Esc` stays, `s` saves and quits.
+    send(b"d");
+    wait_for(&rx, &mut parser, "unsaved");
+    send(b"q");
+    let screen = wait_for(&rx, &mut parser, "Unsaved changes");
+    println!("{screen}");
+    assert!(
+        screen.contains("edits to .mirrord/mirrord.json are not saved"),
+        "screen was:\n{screen}"
+    );
+    send(b"\x1b");
+    wait_for_gone(&rx, &mut parser, "Unsaved changes");
+    send(b"q");
+    wait_for(&rx, &mut parser, "Unsaved changes");
+    send(b"s");
+    child.wait().unwrap();
+
+    // Unsetting the only option left the file with nothing in it.
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&mirrord_json).unwrap()).unwrap();
+    assert_eq!(saved, serde_json::json!({}));
+}
+
+#[test]
+fn run_view_works_out_the_project_and_its_command() {
+    let home = temporary_home("run");
+    let project = home.join("checkout");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("package.json"),
+        r#"{ "name": "@shop/checkout", "scripts": { "dev": "node server.js" } }"#,
+    )
+    .unwrap();
+
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: ROWS,
+            cols: COLS,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    // Outside any project, so the TUI opens on the dashboard; tests that need a project set their
+    // own.
+    cmd.cwd(empty_dir());
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("HOME", &home);
+    cmd.cwd(&project);
+    let mut child = pair.slave.spawn_command(cmd).unwrap();
+    drop(pair.slave);
+
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                return;
+            }
+        }
+    });
+
+    let mut parser = vt100::Parser::new(ROWS, COLS, 0);
+    let mut writer = pair.master.take_writer().unwrap();
+    let mut send = |bytes: &[u8]| {
+        writer.write_all(bytes).unwrap();
+        writer.flush().unwrap();
+    };
+
+    wait_for(&rx, &mut parser, "<?> help");
+    send(b":run\r");
+    // The project's own name and dev script are found without asking.
+    wait_for(&rx, &mut parser, "Looks like checkout");
+    let screen = wait_for(&rx, &mut parser, "$ npm run dev");
+    println!("{screen}");
+
+    // The job is a choice of three, defaulting to the safe one.
+    send(b"m");
+    wait_for(&rx, &mut parser, "Take over all traffic");
+    send(b"no incoming\r");
+    let screen = wait_for(&rx, &mut parser, "not needed for this job");
+    println!("{screen}");
+    // With no target needed and a command found, the session is ready to start.
+    wait_for(&rx, &mut parser, "Ready - enter to start");
+
+    send(b"q");
+    child.wait().unwrap();
 }

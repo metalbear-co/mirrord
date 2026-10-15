@@ -9,13 +9,14 @@ use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     style::Style,
-    text::{Line, Span},
+    text::Line,
     widgets::{Paragraph, Wrap},
 };
 
 use crate::{
     context::Context,
     helpers::{centered, dialog},
+    kit::hints::Hint,
     screens::{
         Screen,
         targets::{
@@ -29,17 +30,18 @@ use crate::{
             plan::{EXPORT_SETTINGS, ExportDraft, PlanPane, validate_export, write_export},
         },
     },
+    theme,
 };
 
-mod browser;
-mod form;
-mod history;
+// The Run view drives the same listing, launcher and history from its own flow.
+pub(crate) mod browser;
+pub(crate) mod form;
+pub(crate) mod history;
 mod keys;
-mod launch;
-mod model;
+pub(crate) mod launch;
+pub(crate) mod model;
 mod plan;
-mod suggest;
-mod theme;
+pub(crate) mod suggest;
 
 /// Which pane has the keyboard: the browser (left), the session plan
 /// (right), or the `mirrord up` log pane that opens below both while a
@@ -116,8 +118,6 @@ pub struct TargetsScreen {
     /// One-shot note for the next run's log pane (e.g. what cleanup
     /// preceded it).
     launch_note: Option<String>,
-    /// The `?` key binding overlay is open.
-    help: bool,
 }
 
 impl TargetsScreen {
@@ -371,7 +371,7 @@ impl TargetsScreen {
         ControlFlow::Break(())
     }
 
-    fn hint(&self) -> String {
+    fn hint_text(&self) -> String {
         if self.conflict.is_some() {
             return "Enter kill sessions & relaunch · Esc dismiss".to_owned();
         }
@@ -385,12 +385,12 @@ impl TargetsScreen {
 
         match self.focus {
             Focus::Browser => format!(
-                "{} · / filter · n namespace · c context · p plan · ? help",
+                "{} · / filter · n namespace · c context · p plan",
                 self.browser.enter_hint()
             ),
             Focus::Plan => {
                 if self.plan.services.is_empty() {
-                    return "a browse · ? help".to_owned();
+                    return "a browse".to_owned();
                 }
                 // Every per-service action, adapted to the selection.
                 let skip = match self.plan.services.get(self.plan.selected) {
@@ -398,20 +398,18 @@ impl TargetsScreen {
                     _ => "s skip",
                 };
                 match &self.launch {
-                    Some(launch) if launch.running() => format!(
-                        "Enter edit · d delete · {skip} · K/J reorder · x stop · ⌃↓ logs · ? help"
-                    ),
+                    Some(launch) if launch.running() => {
+                        format!("Enter edit · d delete · {skip} · K/J reorder · x stop · ⌃↓ logs")
+                    }
                     _ => format!(
                         "Enter edit · d delete · {skip} · K/J reorder · e export · r run · \
-                         a browse · ? help"
+                         a browse"
                     ),
                 }
             }
             Focus::Logs => match &self.launch {
-                Some(launch) if launch.running() => {
-                    "x stop · ↑/↓ scroll · p plan · ? help".to_owned()
-                }
-                _ => "Esc close · r rerun · ↑/↓ scroll · p plan · ? help".to_owned(),
+                Some(launch) if launch.running() => "x stop · ↑/↓ scroll · p plan".to_owned(),
+                _ => "Esc close · r rerun · ↑/↓ scroll · p plan".to_owned(),
             },
         }
     }
@@ -431,25 +429,25 @@ impl TargetsScreen {
             )
         };
         let mut lines = vec![
-            Line::styled(headline, Style::default().fg(theme::TEXT_EMPHASIS)),
+            Line::styled(headline, Style::default().fg(theme::LAVENDER)),
             Line::raw(""),
-            Line::styled(explain, Style::default().fg(theme::TEXT_MUTED)),
+            Line::styled(explain, Style::default().fg(theme::GREY)),
             Line::raw(""),
         ];
         if conflict.sessions.is_empty() {
             lines.push(Line::styled(
                 "Kill ALL your operator sessions and relaunch?",
-                Style::default().fg(theme::TEXT_EMPHASIS).bold(),
+                Style::default().fg(theme::LAVENDER).bold(),
             ));
         } else {
             lines.push(Line::styled(
                 "Kill these sessions and launch?",
-                Style::default().fg(theme::TEXT_EMPHASIS).bold(),
+                Style::default().fg(theme::LAVENDER).bold(),
             ));
             for id in &conflict.sessions {
                 lines.push(Line::styled(
                     format!("  {id}"),
-                    Style::default().fg(theme::WARNING),
+                    Style::default().fg(theme::AMBER),
                 ));
             }
         }
@@ -460,7 +458,7 @@ impl TargetsScreen {
             } else {
                 "Enter kill & relaunch · Esc dismiss"
             },
-            Style::default().fg(theme::TEXT_MUTED).italic(),
+            Style::default().fg(theme::GREY).italic(),
         ));
 
         let dialog_area = centered(
@@ -469,63 +467,6 @@ impl TargetsScreen {
             Constraint::Length(lines.len() as u16 + 2),
         );
         let inner = dialog(frame, dialog_area, " Lingering sessions ");
-        frame.render_widget(Paragraph::new(lines), inner);
-    }
-
-    /// The `?` overlay: every binding of the screen, grouped by pane.
-    fn draw_help(&self, frame: &mut Frame, area: Rect) {
-        let header =
-            |name: &str| Line::styled(format!(" {name}"), Style::default().fg(theme::BRAND).bold());
-        let bind = |key: String, action: &str| {
-            Line::from_iter([
-                Span::styled(
-                    format!("  {key:<8}"),
-                    Style::default().fg(theme::TEXT_EMPHASIS),
-                ),
-                Span::styled(action.to_owned(), Style::default().fg(theme::TEXT_MUTED)),
-            ])
-        };
-
-        let lines = vec![
-            header("Browse"),
-            bind("Enter".into(), "expand / pick the target under the cursor"),
-            bind("→ / ←".into(), "expand / collapse containers"),
-            bind("↑ / ↓".into(), "move the cursor (also j/k)"),
-            bind(keys::FILTER.into(), "filter targets"),
-            bind(keys::NAMESPACE.into(), "switch namespace"),
-            bind(keys::CONTEXT.into(), "switch kube context (cluster)"),
-            bind(keys::REFRESH.into(), "refresh from the cluster"),
-            bind(keys::FOCUS_PLAN.into(), "jump to the plan"),
-            Line::raw(""),
-            header("Plan"),
-            bind("Enter".into(), "edit the selected service"),
-            bind(
-                format!("{} / {}", keys::MOVE_UP, keys::MOVE_DOWN),
-                "reorder services",
-            ),
-            bind(keys::DELETE.into(), "delete service"),
-            bind(keys::SKIP.into(), "toggle skip"),
-            bind(keys::EXPORT.into(), "export yaml/json"),
-            bind(keys::RUN.into(), "run the plan"),
-            bind(keys::BROWSE.into(), "add another target"),
-            Line::raw(""),
-            header("Run"),
-            bind(keys::STOP.into(), "stop (again to force-kill)"),
-            bind(keys::RUN.into(), "run again"),
-            bind(keys::FOLLOW.into(), "follow the log tail"),
-            Line::raw(""),
-            bind("Esc".into(), "one step back, everywhere"),
-            bind("⌃ ←/→".into(), "switch pane (also Alt)"),
-            bind("⌃ ↑/↓".into(), "plan ↔ logs pane"),
-            bind("⌃a/e/u/k/w".into(), "readline editing in text fields"),
-        ];
-
-        let dialog_area = centered(
-            area,
-            Constraint::Length(52),
-            Constraint::Length(lines.len() as u16 + 2),
-        );
-        let inner = dialog(frame, dialog_area, " Keys ");
         frame.render_widget(Paragraph::new(lines), inner);
     }
 }
@@ -545,22 +486,21 @@ impl Screen for TargetsScreen {
             skip_session_check: false,
             seen_context: None,
             launch_note: None,
-            help: false,
         }
     }
 
     fn draw(&mut self, frame: &mut Frame, area: Rect) {
-        // Status messages (errors especially) and the fuller key hints can
-        // be long; give them up to three wrapped lines instead of clipping
-        // at the pane edge.
-        let hint_text_length = match &self.status {
-            Some(status) => status.text.chars().count(),
-            None => self.hint().chars().count(),
+        // A status message (errors especially) can be long; it gets up to three wrapped lines
+        // under the panes, and no room at all while there is none. The keys are on the key bar.
+        let status_height = match &self.status {
+            Some(status) => {
+                let width = (area.width as usize).max(1);
+                ((status.text.chars().count() + 2).div_ceil(width) as u16).clamp(1, 3)
+            }
+            None => 0,
         };
-        let width = (area.width as usize).max(1);
-        let hint_height = ((hint_text_length + 2).div_ceil(width) as u16).clamp(1, 3);
         let [main, hint_area] =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(hint_height)]).areas(area);
+            Layout::vertical([Constraint::Min(1), Constraint::Length(status_height)]).areas(area);
 
         // The log pane opens below the browser and plan, so both stay
         // visible (and the plan stays editable) while a run is active.
@@ -622,43 +562,29 @@ impl Screen for TargetsScreen {
             history::set_cluster(scope_context);
         }
 
-        if self.help {
-            self.draw_help(frame, main);
+        if let Some(status) = &self.status {
+            let style = if status.warning {
+                Style::default().fg(theme::AMBER)
+            } else {
+                Style::default().fg(theme::INDIGO)
+            };
+            frame.render_widget(
+                Paragraph::new(Line::styled(format!(" {}", status.text), style))
+                    .wrap(Wrap { trim: false }),
+                hint_area,
+            );
         }
+    }
 
-        let hint = match &self.status {
-            Some(status) => Line::styled(
-                format!(" {}", status.text),
-                if status.warning {
-                    Style::default().fg(theme::WARNING)
-                } else {
-                    Style::default().fg(theme::BRAND)
-                },
-            ),
-            // Keys light up, their labels stay muted: `x stop · G follow`.
-            None => {
-                let hint = self.hint();
-                let mut spans = vec![Span::raw(" ")];
-                for (index, segment) in hint.split(" · ").enumerate() {
-                    if index > 0 {
-                        spans.push(Span::styled(" · ", Style::default().fg(theme::BORDER_DIM)));
-                    }
-                    let (key, label) = segment.split_once(' ').unwrap_or((segment, ""));
-                    spans.push(Span::styled(
-                        key.to_owned(),
-                        Style::default().fg(theme::TEXT_EMPHASIS),
-                    ));
-                    if !label.is_empty() {
-                        spans.push(Span::styled(
-                            format!(" {label}"),
-                            Style::default().fg(theme::TEXT_MUTED).italic(),
-                        ));
-                    }
-                }
-                Line::from_iter(spans)
-            }
-        };
-        frame.render_widget(Paragraph::new(hint).wrap(Wrap { trim: false }), hint_area);
+    fn hints(&self) -> Vec<Hint> {
+        // The hint text is written `key action · key action`, adapted to what is selected.
+        self.hint_text()
+            .split(" · ")
+            .map(|segment| {
+                let (keys, action) = segment.split_once(' ').unwrap_or((segment, ""));
+                Hint::owned(keys.to_owned(), action.to_owned())
+            })
+            .collect()
     }
 
     fn handle_event(&mut self, event: Event) -> ControlFlow<(), Event> {
@@ -686,12 +612,6 @@ impl Screen for TargetsScreen {
         }
 
         self.status = None;
-
-        // The help overlay swallows the next key press.
-        if self.help {
-            self.help = false;
-            return ControlFlow::Break(());
-        }
 
         if let Some(conflict) = &self.conflict {
             match key.code {
@@ -734,12 +654,6 @@ impl Screen for TargetsScreen {
                 FormOutcome::Cancelled => {}
                 FormOutcome::Finished => self.finish_modal(modal),
             }
-            return ControlFlow::Break(());
-        }
-
-        // `?` is a plain character while the filter is being typed.
-        if key.code == KeyCode::Char(keys::HELP) && !self.browser.typing() {
-            self.help = true;
             return ControlFlow::Break(());
         }
 

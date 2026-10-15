@@ -45,6 +45,7 @@ strum.workspace = true
 # crate too - which collides with the `strum` + `strum_macros` imports they already have.
 strum_macros.workspace = true
 throbber-widgets-tui.workspace = true
+toml.workspace = true
 tokio = { workspace = true, features = [
     "rt-multi-thread",
     "macros",
