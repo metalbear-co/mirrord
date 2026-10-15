@@ -190,20 +190,22 @@ spec:
     fn rendered_documents_are_split_and_attributed_to_their_templates() {
         let objects = parse_rendered(Path::new("./chart"), RENDERED).unwrap();
 
+        // Compare as paths: the chart root is joined with the OS separator, so the
+        // displayed string differs on Windows.
         let seen: Vec<_> = objects
             .iter()
-            .map(|object| (object.display(), object.source.display().to_string()))
+            .map(|object| (object.display(), object.source.as_path()))
             .collect();
         assert_eq!(
             seen,
             [
                 (
                     "configmap/echo-config".to_owned(),
-                    "./chart/templates/configmap.yaml".to_owned()
+                    Path::new("./chart/templates/configmap.yaml")
                 ),
                 (
                     "deployment/echo".to_owned(),
-                    "./chart/templates/deployment.yaml".to_owned()
+                    Path::new("./chart/templates/deployment.yaml")
                 ),
             ]
         );
