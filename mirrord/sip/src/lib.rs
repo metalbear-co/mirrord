@@ -104,7 +104,7 @@ mod main {
     ///
     /// Must be kept in sync with the version downloaded by `xtask` (see
     /// `xtask/src/tasks/sip_binaries.rs`).
-    pub const APPLE_UTILS_VERSION: &str = "v8";
+    pub const APPLE_UTILS_VERSION: &str = "v9";
 
     /// Set on the first patched process when SIP patching had to use an x86_64 system binary.
     pub const MIRRORD_SIP_X64_FALLBACK_ENV: &str = "MIRRORD_SIP_X64_FALLBACK";
