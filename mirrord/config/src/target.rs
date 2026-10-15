@@ -4,7 +4,7 @@ use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
 use replica_set::ReplicaSetTarget;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use strum_macros::{EnumDiscriminants, EnumString};
 
 use self::{
@@ -32,7 +32,10 @@ pub mod serverless;
 pub mod service;
 pub mod stateful_set;
 
-#[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+/// Deserialized by hand rather than as an untagged enum: serde discards the error of every variant
+/// of an untagged enum, so a typo in the target path would only be reported as "data did not
+/// match any variant", without saying what is wrong with it.
+#[derive(Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
 #[schemars(
     description = "The Kubernetes workload mirrord runs against: a target path such as \
@@ -68,6 +71,37 @@ pub enum TargetFileConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         namespace: Option<String>,
     },
+}
+
+impl<'de> Deserialize<'de> for TargetFileConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Advanced {
+            #[serde(default, deserialize_with = "string_or_struct_option")]
+            path: Option<Target>,
+            #[serde(default)]
+            namespace: Option<String>,
+        }
+
+        // A map is either the advanced form or a target object such as
+        // `{ "deployment": "my-app" }`, told apart by the advanced form's keys.
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value {
+            serde_json::Value::Null => Ok(Self::Simple(None)),
+            serde_json::Value::Object(ref map)
+                if map.contains_key("path") || map.contains_key("namespace") =>
+            {
+                Advanced::deserialize(value)
+                    .map(|Advanced { path, namespace }| Self::Advanced { path, namespace })
+            }
+            value => string_or_struct_option(value).map(Self::Simple),
+        }
+        .map_err(de::Error::custom)
+    }
 }
 
 fn serialize_target_file_path<S>(target: &Option<Target>, serializer: S) -> Result<S::Ok, S::Error>
