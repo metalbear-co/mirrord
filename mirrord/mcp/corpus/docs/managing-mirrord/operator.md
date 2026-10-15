@@ -34,6 +34,10 @@ You'll need a mirrord for Teams license. [Register here](https://app.metalbear.c
 
 Before you install the Operator, make sure that your cluster and network meet these requirements.
 
+**Kubernetes version**
+
+The Operator needs Kubernetes `1.22` or later. Some features need a newer version. See [Cluster Requirements](../installing-mirrord/README.md#cluster-requirements).
+
 **Permissions**
 
 The Helm chart makes cluster-scoped objects: CRDs, ClusterRoles, an APIService, and a PriorityClass for agent pods. The user who installs the chart needs permission to make these objects. In most clusters, this is the `cluster-admin` role.

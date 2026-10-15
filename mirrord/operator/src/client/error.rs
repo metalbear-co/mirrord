@@ -90,6 +90,8 @@ pub enum OperatorApiError {
 
     #[error("{gate}")]
     FeatureNotLicensed { gate: PaidFeatureGate },
+    #[error("mirrord operator does not serve the operator-hosted sessions-manager")]
+    ServerlessSessionsManagerNotServed,
 
     #[error("{operation} failed with code {}: {}", status.code, status.reason)]
     StatusFailure {

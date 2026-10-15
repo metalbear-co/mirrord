@@ -492,6 +492,7 @@ mod tests {
                 idle: None,
                 cronjob: None,
                 spec_resources: None,
+                share_host: None,
             },
             status: None,
         };

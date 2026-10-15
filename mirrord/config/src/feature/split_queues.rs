@@ -38,7 +38,8 @@ pub type QueueMessageFilter = BTreeMap<String, String>;
 /// - `steal` (default): the matched message is delivered only to this session, so the deployed
 ///   application never sees it.
 /// - `mirror`: the matched message is delivered to this session **and** still delivered to the
-///   deployed application, so both process a copy.
+///   deployed application, so both process a copy. Temporal supports `steal` only: a `mirror`
+///   request on a Temporal task queue runs as `steal`.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq, Default, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum QueueMode {

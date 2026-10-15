@@ -883,6 +883,13 @@ pub enum NewOperatorFeature {
     /// Gated so the CLI fails fast: an older operator has no such endpoint, and the session
     /// would otherwise start without the branches the config asked for.
     DbBranchesFromSplitConfig,
+    /// A multi-cluster primary's interception event stream also carries every linked cluster's
+    /// events, each naming the cluster it came from in `cluster`, and reports a linked cluster
+    /// it cannot reach as a `cluster_unavailable` event. Lets `mirrord subscribe` say up front
+    /// whether a primary streams the whole setup or just its own cluster.
+    MultiClusterSubscribe,
+
+    ServerlessSessionsManager,
 
     /// Reporting is available on Free so locally rejected demand can be observed without granting
     /// permission to use the rejected feature.
@@ -946,8 +953,10 @@ impl NewOperatorFeature {
             | Self::PreviewLabelTarget
             | Self::PreviewTlsClientAuthFromTarget
             | Self::PreviewSpecResources => Some("feature.preview"),
-            Self::LabelTargeting => Some("target.path"),
-            Self::MultiClusterPrimary | Self::MultiClusterRemote => Some("multi_cluster"),
+            Self::LabelTargeting | Self::ServerlessSessionsManager => Some("target.path"),
+            Self::MultiClusterPrimary | Self::MultiClusterRemote | Self::MultiClusterSubscribe => {
+                Some("multi_cluster")
+            }
             Self::ProxyApi
             | Self::SessionManagement
             | Self::LayerReconnect
@@ -1040,6 +1049,7 @@ impl Display for NewOperatorFeature {
                 "TLS client certificate read from the target for previews"
             }
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
+            NewOperatorFeature::MultiClusterSubscribe => "multi-cluster subscribe",
             NewOperatorFeature::QueueSplittingWithComposedFilters => {
                 "queue splitting with composable message filters"
             }
@@ -1051,6 +1061,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchesFromSplitConfig => {
                 "db_branches resolved from the target's MirrordSplitConfig"
             }
+            NewOperatorFeature::ServerlessSessionsManager => "serverless sessions-manager",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

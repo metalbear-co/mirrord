@@ -160,11 +160,35 @@ operator:
 
 A branch whose `image` matches no pattern is rejected and the session fails with an error. When `allowedImages` is **absent**, all images are allowed - restricting is an explicit, opt-in choice per cluster and engine. Each engine has its own `<engine>BranchConfig` block (`pgBranchConfig`, `mysqlBranchConfig`, `genericBranchConfig`, and so on); the list only affects branches that supply a custom `image`, so branches that rely on the default image are always allowed.
 
+## Branch Pod Labels and Annotations
+
+Cluster admins can put labels and annotations on every branch pod of an engine with `dbPod.labels` and `dbPod.annotations` in the operator's Helm values. This is useful when a cluster-wide tool reads pod metadata - for example Karpenter, which otherwise deletes a branch pod while it consolidates an underutilized node, ending the session's database mid-run:
+
+```yaml
+operator:
+  pgBranchConfig:
+    dbPod:
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+      labels:
+        team: platform
+```
+
+The operator puts them on the branch database pod and, from operator 3.219.0 on, on the pods of the branch's [schema migration](db-branching/migrations.md) and copy Jobs, so the whole branch falls under the same rules; earlier versions set them on the database pod only. Each engine has its own `<engine>BranchConfig` block, and a [profile](#branch-config-profiles) is a complete `dbPod`, so set them again in each profile that needs them. Only branches created after the change pick them up.
+
 ## Branch Storage
 
 By default, each branch stores its database on its own PersistentVolumeClaims: one for the data directory and one for staging the dump during the copy, 20Gi each. The claims are provisioned with the cluster's default StorageClass when the branch is created and deleted together with it, so branching a large database does not depend on how much spare disk the node happens to have.
 
 On clusters without a default StorageClass, branches automatically fall back to node-local `emptyDir` volumes, capped at 1Gi for data and 100Mi for the dump.
+
+### Pod replacement
+
+A branch pod can be deleted out from under a branch: a Karpenter consolidation, a node drain, an eviction under memory pressure. When the branch's data lives on its PersistentVolumeClaim (the default), the operator starts a new pod on that claim, so a PostgreSQL, MySQL, MariaDB, ClickHouse or MongoDB branch keeps everything written to it and comes back `Ready` on a new pod; only the copy from the source is redone during the restart. A branch on node-local `emptyDir` storage (a cluster without a default StorageClass, or an explicit `emptyDir` opt-out) loses its data with the pod and is marked `Failed` instead.
+
+Sessions reach such a branch through a per-branch Service rather than the pod's address, so a session attached before the replacement stays attached and finds the branch at the same address once it is `Ready`. Branches that cannot be rebuilt (below) keep the pod's address, which reaches every port the image serves. Open database connections do not survive the pod: the application has to reconnect or retry, as it would after any database restart.
+
+Engines whose setup copies the source again on every start (Redis, DynamoDB, CockroachDB, MSSQL, Spanner) and generic branches cannot be rebuilt without losing what the branch holds, so such a branch is marked `Failed` with the reason, and a new session creates a fresh one.
 
 ### Upgrading from older versions
 
@@ -326,6 +350,67 @@ Profiles work for every engine, each in its own `<engine>BranchConfig` block.
 {% hint style="info" %}
 Branch config profiles require operator and Helm chart `3.190.0` or later, and mirrord CLI `3.244.1` or later. Against an older operator, a branch that sets `profile` fails with a clear error instead of silently running the default settings.
 {% endhint %}
+
+## Branches Defined on the Workload
+
+A cluster admin can define a workload's branches once, on its `MirrordSplitConfig`, and let every session take them from there with `"db_branches": "*"`. This is useful when several services share a database and their branches should match, or when `mirrord exec` and `mirrord up` must not drift: the definition lives next to the workload, not in each developer's `mirrord.json`.
+
+The entries go under `dbBranches` on the workload's `MirrordSplitConfig` (the same resource that defines its queues for [queue splitting](queue-splitting.md); it needs no `queues`). Each entry is a `db_branches` entry with camelCase keys, an `id` sessions refer to, and a `copy` block that also lists the `allowedModes` a session may pick:
+
+An entry differs from an inline `db_branches` entry in three ways, because it lives on the cluster rather than on a developer's machine:
+
+* `location` is not accepted: a split config only branches databases that run in the cluster, never a local Redis.
+* `migrations` need `name` (the source database they run against) and cannot use `path`, a local directory the operator cannot read; bake the files into an image and use `image` with `locations` (flyway) or `searchPath` (liquibase), or the container flavor.
+* `generic` entries have no `copy.mode` or `copy.allowedModes`; a generic branch either runs a copy Job or starts empty.
+
+```yaml
+apiVersion: queues.mirrord.metalbear.co/v1
+kind: MirrordSplitConfig
+metadata:
+  name: cake-maker
+  namespace: bakery
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cake-maker
+  dbBranches:
+    - id: orders-pg
+      type: pg
+      version: "16"
+      ttlSecs: 1800
+      connection:
+        url: DATABASE_URL
+      copy:
+        mode: schema
+        allowedModes: [schema, empty]
+```
+
+The operator checks every entry when the resource is applied and reports the verdict on its `Accepted` condition, so a typo shows up in `kubectl describe` instead of at the first session.
+
+A session asks for every entry with `"*"`, or for some of them by id:
+
+```json
+{
+  "feature": {
+    "db_branches": "*"
+  }
+}
+```
+
+```json
+{
+  "feature": {
+    "db_branches": ["orders-pg", "sessions-redis"]
+  }
+}
+```
+
+* An id that matches no entry fails the session, naming the ids the workload has. A workload with no `dbBranches` gives no branches, and the session continues without them.
+* Inline entries in `mirrord.json` win entirely: with them, the session ignores the workload's `dbBranches` and says which `MirrordSplitConfig` it passed over.
+* The branch id is the entry id plus the session key (`orders-pg-a1b2c3`), so every service started under one key that points at the same entry shares one branch. The first session creates it from its own entry; later ones attach, and only their copy mode is checked: a service whose entry asks for a different mode than the branch was created with fails, naming the service that created it. Two sessions that ask for the same branch at once end up on one branch.
+* Each branch records the source it was copied from (host, port, database) in its status, as far as the operator can see it without reading Secrets. When two branches under one key were copied from the same database, the session that got the second one is told; if they were meant to be one branch, give both entries the same id.
+* The feature needs a mirrord Operator that resolves `dbBranches`; against an older one the session fails before it starts, naming the operator version.
 
 ## Running With DB Branches
 

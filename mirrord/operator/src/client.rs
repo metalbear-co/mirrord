@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt,
     ops::Not,
     time::Duration,
@@ -15,7 +15,7 @@ use k8s_openapi::{
 };
 use kube::{
     Api, Client, Config, Resource, ResourceExt,
-    api::{ListParams, PostParams},
+    api::{ApiResource, DynamicObject, GroupVersionKind, ListParams, PostParams},
     client::ClientBuilder,
 };
 use mirrord_analytics::{AnalyticsOperatorProperties, Reporter, SanitizedString};
@@ -51,7 +51,7 @@ use mirrord_kube::{
 use mirrord_operator_websocket::{connection::OperatorConnection, upgrade};
 use mirrord_progress::Progress;
 use semver::Version;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 use uuid::Uuid;
@@ -67,7 +67,7 @@ use crate::{
             relay_source_compatibility_warnings, reused_branch_connection_sources,
             wait_for_pending_branches,
         },
-        queue_split_progress::QueueSplitProgress,
+        queue_split_progress::{QueueSplitProgress, mirror_requested},
         split_config_branches::{
             MIRRORD_SESSION_KEY_LABEL, ResolvedSplitConfigBranches, check_attach_copy_mode,
             entries_from_response, same_source_warnings,
@@ -104,6 +104,7 @@ mod queue_split_progress;
 pub mod split_config_branches;
 
 pub use discovery::operator_installed;
+pub use queue_split_progress::temporal_mirror_warning;
 
 const BAGGAGE_HEADER: &str = "baggage";
 
@@ -389,6 +390,24 @@ impl OperatorApi<NoClientCert> {
         })
     }
 
+    /// Builds a client for the operator-hosted sessions-manager routes, which kube-apiserver
+    /// authenticates on its own. Unlike [`Self::connect_in_existing_session`], it carries no client
+    /// certificate.
+    pub async fn serverless_sessions_manager_client(
+        layer_config: &LayerConfig,
+    ) -> OperatorApiResult<Client> {
+        let (config, _) = Self::base_client_config(layer_config).await?;
+
+        Ok(ClientBuilder::try_from(config)
+            .map_err(KubeApiError::from)
+            .map_err(OperatorApiError::CreateKubeClient)?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(retry_policy_from_config(
+                &layer_config.startup_retry,
+            )?))
+            .build())
+    }
+
     #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
     pub async fn with_ci_api_key<P, R>(
         self,
@@ -666,6 +685,20 @@ where
         &self.client
     }
 
+    /// Fails with [`OperatorApiError::ServerlessSessionsManagerNotServed`] unless this operator
+    /// serves the operator-hosted sessions-manager routes.
+    pub fn check_serverless_sessions_manager_served(&self) -> OperatorApiResult<()> {
+        self.operator
+            .spec
+            .require_feature(NewOperatorFeature::ServerlessSessionsManager)
+            .map_err(|error| match error {
+                OperatorApiError::UnsupportedFeature { .. } => {
+                    OperatorApiError::ServerlessSessionsManagerNotServed
+                }
+                error => error,
+            })
+    }
+
     /// Create a new CI api key by generating a random key pair, creating a certificate
     /// signing request and sending it to the operator.
     pub async fn create_ci_api_key(&self) -> Result<String, OperatorApiError> {
@@ -718,37 +751,57 @@ where
             values,
         };
 
-        let body = serde_json::to_vec(&request_body)
-            .map_err(|e| OperatorApiError::CredentialSecretCreation(format!("serialize: {e}")))?;
+        // API-aware proxies decode create requests as Kubernetes objects before forwarding.
+        // Keep the payload flat so operators accepting the original request can still read it.
+        let resource = ApiResource::from_gvk(&GroupVersionKind::gvk(
+            "operator.metalbear.co",
+            "v1",
+            "BranchCredential",
+        ));
+        let request_body = DynamicObject::new(branch_name, &resource)
+            .within(namespace)
+            .data(serde_json::to_value(request_body).map_err(|e| {
+                OperatorApiError::CredentialSecretCreation(format!("serialize: {e}"))
+            })?);
 
+        let response: CreateCredentialSecretResponse = self
+            .post_in_namespace(namespace, "branchcredentials", &request_body)
+            .await
+            .map_err(|e| OperatorApiError::CredentialSecretCreation(e.to_string()))?;
+
+        Ok(response.secret_name)
+    }
+
+    /// POSTs `body` to the operator's `resource` in `namespace`, falling back to the
+    /// cluster-scoped route on operators that do not serve the namespaced one.
+    async fn post_in_namespace<T: DeserializeOwned>(
+        &self,
+        namespace: &str,
+        resource: &str,
+        body: &impl Serialize,
+    ) -> kube::Result<T> {
+        let body = serde_json::to_vec(body).map_err(kube::Error::SerdeError)?;
         let request = |uri: String| {
             http::Request::builder()
                 .method("POST")
                 .uri(uri)
                 .header("content-type", "application/json")
                 .body(body.clone())
-                .map_err(|e| {
-                    OperatorApiError::CredentialSecretCreation(format!("build request: {e}"))
-                })
+                .map_err(kube::Error::HttpError)
         };
 
         let namespaced = request(format!(
-            "/apis/operator.metalbear.co/v1/namespaces/{namespace}/branchcredentials"
+            "/apis/operator.metalbear.co/v1/namespaces/{namespace}/{resource}"
         ))?;
 
-        let response: CreateCredentialSecretResponse =
-            match self.client.request(namespaced).await {
-                Err(kube::Error::Api(status)) if status.code == 404 => {
-                    let cluster =
-                        request("/apis/operator.metalbear.co/v1/branchcredentials".to_owned())?;
+        match self.client.request(namespaced).await {
+            Err(kube::Error::Api(status)) if status.code == 404 => {
+                let cluster = request(format!("/apis/operator.metalbear.co/v1/{resource}"))?;
 
-                    self.client.request(cluster).await
-                }
-                result => result,
+                self.client.request(cluster).await
             }
-            .map_err(|e| OperatorApiError::CredentialSecretCreation(e.to_string()))?;
-
-        Ok(response.secret_name)
+            result => result,
+        }
     }
 
     /// Ask the operator to create the Secret holding a preview session's `secret_mounts` file
@@ -770,21 +823,8 @@ where
             values,
         };
 
-        let body = serde_json::to_vec(&request_body)
-            .map_err(|e| OperatorApiError::PreviewSecretMountCreation(format!("serialize: {e}")))?;
-
-        let request = http::Request::builder()
-            .method("POST")
-            .uri("/apis/operator.metalbear.co/v1/previewsecretmounts")
-            .header("content-type", "application/json")
-            .body(body)
-            .map_err(|e| {
-                OperatorApiError::PreviewSecretMountCreation(format!("build request: {e}"))
-            })?;
-
         let response: CreatePreviewSecretMountsResponse = self
-            .client
-            .request(request)
+            .post_in_namespace(namespace, "previewsecretmounts", &request_body)
             .await
             .map_err(|e| OperatorApiError::PreviewSecretMountCreation(e.to_string()))?;
 
@@ -857,45 +897,40 @@ where
             .unwrap_or(self.client.default_namespace())
             .to_owned();
 
-        let body = serde_json::to_vec(&ResolveSplitConfigDbBranchesRequest {
-            namespace,
+        let body = ResolveSplitConfigDbBranchesRequest {
+            namespace: namespace.clone(),
             target: kube_target,
             request: request.clone(),
-        })?;
-        let http_request = http::Request::builder()
-            .method("POST")
-            .uri("/apis/operator.metalbear.co/v1/splitconfigdbbranches")
-            .header("content-type", "application/json")
-            .body(body)
-            .map_err(|error| {
-                OperatorApiError::SplitConfigDbBranches(format!("build request: {error}"))
-            })?;
-        let response: ResolveSplitConfigDbBranchesResponse =
-            match (self.client.request(http_request).await, &request) {
-                (Ok(response), _) => response,
-                // Inline entries need nothing from the answer; a lookup that fails only costs
-                // the warning naming the configs the session ignores.
-                (Err(error), None) => {
-                    tracing::warn!(
-                        %error,
-                        "Could not check which MirrordSplitConfig dbBranches the inline \
-                         db_branches ignore"
-                    );
-                    return Ok(ResolvedSplitConfigBranches::default());
+        };
+        let response: ResolveSplitConfigDbBranchesResponse = match (
+            self.post_in_namespace(&namespace, "splitconfigdbbranches", &body)
+                .await,
+            &request,
+        ) {
+            (Ok(response), _) => response,
+            // Inline entries need nothing from the answer; a lookup that fails only costs
+            // the warning naming the configs the session ignores.
+            (Err(error), None) => {
+                tracing::warn!(
+                    %error,
+                    "Could not check which MirrordSplitConfig dbBranches the inline \
+                     db_branches ignore"
+                );
+                return Ok(ResolvedSplitConfigBranches::default());
+            }
+            // The operator's answer says what is wrong with the request (an unknown id,
+            // a config conflict) in its own words; it is shown as it is, not inside kube's
+            // wrapping of the response.
+            (Err(kube::Error::Api(response)), Some(_)) => {
+                if let Some(gate) = PaidFeatureGate::from_status(&response) {
+                    return Err(OperatorApiError::FeatureNotLicensed { gate });
                 }
-                // The operator's answer says what is wrong with the request (an unknown id,
-                // a config conflict) in its own words; it is shown as it is, not inside kube's
-                // wrapping of the response.
-                (Err(kube::Error::Api(response)), Some(_)) => {
-                    if let Some(gate) = PaidFeatureGate::from_status(&response) {
-                        return Err(OperatorApiError::FeatureNotLicensed { gate });
-                    }
-                    return Err(OperatorApiError::SplitConfigDbBranches(response.message));
-                }
-                (Err(error), Some(_)) => {
-                    return Err(OperatorApiError::SplitConfigDbBranches(error.to_string()));
-                }
-            };
+                return Err(OperatorApiError::SplitConfigDbBranches(response.message));
+            }
+            (Err(error), Some(_)) => {
+                return Err(OperatorApiError::SplitConfigDbBranches(error.to_string()));
+            }
+        };
 
         for warning in &response.warnings {
             progress.warning(warning);
@@ -2188,8 +2223,12 @@ impl OperatorApi<PreparedClientCert> {
             layer_config.baggage.clone(),
         )?;
 
+        // The fresh copy's split is reported here and nowhere else: `copy_target` leaves that to
+        // the connect that follows, and this is that connect.
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let conn = self.connect_to_session(&session).await?;
+        let conn = self
+            .connect_reporting_split(&session, layer_config, &connection_subtask)
+            .await?;
         connection_subtask.success(Some("connected to the target"));
 
         Ok((conn, session))
@@ -2896,7 +2935,11 @@ impl OperatorApi<PreparedClientCert> {
             })?;
         subtask.success(Some("target copy created"));
 
-        self.wait_for_copy_ready(copied, progress).await
+        // A fresh copy's split is also visible to the connect that follows, under the same
+        // session id, and every caller connects through `connect_reporting_split`, which reports
+        // it. Reporting it here too would name each Temporal queue twice.
+        self.wait_for_copy_ready(copied, BTreeSet::new(), progress)
+            .await
     }
 
     async fn try_reuse_copy_target<P: Progress>(
@@ -2935,8 +2978,15 @@ impl OperatorApi<PreparedClientCert> {
                     })
             });
 
+        // A reused copy's split belongs to the session that created the copy, so the connect that
+        // follows (under a new session id) cannot see it; this wait is the only place to report
+        // it.
+        let mirror_requested = mirror_requested(&layer_config.feature.split_queues);
         let existing = match existing {
-            Some(existing) => match self.wait_for_copy_ready(existing, progress).await {
+            Some(existing) => match self
+                .wait_for_copy_ready(existing, mirror_requested, progress)
+                .await
+            {
                 Ok(copied) => Some(copied),
                 Err(OperatorApiError::CopiedTargetFailed { .. }) => None,
                 Err(error) => return Err(error),
@@ -2953,10 +3003,12 @@ impl OperatorApi<PreparedClientCert> {
         Ok(existing)
     }
 
-    /// Polls the given [`CopyTargetCrd`] for readiness.
+    /// Polls the given [`CopyTargetCrd`] for readiness, reporting its queue split meanwhile.
+    /// `mirror_requested` is what [`QueueSplitProgress`] warns about, see [`mirror_requested`].
     async fn wait_for_copy_ready<P: Progress>(
         &self,
         mut copied: CopyTargetCrd,
+        mirror_requested: BTreeSet<String>,
         progress: &P,
     ) -> OperatorApiResult<CopyTargetCrd> {
         let namespace = copied
@@ -2979,7 +3031,13 @@ impl OperatorApi<PreparedClientCert> {
             .then(|| copied.status.as_ref()?.creator_session().id.clone())
             .flatten()
             .map(|session| {
-                QueueSplitProgress::new(self.client.clone(), namespace, session, progress)
+                QueueSplitProgress::new(
+                    self.client.clone(),
+                    namespace,
+                    session,
+                    mirror_requested,
+                    progress,
+                )
             });
 
         loop {
@@ -2992,7 +3050,7 @@ impl OperatorApi<PreparedClientCert> {
                 }
                 Some(CopyTargetPhase::Ready) | None => {
                     if let Some(split_progress) = split_progress {
-                        split_progress.finish();
+                        split_progress.finish().await;
                     }
                     if let Some(mut subtask) = wait_subtask {
                         subtask.success(None);
@@ -3110,6 +3168,7 @@ impl OperatorApi<PreparedClientCert> {
             self.client.clone(),
             namespace,
             format!("{:X}", session.id),
+            mirror_requested(&layer_config.feature.split_queues),
             progress,
         )
         .run(self.connect_to_session(session))
@@ -3206,9 +3265,71 @@ mod test {
         disable_unsupported_auto_splits,
     };
     use crate::{
-        client::connect_params::{BranchDbNames, ConnectParams},
+        client::{
+            connect_params::{BranchDbNames, ConnectParams},
+            error::OperatorApiError,
+        },
         crd::{MirrordOperatorCrd, session::SessionCiInfo},
     };
+
+    #[tokio::test]
+    async fn sessions_manager_requires_advertised_support() {
+        for supported_features in [
+            serde_json::json!(["ServerlessSessionsManager"]),
+            serde_json::json!([]),
+            serde_json::Value::Null,
+        ] {
+            for required_plan in [None, Some("team"), Some("future_plan")] {
+                let enabled = required_plan.is_none()
+                    && supported_features == serde_json::json!(["ServerlessSessionsManager"]);
+                let gated_features = match required_plan {
+                    Some(plan) => serde_json::json!([{
+                        "feature": "ServerlessSessionsManager", "required_plan": plan
+                    }]),
+                    None => serde_json::json!([]),
+                };
+                let config = Config::new("http://127.0.0.1:9669".parse().unwrap());
+                let api = OperatorApi {
+                client: kube::Client::try_from(config.clone()).unwrap(),
+                client_cert: NoClientCert { base_config: config },
+                operator: serde_json::from_value(serde_json::json!({
+                    "apiVersion": "operator.metalbear.co/v1",
+                    "kind": "MirrordOperator",
+                    "metadata": {"name": "operator"},
+                    "spec": {
+                        "operator_version": "3.214.0",
+                        "default_namespace": "default",
+                        "supported_features": supported_features,
+                        "gated_features": gated_features,
+                        "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
+                    }
+                })).unwrap(),
+                kube_context: None,
+                machine_id: None,
+            };
+                let result = api.check_serverless_sessions_manager_served();
+                assert_eq!(result.is_ok(), enabled);
+                match (required_plan, result) {
+                    (
+                        Some("team"),
+                        Err(OperatorApiError::LocalFeatureNotLicensed { feature, gate }),
+                    ) => {
+                        assert_eq!(feature, NewOperatorFeature::ServerlessSessionsManager);
+                        assert_eq!(gate.feature_config_key, "target.path");
+                        assert_eq!(gate.required_plan, crate::types::RequiredPlan::Team);
+                    }
+                    (None, Ok(())) => {}
+                    (
+                        None | Some("future_plan"),
+                        Err(OperatorApiError::ServerlessSessionsManagerNotServed),
+                    ) => {}
+                    (plan, result) => {
+                        panic!("unexpected serverless result for {plan:?}: {result:?}")
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn baggage_is_added_to_base_operator_client() {
@@ -3811,6 +3932,52 @@ mod test {
         "/apis/operator.metalbear.co/v1/namespaces/team/branchcredentials";
     const CLUSTER_CREDENTIALS: &str = "/apis/operator.metalbear.co/v1/branchcredentials";
 
+    /// Exercises the production request through a local Teleport connected to staging.
+    /// The reproduction harness owns the temporary namespace and cleans up the Secret.
+    #[tokio::test]
+    #[ignore = "requires the branchcredentials staging/Teleport reproduction harness"]
+    async fn credential_secret_through_staging_teleport() {
+        let namespace = std::env::var("BRANCHCREDENTIALS_TEST_NAMESPACE").unwrap();
+        assert!(namespace.starts_with("branchcreds-repro-"));
+        let config = Config::infer().await.unwrap();
+        assert_eq!(config.cluster_url.host(), Some("localhost"));
+        let client = Client::try_from(config.clone()).unwrap();
+        let spec = serde_json::from_value(serde_json::json!({
+            "operator_version": "3.219.0",
+            "default_namespace": "default",
+            "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
+        }))
+        .unwrap();
+        let api = OperatorApi {
+            client,
+            client_cert: NoClientCert {
+                base_config: config,
+            },
+            operator: MirrordOperatorCrd::new("operator", spec),
+            kube_context: None,
+            machine_id: None,
+        };
+        tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            api.create_credential_secret(
+                &namespace,
+                "client-test",
+                HashMap::from([("DATABASE_NAME".to_owned(), "test_database".to_owned())]),
+            ),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "Credential creation through Teleport timed out after 60 seconds in namespace {namespace}"
+            )
+        })
+        .unwrap_or_else(|error| {
+            panic!(
+                "Credential creation through Teleport failed in namespace {namespace}: {error}"
+            )
+        });
+    }
+
     /// Only a 404 from the namespaced route sends the request on to the cluster-scoped route.
     #[rstest]
     #[case::served(StatusCode::OK, &[NAMESPACED_CREDENTIALS], true)]
@@ -3825,6 +3992,7 @@ mod test {
         #[case] namespaced_status: StatusCode,
         #[case] expected_paths: &[&str],
         #[case] succeeds: bool,
+        #[values(false, true)] typed_response: bool,
     ) {
         let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
         let spec = serde_json::from_value(serde_json::json!({
@@ -3860,10 +4028,20 @@ mod test {
 
                     paths.push(path);
                     bodies.push(serde_json::from_slice::<serde_json::Value>(&body).unwrap());
+                    let response = if typed_response {
+                        serde_json::json!({
+                            "apiVersion": "operator.metalbear.co/v1",
+                            "kind": "BranchCredential",
+                            "metadata": {"name": "branch", "namespace": "team"},
+                            "secret_name": "creds",
+                        })
+                    } else {
+                        serde_json::json!({"secret_name": "creds"})
+                    };
                     send.send_response(
                         Response::builder()
                             .status(status)
-                            .body(Body::from(br#"{"secret_name":"creds"}"#.to_vec()))
+                            .body(Body::from(serde_json::to_vec(&response).unwrap()))
                             .unwrap(),
                     );
                 }
@@ -3871,6 +4049,9 @@ mod test {
         };
 
         let expected_body = serde_json::json!({
+            "apiVersion": "operator.metalbear.co/v1",
+            "kind": "BranchCredential",
+            "metadata": {"name": "branch", "namespace": "team"},
             "namespace": "team",
             "branch_id": "branch",
             "values": {"password": "secret"},

@@ -461,6 +461,15 @@ pub(crate) enum CliError {
     ))]
     FeatureDisabledInOperatorError { feature: String },
 
+    #[error("mirrord operator does not serve the operator-hosted sessions-manager.")]
+    #[diagnostic(help(
+        "Serverless targets with `operator: true` connect through the sessions-manager hosted by \
+        the mirrord operator. Ask your cluster administrator to enable it with \
+        `operator.sessionsManager=true` in the operator Helm chart, or set `operator: false` to \
+        use a standalone sessions-manager.{GENERAL_HELP}"
+    ))]
+    ServerlessSessionsManagerNotServed,
+
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorBranchCreationFailed(OperatorOperation, String),
@@ -880,8 +889,9 @@ pub(crate) enum CliError {
 
     #[error("No manifests to compare")]
     #[diagnostic(help(
-        "Pass manifest files or directories with `--resource <path>`, or set \
-         `feature.preview.spec_resources` in your mirrord config."
+        "Pass manifest files or directories with `--resource <path>` or a Helm chart with \
+         `--chart <path>`, or set `feature.preview.spec_resources` or `feature.preview.helm` \
+         in your mirrord config."
     ))]
     PreviewResourcesRequired,
 
@@ -944,6 +954,13 @@ pub(crate) enum CliError {
         allowed to `watch` `events.operator.metalbear.co`.{GENERAL_HELP}"
     ))]
     SubscribeError(String),
+
+    #[error("Cannot stream every session's events from this operator: {0}")]
+    #[diagnostic(help(
+        "Pass `--key <key>` to stream one session, or upgrade the operator to 3.210.0 or newer \
+        to stream them all.{GENERAL_HELP}"
+    ))]
+    SubscribeAllSessionsUnsupported(String),
 
     #[error(transparent)]
     ProtocolError(#[from] mirrord_protocol_api::client::ClientError),
@@ -1024,6 +1041,9 @@ impl From<OperatorApiError> for CliError {
                 Self::LocalPaidFeatureRequiresPlan { feature, gate }
             }
             OperatorApiError::FeatureNotLicensed { gate } => Self::PaidFeatureRequiresPlan { gate },
+            OperatorApiError::ServerlessSessionsManagerNotServed => {
+                Self::ServerlessSessionsManagerNotServed
+            }
             OperatorApiError::CreateKubeClient(e) => {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
