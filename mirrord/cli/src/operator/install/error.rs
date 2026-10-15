@@ -5,6 +5,7 @@ use miette::Diagnostic;
 use mirrord_kube::error::KubeApiError;
 use reqwest::StatusCode;
 use thiserror::Error;
+use url::Url;
 
 use crate::{error::GENERAL_BUG, login::LoginError};
 
@@ -230,9 +231,10 @@ pub(crate) enum OperatorInstallError {
     #[diagnostic(help(
         "Install with that key, `mirrord operator install --api-key <key>`, which is in the \
         configuration of any cluster that already runs the operator, or ask an admin of your \
-        organization for it."
+        organization for it. If no cluster uses it, revoke it at {settings_url} and run this \
+        command again."
     ))]
-    ApiKeyExists,
+    ApiKeyExists { settings_url: Url },
 
     #[error("failed to create the operator API key")]
     ApiKeyRequest(#[source] reqwest::Error),

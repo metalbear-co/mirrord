@@ -7,12 +7,14 @@ use kube::Client;
 use mirrord_analytics::{ReportTarget, Reporter};
 use mirrord_kube::api::kubernetes::create_kube_config_with_context;
 use mirrord_progress::{Progress, ProgressTracker};
+use secrecy::ExposeSecret;
+use url::Url;
 
 use self::{
     manifest::Manifest,
     telemetry::{InstallPhase, InstallRun, Outcome},
 };
-use crate::{config::OperatorInstallArgs, data::StoredLoginToken};
+use crate::{config::OperatorInstallArgs, data::StoredLoginToken, login};
 
 mod api_key;
 mod cluster;
@@ -76,7 +78,7 @@ async fn install(
         api_key,
         no_browser: _,
         cluster_hint,
-        no_hint: _,
+        no_hint,
         context,
         yes,
         manifest: manifest_path,
@@ -86,9 +88,16 @@ async fn install(
 
     let credential = match api_key {
         Some(api_key) => Credential::ApiKey(api_key),
-        None => Credential::Login(api_key::login_token(&app_url).await?),
+        None => {
+            run.phase = InstallPhase::Login;
+            let app_url = login::backend_base_url(app_url)
+                .map_err(|error| OperatorInstallError::Login(Box::new(error)))?;
+            let token = api_key::login_token(&app_url).await?;
+            Credential::Login { app_url, token }
+        }
     };
 
+    run.phase = InstallPhase::Connect;
     let mut progress = ProgressTracker::from_env("mirrord operator install");
     let Connection {
         client,
@@ -134,25 +143,26 @@ async fn install(
     let created_key;
     let api_key = match &credential {
         Credential::ApiKey(api_key) => api_key.as_str(),
-        Credential::Login(login) => {
+        Credential::Login { app_url, token } => {
             run.phase = InstallPhase::CreateApiKey;
             let mut subtask = progress.subtask(&format!(
                 "creating the operator API key of the organization of {}",
-                login.email
+                token.email
             ));
-            let name = match cluster_hint {
-                Some(cluster_hint) => Some(cluster_hint),
-                None => cluster::cluster_id(&client).await,
+            let name = match (cluster_hint, no_hint) {
+                (Some(cluster_hint), _) => Some(cluster_hint),
+                (None, true) => None,
+                (None, false) => cluster::cluster_id(&client).await,
             };
-            created_key = api_key::create(&http, &app_url, login, name.as_deref()).await?;
+            created_key = api_key::create(&http, app_url, token, name.as_deref()).await?;
             run.retry = Some(format!(
                 "The operator API key of your organization was created for this installation. To \
                 retry, remove what was installed with `mirrord operator uninstall{context_arg}`, \
-                revoke the key at https://app.metalbear.com/settings, then run this command \
-                again.\n"
+                revoke the key at {}, then run this command again.\n",
+                api_key::settings_url(app_url)
             ));
             subtask.success(None);
-            created_key.as_str()
+            created_key.expose_secret()
         }
     };
     manifest.set_api_key(api_key);
@@ -190,8 +200,12 @@ async fn install(
 enum Credential {
     /// An operator API key the user passed.
     ApiKey(String),
-    /// The login of the user, used to create the operator API key of their organization.
-    Login(StoredLoginToken),
+    /// The login of the user, used to create the operator API key of their organization in the
+    /// app at `app_url`.
+    Login {
+        app_url: Url,
+        token: StoredLoginToken,
+    },
 }
 
 /// What the operator commands need to reach the cluster and the internet.

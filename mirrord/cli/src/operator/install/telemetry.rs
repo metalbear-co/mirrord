@@ -60,6 +60,8 @@ pub(super) enum InstallPhase {
     CreateApiKey = 6,
     CreateObjects = 7,
     WaitForOperator = 8,
+    /// Logging in to the MetalBear app, which comes before [`Self::Connect`].
+    Login = 9,
 }
 
 /// The step of `mirrord operator uninstall` that a run is in, reported when the run does not

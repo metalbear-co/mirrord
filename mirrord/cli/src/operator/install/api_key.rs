@@ -1,8 +1,10 @@
 //! Obtains an operator API key for the organization of the user logged in with `mirrord login`,
 //! so that the key goes from the backend into the cluster without the user handling it.
 
-use reqwest::{StatusCode, header::AUTHORIZATION};
+use reqwest::StatusCode;
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use super::error::OperatorInstallError;
 use crate::{
@@ -11,22 +13,15 @@ use crate::{
     login,
 };
 
-const CREATE_KEY_PATH: &str = "/api/v1/cli/operator-api-key";
+const CREATE_KEY_PATH: &str = "api/v1/cli/operator-api-key";
 
-/// An operator API key.
-///
-/// Deliberately not [`Debug`], to keep the key out of logs.
-pub(super) struct ApiKey(String);
+/// App page where admins revoke the organization's operator API key.
+const SETTINGS_PATH: &str = "settings";
 
-impl ApiKey {
-    pub(super) fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// The login token for `app_url`, logging the user in first when there is none.
-pub(super) async fn login_token(app_url: &str) -> Result<StoredLoginToken, OperatorInstallError> {
-    let issuer = app_url.trim_end_matches('/');
+/// The login token for `app_url`, a base from [`login::backend_base_url`], logging the user in
+/// first when there is none.
+pub(super) async fn login_token(app_url: &Url) -> Result<StoredLoginToken, OperatorInstallError> {
+    let issuer = login::issuer(app_url);
     if let Some(token) = AuthStore::login_token(issuer)
         .await
         .map_err(OperatorInstallError::LoginStore)?
@@ -34,17 +29,24 @@ pub(super) async fn login_token(app_url: &str) -> Result<StoredLoginToken, Opera
         return Ok(token);
     }
 
-    let url = app_url
-        .parse::<url::Url>()
-        .map_err(|error| OperatorInstallError::Login(Box::new(login::LoginError::from(error))))?;
-    login::login_command(LoginArgs { url })
-        .await
-        .map_err(|error| OperatorInstallError::Login(Box::new(error)))?;
+    login::login_command(LoginArgs {
+        url: app_url.clone(),
+    })
+    .await
+    .map_err(|error| OperatorInstallError::Login(Box::new(error)))?;
 
     AuthStore::login_token(issuer)
         .await
         .map_err(OperatorInstallError::LoginStore)?
         .ok_or(OperatorInstallError::NotLoggedIn)
+}
+
+/// Where admins revoke the organization's operator API key.
+pub(super) fn settings_url(app_url: &Url) -> Url {
+    // `app_url` is an http(s) base, which joins any relative path.
+    app_url
+        .join(SETTINGS_PATH)
+        .expect("an http(s) base joins a relative path")
 }
 
 #[derive(Serialize)]
@@ -62,16 +64,17 @@ struct CreatedKey {
 /// Creates the operator API key of the organization that `token` belongs to.
 pub(super) async fn create(
     http: &reqwest::Client,
-    app_url: &str,
+    app_url: &Url,
     token: &StoredLoginToken,
     name: Option<&str>,
-) -> Result<ApiKey, OperatorInstallError> {
+) -> Result<SecretString, OperatorInstallError> {
+    // `app_url` is an http(s) base, which joins any relative path.
+    let url = app_url
+        .join(CREATE_KEY_PATH)
+        .expect("an http(s) base joins a relative path");
     let response = http
-        .post(format!(
-            "{}{CREATE_KEY_PATH}",
-            app_url.trim_end_matches('/')
-        ))
-        .header(AUTHORIZATION, format!("Bearer {}", token.token.as_str()))
+        .post(url)
+        .bearer_auth(token.token.as_str())
         .json(&CreateKeyRequest { name })
         .send()
         .await
@@ -81,13 +84,15 @@ pub(super) async fn create(
         status if status.is_success() => response
             .json::<CreatedKey>()
             .await
-            .map(|created| ApiKey(created.key))
+            .map(|created| SecretString::from(created.key))
             .map_err(OperatorInstallError::ApiKeyRequest),
         StatusCode::UNAUTHORIZED => Err(OperatorInstallError::LoginExpired),
         StatusCode::FORBIDDEN => Err(OperatorInstallError::NotAdmin {
             email: token.email.clone(),
         }),
-        StatusCode::CONFLICT => Err(OperatorInstallError::ApiKeyExists),
+        StatusCode::CONFLICT => Err(OperatorInstallError::ApiKeyExists {
+            settings_url: settings_url(app_url),
+        }),
         status => Err(OperatorInstallError::ApiKeyFailed {
             status,
             body: response.text().await.unwrap_or_default(),

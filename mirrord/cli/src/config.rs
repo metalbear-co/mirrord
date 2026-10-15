@@ -1047,11 +1047,11 @@ pub(super) struct OperatorInstallArgs {
     /// Name of the operator API key the command creates, shown in your organization's settings.
     ///
     /// Defaults to the cluster's ID, the UID of its `default` namespace.
-    #[arg(long, conflicts_with = "api_key")]
+    #[arg(long, conflicts_with_all = ["api_key", "no_hint"])]
     pub cluster_hint: Option<String>,
 
-    /// Has no effect. Kept so that scripts written for earlier versions keep working.
-    #[arg(long, hide = true)]
+    /// Do not name the operator API key after the cluster.
+    #[arg(long, conflicts_with = "api_key")]
     pub no_hint: bool,
 
     /// Kube context to install the operator into, instead of the current one.
@@ -1073,7 +1073,7 @@ pub(super) struct OperatorInstallArgs {
         hide = true,
         default_value = "https://app.metalbear.com"
     )]
-    pub app_url: String,
+    pub app_url: Url,
 
     /// How long to wait for the operator to become ready before the installation fails.
     ///

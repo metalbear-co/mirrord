@@ -51,14 +51,7 @@ pub(crate) async fn operator_signup(args: OperatorSignupArgs) -> Result<(), Oper
         .user_agent(USER_AGENT)
         .build()
         .map_err(OperatorInstallError::HttpClient)?;
-    let agent = match AiAgent::detect() {
-        Some(AiAgent::ClaudeCode) => "claude-code",
-        Some(AiAgent::Cursor) => "cursor",
-        Some(AiAgent::Codex) => "codex",
-        Some(AiAgent::GeminiCli) => "gemini-cli",
-        Some(AiAgent::Amp) => "amp",
-        None => USER_AGENT,
-    };
+    let agent = AiAgent::detect().map(<&str>::from).unwrap_or(USER_AGENT);
     let trial = start_trial(&http, &app_url, agent, cluster_hint.as_deref()).await?;
 
     println!(

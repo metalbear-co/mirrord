@@ -93,8 +93,8 @@ pub(crate) async fn login_command(args: LoginArgs) -> Result<(), LoginError> {
     let token = exchange_grant(&backend_url, &grant, &verifier, &callback_uri).await?;
     let claims = decode_claims(&token).ok_or_else(|| LoginError::BadToken("malformed".into()))?;
     // The token is filed under its issuer, so a backend must not be able to file a token under
-    // another backend's entry. The backend's issuer is its base URL, without the trailing slash.
-    let expected_issuer = backend_url.as_str().trim_end_matches('/');
+    // another backend's entry.
+    let expected_issuer = issuer(&backend_url);
     if claims.iss != expected_issuer {
         return Err(LoginError::BadToken(format!(
             "issued by {}, expected {expected_issuer}",
@@ -140,7 +140,7 @@ pub(crate) async fn login_command(args: LoginArgs) -> Result<(), LoginError> {
 /// The grant and the verifier are sent to the backend, so it must use TLS, unless it runs on this
 /// machine. [`Url::join`] replaces the last path segment of a base that does not end with `/`, so
 /// the slash is added to keep backends mounted under a path working.
-fn backend_base_url(mut url: Url) -> Result<Url, LoginError> {
+pub(crate) fn backend_base_url(mut url: Url) -> Result<Url, LoginError> {
     let loopback = match url.host() {
         Some(Host::Domain(domain)) => domain == "localhost",
         Some(Host::Ipv4(ip)) => ip.is_loopback(),
@@ -156,6 +156,12 @@ fn backend_base_url(mut url: Url) -> Result<Url, LoginError> {
     }
 
     Ok(url)
+}
+
+/// The issuer of the backend at `backend_url`, a base from [`backend_base_url`], which its login
+/// tokens are filed under: the base URL without the trailing slash.
+pub(crate) fn issuer(backend_url: &Url) -> &str {
+    backend_url.as_str().trim_end_matches('/')
 }
 
 /// PKCE verifier (RFC 7636 §4.1) and its S256 challenge (RFC 7636 §4.2).
