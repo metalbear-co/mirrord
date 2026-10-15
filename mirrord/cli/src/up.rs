@@ -6,12 +6,14 @@ use miette::Diagnostic;
 use mirrord_analytics::{Analytics, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::config::EnvKey;
 use mirrord_operator::crd::session::UpSessionInfo;
-use mirrord_up::{InitError, ReadyTracker, UpError, load_up_config, run_wizard};
+use mirrord_up::{
+    InitError, ReadyTracker, UpConfig, UpError, UpListing, load_up_config, run_wizard,
+};
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpSubcommand},
+    config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpListFormat, UpSubcommand},
     data::UserData,
     ui::ui_command,
 };
@@ -62,6 +64,9 @@ pub enum UpCliError {
     ))]
     UsernameFetch(whoami::Error),
 
+    #[error("failed to write the `mirrord up --list` output")]
+    ListOutput(#[source] serde_json::Error),
+
     #[cfg(not(target_os = "windows"))]
     #[error("`mirrord up --debug` is not supported yet on this platform")]
     DebugUnsupported,
@@ -77,6 +82,11 @@ pub(crate) async fn up_command(
         return Ok(run_wizard(output)?);
     }
 
+    // No analytics: extensions list on every refresh, and no session starts.
+    if args.list {
+        return list_services(&args);
+    }
+
     // We don't yet know whether the user has opted out of telemetry,
     // that's stored in the YAML we haven't loaded. Default to enabled
     // so a config-load failure still surfaces as a
@@ -89,6 +99,42 @@ pub(crate) async fn up_command(
     result
 }
 
+/// The session key: `-k`, else the OS username.
+fn session_key(key: Option<String>) -> Result<EnvKey, UpCliError> {
+    Ok(match key {
+        Some(key) => EnvKey::Provided(key),
+        None => EnvKey::Generated(whoami::username().map_err(UpCliError::UsernameFetch)?),
+    })
+}
+
+fn load_config(args: &UpArgs, key: &EnvKey) -> Result<UpConfig, UpCliError> {
+    match load_up_config(&args.config_file, key) {
+        Ok(cfg) => Ok(cfg),
+        Err(UpError::Io(err)) if err.kind() == ErrorKind::NotFound => {
+            Err(UpCliError::ConfigNotFound)
+        }
+        Err(other_error) => Err(other_error.into()),
+    }
+}
+
+/// `mirrord up --list`: prints every service as `mirrord up` would run it, for IDE extensions.
+fn list_services(args: &UpArgs) -> Result<(), UpCliError> {
+    let key = session_key(args.key.clone())?;
+    let mut up_config = load_config(args, &key)?;
+    if let Some(mode) = args.mode {
+        up_config.override_mode(mode);
+    }
+
+    let listing = UpListing::new(&up_config, &args.config_file, &key, args.context.clone())?;
+    match args.format {
+        UpListFormat::Json => {
+            let json = serde_json::to_string(&listing).map_err(UpCliError::ListOutput)?;
+            println!("{json}");
+        }
+    }
+    Ok(())
+}
+
 async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
     // The extension only drives `--debug` on Windows so far; elsewhere it would wait for a hold
     // line that never comes.
@@ -97,18 +143,8 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         return Err(UpCliError::DebugUnsupported);
     }
 
-    let key = match args.key {
-        Some(key) => EnvKey::Provided(key),
-        None => EnvKey::Generated(whoami::username().map_err(UpCliError::UsernameFetch)?),
-    };
-
-    let mut up_config = match load_up_config(&args.config_file, &key) {
-        Ok(cfg) => cfg,
-        Err(UpError::Io(err)) if err.kind() == ErrorKind::NotFound => {
-            return Err(UpCliError::ConfigNotFound);
-        }
-        other_error => other_error?,
-    };
+    let key = session_key(args.key.clone())?;
+    let mut up_config = load_config(&args, &key)?;
 
     analytics.enabled = up_config.telemetry_enabled();
 
@@ -224,7 +260,8 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::Exited)
             | UpCliError::Up(UpError::YamlPatch(_))
             | UpCliError::Up(UpError::YamlQuery(_))
-            | UpCliError::Init(_) => Self::InternalError,
+            | UpCliError::Init(_)
+            | UpCliError::ListOutput(_) => Self::InternalError,
         }
     }
 }

@@ -1983,6 +1983,16 @@ pub(super) struct UpArgs {
     #[arg(long)]
     pub context: Option<Arc<str>>,
 
+    /// Print every service in the config file, rendered as `mirrord up` would run it, then exit.
+    ///
+    /// Touches no cluster and asks nothing. For IDE extensions, so hidden from help.
+    #[arg(long, hide = true, conflicts_with_all = ["services", "debug"])]
+    pub list: bool,
+
+    /// Output format of `--list`.
+    #[arg(long, hide = true, value_enum, default_value_t = UpListFormat::Json, requires = "list")]
+    pub format: UpListFormat,
+
     /// Hold this service's program at its entry point until an IDE releases it, so a debugger
     /// attaches before its first line runs.
     ///
@@ -1994,6 +2004,16 @@ pub(super) struct UpArgs {
     /// the config file. With a subcommand, the flags above are ignored.
     #[command(subcommand)]
     pub command: Option<UpSubcommand>,
+}
+
+/// Output formats of `mirrord up --list`.
+///
+/// Only JSON for now. The flag exists so a text format can come later without changing what
+/// callers that ask for JSON get.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(super) enum UpListFormat {
+    /// One JSON document, in the shape `mirrord_up::UpListing` defines.
+    Json,
 }
 
 #[derive(Subcommand, Debug)]
