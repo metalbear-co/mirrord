@@ -231,6 +231,8 @@ unsafe extern "system" fn create_process_internal_w_hook(
             // pitm/exec job already owns the whole descendant tree via inheritance.
             false,
             LayerFailurePolicy::RunWithoutMirrord,
+            // Only the program `mirrord exec` starts is ever held for a debugger.
+            false,
             None::<mirrord_progress::NullProgress>, // No progress in hook context
         )
         .map(LayerManagedProcess::release)

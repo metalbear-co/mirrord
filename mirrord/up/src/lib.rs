@@ -76,6 +76,11 @@ impl ReadyTracker {
 /// Environment variable used to pass the resolved configuration to child mirrord processes.
 pub const RESOLVED_CONFIG_ENV: &str = "MIRRORD_UP_RESOLVED_CONFIG";
 
+/// Set to `1` on the `mirrord exec` of the service `mirrord up --debug` names. That `exec` holds
+/// the program it starts at its entry point until an IDE releases it, and leaves the variable out
+/// of the program's environment.
+pub const DEBUG_HOLD_ENV: &str = "MIRRORD_DEBUG_HOLD";
+
 /// Errors produced by `mirrord up` command.
 #[derive(Debug, Error, Diagnostic)]
 pub enum UpError {

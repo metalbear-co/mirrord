@@ -339,6 +339,10 @@ pub enum LayerError {
     ProcessSynchronization(String),
 
     #[cfg(target_os = "windows")]
+    #[error(transparent)]
+    DebugHold(#[from] crate::process::windows::execution::hold::DebugHoldError),
+
+    #[cfg(target_os = "windows")]
     #[error("Process with PID {0} not found")]
     ProcessNotFound(u32),
 
