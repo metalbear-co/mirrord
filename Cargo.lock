@@ -5661,6 +5661,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "winapi",
 ]
 
 [[package]]
