@@ -1,1 +1,1 @@
-The `validate_config` tool of `mirrord mcp` takes the directory the user runs mirrord from, and resolves a relative protobuf `schema_file` and `include_directories` from it. Before, it resolved the path from the working directory of `mirrord mcp`, which the MCP client chooses.
+The `validate_config` tool of `mirrord mcp` takes the directory the user runs mirrord from, and resolves a relative `payload_protobuf.schema_file` and `include_directories` from it. Before, it resolved the path from the working directory of `mirrord mcp`, which the MCP client chooses.
