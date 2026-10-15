@@ -31,7 +31,7 @@ const OPERATOR_API_SERVICE: &str = "v1.operator.metalbear.co";
 
 /// The field manager helm 4 applies releases with.
 ///
-/// Applying under the same manager lets the printed `helm install` take over the objects. Under a
+/// Applying under the same manager lets `helm install` take over the objects. Under a
 /// different one, fields the API server defaults inside atomic values (e.g. RBAC subjects) would
 /// conflict with helm's apply, even though the rendered manifest is identical.
 const FIELD_MANAGER: &str = "helm";
@@ -141,7 +141,7 @@ pub(super) async fn ensure_no_operator(
 }
 
 /// Dry-runs creating every object, so missing permissions, leftovers of an earlier installation and
-/// objects of other tools surface before anything is created or a trial is started.
+/// objects of other tools surface before anything is created, including the operator API key.
 ///
 /// A plain create finds the leftovers, which a server-side apply would silently merge into. Since
 /// [`create`] applies server-side, which also needs the `patch` permission, each object is then

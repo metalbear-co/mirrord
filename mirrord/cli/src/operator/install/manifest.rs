@@ -144,7 +144,8 @@ impl Manifest {
     /// Parses a rendered manifest, leaving out helm hooks.
     ///
     /// Also validates that the operator is at least [`MIN_OPERATOR_VERSION`] and that the API key
-    /// can be set, so an unsupported or broken manifest fails before a trial is started for it.
+    /// can be set, so an unsupported or broken manifest fails before an operator API key is
+    /// created.
     pub(super) fn parse(manifest: &str) -> Result<Self, OperatorInstallError> {
         let mut objects = serde_saphyr::from_multiple::<Option<DynamicObject>>(manifest)
             .map_err(OperatorInstallError::ParseManifest)?
