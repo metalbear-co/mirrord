@@ -18,7 +18,7 @@ use mirrord_kube::{
     resolved::ResolvedTarget,
 };
 use mirrord_operator::{
-    client::{OperatorApi, OperatorSessionConnection},
+    client::{OperatorApi, OperatorSessionConnection, error::OperatorApiError},
     crd::NewOperatorFeature,
 };
 use mirrord_progress::{
@@ -86,7 +86,12 @@ where
         .await?
         .ok_or(CliError::OperatorNotInstalled)?;
     api.check_license_validity(&subtask)?;
-    api.check_serverless_sessions_manager_served()?;
+    if let Err(error) = api.check_serverless_sessions_manager_served() {
+        if let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error {
+            api.report_feature_gate(*feature).await;
+        }
+        return Err(error.into());
+    }
     subtask.success(Some("operator sessions-manager available"));
 
     Ok(api.client().clone())
@@ -188,6 +193,17 @@ where
             "Agent configuration is ignored when using the mirrord operator. \
              Agent configuration is managed by the cluster admin.",
         );
+    }
+
+    if layer_config.multi_cluster == Some(true)
+        && let Err(error @ OperatorApiError::LocalFeatureNotLicensed { .. }) = api
+            .operator()
+            .spec
+            .require_feature(NewOperatorFeature::MultiClusterPrimary)
+    {
+        api.report_feature_gate(NewOperatorFeature::MultiClusterPrimary)
+            .await;
+        return Err(error.into());
     }
 
     let is_multi_cluster = api
