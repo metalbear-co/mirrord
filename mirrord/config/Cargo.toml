@@ -18,6 +18,7 @@ workspace = true
 
 [dependencies]
 mirrord-config-derive = { path = "./derive" }
+mirrord-command = { path = "../command" }
 mirrord-analytics = { path = "../analytics" }
 mirrord-protocol = { path = "../protocol" }
 # We don't need the `eval` feature here because we only want to compile

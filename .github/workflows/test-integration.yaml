@@ -131,6 +131,13 @@ jobs:
         with:
           command: |
             cargo nextest run -p mirrord-up
+      # Also checks the vendored docs and skills, so a release PR whose bumped corpus doesn't hold
+      # up fails here.
+      - name: mirrord mcp UT
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: |
+            cargo nextest run -p mirrord-mcp
       - name: mirrord tui build and UT
         uses: ./.github/actions/run-in-ci-runner
         with:

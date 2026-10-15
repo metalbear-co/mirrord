@@ -65,6 +65,33 @@ fn send_upgrade_ide_message<P: Progress>(
     Ok(())
 }
 
+/// Kubernetes client for a serverless session that `operator: true` routes through the
+/// operator-hosted sessions-manager.
+///
+/// Unlike [`try_connect_using_operator`], a missing operator, an invalid license, or an operator
+/// without sessions-manager support is an error rather than a fallback, since the user asked for
+/// the operator explicitly. The client carries only the user's kubeconfig credentials, with no
+/// operator session certificate: the hosted routes are authorized by Kubernetes RBAC.
+async fn operator_sessions_manager_client<P, R>(
+    layer_config: &LayerConfig,
+    progress: &P,
+    analytics: &mut R,
+) -> CliResult<kube::Client>
+where
+    P: Progress,
+    R: Reporter,
+{
+    let mut subtask = progress.subtask("checking operator sessions-manager");
+    let api = OperatorApi::try_new(layer_config, analytics, progress)
+        .await?
+        .ok_or(CliError::OperatorNotInstalled)?;
+    api.check_license_validity(&subtask)?;
+    api.check_serverless_sessions_manager_served()?;
+    subtask.success(Some("operator sessions-manager available"));
+
+    Ok(api.client().clone())
+}
+
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], prepares an operator
 ///    session, connects to it, and returns [`Some`] [`ConnectData`] with an [`OperatorConnector`]
 ///    holding that connection.
@@ -126,16 +153,22 @@ where
         }
     }
 
+    if mirrord_for_ci.is_some_and(|ci| ci.api_key().is_none())
+        && api
+            .operator()
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::KeylessCi)
+            .not()
+    {
+        return Err(CiError::MissingCiApiKey.into());
+    }
+
     let mut user_cert_subtask = operator_subtask.subtask("preparing user credentials");
-    let api = match mirrord_for_ci {
-        Some(mirrord_for_ci) => {
-            api.with_ci_api_key(
-                analytics,
-                progress,
-                layer_config,
-                mirrord_for_ci.api_key().ok_or(CiError::MissingCiApiKey)?,
-            )
-            .await
+    let api = match mirrord_for_ci.and_then(MirrordCi::api_key) {
+        Some(key) => {
+            api.with_ci_api_key(analytics, progress, layer_config, key)
+                .await
         }
         None => {
             api.with_client_certificate(analytics, progress, layer_config)
@@ -329,12 +362,24 @@ pub(crate) async fn create_and_connect<R: Reporter>(
             user_session_id,
             replica_filter: agent_replica_filter.map(Into::into),
         };
+        let (operator_client, agent_connect_info) = if config.operator == Some(true) {
+            (
+                Some(operator_sessions_manager_client(config, progress, analytics).await?),
+                AgentConnectInfo::OperatorSessionsManager(connect_info.clone()),
+            )
+        } else {
+            (
+                None,
+                AgentConnectInfo::SessionsManager(connect_info.clone()),
+            )
+        };
         let connector = AgentConnector::SessionsManager(SessionsManagerConnector {
-            connect_info: connect_info.clone(),
+            connect_info,
+            operator_client,
         });
 
         return Ok(ConnectData {
-            connect_info: AgentConnectInfo::SessionsManager(connect_info),
+            connect_info: agent_connect_info,
             connector,
             // Implement - see MBE-1981
             api_version: (0, 0),
@@ -481,6 +526,20 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
             "requiresoperator",
         )?;
         return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
+    }
+
+    // Only the operator can look the entries up on the workload's MirrordSplitConfig, so a
+    // session that asks for them has nothing to run without it.
+    if config.feature.db_branches.split_config_request().is_some() {
+        send_upgrade_ide_message(
+            progress,
+            "db_branches taken from a MirrordSplitConfig require the mirrord operator, which is \
+             part of mirrord for Teams.",
+            "requiresoperator",
+        )?;
+        return Err(CliError::FeatureRequiresOperatorError(
+            "feature.db_branches set to \"*\" or entry ids".into(),
+        ));
     }
 
     match (

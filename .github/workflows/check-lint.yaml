@@ -44,10 +44,11 @@ jobs:
           tool: typos-cli
       - name: print typos version
         run: echo $(typos --version)
+      # The docs and skills vendored for `mirrord mcp` are upstream's, kept byte-identical.
       - name: list markdown files
-        run: echo $(git ls-files '*.md')
+        run: echo $(git ls-files '*.md' ':!mirrord/mcp/corpus')
       - name: spell check markdown files
-        run: typos --format brief $(git ls-files '*.md')
+        run: typos --format brief $(git ls-files '*.md' ':!mirrord/mcp/corpus')
       - name: spell check mirrord/config crate
         run: typos --format brief $(git ls-files 'mirrord/config/*.rs')
   lint-markdown:

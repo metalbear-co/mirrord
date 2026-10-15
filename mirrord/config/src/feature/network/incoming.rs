@@ -333,6 +333,7 @@ pub struct IncomingAdvancedFileConfig {
     /// (Operator Only): if value of override will force close any other connections on requested
     /// target
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Team))]
     pub on_concurrent_steal: Option<ConcurrentSteal>,
 
     /// ### ports
@@ -347,6 +348,7 @@ pub struct IncomingAdvancedFileConfig {
     ///
     /// DEPRECATED: use `tls_delivery` instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Team))]
     pub https_delivery: Option<LocalTlsDelivery>,
 
     /// #### tls_delivery
@@ -354,6 +356,7 @@ pub struct IncomingAdvancedFileConfig {
     /// (Operator Only): configures how mirrord delivers stolen TLS traffic
     /// to the local application.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Team))]
     pub tls_delivery: Option<LocalTlsDelivery>,
 }
 

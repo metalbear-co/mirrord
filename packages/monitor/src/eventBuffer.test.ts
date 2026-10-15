@@ -4,11 +4,16 @@ import type { SubscribeEventRow } from './subscribeEvents'
 
 let seq = 0
 
-function request(correlation: string, sessionKey = 'alice'): SubscribeEventRow {
+function request(
+  correlation: string,
+  sessionKey = 'alice',
+  cluster = '',
+): SubscribeEventRow {
   return {
     seq: seq++,
     timestamp: '2026-01-01T00:00:00Z',
     sessionKey,
+    cluster,
     serviceName: 'checkout',
     type: 'http',
     source: 'GET /health',
@@ -23,9 +28,10 @@ function response(
   correlation: string,
   status = '200',
   sessionKey = 'alice',
+  cluster = '',
 ): SubscribeEventRow {
   return {
-    ...request(correlation, sessionKey),
+    ...request(correlation, sessionKey, cluster),
     type: 'http_response',
     source: '',
     status,
@@ -77,6 +83,17 @@ describe('EventBuffer', () => {
     const buffer = new EventBuffer()
     buffer.absorb([request('4:1', 'alice')])
     const rows = buffer.absorb([response('4:1', '200', 'bob')])
+
+    expect(rows).toHaveLength(2)
+    expect(rows[0]?.awaitingResponse).toBe(true)
+  })
+
+  // Each cluster of a multi-cluster primary numbers its connections from zero, so the same
+  // correlation can be live on two clusters at once.
+  it('does not pair across clusters that share a correlation', () => {
+    const buffer = new EventBuffer()
+    buffer.absorb([request('4:1', 'alice', 'eu-west-1')])
+    const rows = buffer.absorb([response('4:1', '200', 'alice', 'us-east-1')])
 
     expect(rows).toHaveLength(2)
     expect(rows[0]?.awaitingResponse).toBe(true)

@@ -13,6 +13,7 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, MIRRORD_KUBE_VERSION_MAJOR_ENV,
     MIRRORD_KUBE_VERSION_MINOR_ENV, Reporter,
 };
+use mirrord_command::resolve_tokio_command;
 #[cfg(any(windows, test))]
 use mirrord_config::MIRRORD_LAYER_CRASH_REPORTING;
 use mirrord_config::{
@@ -29,13 +30,16 @@ use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use mirrord_protocol_api::client::{MirrordClient, MirrordClientRetry};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{
-    MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, extract_sip_binaries, sip_patch,
+    MIRRORD_BINARIES_DIR_PATH_BUF, MIRRORD_SIP_X64_FALLBACK_ENV, SipError, SipPatchOptions,
+    extract_sip_binaries,
+    rosetta::{MIRRORD_ROSETTA_FALLBACKS_PATH_ENV, rosetta_fallbacks_path},
+    sip_patch,
 };
 use mirrord_tls_util::SecureChannelSetup;
 use serde::Serialize;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::{Child, ChildStderr, Command},
+    process::{Child, ChildStderr},
     select,
     sync::mpsc::{self, UnboundedReceiver},
 };
@@ -56,7 +60,7 @@ use crate::{
 };
 
 #[cfg(target_os = "macos")]
-const COMPRESSED_SIP_BINARIES: &[u8] =
+pub(crate) const COMPRESSED_SIP_BINARIES: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/apple-utils.tar.gz"));
 
 /// Environment variable for saving the execution kind for analytics.
@@ -326,6 +330,18 @@ impl MirrordExecution {
             }
             #[cfg(target_os = "macos")]
             {
+                match rosetta_fallbacks_path() {
+                    Ok(path) => {
+                        env_vars.insert(
+                            MIRRORD_ROSETTA_FALLBACKS_PATH_ENV.to_owned(),
+                            path.to_string_lossy().into_owned(),
+                        );
+                    }
+                    Err(error) => progress.warning(&format!(
+                        "Rosetta fallback reporting is disabled because its data path could not be determined: {error}"
+                    )),
+                }
+
                 let log_info =
                     config
                         .experimental
@@ -340,7 +356,7 @@ impl MirrordExecution {
                     extract_sip_binaries(&MIRRORD_BINARIES_DIR_PATH_BUF, COMPRESSED_SIP_BINARIES)?;
                 }
 
-                executable
+                let result = executable
                     .and_then(|exe| {
                         sip_patch(
                             exe,
@@ -367,7 +383,23 @@ impl MirrordExecution {
                         if let SipError::TooManyFilesOpen(..) = sip_error {
                             panic!("mirrord failed to patch SIP with: {}", sip_error);
                         }
-                    })?
+                    })?;
+
+                if let Some(fallback) = result
+                    .as_ref()
+                    .and_then(|result| result.x64_fallback.as_ref())
+                {
+                    progress.warning(&format!(
+                        "The protected system binary `{}` is missing from mirrord's native macOS bundle. This run requires Rosetta. Run `mirrord diagnose sip-report` to send a report to the mirrord team.",
+                        fallback.display(),
+                    ));
+                    env_vars.insert(
+                        MIRRORD_SIP_X64_FALLBACK_ENV.to_owned(),
+                        fallback.to_string_lossy().into_owned(),
+                    );
+                }
+
+                result.map(|result| result.path_string())
             }
         };
 
@@ -396,7 +428,7 @@ impl MirrordExecution {
     /// [`session_log_directory`].
     #[cfg(windows)]
     async fn spawn_crash_monitor(env_vars: &mut HashMap<String, String>) -> Option<Child> {
-        let mut command = Command::new(std::env::current_exe().ok()?);
+        let mut command = resolve_tokio_command(std::env::current_exe().ok()?);
         // No `kill_on_drop`: the monitor must outlive this CLI while a crash dialog is on screen.
         // It self-exits when it sees the root (this process) die — see
         // `monitor::watch_root`.
@@ -503,7 +535,7 @@ impl MirrordExecution {
         let encoded_config = config.encode()?;
 
         let mut proxy_command =
-            Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+            resolve_tokio_command(std::env::current_exe().map_err(CliError::CliPathError)?);
         proxy_command
             .arg("extproxy")
             // Start of debug args. Don't add real args after this point,
@@ -568,7 +600,7 @@ impl MirrordExecution {
                 .clone()
                 .map(|unset| unset.to_vec())
                 .unwrap_or_default(),
-            uses_operator: matches!(connect_info, AgentConnectInfo::Operator(..)),
+            uses_operator: connect_info.is_operator(),
         };
 
         Ok((execution, proxy_addr))
@@ -676,7 +708,7 @@ impl MirrordExecution {
         let encoded_config = config.encode()?;
 
         let mut proxy_command =
-            Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+            resolve_tokio_command(std::env::current_exe().map_err(CliError::CliPathError)?);
         proxy_command.arg("intproxy");
 
         if mirrord_for_ci.is_some() {
@@ -711,7 +743,10 @@ impl MirrordExecution {
         // session ID chosen during connection setup or fall back to a local UUID.
         let session_id = match &connect_info {
             AgentConnectInfo::Operator(session) => format!("{:X}", session.id()),
-            AgentConnectInfo::SessionsManager(connect_info) => connect_info.user_session_id.clone(),
+            AgentConnectInfo::SessionsManager(connect_info)
+            | AgentConnectInfo::OperatorSessionsManager(connect_info) => {
+                connect_info.user_session_id.clone()
+            }
             _ => uuid::Uuid::new_v4().to_string(),
         };
         proxy_command.env("MIRRORD_SESSION_ID", &session_id);
@@ -776,11 +811,7 @@ impl MirrordExecution {
             intproxy_address.to_string(),
         );
 
-        Ok((
-            env_vars,
-            Some(proxy_process),
-            matches!(connect_info, AgentConnectInfo::Operator(..)),
-        ))
+        Ok((env_vars, Some(proxy_process), connect_info.is_operator()))
     }
 
     /// Construct filter and retrieve remote environment from the connected agent using

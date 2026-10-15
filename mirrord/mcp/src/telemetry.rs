@@ -77,6 +77,10 @@ pub(crate) enum McpTool {
     #[strum(disabled)]
     Unknown = 0,
     ValidateConfig = 1,
+    ExplainConfigOption = 2,
+    GetSkill = 3,
+    SearchDocs = 4,
+    ReadDoc = 5,
 }
 
 /// How a `tools/call` ended.
@@ -180,6 +184,13 @@ mod tests {
     #[test]
     fn tool_names() {
         assert_eq!("validate_config".parse(), Ok(McpTool::ValidateConfig));
+        assert_eq!(
+            "explain_config_option".parse(),
+            Ok(McpTool::ExplainConfigOption)
+        );
+        assert_eq!("get_skill".parse(), Ok(McpTool::GetSkill));
+        assert_eq!("search_docs".parse(), Ok(McpTool::SearchDocs));
+        assert_eq!("read_doc".parse(), Ok(McpTool::ReadDoc));
         assert!("unknown".parse::<McpTool>().is_err());
         assert!("no_such_tool".parse::<McpTool>().is_err());
     }

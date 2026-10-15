@@ -83,6 +83,8 @@ crypto
 runtime
 goroutine
 plaintext
+keyless
+[vV]endor(?:ed|ing)?
 
 # Linux syscalls and C API
 variadic
@@ -180,9 +182,11 @@ greptile
 Greptile
 Liquibase
 Jev
+devshell
 
 # Cloud services
 SNS
+serverless
 
 # Kafka
 rebalance

@@ -75,7 +75,7 @@ async fn read_from_mirrord_bin() {
 
     // <TMPDIR>/mirrord-bin/cat <TMPDIR>/mirrord-bin/<TMPDIR>/mirrord-test-read-from-mirrord-bin
     let application = Application::DynamicApp(
-        executable,
+        executable.path_string(),
         vec![path_in_mirrord_bin.to_string_lossy().to_string()],
     );
 

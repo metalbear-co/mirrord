@@ -4,7 +4,7 @@
 use std::{
     collections::HashMap,
     ffi::{CStr, CString},
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, PoisonError},
 };
 
 use mirrord_layer_lib::{
@@ -15,7 +15,7 @@ use mirrord_layer_lib::{
 use mirrord_protocol::file::{CloseDirRequest, DirEntryInternal, ReadDirRequest, ReadDirResponse};
 
 use super::{DirStreamFd, LocalFd, OPEN_FILES, RemoteFd};
-use crate::common;
+use crate::{CLOSE_FORK_LOCK, common};
 
 /// Global instance of [`OpenDirs`]. Used in hooks.
 pub static OPEN_DIRS: LazyLock<OpenDirs> = LazyLock::new(OpenDirs::new);
@@ -145,6 +145,15 @@ impl OpenDirs {
 
     /// Closes the open directory with the given [`DirStreamFd`].
     pub fn close(&self, local_dir_fd: DirStreamFd) -> Detour<libc::c_int> {
+        // Most directories are local, so look first, and only take the lock for a remote one.
+        if !self.inner.lock()?.contains_key(&local_dir_fd) {
+            return Detour::Bypass(Bypass::LocalDirStreamNotFound(local_dir_fd));
+        }
+        // A `fork` must not happen between the removal of the directory and its close requests,
+        // see [`CLOSE_FORK_LOCK`].
+        let _fork_guard = CLOSE_FORK_LOCK
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let dir = self
             .inner
             .lock()?
@@ -153,7 +162,9 @@ impl OpenDirs {
 
         let mut guard = dir.lock().expect("lock poisoned");
         guard.closed = true;
-        OPEN_FILES.lock()?.remove(&guard.base_fd);
+        // Dropped after the `OPEN_FILES` guard, see [`OPEN_FILES`].
+        let base_file = OPEN_FILES.lock()?.remove(&guard.base_fd);
+        drop(base_file);
         common::make_proxy_request_no_response(CloseDirRequest {
             remote_fd: guard.remote_fd,
         })?;

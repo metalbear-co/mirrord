@@ -18,8 +18,9 @@ use std::{
 };
 
 pub use config::{
-    ConfigPatchError, IncompatibleTarget, ModeError, SelectError, ServiceError, ServiceMode,
-    SubprocessCfg, UpConfig, WindowsSupportError,
+    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, ModeError,
+    SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SubprocessCfg,
+    UpConfig, WindowsSupportError,
 };
 use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
@@ -28,8 +29,9 @@ use inquire::{Confirm, Select};
 use k8s_openapi::api::core::v1::Namespace;
 use miette::Diagnostic;
 use mirrord_analytics::MIRRORD_UP_CORRELATION_ID_ENV;
+use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
-    config::{ConfigError, EnvKey},
+    config::{ConfigContext, ConfigError, EnvKey},
     target::{Target, TargetType},
     util::GIT_BRANCH,
 };
@@ -41,7 +43,7 @@ use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use serde_saphyr::{DefaultMessageFormatter, MessageFormatter};
 use tera::Tera;
 use thiserror::Error;
-use tokio::{process::Command, task::JoinError};
+use tokio::task::JoinError;
 use uuid::Uuid;
 use yamlpatch::{Op, Patch, apply_yaml_patches};
 use yamlpath::{Document, route};
@@ -82,12 +84,15 @@ pub enum UpError {
     Io(#[from] std::io::Error),
 
     /// Failed to parse the mirrord-up YAML configuration.
+    ///
+    /// The message already renders the parse error with its snippet, so it is not also a
+    /// `source`. Otherwise miette prints the snippet a second time, without the suggestion.
     #[error(
         "failed to parse mirrord-up config: {}",
         .0.render_with_formatter(&SuggestingFormatter)
     )]
     #[diagnostic(help("Check the YAML syntax and field names in your mirrord-up.yaml."))]
-    Parse(#[from] serde_saphyr::Error),
+    Parse(serde_saphyr::Error),
 
     /// A service configured a working directory that does not exist.
     #[error("invalid `run.directory` for service `{service}`: `{directory}` is not a directory")]
@@ -140,6 +145,25 @@ pub enum UpError {
         status: ExitStatus,
     },
 
+    /// The `run.pre_command` of the only service left to start exited with a non-zero status.
+    #[error("`run.pre_command` of service {name} failed with {status}")]
+    PreCommandFailed {
+        /// Name of the service whose pre-command failed.
+        name: Arc<str>,
+        /// Exit status of the pre-command.
+        status: ExitStatus,
+    },
+
+    /// The `run.pre_command` of the only service left to start could not be spawned.
+    #[error("failed to start `run.pre_command` of service {name}")]
+    PreCommandSpawn {
+        /// Name of the service whose pre-command could not be spawned.
+        name: Arc<str>,
+        /// Why spawning the pre-command failed.
+        #[source]
+        source: std::io::Error,
+    },
+
     /// A child process handler task panicked.
     #[error("Child process handler task panicked: {0:?}")]
     Panic(JoinError),
@@ -181,6 +205,12 @@ impl UpError {
                         | inquire::InquireError::OperationInterrupted
                 )
         )
+    }
+}
+
+impl From<serde_saphyr::Error> for UpError {
+    fn from(error: serde_saphyr::Error) -> Self {
+        Self::Parse(error)
     }
 }
 
@@ -616,7 +646,12 @@ pub async fn run(
     let mut resolved_targets =
         resolve_unresolved_workloads(&up_config, config_path, up_context.clone()).await?;
 
-    let service_configs = up_config.service_configs(&key, &mut resolved_targets, up_context)?;
+    let service_configs = up_config.service_configs(
+        &key,
+        &mut resolved_targets,
+        up_context,
+        &mut ConfigContext::default(),
+    )?;
 
     validate_targets(&service_configs)?;
 
@@ -633,11 +668,12 @@ pub async fn run(
                 r#type,
                 directory,
                 command,
+                pre_command,
             } = run;
 
             let encoded_cfg = config.encode()?;
 
-            let mut cmd = Command::new(std::env::current_exe()?);
+            let mut cmd = resolve_tokio_command(std::env::current_exe()?);
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
@@ -648,11 +684,27 @@ pub async fn run(
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
+            let pre = pre_command.split_first().map(|(program, args)| {
+                let mut pre = resolve_tokio_command(program);
+                pre.args(args)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .kill_on_drop(true);
+                if let Some(directory) = &directory {
+                    pre.current_dir(directory);
+                }
+                pre
+            });
             if let Some(directory) = directory {
                 cmd.current_dir(directory);
             }
 
-            Ok((service_name, cmd))
+            Ok(process::ServiceCommands {
+                name: service_name,
+                pre,
+                session: cmd,
+            })
         })
         .collect::<Result<_, UpError>>()?;
 
@@ -717,6 +769,24 @@ mod tests {
             }
             None => assert_eq!(message, default_message),
         }
+    }
+
+    /// The report shows the YAML snippet once: in the message, with its suggestion.
+    #[test]
+    fn parse_error_report_shows_the_snippet_once() {
+        let yaml = "services:\n  api:\n    default_mode: mirorr\n    run:\n      command: [x]\n";
+        let error = template(yaml, &EnvKey::Provided("key".to_owned())).unwrap_err();
+
+        let mut report = String::new();
+        miette::GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor())
+            .render_report(&mut report, &error)
+            .expect("rendering into a String can't fail");
+
+        assert_eq!(
+            report.matches("--> <input>").count(),
+            1,
+            "the parse error must not repeat as its own source:\n{report}"
+        );
     }
 
     #[test]

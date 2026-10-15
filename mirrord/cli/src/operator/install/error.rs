@@ -187,7 +187,10 @@ pub(crate) enum OperatorInstallError {
         source: Box<kube::Error>,
     },
 
-    #[error("the operator did not become ready within {} minutes", .timeout.as_secs() / 60)]
+    #[error(
+        "the operator did not become ready within {}",
+        humantime::format_duration(*.timeout)
+    )]
     #[diagnostic(help("Inspect it with `kubectl{context_arg} get pods -n {namespace}`."))]
     NotReady {
         namespace: String,

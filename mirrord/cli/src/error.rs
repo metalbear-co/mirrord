@@ -363,6 +363,10 @@ pub(crate) enum CliError {
     ))]
     SipError(#[from] mirrord_sip::SipError),
 
+    #[cfg(target_os = "macos")]
+    #[error("Failed to send the Rosetta fallback report: {0}")]
+    RosettaReportRequest(#[from] reqwest::Error),
+
     #[error(transparent)]
     #[diagnostic(transparent)]
     OperatorSetupError(#[from] OperatorSetupError),
@@ -459,9 +463,49 @@ pub(crate) enum CliError {
     ))]
     FeatureDisabledInOperatorError { feature: String },
 
+    #[error("mirrord operator does not serve the operator-hosted sessions-manager.")]
+    #[diagnostic(help(
+        "Serverless targets with `operator: true` connect through the sessions-manager hosted by \
+        the mirrord operator. Ask your cluster administrator to enable it with \
+        `operator.sessionsManager=true` in the operator Helm chart, or set `operator: false` to \
+        use a standalone sessions-manager.{GENERAL_HELP}"
+    ))]
+    ServerlessSessionsManagerNotServed,
+
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorBranchCreationFailed(OperatorOperation, String),
+
+    #[error(
+        "branch `{branch_id}` exists with copy mode \"{existing_mode}\", this service asked for \
+         \"{requested_mode}\""
+    )]
+    #[diagnostic(help(
+        "`{creator}` created it. Put both services on modes with the same copy mode."
+    ))]
+    BranchCopyModeMismatch {
+        branch_id: String,
+        existing_mode: String,
+        requested_mode: String,
+        creator: String,
+    },
+
+    #[error(
+        "the db_branches resolved from the target's MirrordSplitConfig do not fit this config: {0}"
+    )]
+    #[diagnostic(help(
+        "Fix the `dbBranches` entry on the MirrordSplitConfig, or the part of this config it \
+         conflicts with, such as `feature.env.override`."
+    ))]
+    ResolvedDbBranchesInvalid(#[source] ConfigError),
+
+    #[error("{0}")]
+    #[diagnostic(help(
+        "The operator resolves `feature.db_branches: \"*\"` or a list of ids against the \
+         `dbBranches` on the target's MirrordSplitConfig. Check the ids the workload has, or \
+         define the branches inline in `feature.db_branches`."
+    ))]
+    SplitConfigDbBranches(String),
 
     #[error("mirrord operator API failed: {0} failed with {1}")]
     #[diagnostic(help(
@@ -895,6 +939,13 @@ pub(crate) enum CliError {
     ))]
     SubscribeError(String),
 
+    #[error("Cannot stream every session's events from this operator: {0}")]
+    #[diagnostic(help(
+        "Pass `--key <key>` to stream one session, or upgrade the operator to 3.210.0 or newer \
+        to stream them all.{GENERAL_HELP}"
+    ))]
+    SubscribeAllSessionsUnsupported(String),
+
     #[error(transparent)]
     ProtocolError(#[from] mirrord_protocol_api::client::ClientError),
 
@@ -962,6 +1013,9 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::FeatureDisabled { feature } => Self::FeatureDisabledInOperatorError {
                 feature: feature.to_string(),
             },
+            OperatorApiError::ServerlessSessionsManagerNotServed => {
+                Self::ServerlessSessionsManagerNotServed
+            }
             OperatorApiError::CreateKubeClient(e) => {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
@@ -1034,6 +1088,24 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
+            OperatorApiError::SplitConfigDbBranches(msg) => Self::SplitConfigDbBranches(msg),
+            OperatorApiError::ResolvedDbBranchesInvalid(error) => {
+                Self::ResolvedDbBranchesInvalid(error)
+            }
+            error @ OperatorApiError::SplitConfigDbBranchEntry { .. } => {
+                Self::SplitConfigDbBranches(error.to_string())
+            }
+            OperatorApiError::BranchCopyModeMismatch {
+                branch_id,
+                existing_mode,
+                requested_mode,
+                creator,
+            } => Self::BranchCopyModeMismatch {
+                branch_id,
+                existing_mode,
+                requested_mode,
+                creator,
+            },
             OperatorApiError::PreviewSecretMountCreation(msg) => {
                 Self::PreviewSecretMountFailed(msg)
             }

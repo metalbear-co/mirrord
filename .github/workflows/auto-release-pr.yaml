@@ -68,6 +68,12 @@ jobs:
         if: steps.version.outputs.should-release == 'true'
         run: cargo update -w -q
 
+      # Ships the current docs and skills. Only fails when they can't be fetched; content that
+      # doesn't hold up fails the release PR's checks instead.
+      - name: Bump the docs and skills corpus
+        if: steps.version.outputs.should-release == 'true'
+        run: cargo xtask corpus sync --bump
+
       - name: Generate draft release notes
         if: steps.version.outputs.should-release == 'true'
         run: uv run towncrier build --draft --version "${{ steps.version.outputs.new-version }}" > /tmp/release-notes.md
@@ -89,3 +95,4 @@ jobs:
             Cargo.lock
             changelog.d
             CHANGELOG.md
+            mirrord/mcp/corpus

@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 chrono.workspace = true
 fancy-regex.workspace = true
+mirrord-command = { path = "../mirrord/command", features = ["tokio"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "process", "time", "io-util", "sync"] }
 

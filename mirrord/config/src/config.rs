@@ -19,6 +19,11 @@ pub enum ConfigError {
     #[error("invalid target provided `{0}`!")]
     InvalidTarget(String),
 
+    /// A target path that has none of the forms in
+    /// [`TARGET_PATH_FORMATS`](crate::target::TARGET_PATH_FORMATS).
+    #[error("invalid target provided `{0}`!")]
+    InvalidTargetPath(String),
+
     #[error("value for {1:?} not provided in {0:?} (env override {2:?})")]
     ValueNotProvided(&'static str, &'static str, Option<&'static str>),
 
@@ -40,6 +45,15 @@ pub enum ConfigError {
 
     #[error("Conflicting configuration found `{0}`")]
     Conflict(String),
+
+    /// A [`ConfigError::Conflict`] that is resolved by changing one setting, so tools such as
+    /// `mirrord mcp` can point at it.
+    #[error("Conflicting configuration found `{message}`")]
+    ConflictAt {
+        /// Path of the setting in the config, e.g. `feature.copy_target`.
+        setting: Cow<'static, str>,
+        message: String,
+    },
 
     #[error(
         "A target namespace was specified, but no target was specified. If you want to set the \

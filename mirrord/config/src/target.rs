@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fmt, str::FromStr};
+use std::{borrow::Cow, fmt, str::FromStr, sync::LazyLock};
 
 use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
@@ -34,6 +34,12 @@ pub mod stateful_set;
 
 #[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
+#[schemars(
+    description = "The Kubernetes workload mirrord runs against: a target path such as \
+    `deployment/my-app` or `pod/my-pod/container/my-container`, `targetless`, or an object with \
+    the `path` (as a string or a mapping such as `{ \"deployment\": \"my-app\" }`) and the \
+    `namespace` to look for it in."
+)]
 pub enum TargetFileConfig {
     // Generated when the value of the `target` field is a string, or when there is no target.
     // we need default else target value will be required in some scenarios.
@@ -284,21 +290,36 @@ trait FromSplit {
         Self: Sized;
 }
 
-const FAIL_PARSE_DEPLOYMENT_OR_POD: &str = r#"
+/// The forms a target path can take, listed in [`FAIL_PARSE_DEPLOYMENT_OR_POD`] and by tools that
+/// explain an invalid one without the rest of that guide.
+pub const TARGET_PATH_FORMATS: &[&str] = &[
+    "targetless",
+    "pod/{pod-name}[/container/{container-name}]",
+    "deployment/{deployment-name}[/container/{container-name}]",
+    "deploy/{deployment-name}[/container/{container-name}]",
+    "rollout/{rollout-name}[/container/{container-name}]",
+    "job/{job-name}[/container/{container-name}]",
+    "cronjob/{cronjob-name}[/container/{container-name}]",
+    "statefulset/{statefulset-name}[/container/{container-name}]",
+    "service/{service-name}[/container/{container-name}]",
+    "replicaset/{replicaset-name}[/container/{container-name}]",
+    "label/{key}={value}[,{key}={value}...][/container/{container-name}]",
+    "serverless/{service-name}[/container/{container-name}]",
+];
+
+/// The error message for a target path that doesn't parse, which tells the user how to fix the
+/// target they gave to `mirrord exec` and friends.
+pub static FAIL_PARSE_DEPLOYMENT_OR_POD: LazyLock<String> = LazyLock::new(|| {
+    let formats: String = TARGET_PATH_FORMATS
+        .iter()
+        .map(|format| format!("    >> `{format}`;\n"))
+        .collect();
+    format!(
+        r#"
 mirrord-layer failed to parse the provided target!
 
 - Valid format:
-    >> `targetless`
-    >> `pod/{pod-name}[/container/{container-name}]`;
-    >> `deployment/{deployment-name}[/container/{container-name}]`;
-    >> `rollout/{rollout-name}[/container/{container-name}]`;
-    >> `job/{job-name}[/container/{container-name}]`;
-    >> `cronjob/{cronjob-name}[/container/{container-name}]`;
-    >> `statefulset/{statefulset-name}[/container/{container-name}]`;
-    >> `service/{service-name}[/container/{container-name}]`;
-    >> `replicaset/{replicaset-name}[/container/{container-name}]`;
-    >> `serverless/{service-name}[/container/{container-name}]`;
-
+{formats}
 - Note:
     >> specifying container name is optional, defaults to a container chosen by mirrord
     >> targeting a workload without the mirrord Operator results in a session targeting a random pod replica
@@ -307,7 +328,9 @@ mirrord-layer failed to parse the provided target!
     >> check for typos in the provided target.
     >> check if the provided target exists in the cluster using `kubectl get/describe` commands.
     >> check if the provided target is in the correct namespace.
-"#;
+"#
+    )
+});
 
 /// <!--${internal}-->
 /// ## path
@@ -416,7 +439,7 @@ impl JsonSchema for Target {
             schema_gen
                 .subschema_for::<serverless::ServerlessTarget>()
                 .to_value(),
-            serde_json::json!({ "enum": ["targetless"] }),
+            serde_json::json!({ "enum": ["targetless"], "x-mirrord-plan": crate::plan::Plan::Oss }),
         ];
 
         let mut schema = schemars::json_schema!({});
@@ -452,8 +475,9 @@ impl FromStr for Target {
             Some("serverless") => {
                 serverless::ServerlessTarget::from_split(&mut split).map(Target::Serverless)
             }
-            _ => Err(ConfigError::InvalidTarget(format!(
-                "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
+            _ => Err(ConfigError::InvalidTargetPath(format!(
+                "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{}",
+                *FAIL_PARSE_DEPLOYMENT_OR_POD
             ))),
         }
     }

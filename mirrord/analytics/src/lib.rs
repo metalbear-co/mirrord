@@ -1,6 +1,10 @@
 #![deny(unused_crate_dependencies)]
 
-use std::{collections::HashMap, str::FromStr, time::Instant};
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
@@ -49,9 +53,11 @@ pub fn read_kube_version_from_env() -> Option<(u16, u16)> {
     Some((major, minor))
 }
 
-/// Possible values for analytic data
-/// This is strict so we won't send sensitive data by accident.
-/// (Don't add strings)
+/// Possible values for analytic data.
+///
+/// Variant order affect deserialization, but all values are deserialized by the server into json
+/// `Value`. This means, for example, `Uuid` and `SanitizedString` will become `String`. Rount trip
+/// serialization to the same [`AnalyticValue`] variant is not important.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum AnalyticValue {
@@ -59,7 +65,7 @@ pub enum AnalyticValue {
     Number(u32),
     Uuid(Uuid),
     Nested(Analytics),
-    Hash(AnalyticsHash),
+    String(SanitizedString),
     List(Vec<AnalyticValue>),
 }
 
@@ -115,7 +121,7 @@ impl FromStr for ExecutionKind {
 ///
 /// Reported on analytics events as the numeric `ai_agent` property (alongside the
 /// `is_ai_agent` boolean), so AI-agent-driven usage can be distinguished from direct
-/// human usage. [`AnalyticValue`] has no string variant by design, hence the numeric mapping.
+/// human usage. The numeric mapping keeps the analytics schema stable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum AiAgent {
@@ -200,22 +206,28 @@ impl Analytics {
     }
 }
 
-/// Type safe abstraction for Bytes to send hash values, should be explicitly created so we woun't
-/// accidentaly send sensitive data
+/// Type safe abstraction for sending [`String`] values, should be explicitly created so we don't
+/// accidentaly send sensitive data.
 ///
-/// Saved as base64 for more optimal size of json
+/// If hashed, values are base64 for more optimal size of json.
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct AnalyticsHash(String);
+pub struct SanitizedString(String);
 
-impl AnalyticsHash {
-    /// Create AnalyticsHash from hash bytes
+impl SanitizedString {
+    /// Creates a [`SanitizedString`] contianing `bytes` encoded as base 64.
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        AnalyticsHash(general_purpose::STANDARD_NO_PAD.encode(bytes))
+        SanitizedString(general_purpose::STANDARD_NO_PAD.encode(bytes))
     }
 
-    /// Create AnalyticsHash from base64 string
+    /// Creates a [`SanitizedString`] from a base64 string.
     pub fn from_base64(val: &str) -> Self {
-        AnalyticsHash(val.to_owned())
+        SanitizedString(val.to_owned())
+    }
+
+    /// Creates a [`SanitizedString`] containing an explicitly non-sensitive value. Used only when
+    /// we need to know the value itself, e.g. for `mirrord::diagnose::sip::send_entries()`.
+    pub fn new_plaintext(val: &str) -> Self {
+        SanitizedString(val.to_owned())
     }
 
     /// Deterministically hashes a session key with the operator license fingerprint.
@@ -279,9 +291,9 @@ impl From<Analytics> for AnalyticValue {
     }
 }
 
-impl From<AnalyticsHash> for AnalyticValue {
-    fn from(hash: AnalyticsHash) -> Self {
-        AnalyticValue::Hash(hash)
+impl From<SanitizedString> for AnalyticValue {
+    fn from(hash: SanitizedString) -> Self {
+        AnalyticValue::String(hash)
     }
 }
 
@@ -324,6 +336,8 @@ pub enum ReportTarget {
     OperatorInstall,
     /// One run of `mirrord operator uninstall`.
     OperatorUninstall,
+    /// An ARM mac had to use Rosetta for some binaries.
+    MissingX86Binaries,
 }
 
 /// Header the client sets to tell the analytics-server which event a report is.
@@ -344,6 +358,7 @@ impl ReportTarget {
             ReportTarget::McpToolCalled => "mcp-tool-called",
             ReportTarget::OperatorInstall => "operator-install",
             ReportTarget::OperatorUninstall => "operator-uninstall",
+            ReportTarget::MissingX86Binaries => "missing-x86-binaries",
         }
     }
 }
@@ -495,7 +510,7 @@ impl AnalyticsReporter {
                 .and_then(|properties| properties.license_hash.as_ref())
         {
             let session_key_identifier =
-                AnalyticsHash::for_session_key(key, license_fingerprint.as_str());
+                SanitizedString::for_session_key(key, license_fingerprint.as_str());
             self.analytics
                 .add("session_key_identifier", session_key_identifier);
         }
@@ -509,6 +524,21 @@ impl AnalyticsReporter {
             platform: std::env::consts::OS,
             version: CURRENT_VERSION,
         }
+    }
+
+    /// Sends this report immediately instead of waiting for its drop task. Sets enabled to false so
+    /// another report will not be created on drop.
+    ///
+    /// `explicitly_enabled` can override MIRRORD_TELEMETRY=false if the user has explicitly asked
+    /// the report to be sent, e.g. with `mirrord diagnose sip-report`
+    pub async fn send_now(mut self, explicitly_enabled: bool) -> Result<(), reqwest::Error> {
+        if !(self.enabled || explicitly_enabled) {
+            return Ok(());
+        }
+
+        self.enabled = false;
+        let report = self.as_report();
+        send_analytics(report, self.target).await
     }
 }
 
@@ -549,9 +579,10 @@ impl Reporter for NullReporter {
     }
 }
 
-/// Must be called in tokio runtime
-/// We rely on the main tokio runtime to be started using the macro,
-/// meaning it will wait for all ongoing tasks to finish before exiting.
+/// Must be called in tokio runtime.
+///
+/// We rely on the main tokio runtime to be started using the macro, meaning it will wait for all
+/// ongoing tasks to finish before exiting.
 impl Drop for AnalyticsReporter {
     fn drop(&mut self) {
         if self.enabled && (self.error.is_some() || !self.error_only_send) {
@@ -559,7 +590,9 @@ impl Drop for AnalyticsReporter {
             let watch = self.watch.clone();
             let target = self.target;
             tokio::spawn(async move {
-                send_analytics(report, target).await;
+                if let Err(error) = send_analytics(report, target).await {
+                    info!("Failed to send analytics: {error}");
+                }
                 // hold clone of watch to prevent it from being dropped
                 // allowing our task to finish
                 drop(watch);
@@ -568,14 +601,14 @@ impl Drop for AnalyticsReporter {
     }
 }
 
-/// Extra fields for `AnalyticsReport` when using mirrord with operator.
+/// Extra fields for [`AnalyticsReport`] when using mirrord with operator.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AnalyticsOperatorProperties {
     /// client certificate public key
-    pub client_hash: Option<AnalyticsHash>,
+    pub client_hash: Option<SanitizedString>,
 
     /// sha256 fingerprint from operator license
-    pub license_hash: Option<AnalyticsHash>,
+    pub license_hash: Option<SanitizedString>,
 }
 
 #[derive(Debug, Serialize)]
@@ -591,20 +624,28 @@ struct AnalyticsReport {
 }
 
 const ANALYTICS_ENDPOINT: &str = "https://analytics.metalbear.com/api/v1/event";
+const ANALYTICS_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.com
+/// Send [`Analytics`] & [`AnalyticsOperatorProperties`] to [`ANALYTICS_ENDPOINT`].
+///
+/// Will time out after [`ANALYTICS_TIMEOUT`], preventing blocking execution when analytics are sent
+/// at a time other than the end of the session (e.g. for `ReportTarget::MissingX86Binaries`).
 #[tracing::instrument(level = Level::TRACE)]
-async fn send_analytics(report: AnalyticsReport, target: ReportTarget) {
-    let client = reqwest::Client::new();
-    let res = client
+async fn send_analytics(
+    report: AnalyticsReport,
+    target: ReportTarget,
+) -> Result<(), reqwest::Error> {
+    let client = reqwest::Client::builder()
+        .timeout(ANALYTICS_TIMEOUT)
+        .build()?;
+    client
         .post(ANALYTICS_ENDPOINT)
         .header(EVENT_KIND_HEADER, target.event_kind())
         .json(&report)
         .send()
-        .await;
-    if let Err(e) = res {
-        info!("Failed to send analytics: {e}");
-    }
+        .await?
+        .error_for_status()?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -657,7 +698,10 @@ mod tests {
     #[test]
     fn hash_value_serialization() {
         let mut analytics = Analytics::default();
-        analytics.add("preview_key_identifier", AnalyticsHash::from_bytes(b"key"));
+        analytics.add(
+            "preview_key_identifier",
+            SanitizedString::from_bytes(b"key"),
+        );
 
         assert_json_eq!(
             analytics,

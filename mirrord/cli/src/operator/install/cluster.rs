@@ -36,8 +36,6 @@ const OPERATOR_API_SERVICE: &str = "v1.operator.metalbear.co";
 /// conflict with helm's apply, even though the rendered manifest is identical.
 const FIELD_MANAGER: &str = "helm";
 
-const READY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
-
 const READY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Identifies the cluster by the UID of its `default` namespace, which is stable for the lifetime
@@ -253,14 +251,16 @@ pub(super) async fn create(
 }
 
 /// Waits until the operator serves its status, which requires its pod to be up and its API to be
-/// registered. `context_arg` gives the command in the error the kubecontext of the run.
+/// registered, and fails after `timeout`. `context_arg` gives the command in the error the
+/// kubecontext of the run.
 pub(super) async fn wait_for_operator(
     client: &Client,
     namespace: &str,
+    timeout: Duration,
     context_arg: &str,
 ) -> Result<MirrordOperatorCrd, OperatorInstallError> {
     let api = Api::<MirrordOperatorCrd>::all(client.clone());
-    let deadline = Instant::now() + READY_TIMEOUT;
+    let deadline = Instant::now() + timeout;
 
     loop {
         match api.get(OPERATOR_STATUS_NAME).await {
@@ -269,7 +269,7 @@ pub(super) async fn wait_for_operator(
                 return Err(OperatorInstallError::NotReady {
                     namespace: namespace.to_owned(),
                     context_arg: context_arg.to_owned(),
-                    timeout: READY_TIMEOUT,
+                    timeout,
                     source: Box::new(error),
                 });
             }

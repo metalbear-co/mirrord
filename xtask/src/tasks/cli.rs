@@ -1,9 +1,7 @@
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use mirrord_command::resolve_command;
 
 use super::{
     layer::{self, CargoOptions, Target},
@@ -105,7 +103,7 @@ pub fn merge_macos_universal_cli(release: bool) -> Result<PathBuf> {
     let universal_cli = universal_dir.join("mirrord");
     println!("Creating universal CLI with lipo...");
 
-    let status = Command::new("lipo")
+    let status = resolve_command("lipo")
         .args(["-create", "-output"])
         .arg(&universal_cli)
         .arg(&x86_cli)
@@ -155,7 +153,7 @@ pub fn build_macos_universal_cli(
 
     let universal_cli = universal_dir.join("mirrord");
     println!("Creating universal CLI...");
-    let status = Command::new("lipo")
+    let status = resolve_command("lipo")
         .args(["-create", "-output"])
         .arg(&universal_cli)
         .arg(&x86_cli)

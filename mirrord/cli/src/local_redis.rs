@@ -6,10 +6,11 @@
 use std::{
     io::{Read, Write},
     net::{TcpStream, ToSocketAddrs},
-    process::{Child, Command, Stdio},
+    process::{Child, Stdio},
     time::Duration,
 };
 
+use mirrord_command::resolve_command;
 use mirrord_config::{
     container::ContainerRuntime,
     feature::database_branches::{
@@ -39,7 +40,7 @@ impl Drop for LocalRedis {
                 runtime,
                 container_name,
             } => {
-                let _ = Command::new(runtime.command())
+                let _ = resolve_command(runtime.command())
                     .args(["rm", "-f", container_name])
                     .output();
             }
@@ -160,7 +161,7 @@ async fn start_container<P: Progress>(
     let image = format!("redis:{}", config.version);
 
     // Remove any existing container with same name
-    let _ = Command::new(runtime_cmd)
+    let _ = resolve_command(runtime_cmd)
         .args(["rm", "-f", &container_name])
         .output();
 
@@ -180,7 +181,7 @@ async fn start_container<P: Progress>(
     // Add any custom Redis args (passed as CMD to the container)
     container_args.extend(config.options.args.iter().map(String::as_str));
 
-    let output = Command::new(runtime_cmd)
+    let output = resolve_command(runtime_cmd)
         .args(&container_args)
         .output()
         .map_err(|e| CliError::LocalRedisError(format!("{runtime_name} failed: {e}")))?;
@@ -234,7 +235,7 @@ async fn start_server<P: Progress>(
     let mut redis_args = vec!["--port".to_owned(), port.to_string()];
     redis_args.extend(config.options.args.iter().cloned());
 
-    let child = Command::new(server_cmd)
+    let child = resolve_command(server_cmd)
         .args(&redis_args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -271,7 +272,7 @@ impl LocalRedis {
         let watched_pid = std::process::id();
         let exe = std::env::current_exe().map_err(CliError::CliPathError)?;
 
-        let mut cmd = tokio::process::Command::new(exe);
+        let mut cmd = mirrord_command::resolve_tokio_command(exe);
         cmd.arg("cleanup-guardian")
             .arg("--watch-pid")
             .arg(watched_pid.to_string());
