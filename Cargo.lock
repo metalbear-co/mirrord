@@ -6087,6 +6087,7 @@ version = "3.274.0"
 dependencies = [
  "assert-json-diff",
  "clap",
+ "dunce",
  "futures",
  "inquire",
  "itertools 0.14.0",
