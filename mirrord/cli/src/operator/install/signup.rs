@@ -6,7 +6,7 @@ use mirrord_analytics::AiAgent;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
-use super::{Connection, USER_AGENT, cluster, error::OperatorInstallError};
+use super::{Connection, USER_AGENT, cluster, context_flag, error::OperatorInstallError};
 use crate::config::OperatorSignupArgs;
 
 #[derive(Serialize)]
@@ -34,6 +34,7 @@ pub(crate) async fn operator_signup(args: OperatorSignupArgs) -> Result<(), Oper
         app_url,
     } = args;
 
+    let context_arg = context_flag("--context", context.as_deref());
     let cluster_hint = match (cluster_hint, no_hint) {
         (Some(cluster_hint), _) => Some(cluster_hint),
         (None, true) => None,
@@ -63,7 +64,7 @@ pub(crate) async fn operator_signup(args: OperatorSignupArgs) -> Result<(), Oper
     println!(
         "Started a mirrord Enterprise trial under a new organization. It ends on {}.\n\nClaim the \
         organization: {}\n\nInstall the operator with the trial's API key, which the claim keeps \
-        working:\n\n  mirrord operator install --api-key {}",
+        working:\n\n  mirrord operator install{context_arg} --api-key {}",
         trial.trial_ends_at.format("%B %-d, %Y"),
         trial.claim_url,
         trial.api_key,
