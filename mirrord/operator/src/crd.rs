@@ -859,6 +859,12 @@ pub enum NewOperatorFeature {
 
     ServerlessSessionsManager,
 
+    /// This operator applies `value_selector` / `value_pattern` on `gcp_secret_manager` and
+    /// `aws_secrets_manager` connection sources, picking one field out of a JSON secret. Gated
+    /// so the CLI fails fast: an older operator drops the extractors silently and provisions
+    /// with the whole secret as the value, which surfaces only as a login failure.
+    DbBranchSecretManagerExtract,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -954,6 +960,9 @@ impl Display for NewOperatorFeature {
                 "db_branches resolved from the target's MirrordSplitConfig"
             }
             NewOperatorFeature::ServerlessSessionsManager => "serverless sessions-manager",
+            NewOperatorFeature::DbBranchSecretManagerExtract => {
+                "DB branching field extraction from secret manager sources"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
