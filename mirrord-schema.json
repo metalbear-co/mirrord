@@ -4159,7 +4159,7 @@
           ]
         },
         "include_directories": {
-          "description": "Extra import roots for compiling `schema_file`. The file's own directory is always an\nimport root.",
+          "description": "Extra directories to look for the files that `schema_file` imports in. They are searched\nin order, and then the directory of `schema_file`. A relative path is resolved like\n`schema_file`.",
           "type": "array",
           "items": {
             "type": "string"
@@ -4170,7 +4170,7 @@
           "type": "string"
         },
         "schema_file": {
-          "description": "Path to the `.proto` file defining the payload's message type. Relative paths are\nresolved against the current working directory. Not needed when `descriptor_base64` is\nprovided.",
+          "description": "Path to the `.proto` file defining the payload's message type. Not needed when\n`descriptor_base64` is provided.\n\nA relative path is resolved from the directory you run `mirrord exec` or `mirrord up`\nfrom, not from the directory of the config file. With `mirrord up`, it is also not\nresolved from the service's `run.directory`, because the schema is compiled before the\nservice starts.",
           "type": [
             "string",
             "null"

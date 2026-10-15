@@ -787,14 +787,19 @@ impl FromMirrordConfig for SplitQueuesConfig {
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KafkaPayloadProtobuf {
-    /// Path to the `.proto` file defining the payload's message type. Relative paths are
-    /// resolved against the current working directory. Not needed when `descriptor_base64` is
-    /// provided.
+    /// Path to the `.proto` file defining the payload's message type. Not needed when
+    /// `descriptor_base64` is provided.
+    ///
+    /// A relative path is resolved from the directory you run `mirrord exec` or `mirrord up`
+    /// from, not from the directory of the config file. With `mirrord up`, it is also not
+    /// resolved from the service's `run.directory`, because the schema is compiled before the
+    /// service starts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_file: Option<PathBuf>,
 
-    /// Extra import roots for compiling `schema_file`. The file's own directory is always an
-    /// import root.
+    /// Extra directories to look for the files that `schema_file` imports in. They are searched
+    /// in order, and then the directory of `schema_file`. A relative path is resolved like
+    /// `schema_file`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub include_directories: Vec<PathBuf>,
 
