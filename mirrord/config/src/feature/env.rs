@@ -71,7 +71,8 @@ pub struct EnvConfig {
     /// any character and `*` matches arbitrary many (including zero) occurrences of any character.
     ///
     /// Some of the variables that are excluded by default:
-    /// `PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`.
+    /// `PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`, `TMPDIR`,
+    /// `TMP`, `TEMP`.
     ///
     /// Can be passed as a list or as a semicolon-delimited string (e.g. `"VAR;OTHER_VAR"`).
     #[config(env = MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV)]

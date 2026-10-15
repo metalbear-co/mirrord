@@ -4,16 +4,17 @@ use std::{
 };
 
 use mirrord_sessions_manager_protocol::{
-    AgentIdentity, AssignmentId, AssignmentSubscription, ConnectionAssignment,
+    AgentIdentity, AssignmentId, AssignmentSubscription, ConnectionAssignment, ServiceScope,
 };
 
 use crate::{
     control_plane::{
-        ControlPlaneEvent, ControlPlaneEventStream, HttpControlPlaneClient,
+        ControlPlaneEvent, ControlPlaneEventStream,
         subscriber::{ControlPlaneSubscriber, ControlPlaneSubscription},
     },
     error::SessionsManagerClientError,
     retry::RetryBudget,
+    transport::SessionsManagerTransport,
 };
 
 impl ControlPlaneSubscription for AssignmentSubscription {
@@ -26,11 +27,12 @@ impl ControlPlaneSubscription for AssignmentSubscription {
         }
     }
 
-    async fn subscribe(
+    async fn subscribe<T: SessionsManagerTransport>(
         &self,
-        client: &HttpControlPlaneClient,
+        transport: &T,
+        scope: &ServiceScope,
     ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
-        client.subscribe_assignments(self).await
+        transport.subscribe_assignments(scope, self).await
     }
 
     fn extract(
@@ -147,17 +149,18 @@ impl AssignmentRegistry {
 }
 
 /// Filters replayed assignments from the agent control-plane subscription.
-pub(crate) struct DeduplicatingAssignmentSubscriber {
-    subscriber: ControlPlaneSubscriber<AssignmentSubscription>,
+pub(crate) struct DeduplicatingAssignmentSubscriber<T> {
+    subscriber: ControlPlaneSubscriber<AssignmentSubscription, T>,
     assignments: AssignmentRegistry,
     retry: RetryBudget,
 }
 
-impl DeduplicatingAssignmentSubscriber {
-    pub(crate) fn new(client: HttpControlPlaneClient, identity: AgentIdentity) -> Self {
+impl<T: SessionsManagerTransport> DeduplicatingAssignmentSubscriber<T> {
+    pub(crate) fn new(transport: T, scope: ServiceScope, identity: AgentIdentity) -> Self {
         Self {
             subscriber: ControlPlaneSubscriber::new(
-                client,
+                transport,
+                scope,
                 AssignmentSubscription::Agent(identity),
                 true,
             ),
