@@ -1002,10 +1002,15 @@ pub(super) enum OperatorCommand {
     /// Install the mirrord operator into the cluster of the current kubecontext, or of the one
     /// given with `--context`.
     ///
-    /// Without `--api-key`, starts an Enterprise trial and opens a link to claim it. Installs the
-    /// latest version of the helm chart with default values; use the helm chart directly for a
+    /// Without `--api-key`, logs you in and creates your organization's operator API key. Installs
+    /// the latest version of the helm chart with default values; use the helm chart directly for a
     /// customized installation.
     Install(Box<OperatorInstallArgs>),
+    /// Start a 7-day mirrord Enterprise trial under a new organization, for AI agents.
+    ///
+    /// Prints the trial's operator API key, for `mirrord operator install --api-key`, and the URL
+    /// where the user claims the organization.
+    Signup(OperatorSignupArgs),
     /// Remove the mirrord operator that `mirrord operator install` installed from the cluster of
     /// the current kubecontext, or of the one given with `--context`.
     ///
@@ -1085,6 +1090,32 @@ pub(super) struct OperatorInstallArgs {
         default_value = "5m"
     )]
     pub ready_timeout: Duration,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct OperatorSignupArgs {
+    /// Name shown on the claim page to identify the cluster.
+    ///
+    /// Defaults to the cluster's ID, the UID of its `default` namespace.
+    #[arg(long, conflicts_with = "no_hint")]
+    pub cluster_hint: Option<String>,
+
+    /// Do not send a cluster hint to the claim page.
+    #[arg(long)]
+    pub no_hint: bool,
+
+    /// Kube context whose cluster the hint names, instead of the current one.
+    #[arg(long)]
+    pub context: Option<String>,
+
+    /// Base URL of the MetalBear app, used for the signup.
+    #[arg(
+        long,
+        env = "MIRRORD_OPERATOR_INSTALL_APP_URL",
+        hide = true,
+        default_value = "https://app.metalbear.com"
+    )]
+    pub app_url: String,
 }
 
 #[derive(Args, Debug)]

@@ -1,6 +1,4 @@
-//! `mirrord operator install`: gets a license, installs the operator into the cluster of a
-//! kubecontext, and hands ownership of the license to the user. `mirrord operator uninstall`
-//! removes it again, see [`uninstall`].
+//! `mirrord operator install`, `signup` and `uninstall`: the operator lifecycle without helm.
 
 use std::{io::IsTerminal, ops::Not};
 
@@ -20,12 +18,14 @@ mod api_key;
 mod cluster;
 mod error;
 mod manifest;
+mod signup;
 mod telemetry;
 #[cfg(test)]
 mod tests;
 mod uninstall;
 
 pub(crate) use error::OperatorInstallError;
+pub(super) use signup::operator_signup;
 pub(crate) use telemetry::OperatorTelemetry;
 pub(super) use uninstall::operator_uninstall;
 
@@ -283,26 +283,11 @@ fn context_flag(flag: &str, context: Option<&str>) -> String {
 
 /// What the user needs to know after a successful installation, printed once.
 fn summary(version: &semver::Version, manifest: &Manifest, context: Option<&str>) -> String {
-    let kube_context_arg = context_flag("--kube-context", context);
     let context_arg = context_flag("--context", context);
 
-    let mut summary = format!(
+    format!(
         "mirrord operator {version} is installed in {}. To remove it, run `mirrord operator \
-        uninstall{context_arg}`.\n\n",
+        uninstall{context_arg}`.",
         location(manifest.operator_namespace(), context)
-    );
-    summary.push_str(&format!(
-        "This is a default installation. For anything custom (namespace, tolerations, pull \
-        secrets, OIDC, ...), manage it with the helm chart, which takes over this installation \
-        and keeps its API key:\n\n  helm repo add metalbear {repo}\n  helm install {release} \
-        metalbear/{chart} --version {chart_version}{kube_context_arg} \\\n    --set \
-        cloud.apiKey.key=\"{api_key}\"",
-        chart_version = manifest.chart_version(),
-        api_key = manifest.api_key_lookup(&context_arg),
-        repo = manifest::CHARTS_REPO_URL,
-        release = manifest::RELEASE_NAME,
-        chart = manifest::CHART_NAME,
-    ));
-
-    summary
+    )
 }

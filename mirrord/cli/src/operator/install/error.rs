@@ -228,9 +228,9 @@ pub(crate) enum OperatorInstallError {
 
     #[error("your mirrord organization already has an operator API key")]
     #[diagnostic(help(
-        "Install with that key: `mirrord operator install --api-key <key>`. The key is in the \
-        configuration of any cluster that already runs the operator. If no cluster uses it any \
-        more, revoke it at https://app.metalbear.com/settings and run this command again."
+        "Install with that key, `mirrord operator install --api-key <key>`, which is in the \
+        configuration of any cluster that already runs the operator, or ask an admin of your \
+        organization for it."
     ))]
     ApiKeyExists,
 
@@ -239,6 +239,24 @@ pub(crate) enum OperatorInstallError {
 
     #[error("failed to create the operator API key, the server responded with {status}: {body}")]
     ApiKeyFailed { status: StatusCode, body: String },
+
+    #[error("failed to start a trial")]
+    SignupRequest(#[source] reqwest::Error),
+
+    #[error("too many trials were started from this network recently")]
+    #[diagnostic(help(
+        "Try again later, or sign up at https://app.metalbear.com/account/sign-up instead."
+    ))]
+    SignupRateLimited,
+
+    #[error("starting a trial is currently unavailable")]
+    #[diagnostic(help(
+        "Try again later, or sign up at https://app.metalbear.com/account/sign-up instead."
+    ))]
+    SignupUnavailable,
+
+    #[error("failed to start a trial, the server responded with {status}: {body}")]
+    SignupFailed { status: StatusCode, body: String },
 
     #[error("the mirrord operator is managed by helm")]
     #[diagnostic(help("Remove it with `{uninstall}`."))]

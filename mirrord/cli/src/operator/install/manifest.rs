@@ -21,9 +21,6 @@ pub(super) const RELEASE_NAME: &str = "mirrord-operator";
 /// Set by `render_default_manifest.sh` in the charts repo, the two must stay in sync.
 const API_KEY_PLACEHOLDER: &str = "__MIRRORD_OPERATOR_API_KEY__";
 
-/// The operator Deployment env var the chart puts `cloud.apiKey.key` in.
-const API_KEY_ENV: &str = "OPERATOR_CLOUD_API_KEY";
-
 /// helm only creates objects with this annotation at their point in the release lifecycle. Created
 /// directly, they would run right away, e.g. the chart's pre-delete cleanup Job deletes the
 /// operator's CRDs and Deployment.
@@ -215,19 +212,6 @@ impl Manifest {
 
     pub(super) fn chart_version(&self) -> &semver::Version {
         &self.chart_version
-    }
-
-    /// A shell command substitution that reads the installed operator's API key from the cluster.
-    ///
-    /// Lets users move the installation to helm with the key it already uses, which they may have
-    /// never seen, e.g. when it came from a trial signup. `context_arg` gives kubectl the
-    /// kubecontext of the installation.
-    pub(super) fn api_key_lookup(&self, context_arg: &str) -> String {
-        format!(
-            "$(kubectl{context_arg} -n {} get deployment {} -o \
-            jsonpath='{{.spec.template.spec.containers[*].env[?(@.name==\"{API_KEY_ENV}\")].value}}')",
-            self.operator_namespace, self.operator_deployment,
-        )
     }
 
     /// Attributes all objects to the [`RELEASE_NAME`] helm release in `release_namespace`, so
