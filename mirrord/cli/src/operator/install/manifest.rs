@@ -135,8 +135,6 @@ async fn fetch(http: &reqwest::Client, url: &str) -> Result<Option<String>, Oper
 #[derive(Debug)]
 pub(super) struct Manifest {
     objects: Vec<DynamicObject>,
-    /// Version of the chart the manifest was rendered from, which may differ from the operator's.
-    chart_version: semver::Version,
     operator_deployment: String,
     /// Namespace of the operator Deployment.
     operator_namespace: String,
@@ -164,8 +162,7 @@ impl Manifest {
                     .is_some_and(|types| types.kind == "Deployment")
             })
             .ok_or(OperatorInstallError::NoDeployment)?;
-        let chart_version =
-            chart_version(deployment).ok_or(OperatorInstallError::NoChartVersionLabel)?;
+        chart_version(deployment).ok_or(OperatorInstallError::NoChartVersionLabel)?;
         let operator_version = deployment
             .labels()
             .get(APP_VERSION_LABEL)
@@ -192,7 +189,6 @@ impl Manifest {
 
         Ok(Self {
             objects,
-            chart_version,
             operator_deployment,
             operator_namespace,
         })
@@ -208,10 +204,6 @@ impl Manifest {
 
     pub(super) fn operator_deployment(&self) -> &str {
         &self.operator_deployment
-    }
-
-    pub(super) fn chart_version(&self) -> &semver::Version {
-        &self.chart_version
     }
 
     /// Attributes all objects to the [`RELEASE_NAME`] helm release in `release_namespace`, so
@@ -319,7 +311,6 @@ metadata:
             .collect::<Vec<_>>();
         assert_eq!(names, ["mirrord", "mirrord-operator"]);
         assert_eq!(manifest.operator_namespace(), "mirrord");
-        assert_eq!(manifest.chart_version(), &semver::Version::new(1, 35, 0));
     }
 
     #[test]
