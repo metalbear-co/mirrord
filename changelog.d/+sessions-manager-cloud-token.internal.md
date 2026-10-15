@@ -6,7 +6,7 @@ to point the exchange at somewhere other than `https://app.metalbear.com`. The
 token is reused until a minute before its `exp`, which the client reads without
 verifying; sessions-manager is the one that verifies it. For local development,
 `MIRRORD_METALBEAR_CLOUD_BAGGAGE_SESSION` tags the exchange with
-`baggage: mirrord-session=<key>` so it routes to a locally-run app-server under
+`baggage: mirrord-session=<key>` so it routes to an app-server run locally under
 mirrord, the same way the operator's `OPERATOR_CLOUD_BAGGAGE_SESSION` does. This
 is independent of the `MIRRORD_SESSIONS_MANAGER_AUTH_TOKEN` shared secret, which
 keeps meaning "whatever fronts sessions-manager"; both may be set at once.
