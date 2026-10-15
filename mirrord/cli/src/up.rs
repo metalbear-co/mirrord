@@ -41,6 +41,7 @@ impl MirrordUp {
 #[derive(Debug, Error, Diagnostic)]
 pub enum UpCliError {
     #[error(transparent)]
+    #[diagnostic(transparent)]
     Up(#[from] UpError),
 
     #[error(transparent)]
@@ -234,7 +235,7 @@ mod tests {
     use std::process::ExitStatus;
 
     use mirrord_config::target::TargetType;
-    use mirrord_up::{IncompatibleTarget, ModeError, ServiceMode};
+    use mirrord_up::{IncompatibleTarget, ModeError, SelectError, ServiceMode};
 
     use super::*;
 
@@ -277,6 +278,21 @@ mod tests {
         let v = category(UpCliError::ConfigNotFound);
         assert_eq!(v["success"], false);
         assert_eq!(v["error_category"], ErrorCategory::ConfigValidation as u32);
+    }
+
+    #[test]
+    fn up_errors_keep_their_help() {
+        let error = UpCliError::Up(UpError::Select(SelectError::UnknownServices {
+            unknown: vec!["nope".to_owned()],
+            available: vec!["api".to_owned()],
+        }));
+
+        let help = error.help().map(|help| help.to_string());
+        assert_eq!(
+            help.as_deref(),
+            Some("Available services: api"),
+            "`UpCliError::Up` must forward the wrapped error's help"
+        );
     }
 
     #[test]

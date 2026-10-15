@@ -84,12 +84,15 @@ pub enum UpError {
     Io(#[from] std::io::Error),
 
     /// Failed to parse the mirrord-up YAML configuration.
+    ///
+    /// The message already renders the parse error with its snippet, so it is not also a
+    /// `source`. Otherwise miette prints the snippet a second time, without the suggestion.
     #[error(
         "failed to parse mirrord-up config: {}",
         .0.render_with_formatter(&SuggestingFormatter)
     )]
     #[diagnostic(help("Check the YAML syntax and field names in your mirrord-up.yaml."))]
-    Parse(#[from] serde_saphyr::Error),
+    Parse(serde_saphyr::Error),
 
     /// A service configured a working directory that does not exist.
     #[error("invalid `run.directory` for service `{service}`: `{directory}` is not a directory")]
@@ -202,6 +205,12 @@ impl UpError {
                         | inquire::InquireError::OperationInterrupted
                 )
         )
+    }
+}
+
+impl From<serde_saphyr::Error> for UpError {
+    fn from(error: serde_saphyr::Error) -> Self {
+        Self::Parse(error)
     }
 }
 
@@ -760,6 +769,24 @@ mod tests {
             }
             None => assert_eq!(message, default_message),
         }
+    }
+
+    /// The report shows the YAML snippet once: in the message, with its suggestion.
+    #[test]
+    fn parse_error_report_shows_the_snippet_once() {
+        let yaml = "services:\n  api:\n    default_mode: mirorr\n    run:\n      command: [x]\n";
+        let error = template(yaml, &EnvKey::Provided("key".to_owned())).unwrap_err();
+
+        let mut report = String::new();
+        miette::GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor())
+            .render_report(&mut report, &error)
+            .expect("rendering into a String can't fail");
+
+        assert_eq!(
+            report.matches("--> <input>").count(),
+            1,
+            "the parse error must not repeat as its own source:\n{report}"
+        );
     }
 
     #[test]

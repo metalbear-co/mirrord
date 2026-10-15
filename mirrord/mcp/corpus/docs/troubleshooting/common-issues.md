@@ -90,7 +90,7 @@ When the `local` mode is set, all files will be opened locally. This might preve
 
 If an agent pod's status is `Running`, it means mirrord is probably still running locally as well. Once you terminate the local process, the agent pod's status should change to `Completed`.
 
-On clusters with Kubernetes version v1.23 or higher, agent pods are [automatically cleaned up](https://kubernetes.io/docs/concepts/workloads/controllers/ttlafterfinished/) immediately (or after a [configurable TTL](https://metalbear.com/mirrord/docs/config#agent.ttl)). If your cluster is v1.23 or higher and mirrord agent pods are not being cleaned up automatically, [please open an issue on GitHub](https://github.com/metalbear-co/mirrord/issues/new?assignees=\&labels=bug\&projects=\&template=bug_report.yml\&title=Agent%20pods%20lingering%20after%20completion). As a temporary solution for cleaning up completed agent pods manually, you can run:
+Agent pods are [automatically cleaned up](https://kubernetes.io/docs/concepts/workloads/controllers/ttlafterfinished/) immediately (or after a [configurable TTL](https://metalbear.com/mirrord/docs/config/options#agent-ttl)). On Kubernetes `1.22`, this needs the `TTLAfterFinished` feature gate, which is on by default. If this gate is on and mirrord agent pods are not being cleaned up automatically, [please open an issue on GitHub](https://github.com/metalbear-co/mirrord/issues/new?assignees=\&labels=bug\&projects=\&template=bug_report.yml\&title=Agent%20pods%20lingering%20after%20completion). As a temporary solution for cleaning up completed agent pods manually, you can run:
 
 ```shell
 kubectl delete jobs --selector=app=mirrord --field-selector=status.successful=1

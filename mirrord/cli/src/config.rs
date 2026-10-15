@@ -1691,14 +1691,8 @@ pub(super) struct PreviewStartArgs {
     #[arg(long)]
     pub force: bool,
 
-    /// Kubernetes manifest file or directory to build the preview from, instead of the
-    /// target's live spec. Repeat it to pass several.
-    ///
-    /// Only the target and the ConfigMaps and Secrets its pod uses are taken from the files,
-    /// and only where they differ from what is live. Live objects are never changed: the
-    /// preview gets its own copies. Replaces `feature.preview.spec_resources` from the config.
-    #[arg(long = "resource", value_name = "PATH", value_hint = ValueHint::AnyPath)]
-    pub resources: Vec<PathBuf>,
+    #[command(flatten)]
+    pub manifests: ManifestSourceArgs,
 }
 
 impl PreviewStartArgs {
@@ -1761,10 +1755,45 @@ pub(super) struct PreviewDiffArgs {
     #[arg(short = 'n', long)]
     pub target_namespace: Option<String>,
 
-    /// Kubernetes manifest file or directory to compare. Repeat it to pass several. Replaces
-    /// `feature.preview.spec_resources` from the config.
+    #[command(flatten)]
+    pub manifests: ManifestSourceArgs,
+}
+
+/// Where `mirrord preview start` and `mirrord preview diff` take manifests from instead of the
+/// target's live spec.
+#[derive(Args, Debug, Default)]
+pub(super) struct ManifestSourceArgs {
+    /// Kubernetes manifest file or directory to build the preview from, instead of the
+    /// target's live spec. Repeat it to pass several.
+    ///
+    /// Only the target and the ConfigMaps and Secrets its pod uses are taken from the files,
+    /// and only where they differ from what is live. Live objects are never changed: the
+    /// preview gets its own copies. Replaces `feature.preview.spec_resources` from the config.
     #[arg(long = "resource", value_name = "PATH", value_hint = ValueHint::AnyPath)]
     pub resources: Vec<PathBuf>,
+
+    /// Helm chart to render into manifests and build the preview from, like `--resource`.
+    ///
+    /// Runs `helm template` with the `helm` on your PATH, under the target's namespace and the
+    /// target's name as the release name (see `--release-name`), then handles the rendered
+    /// objects exactly like `--resource`. Can be combined with `--resource`. Replaces
+    /// `feature.preview.helm` from the config.
+    #[arg(long, value_name = "PATH", value_hint = ValueHint::AnyPath)]
+    pub chart: Option<PathBuf>,
+
+    /// Values file for `--chart`, passed to `helm template -f` in this order. Repeat it to
+    /// pass several. Without it the chart's own `values.yaml` is used, which may not match what
+    /// is deployed.
+    #[arg(long, value_name = "PATH", value_hint = ValueHint::FilePath, requires = "chart")]
+    pub values: Vec<PathBuf>,
+
+    /// Release name to render `--chart` under (`.Release.Name`), when the release is not named
+    /// after the target.
+    ///
+    /// Charts usually build object names from the release name, so with the wrong one the
+    /// rendered objects fall outside the target's scope and the preview runs the live spec.
+    #[arg(long, value_name = "NAME", requires = "chart")]
+    pub release_name: Option<String>,
 }
 
 impl PreviewDiffArgs {
