@@ -613,6 +613,15 @@ where
         };
         // Serialize once before the retry layer sees the request, so any replay retains its ID.
         let report_request = async {
+            // API-aware proxies require Kubernetes type metadata; flat data keeps the operator's
+            // report decoder compatible with requests that have no envelope.
+            let resource = ApiResource::from_gvk(&GroupVersionKind::gvk(
+                "operator.metalbear.co",
+                "v1",
+                "FeatureGateHit",
+            ));
+            let report = DynamicObject::new(&report.event_id.to_string(), &resource)
+                .data(serde_json::to_value(&report)?);
             let body = serde_json::to_vec(&report)?;
             let request = Request::builder()
                 .method("POST")
@@ -623,7 +632,7 @@ where
             self.client.request_text(request).await.map_err(|error| {
                 OperatorApiError::KubeError {
                     error,
-                    operation: OperatorOperation::GettingStatus,
+                    operation: OperatorOperation::ReportingFeatureGate,
                 }
             })?;
             Ok::<(), OperatorApiError>(())
@@ -631,9 +640,9 @@ where
         match tokio::time::timeout(Duration::from_secs(2), report_request).await {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
-                tracing::debug!(%error, "Could not report local paid-feature refusal")
+                tracing::debug!(%feature, %error, "Could not report local paid-feature refusal")
             }
-            Err(_) => tracing::debug!("Reporting local paid-feature refusal timed out"),
+            Err(_) => tracing::debug!(%feature, "Reporting local paid-feature refusal timed out"),
         }
     }
 
