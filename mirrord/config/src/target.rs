@@ -32,9 +32,9 @@ pub mod serverless;
 pub mod service;
 pub mod stateful_set;
 
-/// A target path string is deserialized by hand rather than through the untagged enum: serde
-/// discards the error of every variant of an untagged enum, so a typo in the path would only be
-/// reported as "data did not match any variant", without saying what is wrong with it.
+/// Deserialized by hand rather than as an untagged enum: serde discards the error of every variant
+/// of an untagged enum, so a typo in the target path would only be reported as "data did not
+/// match any variant", without saying what is wrong with it.
 #[derive(Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
 #[schemars(
@@ -78,19 +78,13 @@ impl<'de> Deserialize<'de> for TargetFileConfig {
     where
         D: Deserializer<'de>,
     {
-        /// The map forms of [`TargetFileConfig`]. These stay untagged: a map is either a target
-        /// object such as `{ "deployment": "my-app" }` or the advanced form, and only trying both
-        /// tells them apart.
         #[derive(Deserialize)]
-        #[serde(untagged, deny_unknown_fields, rename = "TargetFileConfig")]
-        enum MapForm {
-            Target(Target),
-            Advanced {
-                #[serde(default, deserialize_with = "string_or_struct_option")]
-                path: Option<Target>,
-                #[serde(default)]
-                namespace: Option<String>,
-            },
+        #[serde(deny_unknown_fields)]
+        struct Advanced {
+            #[serde(default, deserialize_with = "string_or_struct_option")]
+            path: Option<Target>,
+            #[serde(default)]
+            namespace: Option<String>,
         }
 
         struct Visitor;
@@ -112,18 +106,66 @@ impl<'de> Deserialize<'de> for TargetFileConfig {
                     .map_err(E::custom)
             }
 
-            fn visit_map<M>(self, map: M) -> Result<Self::Value, M::Error>
+            /// A map is the advanced form when it starts with one of its keys, and a target
+            /// object such as `{ "deployment": "my-app" }` otherwise. Deciding on the first key
+            /// lets the chosen form report its own error, and avoids buffering the map, which
+            /// would lose duplicate keys.
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
             where
                 M: de::MapAccess<'de>,
             {
-                Ok(
-                    match MapForm::deserialize(de::value::MapAccessDeserializer::new(map))? {
-                        MapForm::Target(target) => TargetFileConfig::Simple(Some(target)),
-                        MapForm::Advanced { path, namespace } => {
-                            TargetFileConfig::Advanced { path, namespace }
-                        }
-                    },
-                )
+                let Some(first_key) = map.next_key::<String>()? else {
+                    return Ok(TargetFileConfig::Advanced {
+                        path: None,
+                        namespace: None,
+                    });
+                };
+
+                let advanced = matches!(first_key.as_str(), "path" | "namespace");
+                let map = de::value::MapAccessDeserializer::new(WithFirstKey {
+                    first_key: Some(first_key),
+                    map,
+                });
+
+                if advanced {
+                    Advanced::deserialize(map).map(|Advanced { path, namespace }| {
+                        TargetFileConfig::Advanced { path, namespace }
+                    })
+                } else {
+                    Target::deserialize(map).map(|target| TargetFileConfig::Simple(Some(target)))
+                }
+            }
+        }
+
+        /// Hands back a key already taken from `map`, followed by the rest of `map`.
+        struct WithFirstKey<M> {
+            first_key: Option<String>,
+            map: M,
+        }
+
+        impl<'de, M> de::MapAccess<'de> for WithFirstKey<M>
+        where
+            M: de::MapAccess<'de>,
+        {
+            type Error = M::Error;
+
+            fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
+            where
+                K: de::DeserializeSeed<'de>,
+            {
+                match self.first_key.take() {
+                    Some(key) => seed
+                        .deserialize(de::IntoDeserializer::into_deserializer(key))
+                        .map(Some),
+                    None => self.map.next_key_seed(seed),
+                }
+            }
+
+            fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
+            where
+                V: de::DeserializeSeed<'de>,
+            {
+                self.map.next_value_seed(seed)
             }
         }
 
