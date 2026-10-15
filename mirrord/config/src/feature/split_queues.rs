@@ -737,14 +737,14 @@ impl MirrordConfig for SplitQueuesConfig {
 
     fn generate_config(
         mut self,
-        _context: &mut ConfigContext,
+        context: &mut ConfigContext,
     ) -> crate::config::Result<Self::Generated> {
         // Protobuf schemas are compiled here, on the local machine, because imports in the
         // `.proto` files can only be resolved against the local filesystem. Everything
         // downstream (connect params, the copy-target CRD) carries the compiled descriptor.
         for split in &mut self.0 {
             if let Some(protobuf) = &mut split.payload_protobuf {
-                protobuf.resolve_descriptor(&split.queue_id)?;
+                protobuf.resolve_descriptor(&split.queue_id, context)?;
             }
         }
         Ok(self)
@@ -824,6 +824,7 @@ impl KafkaPayloadProtobuf {
     fn resolve_descriptor(
         &mut self,
         queue_id: &str,
+        context: &ConfigContext,
     ) -> Result<(), QueueSplittingVerificationError> {
         let invalid = |error: String| QueueSplittingVerificationError::ProtobufDescriptorInvalid {
             queue_name: queue_id.to_owned(),
@@ -846,7 +847,7 @@ impl KafkaPayloadProtobuf {
                 }
             }
             (None, Some(schema_file)) => {
-                Self::compile_schema(queue_id, schema_file, &self.include_directories)?
+                Self::compile_schema(queue_id, schema_file, &self.include_directories, context)?
             }
             (None, None) => {
                 return Err(QueueSplittingVerificationError::ProtobufSchemaMissing {
@@ -878,6 +879,7 @@ impl KafkaPayloadProtobuf {
         queue_id: &str,
         schema_file: &Path,
         include_directories: &[PathBuf],
+        context: &ConfigContext,
     ) -> Result<Vec<u8>, QueueSplittingVerificationError> {
         let compile_error = |error: String| QueueSplittingVerificationError::ProtobufCompile {
             queue_name: queue_id.to_owned(),
@@ -885,14 +887,11 @@ impl KafkaPayloadProtobuf {
             errors: error,
         };
 
-        let file_directory = schema_file
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
+        let schema_path = context.resolve_path(schema_file);
         let includes = include_directories
             .iter()
-            .map(PathBuf::as_path)
-            .chain(std::iter::once(file_directory));
+            .map(|include| context.resolve_path(include))
+            .chain(schema_path.parent().map(Path::to_owned));
 
         // Unlike `protox::compile`, source info (comments and source spans) is excluded: the
         // filter only needs the type structure, and descriptor size matters because it rides
@@ -901,7 +900,7 @@ impl KafkaPayloadProtobuf {
             protox::Compiler::new(includes).map_err(|error| compile_error(error.to_string()))?;
         compiler.include_imports(true).include_source_info(false);
         compiler
-            .open_file(schema_file)
+            .open_file(&schema_path)
             .map_err(|error| compile_error(error.to_string()))?;
 
         Ok(compiler.file_descriptor_set().encode_to_vec())
