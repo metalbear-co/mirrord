@@ -424,6 +424,10 @@ pub struct BranchDatabaseStatus {
     /// apart from two that only share an entry id, without re-reading the target's env.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<BranchSourceInfo>,
+    /// Names of the sources this branch copies (databases, a bucket, or a namespace), as mirrord
+    /// policies match them. Empty until the operator has learned them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_names: Vec<String>,
 }
 
 /// Where a branch's data came from: the host, port, and database name of the source the
