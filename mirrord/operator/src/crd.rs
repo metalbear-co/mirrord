@@ -617,8 +617,9 @@ pub enum OperatorFeatures {
 /// - `LicenseType::allows` decides which tiers include the feature. Paid tiers generally get new
 ///   variants automatically, but the free tier is an allowlist, so a new variant is withheld there
 ///   until it is added explicitly. Leaving it withheld is the correct default for anything the
-///   operator adds on top of open-source mirrord. [`KeylessCi`](Self::KeylessCi) is a Free-only
-///   exception: paid and legacy licenses require CI API keys for explicit CI sessions.
+///   operator adds on top of open-source mirrord. [`KeylessCi`](Self::KeylessCi) is advertised by
+///   Free and Teams licenses; Enterprise and legacy licenses require CI API keys for explicit CI
+///   sessions.
 /// - Advertisement filtering is automatic, but *enforcement* is not. If clients request the feature
 ///   through connect params, add it to `ConnectParams::requested_licensed_features`; if it has its
 ///   own endpoint, guard that handler directly.
@@ -842,8 +843,10 @@ pub enum NewOperatorFeature {
     PgBranchAdditionalDatabases,
 
     /// This operator accepts explicit CI sessions using ordinary client certificates without a CI
-    /// API key. Advertised only with a Free license, so clients can reject missing keys before
-    /// requesting credentials or preparing a session on paid or older installations.
+    /// API key. Advertised with Free and Teams licenses, so clients can reject missing keys before
+    /// requesting credentials or preparing a session on Enterprise or legacy installations.
+    /// CI retains the license tier's features; the operator applies the Free target-loader pod
+    /// allowance to Free and Teams CI in each participating cluster.
     KeylessCi,
     /// This operator resolves `feature.db_branches: "*"` (or a list of entry ids) against the
     /// `dbBranches` entries on the target's `MirrordSplitConfig`, through

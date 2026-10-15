@@ -44,11 +44,14 @@ pub(crate) mod stop;
 
 /// Optional CI credentials for operator-backed `mirrord ci start` and `mirrord ci container`.
 ///
-/// Free operators that advertise keyless CI accept automatic ordinary credentials when this is
-/// unset. Other installations require a key from [`generate_ci_api_key`]. The operator enforces its
-/// license policy.
-/// Without the operator, no API key is required. Local `mirrord ci stop` uses saved process
-/// state and requires no operator credentials.
+/// Supporting Free or Teams operators accept automatic ordinary credentials when this is unset.
+/// CI retains the license tier's features. For Free and Teams CI, the operator limits each
+/// target-routing loader to one ready pod per participating cluster, including with a supplied
+/// key. Terminating pods may drain while replacements attach.
+/// Enterprise and legacy installations require a key from [`generate_ci_api_key`]. The operator
+/// enforces its license policy, and a supplied invalid key never falls back to ordinary
+/// credentials. Without the operator, no API key is required. Local `mirrord ci stop` uses saved
+/// process state and requires no operator credentials.
 pub(crate) const MIRRORD_CI_API_KEY: &str = "MIRRORD_CI_API_KEY";
 
 /// Alias for mirrord-for-ci results.
@@ -295,8 +298,11 @@ fn spawn_background_user_command(
 /// Retains explicit CI metadata independently of the optional [`CiApiKey`].
 ///
 /// Operator-backed sessions use automatic ordinary credentials when the key is absent and the
-/// operator advertises keyless CI, so paid or older installations reject missing keys before
-/// credential issuance or session preparation. The operator also enforces its license policy.
+/// operator advertises keyless CI for Free or Teams. CI retains the license tier's features; the
+/// operator applies Free's target-loader pod allowance to Free and Teams CI in each participating
+/// cluster. Existing keyless clients use the same capability on either tier. Missing keys are
+/// rejected before credential issuance on operators without keyless CI. Supplied keys retain
+/// their authentication errors, and the operator independently enforces its license policy.
 ///
 /// `mirrord ci start` stores the process group of the background user command and the pid of our
 /// intproxy so that we can stop these processes on `mirrord ci stop`.
