@@ -4,6 +4,7 @@
 use std::{
     fmt::Debug,
     pin::pin,
+    sync::atomic::{AtomicBool, Ordering},
     task::{Context, Poll, Waker},
 };
 
@@ -42,4 +43,34 @@ fn return_values_coerce_to_the_declared_type() {
     assert_eq!(format!("{:?}", block_on(unsize_return(true))), "\"early\"");
     assert_eq!(format!("{:?}", block_on(unsize_return(false))), "2");
     assert_eq!(block_on(deref_tail(&"tail".to_owned())), "tail");
+}
+
+static DROPPED: AtomicBool = AtomicBool::new(false);
+
+struct DropFlag;
+
+impl Drop for DropFlag {
+    fn drop(&mut self) {
+        DROPPED.store(true, Ordering::SeqCst);
+    }
+}
+
+#[mirrord_macros::boxed_future]
+async fn ignores_a_field((value, _): (u8, DropFlag)) -> bool {
+    let _ = value;
+    DROPPED.load(Ordering::SeqCst)
+}
+
+/// A pattern that binds only some fields must not drop the rest before the first poll, the way
+/// an ignored `drain::Watch` would end a graceful shutdown early.
+#[test]
+fn ignored_fields_live_until_the_future_runs() {
+    DROPPED.store(false, Ordering::SeqCst);
+    let future = ignores_a_field((1, DropFlag));
+    assert!(
+        !DROPPED.load(Ordering::SeqCst),
+        "dropped before the first poll"
+    );
+    assert!(!block_on(future), "dropped before the body ran");
+    assert!(DROPPED.load(Ordering::SeqCst));
 }

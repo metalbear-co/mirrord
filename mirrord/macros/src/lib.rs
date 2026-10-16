@@ -129,7 +129,12 @@ pub fn boxed_future(attr: TokenStream, input: TokenStream) -> TokenStream {
                     let pattern = std::mem::replace(&mut *typed.pat, syn::parse_quote!(#generated));
                     bindings.push(match pattern {
                         Pat::Wild(_) => quote! { let _ = &#generated; },
-                        pattern => quote! { let #pattern = #generated; },
+                        // The mention keeps the whole argument in the future: matching alone
+                        // would move only the fields the pattern binds.
+                        pattern => quote! {
+                            let _ = &#generated;
+                            let #pattern = #generated;
+                        },
                     });
                 }
             },
