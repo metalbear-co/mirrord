@@ -4149,7 +4149,7 @@
         },
         "start_idle_timeout": {
           "title": "internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}",
-          "description": "How much time to wait for the first connection to the proxy in seconds.\n\nCommon cases would be running with dlv or any other debugger, which sets a breakpoint\non process execution, delaying the layer startup and connection to proxy.\n\n```json\n{\n  \"internal_proxy\": {\n    \"start_idle_timeout\": 60\n  }\n}\n```",
+          "description": "How much time to wait for the first connection to the proxy in seconds.\n\nDefaults to 60. When an IDE extension starts mirrord, the proxy instead waits for the\nfirst connection for as long as the session lasts, since the IDE may build the\napplication before starting it.\n\nCommon cases would be running with dlv or any other debugger, which sets a breakpoint\non process execution, delaying the layer startup and connection to proxy.\n\n```json\n{\n  \"internal_proxy\": {\n    \"start_idle_timeout\": 60\n  }\n}\n```",
           "type": [
             "integer",
             "null"
