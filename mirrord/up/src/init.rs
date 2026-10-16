@@ -76,7 +76,11 @@ pub fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
         }
     }
 
-    let cfg = UpConfig { common, services };
+    let cfg = UpConfig {
+        common,
+        modes: Default::default(),
+        services,
+    };
     let rendered = render_yaml(&cfg)?;
 
     println!("\n--- Step 3: Preview ---\n{rendered}");
@@ -532,6 +536,7 @@ mod tests {
                 telemetry: None,
                 context: None,
             },
+            modes: Default::default(),
             services: [("api".into(), sample_service())].into_iter().collect(),
         };
         let rendered = render_yaml(&cfg).unwrap();
@@ -554,6 +559,7 @@ mod tests {
     fn omits_common_when_all_default() {
         let cfg = UpConfig {
             common: CommonConfig::default(),
+            modes: Default::default(),
             services: [("svc".into(), sample_service())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
@@ -589,6 +595,7 @@ mod tests {
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
+            modes: Default::default(),
             services: [("svc".into(), svc.clone())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
@@ -633,6 +640,7 @@ mod tests {
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
+            modes: Default::default(),
             services: [("svc".into(), svc.clone())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
@@ -681,6 +689,7 @@ mod tests {
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
+            modes: Default::default(),
             services: [("svc".into(), svc.clone())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();

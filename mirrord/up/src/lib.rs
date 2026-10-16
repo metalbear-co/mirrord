@@ -18,9 +18,9 @@ use std::{
 };
 
 pub use config::{
-    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, ModeError,
-    SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SubprocessCfg,
-    UpConfig, WindowsSupportError,
+    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, ModeConfig, ModeError,
+    ModeNameError, QueuesMode, SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError,
+    ServiceMode, SubprocessCfg, UpConfig, WindowsSupportError,
 };
 use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
@@ -125,6 +125,11 @@ pub enum UpError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Select(#[from] SelectError),
+
+    /// A mode is defined or selected under a name `mirrord up` can't use.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    ModeName(#[from] ModeNameError),
 
     /// A service's mode can't be used with the target it resolved to.
     #[error(transparent)]
@@ -291,6 +296,14 @@ impl UpConfig {
     /// Doesn't look at the filesystem, so it also serves to validate a config that isn't on disk
     /// (e.g. in `mirrord mcp`); [`load_up_config`] runs it before resolving the services' paths.
     pub fn verify(&self) -> Result<(), UpError> {
+        if let Some(builtin) = self
+            .modes
+            .keys()
+            .find(|name| ServiceMode::from_name(name).is_some())
+        {
+            return Err(ModeNameError::Builtin(builtin.clone()).into());
+        }
+
         for (service, service_config) in &self.services {
             if service_config.run.directory.is_some()
                 && matches!(service_config.run.r#type, config::RunType::Container)
