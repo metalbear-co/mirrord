@@ -938,13 +938,21 @@ impl LayerConfig {
             .iter()
             .map(|capability| capability.as_spec_str())
             .collect::<Vec<_>>();
-        for name in self.agent.disabled_capabilities.iter().flatten() {
-            if known_capabilities.contains(&name.as_str()).not() {
-                context.add_warning(format!(
-                    "`{name}` in `agent.disabled_capabilities` is ignored, valid values are: {}.",
-                    known_capabilities.join(", ")
-                ));
-            }
+        let ignored_caps = self
+            .agent
+            .disabled_capabilities
+            .iter()
+            .flatten()
+            .filter(|name| known_capabilities.contains(&name.as_str()).not())
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+
+        if ignored_caps.is_empty().not() {
+            context.add_warning(format!(
+                "`{}` in `agent.disabled_capabilities` is ignored, valid values are: {}.",
+                ignored_caps.join(", "),
+                known_capabilities.join(", ")
+            ));
         }
 
         if matches!(
@@ -3097,11 +3105,11 @@ mod tests {
         assert!(default_config().feature.magic.auto_mount);
     }
 
-    /// A name that isn't one of the agent's capabilities is ignored, so the user gets a warning.
+    /// Names that aren't one of the agent's capabilities are ignored, so the user gets a warning.
     #[test]
     fn unknown_disabled_capability_warns() {
         let config = ConfigType::Json
-            .parse(r#"{ "agent": { "disabled_capabilities": ["SYS_PTRACE", "CAP_SYS_ADMIN"] } }"#);
+            .parse(r#"{ "agent": { "disabled_capabilities": ["SYS_PTRACE", "CAP_SYS_ADMIN", "CAP_NET_ADMIN"] } }"#);
 
         let mut context = ConfigContext::default();
         let resolved = config
@@ -3117,7 +3125,7 @@ mod tests {
             .filter(|warning| warning.contains("agent.disabled_capabilities"))
             .collect::<Vec<_>>();
         assert!(
-            matches!(warnings.as_slice(), [warning] if warning.contains("`CAP_SYS_ADMIN`")),
+            matches!(warnings.as_slice(), [warning] if warning.contains("`CAP_SYS_ADMIN, CAP_NET_ADMIN`")),
             "unexpected warnings: {warnings:?}"
         );
     }
