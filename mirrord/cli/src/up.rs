@@ -309,7 +309,7 @@ mod tests {
         let v = category(UpCliError::Up(UpError::Mode(
             ModeError::IncompatibleTargets(vec![IncompatibleTarget {
                 service: "svc".into(),
-                mode: ServiceMode::Replace,
+                mode: ServiceMode::Replace.into(),
                 target_type: TargetType::Targetless,
             }]),
         )));

@@ -10,7 +10,14 @@
 //! that failed to deserialize, because it reports every problem at once, each with its location
 //! and, where the schema lists them, the allowed values, where serde stops at the first error.
 
-use std::{collections::HashSet, fmt, ops::Not, path::Path, str::FromStr};
+use std::{
+    collections::{BTreeMap, HashSet},
+    fmt,
+    ops::Not,
+    path::Path,
+    str::FromStr,
+    sync::Arc,
+};
 
 use jsonschema::{
     ValidationError,
@@ -25,7 +32,7 @@ use mirrord_config::{
     target::{TARGET_PATH_FORMATS, Target},
 };
 use mirrord_up::{
-    CommonConfig, SERVICE_LAYER_PATHS, ServiceConfig, ServiceError, UpConfig, UpError,
+    CommonConfig, ModeConfig, SERVICE_LAYER_PATHS, ServiceConfig, ServiceError, UpConfig, UpError,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -458,6 +465,10 @@ fn check_services(
         .get("common")
         .and_then(|common| CommonConfig::deserialize(common).ok())
         .unwrap_or_default();
+    let modes = up_config
+        .get("modes")
+        .and_then(|modes| BTreeMap::<Arc<str>, ModeConfig>::deserialize(modes).ok())
+        .unwrap_or_default();
     // Isolated from the environment like the merged config in `mirrord up`, whose
     // environment-derived settings come from the generated config rather than the patch.
     let check =
@@ -469,7 +480,11 @@ fn check_services(
         let patch = settings.get("config_patch");
         let generated = match ServiceConfig::deserialize(settings) {
             Ok(config) => {
-                match config.unpatched_config_json(&service.as_str().into(), &common, key) {
+                // An unknown mode is reported by `UpConfig::verify`.
+                let Ok(mode) = ModeConfig::named(&modes, config.default_mode()) else {
+                    continue;
+                };
+                match config.unpatched_config_json(&service.as_str().into(), &common, &mode, key) {
                     Ok(generated) => Some(generated),
                     Err(error) => {
                         service_issues.push(ConfigIssue {
