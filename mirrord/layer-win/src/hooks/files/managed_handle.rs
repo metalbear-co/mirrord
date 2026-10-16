@@ -13,7 +13,7 @@ use std::{
 };
 
 use once_cell::sync::Lazy;
-use str_win::path_to_unix_path;
+use str_win::{UnixPath, path_to_unix_path};
 use winapi::{
     shared::{
         minwindef::{FILETIME, ULONG},
@@ -90,6 +90,9 @@ static MANAGED_FILES: Lazy<FileRegistry> = Lazy::new(|| ManagedRegistry::new("MA
 pub(in crate::hooks::files) struct HandleContext {
     /// The Linux path, maps to the `fd`
     pub(in crate::hooks::files) path: String,
+    /// The path the program opened, before `feature.fs.mapping` rewrote it into [`Self::path`].
+    /// A later call that names the file instead of passing this handle names it this way.
+    pub(in crate::hooks::files) requested_path: UnixPath,
     /// Remote file descriptor for file
     pub(in crate::hooks::files) fd: u64,
     /// Windows desired access
@@ -262,13 +265,21 @@ pub(in crate::hooks::files) fn remove_handle(handle: HANDLE) {
     MANAGED_FILES.remove(&handle);
 }
 
-/// Run `fun` closure over each handle whose path matches the `object_attributes`.
+/// Run `fun` closure over each handle open on the file that `object_attributes` names.
+///
+/// A handle is open on that file when it was opened with the same drive and path, in any case
+/// (see [`HandleContext::requested_path`]). So a file that `feature.fs.mapping` sent elsewhere is
+/// still found by the name the program uses, and `C:\app.json` is not `D:\app.json`.
 ///
 /// # Arguments
 ///
 /// * `object_attributes` - The function should be used in the context of NT hooks where you're
 ///   provided a [`POBJECT_ATTRIBUTES`] structure instead of a [`HANDLE`].
 /// * `fun` - Anything but.
+///
+/// # Returns
+///
+/// Whether any handle was open on the file.
 pub(in crate::hooks::files) fn for_each_handle_with_path(
     object_attributes: POBJECT_ATTRIBUTES,
     mut fun: impl FnMut(&MirrordFileHandle, &HandleContext),
@@ -276,10 +287,12 @@ pub(in crate::hooks::files) fn for_each_handle_with_path(
     let mut any = false;
 
     let name = read_object_attributes_name(object_attributes);
-    if let Some(linux_name) = path_to_unix_path(name) {
+    if let Some(named) = path_to_unix_path(name) {
+        let named_path = named.path.to_lowercase();
         MANAGED_FILES.for_each(|handle, handle_context| {
             if let Ok(handle_context) = handle_context.try_read()
-                && handle_context.path == linux_name
+                && handle_context.requested_path.drive == named.drive
+                && handle_context.requested_path.path.to_lowercase() == named_path
             {
                 fun(handle, &handle_context);
                 any = true;
@@ -292,6 +305,8 @@ pub(in crate::hooks::files) fn for_each_handle_with_path(
 
 #[cfg(test)]
 mod tests {
+    use winapi::shared::ntdef::{OBJECT_ATTRIBUTES, UNICODE_STRING};
+
     use super::*;
 
     fn context() -> HandleContext {
@@ -301,6 +316,10 @@ mod tests {
         };
         HandleContext {
             path: "/app/config.json".to_owned(),
+            requested_path: UnixPath {
+                drive: Some('C'),
+                path: "/app/config.json".to_owned(),
+            },
             fd: 3,
             desired_access: 0,
             file_attributes: 0,
@@ -328,5 +347,76 @@ mod tests {
 
         remove_handle(handle);
         assert!(managed_file(handle).is_none());
+    }
+
+    /// Registers a handle the program opened as `requested`, which `feature.fs.mapping` sent to
+    /// `/app/appsettings.json` on the remote.
+    fn open_mapped(requested: &str) -> HANDLE {
+        insert_handle(HandleContext {
+            path: "/app/appsettings.json".to_owned(),
+            requested_path: path_to_unix_path(requested).expect("the test path is rooted"),
+            ..context()
+        })
+        .raw()
+    }
+
+    /// The handles [`for_each_handle_with_path`] finds for the NT path `name`.
+    fn handles_open_on(name: &str) -> Vec<HANDLE> {
+        // NUL-terminated like the names Windows passes, with the NUL outside `Length`.
+        let mut wide = name.encode_utf16().chain([0]).collect::<Vec<_>>();
+        let bytes = u16::try_from((wide.len() - 1) * 2).expect("the test path is short");
+        let mut object_name = UNICODE_STRING {
+            Length: bytes,
+            MaximumLength: bytes + 2,
+            Buffer: wide.as_mut_ptr(),
+        };
+        // SAFETY: all-zero is a valid `OBJECT_ATTRIBUTES`: no root directory and null pointers.
+        let mut attributes: OBJECT_ATTRIBUTES = unsafe { std::mem::zeroed() };
+        attributes.Length = size_of::<OBJECT_ATTRIBUTES>() as ULONG;
+        attributes.ObjectName = &mut object_name;
+
+        let mut found = Vec::new();
+        for_each_handle_with_path(&mut attributes, |handle, _| found.push(handle.raw()));
+        found
+    }
+
+    /// A call that names a mapped file finds its handle by the name the program used, not by
+    /// the remote path the mapping chose.
+    #[test]
+    fn a_mapped_handle_is_found_by_the_name_the_program_opened() {
+        let handle = open_mapped(r"\??\C:\Repos\mapped\appsettings.json");
+
+        let found = handles_open_on(r"\??\C:\Repos\mapped\appsettings.json");
+        remove_handle(handle);
+
+        assert_eq!(found, [handle]);
+    }
+
+    /// File names on Windows ignore case, so a different case names the same file.
+    #[test]
+    fn a_handle_is_found_by_its_name_in_another_case() {
+        let handle = open_mapped(r"\??\C:\Repos\cased\appsettings.json");
+
+        let found = handles_open_on(r"\??\c:\REPOS\Cased\AppSettings.json");
+        remove_handle(handle);
+
+        assert_eq!(found, [handle]);
+    }
+
+    /// The same path on another drive is another file, even when the remote path is the same.
+    #[test]
+    fn a_handle_is_not_found_on_another_drive() {
+        let handle = insert_handle(HandleContext {
+            path: "/Repos/drive/appsettings.json".to_owned(),
+            requested_path: path_to_unix_path(r"\??\C:\Repos\drive\appsettings.json")
+                .expect("the test path is rooted"),
+            ..context()
+        })
+        .raw();
+
+        let found = handles_open_on(r"\??\D:\Repos\drive\appsettings.json");
+        remove_handle(handle);
+
+        assert!(found.is_empty(), "D: holds another file, got {found:?}");
     }
 }

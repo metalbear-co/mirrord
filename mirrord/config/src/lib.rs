@@ -20,6 +20,7 @@ pub mod logfile_path;
 pub mod plan;
 pub mod retry;
 pub mod target;
+pub mod template;
 pub mod util;
 
 use std::{collections::HashMap, ffi::OsStr, io::Read, ops::Not, path::Path};
@@ -52,7 +53,7 @@ use tera::Tera;
 use tracing::warn;
 
 use crate::{
-    agent::AgentConfig,
+    agent::{AgentConfig, LinuxCapability},
     ci::CiConfig,
     config::{FromFileError, source::MirrordConfigSource},
     container::ContainerConfig,
@@ -935,6 +936,27 @@ impl LayerConfig {
             );
         }
 
+        let known_capabilities = LinuxCapability::all()
+            .iter()
+            .map(|capability| capability.as_spec_str())
+            .collect::<Vec<_>>();
+        let ignored_caps = self
+            .agent
+            .disabled_capabilities
+            .iter()
+            .flatten()
+            .filter(|name| known_capabilities.contains(&name.as_str()).not())
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+
+        if ignored_caps.is_empty().not() {
+            context.add_warning(format!(
+                "`{}` in `agent.disabled_capabilities` is ignored, valid values are: {}.",
+                ignored_caps.join(", "),
+                known_capabilities.join(", ")
+            ));
+        }
+
         if matches!(
             self.feature.network.outgoing.filter,
             Some(OutgoingFilterConfig::Remote(_))
@@ -946,6 +968,8 @@ impl LayerConfig {
                 resolved locally. Consider enabling the remote DNS resolution feature.".to_owned(),
             );
         }
+
+        self.feature.fs.verify(context);
 
         let http_filter = &self.feature.network.incoming.http_filter;
         let used_filters = [
@@ -1554,6 +1578,10 @@ impl LayerFileConfig {
     /// Renders the Tera templates in the raw `content` of a config file, returning the text that
     /// gets deserialized. `path` only selects how the `key` field is extracted from `content`.
     ///
+    /// Besides Tera's own functions and filters, templates can use the `path_pattern` and
+    /// `regex_escape` filters of the `template` module, which print text that is safe in a
+    /// pattern.
+    ///
     /// # Key Resolution for Template Rendering
     ///
     /// Config files can reference `{{ key }}` in templates (e.g., for HTTP header filters).
@@ -1578,6 +1606,7 @@ impl LayerFileConfig {
         context: &mut ConfigContext,
     ) -> Result<String, FromFileError> {
         let mut template_engine = Tera::default();
+        template::register(&mut template_engine);
         template_engine.add_raw_template("main", content)?;
 
         let mut tera_context = tera::Context::new();
@@ -3107,5 +3136,30 @@ mod tests {
     #[test]
     fn magic_auto_mount_defaults_to_enabled() {
         assert!(default_config().feature.magic.auto_mount);
+    }
+
+    /// Names that aren't one of the agent's capabilities are ignored, so the user gets a warning.
+    #[test]
+    fn unknown_disabled_capability_warns() {
+        let config = ConfigType::Json
+            .parse(r#"{ "agent": { "disabled_capabilities": ["SYS_PTRACE", "CAP_SYS_ADMIN", "CAP_NET_ADMIN"] } }"#);
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify(&mut context)
+            .expect("an unknown capability should not be an error");
+
+        let warnings = context
+            .into_warnings()
+            .into_iter()
+            .filter(|warning| warning.contains("agent.disabled_capabilities"))
+            .collect::<Vec<_>>();
+        assert!(
+            matches!(warnings.as_slice(), [warning] if warning.contains("`CAP_SYS_ADMIN, CAP_NET_ADMIN`")),
+            "unexpected warnings: {warnings:?}"
+        );
     }
 }

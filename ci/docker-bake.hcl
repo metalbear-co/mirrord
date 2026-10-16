@@ -142,7 +142,7 @@ target "ci-layer-build-aarch64" {
   ])
 }
 
-# Base Rust build image with nightly toolchain and protobuf compiler.
+# Base Rust build image with the pinned Rust toolchain and protobuf compiler.
 target "ci-rust-build" {
   context    = "./ci"
   dockerfile = "rust-build/Dockerfile"

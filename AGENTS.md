@@ -69,7 +69,8 @@ Never write unit tests unless explicitly asked. Run the existing tests to verify
 
 ```bash
 # Formatting
-cargo fmt
+# rustfmt.toml uses nightly-only options, so use the nightly rustfmt pinned in CI (`PINNED_RUSTFMT_TOOLCHAIN`)
+cargo +nightly-2026-08-13 fmt
 ```
 
 ## Simplicity and Reuse
