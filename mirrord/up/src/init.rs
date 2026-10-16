@@ -122,6 +122,7 @@ pub async fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
 
     let cfg = UpConfig {
         common: CommonConfig::default(),
+        modes: Default::default(),
         services,
     };
     let rendered = render_yaml(&cfg)?;
@@ -526,6 +527,7 @@ fn render_yaml(cfg: &UpConfig) -> Result<String, InitError> {
     // that sets only its required field.
     let defaults = serde_yaml::to_value(UpConfig {
         common: CommonConfig::default(),
+        modes: Default::default(),
         services: HashMap::new(),
     })?;
     remove_defaults(&mut value, &defaults);
@@ -673,6 +675,7 @@ mod tests {
                 telemetry: None,
                 context: None,
             },
+            modes: Default::default(),
             services: [("api".into(), sample_service())].into_iter().collect(),
         };
         let rendered = render_yaml(&cfg).unwrap();
@@ -695,6 +698,7 @@ mod tests {
     fn omits_common_when_all_default() {
         let cfg = UpConfig {
             common: CommonConfig::default(),
+            modes: Default::default(),
             services: [("svc".into(), sample_service())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
@@ -730,6 +734,7 @@ mod tests {
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
+            modes: Default::default(),
             services: [("svc".into(), svc.clone())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
@@ -780,6 +785,7 @@ mod tests {
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
+            modes: Default::default(),
             services: [("svc".into(), svc.clone())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
@@ -828,6 +834,7 @@ mod tests {
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
+            modes: Default::default(),
             services: [("svc".into(), svc.clone())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();

@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     ops::Not,
     path::PathBuf,
     sync::Arc,
@@ -88,6 +88,16 @@ pub enum ServiceMode {
     Mirror,
 }
 
+impl ServiceMode {
+    /// The built-in mode named `name`, if there is one.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::VARIANTS
+            .iter()
+            .copied()
+            .find(|mode| <&str>::from(mode) == name)
+    }
+}
+
 // Manual impl because we want different user-facing docs
 impl ValueEnum for ServiceMode {
     fn value_variants<'a>() -> &'a [Self] {
@@ -123,6 +133,56 @@ impl Into<QueueMode> for ServiceMode {
         match self {
             ServiceMode::Split | ServiceMode::Replace => QueueMode::Steal,
             ServiceMode::Mirror => QueueMode::Mirror,
+        }
+    }
+}
+
+/// How a custom mode splits the service's queues.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum QueuesMode {
+    /// Messages matching the session are consumed by the local service only
+    /// (`queue_mode: steal`).
+    Split,
+
+    /// Messages matching the session reach both the local and the original service
+    /// (`queue_mode: mirror`).
+    Mirror,
+}
+
+impl From<QueuesMode> for QueueMode {
+    fn from(mode: QueuesMode) -> Self {
+        match mode {
+            QueuesMode::Split => QueueMode::Steal,
+            QueuesMode::Mirror => QueueMode::Mirror,
+        }
+    }
+}
+
+/// A custom mode, defined under `modes` and selected by name with `default_mode` or
+/// `mirrord up --mode`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ModeConfig {
+    /// How incoming traffic is handled, as in the built-in mode of the same name. Defaults to
+    /// `split`.
+    #[serde(default)]
+    pub incoming: ServiceMode,
+
+    /// How the service's queues are split. When not set, every queue defined in the cluster is
+    /// split, mirrored with `incoming: mirror` and stolen otherwise.
+    ///
+    /// Ignored with `incoming: replace`, which doesn't split queues.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queues: Option<QueuesMode>,
+}
+
+impl From<ServiceMode> for ModeConfig {
+    /// The built-in mode as a custom one.
+    fn from(incoming: ServiceMode) -> Self {
+        Self {
+            incoming,
+            queues: None,
         }
     }
 }
@@ -528,6 +588,11 @@ pub struct UpConfig {
     #[serde(default)]
     #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
     pub common: CommonConfig,
+    /// Custom modes keyed by name, selected with a service's `default_mode` or
+    /// `mirrord up --mode`. The built-in names (`split`, `replace`, `mirror`) are reserved.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
+    pub modes: BTreeMap<Arc<str>, ModeConfig>,
     /// Per-service configurations keyed by service name.
     #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
     pub services: HashMap<Arc<str>, ServiceConfig>,
@@ -1040,6 +1105,33 @@ impl UpConfig {
         }
     }
 
+    /// The mode named `name`: a built-in one, or one defined under `modes`.
+    pub fn mode(&self, name: &str) -> Result<ModeConfig, ModeNameError> {
+        if let Some(builtin) = ServiceMode::from_name(name) {
+            return Ok(builtin.into());
+        }
+
+        if let Some(mode) = self.modes.get(name) {
+            return Ok(mode.clone());
+        }
+
+        let known = ServiceMode::VARIANTS
+            .iter()
+            .map(|mode| Arc::from(<&str>::from(mode)))
+            .chain(self.modes.keys().cloned())
+            .collect::<Vec<_>>();
+
+        let suggestion =
+            crate::closest_name(name, &known.iter().map(AsRef::as_ref).collect::<Vec<_>>())
+                .map(Arc::from);
+
+        Err(ModeNameError::Unknown {
+            name: name.into(),
+            suggestion,
+            known,
+        })
+    }
+
     /// Restrict which services will be launched.
     ///
     /// When `selected` is non-empty, keeps exactly those services,
@@ -1132,6 +1224,33 @@ impl UpConfig {
             .iter()
             .filter_map(move |(name, svc)| svc.resolve_target(name, up_context.clone()).err())
     }
+}
+
+/// A mode name that `mirrord up` can't use.
+#[derive(Debug, Error, Diagnostic)]
+pub enum ModeNameError {
+    /// A custom mode takes the name of a built-in one.
+    #[error("`modes.{0}` conflicts with the built-in `{0}` mode")]
+    #[diagnostic(help("Rename the mode: `split`, `replace` and `mirror` are reserved."))]
+    Builtin(Arc<str>),
+
+    /// A mode was selected that is neither built-in nor defined under `modes`.
+    #[error(
+        "unknown mode `{name}`{}",
+        suggestion
+            .as_ref()
+            .map(|closest| format!("; did you mean `{closest}`?"))
+            .unwrap_or_default()
+    )]
+    #[diagnostic(help("Known modes: {}", known.join(", ")))]
+    Unknown {
+        /// The name that was selected.
+        name: Arc<str>,
+        /// The closest known name, if one is close enough.
+        suggestion: Option<Arc<str>>,
+        /// Every mode that can be selected.
+        known: Vec<Arc<str>>,
+    },
 }
 
 /// Error produced by [`UpConfig::select_services`].
