@@ -240,10 +240,22 @@ pub struct AgentConfig {
 
     /// ### agent.disabled_capabilities {#agent-disabled_capabilities}
     ///
+    /// Linux capabilities to remove from the agent container.
+    ///
     /// If nothing is disabled here, agent uses:
     /// 1. `NET_ADMIN`,
     /// 2. `SYS_PTRACE`,
     /// 3. `SYS_ADMIN`.
+    ///
+    /// The names have to be written exactly as above, any other value is ignored.
+    ///
+    /// ```json
+    /// {
+    ///   "agent": {
+    ///     "disabled_capabilities": ["NET_ADMIN"]
+    ///   }
+    /// }
+    /// ```
     ///
     /// Has no effect when using the targetless mode,
     /// as targetless agent containers have no capabilities.
