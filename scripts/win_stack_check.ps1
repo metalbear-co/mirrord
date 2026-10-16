@@ -50,8 +50,8 @@ Set-Content $kubeconfig "apiVersion: v1`nkind: Config`nclusters: []`ncontexts: [
 # Quotes one argument the way CommandLineToArgvW reads it back.
 function ConvertTo-CommandLineArgument([string]$Argument) {
     if ($Argument -and $Argument -notmatch '[\s"]') { return $Argument }
-    $escaped = $Argument -replace '(\*)"', '$1$1\"'
-    $escaped = $escaped -replace '(\+)$', '$1$1'
+    $escaped = $Argument -replace '(\\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\\+)$', '$1$1'
     return '"' + $escaped + '"'
 }
 
