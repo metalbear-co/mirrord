@@ -33,7 +33,8 @@ mod brand {
     use ratatui::style::Color;
 
     pub use crate::theme::{
-        AMBER as YELLOW, INDIGO as PURPLE, INK, MINT as SUCCESS, MUTED as GREY,
+        AMBER as YELLOW, INDIGO as PURPLE, INK, MINT as SUCCESS, MUTED as GREY, SKY as NAMESPACE,
+        TEAL as TARGET,
     };
 
     /// `Initializing`: `Waiting`'s purple, dimmed.
@@ -45,14 +46,6 @@ mod brand {
     /// `Paused` are the two scaled-to-zero phases and read as a pair for that reason; only `Idle`
     /// still wakes on traffic, so the paused one is the quieter of the two.
     pub const YELLOW_DIM: Color = Color::Rgb(0xB8, 0x96, 0x5E);
-
-    /// Every namespace box. The brand palette has only three hues (purple, yellow, mint) plus
-    /// ink/grey neutrals, and the phase colors above already use all of them, so this steps
-    /// outside the brand list rather than reuse a phase color for an unrelated meaning.
-    pub const NAMESPACE: Color = Color::Rgb(0x5B, 0x9D, 0xF3);
-
-    /// Every target box - see [`NAMESPACE`].
-    pub const TARGET: Color = Color::Rgb(0x4D, 0xB6, 0xB0);
 }
 
 fn phase_color(session: &PreviewSession) -> Color {

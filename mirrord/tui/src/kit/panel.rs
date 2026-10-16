@@ -5,7 +5,7 @@
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Padding},
+    widgets::{Block, BorderType, Padding},
 };
 
 use crate::theme;
@@ -48,9 +48,10 @@ pub fn block(
     title.push(Span::raw(" "));
 
     let mut block = Block::bordered()
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme::FILL_DIM))
         .padding(Padding::horizontal(1))
-        .title(Line::from(title).centered());
+        .title(Line::from(title));
     if let Some(note) = note {
         block = block.title_top(Line::styled(format!(" {note} "), theme::muted()).right_aligned());
     }

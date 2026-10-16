@@ -4,7 +4,7 @@
 
 use std::{ops::ControlFlow, path::PathBuf};
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -73,10 +73,17 @@ impl Modal {
         }
     }
 
-    fn typing(&self) -> bool {
+    fn handle_mouse(&mut self, mouse: &MouseEvent) -> Option<FormOutcome> {
         match self {
-            Self::Service { form, .. } => form.typing(),
-            Self::Export { form } => form.typing(),
+            Self::Service { form, .. } => form.handle_mouse(mouse),
+            Self::Export { form } => form.handle_mouse(mouse),
+        }
+    }
+
+    fn hints(&self) -> Vec<Hint> {
+        match self {
+            Self::Service { form, .. } => form.hints(),
+            Self::Export { form } => form.hints(),
         }
     }
 
@@ -268,6 +275,16 @@ impl TargetsScreen {
         });
     }
 
+    /// Acts on what a key or click in the open dialog asked for: it stays open, closes, or hands
+    /// its finished draft over.
+    fn settle_modal(&mut self, modal: Modal, outcome: FormOutcome) {
+        match outcome {
+            FormOutcome::Consumed => self.modal = Some(modal),
+            FormOutcome::Cancelled => {}
+            FormOutcome::Finished => self.finish_modal(modal),
+        }
+    }
+
     fn finish_modal(&mut self, modal: Modal) {
         match modal {
             Modal::Service { form, editing } => {
@@ -375,14 +392,6 @@ impl TargetsScreen {
         if self.conflict.is_some() {
             return "Enter kill sessions & relaunch · Esc dismiss".to_owned();
         }
-        if let Some(modal) = &self.modal {
-            return if modal.typing() {
-                "type the value · Enter apply · Esc cancel".to_owned()
-            } else {
-                "↑/↓ field · Enter edit/cycle · Esc back".to_owned()
-            };
-        }
-
         match self.focus {
             Focus::Browser => format!(
                 "{} · / filter · n namespace · c context · p plan",
@@ -577,6 +586,11 @@ impl Screen for TargetsScreen {
     }
 
     fn hints(&self) -> Vec<Hint> {
+        if self.conflict.is_none()
+            && let Some(modal) = &self.modal
+        {
+            return modal.hints();
+        }
         // The hint text is written `key action · key action`, adapted to what is selected.
         self.hint_text()
             .split(" · ")
@@ -596,6 +610,18 @@ impl Screen for TargetsScreen {
                 None => self.browser.paste(text),
             };
             if pasted {
+                return ControlFlow::Break(());
+            }
+        }
+
+        if let Event::Mouse(mouse) = &event
+            && self.conflict.is_none()
+            && let Some(mut modal) = self.modal.take()
+        {
+            let outcome = modal.handle_mouse(mouse);
+            let handled = outcome.is_some();
+            self.settle_modal(modal, outcome.unwrap_or(FormOutcome::Consumed));
+            if handled {
                 return ControlFlow::Break(());
             }
         }
@@ -649,11 +675,8 @@ impl Screen for TargetsScreen {
         }
 
         if let Some(mut modal) = self.modal.take() {
-            match modal.handle_key(key) {
-                FormOutcome::Consumed => self.modal = Some(modal),
-                FormOutcome::Cancelled => {}
-                FormOutcome::Finished => self.finish_modal(modal),
-            }
+            let outcome = modal.handle_key(key);
+            self.settle_modal(modal, outcome);
             return ControlFlow::Break(());
         }
 

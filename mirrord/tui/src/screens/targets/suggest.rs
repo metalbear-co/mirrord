@@ -134,6 +134,7 @@ pub fn compress_home(part: &str) -> String {
     let home = home.to_string_lossy();
     match part.strip_prefix(home.as_ref()) {
         Some(rest) if rest.starts_with('/') => format!("~{rest}"),
+        Some("") => "~".to_owned(),
         _ => part.to_owned(),
     }
 }
@@ -275,6 +276,7 @@ mod tests {
         assert_eq!(expand_home("~"), home);
         assert_eq!(expand_home("/opt/x"), "/opt/x");
         assert_eq!(compress_home(&format!("{home}/x")), "~/x");
+        assert_eq!(compress_home(&home), "~");
         assert_eq!(compress_home("/opt/x"), "/opt/x");
         // `~foo` is a different user's home, not ours - leave it alone.
         assert_eq!(expand_home("~foo/x"), "~foo/x");

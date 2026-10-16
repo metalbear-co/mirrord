@@ -9,8 +9,8 @@ use std::{io::stdout, sync::Arc};
 
 use ratatui::crossterm::{
     event::{
-        DisableBracketedPaste, EnableBracketedPaste, KeyboardEnhancementFlags,
-        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
 };
@@ -23,6 +23,7 @@ mod kit;
 mod local_sessions;
 mod scope;
 mod screens;
+mod sidebar;
 mod status;
 mod stderr;
 mod telemetry;
@@ -74,12 +75,15 @@ pub async fn run(telemetry: Option<TelemetrySession>) -> anyhow::Result<()> {
     // Best-effort for the same reason as above, and more so here: by this point stderr is captured,
     // the panic hook is replaced and the alternate screen is up, so returning through `?` would
     // hand all three back to the caller still belonging to the interface.
-    let _ = execute!(stdout(), EnableBracketedPaste);
+    //
+    // Mouse capture lets lists take clicks, double-clicks and the wheel. The terminal's own text
+    // selection still works with Option (macOS) or Shift held, as in other mouse-aware TUIs.
+    let _ = execute!(stdout(), EnableBracketedPaste, EnableMouseCapture);
     // `ratatui::init` installed a hook that restores the terminal; chain onto it so a panic cannot
     // leave bracketed paste enabled in the user's shell either.
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(stdout(), DisableBracketedPaste);
+        let _ = execute!(stdout(), DisableBracketedPaste, DisableMouseCapture);
         // The panic message is written to stderr, which is currently a pipe into the log.
         stderr::restore();
         hook(info);
@@ -91,7 +95,7 @@ pub async fn run(telemetry: Option<TelemetrySession>) -> anyhow::Result<()> {
     // carries are the one part of this that is allowed to go missing.
     telemetry.closed();
 
-    let _ = execute!(stdout(), DisableBracketedPaste);
+    let _ = execute!(stdout(), DisableBracketedPaste, DisableMouseCapture);
     let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
 
     ratatui::restore();

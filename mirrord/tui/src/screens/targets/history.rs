@@ -60,7 +60,7 @@ fn keyed(cluster: &str, target: &TargetSpec) -> String {
 
 /// The active cluster: the kube context the user picked in the TUI, or
 /// the kubeconfig's current context otherwise.
-fn cluster() -> String {
+pub fn cluster() -> String {
     if let Ok(picked) = picked_cluster().read()
         && let Some(picked) = picked.as_ref()
     {
@@ -115,6 +115,22 @@ fn store() -> &'static RwLock<History> {
 /// The remembered settings for a target, if it ever ran.
 pub fn recall(key: &str) -> Option<TargetHistory> {
     store().read().ok()?.targets.get(key).cloned()
+}
+
+/// Every folder something ran from, on any cluster, without duplicates. The folder picker lists
+/// these first: a folder someone ran before is the one they most likely want again.
+pub fn dirs() -> Vec<String> {
+    let Ok(history) = store().read() else {
+        return Vec::new();
+    };
+    let mut dirs: Vec<String> = history
+        .targets
+        .values()
+        .filter_map(|entry| entry.dir.clone())
+        .collect();
+    dirs.sort();
+    dirs.dedup();
+    dirs
 }
 
 /// Records one launched service and persists the history.

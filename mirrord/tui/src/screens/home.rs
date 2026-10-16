@@ -88,6 +88,36 @@ pub struct HomeScreen {
     view_request: Option<&'static str>,
 }
 
+/// How many of each thing the dashboard counted, for the sidebar. `None` until it is read, or
+/// when the cluster could not say.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Counts {
+    pub sessions: Option<usize>,
+    pub previews: Option<usize>,
+    pub splits: Option<usize>,
+    pub branches: Option<usize>,
+}
+
+impl HomeScreen {
+    pub fn counts(&self) -> Counts {
+        let Ok(summary) = self.summary.read() else {
+            return Counts::default();
+        };
+        let total = |tally: &Option<Result<Tally, String>>| {
+            tally
+                .as_ref()
+                .and_then(|tally| tally.as_ref().ok())
+                .map(|tally| tally.total)
+        };
+        Counts {
+            sessions: total(&summary.sessions),
+            previews: total(&summary.previews),
+            splits: total(&summary.splits),
+            branches: total(&summary.branches),
+        }
+    }
+}
+
 impl HomeScreen {
     async fn run(mut context: Context, summary: Arc<RwLock<Summary>>) {
         let mut interval = tokio::time::interval(REFRESH_INTERVAL);

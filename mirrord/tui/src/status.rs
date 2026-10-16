@@ -1,4 +1,5 @@
-//! The status bar, and the dialog holding what does not fit in it.
+//! How the connection is going, at the bottom of the sidebar, and the dialog holding what does not
+//! fit there.
 
 use kube::Client;
 use ratatui::{
@@ -12,6 +13,7 @@ use ratatui::{
 use crate::{
     helpers::{centered, ellipsize},
     scope::Scope,
+    screens::targets::history,
     stderr, theme,
 };
 
@@ -27,111 +29,72 @@ const DETAIL_LIMIT: usize = 400;
 /// terminal instead of stretching across it.
 const DETAIL_WIDTH: u16 = 90;
 
-/// The chip the top bar starts with.
-const LOGO: &str = " \u{25c6} mirrord ";
+/// Most lines a failed connection's summary takes in the sidebar; the `e` dialog has the rest.
+const SUMMARY_LINES: usize = 3;
 
-/// Fewest columns kept between the breadcrumb and the connection state in the top bar.
-const MIN_GAP: usize = 2;
-
-/// Appended to the top bar while a connection attempt has failed. Reserved out of the width the
-/// error message gets, so the two never fight over the same columns.
-const DETAILS_HINT: &str = " · <e> details ";
-
-/// Draws the top bar: where the user is, `mirrord  context › namespace › view` on the left, and
-/// how the connection to that cluster is going on the right.
+/// The bottom of the sidebar, `width` columns wide: the cluster, the namespace, and how the
+/// connection is going. A failed connection gets its summary, cut to a few lines, and the key
+/// that shows the whole of it.
 ///
-/// A failed connection's summary takes the room it needs first, cutting the breadcrumb short
-/// rather than the error, since the error is what the user has to act on.
-pub fn draw(
-    frame: &mut Frame,
-    area: Rect,
+/// Folded to a few columns, only the connection's sign is left.
+pub fn sidebar_footer(
     scope: &Scope,
     client: &Option<anyhow::Result<Client>>,
-    view: &str,
-) {
+    width: u16,
+) -> Vec<Line<'static>> {
+    let width = usize::from(width);
+    let state = match client {
+        Some(Ok(_)) => Span::styled("\u{25cf} connected", Style::default().fg(theme::MINT)),
+        None => Span::styled("\u{25cc} connecting\u{2026}", theme::warning()),
+        Some(Err(_)) => Span::styled(
+            "\u{2717} can't connect",
+            theme::error().add_modifier(Modifier::BOLD),
+        ),
+    };
+    if width < 8 {
+        let sign: String = state.content.chars().take(1).collect();
+        return vec![Line::from(Span::styled(format!(" {sign}"), state.style))];
+    }
+
     let value = Style::default().fg(theme::LAVENDER);
-    let width = usize::from(area.width);
-
-    let right = match client {
-        Some(Ok(_)) => vec![Span::styled(
-            "\u{25cf} connected ",
-            Style::default().fg(theme::MINT),
-        )],
-        None => vec![Span::styled(
-            "\u{25cc} connecting\u{2026} ",
-            theme::warning(),
-        )],
-        Some(Err(error)) => {
-            // Even summarized, an auth failure outruns the bar on a narrow terminal, so it gets
-            // what the logo and the view name leave.
-            let room = width
-                .saturating_sub(LOGO.chars().count() + view.chars().count() + 8)
-                .saturating_sub(DETAILS_HINT.chars().count() + 2);
-            vec![
-                Span::styled("\u{2717} ", theme::error()),
-                Span::styled(ellipsize(&headline(error), room), theme::error()),
-                Span::styled(DETAILS_HINT, theme::muted()),
-            ]
-        }
-    };
-    let right_width: usize = right.iter().map(Span::width).sum();
-    let room = width.saturating_sub(right_width + MIN_GAP);
-
-    let context = match scope.context.as_deref() {
-        Some(name) => Span::styled(name.to_owned(), value),
-        None => Span::styled("current context", theme::muted().italic()),
-    };
-    // Lists read every namespace until one is picked.
-    let namespace = match scope.namespace.as_deref() {
-        Some(name) => Span::styled(name.to_owned(), value),
-        None => Span::styled("all namespaces", theme::muted().italic()),
-    };
-    let logo = Span::styled(
-        LOGO,
-        Style::default()
-            .fg(theme::LAVENDER)
-            .bg(theme::INDIGO)
-            .add_modifier(Modifier::BOLD),
-    );
-    let separator = || Span::styled(" \u{203a} ", theme::muted());
-    let view = Span::styled(view.to_owned(), theme::title());
-
-    // When the bar is short, the context goes first, then the namespace: the view name is what
-    // says where the user is.
-    let candidates = [
-        vec![
-            logo.clone(),
-            Span::raw(" "),
-            context,
-            separator(),
-            namespace.clone(),
-            separator(),
-            view.clone(),
-        ],
-        vec![
-            logo.clone(),
-            Span::raw(" "),
-            namespace,
-            separator(),
-            view.clone(),
-        ],
-        vec![logo, Span::raw(" "), view],
+    let mut lines = vec![
+        // With no context picked, the kubeconfig's current one is in use: name it.
+        Line::styled(
+            format!(
+                " {}",
+                ellipsize(
+                    &scope.context.clone().unwrap_or_else(history::cluster),
+                    width - 1
+                )
+            ),
+            value,
+        ),
+        // Lists read every namespace until one is picked.
+        match scope.namespace.as_deref() {
+            Some(name) => Line::styled(format!(" {}", ellipsize(name, width - 1)), value),
+            None => Line::styled(" all namespaces", theme::muted().italic()),
+        },
+        Line::from(vec![Span::raw(" "), state]),
     ];
-    let fits = |spans: &Vec<Span>| spans.iter().map(Span::width).sum::<usize>() <= room;
-    let mut spans = candidates
-        .iter()
-        .find(|candidate| fits(candidate))
-        .or(candidates.last())
-        .cloned()
-        .unwrap_or_default();
-    let used: usize = spans.iter().map(Span::width).sum();
-
-    spans.push(Span::raw(
-        " ".repeat(width.saturating_sub(used + right_width)),
-    ));
-    spans.extend(right);
-
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    if let Some(Err(error)) = client {
+        let mut summary = wrap(&headline(error), width - 1);
+        if summary.len() > SUMMARY_LINES {
+            summary.truncate(SUMMARY_LINES);
+            if let Some(last) = summary.last_mut() {
+                *last = ellipsize(&format!("{last}\u{2026}"), width - 1);
+            }
+        }
+        lines.extend(
+            summary
+                .into_iter()
+                .map(|line| Line::styled(format!(" {line}"), theme::error())),
+        );
+        lines.push(Line::from(vec![
+            Span::styled(" <e>", theme::title()),
+            Span::styled(" details", theme::muted()),
+        ]));
+    }
+    lines
 }
 
 /// Draws the `e` connection error dialog over `area`.

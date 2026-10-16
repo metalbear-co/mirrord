@@ -51,3 +51,20 @@ pub fn key_bar(hints: &[Hint]) -> Line<'static> {
     }
     Line::from(spans)
 }
+
+/// The hints as a legend inside a view, keys drawn as small keycaps (` space ` select), for the
+/// few keys a view cannot be used without. Unlike the key bar, it sits next to what it explains.
+pub fn legend(hints: &[Hint]) -> Line<'static> {
+    let mut spans = Vec::with_capacity(hints.len() * 3);
+    for hint in hints {
+        spans.push(Span::styled(
+            format!(" {} ", hint.keys),
+            Style::default()
+                .fg(theme::LAVENDER)
+                .bg(theme::BORDER_DIM)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(format!(" {}   ", hint.action), theme::muted()));
+    }
+    Line::from(spans)
+}

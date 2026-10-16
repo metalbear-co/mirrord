@@ -69,6 +69,35 @@ impl Format {
     }
 }
 
+/// Every mirrord config file in `dir`'s `.mirrord` folder, whatever it is named, with what it
+/// holds: teams often keep several (`mirrord.json`, `steal.json`, `db.yaml`) for different jobs.
+/// Files that cannot be read as a map of options are left out.
+pub fn config_files(dir: &Path) -> Vec<(PathBuf, Map<String, Value>)> {
+    let Ok(entries) = std::fs::read_dir(dir.join(DIRECTORY)) else {
+        return Vec::new();
+    };
+    let mut files: Vec<(PathBuf, Map<String, Value>)> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some("json" | "yaml" | "yml" | "toml")
+            )
+        })
+        .filter_map(|path| {
+            let text = std::fs::read_to_string(&path).ok()?;
+            let Value::Object(mut root) = Format::of(&path).parse(&text).ok()? else {
+                return None;
+            };
+            drop_nulls(&mut root);
+            Some((path, root))
+        })
+        .collect();
+    files.sort_by(|(left, _), (right, _)| left.cmp(right));
+    files
+}
+
 pub struct Document {
     path: PathBuf,
     format: Format,

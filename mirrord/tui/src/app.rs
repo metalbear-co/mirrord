@@ -32,6 +32,7 @@ use crate::{
         preview_envs::PreviewEnvsScreen, queues::QueuesScreen, resources::ResourcesScreen,
         run::RunScreen, sessions::SessionsScreen, targets::TargetsScreen, terminal::TerminalScreen,
     },
+    sidebar::{Item, Sidebar},
     status,
     telemetry::Telemetry,
     theme,
@@ -141,6 +142,7 @@ pub struct App {
     picker: Option<AppPicker>,
     /// The `:` command line, while it is open.
     command_bar: Option<CommandBar<Command>>,
+    sidebar: Sidebar,
     /// Namespaces of the connected cluster, offered by `:ns`. Filled once per connection.
     known_namespaces: Arc<std::sync::RwLock<Vec<String>>>,
     /// Namespace names fetched for the picker, handed over on the next
@@ -197,6 +199,7 @@ impl App {
             picker: None,
             fetched_namespaces: Arc::default(),
             command_bar: None,
+            sidebar: Sidebar::default(),
             known_namespaces: Arc::default(),
             error_details: false,
             help: false,
@@ -668,13 +671,17 @@ impl App {
 
     fn draw(&mut self, frame: &mut Frame) {
         let command_height = u16::from(self.command_bar.is_some());
-        let [header, body, command_area, keys_area] = Layout::vertical([
-            Constraint::Length(1),
+        let [main_area, command_area, keys_area] = Layout::vertical([
             Constraint::Min(1),
             Constraint::Length(command_height),
             Constraint::Length(1),
         ])
         .areas(frame.area());
+        let [sidebar_area, body] = Layout::horizontal([
+            Constraint::Length(Sidebar::width(main_area.width)),
+            Constraint::Min(1),
+        ])
+        .areas(main_area);
 
         // Hand freshly fetched namespaces to a waiting picker.
         if let Some(AppPicker::Namespace(picker)) = &mut self.picker
@@ -704,7 +711,25 @@ impl App {
         let scope = self.scope.borrow();
         let client = self.client.borrow();
 
-        status::draw(frame, header, &scope, &client, self.active.label());
+        let counts = self.home_state.counts();
+        let items: Vec<Item> = ActiveScreen::VARIANTS
+            .iter()
+            .map(|screen| Item {
+                icon: screen.icon(),
+                label: screen.short_label(),
+                group: screen.group(),
+                count: match screen {
+                    ActiveScreen::Sessions => counts.sessions,
+                    ActiveScreen::PreviewEnvs => counts.previews,
+                    ActiveScreen::Queues => counts.splits,
+                    ActiveScreen::Databases => counts.branches,
+                    _ => None,
+                },
+                active: *screen as usize == self.active as usize,
+            })
+            .collect();
+        let footer = status::sidebar_footer(&scope, &client, sidebar_area.width.saturating_sub(2));
+        self.sidebar.draw(frame, sidebar_area, &items, footer);
         frame.render_widget(Paragraph::new(hints::key_bar(&self.key_hints())), keys_area);
 
         // What the status bar had to cut short, on request. Never over a picker, which owns the
@@ -746,6 +771,20 @@ impl App {
         if let Event::Key(key) = &event
             && !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
         {
+            return;
+        }
+
+        // A click on a screen in the sidebar goes there, unless a dialog is open over everything.
+        if let Event::Mouse(mouse) = &event
+            && self.picker.is_none()
+            && self.command_bar.is_none()
+            && self.quit_confirm.is_none()
+            && !self.help
+            && let Some(index) = self.sidebar.clicked(mouse)
+        {
+            if let Some(screen) = ActiveScreen::VARIANTS.get(index) {
+                self.go_to(*screen);
+            }
             return;
         }
 
@@ -891,17 +930,35 @@ impl App {
             // claim the key for itself).
             KeyCode::Char('c') => self.open_context_picker(),
             KeyCode::Char('n') => self.open_namespace_picker(),
-            KeyCode::Tab => {
-                let current = self.active as usize;
-                let count = ActiveScreen::COUNT;
-                self.go_to(ActiveScreen::from_repr((current + 1) % count).unwrap());
+            // Some terminals report Shift+Tab as Tab with Shift held rather than as BackTab.
+            KeyCode::BackTab => self.step_screen(false),
+            KeyCode::Tab if event.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.step_screen(false)
             }
-            KeyCode::BackTab => {
-                let current = self.active as usize;
-                let count = ActiveScreen::COUNT;
-                self.go_to(ActiveScreen::from_repr((current + count - 1) % count).unwrap());
-            }
+            KeyCode::Tab => self.step_screen(true),
             _ => {}
+        }
+    }
+}
+
+impl App {
+    /// Moves to the next or previous screen, wrapping around. The Terminal is left out: its
+    /// shell takes every key, Tab included, so cycling into it would leave no way to cycle out.
+    /// `:term` reaches it.
+    fn step_screen(&mut self, forward: bool) {
+        let count = ActiveScreen::COUNT;
+        let mut index = self.active as usize;
+        loop {
+            index = if forward {
+                (index + 1) % count
+            } else {
+                (index + count - 1) % count
+            };
+            match ActiveScreen::from_repr(index) {
+                Some(ActiveScreen::Terminal) => continue,
+                Some(screen) => return self.go_to(screen),
+                None => return,
+            }
         }
     }
 }
@@ -914,16 +971,57 @@ enum ActiveScreen {
     Home,
     Run,
     Targets,
-    Config,
     Sessions,
-    Databases,
-    Queues,
     PreviewEnvs,
+    Queues,
+    Databases,
+    Config,
     Resources,
     Terminal,
 }
 
 impl ActiveScreen {
+    /// The sign the sidebar draws before the screen's name. Each is one column wide on every
+    /// terminal: no emoji, which some terminals draw two columns wide.
+    fn icon(self) -> &'static str {
+        match self {
+            ActiveScreen::Home => "\u{2302}",
+            ActiveScreen::Run => "\u{25b6}",
+            ActiveScreen::Targets => "\u{25ce}",
+            ActiveScreen::Sessions => "\u{25c9}",
+            ActiveScreen::PreviewEnvs => "\u{25c7}",
+            ActiveScreen::Queues => "\u{224b}",
+            ActiveScreen::Databases => "\u{25a4}",
+            ActiveScreen::Config => "\u{2261}",
+            ActiveScreen::Resources => "\u{25a6}",
+            ActiveScreen::Terminal => "\u{276f}",
+        }
+    }
+
+    /// The screen's name in the sidebar, short enough for its width.
+    fn short_label(self) -> &'static str {
+        match self {
+            ActiveScreen::PreviewEnvs => "Previews",
+            other => other.label(),
+        }
+    }
+
+    /// The sidebar heading the screen sits under: starting a session, watching what runs, or
+    /// setting things up.
+    fn group(self) -> Option<&'static str> {
+        match self {
+            ActiveScreen::Home => None,
+            ActiveScreen::Run | ActiveScreen::Targets => Some("start"),
+            ActiveScreen::Sessions
+            | ActiveScreen::PreviewEnvs
+            | ActiveScreen::Queues
+            | ActiveScreen::Databases => Some("watch"),
+            ActiveScreen::Config | ActiveScreen::Resources | ActiveScreen::Terminal => {
+                Some("setup")
+            }
+        }
+    }
+
     /// What `:` takes to reach this screen, the first being the name it suggests.
     fn names(self) -> &'static [&'static str] {
         match self {

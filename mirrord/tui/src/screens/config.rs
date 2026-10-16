@@ -34,7 +34,7 @@ use crate::{
     widgets::picker::{Picker, PickerOutcome},
 };
 
-mod document;
+pub(crate) mod document;
 mod edit;
 mod rows;
 

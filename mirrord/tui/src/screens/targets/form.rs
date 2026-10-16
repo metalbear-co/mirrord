@@ -5,12 +5,20 @@
 //! grows - is one model field plus one registry entry, no new UI code. The
 //! registry is also the seam for generating entries from `mirrord-schema.json`
 //! once the wizard goes fully dynamic.
+//!
+//! The form is assembled from the shared kit, so it edits and picks the way every other view
+//! does: text fields edit through [`TextInput`] (`Ctrl+A` selects everything, `Shift` with the
+//! arrows selects, a click places the cursor, a drag selects and a double-click picks a word),
+//! and fields with a few fixed options draw the same `(●)` / `( )` pick column as the pick lists,
+//! with a click on an option picking it.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::time::Instant;
+
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
-    style::Style,
+    layout::{Constraint, Layout, Position, Rect},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
 };
@@ -18,6 +26,11 @@ use strum::VariantArray;
 
 use crate::{
     helpers::dialog,
+    kit::{
+        hints::{self, Hint},
+        select_list::{DOUBLE_CLICK, Picks, pick_mark},
+        text_input::TextInput,
+    },
     screens::targets::{
         history, keys,
         model::{HttpFilterSpec, RunSpec, ServiceEntry, ServiceMode, ServiceSpec, TargetSpec},
@@ -45,7 +58,8 @@ pub enum WidgetKind<T> {
         get: fn(&T) -> String,
         set: fn(&mut T, &str) -> Result<(), String>,
     },
-    /// One of a fixed set of options, cycled with Enter or arrow keys.
+    /// One of a fixed set of options, all on view with the picked one marked; arrows, `Space`
+    /// or a click pick.
     Select {
         options: &'static [&'static str],
         get: fn(&T) -> usize,
@@ -58,72 +72,61 @@ pub enum WidgetKind<T> {
 /// full set stays reachable by typing more of the name.
 const MAX_SHOWN_CANDIDATES: usize = 8;
 
-/// A single-line text editor for the field being edited.
-struct Input {
-    value: String,
-    cursor: usize,
-    /// Selection anchor; a selection spans `anchor..cursor` (either way).
-    anchor: Option<usize>,
-    /// Next suggestion Tab inserts.
+/// Columns before a field's value: the `› ` cursor marker and the label padded to 14.
+const LABEL_WIDTH: u16 = 16;
+
+/// Columns before the first completion candidate: `  ↹ `.
+const CANDIDATES_PREFIX: u16 = 4;
+
+/// The text field being edited.
+struct Editor {
+    text: TextInput,
+    /// Next suggestion or completion Tab puts in; any edit starts the cycle over.
     suggestion: usize,
 }
 
-impl Input {
-    fn new(value: String) -> Self {
-        let cursor = value.chars().count();
+impl Editor {
+    /// Opens on `value` with the cursor at its end.
+    fn new(value: &str) -> Self {
+        let mut text = TextInput::default();
+        text.paste(value);
         Self {
-            value,
-            cursor,
-            anchor: None,
+            text,
             suggestion: 0,
         }
     }
 
-    /// The active selection as a normalized char range, if any.
-    fn selection(&self) -> Option<(usize, usize)> {
-        let anchor = self.anchor?;
-        if anchor == self.cursor {
-            return None;
-        }
-        Some((anchor.min(self.cursor), anchor.max(self.cursor)))
-    }
-
-    /// Moves the cursor; with `select` the selection extends from where
-    /// the cursor was, without it any selection collapses.
-    fn move_to(&mut self, target: usize, select: bool) {
-        if select {
-            self.anchor.get_or_insert(self.cursor);
-        } else {
-            self.anchor = None;
-        }
-        self.cursor = target.min(self.value.chars().count());
-    }
-
-    /// Deletes the selection if one is active; `true` when it was.
-    fn delete_selection(&mut self) -> bool {
-        let Some((from, to)) = self.selection() else {
-            self.anchor = None;
-            return false;
-        };
-        self.anchor = None;
-        self.delete_chars(from, to);
-        true
+    /// Replaces everything from byte `start` on with `replacement`, leaving the cursor at the end.
+    fn replace_from(&mut self, start: usize, replacement: &str) {
+        let mut value = self
+            .text
+            .value()
+            .get(..start)
+            .unwrap_or_default()
+            .to_owned();
+        value.push_str(replacement);
+        self.text.clear();
+        self.text.paste(&value);
     }
 
     /// Replaces the value with the next suggestion, wrapping around.
     fn cycle_suggestion(&mut self, suggestions: &[String]) {
-        let Some(suggestion) = suggestions.get(self.suggestion % suggestions.len()) else {
+        let Some(suggestion) = self
+            .suggestion
+            .checked_rem(suggestions.len())
+            .and_then(|at| suggestions.get(at))
+        else {
             return;
         };
         self.suggestion += 1;
-        self.value = suggestion.clone();
-        self.cursor = self.value.chars().count();
+        self.replace_from(0, suggestion);
     }
 
-    /// The token being completed: everything after the last space.
+    /// The token being completed: everything after the last space, and the byte it starts at.
     fn last_token(&self) -> (usize, &str) {
-        let start = self.value.rfind(' ').map(|at| at + 1).unwrap_or(0);
-        (start, &self.value[start..])
+        let value = self.text.value();
+        let start = value.rfind(' ').map(|at| at + 1).unwrap_or(0);
+        (start, value.get(start..).unwrap_or_default())
     }
 
     /// Completes the last token against the filesystem, shell-style:
@@ -148,199 +151,44 @@ impl Input {
         let replacement = if prefix.len() > target.len() {
             self.suggestion = 0;
             prefix
-        } else if let Some(pick) = candidates.get(self.suggestion % candidates.len()) {
+        } else if let Some(pick) = self
+            .suggestion
+            .checked_rem(candidates.len())
+            .and_then(|at| candidates.get(at))
+        {
             self.suggestion += 1;
             pick.clone()
         } else {
             return true;
         };
 
-        self.value.truncate(start);
-        self.value.push_str(&replacement);
-        self.cursor = self.value.chars().count();
+        self.replace_from(start, &replacement);
         true
-    }
-
-    /// The value windowed to `width` so the cursor stays visible however
-    /// long the value grows; the cursor renders as a reversed cell and
-    /// the selection as a filled background, with a leading `…` when
-    /// scrolled.
-    fn spans(&self, width: usize) -> Vec<Span<'static>> {
-        let chars: Vec<char> = self.value.chars().collect();
-        let selection = self.selection();
-        // One virtual cell past the end so the cursor can sit there.
-        let total = chars.len() + 1;
-        let skip = (self.cursor + 2).saturating_sub(width);
-
-        let mut spans = Vec::new();
-        if skip > 0 {
-            spans.push(Span::styled("…", Style::default().fg(theme::GREY)));
-        }
-        let take = width.saturating_sub(usize::from(skip > 0));
-        for at in skip..total.min(skip + take) {
-            let cell = chars.get(at).copied().unwrap_or(' ');
-            let mut style = Style::default().fg(theme::LAVENDER).underlined();
-            if selection.is_some_and(|(from, to)| at >= from && at < to) {
-                style = style.bg(theme::INK);
-            }
-            if at == self.cursor {
-                style = style.reversed();
-            }
-            spans.push(Span::styled(cell.to_string(), style));
-        }
-        spans
-    }
-
-    /// Inserts pasted text at the cursor. Control characters collapse to
-    /// spaces: fields are single-line, and the trailing newline most
-    /// clipboards carry must not end up in the value.
-    fn paste(&mut self, text: &str) {
-        self.suggestion = 0;
-        self.delete_selection();
-        let cleaned: String = text
-            .chars()
-            .map(|c| if c.is_control() { ' ' } else { c })
-            .collect();
-        let cleaned = cleaned.trim();
-        let at = self.byte_cursor();
-        self.value.insert_str(at, cleaned);
-        self.cursor += cleaned.chars().count();
-    }
-
-    fn byte_cursor(&self) -> usize {
-        self.byte_at(self.cursor)
-    }
-
-    fn byte_at(&self, at: usize) -> usize {
-        self.value
-            .char_indices()
-            .nth(at)
-            .map(|(index, _)| index)
-            .unwrap_or(self.value.len())
-    }
-
-    /// Deletes the character range `from..to` and parks the cursor at the
-    /// start of it.
-    fn delete_chars(&mut self, from: usize, to: usize) {
-        let range = self.byte_at(from)..self.byte_at(to);
-        self.value.replace_range(range, "");
-        self.cursor = from;
-    }
-
-    /// The word boundary left of the cursor: skips spaces, then the word.
-    fn word_start(&self) -> usize {
-        let chars: Vec<char> = self.value.chars().collect();
-        let mut at = self.cursor.min(chars.len());
-        while at > 0 && chars.get(at - 1) == Some(&' ') {
-            at -= 1;
-        }
-        while at > 0 && chars.get(at - 1) != Some(&' ') {
-            at -= 1;
-        }
-        at
-    }
-
-    /// The word boundary right of the cursor: skips spaces, then to the
-    /// end of the word.
-    fn word_end(&self) -> usize {
-        let chars: Vec<char> = self.value.chars().collect();
-        let mut at = self.cursor.min(chars.len());
-        while chars.get(at) == Some(&' ') {
-            at += 1;
-        }
-        while chars.get(at).is_some_and(|c| *c != ' ') {
-            at += 1;
-        }
-        at
-    }
-
-    fn handle_key(&mut self, key: KeyEvent) {
-        // Any edit restarts suggestion and completion cycling.
-        self.suggestion = 0;
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let alt = key.modifiers.contains(KeyModifiers::ALT);
-        // Cmd on macOS; only terminals speaking the kitty keyboard
-        // protocol deliver it.
-        let cmd = key.modifiers.contains(KeyModifiers::SUPER);
-        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
-        let end = self.value.chars().count();
-
-        match key.code {
-            // Mac conventions: ⌘a select all, ⌘←/→ line ends, ⌘⌫ kill
-            // to start; ⌥ jumps words. Shift extends the selection.
-            // ⌥a doubles as select-all for terminals that never forward
-            // ⌘ (it activates the menu bar in e.g. Warp).
-            KeyCode::Char('a') if cmd || alt => {
-                self.anchor = Some(0);
-                self.cursor = end;
-            }
-            KeyCode::Backspace if cmd => {
-                if !self.delete_selection() {
-                    self.delete_chars(0, self.cursor);
-                }
-            }
-            // Readline, the terminal-native conventions: ^a/^e line
-            // ends, ^u/^k kill to start/end, ^w word back.
-            KeyCode::Char('a') if ctrl => self.move_to(0, shift),
-            KeyCode::Char('e') if ctrl => self.move_to(end, shift),
-            KeyCode::Char('u') if ctrl => self.delete_chars(0, self.cursor),
-            KeyCode::Char('k') if ctrl => {
-                let at = self.byte_cursor();
-                self.value.truncate(at);
-            }
-            KeyCode::Char('w') if ctrl => self.delete_chars(self.word_start(), self.cursor),
-            KeyCode::Backspace if alt => {
-                if !self.delete_selection() {
-                    self.delete_chars(self.word_start(), self.cursor);
-                }
-            }
-            KeyCode::Left if cmd => self.move_to(0, shift),
-            KeyCode::Right if cmd => self.move_to(end, shift),
-            KeyCode::Left if ctrl || alt => self.move_to(self.word_start(), shift),
-            KeyCode::Right if ctrl || alt => self.move_to(self.word_end(), shift),
-            KeyCode::Char(c) if !ctrl && !alt && !cmd => {
-                self.delete_selection();
-                let at = self.byte_cursor();
-                self.value.insert(at, c);
-                self.cursor += 1;
-            }
-            KeyCode::Backspace => {
-                if !self.delete_selection() && self.cursor > 0 {
-                    self.cursor -= 1;
-                    let at = self.byte_cursor();
-                    self.value.remove(at);
-                }
-            }
-            KeyCode::Delete => {
-                if !self.delete_selection() && self.cursor < end {
-                    let at = self.byte_cursor();
-                    self.value.remove(at);
-                }
-            }
-            // A plain arrow with a selection collapses to its edge, the
-            // mac way; shift+arrow extends it.
-            KeyCode::Left => match (self.selection(), shift) {
-                (Some((from, _)), false) => self.move_to(from, false),
-                _ => self.move_to(self.cursor.saturating_sub(1), shift),
-            },
-            KeyCode::Right => match (self.selection(), shift) {
-                (Some((_, to)), false) => self.move_to(to, false),
-                _ => self.move_to(self.cursor + 1, shift),
-            },
-            KeyCode::Home => self.move_to(0, shift),
-            KeyCode::End => self.move_to(end, shift),
-            _ => {}
-        }
     }
 }
 
-/// What a key press in the form resulted in.
+/// What a key press or click in the form resulted in.
 pub enum FormOutcome {
     Consumed,
     /// Esc outside of text editing.
     Cancelled,
     /// The finish row was activated and validation passed; the draft is ready.
     Finished,
+}
+
+/// Where the form's clickable parts landed in the last frame, for the mouse.
+#[derive(Default)]
+struct Hits {
+    area: Rect,
+    /// Each drawn row's line, what it is (an index into the visible fields, or one past the last
+    /// for the finish row, like the cursor), and how many characters of its value are scrolled
+    /// out on the left.
+    rows: Vec<(u16, usize, usize)>,
+    /// Column where the values start.
+    value_x: u16,
+    /// Each option of the select fields: where it is drawn, its field and its index.
+    options: Vec<(Rect, usize, usize)>,
+    candidates: Vec<(Rect, String)>,
 }
 
 pub struct SettingsForm<T: 'static> {
@@ -351,8 +199,11 @@ pub struct SettingsForm<T: 'static> {
     validate: fn(&T) -> Result<(), String>,
     /// Index into the *visible* fields; one past the end is the finish row.
     cursor: usize,
-    input: Option<Input>,
+    editor: Option<Editor>,
     error: Option<String>,
+    hits: Hits,
+    /// When and on which row the last click landed, to tell a double-click.
+    last_click: Option<(Instant, usize)>,
 }
 
 impl<T> SettingsForm<T> {
@@ -370,8 +221,10 @@ impl<T> SettingsForm<T> {
             finish_label,
             validate,
             cursor: 0,
-            input: None,
+            editor: None,
             error: None,
+            hits: Hits::default(),
+            last_click: None,
         }
     }
 
@@ -392,7 +245,7 @@ impl<T> SettingsForm<T> {
             return;
         };
         if let WidgetKind::Text { get, .. } = &def.widget {
-            self.input = Some(Input::new(get(&self.draft)));
+            self.editor = Some(Editor::new(&get(&self.draft)));
         }
     }
 
@@ -403,55 +256,67 @@ impl<T> SettingsForm<T> {
             .collect()
     }
 
-    /// True while a text field is capturing keystrokes.
-    pub fn typing(&self) -> bool {
-        self.input.is_some()
-    }
-
     /// Routes a terminal paste into the field being edited; `false` when
-    /// no text editor is open to take it.
+    /// no text editor is open to take it. The ends are trimmed: the trailing
+    /// newline most clipboards carry must not end up in a one-line value.
     pub fn paste(&mut self, text: &str) -> bool {
-        let Some(input) = &mut self.input else {
+        let Some(editor) = &mut self.editor else {
             return false;
         };
-        input.paste(text);
+        editor.suggestion = 0;
+        editor.text.paste(text.trim());
         true
+    }
+
+    /// Writes the edited value into the draft and closes the editor; a value the field rejects
+    /// shows why.
+    fn apply_edit(&mut self) {
+        let Some(editor) = self.editor.take() else {
+            return;
+        };
+        if let Some(def) = self.visible().get(self.cursor)
+            && let WidgetKind::Text { set, .. } = &def.widget
+        {
+            self.error = set(&mut self.draft, editor.text.value().trim()).err();
+        }
+    }
+
+    fn finish(&mut self) -> FormOutcome {
+        match (self.validate)(&self.draft) {
+            Ok(()) => FormOutcome::Finished,
+            Err(message) => {
+                self.error = Some(message);
+                FormOutcome::Consumed
+            }
+        }
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> FormOutcome {
         let visible = self.visible();
 
-        if let Some(input) = &mut self.input {
+        if let Some(editor) = &mut self.editor {
             match key.code {
-                KeyCode::Esc => self.input = None,
+                KeyCode::Esc => self.editor = None,
                 KeyCode::Tab => {
                     // A path-like token completes against the filesystem;
                     // anything else cycles the field's suggestions.
-                    if !input.complete_path()
+                    if !editor.complete_path()
                         && let Some(suggest) = visible.get(self.cursor).and_then(|def| def.suggest)
                     {
-                        input.cycle_suggestion(&suggest(&self.draft));
+                        editor.cycle_suggestion(&suggest(&self.draft));
                     }
                 }
-                KeyCode::Enter => {
-                    let value = input.value.clone();
-                    self.input = None;
-                    if let Some(def) = visible.get(self.cursor)
-                        && let WidgetKind::Text { set, .. } = &def.widget
-                    {
-                        match set(&mut self.draft, value.trim()) {
-                            Ok(()) => self.error = None,
-                            Err(message) => self.error = Some(message),
-                        }
-                    }
+                KeyCode::Enter => self.apply_edit(),
+                _ => {
+                    editor.suggestion = 0;
+                    editor.text.handle_key(&key);
                 }
-                _ => input.handle_key(key),
             }
             return FormOutcome::Consumed;
         }
 
-        // Selection keys on a focused text field open its editor and
-        // apply immediately, so the field behaves as if always editable
+        // The selecting keys on a focused text field open its editor and
+        // apply at once, so the field behaves as if always editable
         // instead of demanding an Enter first.
         if let Some(def) = visible.get(self.cursor)
             && let WidgetKind::Text { get, .. } = &def.widget
@@ -461,14 +326,12 @@ impl<T> SettingsForm<T> {
                     key.code,
                     KeyCode::Left | KeyCode::Right | KeyCode::Home | KeyCode::End
                 );
-            let select_all = key
-                .modifiers
-                .intersects(KeyModifiers::SUPER | KeyModifiers::ALT)
-                && matches!(key.code, KeyCode::Char('a'));
+            let select_all =
+                key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('a');
             if shift_move || select_all {
-                let mut input = Input::new(get(&self.draft));
-                input.handle_key(key);
-                self.input = Some(input);
+                let mut editor = Editor::new(&get(&self.draft));
+                editor.text.handle_key(&key);
+                self.editor = Some(editor);
                 return FormOutcome::Consumed;
             }
         }
@@ -479,22 +342,17 @@ impl<T> SettingsForm<T> {
             KeyCode::Down | KeyCode::Char(keys::DOWN) => {
                 self.cursor = (self.cursor + 1).min(visible.len());
             }
-            KeyCode::Enter => {
-                if self.cursor == visible.len() {
-                    match (self.validate)(&self.draft) {
-                        Ok(()) => return FormOutcome::Finished,
-                        Err(message) => self.error = Some(message),
+            KeyCode::Enter if self.cursor == visible.len() => return self.finish(),
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                match visible.get(self.cursor).map(|def| &def.widget) {
+                    Some(WidgetKind::Text { get, .. }) if key.code == KeyCode::Enter => {
+                        self.editor = Some(Editor::new(&get(&self.draft)));
                     }
-                } else if let Some(def) = visible.get(self.cursor) {
-                    match &def.widget {
-                        WidgetKind::Text { get, .. } => {
-                            self.input = Some(Input::new(get(&self.draft)));
-                        }
-                        WidgetKind::Select { options, get, set } => {
-                            let next = (get(&self.draft) + 1) % options.len();
-                            set(&mut self.draft, next);
-                        }
+                    Some(WidgetKind::Select { options, get, set }) => {
+                        let next = (get(&self.draft) + 1) % options.len();
+                        set(&mut self.draft, next);
                     }
+                    _ => {}
                 }
             }
             KeyCode::Left | KeyCode::Right => {
@@ -541,14 +399,174 @@ impl<T> SettingsForm<T> {
         FormOutcome::Consumed
     }
 
+    /// Handles the mouse over the form: a click focuses a row, opens a text field with the
+    /// cursor where it landed (a double-click selects the word there), picks a select option or a
+    /// completion candidate, or finishes on the finish row; a drag selects text and the wheel
+    /// moves between fields.
+    ///
+    /// `None` when the mouse is outside the form, so the owner can act on it.
+    pub fn handle_mouse(&mut self, mouse: &MouseEvent) -> Option<FormOutcome> {
+        let at = Position::new(mouse.column, mouse.row);
+        if !self.hits.area.contains(at) {
+            return None;
+        }
+        match mouse.kind {
+            MouseEventKind::ScrollUp if self.editor.is_none() => {
+                self.cursor = self.cursor.saturating_sub(1);
+            }
+            MouseEventKind::ScrollDown if self.editor.is_none() => {
+                self.cursor = (self.cursor + 1).min(self.visible().len());
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(char) = self.char_at(at, self.cursor)
+                    && let Some(editor) = &mut self.editor
+                {
+                    editor.text.drag_to(char);
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => return Some(self.click(at)),
+            _ => {}
+        }
+        Some(FormOutcome::Consumed)
+    }
+
+    /// The character of row `row`'s value under `at`, when `at` is on that row's value.
+    fn char_at(&self, at: Position, row: usize) -> Option<usize> {
+        let (_, _, skip) = self
+            .hits
+            .rows
+            .iter()
+            .find(|(y, drawn, _)| *y == at.y && *drawn == row)?;
+        let column = usize::from(at.x.checked_sub(self.hits.value_x)?);
+        // A scrolled value starts with a `…` standing in for what is cut.
+        Some((skip + column).saturating_sub(usize::from(*skip > 0)))
+    }
+
+    fn click(&mut self, at: Position) -> FormOutcome {
+        if let Some(candidate) = self
+            .hits
+            .candidates
+            .iter()
+            .find(|(area, _)| area.contains(at))
+            .map(|(_, candidate)| candidate.clone())
+        {
+            self.use_candidate(&candidate);
+            return FormOutcome::Consumed;
+        }
+
+        if let Some((field, option)) = self
+            .hits
+            .options
+            .iter()
+            .find(|(area, ..)| area.contains(at))
+            .map(|(_, field, option)| (*field, *option))
+        {
+            self.apply_edit();
+            self.cursor = field;
+            if let Some(WidgetKind::Select { set, .. }) =
+                self.visible().get(field).map(|def| &def.widget)
+            {
+                set(&mut self.draft, option);
+            }
+            return FormOutcome::Consumed;
+        }
+
+        let Some(row) = self
+            .hits
+            .rows
+            .iter()
+            .find(|(y, ..)| *y == at.y)
+            .map(|(_, row, _)| *row)
+        else {
+            return FormOutcome::Consumed;
+        };
+        let double = self
+            .last_click
+            .is_some_and(|(when, last)| last == row && when.elapsed() < DOUBLE_CLICK);
+        self.last_click = Some((Instant::now(), row));
+
+        let visible = self.visible();
+        if row != self.cursor {
+            self.apply_edit();
+            self.cursor = row;
+        }
+        if row == visible.len() {
+            return self.finish();
+        }
+        let Some(WidgetKind::Text { get, .. }) = visible.get(row).map(|def| &def.widget) else {
+            return FormOutcome::Consumed;
+        };
+        let char = self.char_at(at, row);
+        let editor = self
+            .editor
+            .get_or_insert_with(|| Editor::new(&get(&self.draft)));
+        // A click on the label opens the field with the cursor at the end.
+        match (char, double) {
+            (Some(char), false) => editor.text.click(char),
+            (Some(char), true) => editor.text.select_word_at(char),
+            (None, _) => {}
+        }
+        FormOutcome::Consumed
+    }
+
+    /// Puts a clicked completion candidate in: in place of the token being completed for a path,
+    /// as the whole value for a suggestion.
+    fn use_candidate(&mut self, candidate: &str) {
+        let (_, is_path) = self.candidates();
+        if let Some(editor) = &mut self.editor {
+            let start = if is_path { editor.last_token().0 } else { 0 };
+            editor.suggestion = 0;
+            editor.replace_from(start, candidate);
+            return;
+        }
+        if let Some(def) = self.visible().get(self.cursor)
+            && let WidgetKind::Text { set, .. } = &def.widget
+        {
+            self.error = set(&mut self.draft, candidate).err();
+        }
+    }
+
+    /// The keys for what is focused, for the legend under the form and the key bar.
+    pub fn hints(&self) -> Vec<Hint> {
+        if self.editor.is_some() {
+            return vec![
+                Hint::new("enter", "apply"),
+                Hint::new("tab", "complete"),
+                Hint::new("ctrl+a", "select all"),
+                Hint::new("esc", "cancel"),
+            ];
+        }
+        let mut hints = vec![Hint::new("\u{2191}/\u{2193}", "field")];
+        match self.visible().get(self.cursor) {
+            Some(def) => match &def.widget {
+                WidgetKind::Text { .. } => {
+                    hints.push(Hint::new("enter", "edit"));
+                    if def
+                        .suggest
+                        .is_some_and(|suggest| !suggest(&self.draft).is_empty())
+                    {
+                        hints.push(Hint::new("\u{2190}/\u{2192}", "suggestions"));
+                    }
+                }
+                WidgetKind::Select { .. } => hints.push(Hint::new("space", "choose")),
+            },
+            None => hints.push(Hint::owned(
+                "enter".to_owned(),
+                self.finish_label.to_lowercase(),
+            )),
+        }
+        hints.push(Hint::new("esc", "cancel"));
+        hints
+    }
+
     /// Completion candidates for the field being edited: filesystem
     /// matches when the current token is a path, the field's suggestions
     /// otherwise. The flag says they are paths (displayed by last
     /// component).
     fn candidates(&self) -> (Vec<String>, bool) {
         // While editing, the current token drives filesystem completion.
-        if let Some(input) = &self.input {
-            let (_, token) = input.last_token();
+        if let Some(editor) = &self.editor {
+            let (_, token) = editor.last_token();
             if let Some(target) = completion_target(token) {
                 let matches = suggest::complete_path(&target);
                 if !matches.is_empty() {
@@ -577,18 +595,12 @@ impl<T> SettingsForm<T> {
         if candidates.is_empty() {
             return 0;
         }
-        let total: usize = 4 + candidates
-            .iter()
-            .take(MAX_SHOWN_CANDIDATES)
-            .map(|candidate| {
-                let shown = if is_path {
-                    short_name(candidate)
-                } else {
-                    candidate.clone()
-                };
-                shown.chars().count() + 2
-            })
-            .sum::<usize>();
+        let total: usize = usize::from(CANDIDATES_PREFIX)
+            + candidates
+                .iter()
+                .take(MAX_SHOWN_CANDIDATES)
+                .map(|candidate| shown_candidate(candidate, is_path).chars().count() + 2)
+                .sum::<usize>();
         (total as u16).div_ceil(width.max(1)).clamp(1, 3)
     }
 
@@ -604,13 +616,18 @@ impl<T> SettingsForm<T> {
             .unwrap_or(0)
     }
 
+    /// Lines under the fields: candidates, the error, the focused field's help and the key
+    /// legend.
+    fn footer_height(&self, width: u16) -> u16 {
+        2 + self.error_height(width) + self.candidates_height(width)
+    }
+
     /// Total height a floating dialog needs to show the whole form: fields,
     /// finish row, footer, and borders. Not needed when the form fills a
     /// pane - it scrolls there.
     pub fn dialog_height(&self, width: u16) -> u16 {
         let fields_and_finish = self.visible().len() as u16 + 2;
-        let footer = 1 + self.error_height(width) + self.candidates_height(width);
-        fields_and_finish + footer + 2
+        fields_and_finish + self.footer_height(width) + 2
     }
 
     /// Renders the form filling `area`. The field list scrolls when the
@@ -621,15 +638,18 @@ impl<T> SettingsForm<T> {
         self.cursor = self.cursor.min(visible.len());
 
         let inner = dialog(frame, area, self.title);
-        let footer_height =
-            1 + self.error_height(inner.width) + self.candidates_height(inner.width);
-        let [fields_area, footer_area] =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(footer_height)]).areas(inner);
+        let [fields_area, footer_area] = Layout::vertical([
+            Constraint::Min(1),
+            Constraint::Length(self.footer_height(inner.width)),
+        ])
+        .areas(inner);
 
+        let value_x = inner.x + LABEL_WIDTH;
+        let value_width = usize::from(inner.width.saturating_sub(LABEL_WIDTH)).max(8);
         let mut lines: Vec<Line> = Vec::new();
-
-        // The value column: whatever the marker and label leave over.
-        let value_width = (inner.width as usize).saturating_sub(16).max(8);
+        // Per field line: how much of its value is scrolled out, and its options' columns.
+        let mut skips = Vec::new();
+        let mut options = Vec::new();
 
         for (index, def) in visible.iter().enumerate() {
             let focused = index == self.cursor;
@@ -640,26 +660,60 @@ impl<T> SettingsForm<T> {
                 Style::default().fg(theme::GREY)
             };
 
-            let value_spans = match (&def.widget, focused, &self.input) {
-                (WidgetKind::Text { .. }, true, Some(input)) => input.spans(value_width),
+            let (value_spans, skip) = match (&def.widget, focused, &self.editor) {
+                (WidgetKind::Text { .. }, true, Some(editor)) => {
+                    let skip = window_start(editor.text.cursor(), value_width);
+                    let spans = editor.text.spans(
+                        Style::default().fg(theme::LAVENDER),
+                        Style::default().fg(theme::INDIGO),
+                        true,
+                    );
+                    (scrolled(spans, skip), skip)
+                }
                 (WidgetKind::Text { get, .. }, ..) => {
                     let value = get(&self.draft);
-                    let span = if value.is_empty() {
-                        Span::styled("(unset)", Style::default().fg(theme::GREY).italic())
+                    if value.is_empty() {
+                        let unset =
+                            Span::styled("(unset)", Style::default().fg(theme::GREY).italic());
+                        (vec![unset], 0)
                     } else {
-                        // Keep the tail: for paths it is the identifying part.
-                        Span::styled(
-                            tail_ellipsize(&value, value_width),
-                            Style::default().fg(theme::LAVENDER),
-                        )
-                    };
-                    vec![span]
+                        // The window ends on the value's tail: for paths it is the identifying
+                        // part, and it is where the cursor lands when the field opens.
+                        let skip = window_start(value.chars().count(), value_width);
+                        let span = Span::styled(value, Style::default().fg(theme::LAVENDER));
+                        (scrolled(vec![span], skip), skip)
+                    }
                 }
-                (WidgetKind::Select { options, get, .. }, ..) => {
+                (
+                    WidgetKind::Select {
+                        options: names,
+                        get,
+                        ..
+                    },
+                    ..,
+                ) => {
                     let selected = get(&self.draft);
-                    vec![return_spans_select(options, selected, focused)]
+                    let mut spans = Vec::new();
+                    let mut x = value_x;
+                    for (option, name) in names.iter().enumerate() {
+                        let picked = option == selected;
+                        let mark = pick_mark(Picks::One, picked);
+                        let style = match (picked, focused) {
+                            (true, _) => Style::default()
+                                .fg(theme::MINT)
+                                .add_modifier(Modifier::BOLD),
+                            (false, true) => Style::default().fg(theme::LAVENDER),
+                            (false, false) => Style::default().fg(theme::GREY),
+                        };
+                        let width = (mark.width() + name.chars().count()) as u16;
+                        options.push((lines.len(), x, width, index, option));
+                        x += width + 2;
+                        spans.extend([mark, Span::styled(*name, style), Span::raw("  ")]);
+                    }
+                    (spans, 0)
                 }
             };
+            skips.push(skip);
 
             lines.push(Line::from_iter(
                 [
@@ -684,23 +738,49 @@ impl<T> SettingsForm<T> {
 
         // Scroll just enough to keep the focused row (or the finish row at
         // the very end) in view.
+        let finish_line = lines.len() - 1;
         let cursor_line = if finish_focused {
-            lines.len() - 1
+            finish_line
         } else {
             self.cursor
         };
         let top = cursor_line.saturating_sub((fields_area.height as usize).saturating_sub(1));
         frame.render_widget(Paragraph::new(lines).scroll((top as u16, 0)), fields_area);
 
+        let mut hits = Hits {
+            area,
+            value_x,
+            ..Hits::default()
+        };
+        let line_y = |line: usize| {
+            line.checked_sub(top)
+                .and_then(|row| u16::try_from(row).ok())
+                .filter(|row| *row < fields_area.height)
+                .map(|row| fields_area.y + row)
+        };
+        for (line, skip) in skips.iter().enumerate() {
+            if let Some(y) = line_y(line) {
+                hits.rows.push((y, line, *skip));
+            }
+        }
+        if let Some(y) = line_y(finish_line) {
+            hits.rows.push((y, visible.len(), 0));
+        }
+        for (line, x, width, field, option) in options {
+            if let Some(y) = line_y(line) {
+                hits.options
+                    .push((Rect::new(x, y, width, 1), field, option));
+            }
+        }
+
         let mut footer: Vec<Line> = Vec::new();
         let (candidates, is_path) = self.candidates();
         if !candidates.is_empty() {
             // What lights up in the row: the token being completed, or
             // the field's whole value when cycling outside edit mode.
-            let token = match &self.input {
-                Some(input) => input.last_token().1.to_owned(),
-                None => self
-                    .visible()
+            let token = match &self.editor {
+                Some(editor) => editor.last_token().1.to_owned(),
+                None => visible
                     .get(self.cursor)
                     .and_then(|def| match &def.widget {
                         WidgetKind::Text { get, .. } => Some(get(&self.draft)),
@@ -709,12 +789,18 @@ impl<T> SettingsForm<T> {
                     .unwrap_or_default(),
             };
             let mut spans = vec![Span::styled("  ↹ ", Style::default().fg(theme::GREY))];
+            let mut x = footer_area.x + CANDIDATES_PREFIX;
+            let right = footer_area.x + footer_area.width;
             for candidate in candidates.iter().take(MAX_SHOWN_CANDIDATES) {
-                let shown = if is_path {
-                    short_name(candidate)
-                } else {
-                    candidate.clone()
-                };
+                let shown = shown_candidate(candidate, is_path);
+                let width = shown.chars().count() as u16;
+                // Only the candidates on the row's first line are clicked by position; the ones
+                // wrapped below it are still reachable with Tab.
+                if x + width <= right {
+                    hits.candidates
+                        .push((Rect::new(x, footer_area.y, width, 1), candidate.clone()));
+                }
+                x = x.saturating_add(width + 2);
                 // The candidate Tab just picked lights up.
                 let style = if *candidate == token {
                     Style::default().fg(theme::INDIGO).bold()
@@ -738,37 +824,49 @@ impl<T> SettingsForm<T> {
                 Style::default().fg(theme::AMBER),
             ));
         }
-        let help = match visible.get(self.cursor) {
-            Some(def) if self.input.is_some() => {
-                let tab_hint = if def
-                    .suggest
-                    .is_some_and(|suggest| !suggest(&self.draft).is_empty())
-                {
-                    " · Tab completes paths & suggestions"
-                } else {
-                    " · Tab completes paths"
-                };
-                format!("{}{tab_hint}", def.help)
-            }
-            Some(def)
-                if def
-                    .suggest
-                    .is_some_and(|suggest| !suggest(&self.draft).is_empty()) =>
-            {
-                format!("{} · ←/→ cycle suggestions", def.help)
-            }
-            Some(def) => def.help.to_owned(),
-            None => "write the plan and continue".to_owned(),
-        };
+        let help = visible
+            .get(self.cursor)
+            .map_or("write the plan and continue", |def| def.help);
         footer.push(Line::styled(
             format!("  {help}"),
             Style::default().fg(theme::GREY).italic(),
         ));
+        let mut legend = hints::legend(&self.hints());
+        legend.spans.insert(0, Span::raw("  "));
+        footer.push(legend);
         frame.render_widget(
             Paragraph::new(footer).wrap(Wrap { trim: false }),
             footer_area,
         );
+        self.hits = hits;
     }
+}
+
+/// The first character drawn of a value shown `width` cells wide with the cursor at `cursor`:
+/// enough is cut from the front to keep the cursor, and the cell after it where typing goes, in
+/// view.
+fn window_start(cursor: usize, width: usize) -> usize {
+    (cursor + 2).saturating_sub(width)
+}
+
+/// `spans` with their first `skip` characters cut, behind a `…` when anything was cut.
+fn scrolled(spans: Vec<Span<'static>>, skip: usize) -> Vec<Span<'static>> {
+    if skip == 0 {
+        return spans;
+    }
+    let mut left = skip;
+    let mut kept = vec![Span::styled("…", Style::default().fg(theme::GREY))];
+    for span in spans {
+        let count = span.content.chars().count();
+        if left >= count {
+            left -= count;
+            continue;
+        }
+        let content: String = span.content.chars().skip(left).collect();
+        left = 0;
+        kept.push(Span::styled(content, span.style));
+    }
+    kept
 }
 
 /// Whether a token is a filesystem path to complete rather than a word.
@@ -794,6 +892,15 @@ fn completion_target(token: &str) -> Option<String> {
     }
 }
 
+/// How a completion candidate shows in the footer row: paths by their last component.
+fn shown_candidate(candidate: &str, is_path: bool) -> String {
+    if is_path {
+        short_name(candidate)
+    } else {
+        candidate.to_owned()
+    }
+}
+
 /// The last path component (directories keep their trailing `/`), for
 /// showing completion candidates compactly.
 fn short_name(candidate: &str) -> String {
@@ -804,42 +911,6 @@ fn short_name(candidate: &str) -> String {
         }
         _ => candidate.to_owned(),
     }
-}
-
-/// Clamps `text` to its LAST `max` characters with a leading `…`; the
-/// tail is what identifies long values like filesystem paths.
-fn tail_ellipsize(text: &str, max: usize) -> String {
-    let count = text.chars().count();
-    if count <= max {
-        return text.to_owned();
-    }
-    std::iter::once('…')
-        .chain(text.chars().skip(count + 1 - max))
-        .collect()
-}
-
-/// Renders a select value as `option-a | option-b` with the active one lit.
-fn return_spans_select(options: &[&'static str], selected: usize, focused: bool) -> Span<'static> {
-    let rendered = options
-        .iter()
-        .enumerate()
-        .map(|(index, option)| {
-            if index == selected {
-                format!("[{option}]")
-            } else {
-                (*option).to_owned()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    Span::styled(
-        rendered,
-        if focused {
-            Style::default().fg(theme::LAVENDER)
-        } else {
-            Style::default().fg(theme::GREY)
-        },
-    )
 }
 
 /// The service settings registry: one entry per field of the service dialog.
@@ -1127,7 +1198,53 @@ pub fn join_command(parts: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    use crossterm::event::{KeyEvent, KeyModifiers};
+    use ratatui::{Terminal, backend::TestBackend};
+
     use super::*;
+
+    fn service_form() -> SettingsForm<ServiceEntry> {
+        let entry = draft_for_target("pod/app", "ns", "app");
+        SettingsForm::new(entry, SERVICE_SETTINGS, " t ", "ok", validate_service)
+    }
+
+    fn press(form: &mut SettingsForm<ServiceEntry>, code: KeyCode, modifiers: KeyModifiers) {
+        form.handle_key(KeyEvent::new(code, modifiers));
+    }
+
+    fn draw(form: &mut SettingsForm<ServiceEntry>) {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| form.draw(frame, frame.area()))
+            .unwrap();
+    }
+
+    fn mouse(form: &mut SettingsForm<ServiceEntry>, kind: MouseEventKind, column: u16, row: u16) {
+        form.handle_mouse(&MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+
+    /// The line the field labelled `label` was drawn on.
+    fn row_of(form: &SettingsForm<ServiceEntry>, label: &str) -> u16 {
+        let index = form
+            .visible()
+            .iter()
+            .position(|def| def.label == label)
+            .unwrap();
+        form.hits
+            .rows
+            .iter()
+            .find(|(_, row, _)| *row == index)
+            .map(|(y, ..)| *y)
+            .unwrap()
+    }
 
     /// On a focused (not edited) Command row, ←/→ cycle the suggestions
     /// straight into the value, like a select.
@@ -1136,10 +1253,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn arrows_cycle_suggestions_on_a_focused_text_field() {
-        use std::os::unix::fs::PermissionsExt;
-
-        use crossterm::event::{KeyEvent, KeyModifiers};
-
         let dir =
             std::env::temp_dir().join(format!("mirrord-tui-form-cycle-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1156,12 +1269,21 @@ mod tests {
         // Walk down to the Command row: Name, Mode, HTTP filter,
         // Ignore ports, Directory, then Command.
         for _ in 0..5 {
-            form.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            press(&mut form, KeyCode::Down, KeyModifiers::NONE);
         }
-        form.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        press(&mut form, KeyCode::Right, KeyModifiers::NONE);
 
         assert_eq!(form.draft.spec.run.command, ["./app"]);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Tab on a field that has a suggestion list but nothing in it does nothing, rather than
+    /// cycling through an empty list.
+    #[test]
+    fn tab_with_no_suggestions_leaves_the_value_alone() {
+        let mut editor = Editor::new("npm start");
+        editor.cycle_suggestion(&[]);
+        assert_eq!(editor.text.value(), "npm start");
     }
 
     /// Bare words complete against the working directory - where the
@@ -1174,84 +1296,142 @@ mod tests {
         assert_eq!(completion_target(""), None);
     }
 
-    /// The single-line editor speaks readline: ^a/^e/^u/^k/^w and
-    /// word-wise movement.
+    /// `Ctrl+A` selects the whole value, as in every other text box of the interface, and
+    /// typing replaces it. On a field not being edited yet it opens the editor by itself.
     #[test]
-    fn readline_keys_edit_the_line() {
-        use crossterm::event::KeyModifiers;
-
-        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
-        let mut input = Input::new("cargo run --release".to_owned());
-
-        input.handle_key(ctrl('w'));
-        assert_eq!(input.value, "cargo run ");
-        input.handle_key(ctrl('a'));
-        assert_eq!(input.cursor, 0);
-        input.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT));
-        assert_eq!(input.cursor, 5, "alt+right lands at the word's end");
-        input.handle_key(ctrl('k'));
-        assert_eq!(input.value, "cargo");
-        input.handle_key(ctrl('u'));
-        assert_eq!(input.value, "");
-    }
-
-    #[test]
-    fn tail_ellipsize_keeps_the_identifying_tail() {
-        assert_eq!(tail_ellipsize("short", 10), "short");
-        assert_eq!(tail_ellipsize("/a/long/path/binary", 10), "…th/binary");
-        assert_eq!(tail_ellipsize("exact-fit!", 10), "exact-fit!");
-    }
-
-    /// The edit window follows the cursor: it stays visible with a
-    /// leading `…` once the value outgrows the field.
-    #[test]
-    fn input_window_follows_the_cursor() {
-        let rendered = |input: &Input, width: usize| -> String {
-            input
-                .spans(width)
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect()
-        };
-
-        let mut input = Input::new("abcdefghij".to_owned());
-        assert_eq!(rendered(&input, 6), "…ghij ", "trailing cursor cell");
-        input.cursor = 0;
-        assert_eq!(rendered(&input, 6), "abcdef");
+    fn ctrl_a_selects_the_whole_value() {
+        let mut form = service_form();
+        press(&mut form, KeyCode::Char('a'), KeyModifiers::CONTROL);
+        assert!(form.editor.is_some(), "the editor opened by itself");
+        press(&mut form, KeyCode::Char('x'), KeyModifiers::NONE);
+        press(&mut form, KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(form.draft.name, "x", "typing replaced the selection");
     }
 
     /// A selection key on a focused (not yet edited) text field opens
     /// the editor and applies immediately - no Enter needed first.
     #[test]
     fn shift_selection_opens_the_editor_from_the_focused_row() {
-        use crossterm::event::KeyModifiers;
-
-        let entry = draft_for_target("pod/app", "ns", "app");
-        let mut form = SettingsForm::new(entry, SERVICE_SETTINGS, " t ", "ok", validate_service);
+        let mut form = service_form();
 
         // The Name field is focused; shift+Home selects its whole value.
-        form.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::SHIFT));
-        assert!(form.typing(), "the editor opened by itself");
-        form.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
-        form.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        press(&mut form, KeyCode::Home, KeyModifiers::SHIFT);
+        assert!(form.editor.is_some(), "the editor opened by itself");
+        press(&mut form, KeyCode::Char('x'), KeyModifiers::NONE);
+        press(&mut form, KeyCode::Enter, KeyModifiers::NONE);
         assert_eq!(form.draft.name, "x", "typing replaced the selection");
     }
 
-    /// ⌘a selects everything and typing replaces it; shift+arrows mark
-    /// part of the text for deletion.
+    /// The edit window follows the cursor: it stays visible with a
+    /// leading `…` once the value outgrows the field.
     #[test]
-    fn selection_replaces_and_deletes() {
-        use crossterm::event::KeyModifiers;
+    fn long_values_scroll_to_keep_the_cursor_in_view() {
+        let rendered = |spans: Vec<Span<'static>>| -> String {
+            spans.iter().map(|span| span.content.as_ref()).collect()
+        };
+        let mut input = TextInput::default();
+        input.paste("abcdefghij");
+        let spans = || input.spans(Style::default(), Style::default(), true);
 
-        let mut input = Input::new("old value".to_owned());
-        input.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::SUPER));
-        input.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
-        assert_eq!(input.value, "x");
+        assert_eq!(
+            rendered(scrolled(spans(), window_start(10, 6))),
+            "…ghij\u{2588}"
+        );
+        assert_eq!(window_start(0, 6), 0, "the start is in view as it is");
+    }
 
-        input.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
-        input.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
-        input.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
-        assert_eq!(input.value, "x", "shift+left marked `y`, backspace ate it");
+    /// A click on a text field opens it with the cursor where the click landed, a double-click
+    /// selects the word there, and a click on another row applies the edit.
+    #[test]
+    fn clicks_edit_text_fields() {
+        let mut form = service_form();
+        form.draft.name = "shop api".to_owned();
+        draw(&mut form);
+
+        let name = row_of(&form, "Name");
+        let value_x = form.hits.value_x;
+        mouse(
+            &mut form,
+            MouseEventKind::Down(MouseButton::Left),
+            value_x + 2,
+            name,
+        );
+        press(&mut form, KeyCode::Char('i'), KeyModifiers::NONE);
+        assert_eq!(form.editor.as_ref().unwrap().text.value(), "shiop api");
+
+        draw(&mut form);
+        mouse(
+            &mut form,
+            MouseEventKind::Down(MouseButton::Left),
+            value_x + 7,
+            name,
+        );
+        assert!(form.editor.as_ref().unwrap().text.has_selection());
+        press(&mut form, KeyCode::Char('x'), KeyModifiers::NONE);
+
+        let directory = row_of(&form, "Directory");
+        mouse(
+            &mut form,
+            MouseEventKind::Down(MouseButton::Left),
+            2,
+            directory,
+        );
+        assert_eq!(form.draft.name, "shiop x", "leaving the field applied it");
+    }
+
+    /// A drag across a field's value selects what it passes over.
+    #[test]
+    fn dragging_selects_text() {
+        let mut form = service_form();
+        form.draft.name = "checkout".to_owned();
+        draw(&mut form);
+
+        let name = row_of(&form, "Name");
+        let value_x = form.hits.value_x;
+        mouse(
+            &mut form,
+            MouseEventKind::Down(MouseButton::Left),
+            value_x,
+            name,
+        );
+        mouse(
+            &mut form,
+            MouseEventKind::Drag(MouseButton::Left),
+            value_x + 5,
+            name,
+        );
+        press(&mut form, KeyCode::Char('x'), KeyModifiers::NONE);
+        assert_eq!(form.editor.as_ref().unwrap().text.value(), "xout");
+    }
+
+    /// A select field shows every option with the shared pick mark, and a click on one picks
+    /// it.
+    #[test]
+    fn clicking_an_option_picks_it() {
+        let mut form = service_form();
+        draw(&mut form);
+
+        let (area, ..) = form
+            .hits
+            .options
+            .iter()
+            .find(|(_, _, option)| *option == 1)
+            .copied()
+            .unwrap();
+        mouse(
+            &mut form,
+            MouseEventKind::Down(MouseButton::Left),
+            area.x,
+            area.y,
+        );
+        assert_eq!(form.draft.spec.default_mode, ServiceMode::Replace);
+
+        press(&mut form, KeyCode::Char(' '), KeyModifiers::NONE);
+        assert_eq!(
+            form.draft.spec.default_mode,
+            ServiceMode::Split,
+            "space picks the next option"
+        );
     }
 
     #[test]

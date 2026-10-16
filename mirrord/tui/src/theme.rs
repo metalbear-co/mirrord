@@ -5,6 +5,16 @@
 //! selection backgrounds are used, so the application keeps whatever background
 //! the terminal already has.
 //!
+//! Colours carry the same meaning on every screen, so a glance says where to look:
+//! - [`MINT`]: done, ready, safe
+//! - [`AMBER`]: a guess worth checking, or something still missing
+//! - [`CORAL`]: failed, or a choice that affects other people (taking over a target)
+//! - [`TEAL`] and [`SKY`]: things in the cluster, targets and namespaces
+//! - [`INDIGO`]: the brand, keys and focus
+//!
+//! Most text stays [`LAVENDER`] or [`MUTED`]; colour goes on borders, short values and chips, so
+//! the screen does not turn into a rainbow.
+//!
 //! Screens always draw with the 24-bit colours below. [`adapt`] runs over every finished frame and
 //! swaps them for named terminal colours, or drops colour entirely, when the terminal or the user
 //! asks for that, so no screen has to think about colour support.
@@ -28,6 +38,10 @@ pub const DEEP: Color = Color::Rgb(0x2E, 0x2A, 0x5E);
 pub const AMBER: Color = Color::Rgb(0xFF, 0xCB, 0x7D);
 /// Brand accent, used for healthy states.
 pub const MINT: Color = Color::Rgb(0x7D, 0xD3, 0xA8);
+/// Cluster namespaces. Not part of the marketing palette, picked to sit next to it.
+pub const SKY: Color = Color::Rgb(0x5B, 0x9D, 0xF3);
+/// Cluster targets: the workloads a session runs against.
+pub const TEAL: Color = Color::Rgb(0x4D, 0xB6, 0xB0);
 /// Error accent. Not part of the marketing palette, picked to sit next to it.
 pub const CORAL: Color = Color::Rgb(0xF2, 0x77, 0x7A);
 /// De-emphasised text.
@@ -79,6 +93,15 @@ pub fn error() -> Style {
 /// Style for a warning message.
 pub fn warning() -> Style {
     Style::default().fg(AMBER)
+}
+
+/// A short label on a solid colour, such as ` READY `, for the one thing on a screen that should
+/// catch the eye first.
+pub fn chip(color: Color) -> Style {
+    Style::default()
+        .fg(INK)
+        .bg(color)
+        .add_modifier(Modifier::BOLD)
 }
 
 /// How much colour the terminal gets.
@@ -133,8 +156,8 @@ const NAMED: &[((u8, u8, u8), Color)] = &[
     ((0x7A, 0x78, 0xA0), Color::Magenta),      // Preview Environments: Initializing
     ((0xFF, 0x5F, 0x57), Color::LightRed),     // Preview Environments: Failed
     ((0xB8, 0x96, 0x5E), Color::Yellow),       // Preview Environments: Paused
-    ((0x5B, 0x9D, 0xF3), Color::LightBlue),    // Preview Environments: namespace boxes
-    ((0x4D, 0xB6, 0xB0), Color::LightCyan),    // Preview Environments: target boxes
+    ((0x5B, 0x9D, 0xF3), Color::LightBlue),    // SKY
+    ((0x4D, 0xB6, 0xB0), Color::LightCyan),    // TEAL
     ((0x2B, 0x27, 0x57), Color::DarkGray),     // Preview Environments: focused card tint
 ];
 

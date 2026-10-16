@@ -48,22 +48,23 @@ MIRRORD_LOG_FILE=/tmp/mirrord-tui.log MIRRORD_LOG=debug cargo run
 
 ## Screen layout
 
-Every frame is laid out vertically, in the style of k9s:
+Every frame is a sidebar on the left and the active view on the right, with the key bar along the bottom:
 
-| Region | Height | Content |
+| Region | Size | Content |
 | --- | --- | --- |
-| Top bar | 1 line | Where the user is and how the connection is going (see below). |
-| Body | remaining | The active view, framed in a panel titled like `sessions[2]`. |
+| Sidebar | 22 columns, 5 when the terminal is narrower than 90 | Every screen, where the user is, and how the connection is going (see below). |
+| Body | the rest | The active view, framed in a rounded panel titled like `sessions[2]`. |
 | Command line | 1 line, only while open | The `:` command line (see below). |
 | Key bar | 1 line | The keys of whatever has the keyboard, as `<key> action`, keys in indigo. It starts with `<?> help` and ends with `<:> go to`, so the way to everything else is never the part cut off on a narrow terminal. |
 
-There is no tab bar. Views are reached by name on the `:` command line: `home`, `run`, `targets`,
-`config`, `sessions`, `dbs`, `queues`, `previews`, `resources`, `terminal`. `Tab` / `Shift+Tab` still step through them
-in that order. The application opens on `run` when it was started inside a project (a `package.json`,
-`Cargo.toml`, `go.mod` or `pyproject.toml` names it, or the folder has a command to run), and on
-`home` anywhere else.
+Views are reached from the sidebar (a click), by name on the `:` command line (`home`, `run`, `targets`,
+`sessions`, `previews`, `queues`, `dbs`, `config`, `resources`, `terminal`), or with `Tab` / `Shift+Tab`, which
+step through them in the sidebar's order, skipping `terminal`: its shell takes every key, so cycling into it
+would leave no key to cycle out with. The application opens on `run` when it was started inside a project (a
+`package.json`, `Cargo.toml`, `go.mod` or `pyproject.toml` names it, or the folder has a command to run), and
+on `home` anywhere else.
 
-**Panels.** List views are framed in a panel whose top border carries the view's name centered, bold
+**Panels.** Views are framed in a rounded panel whose top border carries the view's name on the left, bold
 indigo, with the number of rows after it in amber brackets (`sessions[2]`, or `[1/3]` while a search
 narrows the list), and when the list was last refreshed on the right (`updated 13:01:02`, local time). A
 short-lived message, such as the outcome of killing a session, sits on the bottom border.
@@ -73,8 +74,14 @@ short-lived message, such as the outcome of killing a session, sits on the botto
 Screens that have been implemented are styled with the MetalBear brand palette: indigo `#756DF3` for panel
 borders and titles, its lighter tint `#A8A5F7` for table headers, the brand dark `#2E2A5E` behind the selected
 row, mint `#7DD3A8` for healthy states, amber `#FFCB7D` for in-progress states and warnings, and coral `#F2777A`
-for errors. Only foreground colors and the selection background are painted, so the terminal keeps its own
-background.
+for errors. Only foreground colors, the selection background and small chips are painted, so the terminal
+keeps its own background.
+
+Colors mean the same thing on every screen, so a glance says where to look: mint is done, ready or safe;
+amber is a guess worth checking or something still missing; coral is failed, or a choice that affects other
+people; teal `#4DB6B0` and sky `#5B9DF3` are things in the cluster (targets and namespaces); indigo is the
+brand, keys and focus. Most text stays lavender or grey: color goes on borders, short values and chips (a
+short label on a solid color, such as `● READY`), not on whole paragraphs.
 
 How much of that color reaches the terminal is decided once per process, from the environment, first match
 wins:
@@ -88,39 +95,41 @@ wins:
 This applies to everything on screen, every screen and dialog and the Terminal screen's shell output
 included, since on a terminal without 24-bit support a 24-bit color is drawn as one flat grey.
 
-## Top bar
+## Sidebar
 
-One line: a `◆ mirrord` chip, then `context › namespace › view` on the left, and the connection state on the
-right.
+A rounded column down the left edge, top to bottom:
 
-- **context** — the Kubernetes context the application is connecting to, or italic `current context` when
-  none was picked (the ambient current context is used).
-- **namespace** — the namespace lists are narrowed to, or italic `all namespaces` when none was picked.
-- **view** — the active view, bold indigo.
-- **state**, on the right — one of:
+- the `◆ mirrord` chip (indigo);
+- `⌂ Home`, then the screens under three headings: **START** `▶ Run`, `◎ Targets`; **WATCH** `◉ Sessions`,
+  `◇ Previews`, `≋ Queues`, `▤ Databases`; **SETUP** `≡ Config`, `▦ Resources`, `❯ Terminal`. Every icon is
+  one column wide on every terminal (no emoji). The current screen has an indigo `▌` bar and a filled row.
+  The WATCH screens show how many things they hold at the right edge in mint (the Home dashboard's counts:
+  sessions, previews, queue splits, database branches), when the count is known and not zero;
+- at the bottom: the Kubernetes context (the kubeconfig's current one when none was picked), the namespace
+  (italic `all namespaces` when none was picked), and the connection state:
   - `◌ connecting…` (amber) while a connection attempt is in flight and no result has arrived yet;
   - `● connected` (mint) while the most recent connection attempt succeeded;
-  - `✗ <summary>` (coral) followed by `· <e> details` (gray) if the most recent attempt failed.
+  - `✗ can't connect` (coral) if the most recent attempt failed, followed by its summary (at most three
+    lines, the last cut with `…`) and `<e> details`.
 
-When the line is too short for everything, the breadcrumb drops the context first, then the namespace,
-keeping the view name and at least two columns before the state.
+Clicking a screen goes there (unless a dialog is open). Narrower than 90 columns, the sidebar folds to
+the icons and the connection's sign alone.
 
-The summary is a one-line condensation of the failure, never the error verbatim. Errors built around a
-payload are cut back to the classification in front of it — a `kube` auth error quotes the entire failed
-credential-plugin command, `KUBERNETES_EXEC_INFO`'s JSON included, so `auth error: auth exec command
-'<hundreds of characters>' failed with status ...` is shown as `auth error: auth exec command`. Whatever is
-still too wide is cut with a trailing `…`, so the bar never spills onto the line below it.
+The summary is a condensation of the failure, never the error verbatim. Errors built around a payload are cut
+back to the classification in front of it: a `kube` auth error quotes the entire failed credential-plugin
+command, `KUBERNETES_EXEC_INFO`'s JSON included, so `auth error: auth exec command '<hundreds of characters>'
+failed with status ...` is shown as `auth error: auth exec command`.
 
 ## Connection error dialog
 
-Pressing `e` while the status bar reports a failed connection opens a centered modal dialog, red-bordered
+Pressing `e` while the sidebar reports a failed connection opens a centered modal dialog, red-bordered
 and titled `connection error`, over the body area. It captures all input while open; `Esc`, `q` and `e`
 close it. A new connection attempt (triggered by changing the context or namespace) closes it too, since the
 failure it describes is no longer the current one. It is never drawn over a context or namespace picker.
 
 It shows, in order:
 
-- the same one-line summary as the status bar, in bold;
+- the same summary as the sidebar, in bold;
 - **captured output** — the last lines written to the inherited stderr, which for a failing credential
   plugin is where the actionable instruction (`Please run: $ gcloud auth login`) lives. Omitted when nothing
   has been captured;
@@ -194,8 +203,8 @@ The following keys are handled globally, regardless of which screen is active:
 | --- | --- |
 | `q` | Quit the application, asking first when there are unsaved edits. |
 | `Ctrl+C` | Quit the application, asking first when there are unsaved edits. |
-| `Tab` | Move to the next screen (wraps from the last back to the first). |
-| `Shift+Tab` | Move to the previous screen (wraps from the first back to the last). |
+| `Tab` | Move to the next screen (wraps from the last back to the first), skipping the Terminal. |
+| `Shift+Tab` | Move to the previous screen (wraps from the first back to the last), skipping the Terminal. Terminals that report it as `Tab` with Shift held work too. |
 | `e` | Open the connection error dialog. Does nothing unless the last connection attempt failed. |
 | `c` | Open the kube context picker. |
 | `n` | Open the namespace picker. Does nothing until connected. |
@@ -209,6 +218,16 @@ consumes *every* key while the shell has the keyboard, so none of the global key
 `Ctrl+B` is pressed (see below).
 
 Key releases are ignored; only presses and auto-repeats are acted on.
+
+**Text boxes** (search lines, the command editor, the `:` line's text) all edit the same way: `Ctrl+A`
+selects everything, `Shift` with `←` `→` `Home` `End` selects, typing or pasting replaces the selection,
+`Backspace`/`Delete` remove it, `Ctrl`/`Alt` with the arrows move by word, `Ctrl+W`, `Alt+Backspace` and
+`Ctrl+Backspace` delete the word before the cursor, `Ctrl+U`/`Ctrl+K` delete to the start/end, and `Ctrl+E`
+jumps to the end. With the mouse, a click places the cursor, a drag selects and a double-click selects a
+word.
+
+**The mouse** is captured while the interface runs, so lists take clicks, double-clicks and the wheel. The
+terminal's own text selection still works with `Option` (macOS) or `Shift` held.
 
 ## Screens
 
@@ -241,36 +260,117 @@ the rest of the height.
 
 ### Run
 
-Starts a mirrord session from the folder the application was started in, working out everything it can
-instead of asking. It shows one card per decision, each with the reason for it, so a guess can be checked at
-a glance; `Enter` starts the session, and the key in a card's title changes just that card.
+Starts a mirrord session in three short steps, each one a list to pick from: **Folders** (what to run),
+**Targets** (what it runs against) and **Config** (how mirrord runs it). Everything that can be guessed is
+guessed and already picked, so the usual run is `Enter`, `Enter`, `Enter`.
 
-The panel is titled `run`, with the namespace searched (`in staging`, or `in all namespaces`) on the right.
-Its first line says `Looks like <name> (<where the name came from>)` when a project name was found, and `No
-project files here; pick a target and a command.` otherwise.
+**Layout.** The panel is titled `run`, with the namespace searched (`in staging`, or `in all namespaces`) on
+the right. Top to bottom:
 
-| Card | Shows | Changed with |
+| Row | Shows |
+| --- | --- |
+| Step bar | `1 Folders › 2 Targets › 3 Config › ▶ run`. The current step is on an indigo chip, done steps are mint with what was picked (`Folders ✓ 2`), later ones grey; `▶ run` turns mint once the plan is ready. Clicking a step goes there. |
+| Question | The step's question in bold (`Which folders do you want to run?`) and one muted line of help. |
+| List | The step's choices (see below), with a search line on top. |
+| Details | A pane about the row under the cursor, next to the list from 90 columns, under it on narrower terminals that are tall enough. |
+| Tray | What is picked, as chips with a coral `✕` that unpicks on a click (`picked  checkout ✕  payments ✕`, `+N more` when they do not fit). On the config step, the status chip instead: `● READY` on mint, `NEEDS` on amber, `FAILED` on coral. |
+| Legend | The step's keys drawn as keycaps (` space  pick   enter  next   esc  back`). |
+
+**Lists work the same in every step.** Each row has its pick column in the same place: `[✓]` / `[ ]` where
+several can be picked, `(●)` / `( )` where one is; picked rows turn mint.
+
+| Input | Does |
+| --- | --- |
+| `Space`, or a click | Picks or unpicks the row (on the config step, chooses it) |
+| `↑` `↓` `PgUp` `PgDn`, the mouse wheel | Moves |
+| Typing | Searches: every typed word has to appear in the row (its title, description or hidden keywords); matches in the title come first, and the matching text lights up amber. `Esc` clears the search. With nothing typed, `:` and `?` still open the command line and help. |
+| `Enter` | Goes to the next step; on the config step, runs |
+| `Esc` (nothing typed), `←` | Goes back a step |
+| Double-click | Opens a folder, or picks a target |
+| `Ctrl+A` (nothing typed) | Picks every folder shown, or none if all are picked |
+
+Plain letters always go to the search, so a step's own actions are on `Ctrl` chords. The search line is a
+full text box, like every other one in the interface: `Ctrl+A` selects all, `Shift`+arrows select, typing replaces
+the selection, a click places the cursor, a drag selects and a double-click selects a word.
+
+**1 Folders.** Opens on `projects` (`found on this computer and used before`), in sections: `picked` (so
+each can be unpicked here even when it was found elsewhere), `used before` (folders something ran from,
+marked `ran before` in mint), `projects` (found under the home folder), and `browse` with `~/ your home
+folder`. Each row shows the file that makes it a project (`package.json`, `Cargo.toml`, `go.mod`,
+`pyproject.toml`, `requirements.txt`, `pom.xml`, `build.gradle`, `Gemfile`, `composer.json`, `mix.exs`,
+`Dockerfile`) in soft indigo; folders without one are grey.
+
+- The search for projects runs once in the background when the application starts, at most 5 folders deep
+  under the home folder, skipping hidden folders and `node_modules`, `target`, `vendor`, `dist`, `build`,
+  `out`, `venv`, `Library` and the like, and stops after 4 seconds, 30,000 folders or 2,000 projects. Until
+  it is done, the location line says `still looking in your home folder...`.
+- `→` or a double-click goes into a folder, `←` (or `Backspace` with nothing typed) goes up with the cursor
+  on the folder just left, and `~` or `/` typed first jumps to the home folder or the root. Inside a folder
+  the location line says `in ~/code/shop`, the first row is `.` (the folder itself, to pick it), then its
+  subfolders. `Esc` goes back to the project list.
+- The details pane shows the project's name, its folder, its project file and the command it would run.
+- `Enter` with nothing picked takes the folder under the cursor and goes on.
+- The folder the application was started in is already picked when it is a project (a manifest names it,
+  or it has a command to run), and the view then opens on the targets step.
+
+**2 Targets.** Every target found, in sections:
+
+- `suggested`: workloads named like a picked folder's project, best first, each with `★` (mint, a sure
+  match: run from that folder before, or named exactly like it) or `☆` (amber, a looser match such as `close
+  to` or `shares a word with`) and the reason (`named like echo-app`; `for checkout · ...` when several folders
+  are picked). Pods and replica sets are never suggested: their workload is the better pick.
+- `all targets`, then `pods and replica sets`, each sorted by namespace and path.
+
+Target paths are teal and namespaces sky blue. Each folder's sure match is ticked once its targets are
+known, unless the folder already has a target; unpicking it is never undone. A picked target goes to the
+folder it fits best that has no target yet, or replaces the target of the folder it fits best when every
+folder has one; the tray says which (`checkout → deployment/checkout ✕`) and `Ctrl+F` moves the target under
+the cursor to the next folder, swapping targets if that folder has one. Folders without a target run with no
+incoming traffic. The details pane shows the target's namespace, kind, why it is suggested, which folder it
+runs for, and what reading it from the cluster found: its databases (with where their credentials come
+from) and queues.
+
+While there is nothing to list: `Waiting for the cluster... Enter goes on without a target.`, `Looking for
+targets...`, the error when listing failed, or `Nothing to target here. Try :ns, or Enter to go on without a
+target.` Discovery runs again whenever the connection or the namespace changes.
+
+**3 Config.** One config is chosen, the first one by default. Configs `made from your picks` (marked `✦`):
+
+| Config | Offered | Does |
 | --- | --- | --- |
-| `<m> JOB` | `Only my requests` by default: requests with the session's key reach the local process, everyone else's keep going to the cluster. The others are `Take over all traffic` (the original is scaled down) and `No incoming traffic` (no target). Each comes with one sentence on what it does. | `m`, a picker of the three jobs |
-| `<t> TARGET` | The best match among the cluster's targets, then its namespace and the reason it was picked (`test-mirrord · named like echo-app (package.json)`), and `+N more` when there are others. `none` and `not needed for this job` for the no-traffic job. | `t`, a picker of every target, best match first, listed as `path (namespace)` |
-| `<p> COMMAND` | What was last run for that target from this folder (`ran last time`), else the first command the project files point to (`detected - check it`), or `your pick`. | `p`, a picker of past and detected commands plus `type my own command...`, which opens a one-line editor (`Enter` keeps, `Esc` cancels) |
-| `<y> PLAN` | What will run, in five rows: `target`, `traffic` (`only requests with your session key`, `all of it, original scaled down` or `none`), `runs` (the command), `in` (the folder, `~` for the home directory) and `db` (`the originals`, or how many are branched). Or what is still missing. | `y` switches the card to the exact YAML mirrord reads (titled `<y> YAML`), and back |
-| `<b> DATABASES` | Every database the target uses, one checkbox each (`[ ] postgres · ORDERS_DATABASE_URL`) with where its credentials come from under it, and `not branched - b to choose` or `N branched for this session`. Detected Redis databases and URL variables whose engine is unknown are listed with `branch it in :config`. Things that could not be read (a Secret or ConfigMap loaded with `envFrom`, the workload itself) are noted in amber. `none without a target` for the no-traffic job. | `b`, a `Branch databases` checklist: `Up`/`Down` move, `Space` switches one, `a` switches all or none, `Enter` keeps, `Esc` cancels |
-| `QUEUES` | The queues the operator can split for the target (`test-topic · kafka`), and what happens to them with the job: `messages with your session key come to you`, `the copy reads them; nothing is split`, or `not split without a target`. `None registered with the operator.` when there are none. | - |
+| `Only my requests` | when a target is picked; marked ` recommended ` | `mirrord up` split mode: requests with the session key reach you, and the targets' queues split the same way |
+| `Only my requests + branch N databases` | when the picked targets use databases | the same, with every branchable database (or the team's presets) branched for this session |
+| `Take over all traffic` | when a target is picked | replace mode: every request reaches you, the original is scaled down |
+| `No incoming traffic` | always | targetless: the cluster's network, files and env only |
 
-**Layout.** Cards are as tall as their contents. At an inner width of 90 columns or more they sit two to a
-row (job and target, command and plan, databases and queues); narrower, one per row. When the terminal is
-too short for the boxes, they become a plain list: one row per card with its key and name, then its other
-lines indented underneath, card by card, for as long as there is room. The Ready line follows the cards.
+Then the `files in your folders` (marked `≡`): every `.json`, `.yaml`, `.yml` or `.toml` file in a picked
+folder's `.mirrord` directory, titled by its path and described by its first options
+(`feature.network.incoming: steal · +3 more`). A file applies to its own folder, as a `config_patch` with its
+whole content; other folders run with only their own requests.
 
-**Databases and queues.** Whenever the view settles on a target, it reads the target from the cluster in the
-background (read-only), and does it again when the target changes, which also clears the databases chosen
-for the previous one.
+Every config carries the words a search should find it by: the made ones what they do (`split`, `steal`,
+`takeover`, `targetless`, `db`, `database`, `branch`) plus the picked targets' engines, database variables
+and queue names; files every key and value they hold. So `db`, `postgres`, `kafka`, `steal` or a variable
+name narrows the list to the configs that do it.
+
+The details pane (`what will run`) lists each folder: its path, `target` and `in` (namespace), `traffic`
+(`only yours (session key)`, `all, original scaled down` or `none`, in the job's color), `runs` with the
+command and where it came from under it (`ran last time` or `your pick` in mint, `detected - check it` in
+amber), and `db  N branched` or `config  from the file` when the config adds something. `Ctrl+Y` switches it
+to the exact YAML mirrord reads, and back. `Ctrl+E` changes a folder's command (asking which folder first
+when there are several): a picker of past and detected commands plus `type my own command...`, which opens a
+`Command for <folder>` box with the current command selected.
+
+The plan has one service per folder, named after its target (or the project when there is none), with `-2`,
+`-3` ... added when two would share a name; each runs in its own folder. It needs a folder and, for each
+folder, a command: `NEEDS  a command for checkout - ctrl+e` otherwise.
+
+**Databases and queues.** Each picked target, and the target under the cursor on the targets step, is read
+from the cluster once in the background (read-only):
 
 - *The team's presets come first.* A `MirrordSplitConfig` in the target's namespace that names the target
   (`targetRef`) or selects it by labels (`targetSelector.matchLabels`) lists databases under `dbBranches`;
-  when any apply, they are the whole list (`pg · orders-db`, `team preset (MirrordSplitConfig)`), and
-  branching them writes their ids.
+  when any apply, they are the databases offered, and branching them writes their ids.
 - *Otherwise the pod spec is read*: the targeted container (or every container but mesh sidecars), with the
   keys of Secrets and ConfigMaps it loads through `envFrom`. Secret values are never kept or shown; only key
   names are used.
@@ -286,7 +386,7 @@ for the previous one.
   - When no password was found (no password variable, or a plain URL without one) and the pod has a cloud
     identity, the branch signs in with it: an IRSA role on the service account, the EKS web-identity
     variables or static AWS keys mean AWS (`iam_auth: aws_rds`); a GKE Workload Identity annotation or a
-    Cloud SQL proxy sidecar means Google Cloud (`iam_auth: gcp_cloud_sql`). The card says so (`signs in with
+    Cloud SQL proxy sidecar means Google Cloud (`iam_auth: gcp_cloud_sql`). The details pane says so (`signs in with
     the pod's AWS role (IRSA)`).
 - *Queues* come from the same split configs (`queues`) and from older `MirrordWorkloadQueueRegistry`
   resources whose consumer is the target.
@@ -305,8 +405,8 @@ its own.
 - *Where to look*: the namespace picked with `:ns`, or, when none is, every namespace except `kube-system`,
   `kube-public`, `kube-node-lease` and `mirrord`. A cluster with more than 30 such namespaces, or one that does
   not allow listing them, is searched in its default namespace only.
-- *Targets* are listed the same way the Targets view lists them, and ranked: a target run from this folder
-  before first (`ran from here before`), then one named exactly like a project name (`named like checkout
+- *Targets* are listed once, the same way the Targets view lists them, and ranked for each folder against
+  its own names: a target run from that folder before first (`ran from here before`), then one named exactly like a project name (`named like checkout
   (package.json)`), then one whose name contains a project name or the other way round (`close to`), then
   one sharing a word with it (`shares a word with`). Deployments and rollouts win ties over
   statefulsets, services, pods and jobs. Targets matching nothing are still offered, last.
@@ -315,16 +415,11 @@ its own.
   project wins, else the first, and the reason says which (`container app, sidecars skipped`).
 - *Commands*: the same detection the Targets view offers (`npm run dev`, `cargo run`, `go run .` ...).
 
-The target card shows `Waiting for the cluster...` or `Looking for targets...` while those are under way,
-the error when listing failed, and `Nothing to target here. Try :ns.` when nothing was found. Discovery runs again whenever the connection or the namespace changes.
-
-The line under the cards says `● Ready - enter to start` once there is a target (when the job needs one)
-and a command, and `Needs a target.` or `Needs a command.` otherwise.
-
-**Running.** `Enter` writes the plan to a temporary file and starts `mirrord up -f` on it, exactly as the
-Targets view does, records the command in the target's history, and replaces the cards with the run's log
-pane, which starts with `$ mirrord  (plan: <file>)`. `x` stops it, `Up`/`Down` scroll, `G` follows the tail, and `Esc` returns to the cards once it has
-stopped. If mirrord cannot be started, the reason is shown under the cards instead.
+**Running.** `Enter` on the config step writes the plan to a temporary file and starts `mirrord up -f` on it,
+exactly as the Targets view does, records each folder's command in its target's history, and replaces the
+steps with the run's log pane, which starts with `$ mirrord  (plan: <file>)`. `x` stops it, `Up`/`Down`
+scroll, `G` follows the tail, and `Esc` returns to the steps once it has stopped. If mirrord cannot be
+started, the reason is shown on the config step instead.
 
 ### Targets
 
@@ -332,7 +427,30 @@ A wizard for assembling and running a multi-service session.
 
 It lists everything mirrord can target in the current namespace as a flat tree with per-kind
 badges. Choosing a target opens a settings dialog, prefilled from what was last run against that
-target, and each confirmed target is appended to an ordered plan.
+target, and each confirmed target is appended to an ordered plan. `/` filters the list; the filter
+line is the shared text input, so it edits like every other box.
+
+The settings dialog (and the export dialog) is a form of labelled fields built from the shared
+pieces, so it behaves like the rest of the interface:
+
+- `↑`/`↓` (or a click, or the wheel) move between fields; the last row finishes (`Add to plan`,
+  `Save`, `Write file`).
+- Text fields edit with the shared text input. `Enter` or a click opens the field (a click puts the
+  cursor where it landed, a drag selects, a double-click selects a word), `Ctrl+A` selects
+  everything and `Shift` with the arrows selects, also on a field not opened yet, and typing replaces
+  the selection. `Enter` applies, `Esc` drops the edit. A value too long for the field scrolls
+  behind a `…` to keep the cursor in view.
+- `Tab` completes the last word against the filesystem, or cycles the field's suggestions (the
+  Command field suggests what ran for the target before and what the folder's project files run).
+  The candidates show on a row under the fields, and a click on one puts it in. On a field not
+  being edited, `←`/`→` cycle its suggestions straight into the value.
+- Fields with a few fixed options (Mode, Format, Operator, Insecure TLS) show every option with the
+  same `(●)` / `( )` pick mark as the pick lists; `←`/`→` or `Space` change it, and a click on an
+  option picks it.
+
+Under the fields sit the focused field's help, any error (a value the field rejects, or a run that
+needs a missing command, which opens that field with the reason), and a legend of the keys for what
+is focused. The same keys are on the key bar.
 
 The plan pane holds the services that make up the `mirrord-up.yaml` the screen emits. From there
 the plan can be written to a file, or run directly, which starts `mirrord up` as a child process
@@ -813,7 +931,7 @@ is no panel to see.
 
 Sessions are read from the local session registry mirrord's internal proxy maintains in
 `~/.mirrord/sessions` — the same source as `mirrord session list`, and independent of the cluster connection
-in the status bar. That registry is per-user rather than per-shell, so a session is attributed to this pane by
+shown in the sidebar. That registry is per-user rather than per-shell, so a session is attributed to this pane by
 its **process tree**: the panel keeps a session when the pane's shell is an ancestor of any process running
 under it. Walking the whole ancestry (rather than only comparing against the immediate parent) is what makes
 indirectly started sessions show up — `mirrord exec` under `npm run`, a `make` recipe, or a wrapper script —
@@ -843,7 +961,7 @@ bottom border shows how many sessions are listed and how long ago the registry w
 
 ## Connecting to Kubernetes
 
-On startup the application immediately begins a connection attempt to the Kubernetes cluster. The status bar reflects the progress of that attempt:
+On startup the application immediately begins a connection attempt to the Kubernetes cluster. The sidebar reflects the progress of that attempt:
 
 1. `connecting...` is shown while the attempt is in flight.
 2. It changes to `connected` on success, or to the error message on failure.
@@ -854,4 +972,4 @@ The connection is built from the ambient mirrord configuration — the same sour
 - whether invalid TLS certificates are accepted,
 - the current Kubernetes context.
 
-If the connection scope ever changes, any in-flight connection attempt is cancelled and a new one is started immediately, with the status bar reverting to `connecting...`. In the current version there is no in-app way to change the scope, so this only happens once, at startup.
+If the connection scope ever changes, any in-flight connection attempt is cancelled and a new one is started immediately, with the sidebar reverting to `connecting…`. In the current version there is no in-app way to change the scope, so this only happens once, at startup.

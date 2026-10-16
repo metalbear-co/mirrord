@@ -22,7 +22,13 @@ use strum::VariantArray;
 use strum_macros::{Display, IntoStaticStr, VariantArray};
 use tokio::sync::Notify;
 
-use crate::{context::Context, helpers::ellipsize, kit::panel, screens::targets::keys, theme};
+use crate::{
+    context::Context,
+    helpers::ellipsize,
+    kit::{panel, text_input::TextInput},
+    screens::targets::keys,
+    theme,
+};
 
 /// A kind of cluster resource mirrord can target. Declaration order is the
 /// display order in the browser.
@@ -155,7 +161,7 @@ pub struct Browser {
     refresh: Arc<Notify>,
     selected: usize,
     expanded: HashSet<(TargetKind, String)>,
-    filter: String,
+    filter: TextInput,
     filter_active: bool,
     list_state: ListState,
     /// Anchors the loading spinner's animation.
@@ -178,7 +184,7 @@ impl Browser {
             refresh,
             selected: 0,
             expanded: HashSet::new(),
-            filter: String::new(),
+            filter: TextInput::default(),
             filter_active: false,
             list_state: ListState::default(),
             started: Instant::now(),
@@ -217,11 +223,11 @@ impl Browser {
             };
 
             for item in items {
-                let name_matches = subsequence_match(&self.filter, &item.name);
+                let name_matches = subsequence_match(self.filter.value(), &item.name);
                 let matched_containers: Vec<&String> = item
                     .containers
                     .iter()
-                    .filter(|container| subsequence_match(&self.filter, container))
+                    .filter(|container| subsequence_match(self.filter.value(), container))
                     .collect();
 
                 if !name_matches && matched_containers.is_empty() {
@@ -263,7 +269,7 @@ impl Browser {
             }
         }
 
-        if subsequence_match(&self.filter, "targetless") {
+        if subsequence_match(self.filter.value(), "targetless") {
             rows.push(Row::Targetless);
         }
         rows.extend(errors);
@@ -302,11 +308,9 @@ impl Browser {
                     self.filter_active = false;
                 }
                 KeyCode::Enter => self.filter_active = false,
-                KeyCode::Backspace => {
-                    self.filter.pop();
+                _ => {
+                    self.filter.handle_key(&key);
                 }
-                KeyCode::Char(c) => self.filter.push(c),
-                _ => {}
             }
             self.selected = 0;
             return BrowserOutcome::Consumed;
@@ -386,17 +390,12 @@ impl Browser {
 
     /// True while the filter line is capturing keystrokes.
     /// Routes a terminal paste into the filter while it is being typed;
-    /// `false` otherwise. Control characters collapse to spaces and the
-    /// ends trim - the filter is a single line.
+    /// `false` otherwise. The ends trim - the filter is a single line.
     pub fn paste(&mut self, text: &str) -> bool {
         if !self.filter_active {
             return false;
         }
-        let cleaned: String = text
-            .chars()
-            .map(|c| if c.is_control() { ' ' } else { c })
-            .collect();
-        self.filter.push_str(cleaned.trim());
+        self.filter.paste(text.trim());
         true
     }
 
@@ -485,22 +484,17 @@ impl Browser {
                 1 => "1 hit".to_owned(),
                 count => format!("{count} hits"),
             };
-            frame.render_widget(
-                Line::from_iter([
-                    Span::styled("/", Style::default().fg(theme::INDIGO)),
-                    Span::styled(self.filter.clone(), Style::default().fg(theme::LAVENDER)),
-                    if self.filter_active {
-                        Span::styled("█", Style::default().fg(theme::INDIGO))
-                    } else {
-                        Span::raw("")
-                    },
-                    Span::styled(
-                        format!("  {hits}"),
-                        Style::default().fg(theme::GREY).italic(),
-                    ),
-                ]),
-                filter_area,
-            );
+            let mut spans = vec![Span::styled("/", Style::default().fg(theme::INDIGO))];
+            spans.extend(self.filter.spans(
+                Style::default().fg(theme::LAVENDER),
+                Style::default().fg(theme::INDIGO),
+                self.filter_active,
+            ));
+            spans.push(Span::styled(
+                format!("  {hits}"),
+                Style::default().fg(theme::GREY).italic(),
+            ));
+            frame.render_widget(Line::from(spans), filter_area);
         }
 
         if rows.is_empty() {

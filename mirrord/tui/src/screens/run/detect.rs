@@ -90,6 +90,10 @@ pub fn project_names(dir: &Path) -> Vec<ProjectName> {
     names
 }
 
+/// The lowest score of a sure guess: an exact name match. A close match plus the best kind
+/// weight stays under it.
+const SURE_SCORE: u32 = 60;
+
 /// A cluster target the project could run against, and why it is offered.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
@@ -107,6 +111,12 @@ impl Candidate {
     /// `deployment/api (shop)`.
     pub fn label(&self) -> String {
         format!("{} ({})", self.path(), self.namespace)
+    }
+
+    /// Whether the guess is one to trust without looking: the user ran it from here before, or
+    /// it is named exactly like the project. Looser matches are worth a glance.
+    pub fn is_sure(&self) -> bool {
+        self.score >= SURE_SCORE
     }
 
     /// The mirrord target path, such as `deployment/api/container/app`.
