@@ -28,7 +28,10 @@ param(
     [long]$Budget = 1MB,
 
     # Small enough that any build overflows, to exercise the report.
-    [long]$TooSmall = 256KB
+    [long]$TooSmall = 256KB,
+
+    # Longest a single run may take. Each one ends in seconds; a hang fails the check instead.
+    [int]$TimeoutSeconds = 300
 )
 
 Set-StrictMode -Version Latest
@@ -69,11 +72,22 @@ function Invoke-WithStack([long]$Stack, [string[]]$Arguments) {
     $env:MIRRORD_PROGRESS_MODE = 'off'
     $stdout = [IO.Path]::GetTempFileName()
     $stderr = [IO.Path]::GetTempFileName()
-    $process = Start-Process -FilePath $copy -NoNewWindow -Wait -PassThru `
+    $process = Start-Process -FilePath $copy -NoNewWindow -PassThru `
         -ArgumentList (($Arguments | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' ') `
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    # Without a handle taken while it runs, Windows PowerShell loses the exit code.
+    $null = $process.Handle
+    $finished = $process.WaitForExit($TimeoutSeconds * 1000)
+    if (-not $finished) {
+        $process.Kill()
+        $process.WaitForExit()
+    }
     $output = @(Get-Content $stdout) + @(Get-Content $stderr)
     Remove-Item $copy, $stdout, $stderr -Force -ErrorAction SilentlyContinue
+    if (-not $finished) {
+        $output | ForEach-Object { Write-Host $_ }
+        throw "mirrord $($Arguments -join ' ') was still running after $TimeoutSeconds s; its output is above."
+    }
 
     [pscustomobject]@{
         Output     = $output
@@ -82,15 +96,16 @@ function Invoke-WithStack([long]$Stack, [string[]]$Arguments) {
     }
 }
 
-# Each run must reach a known end, so a run that printed nothing never passes for one that fit.
+# Each run must reach a known end, so a run that died some other way never passes for one that fit.
 $runs = @(
     @{
         Name      = 'exec (offline)'
         Arguments = @('exec', '--target', 'targetless', '--', 'cmd.exe', '/c', 'exit 0')
         # The empty kubeconfig stops it at the cluster connection.
-        Expect    = 'Kubernetes'
+        Expect    = 'Failed to create Kubernetes API client'
+        ExitCode  = 1
     },
-    @{ Name = '--help'; Arguments = @('--help'); Expect = 'Usage:' }
+    @{ Name = '--help'; Arguments = @('--help'); Expect = 'Usage:'; ExitCode = 0 }
 )
 $failed = $false
 
@@ -127,12 +142,12 @@ foreach ($run in $runs) {
             "above ranks the frames that used it; see 'Stack Usage' in AGENTS.md.") -f $run.Name, ($Budget / 1KB)
         Write-Host "::error title=Stack budget::$message"
         $failed = $true
-    } elseif (-not ($result.Output -match $run.Expect)) {
+    } elseif ($result.ExitCode -ne $run.ExitCode -or -not ($result.Output -match $run.Expect)) {
         Write-Host "::group::$($run.Name) output"
         $result.Output | ForEach-Object { Write-Host $_ }
         Write-Host '::endgroup::'
-        Write-Host ("::error title=Stack budget::mirrord {0} exited {1} without printing '{2}'." -f
-            $run.Name, $result.ExitCode, $run.Expect)
+        Write-Host ("::error title=Stack budget::mirrord {0} should exit {1} after printing '{2}', but exited {3}." -f
+            $run.Name, $run.ExitCode, $run.Expect, $result.ExitCode)
         $failed = $true
     } else {
         Write-Host "ok: $($run.Name) fits in $($Budget / 1KB) KiB"
