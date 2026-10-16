@@ -655,6 +655,96 @@ mod tests {
         ));
     }
 
+    /// The secret manager extractors survive every hop from the client config into the CR
+    /// and back out of its JSON: params, the owned and borrowed `url` conversions, AWS and
+    /// GCP alike. A dropped field here makes the operator copy with the whole secret as the
+    /// value. Without an extractor nothing extra is written to the CR, so an older operator
+    /// reads it unchanged.
+    #[rstest::rstest]
+    #[case::aws_selector(true, Some(".password"), None)]
+    #[case::gcp_pattern(false, None, Some("password=(.+)"))]
+    #[case::aws_none(true, None, None)]
+    fn secret_manager_extractors_map_to_crd_kind(
+        #[case] aws: bool,
+        #[case] value_selector: Option<&str>,
+        #[case] value_pattern: Option<&str>,
+    ) {
+        let secret_ref = "db-creds".to_owned();
+        let value_selector = value_selector.map(str::to_owned);
+        let value_pattern = value_pattern.map(str::to_owned);
+        let env_var_name = Some("DB_PASSWORD".to_owned());
+        let expected = if aws {
+            ConnectionSourceKind::AwsSecretsManager {
+                secret_ref: secret_ref.clone(),
+                value_selector: value_selector.clone(),
+                value_pattern: value_pattern.clone(),
+                env_var_name: env_var_name.clone(),
+            }
+        } else {
+            ConnectionSourceKind::GcpSecretManager {
+                secret_ref: secret_ref.clone(),
+                value_selector: value_selector.clone(),
+                value_pattern: value_pattern.clone(),
+                env_var_name: env_var_name.clone(),
+            }
+        };
+        let (param, url) = if aws {
+            (
+                ParamSource::AwsSecretsManager {
+                    secret_ref: secret_ref.clone(),
+                    value_selector: value_selector.clone(),
+                    value_pattern: value_pattern.clone(),
+                    env_var_name: env_var_name.clone(),
+                },
+                TargetEnvironmentVariableSource::AwsSecretsManager {
+                    secret_ref,
+                    value_selector: value_selector.clone(),
+                    value_pattern: value_pattern.clone(),
+                    env_var_name,
+                },
+            )
+        } else {
+            (
+                ParamSource::GcpSecretManager {
+                    secret_ref: secret_ref.clone(),
+                    value_selector: value_selector.clone(),
+                    value_pattern: value_pattern.clone(),
+                    env_var_name: env_var_name.clone(),
+                },
+                TargetEnvironmentVariableSource::GcpSecretManager {
+                    secret_ref,
+                    value_selector: value_selector.clone(),
+                    value_pattern: value_pattern.clone(),
+                    env_var_name,
+                },
+            )
+        };
+
+        assert_eq!(param_source_to_kind(&param, None), expected);
+        assert_eq!(ConnectionSourceKind::from(&url), expected);
+        assert_eq!(ConnectionSourceKind::from(url), expected);
+
+        let json = serde_json::to_value(&expected).unwrap();
+        assert_eq!(
+            serde_json::from_value::<ConnectionSourceKind>(json.clone()).unwrap(),
+            expected
+        );
+        let fields = json
+            .as_object()
+            .and_then(|kind| kind.values().next())
+            .unwrap();
+        assert_eq!(
+            fields.get("value_selector").is_some(),
+            value_selector.is_some(),
+            "{json}"
+        );
+        assert_eq!(
+            fields.get("value_pattern").is_some(),
+            value_pattern.is_some(),
+            "{json}"
+        );
+    }
+
     #[test]
     fn unknown_migration_phase_deserializes_as_unknown() {
         let phase: MigrationPhase = serde_json::from_value(serde_json::json!("SomeFuturePhase"))
