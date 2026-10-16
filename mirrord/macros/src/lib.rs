@@ -142,7 +142,25 @@ pub fn boxed_future(attr: TokenStream, input: TokenStream) -> TokenStream {
     };
     function.sig.output = syn::parse_quote!(-> impl ::core::future::Future<Output = #output>);
 
+    // An `async` block infers its output from its body, so `return` and the tail expression would
+    // not coerce to the declared type (`Box::new(1)` to `Box<dyn Debug>`, `&String` to `&str`).
+    // The never-taken `return` fixes the output type first, as `async-trait` does. A type with
+    // `impl Trait` in it can't be named in a `let` or a turbofish, so it's left to inference.
     let body = &function.block;
+    let body = if contains_impl_trait(output.clone()) {
+        quote!(#body)
+    } else {
+        quote! {
+            if let ::core::option::Option::Some(__ret) = ::core::option::Option::None::<#output> {
+                #[allow(unreachable_code)]
+                return __ret;
+            }
+            #[allow(clippy::diverging_sub_expression)]
+            let __ret: #output = #body;
+            #[allow(unreachable_code)]
+            __ret
+        }
+    };
     function.block = syn::parse_quote!({
         ::std::boxed::Box::pin(async move {
             #(#bindings)*
@@ -152,4 +170,12 @@ pub fn boxed_future(attr: TokenStream, input: TokenStream) -> TokenStream {
     function.attrs.push(syn::parse_quote!(#[inline(never)]));
 
     quote!(#function).into()
+}
+
+fn contains_impl_trait(tokens: TokenStream2) -> bool {
+    tokens.into_iter().any(|token| match token {
+        proc_macro2::TokenTree::Ident(ident) => ident == "impl",
+        proc_macro2::TokenTree::Group(group) => contains_impl_trait(group.stream()),
+        _ => false,
+    })
 }
