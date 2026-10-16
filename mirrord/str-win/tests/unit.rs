@@ -113,9 +113,8 @@ fn try_get_unix_path() {
     const WINDOWS_PATH: &str = r#"\??\C:\home\gabrielaelae\dev\MIRRORD\mirrord\target\debug"#;
     const UNIX_PATH: &str = r#"/home/gabrielaelae/dev/MIRRORD/mirrord/target/debug"#;
 
-    let new_path = path_to_unix_path(WINDOWS_PATH);
-    assert!(&new_path.is_some());
-    assert_eq!(Path::new(&new_path.unwrap()), Path::new(UNIX_PATH));
+    let new_path = path_to_unix_path(WINDOWS_PATH).expect("an NT disk path converts");
+    assert_eq!(Path::new(&new_path.path), Path::new(UNIX_PATH));
 }
 
 #[test]
@@ -125,7 +124,10 @@ fn try_all_possible_volume_letters_to_unix_path() {
 
         assert_eq!(
             path_to_unix_path(path),
-            Some("/windows/system32".to_owned())
+            Some(UnixPath {
+                drive: Some(c),
+                path: "/windows/system32".to_owned()
+            })
         );
     }
 }
@@ -135,8 +137,62 @@ fn try_just_all_possible_volume_letters_to_unix_path() {
     for c in 'C'..'Z' {
         let path = format!("\\??\\{c}:\\");
 
-        assert_eq!(path_to_unix_path(path), Some("/".to_owned()));
+        assert_eq!(
+            path_to_unix_path(path),
+            Some(UnixPath {
+                drive: Some(c),
+                path: "/".to_owned()
+            })
+        );
     }
+}
+
+/// Every spelling of a rooted path gives the drive-less form the fs patterns have always matched,
+/// and the drive it names, if any.
+#[cfg(windows)]
+#[rstest::rstest]
+#[case::nt_disk_path(
+    r"\??\C:\Repos\app\appsettings.json",
+    Some('C'),
+    "/Repos/app/appsettings.json"
+)]
+#[case::win32_disk_path(r"D:\Repos\app.json", Some('D'), "/Repos/app.json")]
+#[case::lowercase_drive_is_upper_cased(r"\??\d:\data", Some('D'), "/data")]
+#[case::forward_slashes(r"E:/data/file.txt", Some('E'), "/data/file.txt")]
+#[case::verbatim_disk_path(r"\\?\C:\Users\me", Some('C'), "/Users/me")]
+#[case::drive_root_without_separator(r"\??\C:", Some('C'), "/")]
+#[case::unc_path_has_no_drive(r"\\server\share\dir\file", None, "/dir/file")]
+#[case::rooted_path_without_a_prefix(r"\Users\me", None, "/Users/me")]
+fn rooted_paths_convert_with_their_drive(
+    #[case] windows: &str,
+    #[case] drive: Option<char>,
+    #[case] unix: &str,
+) {
+    let converted = path_to_unix_path(windows).expect("a rooted path always converts");
+
+    assert_eq!(converted.path, unix, "the drive-less form of {windows}");
+    assert_eq!(converted.drive, drive, "the drive of {windows}");
+}
+
+/// A path with no root can't be placed on the remote, so it isn't converted.
+#[cfg(windows)]
+#[rstest::rstest]
+#[case::relative(r"Repos\app.json")]
+#[case::drive_relative(r"C:Repos\app.json")]
+fn paths_without_a_root_do_not_convert(#[case] windows: &str) {
+    assert_eq!(path_to_unix_path(windows), None);
+}
+
+/// The drive form is what a pattern naming a drive (`^C:/Repos/`) matches. A path with no drive
+/// has no such form, so a drive pattern can't match a UNC path by accident.
+#[cfg(windows)]
+#[test]
+fn with_drive_puts_the_drive_before_the_unix_path() {
+    let on_drive = path_to_unix_path(r"\??\C:\Repos\app.json").expect("an NT disk path converts");
+    let on_share = path_to_unix_path(r"\\server\share\app.json").expect("a UNC path converts");
+
+    assert_eq!(on_drive.with_drive().as_deref(), Some("C:/Repos/app.json"));
+    assert_eq!(on_share.with_drive(), None);
 }
 
 /// Encodes `entries` as a Unicode block, then puts `after` behind it.
