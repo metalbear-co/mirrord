@@ -6094,7 +6094,6 @@ name = "mirrord-up"
 version = "3.277.0"
 dependencies = [
  "assert-json-diff",
- "clap",
  "dunce",
  "futures",
  "inquire",
