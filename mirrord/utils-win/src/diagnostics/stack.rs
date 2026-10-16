@@ -354,10 +354,13 @@ fn symbolize(frames: &[Frame]) -> Vec<String> {
             let location = modules
                 .resolve_offset(ip)
                 .map(|(module, offset)| format!("{module}+{offset:#x}"));
-            match (
-                symbols.then(|| symbol_name(process, ip)).flatten(),
-                location,
-            ) {
+            // Only the name is cut, so the location after it always survives.
+            let symbol = symbols.then(|| symbol_name(process, ip)).flatten();
+            let symbol = symbol.map(|Symbol { name, public }| Symbol {
+                name: cut(&name),
+                public,
+            });
+            match (symbol, location) {
                 (
                     Some(Symbol {
                         name,
@@ -452,7 +455,7 @@ fn format_report(frames: &[Frame], names: &[String], requested: usize) -> String
             small_bytes += size;
             continue;
         }
-        let _ = writeln!(report, "{:>12}  {}", kib(*size), cut(name));
+        let _ = writeln!(report, "{:>12}  {name}", kib(*size));
     }
     if small_count > 0 {
         let _ = writeln!(
@@ -470,8 +473,7 @@ fn format_report(frames: &[Frame], names: &[String], requested: usize) -> String
     {
         let _ = writeln!(
             report,
-            "\nThe overflow hit while {} was allocating a {} frame.",
-            cut(caller),
+            "\nThe overflow hit while {caller} was allocating a {} frame.",
             kib(requested)
         );
     }
@@ -485,7 +487,7 @@ fn format_report(frames: &[Frame], names: &[String], requested: usize) -> String
             "{:>12}  {:>3}%  {}",
             kib(size),
             size * 100 / total.max(1),
-            cut(name)
+            name
         );
     }
     report.push('\n');
@@ -496,7 +498,6 @@ fn kib(bytes: usize) -> String {
     format!("{:.1} KiB", bytes as f64 / 1024.0)
 }
 
-/// Cuts a function name to [`NAME_WIDTH`] characters.
 fn cut(name: &str) -> String {
     if name.chars().count() <= NAME_WIDTH {
         return name.to_owned();
