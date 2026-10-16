@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     iter,
 };
 
@@ -13,8 +13,9 @@ use mirrord_config::feature::database_branches::{
     RedisBranchCopyConfig, S3BranchCopyConfig, S3Provider as ConfigS3Provider, SingleOrVec,
     SpannerBranchCopyConfig, TurbopufferBranchCopyConfig,
 };
-use schemars::JsonSchema;
+use schemars::{JsonSchema, Schema};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use strum::{IntoDiscriminant, VariantArray, VariantNames};
 use strum_macros::{EnumDiscriminants, EnumIter};
 
@@ -42,6 +43,7 @@ use crate::crd::session::KubeResourceTarget;
     printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = immutable_except_migrations)]
 pub struct BranchDatabaseSpec {
     /// ID derived by mirrord CLI.
     pub id: String,
@@ -113,6 +115,41 @@ pub struct BranchDatabaseSpec {
     /// Schema migrations to run on the branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub migrations: Option<MigrationsSpec>,
+}
+
+/// Keeps every [`BranchDatabaseSpec`] field but `migrations` as the branch was created, so the
+/// checks the operator runs before creating a branch hold for its whole life.
+fn immutable_except_migrations(schema: &mut Schema) {
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<BTreeSet<_>>();
+    let rule = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|properties| properties.keys())
+        .filter(|field| *field != "migrations")
+        .map(|field| match required.contains(field.as_str()) {
+            true => format!("self.{field} == oldSelf.{field}"),
+            false => format!(
+                "(has(self.{field}) ? has(oldSelf.{field}) && self.{field} == oldSelf.{field} \
+                 : !has(oldSelf.{field}))"
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join(" && ");
+
+    schema.insert(
+        "x-kubernetes-validations".to_owned(),
+        json!([{
+            "rule": rule,
+            "message": "only `migrations` can change after a branch is created",
+        }]),
+    );
 }
 
 /// Migrations to apply to a branch.

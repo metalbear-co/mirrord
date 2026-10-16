@@ -39,6 +39,7 @@ use feature::{
         },
         outgoing::OutgoingFilterConfig,
     },
+    split_queues::QueueKind,
 };
 use k8s_openapi::api::core::v1::PodSpec;
 use mirrord_analytics::CollectAnalytics;
@@ -914,7 +915,7 @@ impl LayerConfig {
                 ));
             }
 
-            if self.feature.split_queues.is_set() {
+            if self.feature.split_queues.is_set() || self.feature.kafka_branch {
                 return Err(ConfigError::Conflict(
                     "Queue splitting is not yet supported with label targets.".to_owned(),
                 ));
@@ -1219,6 +1220,28 @@ impl LayerConfig {
         self.feature.network.dns.verify(context)?;
         self.feature.network.outgoing.verify(context)?;
         self.feature.split_queues.verify(context)?;
+
+        if self.feature.kafka_branch && matches!(self.target.path, Some(Target::Serverless(_))) {
+            return Err(ConfigError::Conflict(
+                "`feature.kafka_branch` is not supported with serverless targets.".to_owned(),
+            ));
+        }
+
+        if self.feature.kafka_branch
+            && self
+                .feature
+                .split_queues
+                .of_kind(QueueKind::Kafka)
+                .next()
+                .is_some()
+        {
+            return Err(ConfigError::Conflict(
+                "`feature.kafka_branch` moves every Kafka queue to the branch: remove the Kafka \
+                 entries from `feature.split_queues`."
+                    .to_owned(),
+            ));
+        }
+
         self.verify_db_branches(context)?;
 
         self.feature.preview.verify()?;
@@ -1433,11 +1456,12 @@ impl LayerConfig {
         if self.feature.preview.idle.is_enabled()
             && matches!(self.feature.network.incoming.mode, IncomingMode::Off)
             && !self.feature.split_queues.is_set()
+            && !self.feature.kafka_branch
         {
             return Err(ConfigError::Conflict(
                 "`feature.preview.idle` requires a wake source: enable \
-                 `feature.network.incoming` or configure `feature.split_queues`, \
-                 otherwise nothing can ever wake the idle session."
+                 `feature.network.incoming` or `feature.kafka_branch`, or configure \
+                 `feature.split_queues`, otherwise nothing can ever wake the idle session."
                     .to_owned(),
             ));
         }
@@ -1949,6 +1973,7 @@ mod tests {
                 copy_target: None,
                 hostname: None,
                 split_queues: None,
+                kafka_branch: None,
                 db_branches: None,
                 magic: None,
                 preview: None,

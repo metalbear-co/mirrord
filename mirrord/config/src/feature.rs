@@ -120,6 +120,19 @@ pub struct FeatureConfig {
     #[config(nested, default, unstable, plan = Team)]
     pub split_queues: SplitQueuesConfig,
 
+    /// ### feature.kafka_branch {#feature-kafka_branch}
+    ///
+    /// Point the target's Kafka clients at an isolated broker shared by every session with the
+    /// same key, instead of splitting topics on the cluster's Kafka.
+    ///
+    /// Covers every Kafka queue in the target's `MirrordSplitConfig`, which must name where the
+    /// app reads its bootstrap servers from. Messages produced in the session never leave the
+    /// branch, and idle preview environments wake when a message waits on a topic they consume.
+    /// Kafka entries in [`feature.split_queues`](#feature-split_queues) are not allowed alongside
+    /// it.
+    #[config(default = false, unstable, plan = Team)]
+    pub kafka_branch: bool,
+
     /// ### feature.db_branches {#feature-db_branches}
     ///
     /// Configuration for the database branching feature.
@@ -148,6 +161,7 @@ impl CollectAnalytics for &FeatureConfig {
         analytics.add("copy_target", &self.copy_target);
         analytics.add("hostname", self.hostname);
         analytics.add("split_queues", &self.split_queues);
+        analytics.add("kafka_branch", self.kafka_branch);
         analytics.add("db_branches", &self.db_branches);
         analytics.add("magic", &self.magic);
         analytics.add("preview", &self.preview);

@@ -20,7 +20,7 @@ use mirrord_config::{
             IncomingMode,
             http_filter::{HttpFilterConfig, HttpFilterFileConfig},
         },
-        split_queues::{QueueMode, SplitQueuesConfig},
+        split_queues::{QueueKind, QueueMode, SplitQueuesConfig},
     },
     target::{Target, TargetType, deployment::DeploymentTarget},
 };
@@ -736,6 +736,13 @@ fn apply_config_patch(
     key: &EnvKey,
     invocation_directory: Option<&Path>,
 ) -> Result<LayerConfig, ConfigPatchErrorKind> {
+    let generated_kafka_splits = config
+        .feature
+        .split_queues
+        .of_kind(QueueKind::Kafka)
+        .cloned()
+        .collect::<Vec<_>>();
+
     let mut layer_config_json = patchable(config, key).map_err(ConfigPatchErrorKind::Serialize)?;
     json_patch::merge(&mut layer_config_json, &patch);
 
@@ -749,6 +756,20 @@ fn apply_config_patch(
         .invocation_directory(invocation_directory.map(Path::to_owned));
     let mut config = file_config.generate_config(&mut context)?;
     config.key = key.clone();
+
+    // A Kafka branch serves every Kafka queue, so the Kafka splits the mode generated give way.
+    if config.feature.kafka_branch {
+        config.feature.split_queues = SplitQueuesConfig::from_splits(
+            config
+                .feature
+                .split_queues
+                .splits()
+                .iter()
+                .filter(|split| generated_kafka_splits.contains(split).not())
+                .cloned(),
+        );
+    }
+
     config.verify(&mut context)?;
 
     Ok(config)

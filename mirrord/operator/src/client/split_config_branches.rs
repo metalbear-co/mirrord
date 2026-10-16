@@ -283,6 +283,7 @@ mod tests {
                 port: Some(5432),
                 database: Some(database.to_owned()),
             }),
+            source_names: Vec::new(),
         });
         branch
     }
