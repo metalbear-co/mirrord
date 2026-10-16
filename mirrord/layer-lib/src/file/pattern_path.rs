@@ -14,6 +14,9 @@ pub struct PatternPath<'a> {
     /// The path without a drive. This is also the path the agent opens.
     pub path: &'a str,
     /// The path with its drive (`C:/Repos/app.json`), for a Windows path on a drive.
+    ///
+    /// Only the Windows file hooks fill this. Unix paths have no drive, so the Unix layer builds a
+    /// [`PatternPath`] from a plain `&str`, which leaves this [`None`] and matches as before.
     pub with_drive: Option<&'a str>,
 }
 
@@ -27,6 +30,8 @@ impl PatternPath<'_> {
     }
 }
 
+/// A path with no drive form: every Unix path, and a mapped path on Windows (the remote has no
+/// drives).
 impl<'a> From<&'a str> for PatternPath<'a> {
     fn from(path: &'a str) -> Self {
         Self {
