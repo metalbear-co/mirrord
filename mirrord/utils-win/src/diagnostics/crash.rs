@@ -499,8 +499,8 @@ unsafe fn write_crash_record(state: &CrashState, info: *mut EXCEPTION_POINTERS) 
     let mut frames = [Frame::default(); STACK_FRAMES];
     let context = unsafe { (*info).ContextRecord } as *const CONTEXT;
     let walked = match unsafe { context.as_ref() } {
-        // The handler runs on the faulting thread, so its stack base is the one to stay under.
-        Some(context) => unsafe { stack::walk(context, stack::current_stack_base(), &mut frames) },
+        // The handler runs on the faulting thread, so its stack is the one to stay inside.
+        Some(context) => unsafe { stack::walk(context, stack::current_stack(), &mut frames) },
         None => 0,
     };
     let frames = frames.get(..walked).unwrap_or_default();

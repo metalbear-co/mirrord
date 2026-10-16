@@ -13,6 +13,7 @@
 use std::{
     ffi::c_void,
     fmt::Write as _,
+    ops::Range,
     os::windows::ffi::OsStrExt,
     sync::{
         OnceLock,
@@ -25,9 +26,10 @@ use windows_sys::Win32::{
     System::{
         Diagnostics::Debug::{
             AddVectoredExceptionHandler, CONTEXT, EXCEPTION_CONTINUE_SEARCH, EXCEPTION_POINTERS,
-            RtlLookupFunctionEntry, RtlVirtualUnwind, SYMBOL_INFOW, SYMFLAG_PUBLIC_CODE,
-            SYMOPT_DEFERRED_LOADS, SYMOPT_FAIL_CRITICAL_ERRORS, SYMOPT_NO_PROMPTS, SYMOPT_UNDNAME,
-            SymCleanup, SymFromAddrW, SymInitializeW, SymSetOptions, UNW_FLAG_NHANDLER,
+            IMAGE_RUNTIME_FUNCTION_ENTRY, RtlLookupFunctionEntry, RtlVirtualUnwind, SYMBOL_INFOW,
+            SYMFLAG_PUBLIC_CODE, SYMOPT_DEFERRED_LOADS, SYMOPT_FAIL_CRITICAL_ERRORS,
+            SYMOPT_NO_PROMPTS, SYMOPT_UNDNAME, SymCleanup, SymFromAddrW, SymInitializeW,
+            SymSetOptions, UNW_FLAG_CHAININFO, UNW_FLAG_NHANDLER,
         },
         Threading::{
             CreateThread, GetCurrentProcess, STACK_SIZE_PARAM_IS_A_RESERVATION,
@@ -58,7 +60,7 @@ const MAX_SYMBOL_NAME: usize = 1024;
 static ARMED: AtomicBool = AtomicBool::new(false);
 /// Set by the first overflow, so a process reports once.
 static REPORTED: AtomicBool = AtomicBool::new(false);
-/// The overflowing thread's registers and stack base, for the report thread.
+/// The overflowing thread's registers and stack bounds, for the report thread.
 ///
 /// A copy, so the report never reads the exception's own context record, which is gone once the
 /// handler returns.
@@ -66,7 +68,7 @@ static OVERFLOW: OnceLock<Overflow> = OnceLock::new();
 
 struct Overflow {
     context: CONTEXT,
-    stack_base: usize,
+    stack: Range<usize>,
 }
 
 /// One frame of a walked stack.
@@ -78,43 +80,47 @@ pub struct Frame {
     pub sp: usize,
 }
 
-/// The highest address of the calling thread's stack, from its thread environment block.
+/// The committed part of the calling thread's stack, from its thread environment block.
 ///
-/// Everything between a thread's stack pointer and this is committed, so a walk that stays in that
-/// range never reads unmapped memory.
-pub fn current_stack_base() -> usize {
-    let base: usize;
-    // SAFETY: on x64 Windows, `gs` points at the current thread's TEB, and `NT_TIB.StackBase` is at
-    // offset 8.
+/// All of it is mapped, so a walk that reads only inside it never faults.
+pub fn current_stack() -> Range<usize> {
+    let (base, limit): (usize, usize);
+    // SAFETY: on x64 Windows, `gs` points at the current thread's TEB, which starts with `NT_TIB`:
+    // `StackBase` at offset 8, `StackLimit` at offset 0x10.
     unsafe {
-        std::arch::asm!("mov {}, gs:[0x08]", out(reg) base, options(nostack, readonly, preserves_flags));
+        std::arch::asm!(
+            "mov {base}, gs:[0x08]",
+            "mov {limit}, gs:[0x10]",
+            base = out(reg) base,
+            limit = out(reg) limit,
+            options(nostack, readonly, preserves_flags),
+        );
     }
-    base
+    limit..base
 }
 
 /// Walks the stack that `context` describes, innermost frame first, into `frames`.
 ///
 /// Allocation-free. Stops at the outermost frame, when `frames` is full, or where the unwind data
-/// leads somewhere a caller cannot be: below the previous frame, or past `stack_base`. The stack
-/// a crash walks may be corrupt, and these bounds keep the walk from faulting on it.
+/// leads somewhere a caller cannot be: below the previous frame, or outside `stack`. The stack a
+/// crash walks may be corrupt, and these bounds keep the walk from faulting on it.
 ///
 /// # Safety
 ///
 /// `context` must describe a stack of this process that does not change during the walk: the
-/// calling thread's own, or that of a thread blocked until the walk is done. `stack_base` must be
-/// that thread's, from [`current_stack_base`].
+/// calling thread's own, or that of a thread blocked until the walk is done. `stack` must be that
+/// thread's, from [`current_stack`].
 ///
 /// # Returns
 ///
 /// How many frames were written.
-pub unsafe fn walk(context: &CONTEXT, stack_base: usize, frames: &mut [Frame]) -> usize {
+pub unsafe fn walk(context: &CONTEXT, stack: Range<usize>, frames: &mut [Frame]) -> usize {
     let mut context = *context;
     let mut count = 0;
 
     for slot in frames.iter_mut() {
-        let in_stack = (context.Rsp as usize)
-            .checked_add(8)
-            .is_some_and(|end| end <= stack_base);
+        let sp = context.Rsp as usize;
+        let in_stack = sp >= stack.start && sp.checked_add(8).is_some_and(|end| end <= stack.end);
         if context.Rip == 0 || !in_stack {
             break;
         }
@@ -134,6 +140,11 @@ pub unsafe fn walk(context: &CONTEXT, stack_base: usize, frames: &mut [Frame]) -
             context.Rip = unsafe { *(context.Rsp as *const u64) };
             context.Rsp += 8;
         } else {
+            // `RtlVirtualUnwind` reads the saved registers through the frame register when the
+            // function has one, and on a corrupt stack that register can point anywhere.
+            if !unsafe { frame_register_in_stack(&context, image_base, entry, &stack) } {
+                break;
+            }
             let mut handler_data = std::ptr::null_mut();
             let mut establisher_frame = 0;
             unsafe {
@@ -157,6 +168,77 @@ pub unsafe fn walk(context: &CONTEXT, stack_base: usize, frames: &mut [Frame]) -
     }
 
     count
+}
+
+/// Whether the frame that `entry`'s unwind data sets up with a frame register, if it has one,
+/// starts inside `stack`.
+///
+/// Follows `UNWIND_INFO` as the x64 ABI lays it out: byte 0 holds the flags in its top 5 bits,
+/// byte 2 the unwind code count, and byte 3 the frame register in its low 4 bits with the frame's
+/// offset below it, in 16-byte units, in its high 4. A chained entry follows the unwind codes.
+///
+/// # Safety
+///
+/// `entry` must come from `RtlLookupFunctionEntry`, with `image_base` its module's base.
+unsafe fn frame_register_in_stack(
+    context: &CONTEXT,
+    image_base: u64,
+    entry: *const IMAGE_RUNTIME_FUNCTION_ENTRY,
+    stack: &Range<usize>,
+) -> bool {
+    let mut entry = unsafe { entry.read_unaligned() };
+    // Real chains are a few entries long; the bound only stops a loop in a corrupt image.
+    for _ in 0..32 {
+        let info = (image_base + u64::from(unsafe { entry.Anonymous.UnwindData })) as *const u8;
+        let [flags, _, code_count, frame] = unsafe { info.cast::<[u8; 4]>().read_unaligned() };
+
+        let register = frame & 0x0f;
+        if register != 0 {
+            let offset = u64::from(frame >> 4) * 16;
+            let in_stack = register_value(context, register)
+                .checked_sub(offset)
+                .is_some_and(|frame| stack.contains(&(frame as usize)));
+            if !in_stack {
+                return false;
+            }
+        }
+
+        if u32::from(flags >> 3) & UNW_FLAG_CHAININFO == 0 {
+            return true;
+        }
+        // The codes take 2 bytes each, and their count is rounded up to even.
+        let codes = usize::from(code_count.next_multiple_of(2)) * 2;
+        entry = unsafe {
+            info.add(4 + codes)
+                .cast::<IMAGE_RUNTIME_FUNCTION_ENTRY>()
+                .read_unaligned()
+        };
+    }
+    false
+}
+
+/// The general-purpose register that unwind data numbers `number`, in the x64 encoding's order.
+fn register_value(context: &CONTEXT, number: u8) -> u64 {
+    match number {
+        0 => context.Rax,
+        1 => context.Rcx,
+        2 => context.Rdx,
+        3 => context.Rbx,
+        4 => context.Rsp,
+        5 => context.Rbp,
+        6 => context.Rsi,
+        7 => context.Rdi,
+        8 => context.R8,
+        9 => context.R9,
+        10 => context.R10,
+        11 => context.R11,
+        12 => context.R12,
+        13 => context.R13,
+        14 => context.R14,
+        15 => context.R15,
+        // Unwind data has 4 bits for it. Zero is outside every stack, so the walk stops.
+        _ => 0,
+    }
 }
 
 /// The stack the frame at `index` uses: the distance to its caller's stack pointer.
@@ -196,7 +278,7 @@ unsafe extern "system" fn overflow_handler(info: *mut EXCEPTION_POINTERS) -> i32
 
     let _ = OVERFLOW.set(Overflow {
         context: unsafe { *(*info).ContextRecord },
-        stack_base: current_stack_base(),
+        stack: current_stack(),
     });
 
     // This thread is out of stack, so the report is made on a fresh one. The stack it walks stays
@@ -226,7 +308,7 @@ unsafe extern "system" fn report_thread(_: *mut c_void) -> u32 {
     };
 
     let mut frames = vec![Frame::default(); REPORT_FRAMES];
-    let count = unsafe { walk(&overflow.context, overflow.stack_base, &mut frames) };
+    let count = unsafe { walk(&overflow.context, overflow.stack.clone(), &mut frames) };
     frames.truncate(count);
 
     let names = symbolize(&frames);
@@ -422,4 +504,50 @@ fn cut(name: &str) -> String {
     let mut cut: String = name.chars().take(NAME_WIDTH - 3).collect();
     cut.push_str("...");
     cut
+}
+
+#[cfg(test)]
+mod tests {
+    use std::hint::black_box;
+
+    use windows_sys::Win32::System::Diagnostics::Debug::RtlCaptureContext;
+
+    use super::*;
+
+    /// A local this aligned makes the compiler realign the frame and address it through `rbp`,
+    /// which the unwind data then names as the frame register.
+    #[repr(align(64))]
+    struct Aligned(#[allow(dead_code)] [u8; 64]);
+
+    /// `RtlCaptureContext` saves with `fxsave`, which needs the 16-byte alignment that Windows
+    /// declares `CONTEXT` with and `windows-sys` leaves out.
+    #[repr(C, align(16))]
+    struct AlignedContext(CONTEXT);
+
+    /// Walks the stack from inside a frame that has a frame register, with the walked context's
+    /// `rbp` replaced when one is given.
+    #[inline(never)]
+    fn walk_from_frame_with_frame_register(rbp: Option<u64>) -> usize {
+        let aligned = black_box(Aligned([0; 64]));
+        let mut context: AlignedContext = unsafe { std::mem::zeroed() };
+        unsafe { RtlCaptureContext(&mut context.0) };
+        if let Some(rbp) = rbp {
+            context.0.Rbp = rbp;
+        }
+        let mut frames = [Frame::default(); 64];
+        let count = unsafe { walk(&context.0, current_stack(), &mut frames) };
+        black_box(&aligned);
+        count
+    }
+
+    #[test]
+    fn walks_through_a_frame_register() {
+        assert!(walk_from_frame_with_frame_register(None) > 1);
+    }
+
+    /// The unwind reads through `rbp`, so before the bound this one faulted at 0x1000.
+    #[test]
+    fn stops_at_a_frame_register_outside_the_stack() {
+        assert_eq!(walk_from_frame_with_frame_register(Some(0x1000)), 1);
+    }
 }
