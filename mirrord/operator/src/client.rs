@@ -1632,6 +1632,12 @@ where
                 .require_feature(NewOperatorFeature::CopyTargetExcludeContainers)?
         }
 
+        if layer_config.feature.kafka_branch {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::KafkaBranching)?;
+        }
+
         if auto_queue_splitting {
             return Ok(());
         }
@@ -2194,6 +2200,14 @@ impl OperatorApi<PreparedClientCert> {
         // Multi-cluster: CLI connects to Primary, which routes to the workload cluster
         // where the target is resolved and the session is created
 
+        if layer_config.feature.kafka_branch {
+            return Err(OperatorApiError::UnsupportedTargetConfig(
+                "Kafka branching is not available in multi-cluster sessions; set `multi_cluster` \
+                 to false to run the session on the primary cluster"
+                    .to_owned(),
+            ));
+        }
+
         // Owned: branch preparation below edits the config while the target is still needed.
         let target = layer_config
             .target
@@ -2744,6 +2758,7 @@ impl OperatorApi<PreparedClientCert> {
             nats_pubsub_jq_filters: Default::default(),
             queue_filters: Default::default(),
             queue_modes: Default::default(),
+            kafka_branch: false,
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -2812,6 +2827,7 @@ impl OperatorApi<PreparedClientCert> {
                 .key
                 .is_provided()
                 .then(|| layer_config.key.as_str().to_owned()),
+            kafka_branch: layer_config.feature.kafka_branch.then_some(true),
         }
     }
 
@@ -3578,6 +3594,7 @@ mod test {
             key,
             header_filter: None,
             queue_modes: Default::default(),
+            kafka_branch: false,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
@@ -3723,6 +3740,7 @@ mod test {
             key,
             header_filter: None,
             queue_modes: Default::default(),
+            kafka_branch: false,
         };
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);

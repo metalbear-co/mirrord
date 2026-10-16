@@ -859,6 +859,12 @@ pub enum NewOperatorFeature {
 
     ServerlessSessionsManager,
 
+    /// This operator runs a session's Kafka queues against an isolated per-key broker
+    /// (`feature.kafka_branch`), sent in the `kafka_branch` connect param and the preview
+    /// session's `kafkaBranch` field. Gated so the CLI fails fast: an older operator ignores both
+    /// and would leave the app on the cluster's Kafka.
+    KafkaBranching,
+
     /// This operator applies `value_selector` / `value_pattern` on `gcp_secret_manager` and
     /// `aws_secrets_manager` connection sources, picking one field out of a JSON secret. Gated
     /// so the CLI fails fast: an older operator drops the extractors silently and provisions
@@ -960,6 +966,7 @@ impl Display for NewOperatorFeature {
                 "db_branches resolved from the target's MirrordSplitConfig"
             }
             NewOperatorFeature::ServerlessSessionsManager => "serverless sessions-manager",
+            NewOperatorFeature::KafkaBranching => "Kafka branching",
             NewOperatorFeature::DbBranchSecretManagerExtract => {
                 "DB branching field extraction from secret manager sources"
             }
