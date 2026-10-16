@@ -140,8 +140,8 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     analytics
         .get_mut()
         .add("mode_override", args.mode.is_some());
-    if let Some(mode) = args.mode {
-        up_config.override_mode(mode);
+    if let Some(mode) = &args.mode {
+        up_config.override_mode(mode).map_err(UpError::from)?;
     }
 
     #[cfg(target_os = "windows")]

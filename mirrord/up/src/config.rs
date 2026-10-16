@@ -6,7 +6,6 @@ use std::{
     sync::Arc,
 };
 
-use clap::{ValueEnum, builder::PossibleValue};
 use itertools::Itertools;
 use miette::Diagnostic;
 use mirrord_analytics::{Analytics, CollectAnalytics};
@@ -101,25 +100,6 @@ impl ServiceMode {
             .iter()
             .copied()
             .find(|mode| <&str>::from(mode) == name)
-    }
-}
-
-// Manual impl because we want different user-facing docs
-impl ValueEnum for ServiceMode {
-    fn value_variants<'a>() -> &'a [Self] {
-        Self::VARIANTS
-    }
-
-    fn to_possible_value(&self) -> Option<PossibleValue> {
-        let name: &'static str = self.into();
-        match self {
-            ServiceMode::Split => Some(PossibleValue::new(name).help("Incoming traffic is split between the local and original services using HTTP filtering.
-If no filter is provided, a header filter matching the regex `baggage: .*mirrord-session={session key}.*` will be used.")),
-            ServiceMode::Replace => Some(PossibleValue::new(name).help("The local service replaces the original one: the target workload is copied and scaled down to zero, so all incoming traffic reaches your local process.
-Any configured HTTP filter is ignored. Requires a target that supports copy target with scale down.")),
-            ServiceMode::Mirror => Some(PossibleValue::new(name).help("Incoming traffic is mirrored to the local service using HTTP filtering.
-If no filter is provided, a header filter matching the regex `baggage: .*mirrord-session={session key}.*` will be used.")),
-        }
     }
 }
 
@@ -1167,13 +1147,17 @@ impl UpConfig {
             .map_or(Ok(()), Err)
     }
 
-    /// Force services to run in `mode`, discarding the `default_mode` set in the config file.
+    /// Force services to run in the mode named `mode`, discarding the `default_mode` set in the
+    /// config file. Fails if no such mode exists.
     ///
     /// Meant for the `--mode` flag, so it should be called *after* [`Self::select_services`].
-    pub fn override_mode(&mut self, mode: ServiceMode) {
+    pub fn override_mode(&mut self, mode: &str) -> Result<(), ModeNameError> {
+        ModeConfig::named(&self.modes, mode)?;
+        let mode = Arc::<str>::from(mode);
         for svc in self.services.values_mut() {
-            svc.default_mode = mode.into();
+            svc.default_mode = mode.clone();
         }
+        Ok(())
     }
 
     /// Restrict which services will be launched.
@@ -2062,7 +2046,7 @@ mod tests {
             "#,
         );
 
-        config.override_mode(ServiceMode::Replace);
+        config.override_mode(ServiceMode::Replace.into()).unwrap();
         assert!(
             config
                 .services
@@ -2070,7 +2054,7 @@ mod tests {
                 .all(|svc| svc.default_mode == Arc::<str>::from(ServiceMode::Replace))
         );
 
-        config.override_mode(ServiceMode::Split);
+        config.override_mode(ServiceMode::Split.into()).unwrap();
         assert!(
             config
                 .services
@@ -2078,7 +2062,7 @@ mod tests {
                 .all(|svc| svc.default_mode == Arc::<str>::from(ServiceMode::Split))
         );
 
-        config.override_mode(ServiceMode::Mirror);
+        config.override_mode(ServiceMode::Mirror.into()).unwrap();
         assert!(
             config
                 .services
