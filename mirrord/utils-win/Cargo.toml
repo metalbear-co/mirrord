@@ -72,5 +72,6 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]
+mirrord-command = { path = "../command" }
 # Oplocks, to hold an open of a file from a test.
 winapi = { workspace = true, features = ["ioapiset", "winioctl"] }

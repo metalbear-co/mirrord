@@ -24,7 +24,7 @@ use tracing::{debug, trace};
 use winapi::um::winsock2::{WSA_IO_PENDING, WSAEINPROGRESS, WSAEINTR, WSAEWOULDBLOCK};
 
 use crate::{
-    detour::{Bypass, Detour},
+    detour::{Bypass, Detour, DetourError},
     error::{HookError, HookResult},
     proxy_connection::make_proxy_request_with_response,
     setup::setup,
@@ -187,7 +187,7 @@ where
     }?;
 
     if domain == AF_INET6 && setup().layer_config().feature.network.ipv6.not() {
-        return Detour::Error(HookError::SocketUnsuportedIpv6);
+        return Err(DetourError::Error(HookError::SocketUnsuportedIpv6));
     }
 
     let socket_fd = call_original()?;
@@ -196,7 +196,7 @@ where
 
     SOCKETS.lock()?.insert(socket_fd, Arc::new(new_socket));
 
-    Detour::Success(socket_fd)
+    Ok(socket_fd)
 }
 
 pub fn nop_connect_fn(_addr: SockAddr) -> ConnectResult {
@@ -220,7 +220,7 @@ where
     F: FnOnce(SockAddr) -> ConnectResult,
 {
     if setup().outgoing_config().ignore_localhost {
-        return Detour::Bypass(Bypass::IgnoredInIncoming(ip_address));
+        return Err(DetourError::Bypass(Bypass::IgnoredInIncoming(ip_address)));
     }
 
     // Find the address in a separate statement, so that the `SOCKETS` guard is dropped before
@@ -251,7 +251,7 @@ where
             }
         });
 
-    Detour::Success(local_address.map(connect_fn))
+    Ok(local_address.map(connect_fn))
 }
 
 /// Helper function to check if a port should be ignored (port 0)
@@ -332,7 +332,7 @@ where
 
     if let Some(ip_address) = optional_ip_address {
         if setup().experimental().tcp_ping4_mock && ip_address.port() == 7 {
-            return Detour::Success(ConnectResult::from(0));
+            return Ok(ConnectResult::from(0));
         }
 
         // Handle localhost/unspecified addresses first -
@@ -344,17 +344,17 @@ where
         {
             // `result` here is always a success, as error and bypass are returned on the `?`
             // above.
-            return Detour::Success(result);
+            return Ok(result);
         }
 
         if is_ignored_port(&ip_address) {
-            return Detour::Bypass(Bypass::IgnoredInIncoming(ip_address));
+            return Err(DetourError::Bypass(Bypass::IgnoredInIncoming(ip_address)));
         }
 
         // Ports 50000 and 50001 are commonly used to communicate with sidecar containers.
         let bypass_debugger_check = ip_address.port() == 50000 || ip_address.port() == 50001;
         if bypass_debugger_check.not() && setup().is_debugger_port(&ip_address) {
-            return Detour::Bypass(Bypass::IgnoredInIncoming(ip_address));
+            return Err(DetourError::Bypass(Bypass::IgnoredInIncoming(ip_address)));
         }
     } else if remote_address.is_unix() {
         #[cfg(unix)]
@@ -374,17 +374,19 @@ where
                 .map(|addr| unix_streams.is_match(addr))
                 .unwrap_or(false);
             if !handle_remotely {
-                return Detour::Bypass(Bypass::UnixSocket(address));
+                return Err(DetourError::Bypass(Bypass::UnixSocket(address)));
             }
         }
         #[cfg(windows)]
         {
             mirrord_layer_macro::debug!("bypassing unix socket, not supported on windows");
-            return Detour::Bypass(Bypass::UnixSocket(None));
+            return Err(DetourError::Bypass(Bypass::UnixSocket(None)));
         }
     } else {
         // We do not hijack connections of this address type - Bypass!
-        return Detour::Bypass(Bypass::Domain(remote_address.domain().into()));
+        return Err(DetourError::Bypass(Bypass::Domain(
+            remote_address.domain().into(),
+        )));
     }
 
     tracing::debug!("intercepting connection to {:?}", remote_address);
@@ -415,7 +417,7 @@ where
                 )
             }
 
-            _ => Detour::Bypass(Bypass::DisabledOutgoing),
+            _ => Err(DetourError::Bypass(Bypass::DisabledOutgoing)),
         },
 
         NetProtocol::Seqpacket => match user_socket_info.state {
@@ -431,10 +433,10 @@ where
                 )
             }
 
-            _ => Detour::Bypass(Bypass::DisabledOutgoing),
+            _ => Err(DetourError::Bypass(Bypass::DisabledOutgoing)),
         },
 
-        _ => Detour::Bypass(Bypass::DisabledOutgoing),
+        _ => Err(DetourError::Bypass(Bypass::DisabledOutgoing)),
     }
 }
 
@@ -558,7 +560,7 @@ where
                 "Failed to connect to an internal proxy socket. \
                 This is most likely a bug, please report it.",
             );
-            return Detour::Error(error.into());
+            return Err(DetourError::Error(error.into()));
         }
 
         let connected = Connected {
@@ -572,7 +574,7 @@ where
 
         Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
         SOCKETS.lock()?.insert(sockfd, user_socket_info);
-        Detour::Success(connect_result)
+        Ok(connect_result)
     };
 
     let connect_result = if remote_address.is_unix() {
@@ -598,7 +600,7 @@ where
             }
         }
     };
-    Detour::Success(connect_result)
+    Ok(connect_result)
 }
 
 /// Checks if an address should be handled as a Unix socket
@@ -770,7 +772,7 @@ where
             NetProtocol::Datagrams,
             nop_connect_fn,
         ) {
-            Detour::Success(..) => {}
+            Ok(..) => {}
             _ => {
                 return Err(ConnectError::Fallback.into());
             }

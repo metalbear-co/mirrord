@@ -5,7 +5,7 @@
 //! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Idle` / `Failed`),
 //! which the CLI watches to report progress back to the user.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, ops::Not, time::Duration};
 
 use k8s_openapi::{
     apimachinery::pkg::apis::meta::v1::{Condition, MicroTime},
@@ -145,6 +145,17 @@ pub struct PreviewSessionSpec {
     /// user's files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec_resources: Option<PreviewSpecResources>,
+
+    /// Share host of the session this one replaces.
+    ///
+    /// `mirrord preview start` copies the replaced session's `status.shareHost` here when it
+    /// starts a new session for the same key and target (typically a new image), so the preview
+    /// link stays the same across pushes. The operator keeps this host only when it is one it
+    /// could have minted for this key under its own share domain. An absent (what older CLIs
+    /// send) or rejected host goes through the operator's normal host selection: a random
+    /// suffix by default, or the key-derived host with `shareIngress.stableSlugs`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_host: Option<String>,
 }
 
 /// The user's versions of the target and the ConfigMaps and Secrets its pod uses.
@@ -730,7 +741,7 @@ mod tests {
             },
         ]);
 
-        let preview = PreviewQueueSplittingConfig::from_config(&config).unwrap();
+        let preview = PreviewQueueSplittingConfig::from_config(&config, false).unwrap();
 
         assert_eq!(preview.sqs_queue_filters.len(), 1);
         assert_eq!(
@@ -952,7 +963,34 @@ mod tests {
             serde_json::from_value(old.clone()).expect("spec from an older CLI should deserialize");
 
         assert_eq!(spec.spec_resources, None);
+        assert_eq!(spec.share_host, None);
         assert_eq!(serde_json::to_value(&spec).unwrap(), old);
+    }
+
+    /// The carried-over host travels as `spec.shareHost`, the same spelling as the status field
+    /// it is copied from, so a CR written by hand reads naturally next to `kubectl get` output.
+    #[test]
+    fn share_host_round_trips_in_camel_case() {
+        let json = json!({
+            "image": "nginx",
+            "key": "pr-123",
+            "target": {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "name": "app",
+                "container": "app",
+            },
+            "ttlSecs": 3600,
+            "replicas": 1,
+            "shareHost": "pr-123-abc123.preview.example.com",
+        });
+        let spec: PreviewSessionSpec = serde_json::from_value(json.clone()).unwrap();
+
+        assert_eq!(
+            spec.share_host.as_deref(),
+            Some("pr-123-abc123.preview.example.com")
+        );
+        assert_eq!(serde_json::to_value(&spec).unwrap(), json);
     }
 
     #[test]
@@ -1134,6 +1172,10 @@ pub struct PreviewQueueSplittingConfig {
     /// `QueueSplittingWithComposedFilters`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queues: Vec<PreviewSplitQueue>,
+
+    /// Run the session's Kafka queues against the key's branch broker.
+    #[serde(default, skip_serializing_if = "Not::not")]
+    pub kafka_branch: bool,
 }
 
 /// One queue of a preview session requested with the composable `filter` shape.
@@ -1156,11 +1198,12 @@ pub struct PreviewSplitQueue {
 }
 
 impl PreviewQueueSplittingConfig {
-    /// Converts from the user's split queues config. Returns `None` when no queues are configured.
+    /// Converts from the user's split queues config. Returns `None` when no queues are configured
+    /// and `kafka_branch` is off.
     ///
     /// Legacy `message_filter` entries fill the per-broker maps older operators read; entries
     /// using the composable `filter` shape go to [`Self::queues`].
-    pub fn from_config(value: &SplitQueuesConfig) -> Option<Self> {
+    pub fn from_config(value: &SplitQueuesConfig, kafka_branch: bool) -> Option<Self> {
         let legacy = |kind| collect_queue_filters(value.of_kind(kind));
 
         let kafka_queue_filters = value
@@ -1207,6 +1250,7 @@ impl PreviewQueueSplittingConfig {
             nats_pubsub_queue_filters: legacy(QueueKind::NatsPubSub),
             queue_modes,
             queues,
+            kafka_branch,
         };
 
         if config == Self::default() {

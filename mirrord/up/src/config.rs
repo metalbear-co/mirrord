@@ -20,7 +20,7 @@ use mirrord_config::{
             IncomingMode,
             http_filter::{HttpFilterConfig, HttpFilterFileConfig},
         },
-        split_queues::{QueueMode, SplitQueuesConfig},
+        split_queues::{QueueKind, QueueMode, SplitQueuesConfig},
     },
     target::{Target, TargetType, deployment::DeploymentTarget},
 };
@@ -163,6 +163,15 @@ pub struct RunConfig {
     /// The command to run, as a list of the program and its arguments, e.g.
     /// `["npm", "run", "dev"]`.
     pub command: Vec<String>,
+
+    /// A command to run to completion before the service's mirrord session starts, as a list of
+    /// the program and its arguments, e.g. `["npm", "run", "build"]`.
+    ///
+    /// Runs locally without mirrord, in the same directory as `command`. The session starts
+    /// only if it exits successfully; if it fails, this service is not started and the other
+    /// services keep running.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_command: Vec<String>,
 }
 
 /// Settings applied to every service.
@@ -721,6 +730,13 @@ fn apply_config_patch(
     patch: serde_json::Value,
     key: &EnvKey,
 ) -> Result<LayerConfig, ConfigPatchErrorKind> {
+    let generated_kafka_splits = config
+        .feature
+        .split_queues
+        .of_kind(QueueKind::Kafka)
+        .cloned()
+        .collect::<Vec<_>>();
+
     let mut layer_config_json = patchable(config, key).map_err(ConfigPatchErrorKind::Serialize)?;
     json_patch::merge(&mut layer_config_json, &patch);
 
@@ -732,6 +748,20 @@ fn apply_config_patch(
     let mut context = ConfigContext::default().strict_env(true);
     let mut config = file_config.generate_config(&mut context)?;
     config.key = key.clone();
+
+    // A Kafka branch serves every Kafka queue, so the Kafka splits the mode generated give way.
+    if config.feature.kafka_branch {
+        config.feature.split_queues = SplitQueuesConfig::from_splits(
+            config
+                .feature
+                .split_queues
+                .splits()
+                .iter()
+                .filter(|split| generated_kafka_splits.contains(split).not())
+                .cloned(),
+        );
+    }
+
     config.verify(&mut context)?;
 
     Ok(config)
@@ -1135,6 +1165,7 @@ impl CollectAnalytics for &UpConfig {
         let mut count_context: u32 = 0;
         let mut count_config_patch: u32 = 0;
         let mut count_directory: u32 = 0;
+        let mut count_pre_command: u32 = 0;
 
         let mut count_exec: u32 = 0;
         let mut count_container: u32 = 0;
@@ -1188,6 +1219,9 @@ impl CollectAnalytics for &UpConfig {
             if run.directory.is_some() {
                 count_directory += 1;
             }
+            if run.pre_command.is_empty().not() {
+                count_pre_command += 1;
+            }
 
             match run.r#type {
                 RunType::Exec => count_exec += 1,
@@ -1205,6 +1239,7 @@ impl CollectAnalytics for &UpConfig {
         config_fields_used.add("context", count_context);
         config_fields_used.add("config_patch", count_config_patch);
         config_fields_used.add("directory", count_directory);
+        config_fields_used.add("pre_command", count_pre_command);
         analytics.add("config_fields_used", config_fields_used);
 
         let mut run_types = Analytics::default();
@@ -1419,7 +1454,8 @@ mod tests {
                     "-p".into(),
                     "8080:8080".into(),
                     "web:latest".into(),
-                ]
+                ],
+                pre_command: Vec::new(),
             }
         );
     }
@@ -2445,7 +2481,8 @@ mod tests {
                     "skip": 0,
                     "context": 0,
                     "config_patch": 0,
-                    "directory": 0
+                    "directory": 0,
+                    "pre_command": 0
                 },
                 "run_types": {
                     "exec": 1,

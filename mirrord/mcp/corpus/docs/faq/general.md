@@ -47,7 +47,7 @@ Yes, you can use the `--steal` flag to intercept traffic instead of duplicating 
 
 ## Does mirrord install anything on the cluster?
 
-No, mirrord doesn't install anything on the cluster, nor does it have any persistent state. It does spawn a short-living pod/container to run the proxy, which is automatically removed when mirrord exits. mirrord works using the Kubernetes API, and so the only prerequisite to start using mirrord is to have kubectl configured for your cluster.
+No, mirrord doesn't install anything on the cluster, nor does it have any persistent state. It does spawn a short-living pod/container to run the proxy, which is automatically removed when mirrord exits. mirrord works using the Kubernetes API, and so the only prerequisites to start using mirrord are a cluster that meets the [Cluster Requirements](../installing-mirrord/README.md#cluster-requirements) and kubectl configured for that cluster.
 
 If you have any restrictions for pulling external images inside your cluster, you have to allow pulling of ghcr.io/metalbear-co/mirrord image.
 

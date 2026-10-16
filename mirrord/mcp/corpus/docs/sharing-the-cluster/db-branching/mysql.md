@@ -58,7 +58,7 @@ Copying large datasets can significantly increase branch creation time and stora
 
 Everything in this section requires mirrord operator `3.210.0` or later. Earlier operators copy tables and data only, and start the branch server on the image's own settings.
 
-In `schema` and `all` modes the branch gets the source database's views, triggers, stored functions and stored procedures along with its tables. Every copied object is owned by the branch's `root` user: the `DEFINER` the source recorded is dropped, since that account does not exist on the branch and an object that kept it would fail with `The user specified as a definer does not exist`.
+In `schema` and `all` modes the branch gets the source database's views, triggers, stored functions and stored procedures along with its tables. Every copied object is owned by the branch's `root` user: the `DEFINER` the source recorded is dropped, since that account does not exist on the branch and an object that kept it would fail with `The user specified as a definer does not exist`. With [`roles: full`](#roles-permissions-and-credentials), an object keeps a definer the branch recreates.
 
 The copy runs `mysqldump` as the declared connection user. The server only shows a routine's body to its definer, to an account with `SHOW_ROUTINE` (MySQL 8.0.20 and later) or to one with the global `SELECT` privilege, so routines the connection user defined itself always come along, and routines defined by other accounts need one of those grants; without it `mysqldump` leaves them out with an `insufficient privileges` comment in place of the body. `EXECUTE` alone is not enough.
 
@@ -113,6 +113,51 @@ By default, mirrord passes no arguments to `mysqldump`, which then runs with its
 ```
 
 In this example, `mysqldump` runs with `--single-transaction`, `--no-tablespaces`, and `--skip-lock-tables`.
+
+## Roles, Permissions, and Credentials
+
+Everything in this section requires mirrord operator `3.220.0` or later.
+
+A branch pod is a fresh MySQL server, so mirrord recreates the source database's accounts in it. How much of them it recreates is controlled by the operator's Helm values, per cluster:
+
+```yaml
+operator:
+  mysqlBranchConfig:
+    dbPod:
+      roles: "empty" # or "full"
+```
+
+`empty` (the default) recreates only the user declared in the branch's `connection` config. The copy drops definers, and your app connects through mirrord's env overrides as `root`.
+
+`full` recreates the source accounts with their grants, and copied objects keep a definer the branch recreates. The branch then enforces the same permissions as the source. In `full` mode, mirrord's env overrides only redirect the connection address, so the app keeps using its own user and password (see the table below for how this interacts with `url`-style connections).
+
+`full` recreates every source account when the declared user has `SELECT` on the `mysql` schema, and only the declared user otherwise.
+
+### The source user's password
+
+The user declared in the branch's `connection` config can log into the branch with its real password, in both modes. Only a password hash is written into the branch, never the plaintext.
+
+In `empty` mode this login has every privilege on the branch; in `full` mode it has the user's real grants.
+
+### Which credentials does my app end up using?
+
+| `roles` | Connection config | Where the app gets its credentials | App connects to the branch as |
+| --- | --- | --- | --- |
+| `empty` (default) | `params` or `url` | env vars | `root`, mirrord's branch password |
+| `empty` (default) | `params` or `url` | fetched at runtime (secret manager, Vault, ...) | the declared user, its real password (every privilege on the branch) |
+| `full` | `params` | env vars | the declared user, its real password, real permissions (mirrord leaves user/password vars untouched) |
+| `full` | `params` | fetched at runtime (secret manager, Vault, ...) | the declared user, its real password, real permissions |
+| `full` | `url` | env vars | `root` (the URL var is replaced whole) |
+| any | IAM auth | any | `root` (no source login is created) |
+
+### Limits
+
+- Accounts other than the declared user are recreated without a password and cannot log in.
+- The declared user's login needs `mysql_native_password` or `caching_sha2_password`, loaded on the branch server (MySQL 8.4 and later do not load `mysql_native_password` by default). Otherwise `full` fails the branch and `empty` creates it without that login.
+- The declared user can log in from any host, without the TLS or X.509 requirement it has on the source.
+- Roles granted to a declared user without `SELECT` on the `mysql` schema are recreated empty, and the user gets their privileges directly.
+- Accounts are recreated when a branch is created. Changing the Helm value or rotating a source password affects new branches, not ones already running.
+- Accounts the server or a cloud provider owns (`root`, `mysql.sys`, `rdsadmin`, `cloudsqladmin`, and similar) are skipped.
 
 ## IAM Authentication
 

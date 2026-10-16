@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt,
     ops::Not,
     time::Duration,
@@ -65,7 +65,7 @@ use crate::{
             relay_source_compatibility_warnings, reused_branch_connection_sources,
             wait_for_pending_branches,
         },
-        queue_split_progress::QueueSplitProgress,
+        queue_split_progress::{QueueSplitProgress, mirror_requested},
         split_config_branches::{
             MIRRORD_SESSION_KEY_LABEL, ResolvedSplitConfigBranches, check_attach_copy_mode,
             entries_from_response, same_source_warnings,
@@ -102,6 +102,7 @@ mod queue_split_progress;
 pub mod split_config_branches;
 
 pub use discovery::operator_installed;
+pub use queue_split_progress::temporal_mirror_warning;
 
 const BAGGAGE_HEADER: &str = "baggage";
 
@@ -1109,6 +1110,19 @@ where
                 .require_feature(NewOperatorFeature::DbBranchConfigMapSource)?;
         }
 
+        // `value_selector` / `value_pattern` on a secret manager source need an operator that
+        // applies them: an older one drops them and copies with the whole secret as the value.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_secret_manager_extractor)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchSecretManagerExtract)?;
+        }
+
         // A `url` connection param needs an operator that layers the other params over it: an
         // older operator ignores the param and builds the source connection from whatever else
         // is declared, silently branching the wrong database.
@@ -1616,6 +1630,12 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::CopyTargetExcludeContainers)?
+        }
+
+        if layer_config.feature.kafka_branch {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::KafkaBranching)?;
         }
 
         if auto_queue_splitting {
@@ -2142,8 +2162,12 @@ impl OperatorApi<PreparedClientCert> {
             layer_config.baggage.clone(),
         )?;
 
+        // The fresh copy's split is reported here and nowhere else: `copy_target` leaves that to
+        // the connect that follows, and this is that connect.
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let conn = self.connect_to_session(&session).await?;
+        let conn = self
+            .connect_reporting_split(&session, layer_config, &connection_subtask)
+            .await?;
         connection_subtask.success(Some("connected to the target"));
 
         Ok((conn, session))
@@ -2175,6 +2199,14 @@ impl OperatorApi<PreparedClientCert> {
     {
         // Multi-cluster: CLI connects to Primary, which routes to the workload cluster
         // where the target is resolved and the session is created
+
+        if layer_config.feature.kafka_branch {
+            return Err(OperatorApiError::UnsupportedTargetConfig(
+                "Kafka branching is not available in multi-cluster sessions; set `multi_cluster` \
+                 to false to run the session on the primary cluster"
+                    .to_owned(),
+            ));
+        }
 
         // Owned: branch preparation below edits the config while the target is still needed.
         let target = layer_config
@@ -2726,6 +2758,7 @@ impl OperatorApi<PreparedClientCert> {
             nats_pubsub_jq_filters: Default::default(),
             queue_filters: Default::default(),
             queue_modes: Default::default(),
+            kafka_branch: false,
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,
@@ -2794,6 +2827,7 @@ impl OperatorApi<PreparedClientCert> {
                 .key
                 .is_provided()
                 .then(|| layer_config.key.as_str().to_owned()),
+            kafka_branch: layer_config.feature.kafka_branch.then_some(true),
         }
     }
 
@@ -2842,7 +2876,11 @@ impl OperatorApi<PreparedClientCert> {
             })?;
         subtask.success(Some("target copy created"));
 
-        self.wait_for_copy_ready(copied, progress).await
+        // A fresh copy's split is also visible to the connect that follows, under the same
+        // session id, and every caller connects through `connect_reporting_split`, which reports
+        // it. Reporting it here too would name each Temporal queue twice.
+        self.wait_for_copy_ready(copied, BTreeSet::new(), progress)
+            .await
     }
 
     async fn try_reuse_copy_target<P: Progress>(
@@ -2881,8 +2919,15 @@ impl OperatorApi<PreparedClientCert> {
                     })
             });
 
+        // A reused copy's split belongs to the session that created the copy, so the connect that
+        // follows (under a new session id) cannot see it; this wait is the only place to report
+        // it.
+        let mirror_requested = mirror_requested(&layer_config.feature.split_queues);
         let existing = match existing {
-            Some(existing) => match self.wait_for_copy_ready(existing, progress).await {
+            Some(existing) => match self
+                .wait_for_copy_ready(existing, mirror_requested, progress)
+                .await
+            {
                 Ok(copied) => Some(copied),
                 Err(OperatorApiError::CopiedTargetFailed { .. }) => None,
                 Err(error) => return Err(error),
@@ -2899,10 +2944,12 @@ impl OperatorApi<PreparedClientCert> {
         Ok(existing)
     }
 
-    /// Polls the given [`CopyTargetCrd`] for readiness.
+    /// Polls the given [`CopyTargetCrd`] for readiness, reporting its queue split meanwhile.
+    /// `mirror_requested` is what [`QueueSplitProgress`] warns about, see [`mirror_requested`].
     async fn wait_for_copy_ready<P: Progress>(
         &self,
         mut copied: CopyTargetCrd,
+        mirror_requested: BTreeSet<String>,
         progress: &P,
     ) -> OperatorApiResult<CopyTargetCrd> {
         let namespace = copied
@@ -2925,7 +2972,13 @@ impl OperatorApi<PreparedClientCert> {
             .then(|| copied.status.as_ref()?.creator_session().id.clone())
             .flatten()
             .map(|session| {
-                QueueSplitProgress::new(self.client.clone(), namespace, session, progress)
+                QueueSplitProgress::new(
+                    self.client.clone(),
+                    namespace,
+                    session,
+                    mirror_requested,
+                    progress,
+                )
             });
 
         loop {
@@ -2938,7 +2991,7 @@ impl OperatorApi<PreparedClientCert> {
                 }
                 Some(CopyTargetPhase::Ready) | None => {
                     if let Some(split_progress) = split_progress {
-                        split_progress.finish();
+                        split_progress.finish().await;
                     }
                     if let Some(mut subtask) = wait_subtask {
                         subtask.success(None);
@@ -3056,6 +3109,7 @@ impl OperatorApi<PreparedClientCert> {
             self.client.clone(),
             namespace,
             format!("{:X}", session.id),
+            mirror_requested(&layer_config.feature.split_queues),
             progress,
         )
         .run(self.connect_to_session(session))
@@ -3540,6 +3594,7 @@ mod test {
             key,
             header_filter: None,
             queue_modes: Default::default(),
+            kafka_branch: false,
         };
 
         let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
@@ -3685,6 +3740,7 @@ mod test {
             key,
             header_filter: None,
             queue_modes: Default::default(),
+            kafka_branch: false,
         };
         let produced =
             OperatorApi::target_connect_url_from_config(use_proxy, &target, namespace, &params);

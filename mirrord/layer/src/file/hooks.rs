@@ -1,5 +1,3 @@
-#[cfg(target_os = "linux")]
-use core::ffi::{c_size_t, c_ssize_t};
 /// FFI functions that override the `libc` calls (see `file` module documentation on how to
 /// enable/disable these).
 ///
@@ -22,7 +20,7 @@ use libc::{dirent64, stat64, statx};
 #[cfg(target_os = "linux")]
 use mirrord_layer_lib::error::HookError::ResponseError;
 use mirrord_layer_lib::{
-    detour::{Bypass, Detour, DetourGuard},
+    detour::{Bypass, Detour, DetourError, DetourExt, DetourGuard},
     error::HookError,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
@@ -166,15 +164,15 @@ pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> u
     unsafe {
         open_logic(raw_filename, O_RDONLY, O_DIRECTORY)
             .and_then(|fd| match fdopendir(fd) {
-                Detour::Success(success) => Detour::Success(success),
-                Detour::Bypass(bypass) => {
+                Ok(success) => Ok(success),
+                Err(DetourError::Bypass(bypass)) => {
                     // this shouldn't happen, but if it does we shouldn't leak fd
                     close_layer_fd(fd);
-                    Detour::Bypass(bypass)
+                    Err(DetourError::Bypass(bypass))
                 }
-                Detour::Error(fail) => {
+                Err(DetourError::Error(fail)) => {
                     close_layer_fd(fd);
-                    Detour::Error(fail)
+                    Err(DetourError::Error(fail))
                 }
             })
             .unwrap_or_bypass_with(|bypass| {
@@ -188,13 +186,16 @@ pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> u
 /// This allows copying files when the input/output fds are on different
 /// machines.
 ///
-/// Returns (bytes_written, new_offset) on success.
+/// Returns the number of bytes written on success.
+///
+/// When `offset` is `None`, `read()` moves the file position while `write()` does not
+/// guarantee all read bytes are written. Roll back the file position by calling `lseek`.
 unsafe fn sendfile_impl(
     in_fd: RawFd,
     out_fd: RawFd,
     offset: Option<off_t>,
     count: size_t,
-) -> Option<(ssize_t, off_t)> {
+) -> Option<ssize_t> {
     let mut buffer = vec![0u8; count];
 
     let bytes_read = unsafe {
@@ -217,11 +218,14 @@ unsafe fn sendfile_impl(
         )
     };
 
-    if written < 0 {
-        return None;
+    let unsent = bytes_read - written.max(0);
+    if offset.is_none() && unsent > 0 {
+        let errno = Errno::last_raw();
+        unsafe { libc::lseek(in_fd, -(unsent as off_t), libc::SEEK_CUR) };
+        Errno::set_raw(errno);
     }
 
-    Some((written, offset.unwrap_or(0) + bytes_read as off_t))
+    (written >= 0).then_some(written)
 }
 
 /// Hook for macos's [`libc::sendfile`].
@@ -241,7 +245,7 @@ pub(super) unsafe extern "C" fn sendfile_detour(
         };
 
         match sendfile_impl(fd, s, Some(offset), *count as usize) {
-            Some((written, _)) => {
+            Some(written) => {
                 *count = written as off_t;
                 0
             }
@@ -263,20 +267,17 @@ pub(super) unsafe extern "C" fn sendfile_detour(
     count: size_t,
 ) -> ssize_t {
     unsafe {
-        let offset_val = if offset.is_null() {
-            None
-        } else {
-            Some(*offset)
-        };
+        let offset = offset.as_mut();
 
-        sendfile_impl(in_fd, out_fd, offset_val, count)
-            .map(|(written, new_offset)| {
-                if !offset.is_null() {
-                    *offset = new_offset;
+        match sendfile_impl(in_fd, out_fd, offset.as_deref().copied(), count) {
+            Some(written) => {
+                if let Some(offset) = offset {
+                    *offset += written as off_t;
                 }
                 written
-            })
-            .unwrap_or(-1)
+            }
+            None => -1,
+        }
     }
 }
 
@@ -440,9 +441,9 @@ pub(crate) unsafe extern "C" fn readdir64_r_detour(
 pub(crate) unsafe extern "C" fn readdir64_detour(dirp: *mut DIR) -> usize {
     unsafe {
         match OPEN_DIRS.read64(dirp as usize) {
-            Detour::Success(entry) => entry as usize,
-            Detour::Bypass(..) => FN_READDIR64(dirp),
-            Detour::Error(e) => {
+            Ok(entry) => entry as usize,
+            Err(DetourError::Bypass(..)) => FN_READDIR64(dirp),
+            Err(DetourError::Error(e)) => {
                 Errno::set_raw(e.into());
                 std::ptr::null::<dirent64>() as usize
             }
@@ -454,9 +455,9 @@ pub(crate) unsafe extern "C" fn readdir64_detour(dirp: *mut DIR) -> usize {
 pub(crate) unsafe extern "C" fn readdir_detour(dirp: *mut DIR) -> usize {
     unsafe {
         match OPEN_DIRS.read(dirp as usize) {
-            Detour::Success(entry) => entry as usize,
-            Detour::Bypass(..) => FN_READDIR(dirp),
-            Detour::Error(e) => {
+            Ok(entry) => entry as usize,
+            Err(DetourError::Bypass(..)) => FN_READDIR(dirp),
+            Err(DetourError::Error(e)) => {
                 Errno::set_raw(e.into());
                 std::ptr::null::<dirent>() as usize
             }
@@ -570,11 +571,11 @@ pub(crate) unsafe extern "C" fn openat_nocancel_detour(
 pub(crate) unsafe extern "C" fn getdents64_detour(
     fd: RawFd,
     dirent_buf: *mut c_void,
-    buf_size: c_size_t,
-) -> c_ssize_t {
+    buf_size: size_t,
+) -> ssize_t {
     unsafe {
         match getdents64(fd, buf_size as u64) {
-            Detour::Success(res) => {
+            Ok(res) => {
                 let mut next = dirent_buf as *mut dirent;
                 let end = next.byte_add(buf_size);
                 for dent in res.entries {
@@ -603,15 +604,15 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
                         Ok(()) => next = next.byte_add((*next).d_reclen as usize),
                     }
                 }
-                res.result_size as c_ssize_t
+                res.result_size as ssize_t
             }
-            Detour::Bypass(_) => {
+            Err(DetourError::Bypass(_)) => {
                 mirrord_layer_macro::trace!(
                     "bypassing getdents64: calling syscall locally (fd: {fd})."
                 );
-                libc::syscall(libc::SYS_getdents64, fd, dirent_buf, buf_size) as c_ssize_t
+                libc::syscall(libc::SYS_getdents64, fd, dirent_buf, buf_size) as ssize_t
             }
-            Detour::Error(ResponseError(NotFound(not_found_fd))) => {
+            Err(DetourError::Error(ResponseError(NotFound(not_found_fd)))) => {
                 info!(
                     "Go application tried to read a directory and mirrord carried out that read on the \
                 remote destination, however that directory was not found over there (local fd: \
@@ -620,7 +621,7 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
                 Errno::ENOENT.set(); // "No such directory."
                 -1
             }
-            Detour::Error(ResponseError(NotDirectory(file_fd))) => {
+            Err(DetourError::Error(ResponseError(NotDirectory(file_fd)))) => {
                 warn!(
                     "Go application tried to read a directory and mirrord carried out that read on the \
                 remote destination, however the type of that file on the remote destination is not \
@@ -629,7 +630,7 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
                 Errno::ENOTDIR.set(); // "Not a directory."
                 -1
             }
-            Detour::Error(err) => {
+            Err(DetourError::Error(err)) => {
                 error!("Encountered error in getdents64 detour: {err:?}");
                 // There is no appropriate error code for "We hijacked this operation to a remote
                 // agent and the agent returned an error". We could try to map more
@@ -1010,7 +1011,7 @@ fn stat_logic<const FOLLOW_SYMLINK: bool>(
     out_stat: *mut stat64,
 ) -> Detour<c_int> {
     if out_stat.is_null() {
-        Detour::Error(HookError::BadPointer)
+        Err(DetourError::Error(HookError::BadPointer))
     } else {
         let path = raw_path.map(CheckedInto::checked_into);
 
@@ -1148,7 +1149,7 @@ pub(crate) unsafe fn fstatat_logic(
 ) -> Detour<i32> {
     unsafe {
         if out_stat.is_null() {
-            return Detour::Error(HookError::BadPointer);
+            return Err(DetourError::Error(HookError::BadPointer));
         }
 
         let follow_symlink = (flag & libc::AT_SYMLINK_NOFOLLOW) == 0;
@@ -1388,7 +1389,7 @@ pub(crate) unsafe extern "C" fn readv_detour(
         let iovs = (!iovecs.is_null()).then(|| slice::from_raw_parts(iovecs, iovec_count as usize));
 
         readv(iovs)
-            .and_then(|(iovs, read_size)| Detour::Success((read(fd, read_size)?, iovs)))
+            .and_then(|(iovs, read_size)| Ok((read(fd, read_size)?, iovs)))
             .map(|(read_file, iovs)| {
                 let ReadFileResponse { bytes, .. } = read_file;
 
@@ -1416,7 +1417,7 @@ pub(crate) unsafe extern "C" fn readv_nocancel_detour(
         let iovs = (!iovecs.is_null()).then(|| slice::from_raw_parts(iovecs, iovec_count as usize));
 
         readv(iovs)
-            .and_then(|(iovs, read_size)| Detour::Success((read(fd, read_size)?, iovs)))
+            .and_then(|(iovs, read_size)| Ok((read(fd, read_size)?, iovs)))
             .map(|(read_file, iovs)| {
                 let ReadFileResponse { bytes, .. } = read_file;
 
@@ -1445,9 +1446,7 @@ pub(crate) unsafe extern "C" fn preadv_detour(
         let iovs = (!iovecs.is_null()).then(|| slice::from_raw_parts(iovecs, iovec_count as usize));
 
         readv(iovs)
-            .and_then(|(iovs, read_size)| {
-                Detour::Success((pread(fd, read_size, offset as u64)?, iovs))
-            })
+            .and_then(|(iovs, read_size)| Ok((pread(fd, read_size, offset as u64)?, iovs)))
             .map(|(read_file, iovs)| {
                 let ReadFileResponse { bytes, .. } = read_file;
 
@@ -1477,9 +1476,7 @@ pub(crate) unsafe extern "C" fn preadv_nocancel_detour(
         let iovs = (!iovecs.is_null()).then(|| slice::from_raw_parts(iovecs, iovec_count as usize));
 
         readv(iovs)
-            .and_then(|(iovs, read_size)| {
-                Detour::Success((pread(fd, read_size, offset as u64)?, iovs))
-            })
+            .and_then(|(iovs, read_size)| Ok((pread(fd, read_size, offset as u64)?, iovs)))
             .map(|(read_file, iovs)| {
                 let ReadFileResponse { bytes, .. } = read_file;
 

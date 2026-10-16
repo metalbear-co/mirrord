@@ -502,6 +502,7 @@ fn prompt_run() -> Result<RunConfig, inquire::InquireError> {
         r#type: RunType::Exec,
         directory,
         command,
+        pre_command: Vec::new(),
     })
 }
 
@@ -656,6 +657,7 @@ mod tests {
                 r#type: RunType::Exec,
                 directory: Some("services/api".into()),
                 command: vec!["go".to_owned(), "run".to_owned(), "./cmd/api".to_owned()],
+                pre_command: Vec::new(),
             },
             context: Some("popper-deskpop".into()),
             config_patch: None,
@@ -721,6 +723,7 @@ mod tests {
                 r#type: RunType::Exec,
                 directory: None,
                 command: vec!["echo".to_owned()],
+                pre_command: Vec::new(),
             },
             context: None,
             config_patch: None,
@@ -770,6 +773,7 @@ mod tests {
                 r#type: RunType::Exec,
                 directory: None,
                 command: vec!["go".to_owned(), "run".to_owned(), "--opt=a,b".to_owned()],
+                pre_command: Vec::new(),
             },
             context: None,
             config_patch: None,
@@ -817,6 +821,7 @@ mod tests {
                 r#type: RunType::Exec,
                 directory: None,
                 command: vec!["echo".to_owned()],
+                pre_command: Vec::new(),
             },
             context: None,
             config_patch: None,
