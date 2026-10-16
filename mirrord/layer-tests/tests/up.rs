@@ -6,7 +6,13 @@
 
 #[cfg(windows)]
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-use std::{collections::HashMap, fs, ops::Not, path::Path, time::Duration};
+use std::{
+    collections::HashMap,
+    fs,
+    ops::Not,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use mirrord_config::MIRRORD_TEST_INTPROXY_ADDR;
 use mirrord_test_utils::run_command::run_mirrord;
@@ -23,11 +29,19 @@ use winapi::{
 mod common;
 pub use common::*;
 
-/// One `services` entry of a `mirrord-up.yaml` that runs `script` with python.
+/// One `services` entry of a `mirrord-up.yaml` that runs the python app `tests/apps/<script>`
+/// with `args`.
 ///
 /// Files stay local and DNS is not remote, as the test intproxy answers neither.
-fn service(python: &str, name: &str, script: &str) -> String {
-    let command = serde_json::to_string(&[python, "-c", script]).unwrap();
+fn service(python: &str, name: &str, script: &str, args: &[&Path]) -> String {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/apps")
+        .join(script);
+    let command = [python, script.to_str().unwrap()]
+        .into_iter()
+        .chain(args.iter().map(|arg| arg.to_str().unwrap()))
+        .collect::<Vec<_>>();
+    let command = serde_json::to_string(&command).unwrap();
     format!(
         r#"
   {name}:
@@ -81,11 +95,6 @@ async fn run_up(directory: &Path, services: &[String]) -> (TestProcess, TestIntP
     (process, TestIntProxy::new(listener, None).await)
 }
 
-/// A python string literal holding `path`. JSON escapes it the way python reads it.
-fn python_path(path: &Path) -> String {
-    serde_json::to_string(path).unwrap()
-}
-
 /// A service's process, opened while it is known to be running.
 ///
 /// On Windows the open handle keeps the PID from being reused, so a check after shutdown cannot
@@ -130,11 +139,7 @@ async fn up_prefixes_service_output_and_ends_with_the_service() {
     let python = Application::get_python3_executable().await;
     let (mut up, _intproxy) = run_up(
         directory.path(),
-        &[service(
-            &python,
-            "greeter",
-            "print('hello from mirrord up')",
-        )],
+        &[service(&python, "greeter", "up_greeter.py", &[])],
     )
     .await;
 
@@ -153,26 +158,11 @@ async fn up_reports_a_crashed_service_and_stops_the_others() {
     let pid_file = directory.path().join("sleeper.pid");
     let partial = directory.path().join("sleeper.partial");
     let release = directory.path().join("release");
-    let sleeper = format!(
-        "import os, time\n\
-         open({partial}, 'w').write(str(os.getpid()))\n\
-         os.replace({partial}, {pid_file})\n\
-         time.sleep(60)",
-        partial = python_path(&partial),
-        pid_file = python_path(&pid_file),
-    );
-    let failing = format!(
-        "import os, sys, time\n\
-         deadline = time.time() + 60\n\
-         while not os.path.exists({release}) and time.time() < deadline: time.sleep(0.02)\n\
-         sys.exit(3)",
-        release = python_path(&release),
-    );
     let (mut up, _intproxy) = run_up(
         directory.path(),
         &[
-            service(&python, "sleeper", &sleeper),
-            service(&python, "failing", &failing),
+            service(&python, "sleeper", "up_sleeper.py", &[&partial, &pid_file]),
+            service(&python, "failing", "up_failing.py", &[&release]),
         ],
     )
     .await;
