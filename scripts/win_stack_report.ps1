@@ -171,7 +171,7 @@ $commands = switch ($Mode) {
             '.echo ===STACK===',
             '.kframes 0x4000',
             'kf',
-            # The innermost frame is the one being allocated: __chkstk holds its size in rax.
+            # When the overflow hits in __chkstk, rax holds the size of the frame being allocated.
             '.printf "REQUESTED %d\n", @rax',
             '.echo ===END==='
         )
@@ -223,7 +223,8 @@ switch ($Mode) {
         if ($small) {
             Write-Host ('{0}  ({1} frames under 1 KiB each; the log has them all)' -f (Format-Size ($small | Measure-Object -Property Size -Sum).Sum), $small.Count)
         }
-        if ($text -match 'REQUESTED (\d+)') {
+        # Anywhere else, rax is just whatever it held, so there's no frame to blame.
+        if ($frames.Count -ge 2 -and $frames[0].Function -match '__chkstk' -and $text -match 'REQUESTED (\d+)') {
             $requested = [long]$Matches[1]
             Write-Host ("`nThe overflow hit while {0} was allocating a {1} frame." -f (Format-Name (Get-FunctionName $frames[1].Function)), (Format-Size $requested).Trim())
         }
