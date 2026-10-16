@@ -15,6 +15,14 @@
       },
       "x-mirrord-plan": "oss"
     },
+    "modes": {
+      "description": "Custom modes keyed by name, selected with a service's `default_mode` or\n`mirrord up --mode`. The built-in names (`split`, `replace`, `mirror`) are reserved.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ModeConfig"
+      },
+      "x-mirrord-plan": "oss"
+    },
     "services": {
       "description": "Per-service configurations keyed by service name.",
       "type": "object",
@@ -238,6 +246,29 @@
       ],
       "x-mirrord-plan": "team"
     },
+    "ModeConfig": {
+      "description": "A custom mode, defined under `modes` and selected by name with `default_mode` or\n`mirrord up --mode`.",
+      "type": "object",
+      "properties": {
+        "incoming": {
+          "description": "How incoming traffic is handled, as in the built-in mode of the same name. Defaults to\n`split`.",
+          "$ref": "#/$defs/ServiceMode",
+          "default": "split"
+        },
+        "queues": {
+          "description": "How the service's queues are split. When not set, every queue defined in the cluster is\nsplit, mirrored with `incoming: mirror` and stolen otherwise.\n\nIgnored with `incoming: replace`, which doesn't split queues.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueuesMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "PodTarget": {
       "description": "<!--${internal}-->\nMirror the pod specified by [`PodTarget::pod`].",
       "type": "object",
@@ -258,6 +289,21 @@
         "pod"
       ],
       "x-mirrord-plan": "oss"
+    },
+    "QueuesMode": {
+      "description": "How a custom mode splits the service's queues.",
+      "oneOf": [
+        {
+          "description": "Messages matching the session are consumed by the local service only\n(`queue_mode: steal`).",
+          "type": "string",
+          "const": "split"
+        },
+        {
+          "description": "Messages matching the session reach both the local and the original service\n(`queue_mode: mirror`).",
+          "type": "string",
+          "const": "mirror"
+        }
+      ]
     },
     "ReplicaSetTarget": {
       "type": "object",
@@ -387,8 +433,16 @@
           "default": null
         },
         "default_mode": {
-          "description": "How incoming traffic and queue messages are shared between the local and the original\nservice. Defaults to `split`.\n\n`mirrord up --mode` overrides this for every service.",
-          "$ref": "#/$defs/ServiceMode",
+          "description": "How incoming traffic and queue messages are shared between the local and the original\nservice: a built-in mode or one defined under `modes`. Defaults to `split`.\n\n`mirrord up --mode` overrides this for every service.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServiceMode"
+            },
+            {
+              "description": "A mode defined under `modes`.",
+              "type": "string"
+            }
+          ],
           "default": "split"
         },
         "env": {
