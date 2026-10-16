@@ -2620,6 +2620,7 @@ mod test {
             copy: None,
             conditions: Vec::new(),
             source: None,
+            source_names: Vec::new(),
         });
         let branch = BranchDatabase {
             metadata: ObjectMeta {
