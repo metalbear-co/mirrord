@@ -19,4 +19,9 @@ disallowed-methods = [
     { path = "tracing_subscriber::fmt::Layer::with_thread_names", reason = "reaches std::thread::current. Use the OsThreadId event format." },
     { path = "tracing_subscriber::fmt::format::Format::with_thread_ids", reason = "reaches std::thread::current. Use the OsThreadId event format." },
     { path = "tracing_subscriber::fmt::format::Format::with_thread_names", reason = "reaches std::thread::current. Use the OsThreadId event format." },
+    # Clippy reads only the nearest `clippy.toml`, so this file replaces the workspace one. These
+    # two are copied from it; copy any new workspace-wide ban here too.
+    { path = "std::process::Command::new", reason = "on Windows only `.exe` is appended to bare program names, so `.cmd`/`.bat` shims such as `npm.cmd` are never found", replacement = "mirrord_command::resolve_command" },
+    # `allow-invalid` because crates that don't depend on tokio can't resolve this path.
+    { path = "tokio::process::Command::new", reason = "on Windows only `.exe` is appended to bare program names, so `.cmd`/`.bat` shims such as `npm.cmd` are never found", replacement = "mirrord_command::resolve_tokio_command", allow-invalid = true },
 ]
