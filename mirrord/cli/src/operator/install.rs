@@ -40,7 +40,7 @@ pub(super) async fn operator_install(
     let mut reporter = telemetry.reporter(ReportTarget::OperatorInstall);
     reporter
         .get_mut()
-        .add("api_key_given", args.api_key.is_some());
+        .add("api_key_given", args.api_key.is_some() || args.from_signup);
 
     let mut run = InstallRun {
         phase: InstallPhase::Connect,
@@ -76,6 +76,7 @@ async fn install(
 ) -> Result<(), OperatorInstallError> {
     let OperatorInstallArgs {
         api_key,
+        from_signup,
         no_browser: _,
         cluster_hint,
         no_hint,
@@ -88,6 +89,12 @@ async fn install(
 
     let credential = match api_key {
         Some(api_key) => Credential::ApiKey(api_key),
+        None if from_signup => {
+            run.phase = InstallPhase::SignupKey;
+            let app_url = login::backend_base_url(app_url)
+                .map_err(|error| OperatorInstallError::AppUrl(Box::new(error)))?;
+            Credential::ApiKey(signup::saved_key(&app_url).await?)
+        }
         None => {
             run.phase = InstallPhase::Login;
             let app_url = login::backend_base_url(app_url)
@@ -198,7 +205,7 @@ async fn install(
 
 /// What the operator is registered with.
 enum Credential {
-    /// An operator API key the user passed.
+    /// An operator API key the user passed, or that `mirrord operator signup` saved.
     ApiKey(String),
     /// The login of the user, used to create the operator API key of their organization in the
     /// app at `app_url`.

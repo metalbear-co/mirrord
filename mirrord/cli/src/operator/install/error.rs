@@ -211,6 +211,30 @@ pub(crate) enum OperatorInstallError {
     #[error("failed to read the stored login")]
     LoginStore(#[source] io::Error),
 
+    #[error("invalid MetalBear app URL")]
+    AppUrl(#[source] Box<LoginError>),
+
+    #[error("failed to read the trial that `mirrord operator signup` saved")]
+    SignupKeyStore(#[source] io::Error),
+
+    #[error("no trial started by `mirrord operator signup` on this machine was found")]
+    #[diagnostic(help(
+        "Run `mirrord operator signup` on this machine first. It keeps the trial's key until the \
+        trial ends."
+    ))]
+    NoSignupKey,
+
+    #[error("the trial was started, but its API key could not be saved")]
+    #[diagnostic(help(
+        "Claim the organization at {claim_url}, then run `mirrord operator install` to install \
+        with your login."
+    ))]
+    SignupKeyNotSaved {
+        claim_url: String,
+        #[source]
+        source: io::Error,
+    },
+
     #[error("no login for the MetalBear app was stored")]
     #[diagnostic(help("Run `mirrord login` and then this command again."))]
     NotLoggedIn,

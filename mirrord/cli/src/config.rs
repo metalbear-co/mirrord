@@ -1002,10 +1002,13 @@ pub(super) enum OperatorCommand {
     /// Install the mirrord operator into the cluster of the current kubecontext, or of the one
     /// given with `--context`.
     ///
-    /// Without `--api-key`, logs you in and creates your organization's operator API key, then
-    /// installs the helm chart's default values (use the chart directly for anything custom).
+    /// Without `--api-key` or `--from-signup`, logs you in and creates your organization's
+    /// operator API key, then installs the helm chart's default values (use the chart directly for
+    /// anything custom).
     Install(Box<OperatorInstallArgs>),
     /// Start a 7-day mirrord Enterprise trial under a new organization, for AI agents.
+    ///
+    /// Saves the trial's API key on this machine for `mirrord operator install --from-signup`.
     Signup(OperatorSignupArgs),
     /// Remove the mirrord operator that `mirrord operator install` installed from the cluster of
     /// the current kubecontext, or of the one given with `--context`.
@@ -1035,10 +1038,16 @@ pub(super) enum OperatorCommand {
 pub(super) struct OperatorInstallArgs {
     /// Operator API key, the same key the helm chart takes as `cloud.apiKey.key`.
     ///
-    /// Without it, the command logs you in to the MetalBear app (like `mirrord login`) and creates
-    /// the operator API key of your organization, which goes into the cluster without being shown.
+    /// Without it or `--from-signup`, the command logs you in to the MetalBear app (like
+    /// `mirrord login`) and creates the operator API key of your organization, which goes into the
+    /// cluster without being shown.
     #[arg(long, env = "MIRRORD_OPERATOR_API_KEY", hide_env_values = true)]
     pub api_key: Option<String>,
+
+    /// Install with the API key of the trial that `mirrord operator signup` started on this
+    /// machine.
+    #[arg(long, conflicts_with_all = ["api_key", "cluster_hint", "no_hint"])]
+    pub from_signup: bool,
 
     /// Has no effect. Kept so that scripts written for earlier versions keep working.
     #[arg(long, hide = true)]
@@ -1110,7 +1119,7 @@ pub(super) struct OperatorSignupArgs {
         hide = true,
         default_value = "https://app.metalbear.com"
     )]
-    pub app_url: String,
+    pub app_url: Url,
 }
 
 #[derive(Args, Debug)]

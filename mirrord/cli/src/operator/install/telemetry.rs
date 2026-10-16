@@ -62,6 +62,8 @@ pub(super) enum InstallPhase {
     WaitForOperator = 8,
     /// Logging in to the MetalBear app, which comes before [`Self::Connect`].
     Login = 9,
+    /// Reading the key that `mirrord operator signup` saved, which comes before [`Self::Connect`].
+    SignupKey = 10,
 }
 
 /// The step of `mirrord operator uninstall` that a run is in, reported when the run does not
