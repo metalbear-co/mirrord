@@ -1110,6 +1110,19 @@ where
                 .require_feature(NewOperatorFeature::DbBranchConfigMapSource)?;
         }
 
+        // `value_selector` / `value_pattern` on a secret manager source need an operator that
+        // applies them: an older one drops them and copies with the whole secret as the value.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_secret_manager_extractor)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchSecretManagerExtract)?;
+        }
+
         // A `url` connection param needs an operator that layers the other params over it: an
         // older operator ignores the param and builds the source connection from whatever else
         // is declared, silently branching the wrong database.
