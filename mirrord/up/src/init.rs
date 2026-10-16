@@ -205,7 +205,7 @@ async fn prompt_service(
         ServiceConfig {
             target,
             env: EnvConfig::default(),
-            default_mode,
+            default_mode: default_mode.into(),
             http_filter,
             ignore_ports,
             skip: false,
@@ -648,7 +648,7 @@ mod tests {
                 r#override: Some([("FOO".to_owned(), "bar".to_owned())].into_iter().collect()),
                 ..Default::default()
             },
-            default_mode: ServiceMode::default(),
+            default_mode: ServiceMode::default().into(),
             http_filter: HttpFilterConfig {
                 header_filter: Some("x-session: me".to_owned()),
                 ..Default::default()
@@ -716,7 +716,7 @@ mod tests {
         let svc = ServiceConfig {
             target: TargetConfig::UNSPECIFIED,
             env: EnvConfig::default(),
-            default_mode: ServiceMode::default(),
+            default_mode: ServiceMode::default().into(),
             http_filter: HttpFilterConfig {
                 header_filter: Some("x-session: me".to_owned()),
                 ..Default::default()
@@ -770,7 +770,7 @@ mod tests {
         let svc = ServiceConfig {
             target: TargetConfig::UNSPECIFIED,
             env: EnvConfig::default(),
-            default_mode: ServiceMode::default(),
+            default_mode: ServiceMode::default().into(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: [9090, 9091, 15090].into_iter().collect(),
             skip: false,
@@ -819,7 +819,7 @@ mod tests {
                 namespace: Some("staging".into()),
             }),
             env: EnvConfig::default(),
-            default_mode: ServiceMode::default(),
+            default_mode: ServiceMode::default().into(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: BTreeSet::new(),
             skip: false,

@@ -187,7 +187,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     let requesting = db_branches::check_db_branches(&mut services).await?;
     let modes = services
         .iter()
-        .map(|service| (service.service_name.clone(), service.mode))
+        .map(|service| (service.service_name.clone(), service.mode.clone()))
         .collect::<Vec<_>>();
 
     let result = mirrord_up::launch(services, correlation_id, ready.clone()).await;
@@ -208,11 +208,12 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     Ok(result?)
 }
 
-/// One entry per service, in no particular order and without names: its mode, whether it requested
+/// One entry per service, in no particular order and without names: its mode (`custom` for one
+/// defined under `modes`, whose name is the user's), whether it requested
 /// DB branching, and whether its session created a branch, attached to an existing one, and shares
 /// one with another service of the run.
 fn service_analytics(
-    modes: &[(Arc<str>, ServiceMode)],
+    modes: &[(Arc<str>, Arc<str>)],
     requesting: &[Arc<str>],
     db_branches: &HashMap<Arc<str>, Vec<UpSessionDbBranch>>,
 ) -> Vec<AnalyticValue> {
@@ -229,7 +230,8 @@ fn service_analytics(
         .map(|(name, mode)| {
             let branches = db_branches.get(name).map(Vec::as_slice).unwrap_or_default();
             let mut service = Analytics::default();
-            service.add("mode", SanitizedString::new_plaintext(&mode.to_string()));
+            let mode = ServiceMode::from_name(mode).map_or("custom", <&str>::from);
+            service.add("mode", SanitizedString::new_plaintext(mode));
             service.add("db_branching_requested", requesting.contains(name));
             service.add(
                 "db_branch_created",
@@ -392,7 +394,7 @@ mod tests {
         let v = category(UpCliError::Up(UpError::Mode(
             ModeError::IncompatibleTargets(vec![IncompatibleTarget {
                 service: "svc".into(),
-                mode: ServiceMode::Replace,
+                mode: ServiceMode::Replace.into(),
                 target_type: TargetType::Targetless,
             }]),
         )));

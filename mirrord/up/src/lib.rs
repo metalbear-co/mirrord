@@ -26,6 +26,7 @@ use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets
 use futures::TryStreamExt;
 pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
+use itertools::Itertools;
 use k8s_openapi::api::core::v1::Namespace;
 use miette::Diagnostic;
 use mirrord_analytics::{MIRRORD_UP_CORRELATION_ID_ENV, UpSessionDbBranch};
@@ -336,6 +337,14 @@ impl UpConfig {
             .find(|name| ServiceMode::from_name(name).is_some())
         {
             return Err(ModeNameError::Builtin(builtin.clone()).into());
+        }
+        for name in self
+            .services
+            .values()
+            .map(|service| &service.default_mode)
+            .sorted()
+        {
+            ModeConfig::named(&self.modes, name)?;
         }
 
         for (service, service_config) in &self.services {
