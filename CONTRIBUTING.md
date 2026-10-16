@@ -698,6 +698,17 @@ The xtask approach is preferred for new development as it provides better error 
 
 # Submitting a Pull Request
 
+## Formatting
+
+mirrord builds on stable Rust, but `rustfmt.toml` uses options that only nightly `rustfmt` supports (import grouping
+and comment wrapping). Stable `rustfmt` ignores them, so format with the nightly toolchain that CI checks against
+(`PINNED_RUSTFMT_TOOLCHAIN` in `.github/workflows/ci.yaml`):
+
+```bash
+rustup toolchain install nightly-2026-08-13 --profile minimal --component rustfmt
+cargo +nightly-2026-08-13 fmt
+```
+
 ## Greptile Reviews
 
 Greptile may review pull requests automatically. Authors and maintainers can apply the `no-greptile` label when an
