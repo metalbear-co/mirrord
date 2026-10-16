@@ -911,15 +911,15 @@ mod tests {
         Some("target")
     )]
     #[case::value_typo(
-        "services:\n  api:\n    default_mode: splt\n    run:\n      command: [x]\n",
+        "modes:\n  m:\n    incoming: splt\nservices:\n  api:\n    run:\n      command: [x]\n",
         Some("split")
     )]
     #[case::value_in_uppercase(
-        "services:\n  api:\n    default_mode: MIRROR\n    run:\n      command: [x]\n",
+        "modes:\n  m:\n    incoming: MIRROR\nservices:\n  api:\n    run:\n      command: [x]\n",
         Some("mirror")
     )]
     #[case::unrelated_value(
-        "services:\n  api:\n    default_mode: zzzzzz\n    run:\n      command: [x]\n",
+        "modes:\n  m:\n    incoming: zzzzzz\nservices:\n  api:\n    run:\n      command: [x]\n",
         None
     )]
     #[case::other_error("services:\n  api:\n    default_mode: split\n", None)]
@@ -945,7 +945,8 @@ mod tests {
     /// The report shows the YAML snippet once: in the message, with its suggestion.
     #[test]
     fn parse_error_report_shows_the_snippet_once() {
-        let yaml = "services:\n  api:\n    default_mode: mirorr\n    run:\n      command: [x]\n";
+        let yaml =
+            "modes:\n  m:\n    incoming: mirorr\nservices:\n  api:\n    run:\n      command: [x]\n";
         let error = template(yaml, &EnvKey::Provided("key".to_owned())).unwrap_err();
 
         let mut report = String::new();
@@ -957,6 +958,44 @@ mod tests {
             report.matches("--> <input>").count(),
             1,
             "the parse error must not repeat as its own source:\n{report}"
+        );
+    }
+
+    /// A custom mode can't take a built-in mode's name.
+    #[rstest::rstest]
+    fn verify_rejects_custom_mode_named_after_builtin(
+        #[values("split", "replace", "mirror")] name: &str,
+    ) {
+        let yaml = format!(
+            "modes:\n  {name}:\n    incoming: mirror\nservices:\n  api:\n    run:\n      command: [x]\n"
+        );
+        let config = template(&yaml, &EnvKey::Provided("key".to_owned())).unwrap();
+
+        let Err(UpError::ModeName(ModeNameError::Builtin(builtin))) = config.verify() else {
+            panic!("expected a built-in name error");
+        };
+        assert_eq!(&*builtin, name);
+    }
+
+    /// An unknown `default_mode` fails `verify`, naming the closest and every known mode.
+    #[test]
+    fn verify_rejects_unknown_default_mode() {
+        let yaml = "modes:\n  fast: {}\nservices:\n  api:\n    default_mode: fsat\n    run:\n      command: [x]\n";
+        let config = template(yaml, &EnvKey::Provided("key".to_owned())).unwrap();
+
+        let Err(UpError::ModeName(ModeNameError::Unknown {
+            name,
+            suggestion,
+            known,
+        })) = config.verify()
+        else {
+            panic!("expected an unknown mode error");
+        };
+        assert_eq!(&*name, "fsat");
+        assert_eq!(suggestion.as_deref(), Some("fast"));
+        assert_eq!(
+            known.iter().map(AsRef::as_ref).collect::<Vec<&str>>(),
+            ["split", "replace", "mirror", "fast"]
         );
     }
 

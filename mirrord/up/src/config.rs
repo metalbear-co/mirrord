@@ -2071,6 +2071,261 @@ mod tests {
         );
     }
 
+    // -- Custom modes --
+
+    /// The config `mirrord up` generates for the one service of `yaml`.
+    fn only_config(yaml: &str) -> LayerConfig {
+        parse(yaml)
+            .service_configs(
+                &EnvKey::Provided("key".to_owned()),
+                &mut HashMap::new(),
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
+            .unwrap()
+            .remove(0)
+            .config
+    }
+
+    /// `incoming` and `queues` set the incoming and queue modes; `queues` defaults to following
+    /// `incoming`, and a mode without `incoming` is `split`.
+    #[rstest]
+    #[case::empty("{}", IncomingMode::Steal, QueueMode::Steal)]
+    #[case::split_queues("{ queues: split }", IncomingMode::Steal, QueueMode::Steal)]
+    #[case::mirror_queues("{ queues: mirror }", IncomingMode::Steal, QueueMode::Mirror)]
+    #[case::mirror("{ incoming: mirror }", IncomingMode::Mirror, QueueMode::Mirror)]
+    #[case::mirror_split_queues(
+        "{ incoming: mirror, queues: split }",
+        IncomingMode::Mirror,
+        QueueMode::Steal
+    )]
+    fn custom_mode_sets_incoming_and_queue_modes(
+        #[case] mode: &str,
+        #[case] incoming: IncomingMode,
+        #[case] queues: QueueMode,
+    ) {
+        let config = only_config(&format!(
+            r#"
+            modes:
+              custom: {mode}
+            services:
+              svc:
+                default_mode: custom
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        ));
+
+        assert_eq!(config.feature.network.incoming.mode, incoming);
+        assert_eq!(
+            config
+                .feature
+                .network
+                .incoming
+                .http_filter
+                .header_filter
+                .as_deref(),
+            Some("baggage: .*mirrord-session=key.*")
+        );
+        assert!(
+            config
+                .feature
+                .split_queues
+                .is_all_wildcard_with_mode(&EnvKey::Provided("key".to_owned()), queues)
+        );
+    }
+
+    /// A custom mode requests DB branching like the built-in mode its `incoming` names: `split`
+    /// and `mirror` ask for every `MirrordSplitConfig` entry, `replace` for none. `queues` plays
+    /// no part.
+    #[rstest]
+    #[case::split("{ incoming: split, queues: mirror }", true)]
+    #[case::mirror("{ incoming: mirror, queues: split }", true)]
+    #[case::replace("{ incoming: replace, queues: split }", false)]
+    fn custom_mode_db_branching_follows_incoming(#[case] mode: &str, #[case] branches: bool) {
+        let service = parse(&format!(
+            r#"
+            modes:
+              custom: {mode}
+            services:
+              svc:
+                default_mode: custom
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        ))
+        .service_configs(
+            &EnvKey::Provided("key".to_owned()),
+            &mut HashMap::new(),
+            UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
+        )
+        .unwrap()
+        .remove(0);
+
+        assert_eq!(service.default_db_branches, branches);
+        assert_eq!(
+            service
+                .config
+                .feature
+                .db_branches
+                .split_config_request()
+                .is_some_and(SplitConfigDbBranches::is_all),
+            branches
+        );
+        assert_eq!(
+            service.config.feature.db_branches.is_empty(),
+            branches.not()
+        );
+    }
+
+    /// `incoming: replace` copies the target like built-in `replace`, and splits no queues even
+    /// when the mode sets `queues`.
+    #[test]
+    fn custom_replace_mode_ignores_queues() {
+        let config = only_config(
+            r#"
+            modes:
+              takeover:
+                incoming: replace
+                queues: mirror
+            services:
+              svc:
+                default_mode: takeover
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        assert!(config.feature.copy_target.enabled);
+        assert!(config.feature.copy_target.scale_down);
+        assert_eq!(config.feature.split_queues, SplitQueuesConfig::default());
+    }
+
+    /// `config_patch` is applied over what the mode sets.
+    #[test]
+    fn config_patch_overrides_custom_mode() {
+        let config = only_config(
+            r#"
+            modes:
+              custom:
+                queues: mirror
+            services:
+              svc:
+                default_mode: custom
+                target:
+                  path: "deployment/web"
+                config_patch:
+                  feature:
+                    network:
+                      incoming:
+                        mode: mirror
+                    split_queues: []
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        assert_eq!(config.feature.network.incoming.mode, IncomingMode::Mirror);
+        assert_eq!(config.feature.split_queues, SplitQueuesConfig::default());
+    }
+
+    #[test]
+    fn override_mode_selects_custom_modes() {
+        let mut config = parse(
+            r#"
+            modes:
+              custom: {}
+            services:
+              a:
+                default_mode: replace
+                run:
+                  command: ["echo"]
+              b:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        config.override_mode("custom").unwrap();
+        assert!(
+            config
+                .services
+                .values()
+                .all(|svc| &*svc.default_mode == "custom")
+        );
+    }
+
+    /// An unknown `--mode` leaves every service's mode as it was.
+    #[test]
+    fn override_mode_rejects_unknown_modes() {
+        let mut config = parse(
+            r#"
+            modes:
+              custom: {}
+            services:
+              a:
+                default_mode: replace
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let ModeNameError::Unknown { name, known, .. } = config.override_mode("bogus").unwrap_err()
+        else {
+            panic!("expected an unknown mode error");
+        };
+        assert_eq!(&*name, "bogus");
+        assert!(known.iter().any(|mode| &**mode == "custom"));
+        assert_eq!(&*config.services["a"].default_mode, "replace");
+    }
+
+    /// `incoming: replace` on a targetless service fails the target check like built-in
+    /// `replace`, naming the custom mode.
+    #[test]
+    fn verify_services_rejects_targetless_custom_replace_mode() {
+        let config = parse(
+            r#"
+            modes:
+              takeover:
+                incoming: replace
+            services:
+              svc:
+                default_mode: takeover
+                target: none
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let errors = config
+            .verify_services(&EnvKey::Provided("key".to_owned()))
+            .unwrap();
+        let [ServiceError::IncompatibleTarget(target)] = errors.as_slice() else {
+            panic!("expected one incompatible target, got {errors:?}");
+        };
+        assert_eq!(&*target.mode, "takeover");
+        assert_eq!(target.target_type, TargetType::Targetless);
+    }
+
+    #[test]
+    fn unknown_mode_field_is_rejected() {
+        let err = serde_saphyr::from_str::<UpConfig>(
+            "modes:\n  custom:\n    incomming: mirror\nservices:\n  svc:\n    run:\n      command: [x]\n",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown field `incomming`"),
+            "{err}"
+        );
+    }
+
     #[test]
     fn validate_targets_accepts_replace_on_supported_targets() {
         for path in ["deployment/web", "statefulset/web", "replicaset/web"] {
@@ -2620,21 +2875,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn error_invalid_mode() {
-        let result: Result<UpConfig, _> = serde_saphyr::from_str(
-            r#"
-            services:
-              svc:
-                default_mode: bogus
-                run:
-                  exec:
-                    command: ["echo"]
-            "#,
-        );
-        assert!(result.is_err());
-    }
-
     /// A typo of `target: none` gets `none` added to the message as a hint.
     #[rstest]
     #[case::typo("nnoe", "; did you mean `none`?")]
@@ -2704,9 +2944,39 @@ mod tests {
                     "split": 1,
                     "replace": 0,
                     "mirror": 0,
+                    "custom": 0,
                 },
+                "num_custom_modes": 0,
             }),
         );
+    }
+
+    /// Services in custom modes are counted, but the user's mode names are never sent.
+    #[test]
+    fn analytics_counts_custom_modes_without_their_names() {
+        let config = parse(
+            r#"
+            modes:
+              secret-name: {}
+              unused: {}
+            services:
+              a:
+                default_mode: secret-name
+                run:
+                  command: ["echo"]
+              b:
+                default_mode: mirror
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let analytics = collect(&config);
+        assert_eq!(analytics["modes"]["custom"], 1);
+        assert_eq!(analytics["modes"]["mirror"], 1);
+        assert_eq!(analytics["num_custom_modes"], 2);
+        assert_eq!(analytics["config_fields_used"]["default_mode"], 2);
+        assert!(analytics.to_string().contains("secret-name").not());
     }
 
     #[test]
