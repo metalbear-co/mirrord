@@ -125,6 +125,7 @@ pub enum Application {
     NodeFileOps,
     NodeSpawn,
     NodeCopyFile,
+    NodeStat,
     NodeIssue2903,
     GoDir(GoVersion),
     GoDirBypass(GoVersion),
@@ -275,6 +276,7 @@ impl Application {
             Application::NodeFileOps
             | Application::NodeSpawn
             | Application::NodeCopyFile
+            | Application::NodeStat
             | Application::NodeIssue2903
             | Application::NodeMakeConnections => String::from("node"),
             Application::GoDir(version) => format!("tests/apps/dir_go/{version}.go_test_app"),
@@ -482,6 +484,10 @@ impl Application {
                 app_path.push("node_copyfile.mjs");
                 vec![app_path.to_string_lossy().to_string()]
             }
+            Application::NodeStat => {
+                app_path.push("node_stat.mjs");
+                vec![app_path.to_string_lossy().to_string()]
+            }
             Application::NodeIssue2903 => {
                 app_path.push("issue2903.mjs");
                 vec![app_path.to_string_lossy().to_string()]
@@ -626,6 +632,7 @@ impl Application {
             | Application::NodeFileOps
             | Application::NodeSpawn
             | Application::NodeCopyFile
+            | Application::NodeStat
             | Application::NodeIssue2903
             | Application::NodeIssue3456
             | Application::BashShebang
