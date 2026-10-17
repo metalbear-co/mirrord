@@ -18,7 +18,10 @@ use kube::{
     api::{ApiResource, DynamicObject, GroupVersionKind, ListParams, PostParams},
     client::ClientBuilder,
 };
-use mirrord_analytics::{AnalyticsOperatorProperties, Reporter, SanitizedString};
+use mirrord_analytics::{
+    AnalyticsOperatorProperties, Reporter, SanitizedString, UP_DB_BRANCHES_REPORT_PREFIX,
+    UpSessionDbBranch,
+};
 use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
@@ -67,8 +70,8 @@ use crate::{
         },
         queue_split_progress::{QueueSplitProgress, mirror_requested},
         split_config_branches::{
-            MIRRORD_SESSION_KEY_LABEL, ResolvedSplitConfigBranches, check_attach_copy_mode,
-            entries_from_response, same_source_warnings,
+            MIRRORD_SESSION_KEY_LABEL, ResolvedSplitConfigBranches, UP_SERVICE_ANNOTATION,
+            check_attach_copy_mode, entries_from_response, same_source_warnings,
         },
     },
     crd::{
@@ -76,7 +79,7 @@ use crate::{
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
-            branch_database::{BranchDatabase, BranchDatabaseSpec},
+            branch_database::{BranchDatabase, BranchDatabaseSpec, DatabaseDialect},
             mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase,
             pg::PgBranchDatabase,
@@ -286,6 +289,9 @@ pub struct OperatorApi<C> {
     operator: MirrordOperatorCrd,
     /// Named kubeconfig context used to create [`Self::client`].
     kube_context: Option<String>,
+    /// URL of the API server [`Self::client`] talks to. Unlike [`Self::kube_context`], it tells
+    /// clusters apart: two contexts can name one cluster.
+    cluster_url: String,
 }
 
 impl<C> fmt::Debug for OperatorApi<C>
@@ -329,6 +335,7 @@ impl OperatorApi<NoClientCert> {
         P: Progress,
     {
         let (base_config, kube_context) = Self::base_client_config(config).await?;
+        let cluster_url = base_config.cluster_url.to_string();
 
         let client = progress
             .suspend(|| ClientBuilder::try_from(base_config.clone()))
@@ -359,6 +366,7 @@ impl OperatorApi<NoClientCert> {
                     client_cert: NoClientCert { base_config },
                     operator,
                     kube_context,
+                    cluster_url,
                 }));
             }
 
@@ -460,6 +468,7 @@ impl OperatorApi<NoClientCert> {
                 },
                 operator: self.operator,
                 kube_context: self.kube_context,
+                cluster_url: self.cluster_url,
             },
 
             Err(error) => OperatorApi {
@@ -469,6 +478,7 @@ impl OperatorApi<NoClientCert> {
                 },
                 operator: self.operator,
                 kube_context: self.kube_context,
+                cluster_url: self.cluster_url,
             },
         }
     }
@@ -517,6 +527,7 @@ impl OperatorApi<NoClientCert> {
         let previous_client = self.client.clone();
         let operator_crd = self.operator.clone();
         let kube_context = self.kube_context.clone();
+        let cluster_url = self.cluster_url.clone();
 
         let result = async move {
             let certificate = self.get_client_certificate().await?;
@@ -547,6 +558,7 @@ impl OperatorApi<NoClientCert> {
                 },
                 operator: operator_crd,
                 kube_context,
+                cluster_url,
             },
         }
     }
@@ -567,6 +579,7 @@ impl OperatorApi<MaybeClientCert> {
             client_cert: PreparedClientCert { cert },
             operator: self.operator,
             kube_context: self.kube_context,
+            cluster_url: self.cluster_url,
         })
     }
 }
@@ -580,6 +593,12 @@ where
     /// In-cluster clients do not have a named kubeconfig context.
     pub fn kube_context(&self) -> Option<&str> {
         self.kube_context.as_deref()
+    }
+
+    /// Returns the URL of the API server this API's client talks to, which identifies the
+    /// cluster where context names don't.
+    pub fn cluster_url(&self) -> &str {
+        &self.cluster_url
     }
 
     pub fn check_license_validity<P>(&self, progress: &P) -> OperatorApiResult<()>
@@ -773,20 +792,17 @@ where
         Ok(response.secret_name)
     }
 
-    /// Resolves `feature.db_branches: "*"` / `["id", ...]` into inline entries through the
-    /// operator, which looks the ids up on the target's `MirrordSplitConfig`s, and writes them
-    /// back into `layer_config` so every later reader (branch creation, portforwards, the
-    /// internal proxy) sees concrete entries. Each entry's branch id is the entry id plus the
-    /// session key, so services started under one key share the branches.
+    /// Asks the operator which `MirrordSplitConfig` `dbBranches` entries `layer_config`'s
+    /// `feature.db_branches: "*"` / `["id", ...]` stands for. The operator looks them up on the
+    /// `MirrordSplitConfig`s of the target workload; nothing is created.
     ///
     /// With inline entries the operator is still asked, when it can answer, which
-    /// `MirrordSplitConfig`s the session is ignoring; its warnings are printed as they are.
-    /// Returns the ids of the resolved branches, empty when nothing was resolved.
-    async fn resolve_split_config_db_branches<P: Progress>(
+    /// `MirrordSplitConfig`s the session is ignoring, and the answer carries only warnings.
+    /// Returns `None` when there is nothing to ask, or when that inline-entries lookup failed.
+    pub async fn lookup_split_config_db_branches(
         &self,
-        layer_config: &mut LayerConfig,
-        progress: &P,
-    ) -> OperatorApiResult<ResolvedSplitConfigBranches> {
+        layer_config: &LayerConfig,
+    ) -> OperatorApiResult<Option<ResolveSplitConfigDbBranchesResponse>> {
         let supported = self
             .operator
             .spec
@@ -809,7 +825,7 @@ where
             // Inline entries win over the workload's `dbBranches`; the operator names the configs
             // this session ignores. An operator without the lookup has nothing to say.
             None if supported && layer_config.feature.db_branches.is_empty().not() => None,
-            None => return Ok(ResolvedSplitConfigBranches::default()),
+            None => return Ok(None),
         };
 
         let target = layer_config
@@ -830,7 +846,7 @@ where
                      workload"
                 )));
             }
-            _ => return Ok(ResolvedSplitConfigBranches::default()),
+            _ => return Ok(None),
         };
         let namespace = layer_config
             .target
@@ -844,12 +860,12 @@ where
             target: kube_target,
             request: request.clone(),
         };
-        let response: ResolveSplitConfigDbBranchesResponse = match (
+        match (
             self.post_in_namespace(&namespace, "splitconfigdbbranches", &body)
                 .await,
             &request,
         ) {
-            (Ok(response), _) => response,
+            (Ok(response), _) => Ok(Some(response)),
             // Inline entries need nothing from the answer; a lookup that fails only costs
             // the warning naming the configs the session ignores.
             (Err(error), None) => {
@@ -858,25 +874,53 @@ where
                     "Could not check which MirrordSplitConfig dbBranches the inline \
                      db_branches ignore"
                 );
-                return Ok(ResolvedSplitConfigBranches::default());
+                Ok(None)
             }
             // The operator's answer says what is wrong with the request (an unknown id,
             // a config conflict) in its own words; it is shown as it is, not inside kube's
             // wrapping of the response.
             (Err(kube::Error::Api(response)), Some(_)) => {
-                return Err(OperatorApiError::SplitConfigDbBranches(response.message));
+                Err(OperatorApiError::SplitConfigDbBranches(response.message))
             }
             (Err(error), Some(_)) => {
-                return Err(OperatorApiError::SplitConfigDbBranches(error.to_string()));
+                Err(OperatorApiError::SplitConfigDbBranches(error.to_string()))
             }
+        }
+    }
+
+    /// Resolves `feature.db_branches: "*"` / `["id", ...]` into inline entries through the
+    /// operator (see [`Self::lookup_split_config_db_branches`]), and writes them back into
+    /// `layer_config` so every later reader (branch creation, portforwards, the internal proxy)
+    /// sees concrete entries. Each entry's branch id is the entry id plus the session key, so
+    /// services started under one key share the branches.
+    ///
+    /// The operator's warnings are printed as they are. Returns the ids of the resolved
+    /// branches, empty when nothing was resolved.
+    async fn resolve_split_config_db_branches<P: Progress>(
+        &self,
+        layer_config: &mut LayerConfig,
+        progress: &P,
+    ) -> OperatorApiResult<ResolvedSplitConfigBranches> {
+        let Some(response) = self.lookup_split_config_db_branches(layer_config).await? else {
+            return Ok(ResolvedSplitConfigBranches::default());
         };
 
         for warning in &response.warnings {
             progress.warning(warning);
         }
-        if request.is_none() {
+        if layer_config
+            .feature
+            .db_branches
+            .split_config_request()
+            .is_none()
+        {
             return Ok(ResolvedSplitConfigBranches::default());
         }
+        let target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
 
         let resolved = entries_from_response(&response, layer_config.key.as_str())?;
         if resolved.entries.is_empty() {
@@ -923,10 +967,15 @@ where
     /// 1. List reusable branch databases.
     /// 2. Create new ones if any missing.
     /// 3. Wait for all new databases to be ready.
+    ///
+    /// `up_service` is the `mirrord up` service this session runs, if any. It is recorded on the
+    /// branches the session creates from a `MirrordSplitConfig`, and the branches used are
+    /// reported for `mirrord up` (see [`UP_DB_BRANCHES_REPORT_PREFIX`]).
     #[tracing::instrument(level = Level::TRACE, skip_all, err, ret)]
     pub async fn prepare_branch_dbs<P: Progress>(
         &self,
         layer_config: &mut LayerConfig,
+        up_service: Option<&str>,
         progress: &P,
     ) -> OperatorApiResult<BranchDbNames> {
         use database_branches::TARGET_NAMESPACE_ANNOTATION;
@@ -1215,6 +1264,11 @@ where
                         MIRRORD_SESSION_KEY_LABEL.to_owned(),
                         EnvKey::to_hashed_label_value(layer_config.key.as_str()),
                     );
+                    if let Some(service) = up_service {
+                        params
+                            .annotations
+                            .insert(UP_SERVICE_ANNOTATION.to_owned(), service.to_owned());
+                    }
                 }
             }
 
@@ -1353,13 +1407,53 @@ where
                         .values()
                         .map(|branch| (branch, "created by another session meanwhile, reused")),
                 );
+            let mut up_report = Vec::new();
             for (branch, origin) in origins {
-                subtask.info(&format!(
-                    "using branch database {} for id {}: {origin}",
-                    branch.name_any(),
-                    branch.spec.id
-                ));
+                let name = branch.name_any();
+                let created = created_branches.contains_key(&name);
+                // A branch resolved from a `MirrordSplitConfig` is shared by the sessions under
+                // the key, so its line names the database and, under `mirrord up`, the service
+                // that created it.
+                if split_config_specs.contains_key(&name) {
+                    let dialect = branch
+                        .spec
+                        .dialect()
+                        .map(|dialect| DatabaseDialect::from(dialect).to_string())
+                        .unwrap_or_default();
+                    if created {
+                        subtask.info(&format!("new {dialect} branch database ready ({name})"));
+                    } else {
+                        let creator = branch
+                            .annotations()
+                            .get(UP_SERVICE_ANNOTATION)
+                            .filter(|creator| Some(creator.as_str()) != up_service);
+                        subtask.info(&match creator {
+                            Some(creator) => format!(
+                                "reusing {dialect} branch database ({name}, shared with {creator})"
+                            ),
+                            None => format!("reusing {dialect} branch database ({name})"),
+                        });
+                    }
+                } else {
+                    subtask.info(&format!(
+                        "using branch database {name} for id {}: {origin}",
+                        branch.spec.id
+                    ));
+                }
                 relay_source_compatibility_warnings(branch, &subtask);
+                up_report.push(UpSessionDbBranch {
+                    name,
+                    created,
+                    cluster: self.cluster_url().to_owned(),
+                });
+            }
+            if up_service.is_some() {
+                // `mirrord up` reads this line off the session's stdout, so it is printed as is.
+                progress.print(&format!(
+                    "{UP_DB_BRANCHES_REPORT_PREFIX}{}",
+                    serde_json::to_string(&up_report)
+                        .expect("a branch report always serializes to JSON")
+                ));
             }
 
             // Two shared branches under this key copied from one database are usually one
@@ -1864,6 +1958,7 @@ impl OperatorApi<PreparedClientCert> {
         ),
         err
     )]
+    #[allow(clippy::too_many_arguments)]
     pub async fn prepare_session<P>(
         &self,
         target: ResolvedTarget<false>,
@@ -1872,6 +1967,7 @@ impl OperatorApi<PreparedClientCert> {
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
         up_session_info: Option<&UpSessionInfo>,
+        up_service: Option<&str>,
     ) -> OperatorApiResult<PreparedSession>
     where
         P: Progress,
@@ -1901,7 +1997,8 @@ impl OperatorApi<PreparedClientCert> {
             .contains(&NewOperatorFeature::ProxyApi);
 
         let branch_db_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_branch_dbs(layer_config, progress).await?
+            self.prepare_branch_dbs(layer_config, up_service, progress)
+                .await?
         } else {
             BranchDbNames::default()
         };
@@ -2053,6 +2150,7 @@ impl OperatorApi<PreparedClientCert> {
         ret,
         err
     )]
+    #[allow(clippy::too_many_arguments)]
     pub async fn connect_in_new_session<P>(
         &self,
         target: ResolvedTarget<false>,
@@ -2061,6 +2159,7 @@ impl OperatorApi<PreparedClientCert> {
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
         up_session_info: Option<UpSessionInfo>,
+        up_service: Option<&str>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
@@ -2078,6 +2177,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name.clone(),
                 session_ci_info.clone(),
                 up_session_info.as_ref(),
+                up_service,
             )
             .await?;
 
@@ -2193,6 +2293,7 @@ impl OperatorApi<PreparedClientCert> {
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
         up_session_info: Option<UpSessionInfo>,
+        up_service: Option<&str>,
     ) -> OperatorApiResult<OperatorSession>
     where
         P: Progress,
@@ -2253,7 +2354,8 @@ impl OperatorApi<PreparedClientCert> {
         //   happens locally. If Primary != Default, a sync controller copies CRDs to Default where
         //   actual branching happens, then syncs status back.
         let branch_db_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_branch_dbs(layer_config, progress).await?
+            self.prepare_branch_dbs(layer_config, up_service, progress)
+                .await?
         } else {
             BranchDbNames::default()
         };
@@ -2340,6 +2442,7 @@ impl OperatorApi<PreparedClientCert> {
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
         up_session_info: Option<UpSessionInfo>,
+        up_service: Option<&str>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
@@ -2351,6 +2454,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name,
                 session_ci_info,
                 up_session_info,
+                up_service,
             )
             .await?;
 
@@ -3221,6 +3325,7 @@ mod test {
             let config = Config::new("http://127.0.0.1:9669".parse().unwrap());
             let api = OperatorApi {
                 client: kube::Client::try_from(config.clone()).unwrap(),
+                cluster_url: config.cluster_url.to_string(),
                 client_cert: NoClientCert { base_config: config },
                 operator: serde_json::from_value(serde_json::json!({
                     "apiVersion": "operator.metalbear.co/v1",
@@ -3863,6 +3968,7 @@ mod test {
         .unwrap();
         let api = OperatorApi {
             client,
+            cluster_url: config.cluster_url.to_string(),
             client_cert: NoClientCert {
                 base_config: config,
             },
@@ -3920,6 +4026,7 @@ mod test {
             },
             operator: MirrordOperatorCrd::new("operator", spec),
             kube_context: None,
+            cluster_url: "https://127.0.0.1:9669/".to_owned(),
         };
 
         let values = HashMap::from([("password".to_owned(), "secret".to_owned())]);

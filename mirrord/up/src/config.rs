@@ -15,6 +15,9 @@ use mirrord_config::{
     config::{ConfigContext, ConfigError, EnvKey, MirrordConfig},
     feature::{
         copy_target::CopyTargetConfig,
+        database_branches::{
+            AllSplitConfigDbBranches, DatabaseBranchesConfig, SplitConfigDbBranches,
+        },
         env::{EnvConfig, EnvFileConfig},
         network::incoming::{
             IncomingMode,
@@ -57,6 +60,10 @@ pub enum ServiceMode {
     /// Uses the service's `http_filter` if set. Otherwise, requests with a header matching the
     /// regex `baggage: .*mirrord-session={key}.*` go to the local service, where `{key}` is the
     /// session key.
+    ///
+    /// With a workload target and no `db_branches` of its own, the service requests DB branching
+    /// (`db_branches: "*"`): it runs against branches of the databases defined on the workload's
+    /// `MirrordSplitConfig`, shared with the other services of the run that use the same ones.
     #[default]
     Split,
 
@@ -73,7 +80,11 @@ pub enum ServiceMode {
     ///
     /// Uses the service's `http_filter` if set. Otherwise, requests with a header matching the
     /// regex `baggage: .*mirrord-session={key}.*` are mirrored, where `{key}` is the session key.
-    // The fallback filter is built in `ServiceConfig::assemble`.
+    ///
+    /// With a workload target and no `db_branches` of its own, the service requests DB branching
+    /// (`db_branches: "*"`): it runs against branches of the databases defined on the workload's
+    /// `MirrordSplitConfig`, shared with the other services of the run that use the same ones.
+    // The fallback filter and the DB branching request are built in `ServiceConfig::assemble`.
     Mirror,
 }
 
@@ -593,6 +604,26 @@ impl ServiceConfig {
             },
         };
 
+        // The operator resolves `"*"` against the `MirrordSplitConfig` of one targeted
+        // workload, so a targetless or label-selected service has nothing to ask for. Every
+        // service of a run shares the key, so services pointing at one entry land on one branch.
+        // Branches set in the base config, or by `config_patch` below, take precedence.
+        let single_workload = cfg.target.path.as_ref().is_some_and(|path| {
+            matches!(
+                path,
+                Target::Targetless | Target::Serverless(_) | Target::Label(_)
+            )
+            .not()
+        });
+        if matches!(self.default_mode, ServiceMode::Split | ServiceMode::Mirror)
+            && single_workload
+            && cfg.feature.db_branches.is_empty()
+        {
+            cfg.feature.db_branches = DatabaseBranchesConfig::FromSplitConfig(
+                SplitConfigDbBranches::All(AllSplitConfigDbBranches::All),
+            );
+        }
+
         if let Some(patch) = self.config_patch {
             cfg = apply_config_patch(cfg, patch, &key)?;
         }
@@ -792,8 +823,8 @@ pub struct SubprocessCfg {
     pub service_name: Arc<str>,
     /// How to run this service (exec vs container, and the command).
     pub run: RunConfig,
-    /// Mode this service was assembled for. Used only to name it in
-    /// [`validate_targets`] errors; its effects are already in `config`.
+    /// Mode this service was assembled for. Its effects are already in `config`; it names the
+    /// mode in [`validate_targets`] errors and in what `mirrord up` reports about the service.
     pub mode: ServiceMode,
 }
 

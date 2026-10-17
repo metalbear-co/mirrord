@@ -324,7 +324,7 @@ async fn preview_start(
         BranchDbNames::default()
     } else {
         operator_api
-            .prepare_branch_dbs(&mut layer_config, &progress)
+            .prepare_branch_dbs(&mut layer_config, None, &progress)
             .await?
     };
 
