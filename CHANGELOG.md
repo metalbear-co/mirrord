@@ -8,6 +8,57 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.275.0](https://github.com/metalbear-co/mirrord/tree/3.275.0) - 2026-10-17
+
+
+### Added
+
+- Added `--chart` and `--values` to `mirrord preview start` and `mirrord
+  preview diff` to build previews from a Helm chart.
+- Added `feature.kafka_branch`, which points a session's Kafka clients at an
+  isolated broker shared by every session with the same key.
+- On Windows, `feature.fs` patterns can name a drive, as in `^C:/Repos/`, and
+  the `path_pattern` template filter turns a path from the environment into a
+  pattern, as in `"^{{ get_env(name='TEMP') | path_pattern }}/(.*)$":
+  "/tmp/$1"`.
+- On Windows, a stack overflow in the mirrord CLI prints the stack with the
+  size of each frame, largest first, so the report shows what used the stack
+  up.
+- Select one field from JSON AWS/GCP secrets in DB branching.
+
+
+### Changed
+
+- Bundle a non-SIP-protected `zsh` in apple-utils, so `/bin/zsh` no longer
+  needs to be SIP-patched.
+- `BranchDatabase` resources record the names of the sources they copy, and
+  their spec can no longer change after creation except for `migrations`.
+
+
+### Fixed
+
+- The README and the configuration reference show how to set
+  `agent.disabled_capabilities`, and mirrord warns about values in it that it
+  ignores. [#5026](https://github.com/metalbear-co/mirrord/issues/5026)
+- A `feature.fs.mapping` pattern rewrites a path whose case differs from the
+  pattern's, as documented, instead of leaving the path unchanged.
+- A session whose process never connects ends after
+  `internal_proxy.start_idle_timeout`; IDE launches keep waiting for it unless
+  that is set.
+- Fixed `sendfile` on Linux skipping data when the output accepted fewer bytes
+  than were read.
+- On Linux, `lstat` through glibc's `__lxstat` no longer follows symlinks.
+  Node.js sees remote file metadata with the new
+  `experimental.hook_libc_syscall` and `experimental.old_glibc_support`
+  options.
+- On Windows, `%TEMP%` stays local by default even when the user name holds a
+  character such as `(` or `[`.
+- On Windows, `feature.fs.mode: "localwithoverrides"` keeps a file local unless
+  a pattern sends it to the remote, instead of reading every file remotely.
+- mirrord no longer patches `/usr/bin/security` for SIP, so tools that read
+  their credentials from the keychain through it, such as Claude Code, no
+  longer make macOS ask for the keychain password on every run.
+
 ## [3.274.0](https://github.com/metalbear-co/mirrord/tree/3.274.0) - 2026-10-14
 
 
