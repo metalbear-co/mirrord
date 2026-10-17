@@ -3162,6 +3162,14 @@
             "null"
           ]
         },
+        "hook_libc_syscall": {
+          "title": "_experimental_ hook_libc_syscall {#experimental-hook_libc_syscall}",
+          "description": "Hooks libc's generic `syscall` function on Linux, to handle scenarios where libraries\nlike libuv opt into doing syscalls by hand instead of through the libc export (for\nexample, for `statx` or `close`). Currently experimental.\n\nDefaults to `false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "idle_local_http_connection_timeout": {
           "title": "_experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}",
           "description": "Sets a timeout for idle local HTTP connections (in milliseconds).\n\nHTTP requests stolen with a filter are delivered to the local application\nfrom a HTTP connection made from the local machine. Once a request is delivered,\nthe connection is cached for some time, so that it can be reused to deliver\nthe next request.\n\nThis timeout determines for how long such connections are cached.\n\nSet to 0 to disable caching local HTTP connections (connections will be dropped as soon as\nthe request is delivered).\n\nDefaults to 3000ms.",
@@ -3201,6 +3209,14 @@
             "null"
           ],
           "deprecated": true
+        },
+        "old_glibc_support": {
+          "title": "_experimental_ old_glibc_support {#experimental-old_glibc_support}",
+          "description": "Hooks `__fxstat` and `__fxstat64` on Linux.\n\nBinaries linked against glibc older than 2.33, such as the official Node.js builds, call\nthese instead of `fstat`. Without this hook they see the local placeholder of a remote\nfile: an empty character device. In Node.js, `fs.copyFileSync` then copies nothing.\n\nDefaults to `false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "sip_log_destination": {
           "title": "_experimental_ sip_log_destination {#experimental-sip_log_destination}",
