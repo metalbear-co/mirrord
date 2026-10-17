@@ -1,0 +1,49 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: mirrord
+    - navigation [ref=e7]:
+      - button "Session Monitor" [ref=e8] [cursor=pointer]
+      - button "Events" [ref=e9] [cursor=pointer]
+      - button "Config Wizard" [ref=e10] [cursor=pointer]
+    - generic [ref=e11]:
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - button "Context docker-desktop" [ref=e16] [cursor=pointer]:
+            - generic [ref=e17]: Context
+            - generic [ref=e18]: docker-desktop
+          - button "Namespace default" [ref=e22] [cursor=pointer]:
+            - generic [ref=e23]: Namespace
+            - generic [ref=e24]: default
+        - button "Connected hank" [ref=e170] [cursor=pointer]:
+          - generic "Connected" [ref=e29]
+          - generic [ref=e33]: hank
+      - button "Switch to dark mode" [ref=e36] [cursor=pointer]
+  - main [ref=e39]:
+    - generic [ref=e42]:
+      - generic [ref=e43]:
+        - generic [ref=e44]:
+          - searchbox "Search" [ref=e49]
+          - generic: ⌘F
+        - generic [ref=e50]:
+          - generic [ref=e51]: Yours
+          - button "Hide sidebar" [ref=e61] [cursor=pointer]
+        - generic [ref=e217]:
+          - paragraph [ref=e220]: No active sessions
+          - paragraph [ref=e221]: Start mirrord to see sessions here
+        - generic [ref=e95]: Team
+        - generic [ref=e173]:
+          - generic [ref=e174]: Could not reach the mirrord UI server
+          - generic [ref=e175]: Could not read the mirrord operator status
+      - generic [ref=e223]:
+        - generic [ref=e224]:
+          - heading "No sessions yet" [level=2] [ref=e227]
+          - paragraph [ref=e228]: Start a mirrord session and it'll appear here. Pick something below to get going, or join a teammate's session from the right-side extension.
+        - generic [ref=e230]:
+          - generic [ref=e231]: Run a session
+          - button "mirrord exec -t deployment/<your-deployment> -- <your command>" [ref=e235] [cursor=pointer]
+          - paragraph [ref=e242]: Targets a deployment, runs your local process in its context. Drop this into a terminal.
+        - generic [ref=e244]:
+          - generic [ref=e245]: Spin up a preview env
+          - button "mirrord preview start -t deployment/<your-deployment> -i <your-image> -k <your-key>" [ref=e252] [cursor=pointer]
+          - paragraph [ref=e259]: Spawns a long-lived preview pod from your image, shareable with teammates via a header key.
+        - paragraph [ref=e260]: Sessions started anywhere on this machine, plus teammate sessions from the operator, show up automatically.

@@ -84,6 +84,12 @@ export const strings = {
     showingYours: 'Showing only your sessions.',
     connectOperator: 'Connect operator →',
     zeroSessions: '0 sessions · operator not connected',
+    killFailed: (reason: string) => `Could not stop the session: ${reason}`,
+    killAllFailed: (count: number) =>
+      `Could not stop ${count} ${count === 1 ? 'session' : 'sessions'}`,
+    killGone: 'the mirrord UI server is no longer tracking it',
+    killUnreachable: 'the mirrord UI server could not be reached',
+    dismiss: 'Dismiss',
   },
   kubernetesAccess: {
     title: 'Kubernetes access was lost',
