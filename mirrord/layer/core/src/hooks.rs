@@ -141,6 +141,11 @@ impl<'a> HookManager<'a> {
                 .interceptor
                 .replace(func, NativePointer(detour), NativePointer(null_mut()))
                 .or_else(|_| self.hook_any_lib_export(symbol, detour, None)),
+            // The global lookup already covers every loaded image on macOS, so a symbol it does
+            // not find (a libc function that only exists on Linux or on another architecture)
+            // is not in any of them. Searching the modules one by one costs about a millisecond
+            // per missing symbol, in every process the layer loads into.
+            None if cfg!(target_os = "macos") => Err(LayerError::NoExportName(symbol.to_owned())),
             None => self.hook_any_lib_export(symbol, detour, None),
         }
     }
