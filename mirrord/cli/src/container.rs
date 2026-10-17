@@ -395,6 +395,7 @@ pub async fn container_ext_command(
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", target);
     let (mut config, mut analytics) =
         create_config_and_analytics(progress, cfg_context, watch, user_data).await?;
+    config.internal_proxy.wait_indefinitely_by_default();
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
         .ok()

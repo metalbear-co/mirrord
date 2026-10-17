@@ -68,8 +68,8 @@ target "agent" {
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0"  = "target:ci-agent-builder"
-    "ghcr.io/metalbear-co/ci-agent-runtime:54901618bd7bdc9b4975fb7e5439e519f6469ac0" = "target:ci-agent-runtime"
+    "ghcr.io/metalbear-co/ci-agent-build:eb9bdec72b5792472e3a0bbcde5659bb17aa1e87"  = "target:ci-agent-builder"
+    "ghcr.io/metalbear-co/ci-agent-runtime:eb9bdec72b5792472e3a0bbcde5659bb17aa1e87" = "target:ci-agent-runtime"
   }
 }
 
@@ -81,7 +81,7 @@ target "cli" {
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0" = "target:ci-agent-builder"
+    "ghcr.io/metalbear-co/ci-agent-build:eb9bdec72b5792472e3a0bbcde5659bb17aa1e87" = "target:ci-agent-builder"
   }
 }
 
@@ -94,7 +94,7 @@ target "sqs-printer" {
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0" = "target:ci-agent-builder"
+    "ghcr.io/metalbear-co/ci-agent-build:eb9bdec72b5792472e3a0bbcde5659bb17aa1e87" = "target:ci-agent-builder"
   }
 }
 
@@ -142,7 +142,7 @@ target "ci-layer-build-aarch64" {
   ])
 }
 
-# Base Rust build image with nightly toolchain and protobuf compiler.
+# Base Rust build image with the pinned Rust toolchain and protobuf compiler.
 target "ci-rust-build" {
   context    = "./ci"
   dockerfile = "rust-build/Dockerfile"

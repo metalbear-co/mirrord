@@ -9178,6 +9178,7 @@ dependencies = [
 name = "str-win"
 version = "0.1.0"
 dependencies = [
+ "rstest",
  "winapi",
 ]
 

@@ -81,6 +81,7 @@ pub(crate) async fn extension_exec(
 
     let mut config = crate::util::resolve_layer_config(&mut cfg_context).await?;
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
+    config.internal_proxy.wait_indefinitely_by_default();
 
     let mut analytics = AnalyticsReporter::only_error(
         config.telemetry,
