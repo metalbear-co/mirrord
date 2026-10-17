@@ -1093,7 +1093,7 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     }
 }
 
-/// Hook for libc's stat syscall wrapper.
+/// Hook for libc's lstat syscall wrapper.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn __lxstat_detour(
     ver: c_int,
@@ -1101,7 +1101,7 @@ pub(crate) unsafe extern "C" fn __lxstat_detour(
     out_stat: *mut stat,
 ) -> c_int {
     unsafe {
-        stat_logic::<true>(ver, None, Some(raw_path), out_stat as *mut _).unwrap_or_bypass_with(
+        stat_logic::<false>(ver, None, Some(raw_path), out_stat as *mut _).unwrap_or_bypass_with(
             |bypass| {
                 let raw_path = update_ptr_from_bypass(raw_path, &bypass);
                 FN___LXSTAT(ver, raw_path, out_stat)
@@ -1125,7 +1125,7 @@ pub(crate) unsafe extern "C" fn __xstat64_detour(
     }
 }
 
-/// Hook for libc's stat syscall wrapper.
+/// Hook for libc's lstat syscall wrapper.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn __lxstat64_detour(
     ver: c_int,
@@ -1133,7 +1133,7 @@ pub(crate) unsafe extern "C" fn __lxstat64_detour(
     out_stat: *mut stat64,
 ) -> c_int {
     unsafe {
-        stat_logic::<true>(ver, None, Some(raw_path), out_stat).unwrap_or_bypass_with(|bypass| {
+        stat_logic::<false>(ver, None, Some(raw_path), out_stat).unwrap_or_bypass_with(|bypass| {
             let raw_path = update_ptr_from_bypass(raw_path, &bypass);
             FN___LXSTAT64(ver, raw_path, out_stat)
         })
