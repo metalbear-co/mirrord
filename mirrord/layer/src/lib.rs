@@ -747,7 +747,9 @@ pub(crate) static CLOSE_FORK_LOCK: Mutex<()> = Mutex::new(());
 
 /// Shared code for closing `fd` in our data structures.
 ///
-/// Callers should call their respective close before calling this.
+/// Callers should call this before their respective close: once the kernel frees `fd`, another
+/// thread can get the same number for a new remote file, and a later call here would drop that
+/// file instead.
 ///
 /// ## Details
 ///
@@ -829,9 +831,9 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     unsafe {
-        let res = FN_CLOSE(fd);
+        // `close_layer_fd` first, then the real close.
         close_layer_fd(fd);
-        res
+        FN_CLOSE(fd)
     }
 }
 
