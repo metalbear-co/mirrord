@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-10-14T00:00:00.000Z
+lastmod: 2026-10-17T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -105,10 +105,22 @@ Only affects istio, linkerd, kuma.
 
 ### agent.disabled_capabilities {#agent-disabled_capabilities}
 
+Linux capabilities to remove from the agent container.
+
 If nothing is disabled here, agent uses:
 1. `NET_ADMIN`,
 2. `SYS_PTRACE`,
 3. `SYS_ADMIN`.
+
+The names have to be written exactly as above, any other value is ignored.
+
+```json
+{
+  "agent": {
+    "disabled_capabilities": ["NET_ADMIN"]
+  }
+}
+```
 
 Has no effect when using the targetless mode,
 as targetless agent containers have no capabilities.
@@ -645,6 +657,14 @@ DEPRECATED, WILL BE REMOVED
 
 Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.
 
+### _experimental_ hook_libc_syscall {#experimental-hook_libc_syscall}
+
+Hooks libc's generic `syscall` function on Linux, to handle scenarios where libraries
+like libuv opt into doing syscalls by hand instead of through the libc export (for
+example, for `statx` or `close`). Currently experimental.
+
+Defaults to `false`.
+
 ### _experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}
 
 Sets a timeout for idle local HTTP connections (in milliseconds).
@@ -707,6 +727,16 @@ clients) should be unaffected, but custom implementations of
 other protocols may not.
 
 DEPRECATED, WILL BE REMOVED
+
+### _experimental_ old_glibc_support {#experimental-old_glibc_support}
+
+Hooks `__fxstat` and `__fxstat64` on Linux.
+
+Binaries linked against glibc older than 2.33, such as the official Node.js builds, call
+these instead of `fstat`. Without this hook they see the local placeholder of a remote
+file: an empty character device. In Node.js, `fs.copyFileSync` then copies nothing.
+
+Defaults to `false`.
 
 ### _experimental_ sip_log_destination {#experimental-sip_log_destination}
 
@@ -1112,6 +1142,14 @@ selector: `{ "value_selector": ".database.host", "env_var_name": "DB_HOST" }`. A
 only `value_pattern` and `env_var_name` is the env var pattern source instead, so a pattern
 against the profile's ConfigMap keeps `key`. ConfigMap sources need operator `3.204.0` and
 mirrord `3.255.0` or later.
+
+A `gcp_secret_manager` or `aws_secrets_manager` source takes the same `value_selector` /
+`value_pattern` to pick one field out of a secret that holds several, such as a JSON blob
+of credentials. The branch init container applies it right after fetching the secret:
+
+```json
+{ "params": { "password": { "aws_secrets_manager": "db-creds", "value_selector": ".password" } } }
+```
 
 #### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
 
@@ -2584,20 +2622,54 @@ For more information, check the file operations
 }
 ```
 
+#### Windows paths {#fs-windows-paths}
+
+On Windows, the patterns of `read_write`, `read_only`, `local`, `not_found` and `mapping` are
+matched against two forms of the path, both with forward slashes:
+
+| Form | `D:\Workspaces\myapp\app.json` becomes | A pattern for this form matches |
+|---|---|---|
+| without the drive | `/Workspaces/myapp/app.json` | the path on every drive |
+| with the drive | `D:/Workspaces/myapp/app.json` | the path on that drive only |
+
+A pattern applies when it matches either form. So `^/Workspaces/` matches the folder on
+every drive, and `^D:/Workspaces/` matches it on `D:` only. Like the rest of a pattern, the
+drive letter ignores case.
+
+Write patterns with forward slashes. A pattern that needs a backslash in the path (`\\`, or
+`C:\` copied from Explorer) never matches, since neither form has one, and mirrord warns about
+it. A backslash that escapes a regex character (`\.`, `\d`), or one choice in a class
+(`[\\/]`), is fine.
+
+For a path from the environment, use the `path_pattern` template filter. It gives the path's
+form with the drive, escaped so that it matches literally and fits in any config format.
+
+`%TEMP%` is read locally by default. To use the pod's `/tmp` instead, map it:
+
+```json
+{
+  "feature": {
+    "fs": {
+      "mapping": {
+        "^{{ get_env(name='TEMP') | path_pattern }}/(.*)$": "/tmp/$1"
+      }
+    }
+  }
+}
+```
+
+- **Both the short and long name of a folder match.** Windows can give a folder an old-style
+  short name, like `FIRSTN~1` for `First Name`, and `%TEMP%` often uses it. `path_pattern`
+  matches both, as long as the folder exists.
+- **The result never ends in a separator.** Add `/` to match what's inside the folder.
+- **For text that isn't a path,** such as a user name, `regex_escape` escapes it as-is.
+
 #### feature.fs.local {#feature-fs-local}
 
 Specify file path patterns that if matched will be opened locally.
 
-##### Windows
-
-Patterns are matched against a unix-style form of the requested path, not the raw
-Windows path. Before matching, the drive letter is stripped and backslashes are
-converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
-`/Workspaces/myapp/app.json`.
-
-Patterns must therefore be written with forward slashes. Backslashes in the regex
-(e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-regex sees contains no backslashes at all — they were stripped during translation.
+On Windows, write the patterns with forward slashes. They match the path with and without
+its drive, as [Windows paths](#fs-windows-paths) explains.
 
 #### feature.fs.mapping {#feature-fs-mapping}
 
@@ -2626,29 +2698,29 @@ Will produce the following replacements for any io operation:
 
 ##### Windows
 
-Patterns are matched against a unix-style form of the requested path, not the raw
-Windows path. Before matching, the drive letter is stripped and backslashes are
-converted to forward slashes, so:
+Patterns match the path with and without its drive, with forward slashes, as
+[Windows paths](#fs-windows-paths) explains:
 
-`D:\Workspaces\myapp\config\app.json` is matched as `/Workspaces/myapp/config/app.json`
+- **A pattern without a drive** (`^/Workspaces/`) maps the path on every drive.
+- **A pattern with a drive** (`^C:/Repos/`) maps the path on that drive only.
 
-Patterns must therefore be written with forward slashes. Backslashes in the regex
-(e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-regex sees contains no backslashes at all — they were stripped during translation.
-
-The replacement value is sent to the agent as-is and is what the remote (Linux) pod
-will see on disk, so it should also use forward slashes.
+The value is the path the remote (Linux) pod opens, so write it with forward slashes and
+no drive. A drive left in the result is dropped.
 
 Example:
 ```json
 {
-  "^/Workspaces/(?<app>[^/]+)/config/(?<file>.+)": "/etc/${app}/$file"
+  "^/Workspaces/(?<app>[^/]+)/config/(?<file>.+)": "/etc/${app}/$file",
+  "^C:/Repos/api/appsettings\\.json$": "/app/appsettings.json"
 }
 ```
 
-Will produce the following replacement:
+Will produce the following replacements:
 
 `D:\Workspaces\myapp\config\app.json` => `/etc/myapp/app.json`
+`C:\Repos\api\appsettings.json` => `/app/appsettings.json`
+
+`D:\Repos\api\appsettings.json` stays as it is, because the second pattern names `C:`.
 
 ##### Caveats
 
@@ -2689,16 +2761,8 @@ mirrord will read/write from the remote.
 
 Specify file path patterns that if matched will be treated as non-existent.
 
-##### Windows
-
-Patterns are matched against a unix-style form of the requested path, not the raw
-Windows path. Before matching, the drive letter is stripped and backslashes are
-converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
-`/Workspaces/myapp/app.json`.
-
-Patterns must therefore be written with forward slashes. Backslashes in the regex
-(e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-regex sees contains no backslashes at all — they were stripped during translation.
+On Windows, write the patterns with forward slashes. They match the path with and without
+its drive, as [Windows paths](#fs-windows-paths) explains.
 
 #### feature.fs.prefetch {#feature-fs-prefetch}
 
@@ -2767,31 +2831,15 @@ usual.
 Specify file path patterns that if matched will be read from the remote.
 if file matching the pattern is opened for writing or read/write it will be opened locally.
 
-##### Windows
-
-Patterns are matched against a unix-style form of the requested path, not the raw
-Windows path. Before matching, the drive letter is stripped and backslashes are
-converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
-`/Workspaces/myapp/app.json`.
-
-Patterns must therefore be written with forward slashes. Backslashes in the regex
-(e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-regex sees contains no backslashes at all — they were stripped during translation.
+On Windows, write the patterns with forward slashes. They match the path with and without
+its drive, as [Windows paths](#fs-windows-paths) explains.
 
 #### feature.fs.read_write {#feature-fs-read_write}
 
 Specify file path patterns that if matched will be read and written to the remote.
 
-##### Windows
-
-Patterns are matched against a unix-style form of the requested path, not the raw
-Windows path. Before matching, the drive letter is stripped and backslashes are
-converted to forward slashes, so `D:\Workspaces\myapp\app.json` is matched as
-`/Workspaces/myapp/app.json`.
-
-Patterns must therefore be written with forward slashes. Backslashes in the regex
-(e.g. `"\\\\Workspaces\\\\"`) will never match anything, because the input string the
-regex sees contains no backslashes at all — they were stripped during translation.
+On Windows, write the patterns with forward slashes. They match the path with and without
+its drive, as [Windows paths](#fs-windows-paths) explains.
 
 #### feature.fs.readonly_file_buffer {#feature-fs-readonly_file_buffer}
 
@@ -2805,6 +2853,17 @@ This improves performance when the user application reads data in small portions
 ### feature.hostname {#feature-hostname}
 
 Should mirrord return the hostname of the target pod when calling `gethostname`
+
+### feature.kafka_branch {#feature-kafka_branch}
+
+Point the target's Kafka clients at an isolated broker shared by every session with the
+same key, instead of splitting topics on the cluster's Kafka.
+
+Covers every Kafka queue in the target's `MirrordSplitConfig`, which must name where the
+app reads its bootstrap servers from. Messages produced in the session never leave the
+branch, and idle preview environments wake when a message waits on a topic they consume.
+Kafka entries in [`feature.split_queues`](#feature-split_queues) are not allowed alongside
+it.
 
 ### feature.magic {#feature-magic}
 
@@ -4107,6 +4166,42 @@ Set to `false` for jobs whose timing matters (a report that must only run in its
 a job that assumes the previous scheduled run finished), so the preview runs on the
 schedule alone.
 
+#### feature.preview.helm {#feature-preview-helm}
+
+A Helm chart to build the preview from. mirrord renders it on your machine with
+`helm template` and then handles the rendered objects exactly like
+[`spec_resources`](#feature-preview-spec_resources): only the target and the ConfigMaps
+and Secrets its pod uses, and only where they differ from what is live. Same as
+`mirrord preview start --chart <path> --values <path>`, which replaces this block when
+given. Can be combined with `spec_resources`.
+
+Rendering uses the `helm` binary on your `PATH`, under the target's namespace. The
+fields:
+
+- `chart`: a local chart directory or packaged `.tgz`. Chart repositories and `oci://`
+  references are not fetched; pull them first.
+- `values`: values files, applied in order like `helm template -f`. Without any, the
+  chart's own `values.yaml` is used, which may not match what is deployed.
+- `release_name`: the release name the chart is rendered under (`.Release.Name`). Defaults
+  to the target's name. Charts usually build object names from it, so set it when your
+  release is not named after the target: otherwise the rendered objects fall outside the
+  target's scope and the preview runs the live spec.
+
+```json
+{
+  "target": "deployment/app",
+  "feature": {
+    "preview": {
+      "image": "my-registry/app:pr-318",
+      "helm": {
+        "chart": "./chart",
+        "values": ["./values-qa.yaml"]
+      }
+    }
+  }
+}
+```
+
 #### feature.preview.idle {#feature-preview-idle}
 
 Idle-mode settings: run the preview with zero pods while it receives no traffic,
@@ -4670,6 +4765,10 @@ proxy, including their PID, process name, command line, and connection status.
 ### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
 
 How much time to wait for the first connection to the proxy in seconds.
+
+Defaults to 60. When an IDE extension starts mirrord, the proxy instead waits for the
+first connection for as long as the session lasts, since the IDE may build the
+application before starting it.
 
 Common cases would be running with dlv or any other debugger, which sets a breakpoint
 on process execution, delaying the layer startup and connection to proxy.
