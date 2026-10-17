@@ -12,7 +12,7 @@ use crate::error::SessionsManagerClientError;
 /// turns [`SharedSecretCredentials`] on.
 pub const SESSIONS_MANAGER_AUTH_TOKEN_ENV: &str = "MIRRORD_SESSIONS_MANAGER_AUTH_TOKEN";
 
-const AUTH_HEADER_NAME: HeaderName = HeaderName::from_static("x-mirrord-sm-auth");
+pub(super) const AUTH_HEADER_NAME: HeaderName = HeaderName::from_static("x-mirrord-sm-auth");
 
 /// Sends a fixed shared secret on every sessions-manager request, for deployments that put
 /// an authenticating proxy or load balancer in front of it.
@@ -35,7 +35,7 @@ impl SharedSecretCredentials {
         Self::new(&token).map(Some)
     }
 
-    fn new(token: &str) -> Result<Self, SessionsManagerClientError> {
+    pub(super) fn new(token: &str) -> Result<Self, SessionsManagerClientError> {
         let mut value = HeaderValue::from_str(token)
             .map_err(|_| SessionsManagerClientError::InvalidSharedSecret)?;
         value.set_sensitive(true);
