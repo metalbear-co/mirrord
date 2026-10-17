@@ -163,6 +163,8 @@ mod integration_tests_deps {
 }
 
 mod common;
+#[cfg(target_os = "linux")]
+mod diagnostics;
 mod exec_hooks;
 #[cfg(target_os = "macos")]
 mod exec_utils;
@@ -440,6 +442,8 @@ fn layer_start(config: LayerConfig) {
         .filter(|(k, _v)| k != LayerConfig::RESOLVED_CONFIG_ENV)
         .collect();
     tracing::info!("Initializing mirrord-layer!");
+    #[cfg(target_os = "linux")]
+    diagnostics::log_environment();
     tracing::debug!(
         executable = ?EXECUTABLE_PATH.get(),
         args = ?EXECUTABLE_ARGS.get(),
