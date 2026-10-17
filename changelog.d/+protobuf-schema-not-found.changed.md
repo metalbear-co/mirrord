@@ -1,0 +1,1 @@
+A Kafka `payload_protobuf.schema_file` that does not exist is reported with the absolute path mirrord looked for it at, and an import that can't be found is reported with the directories it was looked up in.
