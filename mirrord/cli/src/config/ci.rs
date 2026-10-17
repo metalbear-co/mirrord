@@ -17,9 +17,13 @@ pub(crate) enum CiCommand {
 
     /// Starts mirrord for ci. Takes the same arguments as `mirrord exec` plus ci specific options.
     ///
-    /// - With a Free operator that advertises keyless CI, `MIRRORD_CI_API_KEY` is optional;
+    /// - With a Free or Teams operator that advertises keyless CI, `MIRRORD_CI_API_KEY` is optional;
     ///   ordinary credentials are automatic.
-    /// - With other installations, set `MIRRORD_CI_API_KEY` to a key from `mirrord ci api-key`.
+    /// - Free and Teams CI retain their licensed features, including with a supplied key.
+    /// - For Free and Teams CI, the operator caps each target-routing loader at one ready pod per
+    ///   participating cluster. Terminating pods may drain while replacements attach.
+    /// - With Enterprise or legacy installations, set `MIRRORD_CI_API_KEY` to a key from `mirrord
+    ///   ci api-key`.
     /// - The operator enforces its license policy for CI credentials.
     /// - Without the operator, no API key is required.
     Start(Box<CiStartArgs>),
@@ -32,9 +36,13 @@ pub(crate) enum CiCommand {
     /// Starts mirrord for ci inside a container. Takes the same arguments as `mirrord container`,
     /// plus ci specific options.
     ///
-    /// - With a Free operator that advertises keyless CI, `MIRRORD_CI_API_KEY` is optional;
+    /// - With a Free or Teams operator that advertises keyless CI, `MIRRORD_CI_API_KEY` is optional;
     ///   ordinary credentials are automatic.
-    /// - With other installations, set `MIRRORD_CI_API_KEY` to a key from `mirrord ci api-key`.
+    /// - Free and Teams CI retain their licensed features, including with a supplied key.
+    /// - For Free and Teams CI, the operator caps each target-routing loader at one ready pod per
+    ///   participating cluster. Terminating pods may drain while replacements attach.
+    /// - With Enterprise or legacy installations, set `MIRRORD_CI_API_KEY` to a key from `mirrord
+    ///   ci api-key`.
     /// - The operator enforces its license policy for CI credentials.
     /// - Without the operator, no API key is required.
     Container(Box<CiContainerArgs>),
@@ -109,11 +117,22 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::DisplayHelp);
         let help = error.to_string();
 
-        assert!(help.contains("Free operator"));
+        assert!(help.contains("Free or Teams operator"));
         assert!(help.contains("advertises keyless CI"));
         assert!(help.contains("MIRRORD_CI_API_KEY` is optional"));
         assert!(help.contains("ordinary credentials are automatic"));
-        assert!(help.contains("With other installations, set `MIRRORD_CI_API_KEY`"));
+        assert!(help.contains("Free and Teams CI retain their licensed features"));
+        assert!(help.contains("including with a supplied key"));
+        assert!(
+            help.contains("For Free and Teams CI, the operator caps")
+                && help.contains(
+                    "each target-routing loader at one ready pod per participating cluster",
+                )
+        );
+        assert!(help.contains("Terminating pods may drain while replacements attach"));
+        assert!(
+            help.contains("With Enterprise or legacy installations, set `MIRRORD_CI_API_KEY`")
+        );
         assert!(help.contains("Without the operator, no API key is required"));
     }
 
