@@ -9,6 +9,7 @@ use std::{
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use strum_macros::IntoStaticStr;
 use tracing::{Level, info};
 use uuid::Uuid;
 
@@ -122,7 +123,8 @@ impl FromStr for ExecutionKind {
 /// Reported on analytics events as the numeric `ai_agent` property (alongside the
 /// `is_ai_agent` boolean), so AI-agent-driven usage can be distinguished from direct
 /// human usage. The numeric mapping keeps the analytics schema stable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
 #[repr(u32)]
 pub enum AiAgent {
     ClaudeCode = 1,
