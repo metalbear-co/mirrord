@@ -33,12 +33,15 @@ bincode.workspace = true
 ctor.workspace = true
 dotenvy.workspace = true
 libc.workspace = true
-nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
+nix = { workspace = true, features = ["feature", "fs", "net", "process", "signal"] }
 null-terminated.workspace = true
 num-traits.workspace = true
 rand.workspace = true
 socket2.workspace = true
 tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+object.workspace = true
 
 [target.'cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
 mirrord-layer-go = { path = "../layer-go" }
