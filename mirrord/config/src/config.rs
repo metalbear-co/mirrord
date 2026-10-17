@@ -149,6 +149,8 @@ impl fmt::Display for FromFileError {
             }
         };
 
+        write!(f, ": {error}")?;
+
         let mut source = error.source();
         while let Some(error) = source {
             write!(f, " -> {error}")?;

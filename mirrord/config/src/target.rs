@@ -4,7 +4,7 @@ use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
 use replica_set::ReplicaSetTarget;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use strum_macros::{EnumDiscriminants, EnumString};
 
 use self::{
@@ -32,7 +32,10 @@ pub mod serverless;
 pub mod service;
 pub mod stateful_set;
 
-#[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+/// Deserialized by hand rather than as an untagged enum: serde discards the error of every variant
+/// of an untagged enum, so a typo in the target path would only be reported as "data did not
+/// match any variant", without saying what is wrong with it.
+#[derive(Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
 #[schemars(
     description = "The Kubernetes workload mirrord runs against: a target path such as \
@@ -68,6 +71,106 @@ pub enum TargetFileConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         namespace: Option<String>,
     },
+}
+
+impl<'de> Deserialize<'de> for TargetFileConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Advanced {
+            #[serde(default, deserialize_with = "string_or_struct_option")]
+            path: Option<Target>,
+            #[serde(default)]
+            namespace: Option<String>,
+        }
+
+        struct Visitor;
+
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = TargetFileConfig;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a target path or a target map")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                value
+                    .parse()
+                    .map(|target| TargetFileConfig::Simple(Some(target)))
+                    .map_err(E::custom)
+            }
+
+            /// A map is the advanced form when it starts with one of its keys, and a target
+            /// object such as `{ "deployment": "my-app" }` otherwise. Deciding on the first key
+            /// lets the chosen form report its own error, and avoids buffering the map, which
+            /// would lose duplicate keys.
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: de::MapAccess<'de>,
+            {
+                let Some(first_key) = map.next_key::<String>()? else {
+                    return Ok(TargetFileConfig::Advanced {
+                        path: None,
+                        namespace: None,
+                    });
+                };
+
+                let advanced = matches!(first_key.as_str(), "path" | "namespace");
+                let map = de::value::MapAccessDeserializer::new(WithFirstKey {
+                    first_key: Some(first_key),
+                    map,
+                });
+
+                if advanced {
+                    Advanced::deserialize(map).map(|Advanced { path, namespace }| {
+                        TargetFileConfig::Advanced { path, namespace }
+                    })
+                } else {
+                    Target::deserialize(map).map(|target| TargetFileConfig::Simple(Some(target)))
+                }
+            }
+        }
+
+        /// Hands back a key already taken from `map`, followed by the rest of `map`.
+        struct WithFirstKey<M> {
+            first_key: Option<String>,
+            map: M,
+        }
+
+        impl<'de, M> de::MapAccess<'de> for WithFirstKey<M>
+        where
+            M: de::MapAccess<'de>,
+        {
+            type Error = M::Error;
+
+            fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
+            where
+                K: de::DeserializeSeed<'de>,
+            {
+                match self.first_key.take() {
+                    Some(key) => seed
+                        .deserialize(de::IntoDeserializer::into_deserializer(key))
+                        .map(Some),
+                    None => self.map.next_key_seed(seed),
+                }
+            }
+
+            fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
+            where
+                V: de::DeserializeSeed<'de>,
+            {
+                self.map.next_value_seed(seed)
+            }
+        }
+
+        deserializer.deserialize_any(Visitor)
+    }
 }
 
 fn serialize_target_file_path<S>(target: &Option<Target>, serializer: S) -> Result<S::Ok, S::Error>
@@ -806,7 +909,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::config::{ConfigContext, MirrordConfig};
+    use crate::config::ConfigContext;
 
     #[rstest]
     #[case(None, None,
