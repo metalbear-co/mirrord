@@ -804,6 +804,7 @@ this session.",
     }
 }
 
+#[mirrord_macros::boxed_future]
 async fn exec(
     args: &ExecArgs,
     watch: drain::Watch,
@@ -924,6 +925,7 @@ async fn exec(
     res
 }
 
+#[mirrord_macros::boxed_future]
 async fn port_forward(
     args: &PortForwardArgs,
     watch: drain::Watch,
@@ -1069,6 +1071,11 @@ async fn port_forward(
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> miette::Result<()> {
+    // Armed before anything else runs: in a debug build, parsing the arguments alone takes about
+    // half a megabyte of stack.
+    #[cfg(target_os = "windows")]
+    utils_win::diagnostics::stack::report_stack_overflows();
+
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
 

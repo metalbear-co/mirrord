@@ -68,6 +68,7 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
     Ok(())
 }
 
+#[mirrord_macros::boxed_future]
 #[tracing::instrument(level = Level::INFO, skip_all, err)]
 pub async fn proxy(
     config: LayerConfig,

@@ -36,6 +36,7 @@ use crate::{
 /// 1. Starts a mirrord session using the given config file and target arguments
 /// 2. Subscribes to mirror traffic from the specified ports
 /// 3. Prints all incoming traffic to stdout in a human friendly format
+#[mirrord_macros::boxed_future]
 pub async fn dump_command(
     args: &DumpArgs,
     watch: drain::Watch,
