@@ -53,6 +53,7 @@ use crate::{
 };
 
 pub mod debug;
+pub mod hold;
 
 pub use debug::{
     debugger_wait_targets, format_debugger_config, get_current_process_name,
@@ -162,6 +163,9 @@ struct LaunchPlan<'a> {
     reporting: StartupReporting,
     /// Whether the child's layer waits for a debugger, so its startup has no time bound.
     debugger_wait: bool,
+    /// Whether the program is held at its entry point once its layer is ready, until an IDE
+    /// releases it. See [`hold`].
+    debug_hold: bool,
 }
 
 /// Variables Windows itself needs in every process: without `SystemRoot`, Winsock cannot start,
@@ -439,6 +443,10 @@ impl LayerManagedProcess {
     ///
     /// `progress` succeeds before the program's primary thread first runs, so a caller that shares
     /// its console with the program can end its own output there.
+    ///
+    /// `debug_hold` keeps the program suspended once its layer is ready, until an IDE releases it
+    /// (see [`hold`]).
+    #[allow(clippy::too_many_arguments)]
     pub fn execute<P>(
         application_name: Option<String>,
         command_line: String,
@@ -446,6 +454,7 @@ impl LayerManagedProcess {
         env_vars: WindowsEnv,
         injection_method: InjectionMethod,
         kill_children_on_exit: bool,
+        debug_hold: bool,
         progress: Option<P>,
     ) -> LayerResult<Self>
     where
@@ -522,6 +531,7 @@ impl LayerManagedProcess {
             create_process_fn,
             kill_children_on_exit,
             LayerFailurePolicy::Terminate,
+            debug_hold,
             progress,
         )
         .map_err(|launch| launch.error)
@@ -548,6 +558,11 @@ impl LayerManagedProcess {
     ///   empty one asks for no variables at all, which is a different request.
     /// * `injection_method` - how the layer is loaded. The child's environment carries it on, so
     ///   its own descendants are loaded the same way.
+    /// * `debug_hold` - keep the program suspended once its layer is ready, until an IDE releases
+    ///   it (see [`hold`]). The layer is then loaded with load-library whatever `injection_method`
+    ///   says, so it finishes starting, and connects to the internal proxy, before the hold begins.
+    ///   Descendants still get `injection_method`. A creator that asked for `CREATE_SUSPENDED` is
+    ///   never held: resuming is its call.
     #[allow(clippy::too_many_arguments)]
     pub fn execute_with_closure<F, P>(
         parent: &WindowsEnv,
@@ -558,6 +573,7 @@ impl LayerManagedProcess {
         create_process_fn: F,
         kill_children_on_exit: bool,
         on_layer_failure: LayerFailurePolicy,
+        debug_hold: bool,
         progress: Option<P>,
     ) -> Result<Self, LaunchError>
     where
@@ -610,6 +626,7 @@ impl LayerManagedProcess {
         // Calculate final creation flags (original + environment + suspended)
         let creation_flags = caller_creation_flags | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED;
         let caller_suspended = caller_creation_flags & CREATE_SUSPENDED != 0;
+        let debug_hold = debug_hold && !caller_suspended;
 
         // Call the original function with processed parameters
         let process_info = create_process_fn(creation_flags, environment_ptr, caller_startup_info)
@@ -651,11 +668,16 @@ impl LayerManagedProcess {
 
         let plan = LaunchPlan {
             dll_path: &dll_path,
-            injection_method,
+            injection_method: if debug_hold {
+                InjectionMethod::LoadLibrary
+            } else {
+                injection_method
+            },
             caller_suspended,
             on_layer_failure,
             reporting,
             debugger_wait,
+            debug_hold,
         };
         managed_process
             .inject_and_resume(&plan, progress)
@@ -910,6 +932,15 @@ impl LayerManagedProcess {
             }
         }
 
+        // A held program is still at its entry point here: load-library ran the layer's startup
+        // on a thread of its own.
+        if plan.debug_hold
+            && hold::hold(self.process_handle(), child_pid)? == hold::HoldOutcome::ProcessExited
+        {
+            tracing::debug!(child_pid, "the process ended while held for a debugger");
+            return Ok(self);
+        }
+
         // Readiness and a slow start end the same way: the process was never resumed (unless
         // loading needed it), and now it is, once, unless its creator keeps it suspended.
         self.resume_after_wait(plan, injected.timing)?;
@@ -1154,6 +1185,15 @@ mod tests {
         Silent,
     }
 
+    /// What the fake IDE does with a program held for its debugger.
+    #[derive(Clone, Copy)]
+    enum Ide {
+        /// Releases it, after longer than any launcher timeout.
+        Releases,
+        /// Ends it, as a debugger session stopped before it started.
+        Kills,
+    }
+
     /// A program that outlives the readiness timeout, then ends with [`RAN`].
     const OUTLIVES_THE_WAIT: &str = "ping -n 4 127.0.0.1 > nul & exit 7";
 
@@ -1173,6 +1213,8 @@ mod tests {
         environment: WindowsEnv,
         /// The launching process's environment, which the launcher forwards from.
         parent: WindowsEnv,
+        /// Holds the program for a debugger, and what the IDE then does.
+        hold: Option<Ide>,
     }
 
     struct Launched {
@@ -1250,6 +1292,7 @@ mod tests {
                         .filter_map(|name| Some((name.to_owned(), std::env::var(name).ok()?))),
                 ),
                 parent: WindowsEnv::inherited(),
+                hold: None,
             }
         }
 
@@ -1264,6 +1307,7 @@ mod tests {
 
             let child_pid = Arc::new(Mutex::new(None::<u32>));
             let fake_layer = fake_layer(self.layer, Arc::clone(&child_pid));
+            let fake_ide = self.hold.map(|ide| fake_ide(ide, Arc::clone(&child_pid)));
 
             let mut creations = 0;
             let mut duplicate = None;
@@ -1331,9 +1375,13 @@ mod tests {
                 create,
                 false,
                 self.policy,
+                self.hold.is_some(),
                 Some(recorder.clone()),
             );
             fake_layer.join().expect("fake layer");
+            if let Some(fake_ide) = fake_ide {
+                fake_ide.join().expect("fake IDE");
+            }
             let progress = recorder.0.lock().expect("progress").clone();
 
             Launched {
@@ -1398,6 +1446,57 @@ mod tests {
 
             unsafe {
                 SetEvent(event);
+                CloseHandle(event);
+            }
+        })
+    }
+
+    /// Plays the IDE's part for a held program: waits for the release event the launcher
+    /// announces, checks the program has not run, then does what `ide` says.
+    fn fake_ide(ide: Ide, child_pid: Arc<Mutex<Option<u32>>>) -> JoinHandle<()> {
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            let pid = loop {
+                if let Some(pid) = *child_pid.lock().expect("pid") {
+                    break pid;
+                }
+                assert!(Instant::now() < deadline, "the child was never created");
+                std::thread::sleep(Duration::from_millis(5));
+            };
+
+            // Spelled out rather than taken from `hold::release_event_name`: the IDE matches
+            // this exact name.
+            let name = CString::new(format!(r"Local\mirrord-debug-release-{pid}")).expect("name");
+            let event = loop {
+                let event = unsafe { OpenEventA(EVENT_MODIFY_STATE, FALSE, name.as_ptr()) };
+                if !event.is_null() {
+                    break event;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "the launcher never held the child"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            };
+
+            let process = unsafe { OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid) };
+            assert!(!process.is_null(), "open the held child");
+            match ide {
+                Ide::Releases => {
+                    std::thread::sleep(Duration::from_millis(u64::from(LAYER_INIT_TIMEOUT_MS) * 2));
+                    assert_ne!(
+                        unsafe { WaitForSingleObject(process, 0) },
+                        WAIT_OBJECT_0,
+                        "a held program cannot run, so it cannot have exited, and no timeout ends the hold"
+                    );
+                    unsafe { SetEvent(event) };
+                }
+                Ide::Kills => unsafe {
+                    TerminateProcess(process, 42);
+                },
+            }
+            unsafe {
+                CloseHandle(process);
                 CloseHandle(event);
             }
         })
@@ -1728,6 +1827,64 @@ mod tests {
 
         assert_eq!(resume(process), 1, "exactly the creator's suspension");
         assert_eq!(launched.exit_code(), RAN);
+    }
+
+    /// A program held for a debugger stays at its entry point, past any launcher timeout, until
+    /// the IDE sets its release event, and then runs once.
+    #[test]
+    fn a_held_program_runs_once_after_its_release() {
+        let launched = Launch {
+            hold: Some(Ide::Releases),
+            ..Launch::new(InjectionMethod::LoadLibrary, Layer::Ready)
+        }
+        .run();
+        assert!(
+            launched.result.is_ok(),
+            "launch: {:?}",
+            launched.result.as_ref().err()
+        );
+        assert_eq!(launched.progress, ["Ready!"], "ready before the hold");
+        assert_eq!(launched.creations, 1);
+        assert_eq!(launched.exit_code(), RAN);
+    }
+
+    /// The hold needs the layer up before the program runs, so it loads with load-library even
+    /// when another method is set. The program's own children still get the method that is set.
+    #[test]
+    fn a_held_program_loads_its_layer_before_it_runs_whatever_the_method() {
+        let launched = Launch {
+            hold: Some(Ide::Releases),
+            ..Launch::new(InjectionMethod::Apc, Layer::Ready)
+        }
+        .run();
+        assert_eq!(
+            launched.progress,
+            ["Ready!"],
+            "ready while still suspended, not loading on resume"
+        );
+        assert_eq!(
+            launched.child_environment.get(MIRRORD_INJECTION_METHOD_ENV),
+            Some(InjectionMethod::Apc.to_string().as_str())
+        );
+        assert_eq!(launched.exit_code(), RAN);
+    }
+
+    /// A program ended while held is not resumed, and its exit is the launch's outcome, not an
+    /// error.
+    #[test]
+    fn a_program_ended_while_held_is_handed_back_as_it_is() {
+        let launched = Launch {
+            hold: Some(Ide::Kills),
+            policy: LayerFailurePolicy::Terminate,
+            ..Launch::new(InjectionMethod::LoadLibrary, Layer::Ready)
+        }
+        .run();
+        assert!(
+            launched.result.is_ok(),
+            "launch: {:?}",
+            launched.result.as_ref().err()
+        );
+        assert_eq!(launched.exit_code(), 42, "the program never ran");
     }
 
     /// A crash monitor that takes one registration and acknowledges it.
