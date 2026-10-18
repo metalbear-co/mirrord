@@ -9,14 +9,10 @@ on:
         type: string
         default: "blacksmith-16vcpu-ubuntu-2404"
       runner_arm:
-        description: "arm64 runner label for the native Linux arm64 job. Callers pass the one `plan` picked."
+        description: "arm64 runner label. Callers pass the one `plan` picked."
         required: false
         type: string
         default: "blacksmith-8vcpu-ubuntu-2404-arm"
-      rust_toolchain:
-        description: "Rust toolchain for the native Linux arm64 job, which runs outside the CI runner image."
-        required: true
-        type: string
       runner_image_built:
         description: "Whether the runner image comes from an uploaded artifact rather than the published one."
         required: false
@@ -34,7 +30,18 @@ env:
 
 jobs:
   integration-tests:
-    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ${{ inputs.runner }}
+            artifact: ci-runner-image
+          - arch: arm64
+            runner: ${{ inputs.runner_arm }}
+            artifact: ci-runner-image-arm64
+    name: integration-tests (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     env:
       MIRRORD_TESTS_USE_BINARY: /workspace/mirrord/target/debug/mirrord
       MIRRORD_LAYER_FILE: /workspace/mirrord/target/debug/libmirrord_layer.so
@@ -47,6 +54,7 @@ jobs:
       - uses: ./.github/actions/provide-ci-runner
         with:
           built: ${{ inputs.runner_image_built }}
+          artifact: ${{ matrix.artifact }}
       - name: build test apps
         uses: ./.github/actions/run-in-ci-runner
         with:
@@ -162,76 +170,6 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: intproxy_logs_linux
+          name: intproxy_logs_linux_${{ matrix.arch }}
           path: /tmp/intproxy_logs/linux
           retention-days: 2
-
-  # The CI runner image is amd64-only, so the layer tests run natively on arm64, with the same
-  # toolchains the image provides.
-  integration-tests-arm64:
-    runs-on: ${{ inputs.runner_arm }}
-    env:
-      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
-      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/libmirrord_layer.so
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          cache: false
-          toolchain: ${{ inputs.rust_toolchain }}
-      - name: Rust cache
-        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
-        with:
-          shared-key: integration-arm64
-      - name: Install Protoc
-        uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
-        with:
-          tool: cargo-nextest
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-        with:
-          node-version: 24
-      - run: corepack enable pnpm
-      - name: Install Python test app dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-flask python3-pip
-          sudo pip3 install --break-system-packages fastapi==0.138.0 'uvicorn[standard]==0.49.0'
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-        with:
-          go-version: "1.25"
-          cache: false
-      - run: cd mirrord/layer-tests/tests && ../../../scripts/build_go_apps.sh 25
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-        with:
-          go-version: "1.26"
-          cache: false
-      - run: cd mirrord/layer-tests/tests && ../../../scripts/build_go_apps.sh 26
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
-        with:
-          go-version: "1.27"
-          cache: false
-      - run: cd mirrord/layer-tests/tests && ../../../scripts/build_go_apps.sh 27
-      - name: build test apps
-        run: |
-          set -eux
-          cd mirrord/layer-tests/tests/apps
-          for app in issue1123 issue1054 issue1458 issue1458portnot53 issue2058 issue2204; do
-            (cd "$app" && rustc "$app.rs" --out-dir target)
-          done
-          for app in fileops outgoing recv_from dns_resolve listen_ports issue1776 \
-            issue1776portnot53 issue1899 issue2001 issue2438 issue3248 rebind0 dup_listen \
-            double_listen posix_spawn_shared_sockets; do
-            (cd "$app" && cargo build)
-          done
-          ./dlopen_cgo/build_test_app.sh
-          cd "$GITHUB_WORKSPACE"
-          pnpm --filter mirrord-frontends install --frozen-lockfile
-          ./scripts/build_c_apps.sh
-      - run: cargo xtask build-cli --no-ui
-      - run: cargo nextest run -p mirrord-layer-tests --no-default-features
-      - run: cargo nextest run -p mirrord-layer

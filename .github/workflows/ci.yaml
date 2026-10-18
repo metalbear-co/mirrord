@@ -295,6 +295,7 @@ jobs:
     uses: ./.github/workflows/build-ci-runner.yaml
     with:
       runner: ${{ needs.plan.outputs.runner_8 }}
+      runner_arm: ${{ needs.plan.outputs.runner_8_arm }}
       blacksmith: ${{ needs.plan.outputs.blacksmith == 'true' }}
       build: ${{ needs.plan.outputs.runner_image_changed == 'true' }}
     secrets: inherit
@@ -432,7 +433,6 @@ jobs:
     with:
       runner: ${{ needs.plan.outputs.runner_16 }}
       runner_arm: ${{ needs.plan.outputs.runner_8_arm }}
-      rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
       runner_image_built: ${{ needs.build-ci-runner.outputs.built == 'true' }}
 
   macos_tests:
