@@ -75,8 +75,12 @@ impl CloudTokenCredentials {
             Err(error) => return Err(error.into()),
         };
 
-        let cloud_url = std::env::var(METALBEAR_CLOUD_URL_ENV)
-            .unwrap_or_else(|_| METALBEAR_CLOUD_URL_DEFAULT.to_owned());
+        // An unreadable override must not quietly fall back to production with the API key.
+        let cloud_url = match std::env::var(METALBEAR_CLOUD_URL_ENV) {
+            Ok(cloud_url) => cloud_url,
+            Err(VarError::NotPresent) => METALBEAR_CLOUD_URL_DEFAULT.to_owned(),
+            Err(error) => return Err(error.into()),
+        };
 
         Self::new(&cloud_url, api_key).map(Some)
     }
