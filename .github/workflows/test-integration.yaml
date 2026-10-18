@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: "blacksmith-16vcpu-ubuntu-2404"
+      runner_arm:
+        description: "arm64 runner label. Callers pass the one `plan` picked."
+        required: false
+        type: string
+        default: "blacksmith-8vcpu-ubuntu-2404-arm"
       runner_image_built:
         description: "Whether the runner image comes from an uploaded artifact rather than the published one."
         required: false
@@ -25,7 +30,16 @@ env:
 
 jobs:
   integration-tests:
-    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ${{ inputs.runner }}
+          - arch: arm64
+            runner: ${{ inputs.runner_arm }}
+    name: integration-tests (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     env:
       MIRRORD_TESTS_USE_BINARY: /workspace/mirrord/target/debug/mirrord
       MIRRORD_LAYER_FILE: /workspace/mirrord/target/debug/libmirrord_layer.so
@@ -153,6 +167,6 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: intproxy_logs_linux
+          name: intproxy_logs_linux_${{ matrix.arch }}
           path: /tmp/intproxy_logs/linux
           retention-days: 2
