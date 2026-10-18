@@ -11,7 +11,7 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use tokio::{sync::Mutex, time::Instant};
-use url::{Host, Url};
+use url::Url;
 
 use super::{CredentialProvider, ready_headers};
 use crate::error::SessionsManagerClientError;
@@ -227,28 +227,18 @@ fn token_reuse(header: &HeaderValue) -> Option<Duration> {
 }
 
 /// Whether the API key may be sent to `url`. It is long-lived and travels in the request body,
-/// so anything but TLS exposes it to the network; plain HTTP is tolerated only on loopback,
-/// where there is no network to expose it to (tests, or a locally-run app-server).
+/// so anything but TLS exposes it to the network.
 ///
-/// `allow_any_http` lifts the loopback restriction for debug builds, so a developer can point a
-/// locally-built agent at an app-server reachable only over plain HTTP. Release builds, the only
-/// ones that ship, never do.
-fn is_secure_cloud_url(url: &Url, allow_any_http: bool) -> bool {
-    if url.cannot_be_a_base() {
-        return false;
-    }
-
-    match url.scheme() {
-        "https" => true,
-        "http" if allow_any_http => true,
-        "http" => match url.host() {
-            Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
-            Some(Host::Ipv4(ip)) => ip.is_loopback(),
-            Some(Host::Ipv6(ip)) => ip.is_loopback(),
-            None => false,
-        },
-        _ => false,
-    }
+/// `allow_http` is set only in debug builds, so a developer can point a locally-built agent at a
+/// test endpoint or an app-server reachable only over plain HTTP. Release builds, the only ones
+/// that ship, require HTTPS without exception, loopback included.
+fn is_secure_cloud_url(url: &Url, allow_http: bool) -> bool {
+    !url.cannot_be_a_base()
+        && match url.scheme() {
+            "https" => true,
+            "http" => allow_http,
+            _ => false,
+        }
 }
 
 impl CredentialProvider for CloudTokenCredentials {
@@ -641,21 +631,23 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn plain_http_is_accepted_only_on_loopback_unless_allowed() {
-        let secure = |origin, allow_any_http| {
-            is_secure_cloud_url(&Url::parse(origin).unwrap(), allow_any_http)
-        };
+    fn plain_http_is_accepted_only_when_allowed() {
+        let secure =
+            |origin, allow_http| is_secure_cloud_url(&Url::parse(origin).unwrap(), allow_http);
 
-        for allow_any_http in [false, true] {
-            assert!(secure("https://app.metalbear.com", allow_any_http));
-            assert!(secure("http://localhost:8080", allow_any_http));
-            assert!(secure("http://127.0.0.1:8080", allow_any_http));
-            assert!(secure("http://[::1]:8080", allow_any_http));
-            assert!(!secure("ftp://app.metalbear.com", allow_any_http));
-            assert!(!secure("mailto:dev@metalbear.com", allow_any_http));
+        for allow_http in [false, true] {
+            assert!(secure("https://app.metalbear.com", allow_http));
+            assert!(!secure("ftp://app.metalbear.com", allow_http));
+            assert!(!secure("mailto:dev@metalbear.com", allow_http));
         }
 
-        for origin in ["http://app.metalbear.com", "http://10.0.0.1"] {
+        for origin in [
+            "http://app.metalbear.com",
+            "http://10.0.0.1",
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+            "http://[::1]:8080",
+        ] {
             assert!(!secure(origin, false), "{origin} should be refused");
             assert!(secure(origin, true), "{origin} should be allowed");
         }

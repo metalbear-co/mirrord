@@ -66,8 +66,8 @@ pub enum SessionsManagerClientError {
     )]
     InvalidApiKey,
     #[error(
-        "MIRRORD_METALBEAR_CLOUD_URL must be an https URL, or http only on a loopback address \
-         (any address in debug builds), got {0}"
+        "MIRRORD_METALBEAR_CLOUD_URL must be an https URL (http is accepted only in debug \
+         builds), got {0}"
     )]
     InsecureCloudUrl(Url),
     #[error(
