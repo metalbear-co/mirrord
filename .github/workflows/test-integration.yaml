@@ -207,5 +207,5 @@ jobs:
           go-version: "1.27"
           cache: false
       - run: cd mirrord/layer-tests/tests/apps/issue5092 && go build -o 27.go_test_app
-      - run: cargo build -p mirrord-layer -p mirrord
+      - run: cargo xtask build-cli --no-ui
       - run: cargo nextest run -p mirrord-layer-tests --no-default-features --test issue5092
