@@ -15,6 +15,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use mirrord_sessions_manager_client::LoginToken;
 use serde::{Deserialize, Serialize};
 
 use super::update_owner_only_at_path;
@@ -47,31 +48,6 @@ pub(crate) struct StoredLoginToken {
     pub(crate) email: String,
     /// The token's `exp` claim.
     pub(crate) expires_at: DateTime<Utc>,
-}
-
-/// A signed login token.
-///
-/// Tokens must never appear in logs, so [`fmt::Debug`] does not print it.
-#[derive(Serialize, Deserialize)]
-#[serde(transparent)]
-pub(crate) struct LoginToken(String);
-
-impl LoginToken {
-    pub(crate) fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<String> for LoginToken {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-impl fmt::Debug for LoginToken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("<redacted>")
-    }
 }
 
 /// A key of a trial that `mirrord operator signup` started, as stored in [`AuthStore`].
@@ -245,11 +221,7 @@ mod tests {
             .iter()
             .flat_map(|(issuer, organizations)| {
                 organizations.iter().map(|(organization, token)| {
-                    (
-                        issuer.as_str(),
-                        organization.as_str(),
-                        token.token.0.as_str(),
-                    )
+                    (issuer.as_str(), organization.as_str(), token.token.as_str())
                 })
             })
             .collect()

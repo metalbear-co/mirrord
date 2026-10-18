@@ -118,12 +118,7 @@ impl CloudTokenCredentials {
             Err(error) => return Err(error.into()),
         };
 
-        // An unreadable override must not quietly fall back to production with the API key.
-        let cloud_url = match std::env::var(METALBEAR_CLOUD_URL_ENV) {
-            Ok(cloud_url) => cloud_url,
-            Err(VarError::NotPresent) => METALBEAR_CLOUD_URL_DEFAULT.to_owned(),
-            Err(error) => return Err(error.into()),
-        };
+        let cloud_url = cloud_url_from_env()?;
         // An unreadable session must fail loudly: ignoring it would route the exchange to the
         // deployed app-server while the developer waits on their local one.
         let baggage_session = match std::env::var(METALBEAR_CLOUD_BAGGAGE_SESSION_ENV) {
@@ -277,6 +272,20 @@ fn token_reuse(header: &HeaderValue) -> Option<Duration> {
 /// `allow_http` is set only in debug builds, so a developer can point a locally-built agent at a
 /// test endpoint or an app-server reachable only over plain HTTP. Release builds, the only ones
 /// that ship, require HTTPS without exception, loopback included.
+/// The MetalBear cloud this client talks to: [`METALBEAR_CLOUD_URL_ENV`], or production when it
+/// is unset. Agents exchange their API key there, and it issued the `mirrord login` token an
+/// intproxy presents.
+///
+/// An unreadable override is an error rather than a fallback to production, which would send the
+/// API key, or look up the login token, for the wrong cloud.
+pub fn cloud_url_from_env() -> Result<String, SessionsManagerClientError> {
+    match std::env::var(METALBEAR_CLOUD_URL_ENV) {
+        Ok(cloud_url) => Ok(cloud_url),
+        Err(VarError::NotPresent) => Ok(METALBEAR_CLOUD_URL_DEFAULT.to_owned()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn is_secure_cloud_url(url: &Url, allow_http: bool) -> bool {
     !url.cannot_be_a_base()
         && match url.scheme() {

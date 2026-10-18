@@ -4,19 +4,23 @@
 //!
 //! - [`SharedSecretCredentials`] proves a request may reach sessions-manager at all, to an
 //!   authenticating proxy or load balancer placed in front of it.
-//! - [`CloudTokenCredentials`] proves *who* is calling to sessions-manager itself, by exchanging a
-//!   long-lived MetalBear API key for a short-lived token.
+//! - An identity credential proves *who* is calling to sessions-manager itself. Each side of a
+//!   session has its own: an agent exchanges a long-lived MetalBear API key for a short-lived token
+//!   ([`CloudTokenCredentials`]), and an intproxy presents the developer's `mirrord login` token
+//!   ([`LoginTokenCredentials`]).
 //!
 //! Neither is the per-assignment authorization the control plane hands out; that one is minted
 //! per data-plane connection and travels with the assignment.
 
 mod cloud_token;
+mod login_token;
 mod shared_secret;
 
 use std::sync::Arc;
 
-pub use cloud_token::CloudTokenCredentials;
+pub use cloud_token::{CloudTokenCredentials, cloud_url_from_env};
 use futures::future::{BoxFuture, FutureExt};
+pub use login_token::{LoginToken, LoginTokenCredentials};
 use reqwest::header::HeaderMap;
 pub use shared_secret::SharedSecretCredentials;
 
@@ -66,12 +70,12 @@ impl CredentialProvider for NoCredentials {
     }
 }
 
-/// Whatever the environment configures, which may be both mechanisms at once: they answer to
-/// different parties (a fronting proxy, and sessions-manager itself) and are enabled by
-/// different variables, so neither implies nor excludes the other.
+/// The shared secret the environment configures together with the caller's identity credential,
+/// which may be both mechanisms at once: they answer to different parties (a fronting proxy, and
+/// sessions-manager itself), so neither implies nor excludes the other.
 struct EnvCredentials {
     shared_secret: Option<SharedSecretCredentials>,
-    cloud: Option<CloudTokenCredentials>,
+    identity: Option<Box<dyn CredentialProvider>>,
 }
 
 impl CredentialProvider for EnvCredentials {
@@ -83,8 +87,8 @@ impl CredentialProvider for EnvCredentials {
             if let Some(shared_secret) = &self.shared_secret {
                 headers.extend(shared_secret.control_plane_headers().await?);
             }
-            if let Some(cloud) = &self.cloud {
-                headers.extend(cloud.control_plane_headers().await?);
+            if let Some(identity) = &self.identity {
+                headers.extend(identity.control_plane_headers().await?);
             }
             Ok(headers)
         }
@@ -97,8 +101,8 @@ impl CredentialProvider for EnvCredentials {
             if let Some(shared_secret) = &self.shared_secret {
                 headers.extend(shared_secret.data_plane_headers().await?);
             }
-            if let Some(cloud) = &self.cloud {
-                headers.extend(cloud.data_plane_headers().await?);
+            if let Some(identity) = &self.identity {
+                headers.extend(identity.data_plane_headers().await?);
             }
             Ok(headers)
         }
@@ -106,15 +110,11 @@ impl CredentialProvider for EnvCredentials {
     }
 }
 
-/// The credentials a client uses unless the caller supplies its own.
+/// The credentials an agent uses unless the caller supplies its own: the environment's shared
+/// secret and API key.
 pub(crate) fn credentials_from_env()
 -> Result<Arc<dyn CredentialProvider>, SessionsManagerClientError> {
-    let shared_secret = SharedSecretCredentials::from_env()?;
     let cloud = CloudTokenCredentials::from_env()?;
-
-    if shared_secret.is_some() {
-        tracing::debug!("authenticating sessions-manager connections with a shared secret");
-    }
     if let Some(cloud) = &cloud {
         tracing::debug!(
             endpoint = %cloud.endpoint,
@@ -122,11 +122,37 @@ pub(crate) fn credentials_from_env()
         );
     }
 
-    match (shared_secret, cloud) {
+    with_shared_secret_from_env(cloud.map(|cloud| Box::new(cloud) as Box<dyn CredentialProvider>))
+}
+
+/// The credentials an intproxy uses: the environment's shared secret and the developer's
+/// `login_token`. Never the API key, which sessions-manager refuses from an intproxy.
+pub(crate) fn intproxy_credentials_from_env(
+    login_token: Option<&LoginToken>,
+) -> Result<Arc<dyn CredentialProvider>, SessionsManagerClientError> {
+    let login = login_token.map(LoginTokenCredentials::new).transpose()?;
+    if login.is_some() {
+        tracing::debug!(
+            "authenticating sessions-manager control-plane requests with a mirrord login token"
+        );
+    }
+
+    with_shared_secret_from_env(login.map(|login| Box::new(login) as Box<dyn CredentialProvider>))
+}
+
+fn with_shared_secret_from_env(
+    identity: Option<Box<dyn CredentialProvider>>,
+) -> Result<Arc<dyn CredentialProvider>, SessionsManagerClientError> {
+    let shared_secret = SharedSecretCredentials::from_env()?;
+    if shared_secret.is_some() {
+        tracing::debug!("authenticating sessions-manager connections with a shared secret");
+    }
+
+    match (shared_secret, identity) {
         (None, None) => Ok(Arc::new(NoCredentials)),
-        (shared_secret, cloud) => Ok(Arc::new(EnvCredentials {
+        (shared_secret, identity) => Ok(Arc::new(EnvCredentials {
             shared_secret,
-            cloud,
+            identity,
         })),
     }
 }
@@ -151,7 +177,7 @@ mod tests {
         let endpoint = TokenEndpoint::start([(StatusCode::OK, token("abc"))]).await;
         let credentials = EnvCredentials {
             shared_secret: Some(SharedSecretCredentials::new("shhh").unwrap()),
-            cloud: Some(endpoint.credentials()),
+            identity: Some(Box::new(endpoint.credentials())),
         };
 
         let control_plane = credentials.control_plane_headers().await.unwrap();

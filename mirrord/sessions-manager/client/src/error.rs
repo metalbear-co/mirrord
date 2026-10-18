@@ -60,6 +60,8 @@ pub enum SessionsManagerClientError {
     InvalidOperatorDataPlaneEndpoint,
     #[error("sessions-manager shared secret is not a valid header value")]
     InvalidSharedSecret,
+    #[error("the mirrord login token is not a valid header value")]
+    InvalidLoginToken,
     #[error(
         "MIRRORD_SESSIONS_MANAGER_API_KEY must hold a MetalBear API key, which begins with \
          `metalbear_key_`"

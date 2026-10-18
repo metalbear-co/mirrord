@@ -136,7 +136,11 @@ impl SessionsManagerConnector {
                 self.connect_with(OperatorTransport::new(client.clone()))
                     .await
             }
-            None => self.connect_with(DirectTransport::from_env()?).await,
+            None => {
+                let transport =
+                    DirectTransport::intproxy_from_env(self.connect_info.login_token.as_ref())?;
+                self.connect_with(transport).await
+            }
         }
     }
 

@@ -26,14 +26,16 @@ use mirrord_progress::{
     messages::{AGENT_OPERATOR_HINT, HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     utm_medium,
 };
-use mirrord_sessions_manager_client::{ServiceScope, SessionsManagerConnectInfo};
+use mirrord_sessions_manager_client::{
+    LoginToken, ServiceScope, SessionsManagerConnectInfo, cloud_url_from_env,
+};
 use tracing::Level;
 
 use crate::{
     CliError, CliResult, MirrordCi,
     ci::error::CiError,
     connector::{AgentConnector, DirectConnector, OperatorConnector, SessionsManagerConnector},
-    data::GlobalConfig,
+    data::{AuthStore, GlobalConfig},
     up::MirrordUp,
 };
 
@@ -368,6 +370,31 @@ pub(crate) struct ConnectData {
     pub(crate) target_container_ports: Vec<u16>,
 }
 
+/// The developer's `mirrord login` token for the MetalBear cloud a standalone sessions-manager
+/// trusts, with which the intproxy authenticates to it.
+///
+/// Without one the session still starts, since a sessions-manager run for local development may
+/// not authenticate its callers, but the user is told how to get one.
+async fn standalone_login_token<P: Progress>(progress: &P) -> CliResult<Option<LoginToken>> {
+    let cloud_url = cloud_url_from_env().map_err(CliError::SessionsManagerCloudUrl)?;
+    // `mirrord login` files a token under its issuer, the cloud's base URL without the trailing
+    // slash.
+    let issuer = cloud_url.trim_end_matches('/');
+    let token = AuthStore::login_token(issuer)
+        .await
+        .map_err(CliError::LoginTokenStore)?
+        .map(|login| login.token);
+
+    if token.is_none() {
+        progress.warning(&format!(
+            "You are not logged in to {issuer}, so the sessions-manager will refuse this session \
+             if it authenticates its users. Run `mirrord login` to log in."
+        ));
+    }
+
+    Ok(token)
+}
+
 /// 1. if [`LayerConfig`] targets Serverless, makes a connection to an existing agent through
 ///    mirrord-sessions-manager-client.
 /// 2. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
@@ -393,7 +420,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         let user_session_id = std::env::var("MIRRORD_SESSION_ID")
             .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
         let agent_replica_filter = target.sessions_manager_target_replica_id();
-        let connect_info = SessionsManagerConnectInfo {
+        let mut connect_info = SessionsManagerConnectInfo {
             scope: ServiceScope {
                 service,
                 environment: config
@@ -404,6 +431,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
             },
             user_session_id,
             replica_filter: agent_replica_filter.map(Into::into),
+            login_token: None,
         };
         let (operator_client, agent_connect_info) = if config.operator == Some(true) {
             (
@@ -411,6 +439,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
                 AgentConnectInfo::OperatorSessionsManager(connect_info.clone()),
             )
         } else {
+            connect_info.login_token = standalone_login_token(progress).await?;
             (
                 None,
                 AgentConnectInfo::SessionsManager(connect_info.clone()),
