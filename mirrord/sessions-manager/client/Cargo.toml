@@ -31,10 +31,11 @@ hyper-util = { workspace = true, features = [
   "http1",
   "tokio",
 ] }
-tokio.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
 tokio-retry.workspace = true
 eventsource-stream.workspace = true
 futures.workspace = true
+base64.workspace = true
 tokio-tungstenite.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

@@ -1,11 +1,16 @@
 //! A short-lived MetalBear cloud token, exchanged for a long-lived API key.
 
-use std::{env::VarError, time::Duration};
+use std::{
+    env::VarError,
+    time::{Duration, SystemTime},
+};
 
+use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use futures::future::{BoxFuture, FutureExt};
 use reqwest::header::{HeaderMap, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
+use tokio::{sync::Mutex, time::Instant};
 use url::{Host, Url};
 
 use super::{CredentialProvider, ready_headers};
@@ -29,6 +34,15 @@ const TOKEN_EXCHANGE_SEGMENTS: [&str; 3] = ["api", "v2", "token"];
 
 const TOKEN_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long before a token's `exp` it stops being reused. Covers the request the token is about
+/// to be used for, plus clock skew between this process and sessions-manager.
+const TOKEN_REFRESH_MARGIN: Duration = Duration::from_secs(60);
+
+/// Upper bound on reusing one token, whatever its `exp` claims. Tokens are minted for minutes;
+/// an `exp` far beyond that is not something to keep presenting on the strength of an unverified
+/// claim.
+const MAX_TOKEN_REUSE: Duration = Duration::from_secs(60 * 60);
+
 #[derive(Serialize)]
 struct TokenExchangeRequest<'a> {
     #[serde(rename = "apiKey")]
@@ -40,6 +54,20 @@ struct TokenExchangeResponse {
     token: String,
 }
 
+/// The one claim this client reads, to schedule the next exchange. The token's expiry is only
+/// carried here: the exchange response has no separate field for it.
+#[derive(Deserialize)]
+struct TokenClaims {
+    exp: u64,
+}
+
+struct CachedToken {
+    /// Complete `Bearer <token>` value, marked sensitive.
+    header: HeaderValue,
+    /// Monotonic, so a wall-clock jump after the exchange can't extend the token's reuse.
+    refresh_at: Instant,
+}
+
 /// Authenticates the client to sessions-manager itself, by trading a long-lived MetalBear API
 /// key for a short-lived token and sending it as `Authorization: Bearer <token>`.
 ///
@@ -47,10 +75,11 @@ struct TokenExchangeResponse {
 /// must never leave this process by any other route — neither it nor the tokens it yields are
 /// ever logged.
 ///
-/// The token is opaque to the client: it is neither verified nor parsed here, since
-/// sessions-manager is the one that checks it. With nothing to learn its lifetime from, a fresh
-/// token is exchanged for every request that needs one. That is cheap because those requests are
-/// rare — sessions-manager connections are long-lived, and the token is only needed to open one.
+/// The token is not verified here, since sessions-manager is the one that checks it. Its `exp`
+/// is read only to decide how long to reuse it, which lets a reconnect ride out a cloud outage
+/// on a token that is still valid. A token whose `exp` can't be read is still sent, just never
+/// reused. The mutex is held across the exchange so that concurrent callers waiting on a cold or
+/// stale cache collapse into a single request rather than each starting one of their own.
 ///
 /// Control plane only. The data plane is authenticated through the control plane rather than
 /// alongside it: the single-use per-assignment credential the upgrade presents is minted by a
@@ -61,6 +90,7 @@ pub struct CloudTokenCredentials {
     client: reqwest::Client,
     pub(super) endpoint: Url,
     api_key: SecretString,
+    cached: Mutex<Option<CachedToken>>,
 }
 
 impl CloudTokenCredentials {
@@ -110,7 +140,27 @@ impl CloudTokenCredentials {
                 .build()?,
             endpoint,
             api_key: SecretString::from(api_key),
+            cached: Mutex::new(None),
         })
+    }
+
+    async fn authorization(&self) -> Result<HeaderValue, SessionsManagerClientError> {
+        let mut cached = self.cached.lock().await;
+
+        if let Some(token) = cached
+            .as_ref()
+            .filter(|token| token.refresh_at > Instant::now())
+        {
+            return Ok(token.header.clone());
+        }
+
+        let header = self.exchange().await?;
+        *cached = token_reuse(&header).map(|reuse| CachedToken {
+            header: header.clone(),
+            refresh_at: Instant::now() + reuse,
+        });
+
+        Ok(header)
     }
 
     /// Exchanges the API key for a token, returned as a complete `Bearer <token>` header value
@@ -154,6 +204,28 @@ impl CloudTokenCredentials {
     }
 }
 
+/// How long the token in `header` may be reused, or [`None`] when it shouldn't be.
+///
+/// Reads `exp` from the JWT payload *without verifying the signature*: the client holds no key to
+/// verify it with, and sessions-manager verifies the token anyway. A claim this client mis-trusts
+/// therefore costs at most an ill-timed exchange, and [`MAX_TOKEN_REUSE`] bounds how long a bogus
+/// one can keep a token in use.
+fn token_reuse(header: &HeaderValue) -> Option<Duration> {
+    let token = header.to_str().ok()?.strip_prefix("Bearer ")?;
+    let [_header, payload, _signature] = token.split('.').collect::<Vec<_>>()[..] else {
+        return None;
+    };
+    let TokenClaims { exp } =
+        serde_json::from_slice(&BASE64_URL_SAFE_NO_PAD.decode(payload).ok()?).ok()?;
+
+    let refresh_at = SystemTime::UNIX_EPOCH
+        .checked_add(Duration::from_secs(exp))?
+        .checked_sub(TOKEN_REFRESH_MARGIN)?;
+    let reuse = refresh_at.duration_since(SystemTime::now()).ok()?;
+
+    Some(reuse.min(MAX_TOKEN_REUSE))
+}
+
 /// Whether the API key may be sent to `url`. It is long-lived and travels in the request body,
 /// so anything but TLS exposes it to the network; plain HTTP is tolerated only on loopback,
 /// where there is no network to expose it to (tests, or a locally-run app-server).
@@ -185,7 +257,7 @@ impl CredentialProvider for CloudTokenCredentials {
     ) -> BoxFuture<'_, Result<HeaderMap, SessionsManagerClientError>> {
         async move {
             let mut headers = HeaderMap::new();
-            headers.insert(reqwest::header::AUTHORIZATION, self.exchange().await?);
+            headers.insert(reqwest::header::AUTHORIZATION, self.authorization().await?);
             Ok(headers)
         }
         .boxed()
@@ -293,9 +365,29 @@ pub(super) mod tests {
         }
     }
 
-    /// A token endpoint response carrying `token`, which the client passes on without reading.
+    /// A token endpoint response carrying `token`.
     pub(in crate::credentials) fn token(token: &str) -> Value {
         json!({ "token": token })
+    }
+
+    /// A JWT expiring `exp` seconds after the epoch. Only the payload is ever read, and the
+    /// signature never checked, so it needs no key.
+    fn jwt_expiring_at(exp: u64) -> String {
+        let payload =
+            BASE64_URL_SAFE_NO_PAD.encode(json!({ "sub": "org-1", "exp": exp }).to_string());
+        format!("eyJhbGciOiJFUzI1NiJ9.{payload}.c2lnbmF0dXJl")
+    }
+
+    fn jwt_expiring_in(expires_in: Duration) -> String {
+        let exp = (SystemTime::now() + expires_in)
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        jwt_expiring_at(exp)
+    }
+
+    fn bearer_value(token: &str) -> HeaderValue {
+        HeaderValue::try_from(format!("Bearer {token}")).unwrap()
     }
 
     fn bearer(headers: &HeaderMap) -> &HeaderValue {
@@ -321,10 +413,64 @@ pub(super) mod tests {
         assert_eq!(bearer(&headers), "Bearer abc");
     }
 
-    /// Whatever the token is, including something that is not a JWT, is sent as-is: judging it
-    /// is up to sessions-manager.
+    /// A token whose expiry is readable is reused, so a reconnect while the cloud is unreachable
+    /// still has a credential to present.
     #[tokio::test]
-    async fn every_request_exchanges_a_fresh_opaque_token() {
+    async fn a_token_is_reused_until_shortly_before_it_expires() {
+        let token = jwt_expiring_in(Duration::from_secs(600));
+        let endpoint = TokenEndpoint::start([(StatusCode::OK, self::token(&token))]).await;
+        let credentials = endpoint.credentials();
+
+        let first = credentials.control_plane_headers().await.unwrap();
+        let second = credentials.control_plane_headers().await.unwrap();
+
+        assert_eq!(endpoint.exchanges(), 1, "the cached token should be reused");
+        assert_eq!(bearer(&first), bearer(&second));
+    }
+
+    /// The first token is already inside [`TOKEN_REFRESH_MARGIN`], so it is used once and then
+    /// replaced, and the replacement is reused like any fresh token.
+    #[tokio::test]
+    async fn a_token_near_expiry_is_replaced_once() {
+        let endpoint = TokenEndpoint::start([
+            (
+                StatusCode::OK,
+                token(&jwt_expiring_in(TOKEN_REFRESH_MARGIN / 2)),
+            ),
+            (
+                StatusCode::OK,
+                token(&jwt_expiring_in(Duration::from_secs(600))),
+            ),
+        ])
+        .await;
+        let credentials = endpoint.credentials();
+
+        let expiring = credentials.control_plane_headers().await.unwrap();
+        let replaced = credentials.control_plane_headers().await.unwrap();
+        let reused = credentials.control_plane_headers().await.unwrap();
+
+        assert_eq!(endpoint.exchanges(), 2);
+        assert_ne!(bearer(&expiring), bearer(&replaced));
+        assert_eq!(bearer(&replaced), bearer(&reused));
+    }
+
+    #[test]
+    fn reuse_is_capped_whatever_the_token_claims() {
+        let far_future = bearer_value(&jwt_expiring_in(Duration::from_secs(30 * 24 * 60 * 60)));
+
+        assert_eq!(token_reuse(&far_future), Some(MAX_TOKEN_REUSE));
+    }
+
+    /// An `exp` past what [`SystemTime`] can represent must not panic the agent or intproxy.
+    #[test]
+    fn an_unrepresentable_expiry_is_never_reused() {
+        assert_eq!(token_reuse(&bearer_value(&jwt_expiring_at(u64::MAX))), None);
+    }
+
+    /// Whatever the token is, including something that is not a JWT, is sent as-is: judging it
+    /// is up to sessions-manager. Without a readable expiry it is just never reused.
+    #[tokio::test]
+    async fn a_token_without_a_readable_expiry_is_sent_but_not_reused() {
         let endpoint = TokenEndpoint::start([
             (StatusCode::OK, token("first")),
             (StatusCode::OK, token("not.a.jwt")),
