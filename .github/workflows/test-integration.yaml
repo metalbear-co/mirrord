@@ -36,10 +36,8 @@ jobs:
         include:
           - arch: amd64
             runner: ${{ inputs.runner }}
-            artifact: ci-runner-image
           - arch: arm64
             runner: ${{ inputs.runner_arm }}
-            artifact: ci-runner-image-arm64
     name: integration-tests (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     env:
@@ -54,7 +52,6 @@ jobs:
       - uses: ./.github/actions/provide-ci-runner
         with:
           built: ${{ inputs.runner_image_built }}
-          artifact: ${{ matrix.artifact }}
       - name: build test apps
         uses: ./.github/actions/run-in-ci-runner
         with:

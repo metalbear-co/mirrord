@@ -6,10 +6,6 @@ inputs:
     description: "Whether the image comes from an uploaded artifact to load, rather than a published one to pull."
     required: false
     default: "false"
-  artifact:
-    description: "Name of the uploaded image artifact to load. Each architecture has its own."
-    required: false
-    default: "ci-runner-image"
   image:
     description: "Published image to pull when there is no artifact to load."
     required: false
@@ -25,7 +21,7 @@ runs:
       if: ${{ inputs.built == 'true' }}
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
-        name: ${{ inputs.artifact }}
+        name: ci-runner-image-${{ runner.arch }}
         path: /tmp
     - name: Log in to GHCR
       if: ${{ inputs.built != 'true' }}
