@@ -33,7 +33,10 @@ use crate::{
         api::{ControlPlaneApi, ControlPlaneEndpoint},
         verify_event_stream,
     },
-    credentials::{CredentialProvider, NoCredentials, credentials_from_env},
+    credentials::{
+        CredentialProvider, LoginToken, NoCredentials, credentials_from_env,
+        intproxy_credentials_from_env,
+    },
     error::SessionsManagerClientError,
     retry::with_deadline,
 };
@@ -79,10 +82,19 @@ impl DirectTransport {
         })
     }
 
-    /// Reaches the sessions-manager at [`SESSIONS_MANAGER_URL_ENV`], with the shared secret the
-    /// environment configures, if any.
+    /// Reaches the sessions-manager at [`SESSIONS_MANAGER_URL_ENV`] as an agent, with the shared
+    /// secret and the API key the environment configures, if any.
     pub fn from_env() -> Result<Self, SessionsManagerClientError> {
         Ok(Self::new(base_url_from_env()?)?.with_credentials(credentials_from_env()?))
+    }
+
+    /// Reaches the sessions-manager at [`SESSIONS_MANAGER_URL_ENV`] as an intproxy, with the
+    /// shared secret the environment configures, if any, and the developer's `login_token`.
+    pub fn intproxy_from_env(
+        login_token: Option<&LoginToken>,
+    ) -> Result<Self, SessionsManagerClientError> {
+        Ok(Self::new(base_url_from_env()?)?
+            .with_credentials(intproxy_credentials_from_env(login_token)?))
     }
 
     pub fn with_credentials(mut self, credentials: Arc<dyn CredentialProvider>) -> Self {

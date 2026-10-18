@@ -9,12 +9,13 @@
 
 use std::{
     collections::BTreeMap,
-    fmt, io,
+    io,
     path::{Path, PathBuf},
     sync::LazyLock,
 };
 
 use chrono::{DateTime, Utc};
+use mirrord_sessions_manager_client::LoginToken;
 use serde::{Deserialize, Serialize};
 
 use super::update_owner_only_at_path;
@@ -44,25 +45,6 @@ pub(crate) struct StoredLoginToken {
     pub(crate) email: String,
     /// The token's `exp` claim.
     pub(crate) expires_at: DateTime<Utc>,
-}
-
-/// A signed login token.
-///
-/// Tokens must never appear in logs, so [`fmt::Debug`] does not print it.
-#[derive(Serialize, Deserialize)]
-#[serde(transparent)]
-pub(crate) struct LoginToken(String);
-
-impl From<String> for LoginToken {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-impl fmt::Debug for LoginToken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("<redacted>")
-    }
 }
 
 impl AuthStore {
@@ -97,6 +79,39 @@ impl AuthStore {
         .await?;
 
         Ok(())
+    }
+
+    /// The login token an intproxy presents to a sessions-manager that trusts `issuer`, or
+    /// [`None`] when there is no unexpired one.
+    ///
+    /// A developer may be logged in to several organizations at one issuer, while a session runs
+    /// in one. Every login lasts as long, so the token that expires last is the one from the
+    /// latest `mirrord login`, which is how a developer picks the organization.
+    ///
+    /// A store that cannot be read as one counts as empty, the same as [`Self::save`] treats it.
+    pub(crate) async fn login_token(issuer: &str) -> io::Result<Option<LoginToken>> {
+        let Some(path) = AUTH_STORE_PATH.as_deref() else {
+            return Ok(None);
+        };
+        let store = match tokio::fs::read(path).await {
+            Ok(contents) => serde_json::from_slice::<Self>(&contents).unwrap_or_else(|error| {
+                tracing::warn!(%error, path = %path.display(), "Ignoring an unreadable login token store");
+                Self::default()
+            }),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+
+        Ok(store.latest(issuer, Utc::now()))
+    }
+
+    fn latest(mut self, issuer: &str, now: DateTime<Utc>) -> Option<LoginToken> {
+        self.issuers
+            .remove(issuer)?
+            .into_values()
+            .filter(|token| token.expires_at > now)
+            .max_by_key(|token| token.expires_at)
+            .map(|token| token.token)
     }
 
     /// Inserts `token` and drops every token that is expired at `now`.
@@ -146,11 +161,7 @@ mod tests {
             .iter()
             .flat_map(|(issuer, organizations)| {
                 organizations.iter().map(|(organization, token)| {
-                    (
-                        issuer.as_str(),
-                        organization.as_str(),
-                        token.token.0.as_str(),
-                    )
+                    (issuer.as_str(), organization.as_str(), token.token.as_str())
                 })
             })
             .collect()

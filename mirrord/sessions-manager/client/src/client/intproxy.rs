@@ -11,6 +11,7 @@ use tokio::time::Instant;
 use crate::{
     client::validate_scope,
     control_plane::subscriber::ControlPlaneSubscriber,
+    credentials::LoginToken,
     error::SessionsManagerClientError,
     retry::{RetryBudget, with_deadline},
     transport::{DirectTransport, SessionsManagerTransport},
@@ -28,6 +29,14 @@ pub struct SessionsManagerConnectInfo {
     pub user_session_id: String,
     /// Optional replica constraint for routing this connection.
     pub replica_filter: Option<ReplicaId>,
+    /// The developer's `mirrord login` token, with which a standalone sessions-manager
+    /// authenticates the intproxy. The CLI reads it from its token store, because the intproxy
+    /// may run where that store is not, such as in a container.
+    ///
+    /// [`None`] for a sessions-manager reached through the operator, which authenticates with the
+    /// user's kubeconfig instead, and when the developer has not logged in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login_token: Option<LoginToken>,
 }
 
 /// Connects an intproxy to the data plane assigned by sessions-manager.
@@ -44,7 +53,8 @@ impl IntproxyClient<DirectTransport> {
     pub fn new(
         connect_info: SessionsManagerConnectInfo,
     ) -> Result<Self, SessionsManagerClientError> {
-        Self::with_transport(connect_info, DirectTransport::from_env()?)
+        let transport = DirectTransport::intproxy_from_env(connect_info.login_token.as_ref())?;
+        Self::with_transport(connect_info, transport)
     }
 }
 
