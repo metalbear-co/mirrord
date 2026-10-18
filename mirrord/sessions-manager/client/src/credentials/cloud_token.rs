@@ -124,9 +124,13 @@ impl CloudTokenCredentials {
             Err(VarError::NotPresent) => METALBEAR_CLOUD_URL_DEFAULT.to_owned(),
             Err(error) => return Err(error.into()),
         };
-        let baggage_session = std::env::var(METALBEAR_CLOUD_BAGGAGE_SESSION_ENV)
-            .ok()
-            .filter(|session| !session.trim().is_empty());
+        // An unreadable session must fail loudly: ignoring it would route the exchange to the
+        // deployed app-server while the developer waits on their local one.
+        let baggage_session = match std::env::var(METALBEAR_CLOUD_BAGGAGE_SESSION_ENV) {
+            Ok(session) => Some(session).filter(|session| !session.trim().is_empty()),
+            Err(VarError::NotPresent) => None,
+            Err(error) => return Err(error.into()),
+        };
 
         Self::new(&cloud_url, api_key)?
             .with_baggage_session(baggage_session.as_deref())
