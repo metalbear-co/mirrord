@@ -431,6 +431,8 @@ jobs:
     uses: ./.github/workflows/test-integration.yaml
     with:
       runner: ${{ needs.plan.outputs.runner_16 }}
+      runner_arm: ${{ needs.plan.outputs.runner_8_arm }}
+      rust_toolchain: ${{ needs.plan.outputs.rust_toolchain }}
       runner_image_built: ${{ needs.build-ci-runner.outputs.built == 'true' }}
 
   macos_tests:

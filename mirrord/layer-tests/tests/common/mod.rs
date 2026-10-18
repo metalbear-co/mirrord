@@ -183,6 +183,8 @@ pub enum Application {
     DynamicApp(String, Vec<String>),
     /// Go app that only checks whether Linux pidfd syscalls are supported.
     GoIssue2988(GoVersion),
+    /// Go app that maps an anonymous page with a raw `mmap` syscall and writes to it.
+    GoIssue5092(GoVersion),
     NodeMakeConnections,
     NodeIssue3456,
     /// Node app started via `sh` with stdin closed before the `exec`, reproducing how Next.js
@@ -400,6 +402,9 @@ impl Application {
             Application::GoIssue2988(version) => {
                 format!("tests/apps/issue2988/{version}.go_test_app")
             }
+            Application::GoIssue5092(version) => {
+                format!("tests/apps/issue5092/{version}.go_test_app")
+            }
             Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
             Application::Connectx => String::from("tests/apps/connectx/out.c_test_app"),
             Application::DnsSd => String::from("tests/apps/dns_sd/out.c_test_app"),
@@ -561,6 +566,7 @@ impl Application {
             | Application::RustIssue2438
             | Application::RustIssue3248
             | Application::GoIssue2988(..)
+            | Application::GoIssue5092(..)
             | Application::DlopenCgo
             | Application::Connectx
             | Application::DnsSd
@@ -675,6 +681,7 @@ impl Application {
             | Application::DynamicApp(..)
             | Application::NodeIssue4622
             | Application::GoIssue2988(..)
+            | Application::GoIssue5092(..)
             | Application::NodeMakeConnections
             | Application::DoubleListen
             | Application::PosixSpawnSharedSockets

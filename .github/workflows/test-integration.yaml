@@ -8,6 +8,15 @@ on:
         required: false
         type: string
         default: "blacksmith-16vcpu-ubuntu-2404"
+      runner_arm:
+        description: "arm64 runner label for the native Linux arm64 job. Callers pass the one `plan` picked."
+        required: false
+        type: string
+        default: "blacksmith-8vcpu-ubuntu-2404-arm"
+      rust_toolchain:
+        description: "Rust toolchain for the native Linux arm64 job, which runs outside the CI runner image."
+        required: true
+        type: string
       runner_image_built:
         description: "Whether the runner image comes from an uploaded artifact rather than the published one."
         required: false
@@ -156,3 +165,47 @@ jobs:
           name: intproxy_logs_linux
           path: /tmp/intproxy_logs/linux
           retention-days: 2
+
+  # The CI runner image is amd64-only, so arm64 runs natively. Only covers tests for arm64-specific
+  # code paths, such as the Go syscall hook in `layer-go/src/linux_aarch64.rs`.
+  integration-tests-arm64:
+    runs-on: ${{ inputs.runner_arm }}
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord
+      MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/libmirrord_layer.so
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - run: rm rust-toolchain.toml
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+        with:
+          cache: false
+          toolchain: ${{ inputs.rust_toolchain }}
+      - name: Rust cache
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
+        with:
+          shared-key: integration-arm64
+      - name: Install Protoc
+        uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
+        with:
+          tool: cargo-nextest
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version: "1.25"
+          cache: false
+      - run: cd mirrord/layer-tests/tests/apps/issue5092 && go build -o 25.go_test_app
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version: "1.26"
+          cache: false
+      - run: cd mirrord/layer-tests/tests/apps/issue5092 && go build -o 26.go_test_app
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version: "1.27"
+          cache: false
+      - run: cd mirrord/layer-tests/tests/apps/issue5092 && go build -o 27.go_test_app
+      - run: cargo build -p mirrord-layer -p mirrord
+      - run: cargo nextest run -p mirrord-layer-tests --no-default-features --test issue5092
