@@ -81,6 +81,7 @@ enum RemoteKillResult {
     Unavailable,
 }
 
+#[mirrord_macros::boxed_future]
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 pub async fn session_command(args: SessionArgs) -> Result<(), CliError> {
     let SessionArgs { common, command } = args;
@@ -91,6 +92,7 @@ pub async fn session_command(args: SessionArgs) -> Result<(), CliError> {
     }
 }
 
+#[mirrord_macros::boxed_future]
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 pub async fn kill_command(args: KillArgs) -> Result<(), CliError> {
     delete_command(&args.common, args.delete).await

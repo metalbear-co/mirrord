@@ -23,7 +23,7 @@ use mirrord_config::{
             IncomingMode,
             http_filter::{HttpFilterConfig, HttpFilterFileConfig},
         },
-        split_queues::{QueueMode, SplitQueuesConfig},
+        split_queues::{QueueKind, QueueMode, SplitQueuesConfig},
     },
     target::{Target, TargetType, deployment::DeploymentTarget},
 };
@@ -771,6 +771,13 @@ fn apply_config_patch(
     patch: serde_json::Value,
     key: &EnvKey,
 ) -> Result<LayerConfig, ConfigPatchErrorKind> {
+    let generated_kafka_splits = config
+        .feature
+        .split_queues
+        .of_kind(QueueKind::Kafka)
+        .cloned()
+        .collect::<Vec<_>>();
+
     let mut layer_config_json = patchable(config, key).map_err(ConfigPatchErrorKind::Serialize)?;
     json_patch::merge(&mut layer_config_json, &patch);
 
@@ -782,6 +789,20 @@ fn apply_config_patch(
     let mut context = ConfigContext::default().strict_env(true);
     let mut config = file_config.generate_config(&mut context)?;
     config.key = key.clone();
+
+    // A Kafka branch serves every Kafka queue, so the Kafka splits the mode generated give way.
+    if config.feature.kafka_branch {
+        config.feature.split_queues = SplitQueuesConfig::from_splits(
+            config
+                .feature
+                .split_queues
+                .splits()
+                .iter()
+                .filter(|split| generated_kafka_splits.contains(split).not())
+                .cloned(),
+        );
+    }
+
     config.verify(&mut context)?;
 
     Ok(config)
@@ -1499,6 +1520,19 @@ mod tests {
         config.select_services(&[]).unwrap();
 
         config.validate_windows(false).unwrap();
+    }
+
+    #[test]
+    fn windows_validation_rejects_selected_container_services() {
+        let mut config = windows_validation_fixture();
+        config
+            .select_services(&["exec".to_owned(), "zeta-container".to_owned()])
+            .unwrap();
+
+        assert!(matches!(
+            config.validate_windows(false),
+            Err(WindowsSupportError::Container(name)) if &*name == "zeta-container"
+        ));
     }
 
     #[test]

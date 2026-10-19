@@ -17,11 +17,17 @@ use mirrord_progress::{Progress, ProgressTracker};
 ///
 /// Finishing it finishes the root too, task first. `execute` finishes it before the child first
 /// runs, so no spinner is left redrawing over what the child prints.
+///
+/// After that handoff, `execute` may still print a line (a layer loaded on resume reports ready
+/// later). Line-based progress prints it; a spinner tree drops it, since printing through the
+/// tree redraws it over the child's output.
 pub(crate) struct ProcessHandoffProgress<'a> {
     task: ProgressTracker,
     /// Finished right after `task`, on its first success. [`None`] once finished, and in
     /// subtasks, which never own the root.
     root: Option<&'a mut ProgressTracker>,
+    /// Whether the console belongs to the child now.
+    handed_off: bool,
 }
 
 impl<'a> ProcessHandoffProgress<'a> {
@@ -30,6 +36,7 @@ impl<'a> ProcessHandoffProgress<'a> {
         Self {
             task: root.subtask(text),
             root: Some(root),
+            handed_off: false,
         }
     }
 }
@@ -39,6 +46,7 @@ impl Progress for ProcessHandoffProgress<'_> {
         Self {
             task: self.task.subtask(text),
             root: None,
+            handed_off: self.handed_off,
         }
     }
 
@@ -46,6 +54,7 @@ impl Progress for ProcessHandoffProgress<'_> {
         self.task.success(msg);
         if let Some(root) = self.root.take() {
             root.success(None);
+            self.handed_off = true;
         }
     }
 
@@ -66,6 +75,9 @@ impl Progress for ProcessHandoffProgress<'_> {
     }
 
     fn print(&self, msg: &str) {
+        if self.handed_off && matches!(self.task, ProgressTracker::SpinnerProgress(_)) {
+            return;
+        }
         self.task.print(msg);
     }
 

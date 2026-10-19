@@ -135,6 +135,7 @@ fn stream_scope(
 
 /// Streams interception events for a session key, or for every session, from the operator to
 /// stdout as JSON.
+#[mirrord_macros::boxed_future]
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
 pub(crate) async fn subscribe_command(args: SubscribeArgs) -> CliResult<()> {
     let mut cfg_context = ConfigContext::default().override_envs(args.as_env_vars());

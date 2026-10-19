@@ -10,6 +10,9 @@ static mut FN_ASMCGOCALL: Option<VoidFn> = None;
 
 /// asmcgocall can only pass a pointer argument, so it sends us the SP
 /// which layouts to this struct.
+///
+/// The fields mirror the `Syscall6.abi0` stack frame: the syscall number and its six arguments,
+/// followed by the `r1` result slot.
 #[repr(C)]
 struct SyscallArgs {
     syscall: i64,
@@ -19,12 +22,18 @@ struct SyscallArgs {
     arg4: i64,
     arg5: i64,
     arg6: i64,
+    /// Full 64-bit result of the handler. `runtime.asmcgocall` returns `int32`, so its return
+    /// value cannot carry results such as `mmap` addresses (see
+    /// [#5092](https://github.com/metalbear-co/mirrord/issues/5092)); the detour reads this slot
+    /// instead.
+    result: i64,
 }
 
-/// asmcgocall can pass a pointer, so this is a conversion call to `c_abi_syscall6_handler`
-unsafe extern "C" fn mirrord_syscall_handler(syscall_struct: *const SyscallArgs) -> i64 {
+/// asmcgocall can pass a pointer, so this is a conversion call to `c_abi_syscall6_handler`.
+/// The result is written to [`SyscallArgs::result`].
+unsafe extern "C" fn mirrord_syscall_handler(syscall_struct: *mut SyscallArgs) {
     unsafe {
-        c_abi_syscall6_handler(
+        (*syscall_struct).result = c_abi_syscall6_handler(
             (*syscall_struct).syscall,
             (*syscall_struct).arg1,
             (*syscall_struct).arg2,
@@ -32,7 +41,7 @@ unsafe extern "C" fn mirrord_syscall_handler(syscall_struct: *const SyscallArgs)
             (*syscall_struct).arg4,
             (*syscall_struct).arg5,
             (*syscall_struct).arg6,
-        )
+        );
     }
 }
 
@@ -56,10 +65,11 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "adrp    x8, {asmcgocall}",
         "ldr     x8, [x8, :lo12:{asmcgocall}]",
         "blr     x8",
-        // result is in x0
         // clean frame, this is a bit ugly - consider doing it at the end and just adjusting the return code offsets.
         "ldp x29, x30, [sp, -0x8]",
         "add sp, sp ,0x10",
+        // load the full 64-bit result from `SyscallArgs::result` (original sp+0x40)
+        "ldr x0, [sp, 0x40]",
         // check return code
         "cmn x0, 0xfff",
         // jump to success if return code == 0

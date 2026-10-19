@@ -66,6 +66,7 @@ pub(crate) enum AgentConnector {
 }
 
 impl AgentConnector {
+    #[mirrord_macros::boxed_future]
     pub async fn into_client(self) -> Result<MirrordClient, ClientError> {
         MirrordClient::new(
             self,

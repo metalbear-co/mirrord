@@ -31,8 +31,8 @@
                         fenix = inputs.fenix.packages.${system};
 
                         toolchainName = {
-                          name = "nightly-2026-08-13";
-                          sha256 = "sha256-Ki4L7dIE4vXNJE2vTI+REJQ/cYSehBASKPocAFeDkQk=";
+                          name = "1.99.0";
+                          sha256 = "sha256-zm3dyIY2T414ZRR3EhLOvptzG6gta4WZUcawzMUWtqI=";
                         };
 
                         components = with fenix.fromToolchainName toolchainName; [

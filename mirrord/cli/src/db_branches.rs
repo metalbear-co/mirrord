@@ -199,6 +199,7 @@ impl From<MongodbBranchDatabase> for BranchInfo {
     }
 }
 
+#[mirrord_macros::boxed_future]
 pub async fn db_branches_command(args: DbBranchesArgs) -> CliResult<()> {
     match &args.command {
         DbBranchesCommand::Status { names } => status_command(&args, names.as_slice()).await,

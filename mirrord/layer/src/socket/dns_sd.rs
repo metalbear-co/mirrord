@@ -71,7 +71,7 @@ use std::{
 
 use libc::{c_char, c_void, sockaddr, sockaddr_in, sockaddr_in6};
 use mirrord_layer_lib::{
-    detour::{Detour, DetourGuard},
+    detour::DetourGuard,
     error::{HookError, getaddrinfo_error_code},
     mutex::Mutex,
     setup::setup,
@@ -313,10 +313,7 @@ impl RemoteQuery {
         // `getaddrinfo` without a service), only the DNS filters without a port apply.
         let unqualified = name.strip_suffix('.').unwrap_or(name);
         if unqualified.parse::<IpAddr>().is_ok()
-            || !matches!(
-                setup().dns_selector().check_query(unqualified, 0),
-                Detour::Success(())
-            )
+            || !matches!(setup().dns_selector().check_query(unqualified, 0), Ok(()))
         {
             return None;
         }

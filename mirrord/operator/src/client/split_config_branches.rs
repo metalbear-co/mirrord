@@ -294,6 +294,7 @@ mod tests {
                 turbopuffer_options: None,
                 generic_options: None,
                 migrations: None,
+                dedicated_namespace_key: None,
             },
             status: None,
         }
@@ -314,6 +315,7 @@ mod tests {
                 port: Some(5432),
                 database: Some(database.to_owned()),
             }),
+            source_names: Vec::new(),
         });
         branch
     }

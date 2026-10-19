@@ -17,6 +17,7 @@ edition.workspace = true
 workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]
+rstest.workspace = true
 winapi.workspace = true
 
 [lib]
