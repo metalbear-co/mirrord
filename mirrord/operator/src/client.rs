@@ -76,7 +76,7 @@ use crate::{
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
-            branch_database::{BranchDatabase, BranchDatabaseSpec},
+            branch_database::{BranchDatabase, BranchDatabaseSpec, dedicated_namespace_name},
             mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase,
             pg::PgBranchDatabase,
@@ -1029,6 +1029,28 @@ where
                 .require_feature(NewOperatorFeature::DbBranchProfiles)?;
         }
 
+        // Same fail-fast for `namespace`: an older operator's CRD schema prunes
+        // `dedicatedNamespaceKey`, so the branch would silently run in the target's namespace.
+        let dedicated_namespace = layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| branch_config.base().is_some_and(|base| base.namespace));
+        if dedicated_namespace {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchDedicatedNamespace)?;
+
+            if !layer_config.key.is_provided() {
+                subtask.warning(&format!(
+                    "`feature.db_branches[].namespace` is set without a `key`, so this run's \
+                     branches get a namespace of their own (`{}`) that the next run will not \
+                     reuse; set `key` to keep one namespace per key",
+                    dedicated_namespace_name(layer_config.key.as_str()),
+                ));
+            }
+        }
+
         // Same fail-fast for a generic branch's copy Job: an older operator's CRD schema would
         // prune `genericOptions.copy` and silently run the branch empty.
         if layer_config.feature.db_branches.iter().any(|branch_config| {
@@ -1265,6 +1287,23 @@ where
                 }
             }
 
+            // Where a branch runs is fixed when it is created, so a session reusing it must ask
+            // for the same placement (see `check_attach_namespace`).
+            let requested_namespace_keys: HashMap<String, Option<String>> = create_params
+                .iter()
+                .map(|(name, params)| (name.clone(), params.spec.dedicated_namespace_key.clone()))
+                .collect();
+            for (name, branch) in existing.ready.iter().chain(existing.pending.iter()) {
+                if let Some(requested) = requested_namespace_keys.get(name) {
+                    database_branches::check_attach_namespace(
+                        branch,
+                        requested.as_deref(),
+                        api_namespace,
+                        &subtask,
+                    )?;
+                }
+            }
+
             // Capture the migrations this session wants per branch before `create_params` is
             // consumed. They're re-applied to every branch below (a no-op for freshly-created ones,
             // whose archive is already on the spec).
@@ -1316,6 +1355,14 @@ where
             for (name, branch) in &conflict_reused_branches {
                 if let Some(requested) = split_config_specs.get(name) {
                     check_attach_copy_mode(branch, requested)?;
+                }
+                if let Some(requested) = requested_namespace_keys.get(name) {
+                    database_branches::check_attach_namespace(
+                        branch,
+                        requested.as_deref(),
+                        api_namespace,
+                        &subtask,
+                    )?;
                 }
             }
 
