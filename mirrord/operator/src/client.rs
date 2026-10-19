@@ -80,7 +80,9 @@ use crate::{
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
-            branch_database::{BranchDatabase, BranchDatabaseSpec, dedicated_namespace_name},
+            branch_database::{
+                BranchDatabase, BranchDatabaseSpec, DatabaseDialect, dedicated_namespace_name,
+            },
             mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase,
             pg::PgBranchDatabase,
