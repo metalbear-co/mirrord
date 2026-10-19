@@ -378,8 +378,10 @@ mod tests {
         assert!(connection.is_some());
         {
             let subscriptions = transport.subscriptions.lock().unwrap();
-            assert_eq!(subscriptions.len(), 2);
-            assert_eq!(subscriptions[0], subscriptions[1]);
+            let [first, second] = subscriptions.as_slice() else {
+                panic!("expected exactly two subscriptions, got {subscriptions:?}");
+            };
+            assert_eq!(first, second);
         }
 
         tokio::time::timeout(Duration::from_secs(10), client.shutdown())
