@@ -130,7 +130,7 @@
     },
     "kube_context": {
       "title": "kube_context {#root-kube_context}",
-      "description": "Kube context to use from the kubeconfig file.\nWill use current context if not specified.\n\n```json\n{\n  \"kube_context\": \"mycluster\"\n}\n```",
+      "description": "Kube context to use from the kubeconfig file.\nIf not specified, uses `kube_context` from the global `~/.mirrord/mirrord.json`, then the\nkubeconfig's current context.\n\n```json\n{\n  \"kube_context\": \"mycluster\"\n}\n```",
       "type": [
         "string",
         "null"
