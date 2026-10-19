@@ -130,9 +130,7 @@ mod tests {
                 )
         );
         assert!(help.contains("Terminating pods may drain while replacements attach"));
-        assert!(
-            help.contains("With Enterprise or legacy installations, set `MIRRORD_CI_API_KEY`")
-        );
+        assert!(help.contains("With Enterprise or legacy installations, set `MIRRORD_CI_API_KEY`"));
         assert!(help.contains("Without the operator, no API key is required"));
     }
 
