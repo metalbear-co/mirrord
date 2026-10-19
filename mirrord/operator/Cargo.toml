@@ -47,6 +47,7 @@ crd = [
   "dep:mirrord-kube",
   "dep:semver",
   "dep:serde_json",
+  "dep:sha2",
   "dep:strum",
   "dep:strum_macros",
   "dep:thiserror",

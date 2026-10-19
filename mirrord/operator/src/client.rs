@@ -76,7 +76,7 @@ use crate::{
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
-            branch_database::{BranchDatabase, BranchDatabaseSpec},
+            branch_database::{BranchDatabase, BranchDatabaseSpec, dedicated_namespace_name},
             mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase,
             pg::PgBranchDatabase,
@@ -1024,6 +1024,28 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::DbBranchProfiles)?;
+        }
+
+        // Same fail-fast for `namespace`: an older operator's CRD schema prunes
+        // `dedicatedNamespaceKey`, so the branch would silently run in the target's namespace.
+        let dedicated_namespace = layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| branch_config.base().is_some_and(|base| base.namespace));
+        if dedicated_namespace {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchDedicatedNamespace)?;
+
+            if !layer_config.key.is_provided() {
+                subtask.warning(&format!(
+                    "`feature.db_branches[].namespace` is set without a `key`, so this run's \
+                     branches get a namespace of their own (`{}`) that the next run will not \
+                     reuse; set `key` to keep one namespace per key",
+                    dedicated_namespace_name(layer_config.key.as_str()),
+                ));
+            }
         }
 
         // Same fail-fast for a generic branch's copy Job: an older operator's CRD schema would
