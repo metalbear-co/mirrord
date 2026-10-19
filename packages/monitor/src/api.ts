@@ -11,6 +11,23 @@ import type {
 import { emitUserBlocked, emitUserSucceeded } from './analytics'
 
 const HTTP_NOT_FOUND = 404
+const HTTP_UNAUTHORIZED = 401
+const HTTP_FORBIDDEN = 403
+
+// `status` is set only when the server answered, so its absence means the request never arrived.
+export class RequestFailedError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message)
+    this.name = 'RequestFailedError'
+  }
+}
+
+export function isAuthFailure(status: number | undefined): boolean {
+  return status === HTTP_UNAUTHORIZED || status === HTTP_FORBIDDEN
+}
 
 let authToken: string | null = null
 
@@ -48,11 +65,18 @@ async function chaosErrorMessage(r: Response): Promise<string> {
 
 export const api = {
   listSessions: async (): Promise<SessionInfo[]> => {
-    const r = await fetch(withToken('/api/v2/local/sessions'), {
-      credentials: 'include',
-    })
+    let r: Response
+    try {
+      r = await fetch(withToken('/api/v2/local/sessions'), {
+        credentials: 'include',
+      })
+    } catch (err) {
+      throw new RequestFailedError(
+        err instanceof Error ? err.message : String(err),
+      )
+    }
     if (!r.ok) {
-      throw new Error(`Failed to fetch sessions: ${r.status} ${r.statusText}`)
+      throw new RequestFailedError(`${r.status} ${r.statusText}`, r.status)
     }
     const data = (await r.json()) as SessionInfo[]
     return data

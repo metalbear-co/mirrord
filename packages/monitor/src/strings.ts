@@ -89,6 +89,15 @@ export const strings = {
     title: 'Kubernetes access was lost',
     help: 'Check your Kubernetes credentials. You may need to re-authenticate. mirrord will retry automatically.',
   },
+  uiServer: {
+    title: 'mirrord ui is not responding',
+    unreachable:
+      'The mirrord ui server stopped answering, so nothing on this page is live. It shuts down with the mirrord session that started it.',
+    unauthorized:
+      'This tab is no longer authorized. Open mirrord ui again from the CLI to get a fresh link.',
+    statusPrefix: 'The mirrord ui server answered with',
+    retrying: 'Retrying every couple of seconds',
+  },
   session: {
     kill: 'Stop session',
     operator: 'Operator',

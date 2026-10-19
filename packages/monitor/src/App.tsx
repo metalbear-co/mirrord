@@ -21,7 +21,7 @@ import {
   emitUserBlocked,
   emitUserSucceeded,
 } from './analytics'
-import { api } from './api'
+import { api, isAuthFailure, RequestFailedError } from './api'
 import { selectKubeContext, useKubeContexts } from './contextStore'
 import { collectEvents } from './eventsStore'
 import { useTelemetryPref } from './hooks/useTelemetryPref'
@@ -37,6 +37,17 @@ import { withPreviewSessions } from './utils'
 const LOCAL_POLL_INTERVAL = 2000
 const OPERATOR_POLL_INTERVAL = 5000
 const EXTENSION_POLL_INTERVAL = 4000
+
+interface ServerFailure {
+  message: string
+  status: number | undefined
+}
+
+function serverFailureHelp(failure: ServerFailure): string {
+  if (isAuthFailure(failure.status)) return strings.uiServer.unauthorized
+  if (failure.status === undefined) return strings.uiServer.unreachable
+  return `${strings.uiServer.statusPrefix} ${failure.message}${strings.common.period}`
+}
 
 /**
  * Theme is owned by the `mirrord-ui` shell (so a single top-right toggle controls both tabs). The
@@ -79,6 +90,9 @@ export default function App({
     supportsBridge: false,
   })
   const [connected, setConnected] = useState(false)
+  const [serverFailure, setServerFailure] = useState<ServerFailure | null>(null)
+  // Edge trigger: one report per outage, not one per two-second poll.
+  const uiServerDownRef = useRef(false)
   const [loading, setLoading] = useState(true)
   const [telemetryPref, setTelemetryPref] = useTelemetryPref()
 
@@ -162,11 +176,31 @@ export default function App({
           if (cancelled) return
           setSessions(data)
           setConnected(true)
+          setServerFailure(null)
+          if (uiServerDownRef.current) {
+            uiServerDownRef.current = false
+            emitUserSucceeded('ui_server_recovered')
+          }
         })
         .catch((err: unknown) => {
           if (cancelled) return
           console.error(err)
           setConnected(false)
+          const status =
+            err instanceof RequestFailedError ? err.status : undefined
+          const message = err instanceof Error ? err.message : String(err)
+          setServerFailure((prev) =>
+            prev?.message === message && prev.status === status
+              ? prev
+              : { message, status },
+          )
+          if (!uiServerDownRef.current) {
+            uiServerDownRef.current = true
+            emitUserBlocked('ui_server_unreachable', {
+              error: message,
+              ...(status === undefined ? {} : { status }),
+            })
+          }
         })
         .finally(() => {
           if (!cancelled) setLoading(false)
@@ -440,6 +474,21 @@ export default function App({
         namespacesLoading={namespacesLoading}
         namespacesError={namespacesError}
       />
+      {serverFailure && (
+        <div
+          role="alert"
+          className="border-destructive/40 bg-destructive/5 flex items-start gap-3 border-b px-4 py-2.5"
+        >
+          <CloudOff className="text-destructive mt-0.5 h-4 w-4 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">{strings.uiServer.title}</p>
+            <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
+              {serverFailureHelp(serverFailure)} {strings.uiServer.retrying}
+              {strings.common.period}
+            </p>
+          </div>
+        </div>
+      )}
       <div className="flex flex-1 overflow-hidden">
         <SessionSidebar
           sessions={sessions}
