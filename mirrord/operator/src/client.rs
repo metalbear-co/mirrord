@@ -1284,6 +1284,23 @@ where
                 }
             }
 
+            // Where a branch runs is fixed when it is created, so a session reusing it must ask
+            // for the same placement (see `check_attach_namespace`).
+            let requested_namespace_keys: HashMap<String, Option<String>> = create_params
+                .iter()
+                .map(|(name, params)| (name.clone(), params.spec.dedicated_namespace_key.clone()))
+                .collect();
+            for (name, branch) in existing.ready.iter().chain(existing.pending.iter()) {
+                if let Some(requested) = requested_namespace_keys.get(name) {
+                    database_branches::check_attach_namespace(
+                        branch,
+                        requested.as_deref(),
+                        api_namespace,
+                        &subtask,
+                    )?;
+                }
+            }
+
             // Capture the migrations this session wants per branch before `create_params` is
             // consumed. They're re-applied to every branch below (a no-op for freshly-created ones,
             // whose archive is already on the spec).
@@ -1335,6 +1352,14 @@ where
             for (name, branch) in &conflict_reused_branches {
                 if let Some(requested) = split_config_specs.get(name) {
                     check_attach_copy_mode(branch, requested)?;
+                }
+                if let Some(requested) = requested_namespace_keys.get(name) {
+                    database_branches::check_attach_namespace(
+                        branch,
+                        requested.as_deref(),
+                        api_namespace,
+                        &subtask,
+                    )?;
                 }
             }
 

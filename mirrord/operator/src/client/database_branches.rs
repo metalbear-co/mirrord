@@ -39,6 +39,7 @@ use crate::{
             GenericOptions, GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions,
             MssqlOptions, MysqlOptions, PgAdditionalDatabase, PostgresOptions, RedisOptions,
             S3Options, SpannerOptions, SqlBranchCopyConfig, TurbopufferOptions,
+            dedicated_namespace_name,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -1027,6 +1028,47 @@ fn deterministic_branch_name(dialect: &str, target_namespace: &str, id: &str) ->
         .expect("a sha256 digest is always 32 bytes long");
     let short = u64::from_be_bytes(short_bytes);
     format!("mirrord-{dialect}-branch-{short:016x}")
+}
+
+/// A session reusing a branch must ask for the placement the branch was created with: the
+/// branch keeps running where it started, so turning `namespace` on or off for an existing id
+/// would otherwise go unnoticed. A branch shared across keys (an explicit `id`) runs in the
+/// namespace of the key that created it, which is only worth a warning.
+pub fn check_attach_namespace<P: Progress>(
+    existing: &BranchDatabase,
+    requested_key: Option<&str>,
+    api_namespace: &str,
+    progress: &P,
+) -> Result<(), OperatorApiError> {
+    let existing_key = existing.spec.dedicated_namespace_key.as_deref();
+    let name = existing.meta().name.as_deref().unwrap_or_default();
+    let id = &existing.spec.id;
+
+    match (existing_key, requested_key) {
+        (Some(existing_key), Some(requested_key)) if existing_key != requested_key => {
+            progress.warning(&format!(
+                "branch database `{name}` (id `{id}`) runs in namespace `{}`, created under \
+                 another key; this session uses it there",
+                dedicated_namespace_name(existing_key),
+            ));
+            Ok(())
+        }
+        (Some(_), Some(_)) | (None, None) => Ok(()),
+        (existing_key, _) => {
+            let placement = match existing_key {
+                Some(key) => format!("in namespace `{}`", dedicated_namespace_name(key)),
+                None => "in its target's namespace".to_owned(),
+            };
+            Err(OperatorApiError::BranchCreationFailed {
+                operation: OperatorOperation::DbBranching,
+                message: format!(
+                    "branch database `{name}` (id `{id}`) already runs {placement}, and a \
+                     running branch cannot move; delete it with `mirrord db-branches -n \
+                     {api_namespace} destroy {name}`, or give the entry another `id`"
+                ),
+            })
+        }
+    }
 }
 
 /// Outcome of [`create_branches`], kept apart so the caller can say which is which. Each branch
