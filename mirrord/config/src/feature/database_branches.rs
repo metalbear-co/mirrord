@@ -365,6 +365,43 @@ pub enum IamAuthConfig {
     },
 }
 
+impl IamAuthConfig {
+    /// The first field set to an `aws_ssm_parameter` source. The operator reads IAM credentials
+    /// from the target pod's env only, so such a field would reach it as a source kind it cannot
+    /// resolve.
+    fn ssm_parameter_field(&self) -> Option<&'static str> {
+        let fields = match self {
+            Self::AwsRds {
+                region,
+                access_key_id,
+                secret_access_key,
+                session_token,
+            } => vec![
+                ("region", region),
+                ("access_key_id", access_key_id),
+                ("secret_access_key", secret_access_key),
+                ("session_token", session_token),
+            ],
+            Self::GcpCloudSql {
+                credentials_json,
+                credentials_path,
+                project,
+            } => vec![
+                ("credentials_json", credentials_json),
+                ("credentials_path", credentials_path),
+                ("project", project),
+            ],
+        };
+        fields.into_iter().find_map(|(field, source)| {
+            matches!(
+                source,
+                Some(TargetEnvironmentVariableSource::AwsSsmParameter { .. })
+            )
+            .then_some(field)
+        })
+    }
+}
+
 /// The branch databases a session runs with. Either defined here, or taken from the
 /// `dbBranches` entries a cluster admin put on the target's `MirrordSplitConfig`, so `mirrord
 /// exec` and `mirrord up` use one definition that does not drift.
@@ -605,6 +642,16 @@ impl DatabaseBranchesConfig {
             }
             for source in branch.url_sources() {
                 source.verify()?;
+            }
+            if let Some(field) = branch
+                .iam_auth()
+                .and_then(IamAuthConfig::ssm_parameter_field)
+            {
+                return Err(ConfigError::Conflict(format!(
+                    "`feature.db_branches[].iam_auth.{field}` is an `aws_ssm_parameter` source, \
+                     but IAM credentials are read from the target pod's env only; use \
+                     `{{ \"type\": \"env\", \"variable\": ... }}` instead."
+                )));
             }
 
             match branch {
@@ -930,6 +977,24 @@ impl DatabaseBranchConfig {
 
     /// The more databases a PostgreSQL branch copies next to its own. Empty for every other
     /// engine.
+    fn iam_auth(&self) -> Option<&IamAuthConfig> {
+        match self {
+            DatabaseBranchConfig::Dynamodb(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Mariadb(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Mongodb(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Mysql(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Pg(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Clickhouse(_)
+            | DatabaseBranchConfig::Cockroachdb(_)
+            | DatabaseBranchConfig::Generic(_)
+            | DatabaseBranchConfig::Mssql(_)
+            | DatabaseBranchConfig::Redis(_)
+            | DatabaseBranchConfig::S3(_)
+            | DatabaseBranchConfig::Spanner(_)
+            | DatabaseBranchConfig::Turbopuffer(_) => None,
+        }
+    }
+
     pub fn pg_additional_databases(&self) -> &[PgAdditionalDatabaseConfig] {
         match self {
             DatabaseBranchConfig::Pg(cfg) => &cfg.additional_databases,
@@ -1087,15 +1152,20 @@ impl ConnectionSource {
         keys
     }
 
-    /// The source database a literal `value` names: the `database` param's literal, else the
-    /// path of a literal URL (`url` or the `url` param).
+    /// The source database a literal `value` names: the `database` param when its first source
+    /// is a literal, else the path of a literal URL (`url` or the `url` param) when no
+    /// `database` param is declared.
     ///
     /// The CLI moves literals into a Secret the operator never reads, so when the config sets
     /// no `name` the operator does not know the database and the app's branch URL falls back
     /// to the engine's default database (`postgres`) while the branch holds the real one.
+    ///
+    /// Only the first source counts, because it is the one the connection uses, and a declared
+    /// `database` param overrides the URL's path. A name that depends on a non-literal source,
+    /// or a percent-encoded path, yields `None`, leaving `name` unset as before.
     pub fn literal_database_name(&self) -> Option<&str> {
-        fn literal(source: &ParamSource) -> Option<&str> {
-            match source {
+        fn first_literal(sources: &Option<SingleOrVec<ParamSource>>) -> Option<&str> {
+            match sources.as_ref()?.0.first()? {
                 ParamSource::Env {
                     value: Some(value), ..
                 } => Some(value),
@@ -1111,26 +1181,20 @@ impl ConnectionSource {
                     },
             } => value.as_str(),
             Self::Url { .. } | Self::FlatUrl { .. } => return None,
-            Self::Params(config) => {
-                let params = &config.params;
-                if let Some(database) = params.database.iter().flat_map(|d| &d.0).find_map(literal)
-                {
-                    return Some(database);
-                }
-                params.url.iter().flat_map(|u| &u.0).find_map(literal)?
+            Self::Params(config) if config.params.database.is_some() => {
+                return first_literal(&config.params.database);
             }
+            Self::Params(config) => first_literal(&config.params.url)?,
         };
 
-        let rest = strip_jdbc_prefix(url).split_once("://")?.1;
-        let (authority, path) = rest.split_once('/')?;
-        // A raw `/` in the password would end the authority early; an `@` after it means the
-        // split landed inside the credentials, so the path is unknowable.
-        if path.contains('@') && !authority.contains('@') {
-            return None;
-        }
+        // Userinfo cannot hold a raw `/`, so the first `/` after the scheme ends the authority.
+        let (_authority, path) = strip_jdbc_prefix(url)
+            .split_once("://")?
+            .1
+            .split_once('/')?;
         path.split(['?', '#', '/'])
             .next()
-            .filter(|name| !name.is_empty())
+            .filter(|name| !name.is_empty() && !name.contains('%'))
     }
 
     /// Literal `value`s this connection sets, as `(env var, value)`, extras included. The
