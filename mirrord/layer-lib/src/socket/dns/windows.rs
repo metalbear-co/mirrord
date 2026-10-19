@@ -15,7 +15,7 @@ use winapi::{
 use windows_strings::PCWSTR;
 
 use crate::{
-    detour::{Bypass, Detour, OptionExt},
+    detour::{Bypass, Detour, DetourError, OptionExt},
     error::ConnectError,
     setup::setup,
     socket::dns::remote_getaddrinfo,
@@ -45,7 +45,7 @@ pub fn getaddrinfo<T: WindowsAddrInfo>(
     // Bypassing loses nothing: with this flag the system `GetAddrInfo` does the same string
     // parse the remote one would, and performs no DNS lookup of its own.
     if raw_hints.is_some_and(|hints| hints.get_flags() & AI_NUMERICHOST != 0) {
-        Detour::Bypass(Bypass::NumericHostLookup)?;
+        Err(DetourError::Bypass(Bypass::NumericHostLookup))?;
     }
 
     // Convert node to string
@@ -107,7 +107,7 @@ pub fn resolve_to_managed<T: WindowsAddrInfo>(
     // Convert response back to Windows ADDRINFO structures using trait method
     let mut managed = ManagedAddrInfo::<T>::try_from(resolved_addr)?;
     managed.apply_port(port);
-    Detour::Success(managed)
+    Ok(managed)
 }
 
 /// Safely deallocates ADDRINFOA structures that were allocated by our getaddrinfo_detour.
@@ -178,7 +178,9 @@ pub fn check_address_reachability(socket: SOCKET, remote_addr: &SocketAddr) -> D
             unsafe { WSAGetLastError() }
         );
         // on failure, GetNameInfoW sets WSALastError
-        return Detour::Error(ConnectError::AddressUnreachable(remote_addr.to_string()).into());
+        return Err(DetourError::Error(
+            ConnectError::AddressUnreachable(remote_addr.to_string()).into(),
+        ));
     }
 
     // Successfully resolved - address is reachable
@@ -188,5 +190,5 @@ pub fn check_address_reachability(socket: SOCKET, remote_addr: &SocketAddr) -> D
         unsafe { str_win::u16_buffer_to_string(PCWSTR(node_buffer.as_ptr()).as_wide()) }
     );
 
-    Detour::Success(())
+    Ok(())
 }

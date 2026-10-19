@@ -77,6 +77,7 @@ mod multicluster;
 pub(crate) mod resources;
 
 /// Handle commands related to preview environments: `mirrord preview ...`
+#[mirrord_macros::boxed_future]
 pub(crate) async fn preview_command(
     args: PreviewArgs,
     watch: drain::Watch,
@@ -445,6 +446,7 @@ async fn preview_start(
         incoming,
         queue_splitting: PreviewQueueSplittingConfig::from_config(
             &layer_config.feature.split_queues,
+            layer_config.feature.kafka_branch,
         ),
         db_branching: PreviewDbBranchingConfig::from_db_names(branch_db_names),
         env: PreviewEnvVarsConfig::from_config(&layer_config.feature.env).map_err(|error| {

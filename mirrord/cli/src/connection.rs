@@ -72,6 +72,7 @@ fn send_upgrade_ide_message<P: Progress>(
 /// without sessions-manager support is an error rather than a fallback, since the user asked for
 /// the operator explicitly. The client carries only the user's kubeconfig credentials, with no
 /// operator session certificate: the hosted routes are authorized by Kubernetes RBAC.
+#[mirrord_macros::boxed_future]
 async fn operator_sessions_manager_client<P, R>(
     layer_config: &LayerConfig,
     progress: &P,
@@ -99,6 +100,7 @@ where
 ///    the caller falls back to the OSS flow.
 /// 3. Otherwise, attempts to use the mirrord-operator and returns [`None`] in case mirrord-operator
 ///    is not found or its license is invalid.
+#[mirrord_macros::boxed_future]
 async fn try_connect_using_operator<P, R>(
     layer_config: &mut LayerConfig,
     progress: &P,
@@ -336,6 +338,7 @@ pub(crate) struct ConnectData {
 ///    mirrord-operator is not found or its license is invalid.
 ///
 /// Here is where we start interactions with the kubernetes API.
+#[mirrord_macros::boxed_future]
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
 pub(crate) async fn create_and_connect<R: Reporter>(
     config: &mut LayerConfig,
@@ -526,6 +529,17 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
             "requiresoperator",
         )?;
         return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
+    }
+
+    if config.feature.kafka_branch {
+        send_upgrade_ide_message(
+            progress,
+            "kafka_branch requires the mirrord operator, which is part of mirrord for Teams.",
+            "requiresoperator",
+        )?;
+        return Err(CliError::FeatureRequiresOperatorError(
+            "feature.kafka_branch".into(),
+        ));
     }
 
     // Only the operator can look the entries up on the workload's MirrordSplitConfig, so a

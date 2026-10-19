@@ -67,6 +67,7 @@ pub(crate) fn ci_api_key_available() -> CiResult<Option<CiApiKey>> {
 }
 
 /// Handle commands related to CI `mirrord ci ...`
+#[mirrord_macros::boxed_future]
 pub(crate) async fn ci_command(
     args: CiArgs,
     watch: Watch,

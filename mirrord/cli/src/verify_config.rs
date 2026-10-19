@@ -179,6 +179,7 @@ enum VerifiedConfig {
 ///   "errors": ["mirrord-config: IO operation failed with `No such file or directory (os error 2)`"]
 /// }
 /// ```
+#[mirrord_macros::boxed_future]
 pub(super) async fn verify_config(
     VerifyConfigArgs {
         ide,

@@ -51,6 +51,7 @@ const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_REJECTION_BODY_CHARS: usize = 512;
 
 /// Implementation of the `mirrord login` command.
+#[mirrord_macros::boxed_future]
 pub(crate) async fn login_command(args: LoginArgs) -> Result<(), LoginError> {
     let mut progress = ProgressTracker::from_env("mirrord login");
 

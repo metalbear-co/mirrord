@@ -68,6 +68,7 @@ pub async fn suggest_newsletter_signup<P: Progress>(user_data: &mut UserData, pr
 
 /// Attempts to open the mirrord newsletter sign-up page in the default browser.
 /// In case of failure, prints the link.
+#[mirrord_macros::boxed_future]
 pub async fn newsletter_command() {
     // open URL with param utm_source=newslettercmd
     let url = format!("{NEWSLETTER_SIGNUP_URL}cmd");

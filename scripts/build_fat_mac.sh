@@ -3,7 +3,7 @@
 # Output will be in target/universal-apple-darwin/debug/mirrord
 # Any arguments provided to this script are passed to `cargo build`.
 # If compilation fails, try running:
-# rustup target add --toolchain nightly-2026-08-13 x86_64-apple-darwin
+# rustup target add --toolchain 1.99.0 x86_64-apple-darwin
 
 set -e
 

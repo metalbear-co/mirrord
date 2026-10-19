@@ -52,6 +52,9 @@ pub struct CopyTargetSpec {
     /// copy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_key: Option<String>,
+    /// Run the copy's Kafka queues against the session key's branch broker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kafka_branch: Option<bool>,
 }
 
 /// This is the `status` field for [`CopyTargetCrd`].

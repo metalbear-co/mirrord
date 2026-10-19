@@ -15,11 +15,12 @@ use nix::{
     sys::signal::{Signal, kill},
     unistd::Pid,
 };
+#[cfg(unix)]
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    IntProxy, LayerInitializerTask,
+    IdleTimeout, IntProxy, LayerInitializerTask,
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     error::{ProxyRuntimeError, ProxyStartupError},
     layer_conn::LayerConnection,
@@ -210,9 +211,13 @@ impl FailoverStrategy {
             }
         }
 
+        let mut idle = IdleTimeout::new(first_timeout, idle_timeout);
+
         // A timeout must drain decoded registrations too; otherwise an acknowledged layer could
         // survive just because its message had not yet reached the owner.
         let exit_result: Option<Result<(), ProxyStartupError>> = loop {
+            idle.observe(failover.has_layer_connections());
+
             tokio::select! {
                 biased;
                 _ = shutdown.cancelled() => break None,
@@ -224,13 +229,7 @@ impl FailoverStrategy {
                     );
                     failover.handle_task_update(task_id, task_update).await;
                 }
-                _ = time::sleep(first_timeout), if !failover.any_connection_accepted => {
-                    break Some(Err(ProxyStartupError::ConnectionAcceptTimeout));
-                },
-                _ = time::sleep(idle_timeout), if failover.any_connection_accepted && !failover.has_layer_connections() => {
-                    tracing::info!("Reached the idle timeout with no active layer connections");
-                    break Some(Ok(()));
-                },
+                result = idle.expired(failover.any_connection_accepted) => break Some(result),
             }
         };
 
