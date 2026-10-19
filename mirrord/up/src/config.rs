@@ -192,7 +192,8 @@ pub struct CommonConfig {
     /// Kube context to use for all services, from your kubeconfig.
     ///
     /// A service's own `context` takes precedence, and `mirrord up --context` takes precedence
-    /// over both.
+    /// over both. When none is set, the global config's `kube_context` is used, then the
+    /// kubeconfig's current context.
     pub(crate) context: Option<Arc<str>>,
 }
 
@@ -897,6 +898,13 @@ impl ServiceError {
 }
 
 impl UpConfig {
+    /// Uses `context` as the common context when the config sets none.
+    pub fn default_context(&mut self, context: Option<Arc<str>>) {
+        if self.common.context.is_none() {
+            self.common.context = context;
+        }
+    }
+
     /// Verifies the config without touching the cluster, similar to
     /// what `verify_config` does for [`LayerConfig`].
     pub fn verify_services(&self, key: &EnvKey) -> Result<Vec<ServiceError>, ConfigError> {
