@@ -28,6 +28,7 @@ pub enum TuiCliError {
 }
 
 /// The `mirrord tui` command handler.
+#[mirrord_macros::boxed_future]
 pub(crate) async fn tui_command(watch: drain::Watch, user_data: &UserData) -> CliResult<()> {
     let telemetry_enabled = LayerConfig::resolve(&mut ConfigContext::default())?.telemetry;
 

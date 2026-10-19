@@ -84,12 +84,15 @@ pub enum UpError {
     Io(#[from] std::io::Error),
 
     /// Failed to parse the mirrord-up YAML configuration.
+    ///
+    /// The message already renders the parse error with its snippet, so it is not also a
+    /// `source`. Otherwise miette prints the snippet a second time, without the suggestion.
     #[error(
         "failed to parse mirrord-up config: {}",
         .0.render_with_formatter(&SuggestingFormatter)
     )]
     #[diagnostic(help("Check the YAML syntax and field names in your mirrord-up.yaml."))]
-    Parse(#[from] serde_saphyr::Error),
+    Parse(serde_saphyr::Error),
 
     /// A service configured a working directory that does not exist.
     #[error("invalid `run.directory` for service `{service}`: `{directory}` is not a directory")]
@@ -205,6 +208,12 @@ impl UpError {
     }
 }
 
+impl From<serde_saphyr::Error> for UpError {
+    fn from(error: serde_saphyr::Error) -> Self {
+        Self::Parse(error)
+    }
+}
+
 /// Formats [`serde_saphyr::Error`]s like [`DefaultMessageFormatter`], but adds the closest allowed
 /// name to unknown field and unknown value errors, so that a typo in `mirrord-up.yaml` points to
 /// its fix.
@@ -296,16 +305,26 @@ impl UpConfig {
     }
 }
 
+/// The absolute directory that holds the config file at `config_path`.
+///
+/// Uses [`dunce::canonicalize`], since `std::fs::canonicalize` returns a verbatim `\\?\C:\...`
+/// path on Windows. That never compares equal to [`std::env::current_dir`], and it is what users
+/// would see in messages.
+fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
+    dunce::canonicalize(
+        config_path
+            .parent()
+            .filter(|parent| parent.as_os_str().is_empty().not())
+            .unwrap_or(Path::new(".")),
+    )
+}
+
 /// Load, parse, and resolve local paths in a `mirrord-up.yaml` configuration file.
 pub fn load_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
     let content = std::fs::read_to_string(path)?;
     let mut config = template(&content, key)?;
     config.verify()?;
-    let config_directory = std::fs::canonicalize(
-        path.parent()
-            .filter(|parent| parent.as_os_str().is_empty().not())
-            .unwrap_or(Path::new(".")),
-    )?;
+    let config_directory = config_directory(path)?;
 
     for (service, service_config) in &mut config.services {
         let Some(directory) = &mut service_config.run.directory else {
@@ -323,7 +342,7 @@ pub fn load_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
             });
         }
         if was_relative {
-            *directory = std::fs::canonicalize(&*directory)?;
+            *directory = dunce::canonicalize(&*directory)?;
         }
     }
 
@@ -609,12 +628,7 @@ pub async fn run(
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
     let invocation_directory = std::env::current_dir()?;
-    let config_directory = std::fs::canonicalize(
-        config_path
-            .parent()
-            .filter(|parent| parent.as_os_str().is_empty().not())
-            .unwrap_or(Path::new(".")),
-    )?;
+    let config_directory = config_directory(config_path)?;
     if invocation_directory != config_directory {
         let config_name = config_path.file_name().unwrap_or(config_path.as_os_str());
         for (service, config) in &up_config.services {
@@ -762,6 +776,24 @@ mod tests {
         }
     }
 
+    /// The report shows the YAML snippet once: in the message, with its suggestion.
+    #[test]
+    fn parse_error_report_shows_the_snippet_once() {
+        let yaml = "services:\n  api:\n    default_mode: mirorr\n    run:\n      command: [x]\n";
+        let error = template(yaml, &EnvKey::Provided("key".to_owned())).unwrap_err();
+
+        let mut report = String::new();
+        miette::GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor())
+            .render_report(&mut report, &error)
+            .expect("rendering into a String can't fail");
+
+        assert_eq!(
+            report.matches("--> <input>").count(),
+            1,
+            "the parse error must not repeat as its own source:\n{report}"
+        );
+    }
+
     #[test]
     fn template_key_in_env_override() {
         let yaml = r#"
@@ -807,6 +839,30 @@ services:
         assert_eq!(
             config.services["logger"].env.r#override.as_ref().unwrap()["SESSION_KEY"],
             "debug-run"
+        );
+    }
+
+    /// A relative `run.directory` resolves to a plain absolute path, without the `\\?\` prefix
+    /// that Windows canonicalization adds.
+    #[test]
+    fn relative_run_directory_resolves_to_a_plain_path() {
+        let directory = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(directory.path().join("web")).unwrap();
+        let config_path = directory.path().join("mirrord-up.yaml");
+        std::fs::write(
+            &config_path,
+            "services:\n  api:\n    target: none\n    run:\n      directory: web\n      command: [x]\n",
+        )
+        .unwrap();
+
+        let config = load_up_config(&config_path, &EnvKey::Provided("key".to_owned())).unwrap();
+        let run_directory = config.services["api"].run.directory.as_ref().unwrap();
+        assert!(run_directory.is_absolute());
+        assert!(run_directory.ends_with("web"));
+        assert!(
+            run_directory.to_str().unwrap().starts_with(r"\\?\").not(),
+            "{} is a verbatim path",
+            run_directory.display()
         );
     }
 

@@ -174,6 +174,12 @@ RUN set -eux; \
 COPY rust-toolchain.toml ./
 RUN rustup show && rustc --version
 
+# The operator's CI also runs in this image, and the operator stays on nightly while mirrord builds
+# on stable. Keep its toolchain here, so that operator jobs don't download it again in every step.
+# Update it together with the operator's `rust-toolchain.toml`.
+ARG OPERATOR_RUST_TOOLCHAIN=nightly-2026-08-13
+RUN rustup toolchain install "$OPERATOR_RUST_TOOLCHAIN" --profile minimal --component clippy,rustfmt
+
 # The bind-mounted /workspace is owned by the host user, not root.
 RUN git config --system --add safe.directory '*'
 

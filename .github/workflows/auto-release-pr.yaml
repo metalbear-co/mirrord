@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 env:
-  PINNED_NIGHTLY: nightly-2026-08-13
+  PINNED_TOOLCHAIN: 1.99.0
 
 jobs:
   create_release_pr:
@@ -56,7 +56,7 @@ jobs:
         uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache: false
-          toolchain: ${{ env.PINNED_NIGHTLY }}
+          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           rustflags: ""
       - name: Rust cache
         if: steps.version.outputs.should-release == 'true'

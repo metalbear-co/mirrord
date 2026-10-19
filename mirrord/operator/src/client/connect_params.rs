@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt,
+    ops::Not,
 };
 
 use mirrord_config::{
@@ -177,6 +178,10 @@ pub struct ConnectParams<'a> {
         skip_serializing_if = "HashMap::is_empty"
     )]
     pub queue_modes: HashMap<&'a str, QueueMode>,
+
+    /// Run the session's Kafka queues against the key's branch broker.
+    #[serde(skip_serializing_if = "Not::not")]
+    pub kafka_branch: bool,
 
     /// User's current git branch name - may be an empty string if user is in detached head mode or
     /// another error occurred: this case handled by the operator
@@ -449,6 +454,7 @@ impl<'a> ConnectParams<'a> {
                 })
                 .collect(),
             queue_modes: config.feature.split_queues.queue_modes().collect(),
+            kafka_branch: config.feature.kafka_branch,
             branch_name,
             pg_branch_names: branch_db_names.pg,
             mysql_branch_names: branch_db_names.mysql,

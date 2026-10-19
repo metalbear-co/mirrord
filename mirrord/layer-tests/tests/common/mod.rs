@@ -125,6 +125,7 @@ pub enum Application {
     NodeFileOps,
     NodeSpawn,
     NodeCopyFile,
+    NodeStat,
     NodeIssue2903,
     GoDir(GoVersion),
     GoDirBypass(GoVersion),
@@ -156,6 +157,7 @@ pub enum Application {
     MkdirRmdir,
     Cor1734FileMode,
     SendfileEagain,
+    SendfilePartial,
     OpenFile,
     CIssue2055,
     CIssue2178,
@@ -181,6 +183,8 @@ pub enum Application {
     DynamicApp(String, Vec<String>),
     /// Go app that only checks whether Linux pidfd syscalls are supported.
     GoIssue2988(GoVersion),
+    /// Go app that maps an anonymous page with a raw `mmap` syscall and writes to it.
+    GoIssue5092(GoVersion),
     NodeMakeConnections,
     NodeIssue3456,
     /// Node app started via `sh` with stdin closed before the `exec`, reproducing how Next.js
@@ -251,6 +255,9 @@ impl Application {
             Application::SendfileEagain => {
                 String::from("tests/apps/sendfile_eagain/out.c_test_app")
             }
+            Application::SendfilePartial => {
+                String::from("tests/apps/sendfile_partial/out.c_test_app")
+            }
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
             Application::NodeHTTP
             | Application::NodeIssue2283
@@ -271,6 +278,7 @@ impl Application {
             Application::NodeFileOps
             | Application::NodeSpawn
             | Application::NodeCopyFile
+            | Application::NodeStat
             | Application::NodeIssue2903
             | Application::NodeMakeConnections => String::from("node"),
             Application::GoDir(version) => format!("tests/apps/dir_go/{version}.go_test_app"),
@@ -394,6 +402,9 @@ impl Application {
             Application::GoIssue2988(version) => {
                 format!("tests/apps/issue2988/{version}.go_test_app")
             }
+            Application::GoIssue5092(version) => {
+                format!("tests/apps/issue5092/{version}.go_test_app")
+            }
             Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
             Application::Connectx => String::from("tests/apps/connectx/out.c_test_app"),
             Application::DnsSd => String::from("tests/apps/dns_sd/out.c_test_app"),
@@ -478,6 +489,10 @@ impl Application {
                 app_path.push("node_copyfile.mjs");
                 vec![app_path.to_string_lossy().to_string()]
             }
+            Application::NodeStat => {
+                app_path.push("node_stat.mjs");
+                vec![app_path.to_string_lossy().to_string()]
+            }
             Application::NodeIssue2903 => {
                 app_path.push("issue2903.mjs");
                 vec![app_path.to_string_lossy().to_string()]
@@ -524,6 +539,7 @@ impl Application {
             | Application::MkdirRmdir
             | Application::Cor1734FileMode
             | Application::SendfileEagain
+            | Application::SendfilePartial
             | Application::Realpath
             | Application::RustFileOps
             | Application::RustIssue1123
@@ -550,6 +566,7 @@ impl Application {
             | Application::RustIssue2438
             | Application::RustIssue3248
             | Application::GoIssue2988(..)
+            | Application::GoIssue5092(..)
             | Application::DlopenCgo
             | Application::Connectx
             | Application::DnsSd
@@ -621,6 +638,7 @@ impl Application {
             | Application::NodeFileOps
             | Application::NodeSpawn
             | Application::NodeCopyFile
+            | Application::NodeStat
             | Application::NodeIssue2903
             | Application::NodeIssue3456
             | Application::BashShebang
@@ -630,6 +648,7 @@ impl Application {
             | Application::MkdirRmdir
             | Application::Cor1734FileMode
             | Application::SendfileEagain
+            | Application::SendfilePartial
             | Application::Realpath
             | Application::GoIssue834(..)
             | Application::GoRead(..)
@@ -662,6 +681,7 @@ impl Application {
             | Application::DynamicApp(..)
             | Application::NodeIssue4622
             | Application::GoIssue2988(..)
+            | Application::GoIssue5092(..)
             | Application::NodeMakeConnections
             | Application::DoubleListen
             | Application::PosixSpawnSharedSockets

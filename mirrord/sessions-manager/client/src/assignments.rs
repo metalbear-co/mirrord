@@ -187,8 +187,11 @@ impl<T: SessionsManagerTransport> DeduplicatingAssignmentSubscriber<T> {
         let retry_delay = self.retry.wait_next_delay().await;
         tracing::warn!(%assignment_id, ?retry_delay, "failed to connect sessions-manager data-plane, retrying assignment");
         self.assignments.release_for_retry(assignment_id);
-        // Keep SSE connection alive; server will send next assignment or Superseded if session is
-        // invalid. Assignment deduplication handles replays from server.
+        // Sessions-manager re-sends the assignments an agent has not claimed, under the same ids,
+        // only when that agent subscribes again. Without a new subscription, the room would wait
+        // out its deadline for a connection that never comes. Replays of assignments still in
+        // progress are dropped by deduplication.
+        self.subscriber.reset().await;
     }
 
     pub(crate) fn ack_connected(&mut self, assignment_id: &AssignmentId) {

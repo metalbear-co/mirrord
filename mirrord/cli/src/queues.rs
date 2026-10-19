@@ -94,6 +94,7 @@ fn render_duration(split: &QueueSplit) -> String {
         .unwrap_or_else(|| "-".to_owned())
 }
 
+#[mirrord_macros::boxed_future]
 pub(crate) async fn queues_command(args: QueuesArgs) -> CliResult<()> {
     match &args.command {
         QueuesCommand::Status { .. } => status_command(args).await,

@@ -1,6 +1,6 @@
 use std::{
     ffi::CStr,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf, Prefix},
 };
 
 // This prefix is a way to explicitly indicate that we're looking in
@@ -175,26 +175,47 @@ pub unsafe fn multi_buffer_ptr_to_strings<T: MultiBufferChar>(mut ptr: *const T)
     }
 }
 
-/// Responsible for turning a Windows absolute path (potentially Device path) into a Unix-compatible
-/// path.
+/// A Windows path in the Unix form the layer matches `feature.fs` patterns against and sends to the
+/// agent, together with the drive it was on.
+///
+/// The agent sees only [`UnixPath::path`], since the remote pod has no drives. The drive is kept so
+/// a pattern can name it: [`UnixPath::with_drive`] is the form a pattern like `^D:/data/` matches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnixPath {
+    /// The drive letter, in upper case, for a path on a drive (`C:\Users`, `\\?\C:\Users`).
+    /// [`None`] for a path with no drive, such as a UNC path or `\Users`.
+    pub drive: Option<char>,
+    /// The path without its drive, with forward slashes: `C:\Users\me` becomes `/Users/me`.
+    pub path: String,
+}
+
+impl UnixPath {
+    /// The path with its drive, with forward slashes: `C:\Users\me` becomes `C:/Users/me`.
+    /// [`None`] when the path has no drive.
+    pub fn with_drive(&self) -> Option<String> {
+        self.drive
+            .map(|drive| format!("{drive}:{path}", path = self.path))
+    }
+}
+
+/// Turns a rooted Windows path, an NT one (`\??\C:\Users`) included, into its [`UnixPath`].
+///
+/// Every rooted path converts, so this does not check that the path is on a disk. The file hooks
+/// do that first, with `is_nt_path_disk_path`.
 ///
 /// ## Implementation
 ///
-/// 1. If present, remove global namespace path, for device paths (e.g. `"\\??\\"`.)
-/// 2. Check if there's at least one component left in the path.
-///     * If not, return.
-/// 3. Check if the first component is 2 characters long, AND ends in a `:` (meaning it's a disk
-///    path).
-///     * If not, return.
-/// 4. Remove volume letter from path.
-/// 5. Check if path starts with a RootDir component.
-///     * If not, add a forward slash at the start.
-/// 6. Make all back-slashes be forward-slashes.
+/// 1. Return [`None`] for a path with no root (`C:Users`, `Users`).
+/// 2. Remove the NT global namespace prefix (`\??\`), which Rust doesn't parse as a prefix.
+/// 3. Remove the path's prefix, if it has one. A drive prefix (`C:`, `\\?\C:`) becomes
+///    [`UnixPath::drive`]; any other prefix (UNC, device) is dropped.
+/// 4. Make sure what's left starts with a separator, so the root of a drive is `/`.
+/// 5. Turn backslashes into forward slashes.
 ///
 /// # Arguments
 ///
-/// * `path` - A Windows absolute path.
-pub fn path_to_unix_path<T: AsRef<Path>>(path: T) -> Option<String> {
+/// * `path` - A rooted Windows path.
+pub fn path_to_unix_path<T: AsRef<Path>>(path: T) -> Option<UnixPath> {
     let mut path = path.as_ref();
 
     if !path.has_root() {
@@ -206,8 +227,21 @@ pub fn path_to_unix_path<T: AsRef<Path>>(path: T) -> Option<String> {
         path = path.strip_prefix(GLOBAL_NAMESPACE_PATH).ok()?;
     }
 
-    // Remove root dir.
-    let mut new_path: PathBuf = path.components().skip(1).collect();
+    let mut components = path.components().peekable();
+    let drive = match components.peek() {
+        Some(Component::Prefix(prefix)) => {
+            let drive = match prefix.kind() {
+                Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+                    Some(char::from(letter).to_ascii_uppercase())
+                }
+                _ => None,
+            };
+            components.next();
+            drive
+        }
+        _ => None,
+    };
+    let mut new_path: PathBuf = components.collect();
 
     // NOTE(gabriela): WIN-56 agent `strip_prefix``
     // If need be, implement RootDir component so that agent doesn't blow up.
@@ -216,5 +250,8 @@ pub fn path_to_unix_path<T: AsRef<Path>>(path: T) -> Option<String> {
     }
 
     // Turn to string, replace Windows slashes to Linux slashes for ease of use.
-    Some(new_path.to_str()?.to_owned().replace("\\", "/"))
+    Some(UnixPath {
+        drive,
+        path: new_path.to_str()?.replace('\\', "/"),
+    })
 }

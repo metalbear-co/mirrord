@@ -23,5 +23,6 @@ test = false
 [dependencies]
 proc-macro2.workspace = true
 proc-macro2-diagnostics.workspace = true
+quote.workspace = true
 syn = { workspace = true, features = ["full", "extra-traits"] }
 semver.workspace = true

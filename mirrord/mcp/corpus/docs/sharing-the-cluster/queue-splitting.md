@@ -16,6 +16,10 @@ The word "queue" in this doc is used to also refer to "topic" in the context of 
 {% endhint %}
 
 {% hint style="info" %}
+Queue splitting needs Kubernetes `1.30` or later.
+{% endhint %}
+
+{% hint style="info" %}
 Queue splitting also works when your environment spans several Kubernetes clusters — see [Queue Splitting in Multi-Cluster](../using-mirrord/multi-cluster.md#queue-splitting-in-multi-cluster).
 {% endhint %}
 
@@ -56,6 +60,48 @@ Please note that:
 1. Temporary queues created for the deployed targets will not be deleted as long as there are any targets' pods that use them.
 2. In case of SQS splitting, deployed targets will keep reading from the temporary queues as long as their temporary queues have unconsumed messages.
 3. For Google Cloud Pub/Sub, the operator creates temporary topics and subscriptions. The target workload's subscription environment variable is patched to read from a temporary subscription, while the operator drains the original subscription and forwards messages through temporary topics.
+
+## One Config for Several Workloads
+
+A `MirrordSplitConfig` names one workload with `targetRef`. When many workloads consume the same queues in the same way, write one config with `targetSelector` instead, and it applies to every Deployment, StatefulSet or Argo Rollout in its namespace whose labels match. A workload that gets the labels later is covered from its next session on, with nothing else to apply:
+
+```yaml
+apiVersion: queues.mirrord.metalbear.co/v1
+kind: MirrordSplitConfig
+metadata:
+  name: pubsub-consumers
+  namespace: staging
+spec:
+  targetSelector:
+    matchLabels:
+      queues: pubsub
+    matchExpressions:
+      - key: tier
+        operator: In
+        values: [worker, api]
+  queues:
+    - id: events
+      kind: googlePubSub
+      appConfig:
+        subscription:
+          - envLike: "^.*_SUBSCRIPTION$"
+```
+
+A config has either `targetRef` or `targetSelector`, not both; the `Accepted` condition reports a config that has neither or both.
+
+Every config that applies to a workload is merged for its sessions, so a shared selector config and a per-workload `targetRef` config can be used together:
+
+* A queue id or a `dbBranches` entry id defined identically by several configs is one queue or one entry.
+* A queue id, a `dbBranches` entry, or one of `ttl`, `drainTimeout` and `tmpNameTemplate` that two configs set differently is a conflict. Both configs get `Accepted: False` with reason `ConflictingConfigs`, naming the other config and the field, and sessions for that workload fail until one of them changes.
+* `restart` and `clientConfigs` merge field by field: one config can set `restart.timeout` and another `restart.strategy`, or each can name its own broker's client config. Only the same field set to two values (`restart.timeout`, `clientConfigs.sqs`) is a conflict.
+
+The older `MirrordWorkloadQueueRegistry` and `MirrordKafkaTopicsConsumer` objects of a workload stay in effect under selector configs: their queues are added to the merge, and their settings fill in what the configs leave unset. A config that names the workload with `targetRef` replaces them, as it always has.
+
+Each config that applies to a workload shows the workload's split phase and session count in its status, and a split session names every config merged into it in its status. The operator log line that starts a split lists them too.
+
+{% hint style="info" %}
+`targetSelector` needs operator `3.220.0` or later on every cluster that reads the config, including remote clusters of a multi-cluster setup. An older operator cannot read a config without `targetRef`.
+{% endhint %}
 
 ## Queue Names in Mounted Config Files
 
@@ -232,6 +278,26 @@ A Temporal target polls a task queue the operator serves, which KEDA cannot meas
 
 A `ScaledObject` none of whose triggers name a split queue directly is left alone. This includes triggers that read the queue name from an environment variable, such as `queueURLFromEnv`, and triggers that measure lag through a query. Unless they measure the temporary queue some other way, the target may be scaled to zero for the duration of the split. A Kafka target keeps its consumer group unless the split gives it a temporary one, so a query over that group's lag across all topics already follows the temporary topic.
 
+{% hint style="info" %}
+Scale trigger overrides require mirrord operator `3.221.0` or later, and operator Helm chart `3.221.0`.
+{% endhint %}
+
+To redirect a trigger that measures the queue through a query, list it under `scaleTriggerOverrides` in the `MirrordSplitConfig`, by its `name`, with the metadata values it should have during the split. In a value, `{{<queue id>.queue}}` stands for the queue the target reads during the split, and, for Kafka and NATS JetStream, `{{<queue id>.group}}` for its consumer group or consumer. The operator sets these values when the split starts, and puts the trigger's own values back when it ends.
+
+```yaml
+spec:
+  queues:
+    - id: orders
+      kind: kafka
+      # ...
+  scaleTriggerOverrides:
+    - name: lag
+      metadata:
+        query: sum(kafka_consumergroup_lag{consumergroup="{{orders.group}}", topic="{{orders.queue}}"})
+```
+
+A value naming a queue id the `MirrordSplitConfig` does not declare, or a `group` its queue does not have, makes the operator refuse the `MirrordSplitConfig`, and splits of its workloads fail. An override naming a trigger or metadata key the `ScaledObject` does not have, or a queue the split does not include, is not applied.
+
 A GitOps tool deploying the `ScaledObject` would put the original triggers back. The operator therefore registers a mutating webhook that reapplies its rewrite to every update of a redirected `ScaledObject`, including the dry runs Flux compares against. Flux sees the `ScaledObject` as in sync and keeps reconciling it: changes from Git roll out during the split, and the triggers stay redirected. When the split ends, the operator undoes only its own rewrite, so those changes stay.
 
 Argo CD compares against Git by itself, so it would report the `ScaledObject` as out of sync and keep syncing it. Set `operator.applicationPauseAutoSync` to let the operator turn off automated sync on the application deploying the `ScaledObject`, and on every application deploying that one, for as long as the split runs. Changes to anything they deploy are not rolled out until the split ends. Without the value, a `ScaledObject` that Argo CD deploys is left alone.
@@ -296,7 +362,7 @@ It pairs each queue ID with a queue filter definition, and accepts either an obj
 
 Filter definition contains the following fields:
 * `queue_type` - `SQS`, `Kafka`, `RMQ`, `GCPPubSub`, `AzureServiceBus`, `RedisPubSub`, `Temporal`, `BullMQ`, `NATS`, or `NATSPubSub`
-* `queue_mode` - optional, `steal` (default) or `mirror`. In `steal` mode, a matched message goes only to your local application. In `mirror` mode, a matched message goes to your local application **and** is still delivered to the deployed application, so both process a copy. Not supported for `Temporal`.
+* `queue_mode` - optional, `steal` (default) or `mirror`. In `steal` mode, a matched message goes only to your local application. In `mirror` mode, a matched message goes to your local application **and** is still delivered to the deployed application, so both process a copy. `Temporal` supports `steal` only, and a `mirror` request runs as `steal` with a warning - see [Temporal queue mode](queue-splitting/temporal.md#queue-mode).
 * `filter` - a composable message filter, shaped like the [HTTP filter](../using-mirrord/incoming-traffic/filter-incoming-traffic.md): one `metadata` regex, or an `any_of` / `all_of` list of `metadata` regexes.
   A `metadata` regex is matched against every message attribute (SQS, GCP Pub/Sub), header (Kafka, RabbitMQ, NATS, NATS pub/sub), application property (Azure Service Bus), JSON field (Redis Pub/Sub, BullMQ), or task metadata entry (Temporal) rendered as `<name>: <value>`, the same way the HTTP filter sees headers.
   The message matches when any attribute line matches, so one regex can pin an attribute by name (`^tenant: blue$`) or find a marker wherever it is propagated (`.*mirrord-session={{ key }}.*`). Matching is case sensitive. See [Composing filters](#composing-filters).

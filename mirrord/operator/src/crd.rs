@@ -859,6 +859,24 @@ pub enum NewOperatorFeature {
 
     ServerlessSessionsManager,
 
+    /// This operator runs a session's Kafka queues against an isolated per-key broker
+    /// (`feature.kafka_branch`), sent in the `kafka_branch` connect param and the preview
+    /// session's `kafkaBranch` field. Gated so the CLI fails fast: an older operator ignores both
+    /// and would leave the app on the cluster's Kafka.
+    KafkaBranching,
+
+    /// This operator applies `value_selector` / `value_pattern` on `gcp_secret_manager` and
+    /// `aws_secrets_manager` connection sources, picking one field out of a JSON secret. Gated
+    /// so the CLI fails fast: an older operator drops the extractors silently and provisions
+    /// with the whole secret as the value, which surfaces only as a login failure.
+    DbBranchSecretManagerExtract,
+
+    /// This operator runs a branch's pods in the operator-managed namespace of the session key
+    /// (`feature.db_branches[].namespace`). Gated so the CLI fails fast: an older operator's
+    /// CRD schema prunes `dedicatedNamespaceKey` and the branch silently runs in the target's
+    /// namespace instead.
+    DbBranchDedicatedNamespace,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -954,6 +972,13 @@ impl Display for NewOperatorFeature {
                 "db_branches resolved from the target's MirrordSplitConfig"
             }
             NewOperatorFeature::ServerlessSessionsManager => "serverless sessions-manager",
+            NewOperatorFeature::KafkaBranching => "Kafka branching",
+            NewOperatorFeature::DbBranchSecretManagerExtract => {
+                "DB branching field extraction from secret manager sources"
+            }
+            NewOperatorFeature::DbBranchDedicatedNamespace => {
+                "DB branches in a dedicated namespace per key"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
