@@ -1457,6 +1457,26 @@ impl ConnectionParamsVars {
 /// { "type": "redis", "profile": "telapp", "connection": { "url": "REDIS_URL" } }
 /// ```
 ///
+/// #### feature.db_branches[].namespace (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, spanner) {#feature-db_branches-sql-namespace}
+///
+/// When `true`, the branch database runs in its own namespace named `mirrord-<key>`, where
+/// `<key>` is the session [`key`](#key). The operator creates the namespace on first use,
+/// copies the Secrets, ConfigMaps and service account the branch pod reads from the target's
+/// namespace into it, and deletes the namespace once no branch runs there anymore. Every
+/// branch started under the same key shares that namespace, which makes it easy to see and
+/// clean up everything one key created.
+///
+/// A key with characters a namespace name cannot hold (uppercase letters, `_`, ...) is turned
+/// into a valid name, with a short hash added to keep it unique. Set a `key` explicitly:
+/// without one, every run gets a fresh key and with it a fresh namespace. Cloud workload
+/// identity (GKE Workload Identity, AWS IRSA, EKS Pod Identity) is bound to a namespace, so
+/// IAM authentication and secret manager sources need a binding for the `mirrord-<key>`
+/// namespace too. Defaults to `false`.
+///
+/// ```json
+/// { "type": "pg", "namespace": true, "connection": { "url": "DATABASE_URL" } }
+/// ```
+///
 /// #### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
 ///
 /// `connection` describes how to get the connection information to the source database.
@@ -1655,6 +1675,11 @@ pub struct BranchBaseConfig {
     /// Name of an admin-defined operator branch-config profile to use for this branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+
+    /// Run the branch in the operator-managed `mirrord-<key>` namespace instead of the
+    /// target's namespace.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub namespace: bool,
 }
 
 impl Default for BranchBaseConfig {
@@ -1665,6 +1690,7 @@ impl Default for BranchBaseConfig {
             ttl_mins: None,
             creation_timeout_secs: default_creation_timeout_secs(),
             profile: None,
+            namespace: false,
         }
     }
 }

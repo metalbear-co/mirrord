@@ -8,6 +8,7 @@ use mirrord_config::{
     MIRRORD_LAYER_CRASH_REPORTING, MIRRORD_LAYER_FULL_MEMORY_DUMP, MIRRORD_LAYER_INTPROXY_ADDR,
     MIRRORD_LAYER_TARGET_CONTAINER_PORTS, MIRRORD_LAYER_WAIT_FOR_DEBUGGER,
 };
+use mirrord_progress::messages::SESSION_READY_MESSAGE;
 use stork::{BorrowedTarget, LoadTiming, LoaderState};
 use str_win::string_to_u16_buffer;
 use utils_win::diagnostics::monitor::InitReport;
@@ -772,10 +773,10 @@ impl LayerManagedProcess {
                 return Ok(self);
             }
             // The program runs from here on, while its layer comes up, and it shares the
-            // launcher's console: progress is done before the program can write to it, and the
-            // wait below only decides how the launch ends.
+            // launcher's console: progress is done before the program can write to it. The wait
+            // below decides how the launch ends, and its readiness is only printed.
             LoadTiming::OnResume => {
-                if let Some(mut progress) = progress.take() {
+                if let Some(progress) = progress.as_mut() {
                     progress.success(Some("layer loading on resume"));
                 }
                 self.resume_main_thread()?;
@@ -790,8 +791,13 @@ impl LayerManagedProcess {
         match parent_events.wait(self.process_handle(), timeout_ms) {
             Ok(InitWaitOutcome::Signaled) => {
                 tracing::debug!(child_pid, "wait: signaled");
+                // `mirrord up` marks a service ready on this line, whichever way its layer loaded.
                 if let Some(progress) = progress.as_mut() {
-                    progress.success(Some("Ready!"));
+                    if injected.timing == LoadTiming::OnResume {
+                        progress.print(SESSION_READY_MESSAGE);
+                    } else {
+                        progress.success(Some(SESSION_READY_MESSAGE));
+                    }
                 }
             }
             Ok(InitWaitOutcome::Failed) => {
@@ -1217,6 +1223,10 @@ mod tests {
                 .expect("progress")
                 .push(message.unwrap_or_default().to_owned());
         }
+
+        fn print(&self, message: &str) {
+            self.0.lock().expect("progress").push(message.to_owned());
+        }
     }
 
     fn system_dll(name: &str) -> String {
@@ -1497,15 +1507,16 @@ mod tests {
 
     #[test]
     fn a_ready_layer_resumes_the_program_once() {
-        // A layer that loads on resume finishes progress before the program runs, not on ready.
+        // A layer that loads on resume finishes progress before the program runs, and its
+        // readiness is still printed, which is what `mirrord up` waits for.
         for (method, reported) in [
-            (InjectionMethod::LoadLibrary, "Ready!"),
-            (InjectionMethod::Apc, "layer loading on resume"),
+            (InjectionMethod::LoadLibrary, &["Ready!"][..]),
+            (InjectionMethod::Apc, &["layer loading on resume", "Ready!"]),
+            (InjectionMethod::Iat, &["layer loading on resume", "Ready!"]),
         ] {
             let launched = Launch::new(method, Layer::Ready).run();
             assert_eq!(
-                launched.progress,
-                [reported],
+                launched.progress, reported,
                 "{method}: the layer was injected"
             );
             assert_eq!(launched.creations, 1);

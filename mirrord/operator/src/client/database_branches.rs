@@ -1029,6 +1029,46 @@ fn deterministic_branch_name(dialect: &str, target_namespace: &str, id: &str) ->
     format!("mirrord-{dialect}-branch-{short:016x}")
 }
 
+/// A session reusing a branch must ask for the placement the branch was created with: the
+/// branch keeps running where it started, so turning `namespace` on or off for an existing id
+/// would otherwise go unnoticed. A branch shared across keys (an explicit `id`) runs in the
+/// namespace of the key that created it, which is only worth a warning.
+pub fn check_attach_namespace<P: Progress>(
+    existing: &BranchDatabase,
+    requested_key: Option<&str>,
+    api_namespace: &str,
+    progress: &P,
+) -> Result<(), OperatorApiError> {
+    let existing_key = existing.spec.dedicated_namespace_key.as_deref();
+    let name = existing.meta().name.as_deref().unwrap_or_default();
+    let id = &existing.spec.id;
+
+    match (existing_key, requested_key) {
+        (Some(existing_key), Some(requested_key)) if existing_key != requested_key => {
+            progress.warning(&format!(
+                "branch database `{name}` (id `{id}`) runs in the dedicated namespace for \
+                 key `{existing_key}`; this session uses it there",
+            ));
+            Ok(())
+        }
+        (Some(_), Some(_)) | (None, None) => Ok(()),
+        (existing_key, _) => {
+            let placement = match existing_key {
+                Some(key) => format!("in the dedicated namespace for key `{key}`"),
+                None => "in its target's namespace".to_owned(),
+            };
+            Err(OperatorApiError::BranchCreationFailed {
+                operation: OperatorOperation::DbBranching,
+                message: format!(
+                    "branch database `{name}` (id `{id}`) already runs {placement}, and a \
+                     running branch cannot move; delete it with `mirrord db-branches -n \
+                     {api_namespace} destroy {name}`, or give the entry another `id`"
+                ),
+            })
+        }
+    }
+}
+
 /// Outcome of [`create_branches`], kept apart so the caller can say which is which. Each branch
 /// is as it was once ready, status included.
 #[derive(Debug, Default)]
@@ -1455,7 +1495,21 @@ impl UnifiedDatabaseBranchParams {
                 continue;
             };
             let sets_id = base.id.is_some();
+            let dedicated_namespace = base.namespace;
             let id = resolve_branch_id(&base.id, session_key, progress);
+
+            // S3 and turbopuffer branches live in the provider's cloud: there is no pod to put
+            // in a namespace, and quietly ignoring the flag would hide a config mistake.
+            if dedicated_namespace && branch_db_config.pod().is_none() {
+                return Err(OperatorApiError::BranchCreationFailed {
+                    operation: OperatorOperation::DbBranching,
+                    message: format!(
+                        "`feature.db_branches[{position}].namespace` is set, but S3 and \
+                         turbopuffer branches run outside the cluster and have no pods to place \
+                         in a namespace; remove `namespace` from that entry"
+                    ),
+                });
+            }
 
             let migrations = read_migrations(branch_db_config.migrations())?;
 
@@ -1501,7 +1555,7 @@ impl UnifiedDatabaseBranchParams {
                 }
             }
 
-            let params = match branch_db_config {
+            let mut params = match branch_db_config {
                 DatabaseBranchConfig::Clickhouse(c) => UnifiedBranchParams::from_clickhouse(
                     id.as_ref(),
                     c,
@@ -1607,6 +1661,9 @@ impl UnifiedDatabaseBranchParams {
                     literal_values,
                 ),
             };
+            if dedicated_namespace {
+                params.spec.dedicated_namespace_key = Some(session_key.to_owned());
+            }
             let name = params.deterministic_name.clone();
             if let Some((earlier, earlier_sets_id)) =
                 entries.insert(name.clone(), (position, sets_id))
@@ -1911,6 +1968,7 @@ impl UnifiedBranchParams {
             turbopuffer_options: None,
             generic_options: None,
             migrations,
+            dedicated_namespace_key: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -1956,6 +2014,7 @@ impl UnifiedBranchParams {
             clickhouse_options: None,
             generic_options: None,
             migrations,
+            dedicated_namespace_key: None,
             cockroachdb_options: None,
             s3_options: None,
             turbopuffer_options: None,
@@ -2007,6 +2066,7 @@ impl UnifiedBranchParams {
             turbopuffer_options: None,
             generic_options: None,
             migrations,
+            dedicated_namespace_key: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -2053,6 +2113,7 @@ impl UnifiedBranchParams {
             turbopuffer_options: None,
             generic_options: None,
             migrations: None,
+            dedicated_namespace_key: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -2101,6 +2162,7 @@ impl UnifiedBranchParams {
             turbopuffer_options: None,
             generic_options: None,
             migrations,
+            dedicated_namespace_key: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -2147,6 +2209,7 @@ impl UnifiedBranchParams {
             turbopuffer_options: None,
             generic_options: None,
             migrations,
+            dedicated_namespace_key: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -2193,6 +2256,7 @@ impl UnifiedBranchParams {
             generic_options: None,
             spanner_options: None,
             migrations,
+            dedicated_namespace_key: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -2236,6 +2300,7 @@ impl UnifiedBranchParams {
             s3_options: None,
             turbopuffer_options: None,
             migrations: None,
+            dedicated_namespace_key: None,
             spanner_options: None,
             generic_options: None,
         };
@@ -2284,6 +2349,7 @@ impl UnifiedBranchParams {
             image: config.pod.image.clone(),
             profile: config.base.profile.clone(),
             migrations,
+            dedicated_namespace_key: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -2338,6 +2404,7 @@ impl UnifiedBranchParams {
                 emulator_host_var: Some(config.emulator_host.clone()),
             }),
             migrations: None,
+            dedicated_namespace_key: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -2422,6 +2489,7 @@ impl UnifiedBranchParams {
                 }),
             }),
             migrations: None,
+            dedicated_namespace_key: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -2474,6 +2542,7 @@ impl UnifiedBranchParams {
             turbopuffer_options: None,
             generic_options: None,
             migrations: None,
+            dedicated_namespace_key: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {
@@ -2526,6 +2595,7 @@ impl UnifiedBranchParams {
             }),
             generic_options: None,
             migrations: None,
+            dedicated_namespace_key: None,
         };
         let labels = BTreeMap::from([(labels::MIRRORD_BRANCH_ID_LABEL.to_owned(), id.to_owned())]);
         Self {

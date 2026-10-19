@@ -318,6 +318,7 @@ impl OperatorApi<NoClientCert> {
     ///
     /// NOTE: `SpinnerProgress` can interfere with any printed messages coming from interactive
     /// authentication with the cluster, for example via the kubelogin tool
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(level = Level::TRACE, skip_all, err)]
     pub async fn try_new<P, R>(
         config: &LayerConfig,
@@ -404,6 +405,7 @@ impl OperatorApi<NoClientCert> {
             .build())
     }
 
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
     pub async fn with_ci_api_key<P, R>(
         self,
@@ -503,6 +505,7 @@ impl OperatorApi<NoClientCert> {
 
     /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
     /// In case of failure, state of this API instance does not change.
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
     pub async fn with_client_certificate<P, R>(
         self,
@@ -1026,6 +1029,27 @@ where
                 .require_feature(NewOperatorFeature::DbBranchProfiles)?;
         }
 
+        // Same fail-fast for `namespace`: an older operator's CRD schema prunes
+        // `dedicatedNamespaceKey`, so the branch would silently run in the target's namespace.
+        let dedicated_namespace = layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| branch_config.base().is_some_and(|base| base.namespace));
+        if dedicated_namespace {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchDedicatedNamespace)?;
+
+            if !layer_config.key.is_provided() {
+                subtask.warning(
+                    "`feature.db_branches[].namespace` is set without a `key`, so this run's \
+                     branches get a namespace of their own that the next run will not \
+                     reuse; set `key` to keep one namespace per key",
+                );
+            }
+        }
+
         // Same fail-fast for a generic branch's copy Job: an older operator's CRD schema would
         // prune `genericOptions.copy` and silently run the branch empty.
         if layer_config.feature.db_branches.iter().any(|branch_config| {
@@ -1275,6 +1299,23 @@ where
                 }
             }
 
+            // Where a branch runs is fixed when it is created, so a session reusing it must ask
+            // for the same placement (see `check_attach_namespace`).
+            let requested_namespace_keys: HashMap<String, Option<String>> = create_params
+                .iter()
+                .map(|(name, params)| (name.clone(), params.spec.dedicated_namespace_key.clone()))
+                .collect();
+            for (name, branch) in existing.ready.iter().chain(existing.pending.iter()) {
+                if let Some(requested) = requested_namespace_keys.get(name) {
+                    database_branches::check_attach_namespace(
+                        branch,
+                        requested.as_deref(),
+                        api_namespace,
+                        &subtask,
+                    )?;
+                }
+            }
+
             // Capture the migrations this session wants per branch before `create_params` is
             // consumed. They're re-applied to every branch below (a no-op for freshly-created ones,
             // whose archive is already on the spec).
@@ -1326,6 +1367,14 @@ where
             for (name, branch) in &conflict_reused_branches {
                 if let Some(requested) = split_config_specs.get(name) {
                     check_attach_copy_mode(branch, requested)?;
+                }
+                if let Some(requested) = requested_namespace_keys.get(name) {
+                    database_branches::check_attach_namespace(
+                        branch,
+                        requested.as_deref(),
+                        api_namespace,
+                        &subtask,
+                    )?;
                 }
             }
 
@@ -1867,6 +1916,7 @@ impl OperatorApi<PreparedClientCert> {
     ///
     /// No connection is made here - the session starts on the operator once a connection is made
     /// with [`OperatorApi::connect_to_session`].
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(
         level = Level::TRACE,
         skip(layer_config, progress),
@@ -2055,6 +2105,7 @@ impl OperatorApi<PreparedClientCert> {
     ///
     /// 1. The 1st one is here;
     /// 2. The 2nd is on the `AgentConnection::new`;
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(
         level = Level::TRACE,
         skip(layer_config, progress),
@@ -2346,6 +2397,7 @@ impl OperatorApi<PreparedClientCert> {
     ///
     /// See [`OperatorApi::prepare_multi_cluster_session`] for how such a session differs from a
     /// single-cluster one.
+    #[mirrord_macros::boxed_future]
     pub async fn connect_in_multi_cluster_session<P>(
         &self,
         layer_config: &mut LayerConfig,

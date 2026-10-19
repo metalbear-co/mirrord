@@ -871,6 +871,11 @@ pub enum NewOperatorFeature {
     /// with the whole secret as the value, which surfaces only as a login failure.
     DbBranchSecretManagerExtract,
 
+    /// This operator runs a branch's pods in the operator-managed namespace of the session key
+    /// (`feature.db_branches[].namespace`). Gated so the CLI fails fast: an older operator's
+    /// CRD schema prunes `dedicatedNamespaceKey` and the branch silently runs in the target's
+    /// namespace instead.
+    DbBranchDedicatedNamespace,
     /// This operator resolves `aws_ssm_parameter` connection sources (AWS Systems Manager
     /// Parameter Store). Gated so the CLI fails fast: an older operator cannot deserialize a
     /// branch carrying the source kind and never reconciles it, which surfaces only as a
@@ -975,6 +980,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::KafkaBranching => "Kafka branching",
             NewOperatorFeature::DbBranchSecretManagerExtract => {
                 "DB branching field extraction from secret manager sources"
+            }
+            NewOperatorFeature::DbBranchDedicatedNamespace => {
+                "DB branches in a dedicated namespace per key"
             }
             NewOperatorFeature::DbBranchSsmParameter => {
                 "DB branching connection values from AWS SSM Parameter Store"

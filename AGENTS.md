@@ -97,6 +97,19 @@ language such as `the existing implementation`, `the new approach`, `now`, `prev
 `we added/removed`. Include historical context only when it is necessary to explain why the current code deliberately
 differs from an otherwise-obvious alternative.
 
+## Stack Usage
+
+The CLI polls its whole runtime on the main thread, and on Windows that thread only gets the `/STACK` linked in
+`mirrord/cli/build.rs`. Debug builds are hit hardest: a function's frame keeps a slot for every future it builds
+before awaiting it, so one `match` with a large future per arm pays for all of them.
+
+- Put `#[mirrord_macros::boxed_future]` (above `#[tracing::instrument]`) on an `async fn` with a large future, such as
+  a subcommand or a connection step: it builds its future on the heap, and callers keep writing `f(..).await`.
+  `Box::pin(f(..))` and `.boxed()` don't help in a debug build, since `f(..)` is still built in the caller's frame first.
+- On a stack overflow, the Windows CLI prints every frame with its size, largest first. Windows CI runs
+  `scripts/win_stack_check.ps1`, which fails when the CLI outgrows its budget and shows that report.
+- `scripts/win_stack_report.ps1` measures peak stack and large frames locally.
+
 ## Style Guideline
 
 - Keep imports at file top (no function-local `use`).

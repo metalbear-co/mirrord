@@ -356,6 +356,41 @@ For an individual parameter, use an `aws_secrets_manager` field:
 **Setup**: the branch pod inherits the target pod's service account, so that account's AWS identity must be allowed `secretsmanager:GetSecretValue` on the secret. The region comes from the ARN when a full ARN is given; for a plain secret name, `AWS_REGION` or `AWS_DEFAULT_REGION` must be set in the target pod spec.
 {% endhint %}
 
+### Picking One Field from a Secret
+
+A Google or AWS secret often holds several values at once, such as a JSON blob with every credential of a database:
+
+```json
+{ "username": "app", "password": "s3cr3t" }
+```
+
+Add `value_selector` to a `gcp_secret_manager` or `aws_secrets_manager` source to use one field of it instead of the whole secret. The selector is a `.a.b` path into the secret parsed as JSON or YAML, the same as on the [ConfigMap source](#configmap-source):
+
+```json
+{
+  "connection": {
+    "params": {
+      "host": "DB_HOST",
+      "user": { "aws_secrets_manager": "db-creds", "value_selector": ".username" },
+      "password": {
+        "aws_secrets_manager": "db-creds",
+        "value_selector": ".password",
+        "env_var_name": "DB_PASSWORD"
+      },
+      "database": "DB_NAME"
+    }
+  }
+}
+```
+
+For a secret that is plain text rather than JSON, use `value_pattern` instead: a regex over the secret, with the same capture group rules as [composite environment variables](#composite-environment-variables). The two are mutually exclusive, and both work on the `url` source too.
+
+The branch init container applies the selector or pattern right after it fetches the secret, so mirrord and the operator still never read the value. An error names the secret and the selector, never the secret's content.
+
+{% hint style="info" %}
+`value_selector` and `value_pattern` on secret manager sources need an operator and a mirrord CLI that support them. An older operator would use the whole secret as the value, so the CLI refuses to start the session against one.
+{% endhint %}
+
 ### Literal Value
 
 You can provide a connection parameter as a literal value directly in the config. This is useful when the credential is injected at runtime by an external system and does not appear in the pod spec where mirrord can read it.

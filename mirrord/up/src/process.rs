@@ -226,11 +226,18 @@ impl Service {
         self.force_stop().await
     }
 
-    /// Job Object termination reaches every descendant before the direct child
-    /// is reaped, matching the Unix forced-shutdown guarantee.
+    /// Job Object termination reaches every descendant along with the direct
+    /// child, matching the Unix forced-shutdown guarantee.
+    ///
+    /// Only the direct child is waited for, not process-wrap's whole-job `wait`.
+    /// That one waits for an event on the job's completion port, and polling
+    /// the child's `try_wait` during supervision takes those events off the
+    /// port. After a service exits on its own the port can be empty for good,
+    /// and the job `wait` would block forever.
     #[cfg(windows)]
     async fn force_stop(&mut self) -> io::Result<()> {
-        Box::into_pin(self.child.kill()).await?;
+        self.child.start_kill()?;
+        self.child.inner_mut().wait().await?;
         Ok(())
     }
 }
@@ -416,7 +423,7 @@ async fn forward_output(
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 async fn supervise(
     commands: Vec<ServiceCommands>,
     ready: ReadyTracker,
@@ -555,6 +562,12 @@ async fn supervise_with_second_signal(
     Ok((result, forced_signal))
 }
 
+#[cfg(test)]
+mod test_support;
+
+#[cfg(all(test, windows))]
+mod windows_tests;
+
 #[cfg(all(test, unix))]
 mod tests {
     use std::{path::Path, process::Stdio};
@@ -565,9 +578,10 @@ mod tests {
     use tempfile::TempDir;
     use tokio::process::Child;
 
-    use super::*;
-
-    const TEST_GRACE: Duration = Duration::from_millis(200);
+    use super::{
+        test_support::{TEST_GRACE, wait_for_file, wait_for_helper_ready},
+        *,
+    };
 
     fn command(script: &str, directory: &Path) -> ServiceCommands {
         let mut command = resolve_tokio_command("sh");
@@ -586,14 +600,25 @@ mod tests {
         }
     }
 
-    async fn wait_for_file(path: &Path) {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while path.exists().not() {
-                tokio::time::sleep(Duration::from_millis(10)).await;
+    async fn wait_for_process_group_exit(group: Pid) {
+        // Killed descendants are adopted by an external reaper, so their group
+        // entries can outlast direct-child reaping.
+        let exited = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match killpg(group, None) {
+                    Ok(()) => tokio::time::sleep(Duration::from_millis(10)).await,
+                    Err(Errno::ESRCH) => break,
+                    Err(error) => {
+                        panic!("failed to inspect service process group {group}: {error}")
+                    }
+                }
             }
         })
-        .await
-        .expect("child did not start");
+        .await;
+        assert!(
+            exited.is_ok(),
+            "service process group {group} must disappear after forced cleanup"
+        );
     }
 
     #[tokio::test]
@@ -653,7 +678,7 @@ mod tests {
     async fn second_shutdown_error_forces_cleanup_before_returning() {
         let directory = TempDir::new().unwrap();
         let command = command(
-            "trap '' TERM; echo $$ > pid; touch started; exec sleep 60",
+            "trap '' TERM; echo $$ > pid; : > started; exec sleep 60",
             directory.path(),
         );
         let first_shutdown = async {
@@ -685,7 +710,7 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(kill(pid, None), Err(Errno::ESRCH));
-        assert_eq!(killpg(pid, None), Err(Errno::ESRCH));
+        wait_for_process_group_exit(pid).await;
     }
 
     #[tokio::test]
@@ -814,7 +839,9 @@ mod tests {
             if natural_exit {
                 "echo \"$READY_MESSAGE\"; exit 0"
             } else if ignores_term {
-                "trap 'touch first-term' TERM; echo $$ > child_pid; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
+                // Ignoring TERM before forking keeps the persistent descendant resistant
+                // through exec, so leader-only forced cleanup cannot pass.
+                "trap '' TERM; echo $$ > child_pid; (exec sleep 60) & trap ': > first-term' TERM; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
             } else {
                 "trap 'touch stopped-int; exit 0' INT; trap 'touch stopped-term; exit 0' TERM; trap 'touch stopped-hup; exit 0' HUP; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
             },
@@ -826,25 +853,6 @@ mod tests {
             std::fs::write(directory.join("draining"), []).unwrap();
             tokio::time::sleep(Duration::from_secs(60)).await;
         }
-    }
-
-    async fn wait_for_helper_ready(helper: &mut Child) {
-        let mut lines = BufReader::new(helper.stdout.take().unwrap()).lines();
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let line = lines
-                    .next_line()
-                    .await
-                    .unwrap()
-                    .expect("helper exited before readiness");
-                if line.contains(SESSION_READY_MESSAGE) {
-                    break;
-                }
-            }
-        })
-        .await
-        .unwrap();
-        tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
     }
 
     fn signal_test_helper(
@@ -928,7 +936,7 @@ mod tests {
             .unwrap();
         assert_eq!(status.code(), Some(130));
         assert_eq!(kill(child, None), Err(Errno::ESRCH));
-        assert_eq!(killpg(child, None), Err(Errno::ESRCH));
+        wait_for_process_group_exit(child).await;
     }
 
     #[tokio::test]
