@@ -600,6 +600,27 @@ mod tests {
         }
     }
 
+    async fn wait_for_process_group_exit(group: Pid) {
+        // Killed descendants are adopted by an external reaper, so their group
+        // entries can outlast direct-child reaping.
+        let exited = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match killpg(group, None) {
+                    Ok(()) => tokio::time::sleep(Duration::from_millis(10)).await,
+                    Err(Errno::ESRCH) => break,
+                    Err(error) => {
+                        panic!("failed to inspect service process group {group}: {error}")
+                    }
+                }
+            }
+        })
+        .await;
+        assert!(
+            exited.is_ok(),
+            "service process group {group} must disappear after forced cleanup"
+        );
+    }
+
     #[tokio::test]
     async fn cancellation_allows_graceful_exit_and_preserves_readiness() {
         let directory = TempDir::new().unwrap();
@@ -657,7 +678,7 @@ mod tests {
     async fn second_shutdown_error_forces_cleanup_before_returning() {
         let directory = TempDir::new().unwrap();
         let command = command(
-            "trap '' TERM; echo $$ > pid; touch started; exec sleep 60",
+            "trap '' TERM; echo $$ > pid; : > started; exec sleep 60",
             directory.path(),
         );
         let first_shutdown = async {
@@ -689,7 +710,7 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(kill(pid, None), Err(Errno::ESRCH));
-        assert_eq!(killpg(pid, None), Err(Errno::ESRCH));
+        wait_for_process_group_exit(pid).await;
     }
 
     #[tokio::test]
@@ -818,7 +839,9 @@ mod tests {
             if natural_exit {
                 "echo \"$READY_MESSAGE\"; exit 0"
             } else if ignores_term {
-                "trap 'touch first-term' TERM; echo $$ > child_pid; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
+                // Ignoring TERM before forking keeps the persistent descendant resistant
+                // through exec, so leader-only forced cleanup cannot pass.
+                "trap '' TERM; echo $$ > child_pid; (exec sleep 60) & trap ': > first-term' TERM; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
             } else {
                 "trap 'touch stopped-int; exit 0' INT; trap 'touch stopped-term; exit 0' TERM; trap 'touch stopped-hup; exit 0' HUP; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
             },
@@ -913,7 +936,7 @@ mod tests {
             .unwrap();
         assert_eq!(status.code(), Some(130));
         assert_eq!(kill(child, None), Err(Errno::ESRCH));
-        assert_eq!(killpg(child, None), Err(Errno::ESRCH));
+        wait_for_process_group_exit(child).await;
     }
 
     #[tokio::test]
