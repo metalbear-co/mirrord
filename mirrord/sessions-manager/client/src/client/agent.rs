@@ -228,7 +228,13 @@ impl QueueSender {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        },
+        time::Duration,
+    };
 
     use bytes::Bytes;
     use futures::{StreamExt, stream};
@@ -248,8 +254,14 @@ mod tests {
 
     /// Offers the same assignment on every subscription and upgrades it over an in-memory
     /// WebSocket, so the agent control plane runs end to end without a sessions-manager.
-    #[derive(Clone)]
-    struct MockTransport;
+    ///
+    /// Re-offering on every subscription mirrors sessions-manager, which re-sends an agent's
+    /// unclaimed assignments when it subscribes again.
+    #[derive(Clone, Default)]
+    struct MockTransport {
+        subscriptions: Arc<AtomicUsize>,
+        fail_next_dial: Arc<AtomicBool>,
+    }
 
     impl SessionsManagerTransport for MockTransport {
         async fn subscribe_assignments(
@@ -257,6 +269,7 @@ mod tests {
             _scope: &ServiceScope,
             _subscription: &AssignmentSubscription,
         ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
+            self.subscriptions.fetch_add(1, Ordering::SeqCst);
             let assignment = serde_json::from_value(serde_json::json!({
                 "assignment_id": "assignment-1",
                 "data_plane_endpoint": "/ws/assignment-1",
@@ -272,6 +285,12 @@ mod tests {
             &self,
             _assignment: ConnectionAssignment,
         ) -> Result<OperatorConnection<E>, SessionsManagerClientError> {
+            if self.fail_next_dial.swap(false, Ordering::SeqCst) {
+                return Err(SessionsManagerClientError::HttpStatus(
+                    reqwest::StatusCode::SERVICE_UNAVAILABLE,
+                ));
+            }
+
             let (client_io, server_io) = tokio::io::duplex(64 * 1024);
             tokio::spawn(async move {
                 let _socket = tokio_tungstenite::accept_async(server_io).await.unwrap();
@@ -310,13 +329,45 @@ mod tests {
             environment: "test".to_owned(),
             service: "test".to_owned(),
         };
-        let mut client =
-            AgentClient::start(scope, "replica-a".to_owned().into(), MockTransport, None).unwrap();
+        let mut client = AgentClient::start(
+            scope,
+            "replica-a".to_owned().into(),
+            MockTransport::default(),
+            None,
+        )
+        .unwrap();
 
         let connection = tokio::time::timeout(Duration::from_secs(10), client.recv())
             .await
             .expect("control plane delivered a connection in time");
         assert!(connection.is_some());
+
+        client.shutdown().await.unwrap();
+    }
+
+    /// The server keeps an unclaimed assignment until its room's deadline but re-sends it only to
+    /// a new subscription, so a failed dial must be followed by one.
+    #[tokio::test]
+    async fn failed_dial_resubscribes_and_connects_the_replayed_assignment() {
+        let scope = ServiceScope {
+            environment: "test".to_owned(),
+            service: "test".to_owned(),
+        };
+        let transport = MockTransport::default();
+        transport.fail_next_dial.store(true, Ordering::SeqCst);
+        let mut client = AgentClient::start(
+            scope,
+            "replica-a".to_owned().into(),
+            transport.clone(),
+            None,
+        )
+        .unwrap();
+
+        let connection = tokio::time::timeout(Duration::from_secs(10), client.recv())
+            .await
+            .expect("control plane delivered a connection in time");
+        assert!(connection.is_some());
+        assert_eq!(transport.subscriptions.load(Ordering::SeqCst), 2);
 
         client.shutdown().await.unwrap();
     }
