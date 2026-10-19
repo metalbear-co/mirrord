@@ -85,13 +85,20 @@ Question 5:
 "For service <name>: Which mirrord network mode should be used?"
 - steal (intercept traffic)
 - mirror (observe traffic)
+If I choose steal, also ask for the session key that marks my requests in the
+baggage header (baggage: mirrord-session=<key>), and suggest my name. Without
+a header filter, steal takes all the traffic of the target from everyone on the
+cluster. If my requests reach the service through other services, tell me that
+those services must propagate the baggage header, and suggest the
+mirrord-header-propagation skill.
+If the service does not serve HTTP, tell me that a header filter cannot
+match its traffic, so a filtered steal sends nothing to my local process.
 WAIT FOR MY ANSWER.
 
 Question 6:
 "For service <name>: Any special requirements?"
 - Filesystem access
 - Environment variables
-- Traffic filtering
 WAIT FOR MY ANSWER.
 
 IMPORTANT:
@@ -106,7 +113,12 @@ For each configured service, generate:
 1. `.mirrord/mirrord-<service>.json`
    - Use the confirmed target type, target name, and namespace
    - Configure the selected network mode
-   - Apply traffic filtering ONLY if I explicitly provided it
+   - In steal mode, add an HTTP header filter for the session key from
+     Question 5, with regex special characters escaped, that matches the
+     baggage entry and not a longer key (for example
+     ^baggage: .*mirrord-session=alice(?:[,; ]|$)). Do not set
+     http_filter.ports, so that the filter applies to every stolen port. Leave
+     the filter out only if I ask for that
    - Use only fields supported by the installed mirrord version
    - Avoid embedding secrets or sensitive values
 

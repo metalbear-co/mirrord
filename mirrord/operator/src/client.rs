@@ -76,7 +76,7 @@ use crate::{
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
-            branch_database::{BranchDatabase, BranchDatabaseSpec, dedicated_namespace_name},
+            branch_database::{BranchDatabase, BranchDatabaseSpec},
             mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase,
             pg::PgBranchDatabase,
@@ -1042,12 +1042,11 @@ where
                 .require_feature(NewOperatorFeature::DbBranchDedicatedNamespace)?;
 
             if !layer_config.key.is_provided() {
-                subtask.warning(&format!(
+                subtask.warning(
                     "`feature.db_branches[].namespace` is set without a `key`, so this run's \
-                     branches get a namespace of their own (`{}`) that the next run will not \
+                     branches get a namespace of their own that the next run will not \
                      reuse; set `key` to keep one namespace per key",
-                    dedicated_namespace_name(layer_config.key.as_str()),
-                ));
+                );
             }
         }
 

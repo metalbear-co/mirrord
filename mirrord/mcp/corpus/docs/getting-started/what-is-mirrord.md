@@ -36,7 +36,7 @@ Working on several microservices at once? [`mirrord up`](../using-mirrord/multip
 
 mirrord's core functionality is free and open source. Individual developers can install it and start using it immediately.
 
-[mirrord for Teams](https://metalbear.com/mirrord/pricing) adds the **mirrord Operator** - a Kubernetes operator that runs in your cluster and acts as a centralized control plane. It enables:
+[mirrord for Teams](https://metalbear.com/mirrord/pricing) is the paid offering, available as the **Team** and **Enterprise** plans. Both add the **mirrord Operator** - a Kubernetes operator that runs in your cluster and acts as a centralized control plane. It enables:
 
 * **Concurrent usage** - Multiple developers can work on the same cluster without conflicts
 * **Traffic filtering** - Route only specific HTTP requests to your local process using header, path, or method filters
@@ -47,9 +47,9 @@ mirrord's core functionality is free and open source. Individual developers can 
 
 Features marked with **\[Teams]** in these docs require a mirrord for Teams license.
 
-### mirrord for Enterprise
+### Enterprise plan
 
-The Enterprise plan adds:
+On top of everything in the Team plan, the Enterprise plan adds:
 
 * **Preview Environments** - Deploy isolated, ephemeral pods in the cluster for async review and QA
 * **mirrord for CI** - Run integration and end-to-end tests against a shared staging cluster without spinning up a dedicated test environment

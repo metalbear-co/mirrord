@@ -39,7 +39,6 @@ use crate::{
             GenericOptions, GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions,
             MssqlOptions, MysqlOptions, PgAdditionalDatabase, PostgresOptions, RedisOptions,
             S3Options, SpannerOptions, SqlBranchCopyConfig, TurbopufferOptions,
-            dedicated_namespace_name,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -1047,16 +1046,15 @@ pub fn check_attach_namespace<P: Progress>(
     match (existing_key, requested_key) {
         (Some(existing_key), Some(requested_key)) if existing_key != requested_key => {
             progress.warning(&format!(
-                "branch database `{name}` (id `{id}`) runs in namespace `{}`, created under \
-                 another key; this session uses it there",
-                dedicated_namespace_name(existing_key),
+                "branch database `{name}` (id `{id}`) runs in the dedicated namespace for \
+                 key `{existing_key}`; this session uses it there",
             ));
             Ok(())
         }
         (Some(_), Some(_)) | (None, None) => Ok(()),
         (existing_key, _) => {
             let placement = match existing_key {
-                Some(key) => format!("in namespace `{}`", dedicated_namespace_name(key)),
+                Some(key) => format!("in the dedicated namespace for key `{key}`"),
                 None => "in its target's namespace".to_owned(),
             };
             Err(OperatorApiError::BranchCreationFailed {
