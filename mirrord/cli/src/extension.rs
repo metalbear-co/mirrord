@@ -67,6 +67,7 @@ async fn mirrord_exec(
 }
 
 /// Facilitate the execution of a process using mirrord by an IDE extension
+#[mirrord_macros::boxed_future]
 pub(crate) async fn extension_exec(
     args: ExtensionExecArgs,
     watch: drain::Watch,

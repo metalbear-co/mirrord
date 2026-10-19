@@ -24,6 +24,7 @@ async fn operator_setup() -> CliResult<(), OperatorSetupError> {
 }
 
 /// Handle commands related to the operator `mirrord operator ...`
+#[mirrord_macros::boxed_future]
 pub(crate) async fn operator_command(
     args: OperatorArgs,
     watch: drain::Watch,

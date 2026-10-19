@@ -318,6 +318,7 @@ impl OperatorApi<NoClientCert> {
     ///
     /// NOTE: `SpinnerProgress` can interfere with any printed messages coming from interactive
     /// authentication with the cluster, for example via the kubelogin tool
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(level = Level::TRACE, skip_all, err)]
     pub async fn try_new<P, R>(
         config: &LayerConfig,
@@ -404,6 +405,7 @@ impl OperatorApi<NoClientCert> {
             .build())
     }
 
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
     pub async fn with_ci_api_key<P, R>(
         self,
@@ -503,6 +505,7 @@ impl OperatorApi<NoClientCert> {
 
     /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
     /// In case of failure, state of this API instance does not change.
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(level = Level::TRACE, skip(reporter, progress))]
     pub async fn with_client_certificate<P, R>(
         self,
@@ -1901,6 +1904,7 @@ impl OperatorApi<PreparedClientCert> {
     ///
     /// No connection is made here - the session starts on the operator once a connection is made
     /// with [`OperatorApi::connect_to_session`].
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(
         level = Level::TRACE,
         skip(layer_config, progress),
@@ -2089,6 +2093,7 @@ impl OperatorApi<PreparedClientCert> {
     ///
     /// 1. The 1st one is here;
     /// 2. The 2nd is on the `AgentConnection::new`;
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(
         level = Level::TRACE,
         skip(layer_config, progress),
@@ -2380,6 +2385,7 @@ impl OperatorApi<PreparedClientCert> {
     ///
     /// See [`OperatorApi::prepare_multi_cluster_session`] for how such a session differs from a
     /// single-cluster one.
+    #[mirrord_macros::boxed_future]
     pub async fn connect_in_multi_cluster_session<P>(
         &self,
         layer_config: &mut LayerConfig,

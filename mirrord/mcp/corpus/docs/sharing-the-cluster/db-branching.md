@@ -160,6 +160,8 @@ operator:
 
 A branch whose `image` matches no pattern is rejected and the session fails with an error. When `allowedImages` is **absent**, all images are allowed - restricting is an explicit, opt-in choice per cluster and engine. Each engine has its own `<engine>BranchConfig` block (`pgBranchConfig`, `mysqlBranchConfig`, `genericBranchConfig`, and so on); the list only affects branches that supply a custom `image`, so branches that rely on the default image are always allowed.
 
+To block branching for specific databases or copy modes, use the [db branching policy](policies.md#db-branching-policy).
+
 ## Branch Pod Labels and Annotations
 
 Cluster admins can put labels and annotations on every branch pod of an engine with `dbPod.labels` and `dbPod.annotations` in the operator's Helm values. This is useful when a cluster-wide tool reads pod metadata - for example Karpenter, which otherwise deletes a branch pod while it consolidates an underutilized node, ending the session's database mid-run:

@@ -276,14 +276,8 @@ impl MirrordExecution {
             match std::env::var(MIRRORD_TEST_INTPROXY_ADDR) {
                 Ok(addr) => (Self::setup_existing_intproxy(addr, config)?, None, false),
                 _ => {
-                    // Box the large future to reduce the stack frame of start_internal.
-                    Box::pin(Self::spawn_agent_and_intproxy(
-                        config,
-                        progress,
-                        analytics,
-                        mirrord_for_ci,
-                    ))
-                    .await?
+                    Self::spawn_agent_and_intproxy(config, progress, analytics, mirrord_for_ci)
+                        .await?
                 }
             };
 
@@ -638,6 +632,7 @@ impl MirrordExecution {
     /// fetches remote env vars (unless configured to load from process), and starts the
     /// internal proxy as a child process. Returns the environment map, child
     /// intproxy process handle, and whether the run uses the operator.
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn spawn_agent_and_intproxy(
         config: &mut LayerConfig,
@@ -816,6 +811,7 @@ impl MirrordExecution {
 
     /// Construct filter and retrieve remote environment from the connected agent using
     /// `MirrordExecution::get_remote_env`.
+    #[mirrord_macros::boxed_future]
     async fn fetch_env_vars(
         config: &LayerConfig,
         connection: &mut MirrordClient,
