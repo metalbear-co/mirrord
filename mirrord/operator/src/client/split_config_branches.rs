@@ -263,6 +263,7 @@ mod tests {
                 turbopuffer_options: None,
                 generic_options: None,
                 migrations: None,
+                dedicated_namespace_key: None,
             },
             status: None,
         }

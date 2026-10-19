@@ -60,6 +60,30 @@ pub enum SessionsManagerClientError {
     InvalidOperatorDataPlaneEndpoint,
     #[error("sessions-manager shared secret is not a valid header value")]
     InvalidSharedSecret,
+    #[error(
+        "MIRRORD_SESSIONS_MANAGER_API_KEY must hold a MetalBear API key, which begins with \
+         `metalbear_key_`"
+    )]
+    InvalidApiKey,
+    #[error("MIRRORD_METALBEAR_CLOUD_BAGGAGE_SESSION is not a valid header value")]
+    InvalidCloudBaggageSession,
+    #[error(
+        "MIRRORD_METALBEAR_CLOUD_URL must be an https URL (http is accepted only in debug \
+         builds), got {0}"
+    )]
+    InsecureCloudUrl(Url),
+    #[error(
+        "the MetalBear API key was rejected; check MIRRORD_SESSIONS_MANAGER_API_KEY and the \
+         cloud endpoint it is being presented to"
+    )]
+    ApiKeyRejected,
+    #[error("MetalBear token exchange returned {0}")]
+    TokenExchangeStatus(reqwest::StatusCode),
+    /// Carries no source: the body is not echoed back, as it may hold a token.
+    #[error("MetalBear token exchange response did not contain a `token`")]
+    TokenExchangeMissingToken,
+    #[error("MetalBear token exchange returned a token that is not a valid header value")]
+    TokenNotHeaderValue,
     #[error("WebSocket request construction failed: {0}")]
     WebSocketRequest(#[from] tokio_tungstenite::tungstenite::http::Error),
     #[error("JSON serialization or deserialization failed: {0}")]
@@ -85,7 +109,9 @@ pub enum SessionsManagerClientError {
 impl SessionsManagerClientError {
     pub(crate) fn is_retryable(&self) -> bool {
         match self {
-            Self::HttpStatus(status) => is_retryable_status(*status),
+            Self::HttpStatus(status) | Self::TokenExchangeStatus(status) => {
+                is_retryable_status(*status)
+            }
             Self::Kube(error) => is_retryable_kube_error(error),
             Self::KubeSseEventStream(error) => match error.as_ref() {
                 EventStreamError::Transport(error) => is_retryable_kube_error(error),

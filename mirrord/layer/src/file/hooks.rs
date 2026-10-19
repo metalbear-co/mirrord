@@ -1093,7 +1093,7 @@ pub(crate) unsafe extern "C" fn __xstat_detour(
     }
 }
 
-/// Hook for libc's stat syscall wrapper.
+/// Hook for libc's lstat syscall wrapper.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn __lxstat_detour(
     ver: c_int,
@@ -1101,7 +1101,7 @@ pub(crate) unsafe extern "C" fn __lxstat_detour(
     out_stat: *mut stat,
 ) -> c_int {
     unsafe {
-        stat_logic::<true>(ver, None, Some(raw_path), out_stat as *mut _).unwrap_or_bypass_with(
+        stat_logic::<false>(ver, None, Some(raw_path), out_stat as *mut _).unwrap_or_bypass_with(
             |bypass| {
                 let raw_path = update_ptr_from_bypass(raw_path, &bypass);
                 FN___LXSTAT(ver, raw_path, out_stat)
@@ -1125,7 +1125,7 @@ pub(crate) unsafe extern "C" fn __xstat64_detour(
     }
 }
 
-/// Hook for libc's stat syscall wrapper.
+/// Hook for libc's lstat syscall wrapper.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn __lxstat64_detour(
     ver: c_int,
@@ -1133,10 +1133,41 @@ pub(crate) unsafe extern "C" fn __lxstat64_detour(
     out_stat: *mut stat64,
 ) -> c_int {
     unsafe {
-        stat_logic::<true>(ver, None, Some(raw_path), out_stat).unwrap_or_bypass_with(|bypass| {
+        stat_logic::<false>(ver, None, Some(raw_path), out_stat).unwrap_or_bypass_with(|bypass| {
             let raw_path = update_ptr_from_bypass(raw_path, &bypass);
             FN___LXSTAT64(ver, raw_path, out_stat)
         })
+    }
+}
+
+/// Hook for libc's fstat syscall wrapper.
+///
+/// Binaries linked against glibc older than 2.33 call this instead of `fstat`, since their
+/// headers turned `fstat` into `__fxstat(_STAT_VER, ...)`. Whether a binary does depends on the
+/// glibc it was built against, not on the program: a Node.js build linked against glibc 2.28
+/// does, and libuv's `copyfile` sizes the copy from it (COR-2032).
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn __fxstat_detour(
+    ver: c_int,
+    fd: RawFd,
+    out_stat: *mut stat,
+) -> c_int {
+    unsafe {
+        stat_logic::<true>(ver, Some(fd), None, out_stat as *mut _)
+            .unwrap_or_bypass_with(|_| FN___FXSTAT(ver, fd, out_stat))
+    }
+}
+
+/// Hook for libc's fstat syscall wrapper, see [`__fxstat_detour`].
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn __fxstat64_detour(
+    ver: c_int,
+    fd: RawFd,
+    out_stat: *mut stat64,
+) -> c_int {
+    unsafe {
+        stat_logic::<true>(ver, Some(fd), None, out_stat)
+            .unwrap_or_bypass_with(|_| FN___FXSTAT64(ver, fd, out_stat))
     }
 }
 
@@ -1803,6 +1834,22 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
                 Fn__lxstat64,
                 FN___LXSTAT64
             );
+            if crate::setup().experimental().old_glibc_support {
+                replace!(
+                    hook_manager,
+                    "__fxstat",
+                    __fxstat_detour,
+                    Fn__fxstat,
+                    FN___FXSTAT
+                );
+                replace!(
+                    hook_manager,
+                    "__fxstat64",
+                    __fxstat64_detour,
+                    Fn__fxstat64,
+                    FN___FXSTAT64
+                );
+            }
             replace!(hook_manager, "lstat", lstat_detour, FnLstat, FN_LSTAT);
             crate::replace_with_fallback!(
                 hook_manager,

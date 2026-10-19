@@ -111,9 +111,6 @@ impl DirectTransport {
         };
 
         let url = assignment.data_plane_endpoint.resolve(base_url, scheme)?;
-        let mut request = Request::builder().uri(url.as_str()).body(Vec::new())?;
-        request.headers_mut().extend(self.credentials.headers()?);
-        request.headers_mut().extend(authorization);
 
         let connector = HttpsConnectorBuilder::new()
             .with_webpki_roots()
@@ -125,6 +122,14 @@ impl DirectTransport {
 
         let started_at = Instant::now();
         tokio::time::timeout(WEBSOCKET_UPGRADE_TIMEOUT, async {
+            // The credentials are gathered inside the timeout: a provider may have to reach the
+            // network for them, and that wait belongs to the upgrade it is holding up.
+            let mut request = Request::builder().uri(url.as_str()).body(Vec::new())?;
+            request
+                .headers_mut()
+                .extend(self.credentials.data_plane_headers().await?);
+            request.headers_mut().extend(authorization);
+
             // The data-plane upgrade request never carries a body, so the (always-empty) `Vec<u8>`
             // built above is simply dropped in favor of the client's own `Empty<Bytes>` body type.
             let stream = connect_ws_direct(request, UpgradeContract::Direct, |request| async {
@@ -168,11 +173,15 @@ impl SessionsManagerTransport for DirectTransport {
             subscription = ?subscription,
             "requesting sessions-manager assignments"
         );
+        // The whole attempt, credentials included, shares one deadline: a provider that has to
+        // fetch something before it can answer is part of what makes subscribing slow.
+        let credentials =
+            with_deadline(Some(deadline), self.credentials.control_plane_headers()).await??;
         let request = self
             .http
             .get(endpoint)
             .query(subscription)
-            .headers(self.credentials.headers()?)
+            .headers(credentials)
             .header(ACCEPT, "text/event-stream")
             .send();
         let response = with_deadline(Some(deadline), request).await??;
