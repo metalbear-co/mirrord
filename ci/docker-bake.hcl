@@ -100,8 +100,8 @@ target "sqs-printer" {
 
 # Builder image: Rust toolchain + cross-compilation tools for building the agent.
 target "ci-agent-builder" {
-  context    = "./ci"
-  dockerfile = "agent-build/builder.Dockerfile"
+  context    = "."
+  dockerfile = "ci/agent-build/builder.Dockerfile"
   platforms  = split(",", PLATFORMS)
   tags = compact([
     "${REGISTRY}/ci-agent-build:latest",
@@ -144,8 +144,8 @@ target "ci-layer-build-aarch64" {
 
 # Base Rust build image with the pinned Rust toolchain and protobuf compiler.
 target "ci-rust-build" {
-  context    = "./ci"
-  dockerfile = "rust-build/Dockerfile"
+  context    = "."
+  dockerfile = "ci/rust-build/Dockerfile"
   platforms  = ["linux/amd64"]
   tags = compact([
     "${REGISTRY}/ci-rust-build:latest",
