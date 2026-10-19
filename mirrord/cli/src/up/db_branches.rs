@@ -12,6 +12,7 @@ use std::{
     sync::Arc,
 };
 
+use futures::future::join_all;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
     LayerConfig, config::ConfigContext, feature::database_branches::DatabaseBranchesConfig,
@@ -100,30 +101,35 @@ pub(super) async fn check_db_branches(
         println!("{service}: using its own DB branch definitions");
     }
 
+    // The lookups are independent, so they run at once: the run waits about one round trip to
+    // the operator instead of one per service. `join_all` keeps the results in service order, so
+    // the failure reported below is still the first failing service's.
+    let lookups = join_all(requesting.iter().map(|service| async {
+        let Some(Some(api)) = apis.get(&operator_key(&service.config)) else {
+            return Ok(None);
+        };
+        let Some(response) = api.lookup_split_config_db_branches(&service.config).await? else {
+            return Ok(None);
+        };
+        let resolved = entries_from_response(&response, service.config.key.as_str())?;
+        // The session runs the config's branch checks again once it holds the resolved
+        // entries (e.g. an env override clashing with a branch's connection variable); a
+        // service that would fail them fails here instead, before any session starts.
+        let mut config = service.config.clone();
+        config.feature.db_branches.set_inline(resolved.entries);
+        config
+            .verify_db_branches(&mut ConfigContext::default())
+            .map_err(OperatorApiError::ResolvedDbBranchesInvalid)?;
+        Ok::<_, OperatorApiError>(Some((api, response)))
+    }))
+    .await;
+
     // Entry id -> the (cluster, namespace) pairs it resolved in, and the services in each. A
     // branch is named for its namespace and lives in its cluster, so each pair is one branch. The
     // cluster is the API server URL, since two kube contexts can name one cluster.
     let mut entry_namespaces: BTreeMap<String, BTreeMap<_, Vec<Arc<str>>>> = BTreeMap::new();
-    for service in requesting {
-        let Some(Some(api)) = apis.get(&operator_key(&service.config)) else {
-            continue;
-        };
-        let lookup = async {
-            let Some(response) = api.lookup_split_config_db_branches(&service.config).await? else {
-                return Ok(None);
-            };
-            let resolved = entries_from_response(&response, service.config.key.as_str())?;
-            // The session runs the config's branch checks again once it holds the resolved
-            // entries (e.g. an env override clashing with a branch's connection variable); a
-            // service that would fail them fails here instead, before any session starts.
-            let mut config = service.config.clone();
-            config.feature.db_branches.set_inline(resolved.entries);
-            config
-                .verify_db_branches(&mut ConfigContext::default())
-                .map_err(OperatorApiError::ResolvedDbBranchesInvalid)?;
-            Ok::<_, OperatorApiError>(Some(response))
-        };
-        let Some(response) = lookup.await.map_err(|error| UpCliError::DbBranches {
+    for (service, lookup) in requesting.into_iter().zip(lookups) {
+        let Some((api, response)) = lookup.map_err(|error| UpCliError::DbBranches {
             service: service.service_name.clone(),
             error: Box::new(error.into()),
         })?
