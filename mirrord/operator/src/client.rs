@@ -1759,6 +1759,11 @@ where
                 .spec
                 .require_feature(NewOperatorFeature::QueueSplittingWithComposedFilters)?;
         }
+        if split_queues.uses_split_config_filters() {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::SplitConfigQueueFilters)?;
+        }
 
         Ok(())
     }

@@ -877,6 +877,12 @@ pub enum NewOperatorFeature {
     /// namespace instead.
     DbBranchDedicatedNamespace,
 
+    /// This operator gives a session queue that sets no filter of its own the `filter` /
+    /// `jqFilter` of the matching `MirrordSplitConfig` queue entry, so the CLI sends such
+    /// entries in `queue_filters` with no filter. Gated so the CLI fails fast: an older
+    /// operator rejects a `queue_filters` entry without a `filter`.
+    SplitConfigQueueFilters,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -978,6 +984,9 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::DbBranchDedicatedNamespace => {
                 "DB branches in a dedicated namespace per key"
+            }
+            NewOperatorFeature::SplitConfigQueueFilters => {
+                "queue filters set on the target's MirrordSplitConfig"
             }
             NewOperatorFeature::Unknown => "unknown feature",
         };

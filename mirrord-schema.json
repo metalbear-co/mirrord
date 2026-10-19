@@ -2374,6 +2374,12 @@
               "description": "Configuration for a remote Redis branch.",
               "type": "object",
               "properties": {
+                "cluster": {
+                  "title": "feature.db_branches[].cluster (type: redis) {#feature-db_branches-redis-cluster}",
+                  "description": "Run the branch as a one node Redis Cluster instead of a standalone server.\n\nSet this when the application connects with a Redis Cluster client (one that runs\n`CLUSTER SLOTS` / `CLUSTER SHARDS` on connect): such clients refuse a standalone server.\nThe branch node owns all 16384 hash slots, so every key the application uses lands on\nit, and the cluster limits apply like on any Redis Cluster: only database `0` exists,\nso `name` must be unset or `0`, and multi key commands must keep all keys in one hash\nslot.\n\nWith `copy.mode: all` the source may be a standalone server or a Redis Cluster; from a\ncluster, keys are copied from every master node.\n\nDefaults to `false`.",
+                  "type": "boolean",
+                  "default": false
+                },
                 "connection": {
                   "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
                   "$ref": "#/$defs/DbBranchingConnectionSource"
