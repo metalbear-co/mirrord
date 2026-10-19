@@ -31,7 +31,7 @@ use mirrord_auth::{
 };
 use mirrord_config::{
     LayerConfig,
-    config::{ConfigContext, EnvKey},
+    config::EnvKey,
     feature::{
         database_branches::{
             DatabaseBranchConfig, SplitConfigDbBranches, default_creation_timeout_secs,
@@ -72,7 +72,7 @@ use crate::{
         queue_split_progress::{QueueSplitProgress, mirror_requested},
         split_config_branches::{
             MIRRORD_SESSION_KEY_LABEL, ResolvedSplitConfigBranches, UP_SERVICE_ANNOTATION,
-            check_attach_copy_mode, entries_from_response, same_source_warnings,
+            apply_resolved_entries, check_attach_copy_mode, same_source_warnings,
         },
     },
     crd::{
@@ -89,7 +89,7 @@ use crate::{
                 ResolveSplitConfigDbBranchesResponse, SplitConfigDbBranchesRequest,
             },
         },
-        session::{SessionCiInfo, SessionTarget, UpSessionInfo},
+        session::{KubeResourceTarget, SessionCiInfo, SessionTarget, UpSessionInfo},
     },
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CONNECT_PARAMS_HEADER,
@@ -803,61 +803,24 @@ where
         Ok(response.secret_name)
     }
 
-    /// Asks the operator which `MirrordSplitConfig` `dbBranches` entries `layer_config`'s
-    /// `feature.db_branches: "*"` / `["id", ...]` stands for. The operator looks them up on the
-    /// `MirrordSplitConfig`s of the target workload; nothing is created.
-    ///
-    /// With inline entries the operator is still asked, when it can answer, which
-    /// `MirrordSplitConfig`s the session is ignoring, and the answer carries only warnings.
-    /// Returns `None` when there is nothing to ask, or when that inline-entries lookup failed.
-    pub async fn lookup_split_config_db_branches(
+    /// The workload `layer_config` targets and its namespace, as the `splitconfigdbbranches`
+    /// route takes them. `None` for a target that isn't one workload (targetless, a label
+    /// selector), which has no `MirrordSplitConfig` to look at.
+    fn split_config_target(
         &self,
         layer_config: &LayerConfig,
-    ) -> OperatorApiResult<Option<ResolveSplitConfigDbBranchesResponse>> {
-        let supported = self
-            .operator
-            .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::DbBranchesFromSplitConfig);
-        let request = match layer_config.feature.db_branches.split_config_request() {
-            Some(request) => {
-                self.operator
-                    .spec
-                    .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
-                Some(match request {
-                    SplitConfigDbBranches::All(_) => {
-                        SplitConfigDbBranchesRequest::All(AllEntries::All)
-                    }
-                    SplitConfigDbBranches::Ids(ids) => {
-                        SplitConfigDbBranchesRequest::Ids(ids.clone())
-                    }
-                })
-            }
-            // Inline entries win over the workload's `dbBranches`; the operator names the configs
-            // this session ignores. An operator without the lookup has nothing to say.
-            None if supported && layer_config.feature.db_branches.is_empty().not() => None,
-            None => return Ok(None),
-        };
-
-        let target = layer_config
+    ) -> Option<(KubeResourceTarget, String)> {
+        let mut target = layer_config
             .target
             .path
             .clone()
             .unwrap_or(Target::Targetless);
-        let mut target_with_container = target.clone();
-        if target_with_container.container().is_none() {
-            target_with_container.set_container(String::new());
+        if target.container().is_none() {
+            target.set_container(String::new());
         }
-        let kube_target = match SessionTarget::from_config(target_with_container) {
-            Some(SessionTarget::KubeResource(kube_target)) => kube_target,
-            _ if request.is_some() => {
-                return Err(OperatorApiError::UnsupportedTargetConfig(format!(
-                    "`feature.db_branches` taken from a MirrordSplitConfig needs a single \
-                     workload target, got `{target}`; define the branches inline or target the \
-                     workload"
-                )));
-            }
-            _ => return Ok(None),
+        let Some(SessionTarget::KubeResource(kube_target)) = SessionTarget::from_config(target)
+        else {
+            return None;
         };
         let namespace = layer_config
             .target
@@ -865,75 +828,132 @@ where
             .as_deref()
             .unwrap_or(self.client.default_namespace())
             .to_owned();
+        Some((kube_target, namespace))
+    }
+
+    /// Asks the operator which `MirrordSplitConfig` `dbBranches` entries a `"*"` / ids `request`
+    /// stands for, on the workload `layer_config` targets. Nothing is created.
+    pub async fn lookup_split_config_db_branches(
+        &self,
+        layer_config: &LayerConfig,
+        request: &SplitConfigDbBranches,
+    ) -> OperatorApiResult<ResolveSplitConfigDbBranchesResponse> {
+        self.operator
+            .spec
+            .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
+        let request = match request {
+            SplitConfigDbBranches::All(_) => SplitConfigDbBranchesRequest::All(AllEntries::All),
+            SplitConfigDbBranches::Ids(ids) => SplitConfigDbBranchesRequest::Ids(ids.clone()),
+        };
+        let Some((target, namespace)) = self.split_config_target(layer_config) else {
+            let target = layer_config
+                .target
+                .path
+                .clone()
+                .unwrap_or(Target::Targetless);
+            return Err(OperatorApiError::UnsupportedTargetConfig(format!(
+                "`feature.db_branches` taken from a MirrordSplitConfig needs a single workload \
+                 target, got `{target}`; define the branches inline or target the workload"
+            )));
+        };
 
         let body = ResolveSplitConfigDbBranchesRequest {
             namespace: namespace.clone(),
-            target: kube_target,
-            request: request.clone(),
+            target,
+            request: Some(request),
         };
-        match (
-            self.post_in_namespace(&namespace, "splitconfigdbbranches", &body)
-                .await,
-            &request,
-        ) {
-            (Ok(response), _) => Ok(Some(response)),
-            // Inline entries need nothing from the answer; a lookup that fails only costs
-            // the warning naming the configs the session ignores.
-            (Err(error), None) => {
+        self.post_in_namespace(&namespace, "splitconfigdbbranches", &body)
+            .await
+            .map_err(|error| match error {
+                // The operator's answer says what is wrong with the request (an unknown id, a
+                // config conflict) in its own words; it is shown as it is, not inside kube's
+                // wrapping of the response.
+                kube::Error::Api(response) => {
+                    OperatorApiError::SplitConfigDbBranches(response.message)
+                }
+                error => OperatorApiError::SplitConfigDbBranches(error.to_string()),
+            })
+    }
+
+    /// For a session that defines its branches inline: the operator's warnings naming the
+    /// `MirrordSplitConfig` `dbBranches` the session ignores, since inline entries win over the
+    /// workload's. Best effort, as the session needs nothing from the answer: empty when the
+    /// operator can't answer or the lookup fails.
+    async fn ignored_split_config_warnings(&self, layer_config: &LayerConfig) -> Vec<String> {
+        let supported = self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::DbBranchesFromSplitConfig);
+        if supported.not() || layer_config.feature.db_branches.is_empty() {
+            return Vec::new();
+        }
+        let Some((target, namespace)) = self.split_config_target(layer_config) else {
+            return Vec::new();
+        };
+
+        let body = ResolveSplitConfigDbBranchesRequest {
+            namespace: namespace.clone(),
+            target,
+            request: None,
+        };
+        match self
+            .post_in_namespace::<ResolveSplitConfigDbBranchesResponse>(
+                &namespace,
+                "splitconfigdbbranches",
+                &body,
+            )
+            .await
+        {
+            Ok(response) => response.warnings,
+            Err(error) => {
                 tracing::warn!(
                     %error,
                     "Could not check which MirrordSplitConfig dbBranches the inline \
                      db_branches ignore"
                 );
-                Ok(None)
-            }
-            // The operator's answer says what is wrong with the request (an unknown id,
-            // a config conflict) in its own words; it is shown as it is, not inside kube's
-            // wrapping of the response.
-            (Err(kube::Error::Api(response)), Some(_)) => {
-                Err(OperatorApiError::SplitConfigDbBranches(response.message))
-            }
-            (Err(error), Some(_)) => {
-                Err(OperatorApiError::SplitConfigDbBranches(error.to_string()))
+                Vec::new()
             }
         }
     }
 
     /// Resolves `feature.db_branches: "*"` / `["id", ...]` into inline entries through the
-    /// operator (see [`Self::lookup_split_config_db_branches`]), and writes them back into
-    /// `layer_config` so every later reader (branch creation, portforwards, the internal proxy)
-    /// sees concrete entries. Each entry's branch id is the entry id plus the session key, so
-    /// services started under one key share the branches.
+    /// operator (see [`Self::lookup_split_config_db_branches`] and [`apply_resolved_entries`]).
+    /// Each entry's branch id is the entry id plus the session key, so services started under one
+    /// key share the branches. With inline entries, only prints the operator's warnings about the
+    /// `MirrordSplitConfig`s the session ignores.
     ///
-    /// The operator's warnings are printed as they are. Returns the ids of the resolved
-    /// branches, empty when nothing was resolved.
+    /// Returns the ids of the resolved branches, empty when nothing was resolved.
     async fn resolve_split_config_db_branches<P: Progress>(
         &self,
         layer_config: &mut LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<ResolvedSplitConfigBranches> {
-        let Some(response) = self.lookup_split_config_db_branches(layer_config).await? else {
-            return Ok(ResolvedSplitConfigBranches::default());
-        };
-
-        for warning in &response.warnings {
-            progress.warning(warning);
-        }
-        if layer_config
+        let Some(request) = layer_config
             .feature
             .db_branches
             .split_config_request()
-            .is_none()
-        {
+            .cloned()
+        else {
+            for warning in self.ignored_split_config_warnings(layer_config).await {
+                progress.warning(&warning);
+            }
             return Ok(ResolvedSplitConfigBranches::default());
+        };
+
+        let response = self
+            .lookup_split_config_db_branches(layer_config, &request)
+            .await?;
+        for warning in &response.warnings {
+            progress.warning(warning);
         }
+
         let target = layer_config
             .target
             .path
             .clone()
             .unwrap_or(Target::Targetless);
-
-        let resolved = entries_from_response(&response, layer_config.key.as_str())?;
+        let (resolved, warnings) = apply_resolved_entries(layer_config, &response)?;
         if resolved.entries.is_empty() {
             progress.info(&format!(
                 "no dbBranches on the MirrordSplitConfigs of `{target}` ({}), continuing without \
@@ -956,18 +976,7 @@ where
                 response.split_configs.join("`, `"),
             ));
         }
-        layer_config
-            .feature
-            .db_branches
-            .set_inline(resolved.entries.clone());
-
-        // The config was verified before these entries existed, so each entry's own checks
-        // and the env override conflict run now that it holds them.
-        let mut context = ConfigContext::default();
-        layer_config
-            .verify_db_branches(&mut context)
-            .map_err(OperatorApiError::ResolvedDbBranchesInvalid)?;
-        for warning in context.into_warnings() {
+        for warning in warnings {
             progress.warning(&warning);
         }
         Ok(resolved)

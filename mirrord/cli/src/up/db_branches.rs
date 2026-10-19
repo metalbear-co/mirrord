@@ -14,12 +14,10 @@ use std::{
 
 use futures::future::join_all;
 use mirrord_analytics::NullReporter;
-use mirrord_config::{
-    LayerConfig, config::ConfigContext, feature::database_branches::DatabaseBranchesConfig,
-};
+use mirrord_config::{LayerConfig, feature::database_branches::DatabaseBranchesConfig};
 use mirrord_operator::client::{
     NoClientCert, OperatorApi, error::OperatorApiError,
-    split_config_branches::entries_from_response,
+    split_config_branches::apply_resolved_entries,
 };
 use mirrord_progress::NullProgress;
 use mirrord_up::SubprocessCfg;
@@ -82,20 +80,24 @@ pub(super) async fn check_db_branches(
         .filter(|service| service.config.feature.db_branches.inline().is_empty().not())
         .map(|service| service.service_name.clone())
         .collect::<Vec<_>>();
+    // Every service still asking, with its request and the operator to ask: a required operator
+    // that can't be used has failed the run above, and a missing optional one dropped the request.
     let requesting = services
         .iter_mut()
-        .filter(|service| {
-            service
+        .filter_map(|service| {
+            let request = service
                 .config
                 .feature
                 .db_branches
-                .split_config_request()
-                .is_some()
+                .split_config_request()?
+                .clone();
+            let api = apis.get(&operator_key(&service.config))?.as_ref()?;
+            Some((service, request, api))
         })
         .collect::<Vec<_>>();
     let requested = requesting
         .iter()
-        .map(|service| service.service_name.clone())
+        .map(|(service, ..)| service.service_name.clone())
         .collect::<Vec<_>>();
     for service in &requested {
         println!("{service}: requesting DB branching");
@@ -107,23 +109,15 @@ pub(super) async fn check_db_branches(
     // The lookups are independent, so they run at once: the run waits about one round trip to
     // the operator instead of one per service. `join_all` keeps the results in service order, so
     // the failure reported below is still the first failing service's.
-    let lookups = join_all(requesting.iter().map(|service| async {
-        let Some(Some(api)) = apis.get(&operator_key(&service.config)) else {
-            return Ok(None);
-        };
-        let Some(response) = api.lookup_split_config_db_branches(&service.config).await? else {
-            return Ok(None);
-        };
-        let resolved = entries_from_response(&response, service.config.key.as_str())?;
-        // The session runs the config's branch checks again once it holds the resolved
-        // entries (e.g. an env override clashing with a branch's connection variable); a
-        // service that would fail them fails here instead, before any session starts.
-        let mut config = service.config.clone();
-        config.feature.db_branches.set_inline(resolved.entries);
-        config
-            .verify_db_branches(&mut ConfigContext::default())
-            .map_err(OperatorApiError::ResolvedDbBranchesInvalid)?;
-        Ok::<_, OperatorApiError>(Some((api, response)))
+    let lookups = join_all(requesting.iter().map(|(service, request, api)| async move {
+        let response = api
+            .lookup_split_config_db_branches(&service.config, request)
+            .await?;
+        // The session applies the answer to its config the same way. Applied to a copy
+        // here, it rejects what the session would (e.g. an env override clashing with a
+        // branch's connection variable), before any session starts.
+        apply_resolved_entries(&mut service.config.clone(), &response)?;
+        Ok::<_, OperatorApiError>(response)
     }))
     .await;
 
@@ -131,14 +125,11 @@ pub(super) async fn check_db_branches(
     // branch is named for its namespace and lives in its cluster, so each pair is one branch. The
     // cluster is the API server URL, since two kube contexts can name one cluster.
     let mut entry_namespaces: BTreeMap<String, BTreeMap<_, Vec<Arc<str>>>> = BTreeMap::new();
-    for (service, lookup) in requesting.into_iter().zip(lookups) {
-        let Some((api, response)) = lookup.map_err(|error| UpCliError::DbBranches {
+    for ((service, _, api), lookup) in requesting.into_iter().zip(lookups) {
+        let response = lookup.map_err(|error| UpCliError::DbBranches {
             service: service.service_name.clone(),
             error: Box::new(error.into()),
-        })?
-        else {
-            continue;
-        };
+        })?;
 
         if response.entries.is_empty() {
             println!(

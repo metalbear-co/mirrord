@@ -11,7 +11,9 @@ use std::{
 };
 
 use kube::ResourceExt;
-use mirrord_config::feature::database_branches::DatabaseBranchConfig;
+use mirrord_config::{
+    LayerConfig, config::ConfigContext, feature::database_branches::DatabaseBranchConfig,
+};
 
 use crate::{
     client::error::OperatorApiError,
@@ -73,6 +75,31 @@ pub fn entries_from_response(
         resolved.branch_ids.insert(id);
     }
     Ok(resolved)
+}
+
+/// Writes the entries a `"*"` / ids request resolved to into `layer_config` as inline entries, so
+/// every later reader (branch creation, portforwards, the internal proxy) sees concrete entries,
+/// and runs the branch checks the config couldn't run while it only held the request (each
+/// entry's own checks, and the env override conflict).
+///
+/// The session applies the answer to its config this way, and `mirrord up`'s check before launch
+/// applies it to a copy of each service's config, so it rejects exactly what the session would.
+/// Returns the resolved branches and the checks' warnings.
+pub fn apply_resolved_entries(
+    layer_config: &mut LayerConfig,
+    response: &ResolveSplitConfigDbBranchesResponse,
+) -> Result<(ResolvedSplitConfigBranches, Vec<String>), OperatorApiError> {
+    let resolved = entries_from_response(response, layer_config.key.as_str())?;
+    layer_config
+        .feature
+        .db_branches
+        .set_inline(resolved.entries.clone());
+
+    let mut context = ConfigContext::default();
+    layer_config
+        .verify_db_branches(&mut context)
+        .map_err(OperatorApiError::ResolvedDbBranchesInvalid)?;
+    Ok((resolved, context.into_warnings()))
 }
 
 /// The copy mode a branch spec asks for, as the user spells it (`empty`, `schema`, `all`),
