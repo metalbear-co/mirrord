@@ -155,7 +155,7 @@ where
     /// Drops the open stream, so the next [`Self::next`] subscribes again.
     ///
     /// For feeds where the server re-sends pending events only to a new subscription.
-    pub(crate) async fn reconnect(&mut self) {
+    pub(crate) async fn reset(&mut self) {
         self.state.lock().await.stream = None;
     }
 }

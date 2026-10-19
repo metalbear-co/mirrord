@@ -191,7 +191,7 @@ impl<T: SessionsManagerTransport> DeduplicatingAssignmentSubscriber<T> {
         // only when that agent subscribes again. Without a new subscription, the room would wait
         // out its deadline for a connection that never comes. Replays of assignments still in
         // progress are dropped by deduplication.
-        self.subscriber.reconnect().await;
+        self.subscriber.reset().await;
     }
 
     pub(crate) fn ack_connected(&mut self, assignment_id: &AssignmentId) {
