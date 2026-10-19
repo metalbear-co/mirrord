@@ -25,7 +25,10 @@ use mirrord_progress::NullProgress;
 use mirrord_up::SubprocessCfg;
 
 use super::UpCliError;
-use crate::error::CliError;
+use crate::{
+    connection::{OperatorAvailability, operator_availability},
+    error::CliError,
+};
 
 /// Asks the operator what each service requesting DB branching gets, printing it, before any
 /// service starts.
@@ -210,29 +213,27 @@ fn operator_key(config: &LayerConfig) -> OperatorKey {
     )
 }
 
-/// The operator a session with `config` would use for branching, if any. Mirrors how the
-/// sessions decide to use the operator (see `try_connect_using_operator`), so a service only
-/// requests branching when its session will be able to, and an operator the config requires
-/// but can't be used fails here, before any session starts, with the session's error.
+/// The operator a session with `config` would use for branching, if any, decided as the session
+/// decides it ([`operator_availability`]). So a service only requests branching when its session
+/// will be able to, and an operator the config requires but can't be used fails here, before any
+/// session starts, with the session's error.
 async fn usable_operator(
     config: &LayerConfig,
 ) -> Result<Option<OperatorApi<NoClientCert>>, CliError> {
     let required = config.operator == Some(true);
-    if config.operator == Some(false) {
-        return Ok(None);
-    }
-    let Some(api) =
-        OperatorApi::try_new(config, &mut NullReporter::default(), &NullProgress).await?
-    else {
-        return if required {
-            Err(CliError::OperatorNotInstalled)
-        } else {
-            Ok(None)
-        };
-    };
-    match api.check_license_validity(&NullProgress) {
-        Ok(()) => Ok(Some(api)),
-        Err(error) if required => Err(error.into()),
-        Err(_) => Ok(None),
+    match operator_availability(
+        config,
+        &mut NullReporter::default(),
+        &NullProgress,
+        &NullProgress,
+    )
+    .await?
+    {
+        OperatorAvailability::Usable(api) => Ok(Some(*api)),
+        OperatorAvailability::NotInstalled if required => Err(CliError::OperatorNotInstalled),
+        OperatorAvailability::LicenseInvalid(error) if required => Err(error.into()),
+        OperatorAvailability::Disabled
+        | OperatorAvailability::NotInstalled
+        | OperatorAvailability::LicenseInvalid(_) => Ok(None),
     }
 }
