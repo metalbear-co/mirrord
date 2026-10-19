@@ -230,8 +230,8 @@ impl QueueSender {
 mod tests {
     use std::{
         sync::{
-            Arc,
-            atomic::{AtomicBool, AtomicUsize, Ordering},
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
         },
         time::Duration,
     };
@@ -259,7 +259,8 @@ mod tests {
     /// unclaimed assignments when it subscribes again.
     #[derive(Clone, Default)]
     struct MockTransport {
-        subscriptions: Arc<AtomicUsize>,
+        /// Every subscription opened, in order.
+        subscriptions: Arc<Mutex<Vec<AssignmentSubscription>>>,
         fail_next_dial: Arc<AtomicBool>,
     }
 
@@ -267,9 +268,12 @@ mod tests {
         async fn subscribe_assignments(
             &self,
             _scope: &ServiceScope,
-            _subscription: &AssignmentSubscription,
+            subscription: &AssignmentSubscription,
         ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
-            self.subscriptions.fetch_add(1, Ordering::SeqCst);
+            self.subscriptions
+                .lock()
+                .unwrap()
+                .push(subscription.clone());
             let assignment = serde_json::from_value(serde_json::json!({
                 "assignment_id": "assignment-1",
                 "data_plane_endpoint": "/ws/assignment-1",
@@ -342,11 +346,16 @@ mod tests {
             .expect("control plane delivered a connection in time");
         assert!(connection.is_some());
 
-        client.shutdown().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(10), client.shutdown())
+            .await
+            .expect("control plane shut down in time")
+            .unwrap();
     }
 
     /// The server keeps an unclaimed assignment until its room's deadline but re-sends it only to
-    /// a new subscription, so a failed dial must be followed by one.
+    /// a new subscription, so a failed dial must be followed by one. That subscription has to
+    /// carry the same agent identity: a new `agent_instance_id` reads as a new agent process, and
+    /// the server would end the rooms of the old one.
     #[tokio::test]
     async fn failed_dial_resubscribes_and_connects_the_replayed_assignment() {
         let scope = ServiceScope {
@@ -367,8 +376,15 @@ mod tests {
             .await
             .expect("control plane delivered a connection in time");
         assert!(connection.is_some());
-        assert_eq!(transport.subscriptions.load(Ordering::SeqCst), 2);
+        {
+            let subscriptions = transport.subscriptions.lock().unwrap();
+            assert_eq!(subscriptions.len(), 2);
+            assert_eq!(subscriptions[0], subscriptions[1]);
+        }
 
-        client.shutdown().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(10), client.shutdown())
+            .await
+            .expect("control plane shut down in time")
+            .unwrap();
     }
 }
