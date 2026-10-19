@@ -871,6 +871,12 @@ pub enum NewOperatorFeature {
     /// with the whole secret as the value, which surfaces only as a login failure.
     DbBranchSecretManagerExtract,
 
+    /// This operator resolves `aws_ssm_parameter` connection sources (AWS Systems Manager
+    /// Parameter Store). Gated so the CLI fails fast: an older operator cannot deserialize a
+    /// branch carrying the source kind and never reconciles it, which surfaces only as a
+    /// creation timeout.
+    DbBranchSsmParameter,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -969,6 +975,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::KafkaBranching => "Kafka branching",
             NewOperatorFeature::DbBranchSecretManagerExtract => {
                 "DB branching field extraction from secret manager sources"
+            }
+            NewOperatorFeature::DbBranchSsmParameter => {
+                "DB branching connection values from AWS SSM Parameter Store"
             }
             NewOperatorFeature::Unknown => "unknown feature",
         };

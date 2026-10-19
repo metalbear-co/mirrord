@@ -140,7 +140,8 @@ pub const BUILTIN_BRANCH_PORT_VAR: &str = "MIRRORD_BRANCH_PORT";
 /// `token`, `org`, and `bucket` are custom params - any key works under `connection.params`,
 /// not just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use
 /// params mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and
-/// `gcp_secret_manager`/`aws_secrets_manager` sources are not supported for generic branches.
+/// `gcp_secret_manager`/`aws_secrets_manager`/`aws_ssm_parameter` sources are not supported for
+/// generic branches.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenericBranchConfig {
@@ -337,6 +338,13 @@ impl GenericBranchConfig {
             if matches!(source, ParamSource::AwsSecretsManager { .. }) {
                 return Err(ConfigError::Conflict(
                     "`aws_secrets_manager` connection params are not supported for generic \
+                     branches."
+                        .to_owned(),
+                ));
+            }
+            if matches!(source, ParamSource::AwsSsmParameter { .. }) {
+                return Err(ConfigError::Conflict(
+                    "`aws_ssm_parameter` connection params are not supported for generic \
                      branches."
                         .to_owned(),
                 ));
