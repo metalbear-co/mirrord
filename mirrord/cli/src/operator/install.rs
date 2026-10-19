@@ -15,7 +15,7 @@ use self::{
     signup::Trial,
     telemetry::{InstallPhase, InstallRun, Outcome},
 };
-use crate::config::OperatorInstallArgs;
+use crate::{config::OperatorInstallArgs, data::GlobalConfig};
 
 mod cluster;
 mod error;
@@ -201,8 +201,10 @@ struct Connection {
 }
 
 impl Connection {
-    /// Loads the given kubecontext, or the current one, and creates the clients.
+    /// Loads the given kubecontext, else the global config's, else the current one, and creates
+    /// the clients.
     async fn new(context: Option<String>) -> Result<Self, OperatorInstallError> {
+        let context = context.or(GlobalConfig::load().await.kube_context().map(str::to_owned));
         let (mut kube_config, context) =
             create_kube_config_with_context(None, None::<&str>, context)
                 .await
