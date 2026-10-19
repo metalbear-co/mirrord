@@ -2233,6 +2233,7 @@ impl UnifiedBranchParams {
             mssql_options: None,
             redis_options: Some(RedisOptions {
                 copy: config.copy.clone().into(),
+                cluster: config.cluster,
             }),
             clickhouse_options: None,
             cockroachdb_options: None,

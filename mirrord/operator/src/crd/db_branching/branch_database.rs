@@ -478,6 +478,11 @@ pub struct MongodbOptions {
 pub struct RedisOptions {
     #[serde(default)]
     pub copy: RedisCopySpec,
+
+    /// Run the branch as a one node Redis Cluster that owns every hash slot, so Redis Cluster
+    /// clients can discover and use it. Only database 0 exists on such a node.
+    #[serde(default)]
+    pub cluster: bool,
 }
 
 /// DynamoDB-specific branch options.

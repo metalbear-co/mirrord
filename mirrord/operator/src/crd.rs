@@ -877,6 +877,12 @@ pub enum NewOperatorFeature {
     /// namespace instead.
     DbBranchDedicatedNamespace,
 
+    /// This operator runs a Redis branch as a one node Redis Cluster when
+    /// `feature.db_branches[].cluster` is set. Gated so the CLI fails fast: an older operator's
+    /// CRD schema prunes `redisOptions.cluster` and brings up a standalone server, which a
+    /// Redis Cluster client then refuses to talk to.
+    RedisClusterBranching,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -979,6 +985,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchDedicatedNamespace => {
                 "DB branches in a dedicated namespace per key"
             }
+            NewOperatorFeature::RedisClusterBranching => "Redis Cluster branching",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

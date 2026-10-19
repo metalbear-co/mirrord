@@ -1147,6 +1147,20 @@ where
                 .require_feature(NewOperatorFeature::DbBranchSecretManagerExtract)?;
         }
 
+        // A Redis Cluster branch needs an operator that knows the `cluster` option: an older
+        // one prunes it from the CRD and brings up a standalone server, and the app's cluster
+        // client then fails on connect with no hint that the branch is the reason.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_redis_cluster)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::RedisClusterBranching)?;
+        }
+
         // A `url` connection param needs an operator that layers the other params over it: an
         // older operator ignores the param and builds the source connection from whatever else
         // is declared, silently branching the wrong database.
