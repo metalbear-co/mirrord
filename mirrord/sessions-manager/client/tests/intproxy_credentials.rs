@@ -20,6 +20,7 @@ use mirrord_sessions_manager_client::{
     SessionsManagerClientError, SessionsManagerConnectInfo,
 };
 use tokio::net::TcpListener;
+use url::Url;
 
 struct FixedLogin;
 
@@ -55,15 +56,13 @@ async fn intproxy_presents_the_login_token_and_never_the_api_key() {
 
     // SAFETY: this binary's only test sets these before anything reads the environment.
     unsafe {
-        std::env::set_var(
-            "MIRRORD_SESSIONS_MANAGER_URL",
-            format!("http://{address}/sm"),
-        );
         std::env::set_var("MIRRORD_METALBEAR_CLOUD_URL", format!("http://{address}"));
         std::env::set_var("MIRRORD_SESSIONS_MANAGER_API_KEY", "metalbear_key_test");
     }
 
-    let transport = DirectTransport::intproxy_from_env(Some(Arc::new(FixedLogin))).unwrap();
+    let base_url = Url::parse(&format!("http://{address}/sm")).unwrap();
+    let transport =
+        DirectTransport::intproxy_from_env(base_url, Some(Arc::new(FixedLogin))).unwrap();
     let client = IntproxyClient::with_transport(
         SessionsManagerConnectInfo {
             scope: ServiceScope {

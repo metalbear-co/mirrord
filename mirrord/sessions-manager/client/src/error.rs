@@ -39,8 +39,6 @@ pub enum SessionsManagerClientError {
     InvalidBaseUrl,
     #[error("sessions-manager base URL must be of schema http/s")]
     InvalidBaseUrlScheme(Url),
-    #[error("MIRRORD_SESSIONS_MANAGER_URL is required for sessions-manager connections")]
-    MissingSessionsManagerUrl,
     #[error("Missing serverless environment")]
     MissingConfigEnvironment,
     #[error("Missing serverless service")]

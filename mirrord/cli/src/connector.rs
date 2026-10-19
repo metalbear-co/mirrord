@@ -25,7 +25,7 @@ use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
 use mirrord_sessions_manager_client::{
     DirectTransport, IntproxyClient, OperatorTransport, SessionsManagerClientError,
-    SessionsManagerConnectInfo, SessionsManagerTransport,
+    SessionsManagerConnectInfo, SessionsManagerEndpoint, SessionsManagerTransport,
 };
 use tokio::io::DuplexStream;
 use tokio_util::codec::Encoder;
@@ -127,20 +127,29 @@ pub(crate) struct DirectConnector {
 /// is over, same as [`DirectConnector`].
 pub(crate) struct SessionsManagerConnector {
     pub(crate) connect_info: SessionsManagerConnectInfo,
-    /// Set when the sessions-manager is hosted by the operator and reached through
-    /// kube-apiserver; otherwise it's the standalone one configured by the environment.
-    pub(crate) operator_client: Option<kube::Client>,
+    pub(crate) route: SessionsManagerRoute,
+}
+
+/// How a [`SessionsManagerConnector`] reaches its sessions-manager.
+pub(crate) enum SessionsManagerRoute {
+    /// Hosted by the operator and reached through kube-apiserver.
+    Operator(kube::Client),
+    /// A standalone sessions-manager at its own base URL.
+    Standalone(SessionsManagerEndpoint),
 }
 
 impl SessionsManagerConnector {
     async fn connect(&self) -> Result<OperatorConnection, SessionsManagerClientError> {
-        match &self.operator_client {
-            Some(client) => {
+        match &self.route {
+            SessionsManagerRoute::Operator(client) => {
                 self.connect_with(OperatorTransport::new(client.clone()))
                     .await
             }
-            None => {
-                let transport = DirectTransport::intproxy_from_env(Some(Arc::new(StoredLogin)))?;
+            SessionsManagerRoute::Standalone(endpoint) => {
+                let transport = DirectTransport::intproxy_from_env(
+                    endpoint.url.clone(),
+                    Some(Arc::new(StoredLogin)),
+                )?;
                 self.connect_with(transport).await
             }
         }
@@ -160,7 +169,10 @@ impl fmt::Debug for SessionsManagerConnector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SessionsManagerConnector")
             .field("connect_info", &self.connect_info)
-            .field("operator_hosted", &self.operator_client.is_some())
+            .field(
+                "operator_hosted",
+                &matches!(self.route, SessionsManagerRoute::Operator(_)),
+            )
             .finish()
     }
 }

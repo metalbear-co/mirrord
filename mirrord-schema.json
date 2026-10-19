@@ -173,6 +173,18 @@
       ],
       "x-mirrord-plan": "team"
     },
+    "sessions_manager": {
+      "title": "sessions_manager {#root-sessions_manager}",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SessionsManagerFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "x-mirrord-plan": "enterprise"
+    },
     "sip_binaries": {
       "title": "sip_binaries {#root-sip_binaries}",
       "description": "Binaries to patch (macOS SIP).\n\nUse this when mirrord isn't loaded to protected binaries that weren't automatically\npatched.\n\nRuns `endswith` on the binary path (so `bash` would apply to any binary ending with `bash`\nwhile `/usr/bin/bash` would apply only for that binary).\n\n```json\n{\n  \"sip_binaries\": [\"bash\", \"python\"]\n}\n```",
@@ -5849,6 +5861,21 @@
         "service"
       ],
       "x-mirrord-plan": "team"
+    },
+    "SessionsManagerFileConfig": {
+      "description": "Selects the sessions-manager that pairs a serverless target with the agent running beside it.\n\nWithout it, mirrord connects through the MetalBear Cloud sessions-manager, unless\n[`operator`](#root-operator) is `true`, in which case the sessions-manager hosted by the\nmirrord operator is used and this section is ignored.\n\n```json\n{\n  \"sessions_manager\": {\n    \"url\": \"https://sessions-manager.example.com/sm\"\n  }\n}\n```",
+      "type": "object",
+      "properties": {
+        "url": {
+          "title": "sessions_manager.url {#sessions_manager-url}",
+          "description": "Base URL of a standalone sessions-manager, including any path prefix it is served under,\ne.g. `https://example.com/sm`.\n\nThe `MIRRORD_SESSIONS_MANAGER_URL` environment variable overrides it.\n\nDefaults to the MetalBear Cloud sessions-manager,\n`https://sm-aws-use1.app.metalbear.com/sm`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "SingleOrVec_ParamSource": {
       "x-kubernetes-preserve-unknown-fields": true

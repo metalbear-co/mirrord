@@ -18,7 +18,7 @@ mod shared_secret;
 
 use std::sync::Arc;
 
-pub use cloud_token::{CloudTokenCredentials, cloud_url_from_env};
+pub use cloud_token::{CloudTokenCredentials, SESSIONS_MANAGER_URL_DEFAULT, cloud_url_from_env};
 use futures::future::{BoxFuture, FutureExt};
 pub use login_token::{LoginToken, LoginTokenCredentials, LoginTokenSource};
 use reqwest::header::HeaderMap;
