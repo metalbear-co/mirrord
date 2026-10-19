@@ -7,6 +7,7 @@ use std::{
 
 use base64::{Engine, prelude::BASE64_STANDARD};
 use fancy_regex::Regex;
+use itertools::Itertools;
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use prost::Message;
 use prost_reflect::DescriptorPool;
@@ -737,14 +738,14 @@ impl MirrordConfig for SplitQueuesConfig {
 
     fn generate_config(
         mut self,
-        _context: &mut ConfigContext,
+        context: &mut ConfigContext,
     ) -> crate::config::Result<Self::Generated> {
         // Protobuf schemas are compiled here, on the local machine, because imports in the
         // `.proto` files can only be resolved against the local filesystem. Everything
         // downstream (connect params, the copy-target CRD) carries the compiled descriptor.
         for split in &mut self.0 {
             if let Some(protobuf) = &mut split.payload_protobuf {
-                protobuf.resolve_descriptor(&split.queue_id)?;
+                protobuf.resolve_descriptor(&split.queue_id, context)?;
             }
         }
         Ok(self)
@@ -786,14 +787,19 @@ impl FromMirrordConfig for SplitQueuesConfig {
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KafkaPayloadProtobuf {
-    /// Path to the `.proto` file defining the payload's message type. Relative paths are
-    /// resolved against the current working directory. Not needed when `descriptor_base64` is
-    /// provided.
+    /// Path to the `.proto` file defining the payload's message type. Not needed when
+    /// `descriptor_base64` is provided.
+    ///
+    /// A relative path is resolved from the directory you run `mirrord exec` or `mirrord up`
+    /// from, not from the directory of the config file. With `mirrord up`, it is also not
+    /// resolved from the service's `run.directory`, because the schema is compiled before the
+    /// service starts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_file: Option<PathBuf>,
 
-    /// Extra import roots for compiling `schema_file`. The file's own directory is always an
-    /// import root.
+    /// Extra directories to look for the files that `schema_file` imports in. They are searched
+    /// in order, and then the directory of `schema_file`. A relative path is resolved like
+    /// `schema_file`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub include_directories: Vec<PathBuf>,
 
@@ -824,6 +830,7 @@ impl KafkaPayloadProtobuf {
     fn resolve_descriptor(
         &mut self,
         queue_id: &str,
+        context: &ConfigContext,
     ) -> Result<(), QueueSplittingVerificationError> {
         let invalid = |error: String| QueueSplittingVerificationError::ProtobufDescriptorInvalid {
             queue_name: queue_id.to_owned(),
@@ -846,7 +853,7 @@ impl KafkaPayloadProtobuf {
                 }
             }
             (None, Some(schema_file)) => {
-                Self::compile_schema(queue_id, schema_file, &self.include_directories)?
+                Self::compile_schema(queue_id, schema_file, &self.include_directories, context)?
             }
             (None, None) => {
                 return Err(QueueSplittingVerificationError::ProtobufSchemaMissing {
@@ -878,33 +885,49 @@ impl KafkaPayloadProtobuf {
         queue_id: &str,
         schema_file: &Path,
         include_directories: &[PathBuf],
+        context: &ConfigContext,
     ) -> Result<Vec<u8>, QueueSplittingVerificationError> {
-        let compile_error = |error: String| QueueSplittingVerificationError::ProtobufCompile {
-            queue_name: queue_id.to_owned(),
-            schema_file: schema_file.display().to_string(),
-            errors: error,
-        };
-
-        let file_directory = schema_file
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        let includes = include_directories
+        let schema_path = context.resolve_path(schema_file);
+        let includes: Vec<_> = include_directories
             .iter()
-            .map(PathBuf::as_path)
-            .chain(std::iter::once(file_directory));
+            .map(|include| context.resolve_path(include))
+            .chain(schema_path.parent().map(Path::to_owned))
+            .collect();
 
         // Unlike `protox::compile`, source info (comments and source spans) is excluded: the
         // filter only needs the type structure, and descriptor size matters because it rides
         // in the connect URL.
-        let mut compiler =
-            protox::Compiler::new(includes).map_err(|error| compile_error(error.to_string()))?;
-        compiler.include_imports(true).include_source_info(false);
-        compiler
-            .open_file(schema_file)
-            .map_err(|error| compile_error(error.to_string()))?;
+        let compiled = protox::Compiler::new(&includes).and_then(|mut compiler| {
+            compiler
+                .include_imports(true)
+                .include_source_info(false)
+                .open_file(&schema_path)
+                .map(|compiler| compiler.file_descriptor_set().encode_to_vec())
+        });
 
-        Ok(compiler.file_descriptor_set().encode_to_vec())
+        compiled.map_err(|error| {
+            let queue_name = queue_id.to_owned();
+            // protox reports a missing file as one that is not in any include path.
+            if let Ok(false) = schema_path.try_exists() {
+                QueueSplittingVerificationError::ProtobufSchemaNotFound {
+                    queue_name,
+                    path: schema_path,
+                }
+            } else if error.is_file_not_found() {
+                QueueSplittingVerificationError::ProtobufImportNotFound {
+                    queue_name,
+                    schema_file: schema_file.to_owned(),
+                    error: error.to_string(),
+                    include_directories: includes,
+                }
+            } else {
+                QueueSplittingVerificationError::ProtobufCompile {
+                    queue_name,
+                    schema_file: schema_file.to_owned(),
+                    errors: error.to_string(),
+                }
+            }
+        })
     }
 }
 
@@ -974,13 +997,27 @@ pub enum QueueSplittingVerificationError {
          set `schema_file` to the `.proto` file describing the topic's payload"
     )]
     ProtobufSchemaMissing { queue_name: String },
+    #[error("{queue_name}.payload_protobuf.schema_file: `{path}` does not exist")]
+    ProtobufSchemaNotFound { queue_name: String, path: PathBuf },
+    #[error(
+        "{queue_name}.payload_protobuf: failed to compile `{schema_file}`: {error}. Imports are \
+         looked up in `include_directories` and then in the file's own directory: {}",
+        .include_directories.iter().map(|directory| format!("`{}`", directory.display())).join(", ")
+    )]
+    ProtobufImportNotFound {
+        queue_name: String,
+        schema_file: PathBuf,
+        error: String,
+        /// The absolute paths of the directories imports were looked up in, in order.
+        include_directories: Vec<PathBuf>,
+    },
     #[error(
         "{queue_name}.payload_protobuf: failed to compile `{schema_file}`: {errors}. Check that \
          the file and everything it imports are reachable through `include_directories`"
     )]
     ProtobufCompile {
         queue_name: String,
-        schema_file: String,
+        schema_file: PathBuf,
         errors: String,
     },
     #[error(
@@ -1549,6 +1586,34 @@ mod test {
         config
             .generate_config(&mut ConfigContext::default())
             .unwrap_err();
+    }
+
+    /// An import that can't be found is reported with the directories it was looked up in.
+    #[test]
+    fn payload_protobuf_missing_import_names_include_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("record.proto"),
+            r#"syntax = "proto3"; import "common.proto"; message Record { int64 id = 1; }"#,
+        )
+        .unwrap();
+        let split = QueueSplit {
+            payload_protobuf: Some(super::KafkaPayloadProtobuf {
+                schema_file: Some(dir.path().join("record.proto")),
+                include_directories: vec![dir.path().join("protos")],
+                message_type: "Record".to_owned(),
+                descriptor_base64: None,
+            }),
+            ..QueueSplit::new("cdc-topic", QueueKind::Kafka)
+        };
+
+        let error = SplitQueuesConfig::from_splits([split])
+            .generate_config(&mut ConfigContext::default())
+            .unwrap_err()
+            .to_string();
+        let protos = format!("`{}`", dir.path().join("protos").display());
+        let own = format!("`{}`", dir.path().display());
+        assert!(error.contains(&format!("{protos}, {own}")), "{error}");
     }
 
     /// A user can paste plain `protoc --descriptor_set_out` output into `descriptor_base64`
