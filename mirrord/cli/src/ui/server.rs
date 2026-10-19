@@ -57,7 +57,7 @@ use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    data::UserData,
+    data::{GlobalConfig, UserData},
     ui::{
         MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, daemon, db_portforwards,
         error::ApiError, wizard::wizard_router,
@@ -800,7 +800,11 @@ async fn list_contexts() -> UiResult<axum::Json<ContextsResponse>> {
             .iter()
             .map(|context| context.name.clone())
             .collect(),
-        current_context: kubeconfig.current_context,
+        current_context: GlobalConfig::load()
+            .await
+            .kube_context()
+            .map(str::to_owned)
+            .or(kubeconfig.current_context),
     }))
 }
 
@@ -833,7 +837,7 @@ pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client
 }
 
 async fn build_client(context: Option<&str>) -> UiResult<Client> {
-    let mut config = match context {
+    let mut config = match context.or(GlobalConfig::load().await.kube_context()) {
         Some(context) => {
             let options = KubeConfigOptions {
                 context: Some(context.to_owned()),

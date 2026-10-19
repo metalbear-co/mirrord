@@ -51,7 +51,7 @@ use super::{
     OperatorSessionOwner, OperatorSessionSummary, OperatorSessionTarget, UiResult,
     client_for_context, get_session, kill_session, list_sessions, session_events_sse,
 };
-use crate::ui::error::ApiError;
+use crate::{data::GlobalConfig, ui::error::ApiError};
 
 mod events;
 mod targets;
@@ -560,7 +560,11 @@ async fn kube_contexts() -> UiResult<axum::Json<ContextsResponse>> {
         })
         .collect();
     Ok(axum::Json(ContextsResponse {
-        current: kubeconfig.current_context,
+        current: GlobalConfig::load()
+            .await
+            .kube_context()
+            .map(str::to_owned)
+            .or(kubeconfig.current_context),
         contexts,
     }))
 }

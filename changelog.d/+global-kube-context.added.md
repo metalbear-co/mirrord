@@ -1,0 +1,1 @@
+A `kube_context` set in the global `~/.mirrord/mirrord.json` (`mirrord config set kube_context <context>`) is used when a command has no context of its own, and `mirrord ui` opens on it.
