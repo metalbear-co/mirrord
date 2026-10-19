@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.275.1](https://github.com/metalbear-co/mirrord/tree/3.275.1) - 2026-10-19
+
+
+### Fixed
+
+- Fix Go programs on Linux arm64 receiving syscall results truncated to 32
+  bits, which crashed them when the result was a pointer such as an `mmap`
+  address. [#5092](https://github.com/metalbear-co/mirrord/issues/5092)
+- Fix `mirrord exec` on Windows not printing `Ready!` when the layer is
+  injected with `apc` or `iat`, so `mirrord up` never saw those services become
+  ready.
+- Fix `mirrord up` on Windows printing the "no `run.directory` set" notice when
+  run from the folder that holds `mirrord-up.yaml`.
+- Fix `mirrord up` on Windows sometimes hanging, even through Ctrl-C, after a
+  service exited or crashed on its own.
+
 ## [3.275.0](https://github.com/metalbear-co/mirrord/tree/3.275.0) - 2026-10-17
 
 
