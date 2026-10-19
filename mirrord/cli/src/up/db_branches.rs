@@ -15,9 +15,12 @@ use std::{
 use futures::future::join_all;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, feature::database_branches::DatabaseBranchesConfig};
-use mirrord_operator::client::{
-    NoClientCert, OperatorApi, error::OperatorApiError,
-    split_config_branches::apply_resolved_entries,
+use mirrord_operator::{
+    client::{
+        NoClientCert, OperatorApi, error::OperatorApiError,
+        split_config_branches::apply_resolved_entries,
+    },
+    crd::NewOperatorFeature,
 };
 use mirrord_progress::NullProgress;
 use mirrord_up::SubprocessCfg;
@@ -33,8 +36,8 @@ use crate::{
 ///
 /// Services whose cluster has no usable operator (not installed, disabled, or with an expired
 /// license) run without branching, unless the config insists on the operator (`operator: true`),
-/// in which case the run stops with the error the session would give. A service that gets no
-/// entries back runs without branching too.
+/// in which case the run stops with the error the session would give. So do services with the
+/// default `"*"` whose operator can't resolve it, and services that get no entries back.
 ///
 /// Services that define their branches inline (e.g. through `config_patch`) have nothing to look
 /// up; they are only announced.
@@ -66,12 +69,34 @@ pub(super) async fn check_db_branches(
                     })?;
             apis.insert(key.clone(), api);
         }
-        if apis.get(&key).is_some_and(Option::is_none) {
-            println!(
-                "{}: no mirrord operator, running against the source DB",
-                service.service_name
-            );
-            service.config.feature.db_branches = DatabaseBranchesConfig::default();
+        match apis.get(&key) {
+            Some(None) => {
+                println!(
+                    "{}: no mirrord operator, running against the source DB",
+                    service.service_name
+                );
+                service.config.feature.db_branches = DatabaseBranchesConfig::default();
+            }
+            // The operator leaves the feature out when its branching is off, its license tier
+            // doesn't include it, or it predates it. A `"*"` the user didn't ask for must not stop
+            // a run on such an operator; one they set fails below, as it would in a session.
+            Some(Some(api))
+                if service.default_db_branches
+                    && api
+                        .operator()
+                        .spec
+                        .supported_features()
+                        .contains(&NewOperatorFeature::DbBranchesFromSplitConfig)
+                        .not() =>
+            {
+                println!(
+                    "{}: the mirrord operator doesn't support DB branching, running against the \
+                     source DB",
+                    service.service_name
+                );
+                service.config.feature.db_branches = DatabaseBranchesConfig::default();
+            }
+            _ => {}
         }
     }
 

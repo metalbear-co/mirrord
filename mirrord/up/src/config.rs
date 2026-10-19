@@ -580,7 +580,7 @@ impl ServiceConfig {
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
-    ) -> Result<(LayerConfig, RunConfig), ConfigPatchErrorKind> {
+    ) -> Result<SubprocessCfg, ConfigPatchErrorKind> {
         let kube_context = up_context.get_context(self.context.clone());
         let mut cfg = self.unpatched_config(base, &key, kube_context.clone());
 
@@ -615,20 +615,30 @@ impl ServiceConfig {
             )
             .not()
         });
-        if matches!(self.default_mode, ServiceMode::Split | ServiceMode::Mirror)
-            && single_workload
-            && cfg.feature.db_branches.is_empty()
-        {
+        let mut default_db_branches =
+            matches!(self.default_mode, ServiceMode::Split | ServiceMode::Mirror)
+                && single_workload
+                && cfg.feature.db_branches.is_empty();
+        if default_db_branches {
             cfg.feature.db_branches = DatabaseBranchesConfig::FromSplitConfig(
                 SplitConfigDbBranches::All(AllSplitConfigDbBranches::All),
             );
         }
 
         if let Some(patch) = self.config_patch {
+            // A patch that sets `db_branches` decides them itself, `[]` included, so whatever it
+            // holds afterwards was asked for by the user.
+            default_db_branches &= patch.pointer("/feature/db_branches").is_none();
             cfg = apply_config_patch(cfg, patch, &key)?;
         }
 
-        Ok((cfg, self.run))
+        Ok(SubprocessCfg {
+            config: cfg,
+            service_name: service_name.clone(),
+            run: self.run,
+            mode: self.default_mode,
+            default_db_branches,
+        })
     }
 
     /// The mirrord config `mirrord up` merges this service's `config_patch` into, as JSON, but
@@ -805,6 +815,9 @@ pub struct SubprocessCfg {
     /// Mode this service was assembled for. Its effects are already in `config`; it names the
     /// mode in [`validate_targets`] errors and in what `mirrord up` reports about the service.
     pub mode: ServiceMode,
+    /// `config.feature.db_branches` is the `"*"` `mirrord up` adds for this service's mode, not
+    /// one the user set. An operator that can't resolve it drops it rather than failing the run.
+    pub default_db_branches: bool,
 }
 
 /// Rejects services whose resolved target cannot support the features their
@@ -936,8 +949,7 @@ impl UpConfig {
         let mut errors = Vec::new();
         let mut assembled = Vec::new();
         for (service_name, service) in self.services.iter().sorted_by_key(|(name, _)| *name) {
-            let mode = service.default_mode;
-            let (config, run) = match service.clone().assemble(
+            let subprocess = match service.clone().assemble(
                 service_name,
                 base.clone(),
                 key.clone(),
@@ -957,7 +969,7 @@ impl UpConfig {
             // As in the service's `mirrord exec` session, which doesn't take a missing target for
             // targetless when verifying; `validate_targets` checks the mode against it below.
             let mut context = ConfigContext::default().strict_env(true);
-            if let Err(source) = config.verify(&mut context) {
+            if let Err(source) = subprocess.config.verify(&mut context) {
                 errors.push(ServiceError::Validation {
                     service: service_name.clone(),
                     source,
@@ -965,12 +977,7 @@ impl UpConfig {
                 continue;
             }
 
-            assembled.push(SubprocessCfg {
-                config,
-                service_name: service_name.clone(),
-                run,
-                mode,
-            });
+            assembled.push(subprocess);
         }
 
         if let Err(ModeError::IncompatibleTargets(incompatible)) = validate_targets(&assembled) {
@@ -1075,23 +1082,19 @@ impl UpConfig {
                         "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
                     );
                 }
-                let (config, run) = svc
-                    .assemble(
-                        &service_name,
-                        base_config.clone(),
-                        key.clone(),
-                        resolved_targets,
-                        up_context.clone(),
-                    )
-                    .map_err(|source| ConfigPatchError {
+                svc.assemble(
+                    &service_name,
+                    base_config.clone(),
+                    key.clone(),
+                    resolved_targets,
+                    up_context.clone(),
+                )
+                .map_err(|source| {
+                    ConfigPatchError {
                         service: service_name.clone(),
                         source,
-                    })?;
-                Ok(SubprocessCfg {
-                    config,
-                    service_name,
-                    run,
-                    mode,
+                    }
+                    .into()
                 })
             })
             .collect()
