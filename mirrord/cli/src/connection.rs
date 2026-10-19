@@ -235,8 +235,7 @@ where
     }
 
     let mut session_subtask = operator_subtask.subtask("starting session");
-    let up_info = mirrord_up.map(MirrordUp::info);
-    let up_service = mirrord_up.and_then(|up| up.service.as_deref());
+    let up_session = mirrord_up.map(MirrordUp::session);
     let ci_info = mirrord_for_ci.map(MirrordCi::info);
 
     let OperatorSessionConnection {
@@ -257,8 +256,7 @@ where
             &session_subtask,
             branch_name,
             ci_info,
-            up_info,
-            up_service,
+            up_session,
         )
         .await?
     } else {
@@ -285,8 +283,7 @@ where
             &session_subtask,
             branch_name,
             ci_info,
-            up_info,
-            up_service,
+            up_session,
         )
         .await?
     };

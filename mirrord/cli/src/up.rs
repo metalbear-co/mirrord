@@ -8,7 +8,7 @@ use mirrord_analytics::{
     UpSessionDbBranch,
 };
 use mirrord_config::config::EnvKey;
-use mirrord_operator::crd::session::UpSessionInfo;
+use mirrord_operator::{client::UpSession, crd::session::UpSessionInfo};
 use mirrord_up::{
     InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, UpError, load_up_config, run_wizard,
 };
@@ -29,22 +29,27 @@ mod db_branches;
 pub(crate) struct MirrordUp {
     pub(crate) auto_queue_splitting: bool,
     /// The service the session runs.
-    pub(crate) service: Option<String>,
+    pub(crate) service: Arc<str>,
 }
 
 impl MirrordUp {
+    /// `mirrord up` sets both its resolved config and the service name on every session it
+    /// starts, so a session missing either wasn't started by it.
     pub(crate) fn from_env() -> Option<Self> {
-        std::env::var_os(mirrord_up::RESOLVED_CONFIG_ENV)
-            .is_some()
-            .then(|| Self {
-                auto_queue_splitting: true,
-                service: std::env::var(SERVICE_NAME_ENV).ok(),
-            })
+        std::env::var_os(mirrord_up::RESOLVED_CONFIG_ENV)?;
+        let service = std::env::var(SERVICE_NAME_ENV).ok()?;
+        Some(Self {
+            auto_queue_splitting: true,
+            service: service.into(),
+        })
     }
 
-    pub(crate) fn info(&self) -> UpSessionInfo {
-        UpSessionInfo {
-            auto_queue_splitting: self.auto_queue_splitting.then_some(true),
+    pub(crate) fn session(&self) -> UpSession {
+        UpSession {
+            info: UpSessionInfo {
+                auto_queue_splitting: self.auto_queue_splitting.then_some(true),
+            },
+            service: self.service.clone(),
         }
     }
 }

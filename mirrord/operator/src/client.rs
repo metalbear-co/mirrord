@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt,
     ops::Not,
+    sync::Arc,
     time::Duration,
 };
 
@@ -240,6 +241,16 @@ impl fmt::Debug for OperatorSession {
             .field("baggage", &self.baggage);
         debug_struct.finish()
     }
+}
+
+/// A session started by `mirrord up`.
+#[derive(Clone, Debug)]
+pub struct UpSession {
+    /// What the operator is told about the session, with the connect params.
+    pub info: UpSessionInfo,
+    /// The `mirrord up` service the session runs. Only the CLI uses it (see
+    /// [`OperatorApi::prepare_branch_dbs`]); it is never sent to the operator.
+    pub service: Arc<str>,
 }
 
 /// Connection to an operator target.
@@ -1939,7 +1950,6 @@ impl OperatorApi<PreparedClientCert> {
         ),
         err
     )]
-    #[allow(clippy::too_many_arguments)]
     pub async fn prepare_session<P>(
         &self,
         target: ResolvedTarget<false>,
@@ -1947,15 +1957,13 @@ impl OperatorApi<PreparedClientCert> {
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
-        up_session_info: Option<&UpSessionInfo>,
-        up_service: Option<&str>,
+        up_session: Option<&UpSession>,
     ) -> OperatorApiResult<PreparedSession>
     where
         P: Progress,
     {
-        let auto_queue_splitting = up_session_info
-            .as_ref()
-            .and_then(|info| info.auto_queue_splitting)
+        let auto_queue_splitting = up_session
+            .and_then(|up| up.info.auto_queue_splitting)
             .unwrap_or_default();
         if auto_queue_splitting
             && let Some(filtered) = disable_unsupported_auto_splits(
@@ -1978,8 +1986,12 @@ impl OperatorApi<PreparedClientCert> {
             .contains(&NewOperatorFeature::ProxyApi);
 
         let branch_db_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_branch_dbs(layer_config, up_service, progress)
-                .await?
+            self.prepare_branch_dbs(
+                layer_config,
+                up_session.as_ref().map(|up| &*up.service),
+                progress,
+            )
+            .await?
         } else {
             BranchDbNames::default()
         };
@@ -2088,7 +2100,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name.clone(),
                 branch_db_names.clone(),
                 session_ci_info.clone(),
-                up_session_info.cloned(),
+                up_session.map(|up| up.info.clone()),
                 layer_config.key.as_str(),
             );
             let connect_url = Self::target_connect_url(use_proxy_api, &target, &params);
@@ -2131,7 +2143,6 @@ impl OperatorApi<PreparedClientCert> {
         ret,
         err
     )]
-    #[allow(clippy::too_many_arguments)]
     pub async fn connect_in_new_session<P>(
         &self,
         target: ResolvedTarget<false>,
@@ -2139,8 +2150,7 @@ impl OperatorApi<PreparedClientCert> {
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
-        up_session_info: Option<UpSessionInfo>,
-        up_service: Option<&str>,
+        up_session: Option<UpSession>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
@@ -2157,8 +2167,7 @@ impl OperatorApi<PreparedClientCert> {
                 progress,
                 branch_name.clone(),
                 session_ci_info.clone(),
-                up_session_info.as_ref(),
-                up_service,
+                up_session.as_ref(),
             )
             .await?;
 
@@ -2182,7 +2191,7 @@ impl OperatorApi<PreparedClientCert> {
                     branch_name,
                     branch_db_names,
                     session_ci_info,
-                    up_session_info.as_ref(),
+                    up_session.as_ref().map(|up| &up.info),
                 )
                 .await?
             }
@@ -2273,8 +2282,7 @@ impl OperatorApi<PreparedClientCert> {
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
-        up_session_info: Option<UpSessionInfo>,
-        up_service: Option<&str>,
+        up_session: Option<UpSession>,
     ) -> OperatorApiResult<OperatorSession>
     where
         P: Progress,
@@ -2289,9 +2297,9 @@ impl OperatorApi<PreparedClientCert> {
             .clone()
             .unwrap_or(Target::Targetless);
 
-        let auto_queue_splitting = up_session_info
+        let auto_queue_splitting = up_session
             .as_ref()
-            .and_then(|info| info.auto_queue_splitting)
+            .and_then(|up| up.info.auto_queue_splitting)
             .unwrap_or_default();
         if auto_queue_splitting
             && let Some(filtered) = disable_unsupported_auto_splits(
@@ -2327,8 +2335,12 @@ impl OperatorApi<PreparedClientCert> {
         //   happens locally. If Primary != Default, a sync controller copies CRDs to Default where
         //   actual branching happens, then syncs status back.
         let branch_db_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_branch_dbs(layer_config, up_service, progress)
-                .await?
+            self.prepare_branch_dbs(
+                layer_config,
+                up_session.as_ref().map(|up| &*up.service),
+                progress,
+            )
+            .await?
         } else {
             BranchDbNames::default()
         };
@@ -2385,7 +2397,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_name,
                 branch_db_names.clone(),
                 session_ci_info,
-                up_session_info,
+                up_session.map(|up| up.info),
                 layer_config.key.as_str(),
             );
 
@@ -2414,8 +2426,7 @@ impl OperatorApi<PreparedClientCert> {
         progress: &P,
         branch_name: Option<String>,
         session_ci_info: Option<SessionCiInfo>,
-        up_session_info: Option<UpSessionInfo>,
-        up_service: Option<&str>,
+        up_session: Option<UpSession>,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
@@ -2426,8 +2437,7 @@ impl OperatorApi<PreparedClientCert> {
                 progress,
                 branch_name,
                 session_ci_info,
-                up_session_info,
-                up_service,
+                up_session,
             )
             .await?;
 
