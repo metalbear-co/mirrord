@@ -373,7 +373,8 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio_seqpacket::ancillary::AncillaryMessageWriter;
 
-    use super::*;
+    use super::{super::incoming::RemoteLayerIncoming, *};
+    use crate::incoming::PortRedirector;
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -514,13 +515,17 @@ mod tests {
     /// layer reported, both towards the incoming pipeline and in the response to the layer.
     #[tokio::test]
     async fn handoff_uses_observed_peer_address() {
-        let (handoff, client, original, peer, frame) = fixture().await;
+        let (Handoff { stream }, client, original, peer, frame) = fixture().await;
+        let RemoteLayerIncoming {
+            mut redirector,
+            sender,
+        } = RemoteLayerIncoming::new();
         let mut request: ConnectionHandoffRequest = decode_handoff_message(&frame).unwrap();
         request.peer_address = SocketAddr::from((Ipv4Addr::new(192, 0, 2, 1), 9));
         let frame = encode_handoff_message(&request).unwrap();
         send_fd(&client, &original, &frame).await;
         drop(original);
-        let task = tokio::spawn(handoff.negotiate());
+        let task = tokio::spawn(ConnectionHandoffServer::serve_connection(stream, sender));
         let response = response(&client).await;
         let observed = peer.local_addr().unwrap();
         assert_eq!(response.peer_address, observed);
@@ -531,8 +536,12 @@ mod tests {
             panic!("handoff rejected");
         };
         let _placeholder = TokioTcpStream::connect(placeholder_address).await.unwrap();
-        let accepted = timeout(TEST_TIMEOUT, task).await.unwrap().unwrap().unwrap();
-        assert_eq!(accepted.peer_address, observed);
+        timeout(TEST_TIMEOUT, task).await.unwrap().unwrap().unwrap();
+        let connection = timeout(TEST_TIMEOUT, redirector.next_connection())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(connection.source(), observed);
     }
 
     #[tokio::test]
