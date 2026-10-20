@@ -1,13 +1,20 @@
-//! Starting a provisional trial through the MetalBear app's agent signup endpoint.
-//!
-//! The signup creates an organization with a trial license and an operator API key. The user takes
-//! ownership of the organization by opening the claim URL, the API key keeps working after that.
+//! `mirrord operator signup`: starts a provisional trial through the MetalBear app's agent signup
+//! endpoint, for `mirrord operator install --api-key`.
 
 use chrono::{DateTime, Utc};
+use mirrord_analytics::AiAgent;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
-use super::error::OperatorInstallError;
+use super::{Connection, USER_AGENT, cluster, context_flag, error::OperatorInstallError};
+use crate::{
+    config::OperatorSignupArgs,
+    data::{AuthStore, SignupApiKey},
+    login,
+};
+
+const SIGNUP_PATH: &str = "api/v1/agent/signup";
 
 #[derive(Serialize)]
 struct SignupRequest<'a> {
@@ -18,27 +25,86 @@ struct SignupRequest<'a> {
     cluster_hint: Option<&'a str>,
 }
 
-/// A started trial.
-///
-/// Deliberately not [`Debug`], to keep the API key out of logs.
+/// A started trial, deliberately not [`Debug`] to keep the API key out of logs.
 #[derive(Deserialize)]
-pub(super) struct Trial {
-    pub(super) api_key: String,
-    pub(super) trial_ends_at: DateTime<Utc>,
-    pub(super) claim_url: String,
+struct Trial {
+    api_key: SignupApiKey,
+    trial_ends_at: DateTime<Utc>,
+    claim_url: String,
 }
 
-pub(super) async fn start_trial(
+pub(crate) async fn operator_signup(args: OperatorSignupArgs) -> Result<(), OperatorInstallError> {
+    let OperatorSignupArgs {
+        cluster_hint,
+        no_hint,
+        context,
+        app_url,
+    } = args;
+
+    let app_url = login::backend_base_url(app_url)
+        .map_err(|error| OperatorInstallError::AppUrl(Box::new(error)))?;
+    let context_arg = context_flag("--context", context.as_deref());
+    let cluster_hint = match (cluster_hint, no_hint) {
+        (Some(cluster_hint), _) => Some(cluster_hint),
+        (None, true) => None,
+        (None, false) => match Connection::new(context).await {
+            Ok(connection) => cluster::cluster_id(&connection.client).await,
+            Err(error) => {
+                tracing::debug!(?error, "no cluster to name in the signup");
+                None
+            }
+        },
+    };
+
+    let http = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(OperatorInstallError::HttpClient)?;
+    let agent = AiAgent::detect().map(<&str>::from).unwrap_or(USER_AGENT);
+    let Trial {
+        api_key,
+        trial_ends_at,
+        claim_url,
+    } = start_trial(&http, &app_url, agent, cluster_hint.as_deref()).await?;
+
+    if let Err(source) =
+        AuthStore::save_signup_key(login::issuer(&app_url).to_owned(), api_key, trial_ends_at).await
+    {
+        return Err(OperatorInstallError::SignupKeyNotSaved { claim_url, source });
+    }
+
+    println!(
+        "Started a mirrord Enterprise trial under a new organization. It ends on {}.\n\nClaim the \
+        organization: {claim_url}\n\nInstall the operator with the trial's API key, which mirrord \
+        saved on this machine and the claim keeps working:\n\n  mirrord operator \
+        install{context_arg} --from-signup",
+        trial_ends_at.format("%B %-d, %Y"),
+    );
+
+    Ok(())
+}
+
+/// The key that [`operator_signup`] saved for the app at `app_url`, a base from
+/// [`login::backend_base_url`].
+pub(super) async fn saved_key(app_url: &Url) -> Result<String, OperatorInstallError> {
+    AuthStore::signup_key(login::issuer(app_url))
+        .await
+        .map_err(OperatorInstallError::SignupKeyStore)?
+        .map(SignupApiKey::into_inner)
+        .ok_or(OperatorInstallError::NoSignupKey)
+}
+
+async fn start_trial(
     http: &reqwest::Client,
-    app_url: &str,
+    app_url: &Url,
     agent: &str,
     cluster_hint: Option<&str>,
 ) -> Result<Trial, OperatorInstallError> {
+    let url = app_url
+        .join(SIGNUP_PATH)
+        .expect("an http(s) base joins a relative path");
     let response = http
-        .post(format!(
-            "{}/api/v1/agent/signup",
-            app_url.trim_end_matches('/')
-        ))
+        .post(url)
         .json(&SignupRequest {
             agent,
             cluster_hint,

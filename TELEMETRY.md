@@ -34,7 +34,7 @@ The opt-out below disables all of it.
 
 ## `mirrord operator install` and `mirrord operator uninstall`
 
-Each run of `mirrord operator install` and `mirrord operator uninstall` sends one anonymous event with the outcome of the run and how long it took. The outcome is success, failure, that the user declined the confirmation prompt, or that the user stopped the command (for example with Ctrl+C). For `mirrord operator uninstall`, the outcome can also be that no operator was installed. When the run fails or is stopped, the event also has the step that it ended in, from a fixed list (for example "fetching the manifest" or "waiting for the operator"). The `mirrord operator install` event also has whether `--api-key` was given and whether a trial was started.
+Each run of `mirrord operator install` and `mirrord operator uninstall` sends one anonymous event with the outcome of the run and how long it took. The outcome is success, failure, that the user declined the confirmation prompt, or that the user stopped the command (for example with Ctrl+C). For `mirrord operator uninstall`, the outcome can also be that no operator was installed. When the run fails or is stopped, the event also has the step that it ended in, from a fixed list (for example "fetching the manifest" or "waiting for the operator"). The `mirrord operator install` event also has whether an API key was given, with `--api-key` or `--from-signup`, and whether the command created the organization's operator API key.
 
 No API key, claim URL, cluster ID, Kubernetes context, namespace name or manifest content is included.
 

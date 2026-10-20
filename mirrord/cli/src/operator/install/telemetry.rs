@@ -56,9 +56,14 @@ pub(super) enum InstallPhase {
     /// Checking that the objects can be created, and that no other objects are in the way.
     CheckPermissions = 4,
     Confirm = 5,
-    StartTrial = 6,
+    /// Creating the operator API key of the logged-in user's organization.
+    CreateApiKey = 6,
     CreateObjects = 7,
     WaitForOperator = 8,
+    /// Logging in to the MetalBear app, which comes before [`Self::Connect`].
+    Login = 9,
+    /// Reading the key that `mirrord operator signup` saved, which comes before [`Self::Connect`].
+    SignupKey = 10,
 }
 
 /// The step of `mirrord operator uninstall` that a run is in, reported when the run does not
@@ -81,8 +86,8 @@ pub(super) enum UninstallPhase {
 #[derive(Debug)]
 pub(super) struct InstallRun {
     pub(super) phase: InstallPhase,
-    /// Set when a trial started: how to retry without starting another trial, printed for the
-    /// user when the run does not complete.
+    /// Set when the run created the organization's operator API key: how to retry, printed for
+    /// the user when the run does not complete.
     pub(super) retry: Option<String>,
 }
 
