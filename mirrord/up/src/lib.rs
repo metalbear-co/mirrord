@@ -173,13 +173,18 @@ pub enum UpError {
     #[error("failed to query the cluster: {0}")]
     Kube(#[from] KubeApiError),
 
-    /// An interactive target-resolution prompt failed or was cancelled.
-    #[error("target resolution prompt failed: {0}")]
+    /// An interactive prompt (of `mirrord up init` or of target resolution) failed or was
+    /// cancelled.
+    #[error("prompt failed: {0}")]
     Inquire(#[from] inquire::InquireError),
 
     /// The user chose to exit from the target-resolution wizard.
     #[error("exited")]
     Exited,
+
+    /// The only namespace that the user can pick has no workload that the user can list.
+    #[error("found no workloads that you can list in namespace \"{0}\"")]
+    NoWorkloads(String),
 
     /// Failed to patch the `mirrord-up.yaml` when saving a chosen target.
     #[error("failed to update config file: {0}")]
@@ -408,7 +413,7 @@ async fn resolve_unresolved_workloads(
             .as_deref()
             .unwrap_or(client.default_namespace());
 
-        let workloads = list_workloads(client, namespace).await?;
+        let workloads = list_workloads(client, namespace, &INFERRED_TARGET_TYPES).await?;
         let resolved = match find_by_name(&workloads, name) {
             Some(path) => {
                 println!("{name}: using {path}");
@@ -437,10 +442,19 @@ async fn resolve_unresolved_workloads(
 }
 
 /// Lists workload paths (`deployment/foo`, `pod/bar/container/baz`, ...) of
-/// the kinds in [`INFERRED_TARGET_TYPES`] living in `namespace`, in priority
-/// order.
-async fn list_workloads(client: &kube::Client, namespace: &str) -> Result<Vec<String>, UpError> {
-    let seeker = KubeResourceSeeker {
+/// the `kinds` living in `namespace`, in the order of `kinds`.
+///
+/// A kind that the user is not allowed to list counts as having no
+/// workloads, so that the user can still pick from the other kinds. Each kind
+/// is listed on its own, because `KubeResourceSeeker::filtered` fails as a
+/// whole when one kind fails, and it returns the errors of pods. It returns
+/// no error for the other kinds.
+async fn list_workloads(
+    client: &kube::Client,
+    namespace: &str,
+    kinds: &[TargetType],
+) -> Result<Vec<String>, UpError> {
+    let seeker = &KubeResourceSeeker {
         client,
         namespace,
         copy_target: false,
@@ -449,9 +463,17 @@ async fn list_workloads(client: &kube::Client, namespace: &str) -> Result<Vec<St
     // `operator_active: true` only lifts the seeker's restriction on listing
     // operator-only kinds (statefulsets); the listing itself is plain
     // Kubernetes API access.
-    Ok(seeker
-        .filtered(INFERRED_TARGET_TYPES.to_vec(), true)
-        .await?)
+    let listings = futures::future::try_join_all(kinds.iter().map(|&kind| async move {
+        match seeker.filtered(vec![kind], true).await {
+            Err(KubeApiError::KubeError(kube::Error::Api(status))) if status.code == 403 => {
+                Ok(Vec::new())
+            }
+            listing => listing,
+        }
+    }))
+    .await?;
+
+    Ok(listings.concat())
 }
 
 async fn list_namespaces(client: &kube::Client) -> Result<Vec<String>, UpError> {
@@ -465,9 +487,21 @@ async fn list_namespaces(client: &kube::Client) -> Result<Vec<String>, UpError> 
         .list_all_clusterwide::<Namespace>(None)
         .try_filter_map(|namespace| std::future::ready(Ok(namespace.metadata.name)))
         .try_collect()
-        .await
-        .map_err(KubeApiError::KubeError)?;
-    Ok(namespaces)
+        .await;
+
+    match namespaces {
+        Ok(namespaces) => Ok(namespaces),
+        // Users whose permissions are limited to some namespaces can't list
+        // namespaces, but can still pick a workload in their default one.
+        Err(kube::Error::Api(status)) if status.code == 403 => {
+            let namespace = client.default_namespace().to_owned();
+            println!(
+                "You can't list the namespaces of the cluster, using namespace \"{namespace}\"."
+            );
+            Ok(vec![namespace])
+        }
+        Err(error) => Err(KubeApiError::KubeError(error).into()),
+    }
 }
 
 /// First path in `workloads` whose workload name matches `name` (paths look
@@ -516,31 +550,102 @@ async fn prompt_for_target(
     }
 
     let namespaces = list_namespaces(client).await?;
+    let PickedTarget::Workload { target, namespace } =
+        pick_workload(client, &namespaces, &INFERRED_TARGET_TYPES, false).await?
+    else {
+        unreachable!("targetless is not offered");
+    };
+
+    offer_to_save_target(config_path, service_name, &target.to_string(), &namespace).await?;
+
+    Ok(ResolvedTarget {
+        resolved: SpecifiedTarget {
+            path: Some(target),
+            namespace: Some(namespace.into()),
+        },
+    })
+}
+
+/// What the user picked with [`pick_workload`].
+enum PickedTarget {
+    /// A workload and its namespace.
+    Workload { target: Target, namespace: String },
+
+    /// No target. Only offered when [`pick_workload`] is asked to.
+    Targetless,
+}
+
+/// Lets the user pick one of `namespaces`, starting at the namespace of the
+/// kube context, and then a workload of one of the `kinds` in it. When
+/// `targetless` is set, the workload prompt also offers to run without a
+/// target.
+///
+/// Both `mirrord up init` and the fallback wizard of `mirrord up` pick
+/// workloads with this, so that they look the same.
+///
+/// When a namespace has nothing that the user can list, the user picks
+/// another namespace. When it is the only namespace, there is nothing else to
+/// pick, so that is an error. When `targetless` is set, running without a
+/// target needs no workload, so the workload prompt still offers it, together
+/// with picking another namespace when there is one.
+async fn pick_workload(
+    client: &kube::Client,
+    namespaces: &[String],
+    kinds: &[TargetType],
+    targetless: bool,
+) -> Result<PickedTarget, UpError> {
+    const TARGETLESS: &str = "Run without a target (outgoing traffic only)";
+    const PICK_ANOTHER: &str = "Pick another namespace";
+
+    let starting_cursor = namespaces
+        .iter()
+        .position(|namespace| namespace == client.default_namespace())
+        .unwrap_or_default();
+    let can_pick_another = namespaces.len() > 1;
+
     loop {
         let namespace = {
-            let namespaces = namespaces.clone();
-            prompt(move || Select::new("Select a namespace:", namespaces).prompt()).await?
+            let namespaces = namespaces.to_vec();
+            prompt(move || {
+                Select::new("Select a namespace:", namespaces)
+                    .with_starting_cursor(starting_cursor)
+                    .prompt()
+            })
+            .await?
         };
 
-        let workloads = list_workloads(client, &namespace).await?;
-        if workloads.is_empty() {
-            println!("No workloads found in namespace \"{namespace}\".");
-            continue;
+        let mut options = list_workloads(client, &namespace, kinds).await?;
+        if options.is_empty() {
+            if targetless.not() && can_pick_another.not() {
+                return Err(UpError::NoWorkloads(namespace));
+            }
+            println!("Found no workloads that you can list in namespace \"{namespace}\".");
+            if targetless.not() {
+                continue;
+            }
+            if can_pick_another {
+                options.push(PICK_ANOTHER.to_owned());
+            }
+        }
+        if targetless {
+            options.push(TARGETLESS.to_owned());
         }
 
         let path = {
             let message = format!("Select a workload in \"{namespace}\":");
-            prompt(move || Select::new(&message, workloads).prompt()).await?
+            prompt(move || Select::new(&message, options).prompt()).await?
         };
 
-        offer_to_save_target(config_path, service_name, &path, &namespace).await?;
-
-        return Ok(ResolvedTarget {
-            resolved: SpecifiedTarget {
-                path: Some(Target::from_str(&path)?),
-                namespace: Some(namespace.into()),
-            },
-        });
+        match path.as_str() {
+            TARGETLESS => return Ok(PickedTarget::Targetless),
+            PICK_ANOTHER => continue,
+            _ => {
+                return Ok(PickedTarget::Workload {
+                    target: Target::from_str(&path)?,
+                    namespace,
+                });
+            }
+        }
     }
 }
 
