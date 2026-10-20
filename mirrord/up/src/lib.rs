@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
     str::FromStr,
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 
@@ -28,7 +28,7 @@ pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
 use k8s_openapi::api::core::v1::Namespace;
 use miette::Diagnostic;
-use mirrord_analytics::MIRRORD_UP_CORRELATION_ID_ENV;
+use mirrord_analytics::{MIRRORD_UP_CORRELATION_ID_ENV, UpSessionDbBranch};
 use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
     config::{ConfigContext, ConfigError, EnvKey},
@@ -55,15 +55,16 @@ mod init;
 mod kube_context;
 mod process;
 
-/// Shared slot that [`run`] fills with the time it took for **all** child
-/// sessions to become ready, measured from process spawn.
+/// Shared slot that [`launch`] fills with what the child sessions report while starting: the
+/// time it took for **all** of them to become ready, measured from process spawn, and the
+/// branch databases each one uses.
 ///
-/// The caller constructs one, passes a clone to [`run`], and reads
-/// [`ReadyTracker::time_to_ready`] afterwards (the value is captured even if
-/// `run` later returns an error, as long as readiness was reached first).
+/// The caller constructs one, passes a clone to [`launch`], and reads it afterwards (the values
+/// are captured even if `launch` later returns an error, as long as they were reported first).
 #[derive(Clone, Default)]
 pub struct ReadyTracker {
     elapsed: Arc<OnceLock<Duration>>,
+    db_branches: Arc<Mutex<HashMap<Arc<str>, Vec<UpSessionDbBranch>>>>,
 }
 
 impl ReadyTracker {
@@ -71,10 +72,30 @@ impl ReadyTracker {
     pub fn time_to_ready(&self) -> Option<Duration> {
         self.elapsed.get().copied()
     }
+
+    /// The branch databases each service's session reported, by service name. A service
+    /// missing here reported none.
+    pub fn db_branches(&self) -> HashMap<Arc<str>, Vec<UpSessionDbBranch>> {
+        self.db_branches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn record_db_branches(&self, service: Arc<str>, branches: Vec<UpSessionDbBranch>) {
+        self.db_branches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(service, branches);
+    }
 }
 
 /// Environment variable used to pass the resolved configuration to child mirrord processes.
 pub const RESOLVED_CONFIG_ENV: &str = "MIRRORD_UP_RESOLVED_CONFIG";
+
+/// Environment variable holding the name of the service a `mirrord up` session runs, so the
+/// session can name the service on the branch databases it creates.
+pub const SERVICE_NAME_ENV: &str = "MIRRORD_UP_SERVICE";
 
 /// Errors produced by `mirrord up` command.
 #[derive(Debug, Error, Diagnostic)]
@@ -136,13 +157,21 @@ pub enum UpError {
     #[diagnostic(transparent)]
     WindowsUnsupported(#[from] WindowsSupportError),
 
-    /// A child mirrord service exited with a non-zero status.
+    /// A service's process, launched by its child mirrord session, exited with a non-zero
+    /// status.
     #[error("Service {name} crashed with exit status {status}")]
     ServiceCrashed {
         /// Name of the service that crashed.
         name: Arc<str>,
         /// Exit status of the crashed service.
         status: ExitStatus,
+    },
+
+    /// A child mirrord session failed before launching the service's process.
+    #[error("Service {name} failed to start")]
+    ServiceFailedToStart {
+        /// Name of the service whose session failed.
+        name: Arc<str>,
     },
 
     /// The `run.pre_command` of the only service left to start exited with a non-zero status.
@@ -715,23 +744,15 @@ fn save_target(
     Ok(())
 }
 
-/// Genererate [`mirrord_config::LayerConfig`]s based on the provided [`UpConfig`] and
-/// [`EnvKey`] and spawn child mirrord processes. Stdout/stderr from
-/// children will be printed to the console, prefixed with the name of
-/// the session.
-///
-/// `ready` is filled with the time-to-ready once every session has signalled
-/// readiness (see [`ReadyTracker`]).
-///
-/// Returns when the user stops the session or one of the child sessions exits.
-pub async fn run(
+/// Generate the [`mirrord_config::LayerConfig`] of every service based on the provided
+/// [`UpConfig`] and [`EnvKey`], resolving the targets left to the cluster. The configs are
+/// handed to [`launch`], after the caller checked what needs the operator.
+pub async fn resolve_services(
     up_config: UpConfig,
     config_path: &Path,
     kube_context_arg: Option<Arc<str>>,
-    key: EnvKey,
-    correlation_id: Uuid,
-    ready: ReadyTracker,
-) -> Result<(), UpError> {
+    key: &EnvKey,
+) -> Result<Vec<SubprocessCfg>, UpError> {
     let invocation_directory = std::env::current_dir()?;
     let config_directory = config_directory(config_path)?;
     if invocation_directory != config_directory {
@@ -757,7 +778,7 @@ pub async fn run(
         resolve_unresolved_workloads(&up_config, config_path, up_context.clone()).await?;
 
     let service_configs = up_config.service_configs(
-        &key,
+        key,
         &mut resolved_targets,
         up_context,
         &mut ConfigContext::default(),
@@ -765,6 +786,22 @@ pub async fn run(
 
     validate_targets(&service_configs)?;
 
+    Ok(service_configs)
+}
+
+/// Spawn a child mirrord process for each of `service_configs`. Stdout/stderr from
+/// children will be printed to the console, prefixed with the name of
+/// the session.
+///
+/// `ready` is filled with the time-to-ready once every session has signalled
+/// readiness, and with the branch databases the sessions report (see [`ReadyTracker`]).
+///
+/// Returns when the user stops the session or one of the child sessions exits.
+pub async fn launch(
+    service_configs: Vec<SubprocessCfg>,
+    correlation_id: Uuid,
+    ready: ReadyTracker,
+) -> Result<(), UpError> {
     let commands: Vec<_> = service_configs
         .into_iter()
         .map(|config| {
@@ -773,6 +810,7 @@ pub async fn run(
                 service_name,
                 run,
                 mode: _,
+                default_db_branches: _,
             } = config;
             let config::RunConfig {
                 r#type,
@@ -787,6 +825,7 @@ pub async fn run(
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
+                .env(SERVICE_NAME_ENV, &*service_name)
                 .arg(Into::<&'static str>::into(r#type))
                 .arg("--")
                 .args(command)
