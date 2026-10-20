@@ -147,7 +147,7 @@ impl SessionsManagerConnector {
             }
             SessionsManagerRoute::Standalone(endpoint) => {
                 let transport = DirectTransport::intproxy_from_env(
-                    endpoint.url.clone(),
+                    endpoint.clone(),
                     Some(Arc::new(StoredLogin)),
                 )?;
                 self.connect_with(transport).await

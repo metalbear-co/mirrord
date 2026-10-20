@@ -17,10 +17,9 @@ use axum::{
 use futures::future::{BoxFuture, FutureExt};
 use mirrord_sessions_manager_client::{
     DirectTransport, IntproxyClient, LoginToken, LoginTokenSource, ServiceScope,
-    SessionsManagerClientError, SessionsManagerConnectInfo,
+    SessionsManagerClientError, SessionsManagerConnectInfo, SessionsManagerEndpoint,
 };
 use tokio::net::TcpListener;
-use url::Url;
 
 struct FixedLogin;
 
@@ -60,9 +59,9 @@ async fn intproxy_presents_the_login_token_and_never_the_api_key() {
         std::env::set_var("MIRRORD_SESSIONS_MANAGER_API_KEY", "metalbear_key_test");
     }
 
-    let base_url = Url::parse(&format!("http://{address}/sm")).unwrap();
+    let endpoint = SessionsManagerEndpoint::resolve(Some(&format!("http://{address}/sm"))).unwrap();
     let transport =
-        DirectTransport::intproxy_from_env(base_url, Some(Arc::new(FixedLogin))).unwrap();
+        DirectTransport::intproxy_from_env(endpoint, Some(Arc::new(FixedLogin))).unwrap();
     let client = IntproxyClient::with_transport(
         SessionsManagerConnectInfo {
             scope: ServiceScope {

@@ -391,7 +391,7 @@ async fn warn_without_login_token<P: Progress>(
             "The sessions-manager at {} is reached over plain HTTP, so your mirrord login \
              is not sent to it, and a sessions-manager that authenticates its users will refuse \
              this session. Use an https:// URL, or reach it through localhost.",
-            endpoint.url
+            endpoint
         ));
         return Ok(());
     }
@@ -482,14 +482,12 @@ pub(crate) async fn create_and_connect<R: Reporter>(
                 .to_owned(),
             Some(endpoint) => match endpoint.source {
                 EndpointSource::Explicit => format!(
-                    "Connecting through the sessions-manager at {}, set by \
-                     `sessions_manager.url` or MIRRORD_SESSIONS_MANAGER_URL",
-                    endpoint.url
+                    "Connecting through the sessions-manager at {endpoint}, set by \
+                     `sessions_manager.url` or MIRRORD_SESSIONS_MANAGER_URL"
                 ),
-                EndpointSource::Default => format!(
-                    "Connecting through the MetalBear Cloud sessions-manager at {}",
-                    endpoint.url
-                ),
+                EndpointSource::Default => {
+                    format!("Connecting through the MetalBear Cloud sessions-manager at {endpoint}")
+                }
             },
         };
         tracing::info!("{message}");

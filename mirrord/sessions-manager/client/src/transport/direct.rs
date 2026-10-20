@@ -1,6 +1,6 @@
 //! A standalone sessions-manager reached at its own base URL.
 
-use std::{sync::Arc, time::Duration};
+use std::{fmt, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
@@ -85,6 +85,20 @@ impl SessionsManagerEndpoint {
     }
 }
 
+/// Shows the URL without its username, password, query or fragment, since the endpoint is printed
+/// to CLI output and logs, and an explicit URL may carry credentials in any of them.
+impl fmt::Display for SessionsManagerEndpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut url = self.url.clone();
+        // These fail only for URLs that cannot carry credentials in the first place.
+        let _ = url.set_username("");
+        let _ = url.set_password(None);
+        url.set_query(None);
+        url.set_fragment(None);
+        url.fmt(f)
+    }
+}
+
 /// Bound on establishing the TCP (and TLS) connection for control-plane HTTP requests.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -120,21 +134,23 @@ impl DirectTransport {
         })
     }
 
-    /// Reaches the sessions-manager at `base_url` as an agent, with the shared secret and the API
+    /// Reaches the sessions-manager at `endpoint` as an agent, with the shared secret and the API
     /// key the environment configures, if any.
-    pub fn from_env(base_url: Url) -> Result<Self, SessionsManagerClientError> {
-        Ok(Self::new(base_url)?.with_credentials(credentials_from_env()?))
+    pub fn from_env(endpoint: SessionsManagerEndpoint) -> Result<Self, SessionsManagerClientError> {
+        let credentials = credentials_from_env(endpoint.source)?;
+        Ok(Self::new(endpoint.url)?.with_credentials(credentials))
     }
 
-    /// Reaches the sessions-manager at `base_url` as an intproxy, with the shared secret the
+    /// Reaches the sessions-manager at `endpoint` as an intproxy, with the shared secret the
     /// environment configures, if any, and the developer's login token from `login_tokens`.
     pub fn intproxy_from_env(
-        base_url: Url,
+        endpoint: SessionsManagerEndpoint,
         login_tokens: Option<Arc<dyn LoginTokenSource>>,
     ) -> Result<Self, SessionsManagerClientError> {
-        let credentials = intproxy_credentials_from_env(login_tokens, &base_url)?;
+        let credentials =
+            intproxy_credentials_from_env(endpoint.source, login_tokens, &endpoint.url)?;
 
-        Ok(Self::new(base_url)?.with_credentials(credentials))
+        Ok(Self::new(endpoint.url)?.with_credentials(credentials))
     }
 
     pub fn with_credentials(mut self, credentials: Arc<dyn CredentialProvider>) -> Self {
@@ -370,6 +386,16 @@ mod tests {
         );
         assert_eq!(endpoint.source, EndpointSource::Default);
         DirectTransport::new(endpoint.url).expect("the default must be a valid base URL");
+    }
+
+    #[test]
+    fn display_hides_credentials() {
+        let endpoint = SessionsManagerEndpoint::resolve(Some(
+            "https://user:password@sm.example.com/sm?token=secret#fragment",
+        ))
+        .unwrap();
+
+        assert_eq!(endpoint.to_string(), "https://sm.example.com/sm");
     }
 
     /// An explicit URL that doesn't parse is an error, not a reason to fall back to MetalBear

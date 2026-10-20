@@ -274,12 +274,12 @@ impl AgentConnection {
                 let endpoint =
                     SessionsManagerEndpoint::resolve(config.sessions_manager.url.as_deref())?;
                 tracing::info!(
-                    url = %endpoint.url,
+                    url = %endpoint,
                     source = ?endpoint.source,
                     "Connecting through a standalone sessions-manager"
                 );
                 let proxy_client =
-                    IntproxyClient::new(connect_info.clone(), endpoint.url, login_tokens.clone())?;
+                    IntproxyClient::new(connect_info.clone(), endpoint, login_tokens.clone())?;
                 let conn = Box::pin(proxy_client.connect(Duration::from_secs(60)))
                     .await
                     .map(Connection::from_channel)?;

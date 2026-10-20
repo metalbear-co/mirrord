@@ -1258,11 +1258,11 @@ async fn start_control_plane(
         SessionsManagerSelection::Standalone(endpoint) => {
             match endpoint.source {
                 EndpointSource::Explicit => info!(
-                    url = %endpoint.url,
+                    url = %endpoint,
                     "Registering with the sessions-manager set by MIRRORD_SESSIONS_MANAGER_URL"
                 ),
                 EndpointSource::Default => info!(
-                    url = %endpoint.url,
+                    url = %endpoint,
                     "Registering with the MetalBear Cloud sessions-manager, since neither \
                      MIRRORD_OPERATOR_API_URL nor MIRRORD_SESSIONS_MANAGER_URL is set"
                 ),
@@ -1272,7 +1272,7 @@ async fn start_control_plane(
                 AgentClient::start(
                     scope,
                     replica_id,
-                    DirectTransport::from_env(endpoint.url)?,
+                    DirectTransport::from_env(endpoint)?,
                     cancellation_token,
                 )?,
                 None,

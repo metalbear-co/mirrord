@@ -7,7 +7,6 @@ use mirrord_sessions_manager_protocol::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
-use url::Url;
 
 use crate::{
     client::validate_scope,
@@ -15,7 +14,7 @@ use crate::{
     credentials::LoginTokenSource,
     error::SessionsManagerClientError,
     retry::{RetryBudget, with_deadline},
-    transport::{DirectTransport, SessionsManagerTransport},
+    transport::{DirectTransport, SessionsManagerEndpoint, SessionsManagerTransport},
 };
 
 /// Describes the sessions-manager control-plane subscription an intproxy opens.
@@ -43,14 +42,14 @@ pub struct IntproxyClient<T = DirectTransport> {
 }
 
 impl IntproxyClient<DirectTransport> {
-    /// Connects through the standalone sessions-manager at `base_url`, authenticating with the
+    /// Connects through the standalone sessions-manager at `endpoint`, authenticating with the
     /// developer's login token from `login_tokens`.
     pub fn new(
         connect_info: SessionsManagerConnectInfo,
-        base_url: Url,
+        endpoint: SessionsManagerEndpoint,
         login_tokens: Option<Arc<dyn LoginTokenSource>>,
     ) -> Result<Self, SessionsManagerClientError> {
-        let transport = DirectTransport::intproxy_from_env(base_url, login_tokens)?;
+        let transport = DirectTransport::intproxy_from_env(endpoint, login_tokens)?;
         Self::with_transport(connect_info, transport)
     }
 }
