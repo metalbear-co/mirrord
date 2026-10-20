@@ -614,11 +614,17 @@ mod tests {
     /// An entry with no filter of its own still has to reach the operator, which gives it the
     /// `MirrordSplitConfig` filter: dropping it would make the queue look unrequested, and an
     /// unrequested queue delivers nothing. It rides in `queue_filters` with no `filter` and no
-    /// `jq_filter`, and never in the legacy params, which have nothing to say about it.
+    /// `jq_filter`, and never in the legacy params, which have nothing to say about it. An
+    /// empty `message_filter` map counts as no filter too, so it must not leak into the legacy
+    /// params as an explicit match-everything filter.
     #[test]
     fn filterless_entries_ride_in_queue_filters_without_a_filter() {
         let split_queues = SplitQueuesConfig::from_splits([
             QueueSplit::new("from-split-config", QueueKind::Sqs),
+            QueueSplit {
+                message_filter: Some(BTreeMap::new()),
+                ..QueueSplit::new("empty-map", QueueKind::Sqs)
+            },
             QueueSplit {
                 jq_filter: Some(".x".to_owned()),
                 ..QueueSplit::new("jq-only", QueueKind::Sqs)
@@ -632,10 +638,16 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_value(queue_filters(&split_queues)).unwrap(),
-            serde_json::json!([{
-                "queue_id": "from-split-config",
-                "queue_type": "SQS",
-            }])
+            serde_json::json!([
+                {
+                    "queue_id": "from-split-config",
+                    "queue_type": "SQS",
+                },
+                {
+                    "queue_id": "empty-map",
+                    "queue_type": "SQS",
+                },
+            ])
         );
     }
 }
