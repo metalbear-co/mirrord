@@ -6,7 +6,7 @@ RUN chmod +x rustup-init.sh
 COPY rust-toolchain.toml .
 RUN ./rustup-init.sh -y --default-toolchain none
 ENV PATH="$PATH:/root/.cargo/bin"
-RUN rustup toolchain install && rustup component add rustfmt
+RUN rustup toolchain install
 RUN rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
 
 RUN apt-get update && apt-get install -y python3-pip

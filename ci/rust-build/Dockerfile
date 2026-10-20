@@ -6,4 +6,4 @@ RUN chmod +x rustup-init.sh
 COPY rust-toolchain.toml .
 RUN ./rustup-init.sh -y --default-toolchain none
 ENV PATH="$PATH:/root/.cargo/bin"
-RUN rustup toolchain install && rustup component add rustfmt
+RUN rustup toolchain install
