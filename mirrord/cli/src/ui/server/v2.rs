@@ -80,16 +80,16 @@ pub(super) fn v2_router() -> Router<AppState> {
         .route("/token", get(token))
 }
 
-/// Returns a kube client for `context` (or the kubeconfig current context when `None`), caching it
-/// in [`AppState::clients`] so the recurring operator-session polls don't rebuild TLS each time.
-/// Callers should [`evict_client`] when a request made with the returned client fails, so a broken
-/// client is rebuilt rather than reused.
+/// Returns a kube client for `context` (or the global default, else the kubeconfig current context,
+/// when `None`), caching it in [`AppState::clients`] so the recurring operator-session polls don't
+/// rebuild TLS each time. Callers should [`evict_client`] when a request made with the returned
+/// client fails, so a broken client is rebuilt rather than reused.
 async fn cached_client(state: &AppState, context: Option<&str>) -> UiResult<Client> {
-    let key = context.map(str::to_owned);
+    let key = client_key(context).await;
     if let Some(client) = state.clients.read().await.get(&key).cloned() {
         return Ok(client);
     }
-    let client = client_for_context(context).await?;
+    let client = client_for_context(key.as_deref()).await?;
     Ok(state
         .clients
         .write()
@@ -108,12 +108,22 @@ async fn evict_client(state: &AppState, context: Option<&str>) {
         .clients
         .write()
         .await
-        .remove(&context.map(str::to_owned));
+        .remove(&client_key(context).await);
+}
+
+/// Keys the client cache by the context a request really uses, so changing the global default
+/// gives later requests a client for the new cluster.
+async fn client_key(context: Option<&str>) -> Option<String> {
+    match context {
+        Some(context) => Some(context.to_owned()),
+        None => GlobalConfig::fresh_kube_context().await,
+    }
 }
 
 #[derive(Deserialize)]
 struct ContextQuery {
-    /// Context to act against. Absent means the kubeconfig's current context.
+    /// Context to act against. Absent means the global default, else the kubeconfig's current
+    /// context.
     context: Option<String>,
 }
 
@@ -560,10 +570,8 @@ async fn kube_contexts() -> UiResult<axum::Json<ContextsResponse>> {
         })
         .collect();
     Ok(axum::Json(ContextsResponse {
-        current: GlobalConfig::load()
+        current: GlobalConfig::fresh_kube_context()
             .await
-            .kube_context()
-            .map(str::to_owned)
             .or(kubeconfig.current_context),
         contexts,
     }))

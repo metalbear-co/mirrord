@@ -800,17 +800,16 @@ async fn list_contexts() -> UiResult<axum::Json<ContextsResponse>> {
             .iter()
             .map(|context| context.name.clone())
             .collect(),
-        current_context: GlobalConfig::load()
+        current_context: GlobalConfig::fresh_kube_context()
             .await
-            .kube_context()
-            .map(str::to_owned)
             .or(kubeconfig.current_context),
     }))
 }
 
 #[derive(Deserialize)]
 struct NamespacesQuery {
-    /// Context to list namespaces from. When absent, the kubeconfig's current context is used.
+    /// Context to list namespaces from. When absent, the global default is used, else the
+    /// kubeconfig's current context.
     context: Option<String>,
 }
 
@@ -825,8 +824,8 @@ struct NamespacesResponse {
 /// auth-exec plugin that blocks on an expired credential.
 const CLIENT_BUILD_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Builds a kube client for the given context, or for the kubeconfig's current context when
-/// `context` is `None`.
+/// Builds a kube client for the given context, or for the global default, else the kubeconfig's
+/// current context, when `context` is `None`.
 pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client> {
     tokio::time::timeout(CLIENT_BUILD_TIMEOUT, build_client(context))
         .await
@@ -837,7 +836,8 @@ pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client
 }
 
 async fn build_client(context: Option<&str>) -> UiResult<Client> {
-    let mut config = match context.or(GlobalConfig::load().await.kube_context()) {
+    let global_context = GlobalConfig::fresh_kube_context().await;
+    let mut config = match context.or(global_context.as_deref()) {
         Some(context) => {
             let options = KubeConfigOptions {
                 context: Some(context.to_owned()),

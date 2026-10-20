@@ -149,6 +149,12 @@ impl GlobalConfig {
     pub(crate) fn kube_context(&self) -> Option<&str> {
         self.config.kube_context.as_deref()
     }
+
+    /// Reads `kube_context` from disk on every call, so the long-lived `mirrord ui` daemon sees
+    /// `mirrord config set` changes without a restart.
+    pub(crate) async fn fresh_kube_context() -> Option<String> {
+        Self::from_default_path().await.ok()?.config.kube_context
+    }
 }
 
 /// Errors returned by `mirrord config`.
