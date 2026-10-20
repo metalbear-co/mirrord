@@ -1,8 +1,8 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    fenix = {
-      url = "github:nix-community/fenix";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -26,41 +26,38 @@
                 # Packages required to build the rust workspace
                 rustPackages =
                   let
-                    rust-toolchain =
-                      let
-                        fenix = inputs.fenix.packages.${system};
-
-                        toolchainName = {
-                          name = "1.99.1";
-                          sha256 = "sha256-+xUr6Al1wZSqX8aEsq7DpuFOK4Ve/i+qTl+K5uWQ9GM=";
-                        };
-
-                        components = with fenix.fromToolchainName toolchainName; [
-                          cargo
-                          clippy
-                          rust-src
-                          rustc
-                          rustfmt
-                        ];
-
+                    rustToolchain =
+                      if stdenv.hostPlatform.isDarwin then
                         # On darwin we need the standard library for x86 too in order to compile universal binaries,
-                        # as well as the one for linux in order to work on the agent, which is linux-only
-                        crossComponents =
-                          let
-                            crossTargets = lib.optionals stdenv.hostPlatform.isDarwin [
+                        # as well as the one for linux in order to work on the agent, which is linux-only. nixpkgs'
+                        # toolchain only ships the host's standard library, so we use rust-overlay to add the
+                        # cross-compilation ones.
+                        let
+                          rust-bin = inputs.rust-overlay.lib.mkRustBin { } pkgs;
+                        in
+                        [
+                          (rust-bin.stable.latest.default.override {
+                            extensions = [ "rust-src" ];
+                            targets = [
                               "x86_64-apple-darwin"
                               "x86_64-unknown-linux-gnu"
                             ];
-                          in
-                          lib.map (target: (fenix.targets.${target}.fromToolchainName toolchainName).rust-std) crossTargets;
-                      in
-                      fenix.combine (components ++ crossComponents);
+                          })
+                          # The wrapper points `RUST_SRC_PATH` to nixpkgs' rust toolchain, but we use rust-overlay's,
+                          # so let rust-analyzer find out where it is on its own with `rustc --print sysroot`.
+                          rust-analyzer-unwrapped
+                        ]
+                      else
+                        [
+                          cargo
+                          clippy
+                          rustc
+                          rustfmt
+                          rust-analyzer
+                        ];
                   in
-                  [
-                    rust-toolchain
-                    # The wrapper points `RUST_SRC_PATH` to nixpkgs' rust toolchain, but we use a custom toolchain,
-                    # so let rust-analyzer find out where it is on its own with `rustc --print sysroot`.
-                    rust-analyzer-unwrapped
+                  rustToolchain
+                  ++ [
                     rustPlatform.bindgenHook
                     # Required to build `containerd-client`
                     protobuf
