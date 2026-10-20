@@ -1687,11 +1687,20 @@ where
                 .require_feature(NewOperatorFeature::KafkaBranching)?;
         }
 
+        let split_queues = &layer_config.feature.split_queues;
+
+        // Checked before the auto-splitting early return: the splits `mirrord up` generates
+        // always carry a jq filter, so a filterless entry can only come from the user's
+        // `config_patch`, and an old operator must not be asked to run it.
+        if split_queues.uses_split_config_filters() {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::SplitConfigQueueFilters)?;
+        }
+
         if auto_queue_splitting {
             return Ok(());
         }
-
-        let split_queues = &layer_config.feature.split_queues;
 
         // One feature per broker (Azure Service Bus shipped without one, so it has no gate);
         // brokers added later were born with jq, so only the early ones gate jq separately.
@@ -1758,11 +1767,6 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::QueueSplittingWithComposedFilters)?;
-        }
-        if split_queues.uses_split_config_filters() {
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::SplitConfigQueueFilters)?;
         }
 
         Ok(())
