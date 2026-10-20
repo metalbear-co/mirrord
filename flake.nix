@@ -31,8 +31,8 @@
                         fenix = inputs.fenix.packages.${system};
 
                         toolchainName = {
-                          name = "1.99.0";
-                          sha256 = "sha256-zm3dyIY2T414ZRR3EhLOvptzG6gta4WZUcawzMUWtqI=";
+                          name = "1.99.1";
+                          sha256 = "sha256-+xUr6Al1wZSqX8aEsq7DpuFOK4Ve/i+qTl+K5uWQ9GM=";
                         };
 
                         components = with fenix.fromToolchainName toolchainName; [
@@ -69,7 +69,7 @@
                 # Packages required to build the frontends
                 uiPackages = [
                   nodejs
-                  pnpm
+                  pnpm_10
                 ];
 
                 # Packages to run tests locally
