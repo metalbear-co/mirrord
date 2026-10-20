@@ -2519,14 +2519,12 @@ mod tests {
     #[test]
     fn redis_cluster_branch_rejects_a_database_other_than_zero() {
         let branch = |name: Option<&str>| {
-            let mut config = json!({
+            let config = json!({
                 "type": "redis",
                 "cluster": true,
                 "connection": { "url": "REDIS_URL" },
+                "name": name,
             });
-            if let Some(name) = name {
-                config["name"] = json!(name);
-            }
             serde_json::from_value::<DatabaseBranchConfig>(config).unwrap()
         };
 

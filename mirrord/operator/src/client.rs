@@ -1300,19 +1300,25 @@ where
                 }
             }
 
-            // Where a branch runs is fixed when it is created, so a session reusing it must ask
-            // for the same placement (see `check_attach_namespace`).
-            let requested_namespace_keys: HashMap<String, Option<String>> = create_params
+            // Where a branch runs, and for Redis whether it runs as a cluster node, is fixed when
+            // it is created, so a session reusing it must ask for the same (see
+            // `check_attach_namespace` and `check_attach_redis_cluster`).
+            let requested_specs: HashMap<String, BranchDatabaseSpec> = create_params
                 .iter()
-                .map(|(name, params)| (name.clone(), params.spec.dedicated_namespace_key.clone()))
+                .map(|(name, params)| (name.clone(), params.spec.clone()))
                 .collect();
             for (name, branch) in existing.ready.iter().chain(existing.pending.iter()) {
-                if let Some(requested) = requested_namespace_keys.get(name) {
+                if let Some(requested) = requested_specs.get(name) {
                     database_branches::check_attach_namespace(
                         branch,
-                        requested.as_deref(),
+                        requested.dedicated_namespace_key.as_deref(),
                         api_namespace,
                         &subtask,
+                    )?;
+                    database_branches::check_attach_redis_cluster(
+                        branch,
+                        requested,
+                        api_namespace,
                     )?;
                 }
             }
@@ -1369,12 +1375,17 @@ where
                 if let Some(requested) = split_config_specs.get(name) {
                     check_attach_copy_mode(branch, requested)?;
                 }
-                if let Some(requested) = requested_namespace_keys.get(name) {
+                if let Some(requested) = requested_specs.get(name) {
                     database_branches::check_attach_namespace(
                         branch,
-                        requested.as_deref(),
+                        requested.dedicated_namespace_key.as_deref(),
                         api_namespace,
                         &subtask,
+                    )?;
+                    database_branches::check_attach_redis_cluster(
+                        branch,
+                        requested,
+                        api_namespace,
                     )?;
                 }
             }

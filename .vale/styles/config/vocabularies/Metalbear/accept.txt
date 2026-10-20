@@ -247,6 +247,7 @@ uvicorn
 Uvicorn
 Vue
 redis
+Redis
 turbopuffer
 nginx
 OpenAPI
