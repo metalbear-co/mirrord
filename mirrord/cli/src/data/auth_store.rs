@@ -335,6 +335,56 @@ mod tests {
         assert_eq!(stored_tokens(&store), [(ISSUER, "org-a", "valid")]);
     }
 
+    /// The latest login is the one that expires last, whichever organization it is for. It is
+    /// returned even once expired, so the CLI can say when it expired.
+    #[test]
+    fn latest_login_is_the_one_that_expires_last_at_the_issuer() {
+        let now = Utc::now();
+        let mut store = AuthStore::default();
+        for (issuer, organization, value, expires_at) in [
+            (ISSUER, "org-a", "older", now + TimeDelta::hours(1)),
+            (ISSUER, "org-b", "newer", now + TimeDelta::hours(2)),
+            ("https://other", "org-a", "other", now + TimeDelta::hours(3)),
+        ] {
+            store.insert(
+                issuer.to_owned(),
+                organization.to_owned(),
+                token(value, expires_at),
+                now,
+            );
+        }
+
+        let latest = store.latest_token(ISSUER).unwrap();
+        assert_eq!(latest.token.expose_secret(), "newer");
+
+        let mut store = AuthStore::default();
+        store.insert(
+            ISSUER.to_owned(),
+            "org-a".to_owned(),
+            token("expired", now - TimeDelta::seconds(1)),
+            now - TimeDelta::hours(24),
+        );
+        assert_eq!(
+            store.latest_token(ISSUER).unwrap().token.expose_secret(),
+            "expired"
+        );
+        assert!(AuthStore::default().latest_token(ISSUER).is_none());
+    }
+
+    /// Spellings of one backend that `Url` normalizes share an issuer, so a token stored by
+    /// `mirrord login` is found whichever spelling `MIRRORD_METALBEAR_CLOUD_URL` uses.
+    #[test]
+    fn spellings_of_one_backend_share_an_issuer() {
+        for spelling in [
+            "https://app.metalbear.com",
+            "https://app.metalbear.com/",
+            "https://APP.MetalBear.com",
+            "https://app.metalbear.com:443",
+        ] {
+            assert_eq!(issuer(&Url::parse(spelling).unwrap()), ISSUER, "{spelling}");
+        }
+    }
+
     #[test]
     fn debug_output_does_not_contain_the_token() {
         let token = token("secret-token", Utc::now());

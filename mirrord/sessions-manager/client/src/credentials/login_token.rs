@@ -103,3 +103,60 @@ impl CredentialProvider for LoginTokenCredentials {
         Some(SessionsManagerClientError::LoginTokenRejected)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use reqwest::header::AUTHORIZATION;
+
+    use super::*;
+
+    struct FixedLogin(Option<&'static str>);
+
+    impl LoginTokenSource for FixedLogin {
+        fn login_token(
+            &self,
+        ) -> BoxFuture<'_, Result<Option<LoginToken>, SessionsManagerClientError>> {
+            let token = self.0.map(|token| LoginToken::from(token.to_owned()));
+            std::future::ready(Ok(token)).boxed()
+        }
+    }
+
+    fn credentials(token: Option<&'static str>) -> LoginTokenCredentials {
+        LoginTokenCredentials::new(Arc::new(FixedLogin(token)))
+    }
+
+    #[tokio::test]
+    async fn sends_the_token_as_a_sensitive_bearer_on_the_control_plane() {
+        let headers = credentials(Some("abc"))
+            .control_plane_headers()
+            .await
+            .unwrap();
+
+        let authorization = headers.get(AUTHORIZATION).unwrap();
+        assert_eq!(authorization, "Bearer abc");
+        assert!(authorization.is_sensitive());
+    }
+
+    /// The data-plane upgrade carries the assignment's own credential in `Authorization`, which
+    /// the login token must not replace.
+    #[tokio::test]
+    async fn sends_nothing_on_the_data_plane() {
+        let headers = credentials(Some("abc")).data_plane_headers().await.unwrap();
+
+        assert!(headers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sends_nothing_without_a_login() {
+        let headers = credentials(None).control_plane_headers().await.unwrap();
+
+        assert!(headers.is_empty());
+    }
+
+    #[test]
+    fn debug_output_does_not_contain_the_token() {
+        let token = LoginToken::from("secret-token".to_owned());
+
+        assert!(!format!("{token:?}").contains("secret-token"));
+    }
+}
