@@ -284,16 +284,15 @@ pub struct ComposedQueueFilter<'a> {
     pub jq_filter: Option<&'a str>,
 }
 
-/// The legacy `message_filter` maps of one broker, keyed by queue id. Entries using the
-/// composable shape and entries with no filter at all are left out: they travel in
-/// [`ConnectParams::queue_filters`].
+/// The legacy `message_filter` maps of one broker, keyed by queue id, an empty map included.
+/// Entries using the composable shape and entries with no filter at all are left out: they
+/// travel in [`ConnectParams::queue_filters`].
 fn legacy_filters(
     split_queues: &SplitQueuesConfig,
     kind: QueueKind,
 ) -> HashMap<&str, &BTreeMap<String, String>> {
     split_queues
         .of_kind(kind)
-        .filter(|split| split.has_filter())
         .filter_map(|split| Some((split.queue_id.as_str(), split.message_filter.as_ref()?)))
         .collect()
 }
@@ -615,14 +614,15 @@ mod tests {
     /// `MirrordSplitConfig` filter: dropping it would make the queue look unrequested, and an
     /// unrequested queue delivers nothing. It rides in `queue_filters` with no `filter` and no
     /// `jq_filter`, and never in the legacy params, which have nothing to say about it. An
-    /// empty `message_filter` map counts as no filter too, so it must not leak into the legacy
-    /// params as an explicit match-everything filter.
+    /// empty `message_filter` map is a filter of the entry's own ("deliver nothing"), so it
+    /// stays in the legacy params exactly as every operator has always read it.
     #[test]
     fn filterless_entries_ride_in_queue_filters_without_a_filter() {
+        let empty_map = BTreeMap::new();
         let split_queues = SplitQueuesConfig::from_splits([
             QueueSplit::new("from-split-config", QueueKind::Sqs),
             QueueSplit {
-                message_filter: Some(BTreeMap::new()),
+                message_filter: Some(empty_map.clone()),
                 ..QueueSplit::new("empty-map", QueueKind::Sqs)
             },
             QueueSplit {
@@ -631,23 +631,20 @@ mod tests {
             },
         ]);
 
-        assert!(legacy_filters(&split_queues, QueueKind::Sqs).is_empty());
+        assert_eq!(
+            legacy_filters(&split_queues, QueueKind::Sqs),
+            [("empty-map", &empty_map)].into()
+        );
         assert_eq!(
             legacy_jq_filters(&split_queues, QueueKind::Sqs),
             [("jq-only", ".x")].into()
         );
         assert_eq!(
             serde_json::to_value(queue_filters(&split_queues)).unwrap(),
-            serde_json::json!([
-                {
-                    "queue_id": "from-split-config",
-                    "queue_type": "SQS",
-                },
-                {
-                    "queue_id": "empty-map",
-                    "queue_type": "SQS",
-                },
-            ])
+            serde_json::json!([{
+                "queue_id": "from-split-config",
+                "queue_type": "SQS",
+            }])
         );
     }
 }
