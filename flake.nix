@@ -69,7 +69,7 @@
                 # Packages required to build the frontends
                 uiPackages = [
                   nodejs
-                  pnpm
+                  pnpm_10
                 ];
 
                 # Packages to run tests locally
