@@ -9,6 +9,7 @@ use std::{
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use strum_macros::IntoStaticStr;
 use tracing::{Level, info};
 use uuid::Uuid;
 
@@ -26,6 +27,24 @@ pub fn read_correlation_id_from_env() -> Option<Uuid> {
     std::env::var(MIRRORD_UP_CORRELATION_ID_ENV)
         .ok()
         .and_then(|value| value.parse().ok())
+}
+
+/// Prefix of the stdout line on which a session started by `mirrord up` reports the branch
+/// databases it uses, as a JSON list of [`UpSessionDbBranch`]. `mirrord up` reads it from the
+/// session's output for its own analytics and doesn't show it.
+pub const UP_DB_BRANCHES_REPORT_PREFIX: &str = "mirrord-up-db-branches:";
+
+/// One branch database a session started by `mirrord up` uses (see
+/// [`UP_DB_BRANCHES_REPORT_PREFIX`]).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpSessionDbBranch {
+    /// Resource name of the branch. It is unique within a cluster only, so services of one run
+    /// use the same branch when they report the same name and the same `cluster`.
+    pub name: String,
+    /// URL of the API server of the cluster the branch lives in.
+    pub cluster: String,
+    /// The session created the branch, rather than attaching to one that existed.
+    pub created: bool,
 }
 
 /// Environment variables carrying the connected cluster's Kubernetes
@@ -122,7 +141,8 @@ impl FromStr for ExecutionKind {
 /// Reported on analytics events as the numeric `ai_agent` property (alongside the
 /// `is_ai_agent` boolean), so AI-agent-driven usage can be distinguished from direct
 /// human usage. The numeric mapping keeps the analytics schema stable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
 #[repr(u32)]
 pub enum AiAgent {
     ClaudeCode = 1,

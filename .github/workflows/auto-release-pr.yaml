@@ -7,9 +7,6 @@ on:
 permissions:
   contents: read
 
-env:
-  PINNED_TOOLCHAIN: 1.99.0
-
 jobs:
   create_release_pr:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -51,12 +48,9 @@ jobs:
         run: uv pip install towncrier==23.11.0
 
       - if: steps.version.outputs.should-release == 'true'
-        run: rm rust-toolchain.toml
-      - if: steps.version.outputs.should-release == 'true'
         uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache: false
-          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           rustflags: ""
       - name: Rust cache
         if: steps.version.outputs.should-release == 'true'

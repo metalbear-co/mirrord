@@ -72,7 +72,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.275.0"
+version = "3.276.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -281,6 +281,7 @@ tar = "0.4"
 tempfile = "3"
 tera = "1"
 test-cdylib = "1"
+textwrap = { version = "0.16", default-features = false }
 thiserror = "2"
 throbber-widgets-tui = "0.11"
 tokio = { version = "1", features = ["fs", "net", "io-util"] }

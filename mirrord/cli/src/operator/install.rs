@@ -1,6 +1,4 @@
-//! `mirrord operator install`: gets a license, installs the operator into the cluster of a
-//! kubecontext, and hands ownership of the license to the user. `mirrord operator uninstall`
-//! removes it again, see [`uninstall`].
+//! `mirrord operator install`, `signup` and `uninstall`: the operator lifecycle without helm.
 
 use std::{io::IsTerminal, ops::Not};
 
@@ -9,14 +7,20 @@ use kube::Client;
 use mirrord_analytics::{ReportTarget, Reporter};
 use mirrord_kube::api::kubernetes::create_kube_config_with_context;
 use mirrord_progress::{Progress, ProgressTracker};
+use secrecy::ExposeSecret;
+use url::Url;
 
 use self::{
     manifest::Manifest,
-    signup::Trial,
     telemetry::{InstallPhase, InstallRun, Outcome},
 };
-use crate::{config::OperatorInstallArgs, data::GlobalConfig};
+use crate::{
+    config::OperatorInstallArgs,
+    data::{GlobalConfig, StoredLoginToken},
+    login,
+};
 
+mod api_key;
 mod cluster;
 mod error;
 mod manifest;
@@ -27,6 +31,7 @@ mod tests;
 mod uninstall;
 
 pub(crate) use error::OperatorInstallError;
+pub(super) use signup::operator_signup;
 pub(crate) use telemetry::OperatorTelemetry;
 pub(super) use uninstall::operator_uninstall;
 
@@ -39,7 +44,7 @@ pub(super) async fn operator_install(
     let mut reporter = telemetry.reporter(ReportTarget::OperatorInstall);
     reporter
         .get_mut()
-        .add("api_key_given", args.api_key.is_some());
+        .add("api_key_given", args.api_key.is_some() || args.from_signup);
 
     let mut run = InstallRun {
         phase: InstallPhase::Connect,
@@ -59,7 +64,7 @@ pub(super) async fn operator_install(
     }
 
     let analytics = reporter.get_mut();
-    analytics.add("trial_started", run.retry.is_some());
+    analytics.add("api_key_created", run.retry.is_some());
     telemetry::add_outcome(
         analytics,
         result.as_ref().map(|()| Outcome::Success),
@@ -75,7 +80,8 @@ async fn install(
 ) -> Result<(), OperatorInstallError> {
     let OperatorInstallArgs {
         api_key,
-        no_browser,
+        from_signup,
+        no_browser: _,
         cluster_hint,
         no_hint,
         context,
@@ -85,6 +91,24 @@ async fn install(
         ready_timeout,
     } = args;
 
+    let credential = match api_key {
+        Some(api_key) => Credential::ApiKey(api_key),
+        None if from_signup => {
+            run.phase = InstallPhase::SignupKey;
+            let app_url = login::backend_base_url(app_url)
+                .map_err(|error| OperatorInstallError::AppUrl(Box::new(error)))?;
+            Credential::ApiKey(signup::saved_key(&app_url).await?)
+        }
+        None => {
+            run.phase = InstallPhase::Login;
+            let app_url = login::backend_base_url(app_url)
+                .map_err(|error| OperatorInstallError::Login(Box::new(error)))?;
+            let token = api_key::login_token(&app_url).await?;
+            Credential::Login { app_url, token }
+        }
+    };
+
+    run.phase = InstallPhase::Connect;
     let mut progress = ProgressTracker::from_env("mirrord operator install");
     let Connection {
         client,
@@ -127,39 +151,32 @@ async fn install(
     );
     confirm(&progress, yes, &question)?;
 
-    match api_key {
-        Some(api_key) => manifest.set_api_key(&api_key),
-        None => {
-            run.phase = InstallPhase::StartTrial;
-            let mut subtask = progress.subtask("starting a trial");
-            let cluster_hint = match (no_hint, cluster_hint) {
-                (true, _) => None,
-                (false, Some(cluster_hint)) => Some(cluster_hint),
-                (false, None) => cluster::cluster_id(&client).await,
+    let created_key;
+    let api_key = match &credential {
+        Credential::ApiKey(api_key) => api_key.as_str(),
+        Credential::Login { app_url, token } => {
+            run.phase = InstallPhase::CreateApiKey;
+            let mut subtask = progress.subtask(&format!(
+                "creating the operator API key of the organization of {}",
+                token.email
+            ));
+            let name = match (cluster_hint, no_hint) {
+                (Some(cluster_hint), _) => Some(cluster_hint),
+                (None, true) => None,
+                (None, false) => cluster::cluster_id(&client).await,
             };
-            let trial =
-                signup::start_trial(&http, &app_url, USER_AGENT, cluster_hint.as_deref()).await?;
+            created_key = api_key::create(&http, app_url, token, name.as_deref()).await?;
             run.retry = Some(format!(
-                "To retry without starting another trial, remove what was installed, then reuse \
-                the API key of the trial:\n\n  mirrord operator uninstall{context_arg}\n  mirrord \
-                operator install{context_arg} --api-key {}\n",
-                trial.api_key
+                "The operator API key of your organization was created for this installation. To \
+                retry, remove what was installed with `mirrord operator uninstall{context_arg}`, \
+                revoke the key at {}, then run this command again.\n",
+                api_key::settings_url(app_url)
             ));
             subtask.success(None);
-
-            // Printed right away, so the claim URL and the API key are not lost if the
-            // installation fails or is interrupted, and a retry can reuse the trial.
-            println!("{}", trial_details(&trial));
-            if no_browser.not()
-                && std::io::stdout().is_terminal()
-                && let Err(error) = opener::open(&trial.claim_url)
-            {
-                tracing::debug!(?error, "failed to open the claim URL in the browser");
-            }
-
-            manifest.set_api_key(&trial.api_key);
+            created_key.expose_secret()
         }
-    }
+    };
+    manifest.set_api_key(api_key);
 
     run.phase = InstallPhase::CreateObjects;
     let mut subtask = progress.subtask("installing the operator");
@@ -188,6 +205,18 @@ async fn install(
     );
 
     Ok(())
+}
+
+/// What the operator is registered with.
+enum Credential {
+    /// An operator API key the user passed, or that `mirrord operator signup` saved.
+    ApiKey(String),
+    /// The login of the user, used to create the operator API key of their organization in the
+    /// app at `app_url`.
+    Login {
+        app_url: Url,
+        token: StoredLoginToken,
+    },
 }
 
 /// What the operator commands need to reach the cluster and the internet.
@@ -264,17 +293,6 @@ fn location(namespace: &str, context: Option<&str>) -> String {
     }
 }
 
-/// What the user needs to know about a trial, printed once as soon as it starts.
-fn trial_details(trial: &Trial) -> String {
-    format!(
-        "Started a mirrord Enterprise trial. It ends on {}, after which the license drops to the \
-        Free tier.\nClaim the trial to take ownership of it: {}\nAPI key of the trial: {}\n",
-        trial.trial_ends_at.format("%B %-d, %Y"),
-        trial.claim_url,
-        trial.api_key,
-    )
-}
-
 /// The `flag` that gives a command printed to the user the kubecontext of the run, so that the
 /// command does not use a different cluster if the kubecontext is not the current one. Empty if
 /// the kubecontext has no name.
@@ -292,26 +310,11 @@ fn context_flag(flag: &str, context: Option<&str>) -> String {
 
 /// What the user needs to know after a successful installation, printed once.
 fn summary(version: &semver::Version, manifest: &Manifest, context: Option<&str>) -> String {
-    let kube_context_arg = context_flag("--kube-context", context);
     let context_arg = context_flag("--context", context);
 
-    let mut summary = format!(
+    format!(
         "mirrord operator {version} is installed in {}. To remove it, run `mirrord operator \
-        uninstall{context_arg}`.\n\n",
+        uninstall{context_arg}`.",
         location(manifest.operator_namespace(), context)
-    );
-    summary.push_str(&format!(
-        "This is a default installation. For anything custom (namespace, tolerations, pull \
-        secrets, OIDC, ...), manage it with the helm chart, which takes over this installation \
-        and keeps its API key:\n\n  helm repo add metalbear {repo}\n  helm install {release} \
-        metalbear/{chart} --version {chart_version}{kube_context_arg} \\\n    --set \
-        cloud.apiKey.key=\"{api_key}\"",
-        chart_version = manifest.chart_version(),
-        api_key = manifest.api_key_lookup(&context_arg),
-        repo = manifest::CHARTS_REPO_URL,
-        release = manifest::RELEASE_NAME,
-        chart = manifest::CHART_NAME,
-    ));
-
-    summary
+    )
 }

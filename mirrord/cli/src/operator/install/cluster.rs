@@ -31,7 +31,7 @@ const OPERATOR_API_SERVICE: &str = "v1.operator.metalbear.co";
 
 /// The field manager helm 4 applies releases with.
 ///
-/// Applying under the same manager lets the printed `helm install` take over the objects. Under a
+/// Applying under the same manager lets `helm install` take over the objects. Under a
 /// different one, fields the API server defaults inside atomic values (e.g. RBAC subjects) would
 /// conflict with helm's apply, even though the rendered manifest is identical.
 const FIELD_MANAGER: &str = "helm";
@@ -41,9 +41,10 @@ const READY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Identifies the cluster by the UID of its `default` namespace, which is stable for the lifetime
 /// of the cluster and is the same ID the operator reports for it.
 ///
-/// Used as the trial's cluster hint in place of the kubecontext name, which can carry the user's
-/// account identity (e.g. EKS context names are ARNs with the AWS account ID, GKE ones name the
-/// project) and must not be sent without consent. `None` if the namespace can't be read.
+/// Used as the default name of the operator API key in place of the kubecontext name, which can
+/// carry the user's account identity (e.g. EKS context names are ARNs with the AWS account ID, GKE
+/// ones name the project) and must not be sent without consent. `None` if the namespace can't be
+/// read.
 pub(super) async fn cluster_id(client: &Client) -> Option<String> {
     Api::<Namespace>::all(client.clone())
         .get("default")
@@ -140,7 +141,7 @@ pub(super) async fn ensure_no_operator(
 }
 
 /// Dry-runs creating every object, so missing permissions, leftovers of an earlier installation and
-/// objects of other tools surface before anything is created or a trial is started.
+/// objects of other tools surface before anything is created, including the operator API key.
 ///
 /// A plain create finds the leftovers, which a server-side apply would silently merge into. Since
 /// [`create`] applies server-side, which also needs the `patch` permission, each object is then

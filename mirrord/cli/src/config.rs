@@ -1002,10 +1002,14 @@ pub(super) enum OperatorCommand {
     /// Install the mirrord operator into the cluster of the kubecontext given with `--context`, else
     /// the global config's `kube_context`, else the current kubecontext.
     ///
-    /// Without `--api-key`, starts an Enterprise trial and opens a link to claim it. Installs the
-    /// latest version of the helm chart with default values; use the helm chart directly for a
-    /// customized installation.
+    /// Without `--api-key` or `--from-signup`, logs you in and creates your organization's
+    /// operator API key, then installs the helm chart's default values (use the chart directly for
+    /// anything custom).
     Install(Box<OperatorInstallArgs>),
+    /// Start a 7-day mirrord Enterprise trial under a new organization, for AI agents.
+    ///
+    /// Saves the trial's API key on this machine for `mirrord operator install --from-signup`.
+    Signup(OperatorSignupArgs),
     /// Remove the mirrord operator that `mirrord operator install` installed from the cluster of
     /// the kubecontext given with `--context`, else the global config's `kube_context`, else the
     /// current kubecontext.
@@ -1035,21 +1039,28 @@ pub(super) enum OperatorCommand {
 pub(super) struct OperatorInstallArgs {
     /// Operator API key, the same key the helm chart takes as `cloud.apiKey.key`.
     ///
-    /// Registers the operator under the key's organization instead of starting a trial.
+    /// Without it or `--from-signup`, the command logs you in to the MetalBear app (like
+    /// `mirrord login`) and creates the operator API key of your organization, which goes into the
+    /// cluster without being shown.
     #[arg(long, env = "MIRRORD_OPERATOR_API_KEY", hide_env_values = true)]
     pub api_key: Option<String>,
 
-    /// Print the trial claim URL instead of opening it in the browser.
-    #[arg(long)]
+    /// Install with the API key of the trial that `mirrord operator signup` started on this
+    /// machine.
+    #[arg(long, conflicts_with_all = ["api_key", "cluster_hint", "no_hint"])]
+    pub from_signup: bool,
+
+    /// Has no effect. Kept so that scripts written for earlier versions keep working.
+    #[arg(long, hide = true)]
     pub no_browser: bool,
 
-    /// Name shown on the trial claim page to identify this cluster.
+    /// Name of the operator API key the command creates, shown in your organization's settings.
     ///
     /// Defaults to the cluster's ID, the UID of its `default` namespace.
     #[arg(long, conflicts_with_all = ["api_key", "no_hint"])]
     pub cluster_hint: Option<String>,
 
-    /// Do not send a cluster hint to the trial claim page.
+    /// Do not name the operator API key after the cluster.
     #[arg(long, conflicts_with = "api_key")]
     pub no_hint: bool,
 
@@ -1065,14 +1076,14 @@ pub(super) struct OperatorInstallArgs {
     #[arg(long, env = "MIRRORD_OPERATOR_INSTALL_MANIFEST", hide = true)]
     pub manifest: Option<PathBuf>,
 
-    /// Base URL of the MetalBear app, used for the trial signup.
+    /// Base URL of the MetalBear app, used to log in and create the operator API key.
     #[arg(
         long,
         env = "MIRRORD_OPERATOR_INSTALL_APP_URL",
         hide = true,
         default_value = "https://app.metalbear.com"
     )]
-    pub app_url: String,
+    pub app_url: Url,
 
     /// How long to wait for the operator to become ready before the installation fails.
     ///
@@ -1085,6 +1096,31 @@ pub(super) struct OperatorInstallArgs {
         default_value = "5m"
     )]
     pub ready_timeout: Duration,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct OperatorSignupArgs {
+    /// Name shown on the claim page to identify the cluster, by default its `default` namespace
+    /// UID.
+    #[arg(long, conflicts_with = "no_hint")]
+    pub cluster_hint: Option<String>,
+
+    /// Do not send a cluster hint to the claim page.
+    #[arg(long)]
+    pub no_hint: bool,
+
+    /// Kube context whose cluster the hint names, instead of the current one.
+    #[arg(long)]
+    pub context: Option<String>,
+
+    /// Base URL of the MetalBear app, used for the signup.
+    #[arg(
+        long,
+        env = "MIRRORD_OPERATOR_INSTALL_APP_URL",
+        hide = true,
+        default_value = "https://app.metalbear.com"
+    )]
+    pub app_url: Url,
 }
 
 #[derive(Args, Debug)]

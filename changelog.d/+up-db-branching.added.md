@@ -1,0 +1,1 @@
+`mirrord up` requests DB branching (`db_branches: "*"`) for services in `split` and `mirror` mode, so services of one run that use the same database share one branch. What each service requested and gets is printed before the sessions start, and a session that fails before launching its service now reports `Service {name} failed to start`.
