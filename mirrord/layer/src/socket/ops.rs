@@ -26,7 +26,7 @@ use mirrord_intproxy_protocol::{
 #[cfg(target_os = "macos")]
 use mirrord_layer_lib::socket::apple_dnsinfo::*;
 use mirrord_layer_lib::{
-    detour::{Detour, OnceLockExt, OptionExt},
+    detour::{Bypass, Detour, DetourError, OnceLockExt, OptionExt},
     error::{HookError, HookResult},
     graceful_exit,
     proxy_connection::make_proxy_request_with_response,
@@ -117,18 +117,18 @@ fn bind_similar_address(
 ) -> Detour<()> {
     let address = SockaddrStorage::from(requested);
     if nix::sys::socket::bind(sockfd, &address).is_ok() {
-        return Detour::Success(());
+        return Ok(());
     };
 
     if can_use_random_port {
         let address = SockaddrStorage::from(SocketAddr::new(requested.ip(), 0));
         if nix::sys::socket::bind(sockfd, &address).is_ok() {
-            return Detour::Success(());
+            return Ok(());
         };
     }
 
     if requested.ip().is_loopback() || requested.ip().is_unspecified() {
-        return Detour::Error(io::Error::last_os_error().into());
+        return Err(DetourError::Error(io::Error::last_os_error().into()));
     }
 
     let new_ip = if requested.ip().is_ipv4() {
@@ -138,17 +138,17 @@ fn bind_similar_address(
     };
     let address = SockaddrStorage::from(SocketAddr::new(new_ip, requested.port()));
     if nix::sys::socket::bind(sockfd, &address).is_ok() {
-        return Detour::Success(());
+        return Ok(());
     }
 
     if can_use_random_port {
         let address = SockaddrStorage::from(SocketAddr::new(new_ip, 0));
         if nix::sys::socket::bind(sockfd, &address).is_ok() {
-            return Detour::Success(());
+            return Ok(());
         }
     }
 
-    Detour::Error(io::Error::last_os_error().into())
+    Err(DetourError::Error(io::Error::last_os_error().into()))
 }
 
 /// Checks if given TCP port needs to be ignored based on ports logic
@@ -238,7 +238,9 @@ pub(super) fn bind(
             || incoming_config.ignore_ports.contains(&requested_port));
 
     if will_not_trigger_subscription && listen_port.is_none() {
-        return Detour::Bypass(Bypass::IgnoredInIncoming(requested_address));
+        return Err(DetourError::Bypass(Bypass::IgnoredInIncoming(
+            requested_address,
+        )));
     }
 
     #[cfg(target_os = "macos")]
@@ -281,7 +283,7 @@ pub(super) fn bind(
             %error,
             "Failed to retrieve socket local address after intercepted bind."
         );
-        return Detour::Error(error.into());
+        return Err(DetourError::Error(error.into()));
     };
     let address: SocketAddr = if let Some(ipv4) = address.as_sockaddr_in() {
         SocketAddrV4::from(*ipv4).into()
@@ -294,7 +296,7 @@ pub(super) fn bind(
             "Failed to retrieve socket local address after intercepted bind. \
             Should be an IPv4 or IPv6 address.",
         );
-        return Detour::Bypass(Bypass::AddressConversion);
+        return Err(DetourError::Bypass(Bypass::AddressConversion));
     };
 
     Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound {
@@ -310,7 +312,7 @@ pub(super) fn bind(
     // node reads errno to check if bind was successful and doesn't care about the return value
     // (???)
     Errno::set_raw(0);
-    Detour::Success(0)
+    Ok(0)
 }
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
@@ -318,13 +320,13 @@ pub(super) fn bind(
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     let Some(mut socket) = SOCKETS.lock()?.remove(&sockfd) else {
-        return Detour::Bypass(Bypass::LocalFdNotFound(sockfd));
+        return Err(DetourError::Bypass(Bypass::LocalFdNotFound(sockfd)));
     };
 
     let setup = crate::setup();
 
     if matches!(setup.incoming_config().mode, IncomingMode::Off) {
-        return Detour::Bypass(Bypass::DisabledIncoming);
+        return Err(DetourError::Bypass(Bypass::DisabledIncoming));
     }
 
     if setup.targetless() {
@@ -333,7 +335,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
         any service. Therefore, letting this port bind happen locally instead of on the \
         cluster.",
         );
-        return Detour::Bypass(Bypass::BindWhenTargetless);
+        return Err(DetourError::Bypass(Bypass::BindWhenTargetless));
     }
 
     match socket.state {
@@ -388,7 +390,7 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 
             SOCKETS.lock()?.insert(sockfd, socket);
 
-            Detour::Success(listen_result)
+            Ok(listen_result)
         }
         SocketState::Listening(_) => {
             tracing::debug!("second listen called");
@@ -402,10 +404,10 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
                 Err(error)?
             }
 
-            Detour::Success(listen_result)
+            Ok(listen_result)
         }
         SocketState::Bound { .. } | SocketState::Initialized | SocketState::Connected(_) => {
-            Detour::Bypass(Bypass::InvalidState(sockfd))
+            Err(DetourError::Bypass(Bypass::InvalidState(sockfd)))
         }
     }
 }
@@ -432,7 +434,7 @@ pub(super) fn connectx(
     connid: *mut sae_connid_t,
 ) -> Detour<ConnectResult> {
     if endpoints.is_null() {
-        return Detour::Error(HookError::NullPointer);
+        return Err(DetourError::Error(HookError::NullPointer));
     }
 
     // The parameter associd is reserved for future use, and must always be set to SAE_ASSOCID_ANY.
@@ -450,7 +452,7 @@ pub(super) fn connectx(
         // Destination address must be specified.
         if eps.sae_dstaddr.is_null() {
             warn!("destination address is null");
-            return Detour::Bypass(Bypass::InvalidArgValue);
+            return Err(DetourError::Bypass(Bypass::InvalidArgValue));
         }
 
         eps
@@ -575,13 +577,15 @@ pub(super) fn getpeername(
             .get(&sockfd)
             .bypass(Bypass::LocalFdNotFound(sockfd))
             .and_then(|socket| match &socket.state {
-                SocketState::Connected(connected) => Detour::Success(map_socketaddress_ipv64(
+                SocketState::Connected(connected) => Ok(map_socketaddress_ipv64(
                     socket.domain,
                     connected.remote_address.clone(),
                 )),
                 SocketState::Bound { .. }
                 | SocketState::Initialized
-                | SocketState::Listening(_) => Detour::Bypass(Bypass::InvalidState(sockfd)),
+                | SocketState::Listening(_) => {
+                    Err(DetourError::Bypass(Bypass::InvalidState(sockfd)))
+                }
             })?
     };
 
@@ -617,7 +621,8 @@ pub(super) fn getsockname(
             ..
         }) => {
             let response =
-                make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: *id })??;
+                make_proxy_request_with_response(OutgoingConnMetadataRequest { conn_id: *id })?
+                    .bypass(Bypass::EmptyOption)?;
             map_ipv64(socket.domain, response.in_cluster_address).into()
         }
         SocketState::Bound {
@@ -639,7 +644,7 @@ pub(super) fn getsockname(
         }
 
         SocketState::Initialized | SocketState::Connected(_) => {
-            return Detour::Bypass(Bypass::InvalidState(sockfd));
+            return Err(DetourError::Bypass(Bypass::InvalidState(sockfd)));
         }
     };
 
@@ -666,7 +671,7 @@ pub(super) fn accept(
                 SocketState::Listening(Bound {
                     requested_address,
                     address,
-                }) => Detour::Success((
+                }) => Ok((
                     socket.domain,
                     socket.protocol,
                     socket.type_,
@@ -675,7 +680,9 @@ pub(super) fn accept(
                 )),
                 SocketState::Bound { .. }
                 | SocketState::Initialized
-                | SocketState::Connected(_) => Detour::Bypass(Bypass::InvalidState(sockfd)),
+                | SocketState::Connected(_) => {
+                    Err(DetourError::Bypass(Bypass::InvalidState(sockfd)))
+                }
             })?
     };
 
@@ -713,7 +720,7 @@ pub(super) fn accept(
 
     SOCKETS.lock()?.insert(new_fd, Arc::new(new_socket));
 
-    Detour::Success(new_fd)
+    Ok(new_fd)
 }
 
 #[mirrord_layer_macro::instrument(level = "trace")]
@@ -800,7 +807,7 @@ pub(super) fn getaddrinfo(
 /// Retrieves the `hostname` from the agent's `/etc/hostname` to be used by [`gethostname`]
 fn remote_hostname_string() -> Detour<CString> {
     if crate::setup().local_hostname() {
-        Detour::Bypass(Bypass::LocalHostname)?;
+        Err(DetourError::Bypass(Bypass::LocalHostname))?;
     }
 
     let hostname_path = PathBuf::from("/etc/hostname");
@@ -823,7 +830,7 @@ fn remote_hostname_string() -> Detour<CString> {
     if bytes.ends_with(b"\n") {
         bytes.pop();
     }
-    CString::new(bytes).map(Detour::Success)?
+    CString::new(bytes).map(Ok)?
 }
 
 /// Resolves a hostname and set result to static global like the original `gethostbyname` does.
@@ -854,7 +861,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
 
     if hosts_and_ips.is_empty() {
         Errno::set_raw(libc::EAI_NODATA);
-        return Detour::Success(ptr::null_mut());
+        return Ok(ptr::null_mut());
     }
 
     // We need `*mut _` at the end, so `ips` has to be `mut`.
@@ -908,7 +915,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
             GETHOSTBYNAME_ADDRESSES_PTR.as_ref().unwrap().as_ptr() as *mut *mut libc::c_char;
     }
 
-    Detour::Success(std::ptr::addr_of!(GETHOSTBYNAME_HOSTENT) as _)
+    Ok(std::ptr::addr_of!(GETHOSTBYNAME_HOSTENT) as _)
 }
 
 /// Resolve hostname from remote host with caching for the result
@@ -937,7 +944,7 @@ pub(super) fn read_remote_resolv_conf() -> Detour<Vec<u8>> {
         trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
     });
 
-    Detour::Success(bytes.0.into())
+    Ok(bytes.0.into())
 }
 
 /// ## DNS resolution on port `53`
@@ -984,11 +991,12 @@ pub(super) fn recv_from(
                 None
             }
         })
-        .map(SocketAddress::try_into)?
+        .map(SocketAddress::try_into)
+        .bypass(Bypass::EmptyOption)?
         .map(|address| fill_address(raw_source, source_length, address))??;
 
     Errno::set_raw(0);
-    Detour::Success(recv_from_result)
+    Ok(recv_from_result)
 }
 
 /// Helps manually resolving DNS on port `53` with UDP, see [`send_to`] and [`sendmsg`].
@@ -1040,9 +1048,10 @@ fn send_dns_patch(
                 }
             }
             SocketState::Listening(_) | SocketState::Initialized => None,
-        })?;
+        })
+        .bypass(Bypass::EmptyOption)?;
 
-    Detour::Success(SockAddr::from(destination))
+    Ok(SockAddr::from(destination))
 }
 
 /// ## DNS resolution on port `53`
@@ -1092,7 +1101,7 @@ pub(super) fn send_to(
     if (destination.is_unix() || user_socket_info.domain == AF_UNIX)
         && !matches!(user_socket_info.state, SocketState::Connected(_))
     {
-        return Detour::Bypass(Bypass::Domain(AF_UNIX));
+        return Err(DetourError::Bypass(Bypass::Domain(AF_UNIX)));
     }
 
     // Currently this flow only handles DNS resolution.
@@ -1138,7 +1147,8 @@ pub(super) fn send_to(
                     unreachable!()
                 }
             })
-            .map(SocketAddress::try_into)??;
+            .map(SocketAddress::try_into)
+            .bypass(Bypass::EmptyOption)??;
 
         let raw_interceptor_address = layer_address.as_ptr();
         let raw_interceptor_length = layer_address.len();
@@ -1155,7 +1165,7 @@ pub(super) fn send_to(
         }
     };
 
-    Detour::Success(sent_result)
+    Ok(sent_result)
 }
 
 /// Same behavior as [`send_to`], the only difference is that here we deal with [`libc::msghdr`],
@@ -1167,11 +1177,13 @@ pub(super) fn sendmsg(
     flags: i32,
 ) -> Detour<isize> {
     // We have a destination, so apply our fake `connect` patch.
-    let destination = (!unsafe { *raw_message_header }.msg_name.is_null()).then(|| {
-        let raw_destination = unsafe { *raw_message_header }.msg_name as *const libc::sockaddr;
-        let destination_length = unsafe { *raw_message_header }.msg_namelen;
-        SockAddr::try_from_raw(raw_destination, destination_length)
-    })??;
+    let destination = (!unsafe { *raw_message_header }.msg_name.is_null())
+        .then(|| {
+            let raw_destination = unsafe { *raw_message_header }.msg_name as *const libc::sockaddr;
+            let destination_length = unsafe { *raw_message_header }.msg_namelen;
+            SockAddr::try_from_raw(raw_destination, destination_length)
+        })
+        .bypass(Bypass::EmptyOption)??;
 
     trace!("destination {:?}", destination.as_socket());
 
@@ -1185,7 +1197,7 @@ pub(super) fn sendmsg(
     if (destination.is_unix() || user_socket_info.domain == AF_UNIX)
         && !matches!(user_socket_info.state, SocketState::Connected(_))
     {
-        return Detour::Bypass(Bypass::Domain(AF_UNIX));
+        return Err(DetourError::Bypass(Bypass::Domain(AF_UNIX)));
     }
 
     // Currently this flow only handles DNS resolution.
@@ -1235,7 +1247,8 @@ pub(super) fn sendmsg(
                     unreachable!()
                 }
             })
-            .map(SocketAddress::try_into)??;
+            .map(SocketAddress::try_into)
+            .bypass(Bypass::EmptyOption)??;
 
         let raw_interceptor_address = layer_address.as_ptr() as *const _;
         let raw_interceptor_length = layer_address.len();
@@ -1252,7 +1265,7 @@ pub(super) fn sendmsg(
         unsafe { FN_SENDMSG(sockfd, true_message_header.as_ref(), flags) }
     };
 
-    Detour::Success(sent_result)
+    Ok(sent_result)
 }
 
 /// helper to reconstruct a [`dns_resolver_t`] for [`remote_dns_configuration_copy`]
@@ -1385,7 +1398,7 @@ pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
     }));
 
     tracing::debug!("remote_dns_configuration_copy success");
-    Detour::Success(config)
+    Ok(config)
 }
 
 /// Calls [`libc::getifaddrs`] and removes IPv6 addresses from the list.

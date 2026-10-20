@@ -179,7 +179,9 @@ By default, opening a Preview Environment as a recipient requires the mirrord br
 
 `mirrord-share-ingress` moves that header injection off the client and onto a server-side component, so a plain HTTPS link works on its own with nothing to install on the recipient's side. Each shareable preview is reachable at its own host, `<slug>.<shareDomain>`, printed by `mirrord preview start` as the `preview URL`.
 
-The `slug` mirrors the preview's key with a random suffix (for example `pr-myrepo-a1b2c3`), so the link is recognizable but unguessable; [stable share hosts](#stable-share-hosts) drop the suffix. When the session's TTL expires the host stops resolving, and the link falls through to a "preview not found" page. By default that page redirects to your app domain after a few seconds; with `shareIngress.notFound.redirect: false` it is a plain 404 (see [Setup](#setup)).
+The `slug` mirrors the preview's key with a random suffix (for example `pr-myrepo-a1b2c3`), so the link is recognizable but unguessable; [stable share hosts](#stable-share-hosts) drop the suffix. Running `mirrord preview start` again with the same key and target (for example on every push to a PR) replaces the session but keeps its host, so a link already posted keeps working with the new image. Once the session is gone, after `mirrord preview stop` or an expired TTL, the next start gets a new suffix. When the session's TTL expires the host stops resolving, and the link falls through to a "preview not found" page. By default that page redirects to your app domain after a few seconds; with `shareIngress.notFound.redirect: false` it is a plain 404 (see [Setup](#setup)).
+
+Keeping a random-suffix host across a replacement requires mirrord `3.274.0` or later and mirrord operator `3.221.0` or later; with an older operator or CLI every start gets a new suffix unless `operator.shareIngress.stableSlugs` is enabled.
 
 {% hint style="info" %}
 The preview URL works with any HTTP filter. A preview with a custom filter (a path filter, a different header, composed filters) additionally routes requests carrying the share link's injected baggage header, so its own filter keeps working for regular traffic while the link always reaches the preview.
@@ -257,7 +259,7 @@ TLS and the public-facing ingress are owned by your platform team. You put an In
 
 #### Stable share hosts
 
-By default the slug carries a random suffix, so the link only exists once `mirrord preview start` prints it. Set `operator.shareIngress.stableSlugs` when you need the link before that - for example when a PR bot posts the preview URL built from the PR number:
+By default the slug carries a random suffix, so the link only exists once `mirrord preview start` prints it (replacing the session with a new image keeps it, stopping the session does not). Set `operator.shareIngress.stableSlugs` when you need the link before that - for example when a PR bot posts the preview URL built from the PR number:
 
 ```yaml
 operator:
@@ -308,11 +310,13 @@ queue splits stay active even though the preview's pods are gone. When a request
 environment's filter arrives, it is **held** while the pods start and answered by the preview
 once ready - the caller just sees a slower first response. Queue messages don't need holding at
 all: they wait in the environment's split queue/topic until the preview consumes them, so
-nothing is lost either way.
+nothing is lost either way. With [Kafka branching](../sharing-the-cluster/queue-splitting/kafka.md#kafka-branching),
+a message waiting on a branch topic the preview consumes starts the preview pods.
 
 While idle, `mirrord preview status` shows the environment as `idle (waiting for traffic)`,
 and the session's TTL keeps counting. Idle mode requires a wake source - incoming traffic
-enabled or queues split - since otherwise nothing could ever wake the environment.
+enabled, queues split, or Kafka branching enabled for a target that consumes Kafka queues - since
+otherwise nothing could ever wake the environment.
 
 Cluster administrators can cap how much traffic a waking environment may hold with these Helm
 chart values (defaults: 512 protocol messages, 8 MiB of payload):

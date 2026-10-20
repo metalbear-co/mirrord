@@ -30,6 +30,7 @@ use mirrord_analytics::{
 use mirrord_config::{
     LayerConfig, LayerFileConfig,
     config::{ConfigContext, MirrordConfig},
+    internal_proxy::InternalProxyConfig,
 };
 use mirrord_intproxy::{
     IntProxy, IntProxyIntervals,
@@ -283,6 +284,7 @@ async fn start_session_monitor(
 
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
+#[mirrord_macros::boxed_future]
 #[tracing::instrument(level = Level::INFO, skip_all, err)]
 pub(crate) async fn proxy(
     config: LayerConfig,
@@ -415,7 +417,12 @@ pub(crate) async fn proxy(
         unsafe { detach_io() }.map_err(InternalProxyError::SetSid)?;
     }
 
-    let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
+    let first_connection_timeout = Duration::from_secs(
+        config
+            .internal_proxy
+            .start_idle_timeout
+            .unwrap_or(InternalProxyConfig::DEFAULT_START_IDLE_TIMEOUT),
+    );
     let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
     let ping_interval = Duration::from_secs(config.internal_proxy.ping_interval.max(1));
     let process_logging_interval =

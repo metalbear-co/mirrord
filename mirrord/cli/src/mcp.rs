@@ -11,6 +11,7 @@ use mirrord_mcp::McpTelemetry;
 use crate::{CliResult, data::UserData};
 
 /// The `mirrord mcp` command handler. Returns when the client disconnects.
+#[mirrord_macros::boxed_future]
 pub(crate) async fn mcp_command(watch: drain::Watch, user_data: &UserData) -> CliResult<()> {
     let enabled = env::var("MIRRORD_TELEMETRY")
         .is_ok_and(|value| value == "false")

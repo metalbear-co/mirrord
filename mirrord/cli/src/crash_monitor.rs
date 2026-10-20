@@ -34,6 +34,7 @@ use crate::error::{CliError, CliResult};
 ///
 /// * `port` - the registration port. `0` binds an ephemeral port.
 /// * `root_pid` - the root CLI process id, recorded for the process-tree report.
+#[mirrord_macros::boxed_future]
 pub(crate) async fn monitor(port: u16, root_pid: u32) -> CliResult<()> {
     init_tracing();
 

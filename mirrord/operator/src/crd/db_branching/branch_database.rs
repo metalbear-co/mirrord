@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     iter,
 };
 
@@ -13,8 +13,10 @@ use mirrord_config::feature::database_branches::{
     RedisBranchCopyConfig, S3BranchCopyConfig, S3Provider as ConfigS3Provider, SingleOrVec,
     SpannerBranchCopyConfig, TurbopufferBranchCopyConfig,
 };
-use schemars::JsonSchema;
+use schemars::{JsonSchema, Schema};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use strum::{IntoDiscriminant, VariantArray, VariantNames};
 use strum_macros::{EnumDiscriminants, EnumIter};
 
@@ -43,6 +45,7 @@ use crate::crd::session::KubeResourceTarget;
     printcolumn = r#"{"name":"Age", "type":"date", "description":"Time since the resource was created.", "jsonPath":".metadata.creationTimestamp"}"#
 )]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = immutable_except_migrations)]
 pub struct BranchDatabaseSpec {
     /// ID derived by mirrord CLI.
     pub id: String,
@@ -114,6 +117,83 @@ pub struct BranchDatabaseSpec {
     /// Schema migrations to run on the branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub migrations: Option<MigrationsSpec>,
+    /// Session key whose operator-managed namespace (`mirrord-<key>`) runs the branch's pods,
+    /// Services, claims and Jobs. The branch resource itself stays in the target's namespace.
+    /// When unset, everything runs in the branch resource's namespace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dedicated_namespace_key: Option<String>,
+}
+
+/// Prefix of every namespace the operator creates for a session key.
+pub const DEDICATED_NAMESPACE_PREFIX: &str = "mirrord-";
+
+/// Longest name a Namespace may have: a DNS-1123 label.
+const NAMESPACE_NAME_LIMIT: usize = 63;
+
+/// Name of the namespace the branches started under `key` run in: `mirrord-<key>`.
+///
+/// A key is any string the user typed, so characters a namespace name cannot hold become `-`.
+/// When that changes the key, or the name would run past the 63 characters a namespace name
+/// allows, the name ends in a hash of the whole key instead, so two keys that clean up to the
+/// same text still get namespaces of their own.
+pub fn dedicated_namespace_name(key: &str) -> String {
+    let cleaned: String = key
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | '0'..='9' | '-' => c,
+            _ => '-',
+        })
+        .collect();
+    let cleaned = cleaned.trim_matches('-');
+
+    let name = format!("{DEDICATED_NAMESPACE_PREFIX}{cleaned}");
+    if !cleaned.is_empty() && cleaned == key && name.len() <= NAMESPACE_NAME_LIMIT {
+        return name;
+    }
+
+    let suffix: String = Sha256::digest(key.as_bytes())
+        .iter()
+        .take(4)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let keep = NAMESPACE_NAME_LIMIT - suffix.len() - 1;
+    let head = name[..name.len().min(keep)].trim_end_matches('-');
+    format!("{head}-{suffix}")
+}
+
+/// Keeps every [`BranchDatabaseSpec`] field but `migrations` as the branch was created, so the
+/// checks the operator runs before creating a branch hold for its whole life.
+fn immutable_except_migrations(schema: &mut Schema) {
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<BTreeSet<_>>();
+    let rule = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|properties| properties.keys())
+        .filter(|field| *field != "migrations")
+        .map(|field| match required.contains(field.as_str()) {
+            true => format!("self.{field} == oldSelf.{field}"),
+            false => format!(
+                "(has(self.{field}) ? has(oldSelf.{field}) && self.{field} == oldSelf.{field} \
+                 : !has(oldSelf.{field}))"
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join(" && ");
+
+    schema.insert(
+        "x-kubernetes-validations".to_owned(),
+        json!([{
+            "rule": rule,
+            "message": "only `migrations` can change after a branch is created",
+        }]),
+    );
 }
 
 /// Migrations to apply to a branch.
@@ -1332,6 +1412,38 @@ mod tests {
     use super::*;
     use crate::crd::db_branching::core::ConnectionParamsSpec;
 
+    /// A key that already is a valid name keeps it; any other key still yields a valid name of
+    /// its own, since the operator creates a namespace with it.
+    #[test]
+    fn dedicated_namespace_name_is_always_a_valid_unique_label() {
+        assert_eq!(
+            dedicated_namespace_name("alice-feature"),
+            "mirrord-alice-feature"
+        );
+
+        let keys = ["Alice_Feature", "alice-feature-", "", "ü", &"k".repeat(80)];
+        let names: Vec<String> = keys
+            .iter()
+            .map(|key| dedicated_namespace_name(key))
+            .collect();
+        for name in &names {
+            assert!(name.len() <= 63, "{name}");
+            assert!(name.starts_with(DEDICATED_NAMESPACE_PREFIX), "{name}");
+            assert!(
+                name.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                "{name}"
+            );
+            assert!(!name.ends_with('-'), "{name}");
+        }
+        let unique: BTreeSet<&String> = names.iter().collect();
+        assert_eq!(unique.len(), names.len(), "{names:?}");
+        assert_ne!(
+            dedicated_namespace_name("Alice_Feature"),
+            "mirrord-alice-feature"
+        );
+    }
+
     /// `Unknown` exists for deserialization only; publishing it in the CRD's `flavor` enum
     /// would make it a value users can set.
     #[test]
@@ -1615,6 +1727,7 @@ mod tests {
             turbopuffer_options: None,
             generic_options: None,
             migrations: None,
+            dedicated_namespace_key: None,
         };
 
         assert!(spec("sslmode").dialect().is_ok());

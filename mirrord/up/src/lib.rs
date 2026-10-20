@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
     str::FromStr,
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 
@@ -28,7 +28,7 @@ pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
 use k8s_openapi::api::core::v1::Namespace;
 use miette::Diagnostic;
-use mirrord_analytics::MIRRORD_UP_CORRELATION_ID_ENV;
+use mirrord_analytics::{MIRRORD_UP_CORRELATION_ID_ENV, UpSessionDbBranch};
 use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
     config::{ConfigContext, ConfigError, EnvKey},
@@ -55,15 +55,16 @@ mod init;
 mod kube_context;
 mod process;
 
-/// Shared slot that [`run`] fills with the time it took for **all** child
-/// sessions to become ready, measured from process spawn.
+/// Shared slot that [`launch`] fills with what the child sessions report while starting: the
+/// time it took for **all** of them to become ready, measured from process spawn, and the
+/// branch databases each one uses.
 ///
-/// The caller constructs one, passes a clone to [`run`], and reads
-/// [`ReadyTracker::time_to_ready`] afterwards (the value is captured even if
-/// `run` later returns an error, as long as readiness was reached first).
+/// The caller constructs one, passes a clone to [`launch`], and reads it afterwards (the values
+/// are captured even if `launch` later returns an error, as long as they were reported first).
 #[derive(Clone, Default)]
 pub struct ReadyTracker {
     elapsed: Arc<OnceLock<Duration>>,
+    db_branches: Arc<Mutex<HashMap<Arc<str>, Vec<UpSessionDbBranch>>>>,
 }
 
 impl ReadyTracker {
@@ -71,10 +72,30 @@ impl ReadyTracker {
     pub fn time_to_ready(&self) -> Option<Duration> {
         self.elapsed.get().copied()
     }
+
+    /// The branch databases each service's session reported, by service name. A service
+    /// missing here reported none.
+    pub fn db_branches(&self) -> HashMap<Arc<str>, Vec<UpSessionDbBranch>> {
+        self.db_branches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn record_db_branches(&self, service: Arc<str>, branches: Vec<UpSessionDbBranch>) {
+        self.db_branches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(service, branches);
+    }
 }
 
 /// Environment variable used to pass the resolved configuration to child mirrord processes.
 pub const RESOLVED_CONFIG_ENV: &str = "MIRRORD_UP_RESOLVED_CONFIG";
+
+/// Environment variable holding the name of the service a `mirrord up` session runs, so the
+/// session can name the service on the branch databases it creates.
+pub const SERVICE_NAME_ENV: &str = "MIRRORD_UP_SERVICE";
 
 /// Errors produced by `mirrord up` command.
 #[derive(Debug, Error, Diagnostic)]
@@ -136,13 +157,21 @@ pub enum UpError {
     #[diagnostic(transparent)]
     WindowsUnsupported(#[from] WindowsSupportError),
 
-    /// A child mirrord service exited with a non-zero status.
+    /// A service's process, launched by its child mirrord session, exited with a non-zero
+    /// status.
     #[error("Service {name} crashed with exit status {status}")]
     ServiceCrashed {
         /// Name of the service that crashed.
         name: Arc<str>,
         /// Exit status of the crashed service.
         status: ExitStatus,
+    },
+
+    /// A child mirrord session failed before launching the service's process.
+    #[error("Service {name} failed to start")]
+    ServiceFailedToStart {
+        /// Name of the service whose session failed.
+        name: Arc<str>,
     },
 
     /// The `run.pre_command` of the only service left to start exited with a non-zero status.
@@ -173,13 +202,18 @@ pub enum UpError {
     #[error("failed to query the cluster: {0}")]
     Kube(#[from] KubeApiError),
 
-    /// An interactive target-resolution prompt failed or was cancelled.
-    #[error("target resolution prompt failed: {0}")]
+    /// An interactive prompt (of `mirrord up init` or of target resolution) failed or was
+    /// cancelled.
+    #[error("prompt failed: {0}")]
     Inquire(#[from] inquire::InquireError),
 
     /// The user chose to exit from the target-resolution wizard.
     #[error("exited")]
     Exited,
+
+    /// The only namespace that the user can pick has no workload that the user can list.
+    #[error("found no workloads that you can list in namespace \"{0}\"")]
+    NoWorkloads(String),
 
     /// Failed to patch the `mirrord-up.yaml` when saving a chosen target.
     #[error("failed to update config file: {0}")]
@@ -305,16 +339,26 @@ impl UpConfig {
     }
 }
 
+/// The absolute directory that holds the config file at `config_path`.
+///
+/// Uses [`dunce::canonicalize`], since `std::fs::canonicalize` returns a verbatim `\\?\C:\...`
+/// path on Windows. That never compares equal to [`std::env::current_dir`], and it is what users
+/// would see in messages.
+fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
+    dunce::canonicalize(
+        config_path
+            .parent()
+            .filter(|parent| parent.as_os_str().is_empty().not())
+            .unwrap_or(Path::new(".")),
+    )
+}
+
 /// Load, parse, and resolve local paths in a `mirrord-up.yaml` configuration file.
 pub fn load_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
     let content = std::fs::read_to_string(path)?;
     let mut config = template(&content, key)?;
     config.verify()?;
-    let config_directory = std::fs::canonicalize(
-        path.parent()
-            .filter(|parent| parent.as_os_str().is_empty().not())
-            .unwrap_or(Path::new(".")),
-    )?;
+    let config_directory = config_directory(path)?;
 
     for (service, service_config) in &mut config.services {
         let Some(directory) = &mut service_config.run.directory else {
@@ -332,7 +376,7 @@ pub fn load_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
             });
         }
         if was_relative {
-            *directory = std::fs::canonicalize(&*directory)?;
+            *directory = dunce::canonicalize(&*directory)?;
         }
     }
 
@@ -398,7 +442,7 @@ async fn resolve_unresolved_workloads(
             .as_deref()
             .unwrap_or(client.default_namespace());
 
-        let workloads = list_workloads(client, namespace).await?;
+        let workloads = list_workloads(client, namespace, &INFERRED_TARGET_TYPES).await?;
         let resolved = match find_by_name(&workloads, name) {
             Some(path) => {
                 println!("{name}: using {path}");
@@ -427,10 +471,19 @@ async fn resolve_unresolved_workloads(
 }
 
 /// Lists workload paths (`deployment/foo`, `pod/bar/container/baz`, ...) of
-/// the kinds in [`INFERRED_TARGET_TYPES`] living in `namespace`, in priority
-/// order.
-async fn list_workloads(client: &kube::Client, namespace: &str) -> Result<Vec<String>, UpError> {
-    let seeker = KubeResourceSeeker {
+/// the `kinds` living in `namespace`, in the order of `kinds`.
+///
+/// A kind that the user is not allowed to list counts as having no
+/// workloads, so that the user can still pick from the other kinds. Each kind
+/// is listed on its own, because `KubeResourceSeeker::filtered` fails as a
+/// whole when one kind fails, and it returns the errors of pods. It returns
+/// no error for the other kinds.
+async fn list_workloads(
+    client: &kube::Client,
+    namespace: &str,
+    kinds: &[TargetType],
+) -> Result<Vec<String>, UpError> {
+    let seeker = &KubeResourceSeeker {
         client,
         namespace,
         copy_target: false,
@@ -439,9 +492,17 @@ async fn list_workloads(client: &kube::Client, namespace: &str) -> Result<Vec<St
     // `operator_active: true` only lifts the seeker's restriction on listing
     // operator-only kinds (statefulsets); the listing itself is plain
     // Kubernetes API access.
-    Ok(seeker
-        .filtered(INFERRED_TARGET_TYPES.to_vec(), true)
-        .await?)
+    let listings = futures::future::try_join_all(kinds.iter().map(|&kind| async move {
+        match seeker.filtered(vec![kind], true).await {
+            Err(KubeApiError::KubeError(kube::Error::Api(status))) if status.code == 403 => {
+                Ok(Vec::new())
+            }
+            listing => listing,
+        }
+    }))
+    .await?;
+
+    Ok(listings.concat())
 }
 
 async fn list_namespaces(client: &kube::Client) -> Result<Vec<String>, UpError> {
@@ -455,9 +516,21 @@ async fn list_namespaces(client: &kube::Client) -> Result<Vec<String>, UpError> 
         .list_all_clusterwide::<Namespace>(None)
         .try_filter_map(|namespace| std::future::ready(Ok(namespace.metadata.name)))
         .try_collect()
-        .await
-        .map_err(KubeApiError::KubeError)?;
-    Ok(namespaces)
+        .await;
+
+    match namespaces {
+        Ok(namespaces) => Ok(namespaces),
+        // Users whose permissions are limited to some namespaces can't list
+        // namespaces, but can still pick a workload in their default one.
+        Err(kube::Error::Api(status)) if status.code == 403 => {
+            let namespace = client.default_namespace().to_owned();
+            println!(
+                "You can't list the namespaces of the cluster, using namespace \"{namespace}\"."
+            );
+            Ok(vec![namespace])
+        }
+        Err(error) => Err(KubeApiError::KubeError(error).into()),
+    }
 }
 
 /// First path in `workloads` whose workload name matches `name` (paths look
@@ -506,31 +579,102 @@ async fn prompt_for_target(
     }
 
     let namespaces = list_namespaces(client).await?;
+    let PickedTarget::Workload { target, namespace } =
+        pick_workload(client, &namespaces, &INFERRED_TARGET_TYPES, false).await?
+    else {
+        unreachable!("targetless is not offered");
+    };
+
+    offer_to_save_target(config_path, service_name, &target.to_string(), &namespace).await?;
+
+    Ok(ResolvedTarget {
+        resolved: SpecifiedTarget {
+            path: Some(target),
+            namespace: Some(namespace.into()),
+        },
+    })
+}
+
+/// What the user picked with [`pick_workload`].
+enum PickedTarget {
+    /// A workload and its namespace.
+    Workload { target: Target, namespace: String },
+
+    /// No target. Only offered when [`pick_workload`] is asked to.
+    Targetless,
+}
+
+/// Lets the user pick one of `namespaces`, starting at the namespace of the
+/// kube context, and then a workload of one of the `kinds` in it. When
+/// `targetless` is set, the workload prompt also offers to run without a
+/// target.
+///
+/// Both `mirrord up init` and the fallback wizard of `mirrord up` pick
+/// workloads with this, so that they look the same.
+///
+/// When a namespace has nothing that the user can list, the user picks
+/// another namespace. When it is the only namespace, there is nothing else to
+/// pick, so that is an error. When `targetless` is set, running without a
+/// target needs no workload, so the workload prompt still offers it, together
+/// with picking another namespace when there is one.
+async fn pick_workload(
+    client: &kube::Client,
+    namespaces: &[String],
+    kinds: &[TargetType],
+    targetless: bool,
+) -> Result<PickedTarget, UpError> {
+    const TARGETLESS: &str = "Run without a target (outgoing traffic only)";
+    const PICK_ANOTHER: &str = "Pick another namespace";
+
+    let starting_cursor = namespaces
+        .iter()
+        .position(|namespace| namespace == client.default_namespace())
+        .unwrap_or_default();
+    let can_pick_another = namespaces.len() > 1;
+
     loop {
         let namespace = {
-            let namespaces = namespaces.clone();
-            prompt(move || Select::new("Select a namespace:", namespaces).prompt()).await?
+            let namespaces = namespaces.to_vec();
+            prompt(move || {
+                Select::new("Select a namespace:", namespaces)
+                    .with_starting_cursor(starting_cursor)
+                    .prompt()
+            })
+            .await?
         };
 
-        let workloads = list_workloads(client, &namespace).await?;
-        if workloads.is_empty() {
-            println!("No workloads found in namespace \"{namespace}\".");
-            continue;
+        let mut options = list_workloads(client, &namespace, kinds).await?;
+        if options.is_empty() {
+            if targetless.not() && can_pick_another.not() {
+                return Err(UpError::NoWorkloads(namespace));
+            }
+            println!("Found no workloads that you can list in namespace \"{namespace}\".");
+            if targetless.not() {
+                continue;
+            }
+            if can_pick_another {
+                options.push(PICK_ANOTHER.to_owned());
+            }
+        }
+        if targetless {
+            options.push(TARGETLESS.to_owned());
         }
 
         let path = {
             let message = format!("Select a workload in \"{namespace}\":");
-            prompt(move || Select::new(&message, workloads).prompt()).await?
+            prompt(move || Select::new(&message, options).prompt()).await?
         };
 
-        offer_to_save_target(config_path, service_name, &path, &namespace).await?;
-
-        return Ok(ResolvedTarget {
-            resolved: SpecifiedTarget {
-                path: Some(Target::from_str(&path)?),
-                namespace: Some(namespace.into()),
-            },
-        });
+        match path.as_str() {
+            TARGETLESS => return Ok(PickedTarget::Targetless),
+            PICK_ANOTHER => continue,
+            _ => {
+                return Ok(PickedTarget::Workload {
+                    target: Target::from_str(&path)?,
+                    namespace,
+                });
+            }
+        }
     }
 }
 
@@ -600,30 +744,17 @@ fn save_target(
     Ok(())
 }
 
-/// Genererate [`mirrord_config::LayerConfig`]s based on the provided [`UpConfig`] and
-/// [`EnvKey`] and spawn child mirrord processes. Stdout/stderr from
-/// children will be printed to the console, prefixed with the name of
-/// the session.
-///
-/// `ready` is filled with the time-to-ready once every session has signalled
-/// readiness (see [`ReadyTracker`]).
-///
-/// Returns when the user stops the session or one of the child sessions exits.
-pub async fn run(
+/// Generate the [`mirrord_config::LayerConfig`] of every service based on the provided
+/// [`UpConfig`] and [`EnvKey`], resolving the targets left to the cluster. The configs are
+/// handed to [`launch`], after the caller checked what needs the operator.
+pub async fn resolve_services(
     up_config: UpConfig,
     config_path: &Path,
     kube_context_arg: Option<Arc<str>>,
-    key: EnvKey,
-    correlation_id: Uuid,
-    ready: ReadyTracker,
-) -> Result<(), UpError> {
+    key: &EnvKey,
+) -> Result<Vec<SubprocessCfg>, UpError> {
     let invocation_directory = std::env::current_dir()?;
-    let config_directory = std::fs::canonicalize(
-        config_path
-            .parent()
-            .filter(|parent| parent.as_os_str().is_empty().not())
-            .unwrap_or(Path::new(".")),
-    )?;
+    let config_directory = config_directory(config_path)?;
     if invocation_directory != config_directory {
         let config_name = config_path.file_name().unwrap_or(config_path.as_os_str());
         for (service, config) in &up_config.services {
@@ -647,7 +778,7 @@ pub async fn run(
         resolve_unresolved_workloads(&up_config, config_path, up_context.clone()).await?;
 
     let service_configs = up_config.service_configs(
-        &key,
+        key,
         &mut resolved_targets,
         up_context,
         &mut ConfigContext::default(),
@@ -655,6 +786,22 @@ pub async fn run(
 
     validate_targets(&service_configs)?;
 
+    Ok(service_configs)
+}
+
+/// Spawn a child mirrord process for each of `service_configs`. Stdout/stderr from
+/// children will be printed to the console, prefixed with the name of
+/// the session.
+///
+/// `ready` is filled with the time-to-ready once every session has signalled
+/// readiness, and with the branch databases the sessions report (see [`ReadyTracker`]).
+///
+/// Returns when the user stops the session or one of the child sessions exits.
+pub async fn launch(
+    service_configs: Vec<SubprocessCfg>,
+    correlation_id: Uuid,
+    ready: ReadyTracker,
+) -> Result<(), UpError> {
     let commands: Vec<_> = service_configs
         .into_iter()
         .map(|config| {
@@ -663,6 +810,7 @@ pub async fn run(
                 service_name,
                 run,
                 mode: _,
+                default_db_branches: _,
             } = config;
             let config::RunConfig {
                 r#type,
@@ -677,6 +825,7 @@ pub async fn run(
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
+                .env(SERVICE_NAME_ENV, &*service_name)
                 .arg(Into::<&'static str>::into(r#type))
                 .arg("--")
                 .args(command)
@@ -834,6 +983,30 @@ services:
         assert_eq!(
             config.services["logger"].env.r#override.as_ref().unwrap()["SESSION_KEY"],
             "debug-run"
+        );
+    }
+
+    /// A relative `run.directory` resolves to a plain absolute path, without the `\\?\` prefix
+    /// that Windows canonicalization adds.
+    #[test]
+    fn relative_run_directory_resolves_to_a_plain_path() {
+        let directory = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(directory.path().join("web")).unwrap();
+        let config_path = directory.path().join("mirrord-up.yaml");
+        std::fs::write(
+            &config_path,
+            "services:\n  api:\n    target: none\n    run:\n      directory: web\n      command: [x]\n",
+        )
+        .unwrap();
+
+        let config = load_up_config(&config_path, &EnvKey::Provided("key".to_owned())).unwrap();
+        let run_directory = config.services["api"].run.directory.as_ref().unwrap();
+        assert!(run_directory.is_absolute());
+        assert!(run_directory.ends_with("web"));
+        assert!(
+            run_directory.to_str().unwrap().starts_with(r"\\?\").not(),
+            "{} is a verbatim path",
+            run_directory.display()
         );
     }
 

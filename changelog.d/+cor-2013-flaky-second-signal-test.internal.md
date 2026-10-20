@@ -1,0 +1,1 @@
+Fix flaky `mirrord-up` forced-cleanup tests (`second_signal_forces_cleanup_before_exit` and `second_shutdown_error_forces_cleanup_before_returning`) by waiting briefly for externally reaped orphans to leave the service process group instead of asserting it is gone the instant the supervisor exits.

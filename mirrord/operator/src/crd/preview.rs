@@ -5,7 +5,7 @@
 //! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Idle` / `Failed`),
 //! which the CLI watches to report progress back to the user.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, ops::Not, time::Duration};
 
 use k8s_openapi::{
     apimachinery::pkg::apis::meta::v1::{Condition, MicroTime},
@@ -742,7 +742,7 @@ mod tests {
             },
         ]);
 
-        let preview = PreviewQueueSplittingConfig::from_config(&config).unwrap();
+        let preview = PreviewQueueSplittingConfig::from_config(&config, false).unwrap();
 
         assert_eq!(preview.sqs_queue_filters.len(), 1);
         assert_eq!(
@@ -1173,6 +1173,10 @@ pub struct PreviewQueueSplittingConfig {
     /// `QueueSplittingWithComposedFilters`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queues: Vec<PreviewSplitQueue>,
+
+    /// Run the session's Kafka queues against the key's branch broker.
+    #[serde(default, skip_serializing_if = "Not::not")]
+    pub kafka_branch: bool,
 }
 
 /// One queue of a preview session requested with the composable `filter` shape.
@@ -1195,11 +1199,12 @@ pub struct PreviewSplitQueue {
 }
 
 impl PreviewQueueSplittingConfig {
-    /// Converts from the user's split queues config. Returns `None` when no queues are configured.
+    /// Converts from the user's split queues config. Returns `None` when no queues are configured
+    /// and `kafka_branch` is off.
     ///
     /// Legacy `message_filter` entries fill the per-broker maps older operators read; entries
     /// using the composable `filter` shape go to [`Self::queues`].
-    pub fn from_config(value: &SplitQueuesConfig) -> Option<Self> {
+    pub fn from_config(value: &SplitQueuesConfig, kafka_branch: bool) -> Option<Self> {
         let legacy = |kind| collect_queue_filters(value.of_kind(kind));
 
         let kafka_queue_filters = value
@@ -1246,6 +1251,7 @@ impl PreviewQueueSplittingConfig {
             nats_pubsub_queue_filters: legacy(QueueKind::NatsPubSub),
             queue_modes,
             queues,
+            kafka_branch,
         };
 
         if config == Self::default() {

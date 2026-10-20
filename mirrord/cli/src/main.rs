@@ -347,6 +347,7 @@ mod login;
 mod mcp;
 mod newsletter;
 mod operator;
+mod operator_tip;
 #[cfg(windows)]
 mod pitm;
 mod port_forward;
@@ -389,6 +390,7 @@ use crate::{
     config::ci::{CiArgs, CiCommand, CiCommonArgs, CiStartArgs},
     data::{UserData, global_config_command},
     newsletter::suggest_newsletter_signup,
+    operator_tip::suggest_operator_install,
     queue_splitting::suggest_queue_splitting,
     util::apply_test_env_overrides,
 };
@@ -490,8 +492,21 @@ async fn exec_process(
     );
     sub_progress_config.success(Some("config summary"));
 
+    let run_count = user_data
+        .bump_session_count()
+        .await
+        .inspect_err(|fail| {
+            // in case of failure to update, return the count as zero to prevent any prompts from
+            // being shown repeatedly if the update fails multiple times
+            trace!(
+                %fail,
+                "Failed to update number of previous mirrord runs."
+            );
+        })
+        .unwrap_or_default();
+
     // print an invitation to the newsletter on certain run count numbers
-    suggest_newsletter_signup(user_data, progress).await;
+    suggest_newsletter_signup(run_count, progress);
 
     #[cfg(not(target_os = "windows"))]
     let mut sub_progress = progress.subtask("running process");
@@ -505,6 +520,14 @@ async fn exec_process(
         execution_info.uses_operator,
         &mut sub_progress,
     )?;
+
+    // Point runs without the operator to its free tier on certain run count numbers
+    suggest_operator_install(
+        run_count,
+        execution_info.uses_operator,
+        mirrord_for_ci.is_some(),
+        &mut sub_progress,
+    );
 
     run_process_with_mirrord(
         binary,
@@ -804,6 +827,7 @@ this session.",
     }
 }
 
+#[mirrord_macros::boxed_future]
 async fn exec(
     args: &ExecArgs,
     watch: drain::Watch,
@@ -924,6 +948,7 @@ async fn exec(
     res
 }
 
+#[mirrord_macros::boxed_future]
 async fn port_forward(
     args: &PortForwardArgs,
     watch: drain::Watch,
@@ -1069,6 +1094,11 @@ async fn port_forward(
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> miette::Result<()> {
+    // Armed before anything else runs: in a debug build, parsing the arguments alone takes about
+    // half a megabyte of stack.
+    #[cfg(target_os = "windows")]
+    utils_win::diagnostics::stack::report_stack_overflows();
+
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
 

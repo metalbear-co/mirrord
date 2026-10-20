@@ -131,6 +131,39 @@ pub struct ExperimentalConfig {
     #[config(default = false)]
     pub dlopen_cgo: bool,
 
+    /// ### _experimental_ hook_libc_syscall {#experimental-hook_libc_syscall}
+    ///
+    /// Hooks libc's generic `syscall` function on Linux, to handle scenarios where libraries
+    /// like libuv opt into doing syscalls by hand instead of through the libc export (for
+    /// example, for `statx` or `close`). Currently experimental.
+    ///
+    /// Defaults to `false`.
+    //
+    // Libraries sometimes skip a libc export and make the syscall through `syscall(SYS_..., ...)`
+    // instead, which none of the named hooks see. Known cases:
+    //
+    // - COR-2032: libuv (Node.js) issues `statx` this way, so `fs.statSync` failed with `ENOENT`
+    //   on remote files and `fs.fstatSync` described the local placeholder. It also closes fds
+    //   this way in `copyfile`, which left the fd mapped, so the next local file that got its
+    //   number read the remote file.
+    #[config(default = false)]
+    pub hook_libc_syscall: bool,
+
+    /// ### _experimental_ old_glibc_support {#experimental-old_glibc_support}
+    ///
+    /// Hooks `__fxstat` and `__fxstat64` on Linux.
+    ///
+    /// Binaries linked against glibc older than 2.33, such as the official Node.js builds, call
+    /// these instead of `fstat`. Without this hook they see the local placeholder of a remote
+    /// file: an empty character device. In Node.js, `fs.copyFileSync` then copies nothing.
+    ///
+    /// Defaults to `false`.
+    //
+    // COR-2032: Node.js linked against glibc 2.28 calls `__fxstat64` for `fstat`, and libuv's
+    // `copyfile` sizes the copy from it, so `fs.copyFileSync` copied 0 bytes from remote files.
+    #[config(default = false)]
+    pub old_glibc_support: bool,
+
     /// ### _experimental_ latency {#experimental-latency}
     ///
     /// Configuration for adding artificial latency to outgoing network operations.
@@ -207,6 +240,8 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("browser_extension_config", self.browser_extension_config);
         analytics.add("non_blocking_tcp_connect", self.non_blocking_tcp_connect);
         analytics.add("dlopen_cgo", self.dlopen_cgo);
+        analytics.add("hook_libc_syscall", self.hook_libc_syscall);
+        analytics.add("old_glibc_support", self.old_glibc_support);
         analytics.add("latency_transmit_delay", self.latency.transmit_delay);
         analytics.add("latency_receive_delay", self.latency.receive_delay);
         analytics.add("applev", self.applev.is_some());
