@@ -13,9 +13,11 @@ pub(crate) enum CiError {
     #[error("The environment variable {0} contains an invalid character!")]
     #[diagnostic(help(
         "`mirrord ci start` and `mirrord ci container` use `{0}` for CI credentials; \
-         it is optional when a Free operator advertises keyless CI. Other installations \
-         require a key. Set it to the value from \
-         `mirrord ci api-key` when required. Without the operator, leave it unset. \
+         it is optional with supporting Free or Teams operators. CI retains the license tier's \
+         features, including with a supplied key. For Free and Teams CI, the operator caps each \
+         target-routing loader at one ready pod per participating cluster. Terminating pods may \
+         drain while replacements attach. Enterprise and legacy installations require a key from \
+         `mirrord ci api-key`. Without the operator, leave it unset. \
          Local `mirrord ci stop` requires no API key."
     ))]
     EnvVar(&'static str, std::env::VarError),
@@ -31,8 +33,12 @@ pub(crate) enum CiError {
         "`MIRRORD_CI_API_KEY` is required for operator-backed `mirrord ci start` and `mirrord ci container` when the operator does not advertise keyless CI."
     )]
     #[diagnostic(help(
-        "Set this environment variable to the value received from `mirrord ci api-key`. \
-         Supporting Free operators advertise keyless CI and use automatic ordinary credentials. \
+        "Supporting Free or Teams operators advertise keyless CI and use automatic ordinary \
+         credentials without a CI key. CI retains the license tier's features, including with a \
+         supplied key. For Free and Teams CI, the operator caps each target-routing loader at one \
+         ready pod per participating cluster. Terminating pods may drain while replacements \
+         attach. Enterprise and legacy installations require this environment variable to contain \
+         a key from `mirrord ci api-key`. \
          Without the operator, no CI API key is required. Local `mirrord ci stop` requires no API key."
     ))]
     MissingCiApiKey,
@@ -64,7 +70,14 @@ mod tests {
 
         let help = error.help().unwrap().to_string();
         assert!(help.contains("mirrord ci api-key"));
-        assert!(help.contains("Free operators advertise keyless CI"));
+        assert!(help.contains("Supporting Free or Teams operators"));
+        assert!(help.contains("advertise keyless CI"));
+        assert!(help.contains("CI retains the license tier's features"));
+        assert!(
+            help.contains("each target-routing loader at one ready pod per participating cluster")
+        );
+        assert!(help.contains("Terminating pods may drain while replacements attach"));
+        assert!(help.contains("including with a supplied key"));
         assert!(help.contains("Without the operator, no CI API key is required"));
         assert!(help.contains("mirrord ci stop` requires no API key"));
     }
