@@ -479,10 +479,6 @@ pub(crate) enum CliError {
     ))]
     SessionsManagerCloudUrl(#[source] mirrord_sessions_manager_client::SessionsManagerClientError),
 
-    #[error("failed to read the `mirrord login` token store")]
-    #[diagnostic(help("Check that `~/.mirrord/auth.json` is readable.{GENERAL_HELP}"))]
-    LoginTokenStore(#[source] std::io::Error),
-
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorBranchCreationFailed(OperatorOperation, String),

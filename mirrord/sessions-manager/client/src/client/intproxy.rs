@@ -1,4 +1,4 @@
-use std::{future::Future, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use mirrord_operator_websocket::connection::OperatorConnection;
 use mirrord_protocol_io::Client;
@@ -11,7 +11,7 @@ use tokio::time::Instant;
 use crate::{
     client::validate_scope,
     control_plane::subscriber::ControlPlaneSubscriber,
-    credentials::LoginToken,
+    credentials::LoginTokenSource,
     error::SessionsManagerClientError,
     retry::{RetryBudget, with_deadline},
     transport::{DirectTransport, SessionsManagerTransport},
@@ -29,14 +29,6 @@ pub struct SessionsManagerConnectInfo {
     pub user_session_id: String,
     /// Optional replica constraint for routing this connection.
     pub replica_filter: Option<ReplicaId>,
-    /// The developer's `mirrord login` token, with which a standalone sessions-manager
-    /// authenticates the intproxy. The CLI reads it from its token store, because the intproxy
-    /// may run where that store is not, such as in a container.
-    ///
-    /// [`None`] for a sessions-manager reached through the operator, which authenticates with the
-    /// user's kubeconfig instead, and when the developer has not logged in.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub login_token: Option<LoginToken>,
 }
 
 /// Connects an intproxy to the data plane assigned by sessions-manager.
@@ -50,10 +42,13 @@ pub struct IntproxyClient<T = DirectTransport> {
 }
 
 impl IntproxyClient<DirectTransport> {
+    /// Reaches the standalone sessions-manager the environment configures, authenticating with
+    /// the developer's login token from `login_tokens`.
     pub fn new(
         connect_info: SessionsManagerConnectInfo,
+        login_tokens: Option<Arc<dyn LoginTokenSource>>,
     ) -> Result<Self, SessionsManagerClientError> {
-        let transport = DirectTransport::intproxy_from_env(connect_info.login_token.as_ref())?;
+        let transport = DirectTransport::intproxy_from_env(login_tokens)?;
         Self::with_transport(connect_info, transport)
     }
 }

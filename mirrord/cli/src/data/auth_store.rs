@@ -15,11 +15,15 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use mirrord_sessions_manager_client::LoginToken;
+use futures::future::{BoxFuture, FutureExt};
+use mirrord_sessions_manager_client::{
+    LoginToken, LoginTokenSource, SessionsManagerClientError, cloud_url_from_env,
+};
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use super::update_owner_only_at_path;
-use crate::util::mirrord_dir;
+use crate::{login::issuer, util::mirrord_dir};
 
 /// `~/.mirrord/auth.json`, or [`None`] when the home directory is unknown.
 ///
@@ -77,6 +81,37 @@ impl fmt::Debug for SignupApiKey {
     }
 }
 
+/// The developer's latest login to the MetalBear cloud set by `MIRRORD_METALBEAR_CLOUD_URL`,
+/// which a standalone sessions-manager trusts, read from the store at every lookup.
+pub(crate) struct StoredLogin;
+
+impl StoredLogin {
+    /// The cloud set by `MIRRORD_METALBEAR_CLOUD_URL`, parsed so its [`issuer`] matches the one
+    /// `mirrord login` stored its token under.
+    pub(crate) fn cloud_url() -> Result<Url, SessionsManagerClientError> {
+        Ok(Url::parse(&cloud_url_from_env()?)?)
+    }
+}
+
+impl LoginTokenSource for StoredLogin {
+    /// A store that cannot be read means no token, rather than failing every request, since a
+    /// sessions-manager that does not authenticate its callers does not need one.
+    fn login_token(&self) -> BoxFuture<'_, Result<Option<LoginToken>, SessionsManagerClientError>> {
+        async {
+            let cloud_url = Self::cloud_url()?;
+            let login = AuthStore::login_token(issuer(&cloud_url))
+                .await
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "Failed to read the login token store, continuing without a login token");
+                    None
+                });
+
+            Ok(login.map(|login| login.token))
+        }
+        .boxed()
+    }
+}
+
 impl AuthStore {
     /// Stores `token` as the login for `organization_id` with `issuer`, replacing the previous
     /// one.
@@ -93,9 +128,17 @@ impl AuthStore {
     /// A user in several organizations has a token for each, and the one that expires last is the
     /// one they logged in with most recently.
     pub(crate) async fn login_token(issuer: &str) -> io::Result<Option<StoredLoginToken>> {
+        let now = Utc::now();
+        Ok(Self::latest_login(issuer)
+            .await?
+            .filter(|token| token.expires_at > now))
+    }
+
+    /// Like [`Self::login_token`], but expired or not, so the user can be told when it expired.
+    pub(crate) async fn latest_login(issuer: &str) -> io::Result<Option<StoredLoginToken>> {
         Ok(Self::load()
             .await?
-            .and_then(|store| store.latest_token(issuer, Utc::now())))
+            .and_then(|store| store.latest_token(issuer)))
     }
 
     /// Stores `key` as the key of the trial started with the app of `issuer`, replacing the
@@ -150,11 +193,10 @@ impl AuthStore {
         }
     }
 
-    fn latest_token(mut self, issuer: &str, now: DateTime<Utc>) -> Option<StoredLoginToken> {
+    fn latest_token(mut self, issuer: &str) -> Option<StoredLoginToken> {
         self.issuers
             .remove(issuer)?
             .into_values()
-            .filter(|token| token.expires_at > now)
             .max_by_key(|token| token.expires_at)
     }
 
@@ -221,7 +263,11 @@ mod tests {
             .iter()
             .flat_map(|(issuer, organizations)| {
                 organizations.iter().map(|(organization, token)| {
-                    (issuer.as_str(), organization.as_str(), token.token.as_str())
+                    (
+                        issuer.as_str(),
+                        organization.as_str(),
+                        token.token.expose_secret(),
+                    )
                 })
             })
             .collect()

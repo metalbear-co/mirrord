@@ -266,12 +266,6 @@ fn token_reuse(header: &HeaderValue) -> Option<Duration> {
     Some(reuse.min(MAX_TOKEN_REUSE))
 }
 
-/// Whether the API key may be sent to `url`. It is long-lived and travels in the request body,
-/// so anything but TLS exposes it to the network.
-///
-/// `allow_http` is set only in debug builds, so a developer can point a locally-built agent at a
-/// test endpoint or an app-server reachable only over plain HTTP. Release builds, the only ones
-/// that ship, require HTTPS without exception, loopback included.
 /// The MetalBear cloud this client talks to: [`METALBEAR_CLOUD_URL_ENV`], or production when it
 /// is unset. Agents exchange their API key there, and it issued the `mirrord login` token an
 /// intproxy presents.
@@ -286,6 +280,12 @@ pub fn cloud_url_from_env() -> Result<String, SessionsManagerClientError> {
     }
 }
 
+/// Whether the API key may be sent to `url`. It is long-lived and travels in the request body,
+/// so anything but TLS exposes it to the network.
+///
+/// `allow_http` is set only in debug builds, so a developer can point a locally-built agent at a
+/// test endpoint or an app-server reachable only over plain HTTP. Release builds, the only ones
+/// that ship, require HTTPS without exception, loopback included.
 fn is_secure_cloud_url(url: &Url, allow_http: bool) -> bool {
     !url.cannot_be_a_base()
         && match url.scheme() {

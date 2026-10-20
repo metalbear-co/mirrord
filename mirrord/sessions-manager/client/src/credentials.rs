@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 pub use cloud_token::{CloudTokenCredentials, cloud_url_from_env};
 use futures::future::{BoxFuture, FutureExt};
-pub use login_token::{LoginToken, LoginTokenCredentials};
+pub use login_token::{LoginToken, LoginTokenCredentials, LoginTokenSource};
 use reqwest::header::HeaderMap;
 pub use shared_secret::SharedSecretCredentials;
 
@@ -49,6 +49,13 @@ pub trait CredentialProvider: Send + Sync {
     /// be satisfied by both.
     fn data_plane_headers(&self) -> BoxFuture<'_, Result<HeaderMap, SessionsManagerClientError>> {
         self.control_plane_headers()
+    }
+
+    /// The error to report when sessions-manager answers a control-plane request with
+    /// `401 Unauthorized`, for a credential that can tell the user how to fix it. [`None`]
+    /// reports the bare status.
+    fn unauthorized_error(&self) -> Option<SessionsManagerClientError> {
+        None
     }
 }
 
@@ -108,6 +115,12 @@ impl CredentialProvider for EnvCredentials {
         }
         .boxed()
     }
+
+    /// Explains a 401 by the identity credential, the one sessions-manager itself checks; the
+    /// shared secret only gets requests past a fronting proxy.
+    fn unauthorized_error(&self) -> Option<SessionsManagerClientError> {
+        self.identity.as_ref()?.unauthorized_error()
+    }
 }
 
 /// The credentials an agent uses unless the caller supplies its own: the environment's shared
@@ -125,19 +138,19 @@ pub(crate) fn credentials_from_env()
     with_shared_secret_from_env(cloud.map(|cloud| Box::new(cloud) as Box<dyn CredentialProvider>))
 }
 
-/// The credentials an intproxy uses: the environment's shared secret and the developer's
-/// `login_token`. Never the API key, which sessions-manager refuses from an intproxy.
+/// The credentials an intproxy uses: the environment's shared secret and the developer's login
+/// token from `login_tokens`. Never the API key, which sessions-manager refuses from an intproxy.
 pub(crate) fn intproxy_credentials_from_env(
-    login_token: Option<&LoginToken>,
+    login_tokens: Option<Arc<dyn LoginTokenSource>>,
 ) -> Result<Arc<dyn CredentialProvider>, SessionsManagerClientError> {
-    let login = login_token.map(LoginTokenCredentials::new).transpose()?;
-    if login.is_some() {
+    let login = login_tokens.map(|source| {
         tracing::debug!(
             "authenticating sessions-manager control-plane requests with a mirrord login token"
         );
-    }
+        Box::new(LoginTokenCredentials::new(source)) as Box<dyn CredentialProvider>
+    });
 
-    with_shared_secret_from_env(login.map(|login| Box::new(login) as Box<dyn CredentialProvider>))
+    with_shared_secret_from_env(login)
 }
 
 fn with_shared_secret_from_env(

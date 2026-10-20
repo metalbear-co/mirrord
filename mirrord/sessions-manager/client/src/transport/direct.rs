@@ -22,9 +22,10 @@ use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_sessions_manager_protocol::{
     AssignmentSubscription, ConnectionAssignment, ServiceScope,
 };
+use reqwest::StatusCode;
 use tokio::time::Instant;
 use tokio_tungstenite::WebSocketStream;
-use url::Url;
+use url::{Host, Url};
 
 use super::{SessionsManagerTransport, assignment_authorization};
 use crate::{
@@ -34,7 +35,7 @@ use crate::{
         verify_event_stream,
     },
     credentials::{
-        CredentialProvider, LoginToken, NoCredentials, credentials_from_env,
+        CredentialProvider, LoginTokenSource, NoCredentials, credentials_from_env,
         intproxy_credentials_from_env,
     },
     error::SessionsManagerClientError,
@@ -89,12 +90,23 @@ impl DirectTransport {
     }
 
     /// Reaches the sessions-manager at [`SESSIONS_MANAGER_URL_ENV`] as an intproxy, with the
-    /// shared secret the environment configures, if any, and the developer's `login_token`.
+    /// shared secret the environment configures, if any, and the developer's login token from
+    /// `login_tokens`.
+    ///
+    /// The login token identifies the developer for as long as it lasts, so it goes only over TLS,
+    /// or over plain HTTP to a sessions-manager on this machine, as when it is run locally or
+    /// reached through a port-forward.
     pub fn intproxy_from_env(
-        login_token: Option<&LoginToken>,
+        login_tokens: Option<Arc<dyn LoginTokenSource>>,
     ) -> Result<Self, SessionsManagerClientError> {
-        Ok(Self::new(base_url_from_env()?)?
-            .with_credentials(intproxy_credentials_from_env(login_token)?))
+        let base_url = base_url_from_env()?;
+        if login_tokens.is_some() && base_url.scheme() != "https" && !is_loopback(&base_url) {
+            return Err(SessionsManagerClientError::InsecureSessionsManagerUrl(
+                base_url,
+            ));
+        }
+
+        Ok(Self::new(base_url)?.with_credentials(intproxy_credentials_from_env(login_tokens)?))
     }
 
     pub fn with_credentials(mut self, credentials: Arc<dyn CredentialProvider>) -> Self {
@@ -197,6 +209,11 @@ impl SessionsManagerTransport for DirectTransport {
             .header(ACCEPT, "text/event-stream")
             .send();
         let response = with_deadline(Some(deadline), request).await??;
+        if response.status() == StatusCode::UNAUTHORIZED
+            && let Some(error) = self.credentials.unauthorized_error()
+        {
+            return Err(error);
+        }
         verify_event_stream(response.status(), response.headers())?;
 
         Ok(ControlPlaneEventStream::from_bytes(response.bytes_stream()))
@@ -223,6 +240,15 @@ fn data_plane_authorization_headers(
     let mut headers = HeaderMap::new();
     headers.insert(AUTHORIZATION, assignment_authorization(assignment)?);
     Ok(headers)
+}
+
+fn is_loopback(url: &Url) -> bool {
+    match url.host() {
+        Some(Host::Domain(domain)) => domain == "localhost",
+        Some(Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
 }
 
 /// Reads the sessions-manager base URL from [`SESSIONS_MANAGER_URL_ENV`].

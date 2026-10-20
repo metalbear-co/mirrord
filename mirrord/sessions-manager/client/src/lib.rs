@@ -27,7 +27,7 @@ mod transport;
 
 pub use client::{AgentClient, IntproxyClient, SessionsManagerConnectInfo};
 pub use credentials::{
-    CloudTokenCredentials, CredentialProvider, LoginToken, LoginTokenCredentials,
+    CloudTokenCredentials, CredentialProvider, LoginToken, LoginTokenCredentials, LoginTokenSource,
     SharedSecretCredentials, cloud_url_from_env,
 };
 pub use error::{Result, SessionsManagerClientError};
