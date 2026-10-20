@@ -68,8 +68,8 @@ target "agent" {
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:eb9bdec72b5792472e3a0bbcde5659bb17aa1e87"  = "target:ci-agent-builder"
-    "ghcr.io/metalbear-co/ci-agent-runtime:eb9bdec72b5792472e3a0bbcde5659bb17aa1e87" = "target:ci-agent-runtime"
+    "ghcr.io/metalbear-co/ci-agent-build:a15f775caaf65c1d08224d51dc51500f826a7405"  = "target:ci-agent-builder"
+    "ghcr.io/metalbear-co/ci-agent-runtime:a15f775caaf65c1d08224d51dc51500f826a7405" = "target:ci-agent-runtime"
   }
 }
 
@@ -81,7 +81,7 @@ target "cli" {
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:eb9bdec72b5792472e3a0bbcde5659bb17aa1e87" = "target:ci-agent-builder"
+    "ghcr.io/metalbear-co/ci-agent-build:a15f775caaf65c1d08224d51dc51500f826a7405" = "target:ci-agent-builder"
   }
 }
 
@@ -94,7 +94,7 @@ target "sqs-printer" {
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:eb9bdec72b5792472e3a0bbcde5659bb17aa1e87" = "target:ci-agent-builder"
+    "ghcr.io/metalbear-co/ci-agent-build:a15f775caaf65c1d08224d51dc51500f826a7405" = "target:ci-agent-builder"
   }
 }
 
