@@ -238,7 +238,11 @@ mod tests {
         }
 
         for response_id in [1, 2, 3] {
-            assert_eq!(manager.receive(response_id).unwrap(), payload(response_id));
+            let receiver = spawn_receive(&manager, response_id);
+            assert_eq!(
+                receiver.recv_timeout(TIMEOUT).unwrap().unwrap(),
+                payload(response_id)
+            );
         }
     }
 
