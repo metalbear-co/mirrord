@@ -332,6 +332,12 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
 }
 
 pub trait Reporter: Sized {
+    /// Workstation identity is exported only with telemetry consent. Non-CLI reporters need not
+    /// invent one for operator reports.
+    fn machine_id(&self) -> Option<Uuid> {
+        None
+    }
+
     fn get_mut(&mut self) -> &mut Analytics;
 
     fn set_operator_properties(&mut self, operator_properties: AnalyticsOperatorProperties);
@@ -395,6 +401,7 @@ pub struct AnalyticsReporter {
     watch: drain::Watch,
     target: ReportTarget,
     session_key: Option<String>,
+    machine_id: Uuid,
 }
 
 impl AnalyticsReporter {
@@ -425,6 +432,7 @@ impl AnalyticsReporter {
             watch,
             target: ReportTarget::ClientSession,
             session_key,
+            machine_id,
         }
     }
 
@@ -453,6 +461,7 @@ impl AnalyticsReporter {
             watch,
             target: ReportTarget::TuiEvent,
             session_key: None,
+            machine_id,
         }
     }
 
@@ -512,6 +521,7 @@ impl AnalyticsReporter {
             watch,
             target,
             session_key: None,
+            machine_id,
         }
     }
 
@@ -563,6 +573,10 @@ impl AnalyticsReporter {
 }
 
 impl Reporter for AnalyticsReporter {
+    fn machine_id(&self) -> Option<Uuid> {
+        self.enabled.then_some(self.machine_id)
+    }
+
     fn get_mut(&mut self) -> &mut Analytics {
         &mut self.analytics
     }

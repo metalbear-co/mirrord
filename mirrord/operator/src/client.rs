@@ -58,14 +58,16 @@ use semver::Version;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
+use uuid::Uuid;
 
 use crate::{
     client::{
         database_branches::{
-            CreatedBranches, DatabaseBranchParams, UnifiedDatabaseBranchParams, create_branches,
-            create_mongodb_branches, create_mysql_branches, create_pg_branches,
-            ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
-            list_reusable_mysql_branches, list_reusable_pg_branches, ownership_label_selector,
+            CreatedBranches, DatabaseBranchParams, TARGET_NAMESPACE_ANNOTATION,
+            UnifiedDatabaseBranchParams, create_branches, create_mongodb_branches,
+            create_mysql_branches, create_pg_branches, ensure_branch_migrations,
+            list_existing_branches, list_reusable_mongodb_branches, list_reusable_mysql_branches,
+            list_reusable_pg_branches, ownership_label_selector,
             relay_source_compatibility_warnings, reused_branch_connection_sources,
             wait_for_pending_branches,
         },
@@ -93,7 +95,7 @@ use crate::{
     },
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CONNECT_PARAMS_HEADER,
-        MIRRORD_CLI_VERSION_HEADER, SESSION_ID_HEADER,
+        FeatureGateHitRequest, MIRRORD_CLI_VERSION_HEADER, PaidFeatureGate, SESSION_ID_HEADER,
     },
 };
 
@@ -300,6 +302,7 @@ pub struct OperatorApi<C> {
     operator: MirrordOperatorCrd,
     /// Named kubeconfig context used to create [`Self::client`].
     kube_context: Option<String>,
+    machine_id: Option<Uuid>,
     /// URL of the API server [`Self::client`] talks to. Unlike [`Self::kube_context`], it tells
     /// clusters apart: two contexts can name one cluster.
     cluster_url: String,
@@ -378,6 +381,7 @@ impl OperatorApi<NoClientCert> {
                     client_cert: NoClientCert { base_config },
                     operator,
                     kube_context,
+                    machine_id: reporter.machine_id(),
                     cluster_url,
                 }));
             }
@@ -481,6 +485,7 @@ impl OperatorApi<NoClientCert> {
                 },
                 operator: self.operator,
                 kube_context: self.kube_context,
+                machine_id: self.machine_id,
                 cluster_url: self.cluster_url,
             },
 
@@ -491,6 +496,7 @@ impl OperatorApi<NoClientCert> {
                 },
                 operator: self.operator,
                 kube_context: self.kube_context,
+                machine_id: self.machine_id,
                 cluster_url: self.cluster_url,
             },
         }
@@ -541,6 +547,7 @@ impl OperatorApi<NoClientCert> {
         let previous_client = self.client.clone();
         let operator_crd = self.operator.clone();
         let kube_context = self.kube_context.clone();
+        let machine_id = self.machine_id;
         let cluster_url = self.cluster_url.clone();
 
         let result = async move {
@@ -572,6 +579,7 @@ impl OperatorApi<NoClientCert> {
                 },
                 operator: operator_crd,
                 kube_context,
+                machine_id,
                 cluster_url,
             },
         }
@@ -593,6 +601,7 @@ impl OperatorApi<MaybeClientCert> {
             client_cert: PreparedClientCert { cert },
             operator: self.operator,
             kube_context: self.kube_context,
+            machine_id: self.machine_id,
             cluster_url: self.cluster_url,
         })
     }
@@ -668,10 +677,13 @@ where
     pub fn check_serverless_sessions_manager_served(&self) -> OperatorApiResult<()> {
         self.operator
             .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::ServerlessSessionsManager)
-            .then_some(())
-            .ok_or(OperatorApiError::ServerlessSessionsManagerNotServed)
+            .require_feature(NewOperatorFeature::ServerlessSessionsManager)
+            .map_err(|error| match error {
+                OperatorApiError::UnsupportedFeature { .. } => {
+                    OperatorApiError::ServerlessSessionsManagerNotServed
+                }
+                error => error,
+            })
     }
 
     /// Create a new CI api key by generating a random key pair, creating a certificate
@@ -872,7 +884,11 @@ where
                 // config conflict) in its own words; it is shown as it is, not inside kube's
                 // wrapping of the response.
                 kube::Error::Api(response) => {
-                    OperatorApiError::SplitConfigDbBranches(response.message)
+                    if let Some(gate) = PaidFeatureGate::from_status(&response) {
+                        OperatorApiError::FeatureNotLicensed { gate }
+                    } else {
+                        OperatorApiError::SplitConfigDbBranches(response.message)
+                    }
                 }
                 error => OperatorApiError::SplitConfigDbBranches(error.to_string()),
             })
@@ -1001,8 +1017,6 @@ where
         up_service: Option<&str>,
         progress: &P,
     ) -> OperatorApiResult<BranchDbNames> {
-        use database_branches::TARGET_NAMESPACE_ANNOTATION;
-
         let mut subtask = progress.subtask("preparing branch databases");
 
         // A `"*"` / ids request becomes inline entries here, before anything below reads them.
@@ -1014,14 +1028,22 @@ where
         // operator. Without this the CLI proceeds blindly: an operator with no branching serves no
         // branch CRD at all, so the create returns a bare `404 page not found`; an operator missing
         // just this dialect creates a CRD nothing reconciles, so the CLI times out waiting for
-        // readiness. We only check the dialects whose feature has been advertised since it was
-        // introduced (see `required_branching_feature`); the rest rely on the operator marking the
+        // readiness. License metadata distinguishes paid refusals from disabled dialects; older
+        // operators retain the disabled-dialect diagnostic. We only check dialects whose feature
+        // has been advertised since it was introduced (see
+        // `required_branching_feature`); the rest rely on the operator marking the
         // branch `Failed`.
         for branch_config in layer_config.feature.db_branches.iter() {
-            if let Some(feature) = required_branching_feature(branch_config)
-                && !self.operator.spec.supported_features().contains(&feature)
-            {
-                return Err(OperatorApiError::FeatureDisabled { feature });
+            if let Some(feature) = required_branching_feature(branch_config) {
+                self.operator
+                    .spec
+                    .require_feature(feature)
+                    .map_err(|error| match error {
+                        OperatorApiError::UnsupportedFeature { .. } => {
+                            OperatorApiError::FeatureDisabled { feature }
+                        }
+                        error => error,
+                    })?;
             }
         }
 
@@ -2009,6 +2031,61 @@ fn disable_unsupported_auto_splits(
 }
 
 impl OperatorApi<PreparedClientCert> {
+    /// Requests stopped by discovery checks never reach the operator's refusal telemetry.
+    /// Reporting fills that gap without delaying the paid diagnosis indefinitely or authorizing
+    /// a resource action.
+    pub async fn cli_gated_feature(&self, feature: NewOperatorFeature) {
+        if self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::LicenseGateReporting)
+            .not()
+        {
+            return;
+        }
+
+        let report = FeatureGateHitRequest {
+            event_id: Uuid::new_v4(),
+            timestamp: Utc::now(),
+            feature,
+            machine_id: self.machine_id,
+        };
+        // Serialize once before the retry layer sees the request, so any replay retains its ID.
+        let report_request = async {
+            // API-aware proxies require Kubernetes type metadata; flat data keeps the operator's
+            // report decoder compatible with requests that have no envelope.
+            let resource = ApiResource::from_gvk(&GroupVersionKind::gvk(
+                "operator.metalbear.co",
+                "v1",
+                "FeatureGateHit",
+            ));
+            let report = DynamicObject::new(&report.event_id.to_string(), &resource)
+                .data(serde_json::to_value(&report)?);
+            let body = serde_json::to_vec(&report)?;
+            let request = Request::builder()
+                .method("POST")
+                .uri("/apis/operator.metalbear.co/v1/featuregatehits")
+                .header("content-type", "application/json")
+                .body(body)
+                .map_err(OperatorApiError::ConnectRequestBuildError)?;
+            self.client.request_text(request).await.map_err(|error| {
+                OperatorApiError::KubeError {
+                    error,
+                    operation: OperatorOperation::ReportingFeatureGate,
+                }
+            })?;
+            Ok::<(), OperatorApiError>(())
+        };
+        match tokio::time::timeout(Duration::from_secs(2), report_request).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::debug!(%feature, %error, "Could not report local paid-feature refusal")
+            }
+            Err(_) => tracing::debug!(%feature, "Reporting local paid-feature refusal timed out"),
+        }
+    }
+
     /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
     const COPIED_POD_IDLE_TTL: u32 = 30;
 
@@ -2052,7 +2129,12 @@ impl OperatorApi<PreparedClientCert> {
             layer_config.feature.split_queues = filtered;
             progress.warning(RMQ_AUTO_SPLITS_DISABLED_WARNING);
         }
-        self.check_feature_support(layer_config, auto_queue_splitting)?;
+        if let Err(error) = self.check_feature_support(layer_config, auto_queue_splitting) {
+            if let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error {
+                self.cli_gated_feature(*feature).await;
+            }
+            return Err(error);
+        }
         let (do_copy_target, reason) = self
             .should_copy_target(layer_config, &target, progress, auto_queue_splitting)
             .await?;
@@ -2064,12 +2146,22 @@ impl OperatorApi<PreparedClientCert> {
             .contains(&NewOperatorFeature::ProxyApi);
 
         let branch_db_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_branch_dbs(
-                layer_config,
-                up_session.as_ref().map(|up| &*up.service),
-                progress,
-            )
-            .await?
+            match self
+                .prepare_branch_dbs(
+                    layer_config,
+                    up_session.as_ref().map(|up| &*up.service),
+                    progress,
+                )
+                .await
+            {
+                Ok(names) => names,
+                Err(error) => {
+                    if let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error {
+                        self.cli_gated_feature(*feature).await;
+                    }
+                    return Err(error);
+                }
+            }
         } else {
             BranchDbNames::default()
         };
@@ -2422,12 +2514,22 @@ impl OperatorApi<PreparedClientCert> {
         //   happens locally. If Primary != Default, a sync controller copies CRDs to Default where
         //   actual branching happens, then syncs status back.
         let branch_db_names = if layer_config.feature.db_branches.is_empty().not() {
-            self.prepare_branch_dbs(
-                layer_config,
-                up_session.as_ref().map(|up| &*up.service),
-                progress,
-            )
-            .await?
+            match self
+                .prepare_branch_dbs(
+                    layer_config,
+                    up_session.as_ref().map(|up| &*up.service),
+                    progress,
+                )
+                .await
+            {
+                Ok(names) => names,
+                Err(error) => {
+                    if let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error {
+                        self.cli_gated_feature(*feature).await;
+                    }
+                    return Err(error);
+                }
+            }
         } else {
             BranchDbNames::default()
         };
@@ -3381,7 +3483,10 @@ mod test {
         disable_unsupported_auto_splits,
     };
     use crate::{
-        client::connect_params::{BranchDbNames, ConnectParams},
+        client::{
+            connect_params::{BranchDbNames, ConnectParams},
+            error::OperatorApiError,
+        },
         crd::{MirrordOperatorCrd, session::SessionCiInfo},
     };
 
@@ -3392,9 +3497,17 @@ mod test {
             serde_json::json!([]),
             serde_json::Value::Null,
         ] {
-            let enabled = supported_features == serde_json::json!(["ServerlessSessionsManager"]);
-            let config = Config::new("http://127.0.0.1:9669".parse().unwrap());
-            let api = OperatorApi {
+            for required_plan in [None, Some("team"), Some("future_plan")] {
+                let enabled = required_plan.is_none()
+                    && supported_features == serde_json::json!(["ServerlessSessionsManager"]);
+                let gated_features = match required_plan {
+                    Some(plan) => serde_json::json!([{
+                        "feature": "ServerlessSessionsManager", "required_plan": plan
+                    }]),
+                    None => serde_json::json!([]),
+                };
+                let config = Config::new("http://127.0.0.1:9669".parse().unwrap());
+                let api = OperatorApi {
                 client: kube::Client::try_from(config.clone()).unwrap(),
                 cluster_url: config.cluster_url.to_string(),
                 client_cert: NoClientCert { base_config: config },
@@ -3406,15 +3519,34 @@ mod test {
                         "operator_version": "3.214.0",
                         "default_namespace": "default",
                         "supported_features": supported_features,
+                        "gated_features": gated_features,
                         "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
                     }
                 })).unwrap(),
                 kube_context: None,
+                machine_id: None,
             };
-            assert_eq!(
-                api.check_serverless_sessions_manager_served().is_ok(),
-                enabled
-            );
+                let result = api.check_serverless_sessions_manager_served();
+                assert_eq!(result.is_ok(), enabled);
+                match (required_plan, result) {
+                    (
+                        Some("team"),
+                        Err(OperatorApiError::LocalFeatureNotLicensed { feature, gate }),
+                    ) => {
+                        assert_eq!(feature, NewOperatorFeature::ServerlessSessionsManager);
+                        assert_eq!(gate.feature_config_key, "target.path");
+                        assert_eq!(gate.required_plan, crate::types::RequiredPlan::Team);
+                    }
+                    (None, Ok(())) => {}
+                    (
+                        None | Some("future_plan"),
+                        Err(OperatorApiError::ServerlessSessionsManagerNotServed),
+                    ) => {}
+                    (plan, result) => {
+                        panic!("unexpected serverless result for {plan:?}: {result:?}")
+                    }
+                }
+            }
         }
     }
 
@@ -4045,6 +4177,7 @@ mod test {
             },
             operator: MirrordOperatorCrd::new("operator", spec),
             kube_context: None,
+            machine_id: None,
         };
         tokio::time::timeout(
             std::time::Duration::from_secs(60),
@@ -4097,6 +4230,7 @@ mod test {
             },
             operator: MirrordOperatorCrd::new("operator", spec),
             kube_context: None,
+            machine_id: None,
             cluster_url: "https://127.0.0.1:9669/".to_owned(),
         };
 
