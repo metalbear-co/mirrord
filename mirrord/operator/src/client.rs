@@ -1216,6 +1216,19 @@ where
                 .require_feature(NewOperatorFeature::DbBranchSecretManagerExtract)?;
         }
 
+        // An `aws_ssm_parameter` source needs an operator that knows the source kind: an
+        // older one fails to deserialize the branch and never reconciles it.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_ssm_parameter_source)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchSsmParameter)?;
+        }
+
         // A `url` connection param needs an operator that layers the other params over it: an
         // older operator ignores the param and builds the source connection from whatever else
         // is declared, silently branching the wrong database.
