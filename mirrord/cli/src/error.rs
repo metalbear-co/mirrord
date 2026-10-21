@@ -1018,15 +1018,20 @@ impl From<OperatorApiError> for CliError {
             },
             OperatorApiError::FeatureDisabled { feature } => Self::FeatureDisabledInOperatorError {
                 feature: feature.to_string(),
-                enable_hint: feature
-                    .helm_value()
-                    .map(|value| {
+                enable_hint: match feature.helm_values() {
+                    [] => String::new(),
+                    values => {
+                        let sets = values
+                            .iter()
+                            .map(|value| format!("--set {value}=true"))
+                            .collect::<Vec<_>>()
+                            .join(" ");
                         format!(
                             " in the operator Helm chart, e.g. `helm upgrade mirrord-operator \
-                             metalbear/mirrord-operator --reuse-values --set {value}=true`"
+                             metalbear/mirrord-operator --reuse-values {sets}`"
                         )
-                    })
-                    .unwrap_or_default(),
+                    }
+                },
             },
             OperatorApiError::ServerlessSessionsManagerNotServed => {
                 Self::ServerlessSessionsManagerNotServed

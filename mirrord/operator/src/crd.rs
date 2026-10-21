@@ -213,10 +213,10 @@ pub struct MirrordOperatorSpec {
     /// can tell "enable it in the chart" apart from "upgrade the operator". Only features the
     /// license tier allows are listed, so a tier restriction is still reported as unsupported.
     ///
-    /// Optional for backwards compatibility: older operators do not send it, and a missing
-    /// feature is then reported as unsupported by the version, as before.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    disabled_features: Option<Vec<NewOperatorFeature>>,
+    /// Older operators do not send it; the list is then empty and a missing feature is
+    /// reported as unsupported by the version, as before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    disabled_features: Vec<NewOperatorFeature>,
 }
 
 impl MirrordOperatorSpec {
@@ -243,20 +243,20 @@ impl MirrordOperatorSpec {
             features,
             copy_target_enabled,
             operator_namespace,
-            disabled_features: None,
+            disabled_features: Vec::new(),
         }
     }
 
     /// Records the features this operator knows but has switched off in its Helm values.
     pub fn with_disabled_features(mut self, disabled_features: Vec<NewOperatorFeature>) -> Self {
-        self.disabled_features = Some(disabled_features);
+        self.disabled_features = disabled_features;
         self
     }
 
     /// Features this operator version knows but has switched off in its Helm values. Empty for
     /// operators that predate the field.
     pub fn disabled_features(&self) -> &[NewOperatorFeature] {
-        self.disabled_features.as_deref().unwrap_or_default()
+        &self.disabled_features
     }
 
     /// Get a vector with the features the operator supports.
@@ -1015,53 +1015,54 @@ impl Display for NewOperatorFeature {
 }
 
 impl NewOperatorFeature {
-    /// The operator Helm value that switches this feature on, for the hint shown when the
-    /// operator reports the feature as disabled. `None` for features that are always on, or that
-    /// come with any of several values (the shared DB branching features turn on with any
-    /// `*Branching` value).
-    pub fn helm_value(&self) -> Option<&'static str> {
-        let value = match self {
+    /// The operator Helm values that switch this feature on, for the hint shown when the
+    /// operator reports the feature as disabled. Empty for features that are always on, that come
+    /// with any of several values (the shared DB branching features turn on with any
+    /// `*Branching` value), or that need more setup than a `--set` (multi-cluster needs its
+    /// cluster list and default cluster, so a lone `multiCluster.enabled` fails startup).
+    pub fn helm_values(&self) -> &'static [&'static str] {
+        match self {
             NewOperatorFeature::PreviewEnv
             | NewOperatorFeature::PreviewTlsDelivery
             | NewOperatorFeature::PreviewTlsClientAuthFromTarget
             | NewOperatorFeature::PreviewCronJobTarget
             | NewOperatorFeature::PreviewLabelTarget
-            | NewOperatorFeature::PreviewSpecResources => "operator.previewEnv",
+            | NewOperatorFeature::PreviewSpecResources => &["operator.previewEnv"],
             NewOperatorFeature::SqsQueueSplitting
             | NewOperatorFeature::SqsQueueSplittingDirect
-            | NewOperatorFeature::SqsQueueSplittingWithJqFilter => "operator.sqsSplitting",
+            | NewOperatorFeature::SqsQueueSplittingWithJqFilter => &["operator.sqsSplitting"],
             NewOperatorFeature::KafkaQueueSplitting
             | NewOperatorFeature::KafkaQueueSplittingDirect
             | NewOperatorFeature::KafkaQueueSplittingWithJqFilter
             | NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding => {
-                "operator.kafkaSplitting"
+                &["operator.kafkaSplitting"]
             }
             NewOperatorFeature::RmqQueueSplitting
-            | NewOperatorFeature::RmqQueueSplittingWithJqFilter => "operator.rmqSplitting",
-            NewOperatorFeature::GcpPubSubQueueSplitting => "operator.gcpPubsubSplitting",
-            NewOperatorFeature::RedisPubSubQueueSplitting => "operator.redisPubsubSplitting",
-            NewOperatorFeature::TemporalQueueSplitting => "operator.temporalSplitting",
-            NewOperatorFeature::BullMqQueueSplitting => "operator.bullmqSplitting",
-            NewOperatorFeature::NatsQueueSplitting => "operator.natsSplitting",
-            NewOperatorFeature::NatsPubSubQueueSplitting => "operator.natsPubsubSplitting",
-            NewOperatorFeature::MySqlBranching => "operator.mysqlBranching",
-            NewOperatorFeature::MariaDbBranching => "operator.mariadbBranching",
+            | NewOperatorFeature::RmqQueueSplittingWithJqFilter => &["operator.rmqSplitting"],
+            NewOperatorFeature::GcpPubSubQueueSplitting => &["operator.gcpPubsubSplitting"],
+            NewOperatorFeature::RedisPubSubQueueSplitting => &["operator.redisPubsubSplitting"],
+            NewOperatorFeature::TemporalQueueSplitting => &["operator.temporalSplitting"],
+            NewOperatorFeature::BullMqQueueSplitting => &["operator.bullmqSplitting"],
+            NewOperatorFeature::NatsQueueSplitting => &["operator.natsSplitting"],
+            NewOperatorFeature::NatsPubSubQueueSplitting => &["operator.natsPubsubSplitting"],
+            NewOperatorFeature::MySqlBranching => &["operator.mysqlBranching"],
+            NewOperatorFeature::MariaDbBranching => &["operator.mariadbBranching"],
             NewOperatorFeature::PgBranching
             | NewOperatorFeature::PgBranchQueryParams
-            | NewOperatorFeature::PgBranchAdditionalDatabases => "operator.pgBranching",
-            NewOperatorFeature::MongodbBranching => "operator.mongodbBranching",
-            NewOperatorFeature::CockroachdbBranching => "operator.cockroachdbBranching",
+            | NewOperatorFeature::PgBranchAdditionalDatabases => &["operator.pgBranching"],
+            NewOperatorFeature::MongodbBranching => &["operator.mongodbBranching"],
+            NewOperatorFeature::CockroachdbBranching => &["operator.cockroachdbBranching"],
             NewOperatorFeature::GenericDbBranching
             | NewOperatorFeature::GenericDbCopy
-            | NewOperatorFeature::GenericBranchProfileDefaults => "operator.genericBranching",
-            NewOperatorFeature::S3Branching => "operator.s3Branching",
-            NewOperatorFeature::TurbopufferBranching => "operator.turbopufferBranching",
-            NewOperatorFeature::KafkaBranching => "operator.kafkaBranching",
-            NewOperatorFeature::DbBranchDedicatedNamespace => "operator.dbBranchNamespaces",
-            NewOperatorFeature::MultiClusterPrimary | NewOperatorFeature::MultiClusterSubscribe => {
-                "operator.multiCluster.enabled"
+            | NewOperatorFeature::GenericBranchProfileDefaults => &["operator.genericBranching"],
+            NewOperatorFeature::S3Branching => &["operator.s3Branching"],
+            NewOperatorFeature::TurbopufferBranching => &["operator.turbopufferBranching"],
+            // Kafka branching rides on the Kafka splitting machinery, so both must be on.
+            NewOperatorFeature::KafkaBranching => {
+                &["operator.kafkaSplitting", "operator.kafkaBranching"]
             }
-            NewOperatorFeature::ServerlessSessionsManager => "operator.sessionsManager",
+            NewOperatorFeature::DbBranchDedicatedNamespace => &["operator.dbBranchNamespaces"],
+            NewOperatorFeature::ServerlessSessionsManager => &["operator.sessionsManager"],
             NewOperatorFeature::ProxyApi
             | NewOperatorFeature::CopyTarget
             | NewOperatorFeature::CopyTargetExcludeContainers
@@ -1070,6 +1071,8 @@ impl NewOperatorFeature {
             | NewOperatorFeature::ExtendableUserCredentials
             | NewOperatorFeature::BypassCiCertificateVerification
             | NewOperatorFeature::MultiClusterRemote
+            | NewOperatorFeature::MultiClusterPrimary
+            | NewOperatorFeature::MultiClusterSubscribe
             | NewOperatorFeature::UnifiedBranchDbCrd
             | NewOperatorFeature::ConnectParamsInHeader
             | NewOperatorFeature::CopyTargetFilterIsolation
@@ -1086,9 +1089,8 @@ impl NewOperatorFeature {
             | NewOperatorFeature::KeylessCi
             | NewOperatorFeature::DbBranchesFromSplitConfig
             | NewOperatorFeature::DbBranchSecretManagerExtract
-            | NewOperatorFeature::Unknown => return None,
-        };
-        Some(value)
+            | NewOperatorFeature::Unknown => &[],
+        }
     }
 }
 
@@ -1635,8 +1637,6 @@ mod tests {
     #[cfg(feature = "client")]
     #[test]
     fn require_feature_tells_disabled_from_unsupported() {
-        use crate::client::error::OperatorApiError;
-
         let spec = spec_without_disabled_features()
             .with_disabled_features(vec![NewOperatorFeature::PreviewEnv]);
 
@@ -1661,8 +1661,6 @@ mod tests {
     #[cfg(feature = "client")]
     #[test]
     fn missing_disabled_features_means_unsupported() {
-        use crate::client::error::OperatorApiError;
-
         let spec = spec_without_disabled_features();
 
         assert!(spec.disabled_features().is_empty());
@@ -1675,22 +1673,24 @@ mod tests {
         ));
     }
 
-    /// Every chart-toggled feature names the value that turns it on, so the disabled error can
-    /// show a `--set` the admin can paste.
+    /// Every chart-toggled feature names the values that turn it on, so the disabled error can
+    /// show `--set`s the admin can paste. Kafka branching needs splitting too, and multi-cluster
+    /// gets no hint because a lone `multiCluster.enabled` fails startup.
     #[test]
-    fn chart_toggled_features_name_their_helm_value() {
+    fn chart_toggled_features_name_their_helm_values() {
         assert_eq!(
-            NewOperatorFeature::PreviewEnv.helm_value(),
-            Some("operator.previewEnv")
+            NewOperatorFeature::PreviewEnv.helm_values(),
+            ["operator.previewEnv"]
         );
         assert_eq!(
-            NewOperatorFeature::SqsQueueSplitting.helm_value(),
-            Some("operator.sqsSplitting")
+            NewOperatorFeature::KafkaBranching.helm_values(),
+            ["operator.kafkaSplitting", "operator.kafkaBranching"]
         );
-        assert_eq!(
-            NewOperatorFeature::MultiClusterPrimary.helm_value(),
-            Some("operator.multiCluster.enabled")
+        assert!(
+            NewOperatorFeature::MultiClusterPrimary
+                .helm_values()
+                .is_empty()
         );
-        assert_eq!(NewOperatorFeature::CopyTarget.helm_value(), None);
+        assert!(NewOperatorFeature::CopyTarget.helm_values().is_empty());
     }
 }
