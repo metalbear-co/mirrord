@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::{
     config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpSubcommand},
-    data::UserData,
+    data::{GlobalConfig, UserData},
     error::CliError,
     ui::ui_command,
 };
@@ -125,6 +125,8 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         }
         other_error => other_error?,
     };
+
+    up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
 
     analytics.enabled = up_config.telemetry_enabled();
 

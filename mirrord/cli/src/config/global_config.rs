@@ -25,6 +25,7 @@ pub(crate) enum GlobalConfigCommand {
 /// ```sh
 /// mirrord config set operator 'true'
 /// mirrord config set agent.image 'custom.image/latest'
+/// mirrord config set kube_context 'staging'
 /// ```
 #[derive(Args, Debug)]
 pub(crate) struct SetGlobalConfigArgs {
