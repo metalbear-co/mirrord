@@ -33,7 +33,7 @@ brew install metalbear-co/mirrord/mirrord
 {% tab title="Windows" %}
 
 ```powershell
-choco install --pre mirrord
+choco install mirrord
 ```
 
 {% endtab %}

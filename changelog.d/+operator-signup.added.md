@@ -1,1 +1,0 @@
-`mirrord operator signup` starts a 7-day Enterprise trial under a new organization, prints its claim URL and saves its API key on the machine for `mirrord operator install --from-signup`, so AI agents can set up mirrord without an account.

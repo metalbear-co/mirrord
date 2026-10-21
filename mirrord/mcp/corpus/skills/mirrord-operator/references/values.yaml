@@ -60,6 +60,10 @@ clusterRole:
   mirrord-operator-ci:
     # add labels to the role, for i.e aggregate RBAC
     labels: {}
+  # Created only with `operator.sessionsManager` enabled.
+  mirrord-operator-sessions-manager-agent:
+    # add labels to the role, for i.e aggregate RBAC
+    labels: {}
 
 operator:
   image: ghcr.io/metalbear-co/operator
@@ -149,6 +153,9 @@ operator:
   sqsSplitting: false
   # Has to be set to `true` in order to use the Kafka queue splitting feature.
   kafkaSplitting: false
+  # Has to be set to `true`, along with `kafkaSplitting`, in order to use Kafka branching
+  # (`feature.kafka_branch`).
+  kafkaBranching: false
   # Has to be set to `true` in order to use the RabbitMQ queue splitting feature.
   rmqSplitting: false
   # Has to be set to `true` in order to use the GCP Pub/Sub queue splitting feature.
@@ -166,6 +173,50 @@ operator:
   # Has to be set to `true` in order to use the core NATS (non-JetStream) pub/sub
   # queue splitting feature. Best-effort delivery: nothing is persisted.
   natsPubsubSplitting: false
+  # Has to be set to `true` in order to serve the operator-hosted sessions-manager
+  # (`serverlessagentassignments`, `serverlessclientassignments` and `serverlessdataplanes`),
+  # which pairs a workload companion's agent with a developer's local mirrord. Grants `proxy` on
+  # `serverlessclientassignments` and `get` on `serverlessdataplanes` to the mirrord user
+  # ClusterRoles (see `operator.sessionsManagerUserRbac`), and creates the
+  # `mirrord-operator-sessions-manager-agent` ClusterRole with
+  # `proxy` on `serverlessagentassignments` and `get` on `serverlessdataplanes`, to bind to the
+  # identity the workload companion's agent authenticates to the cluster as.
+  #
+  # Registrations are named by the scope they pair in, `<environment>.<service>`, so either side
+  # can be limited to some scopes with `resourceNames` on its registration rule. Data planes are
+  # named by per-session allocation ids, so that rule can't be narrowed.
+  #
+  # The `mirrord-operator-sessions-manager-agent` ClusterRole covers every scope. To limit an agent
+  # identity to one, bind it to your own ClusterRole instead:
+  #   - apiGroups: [operator.metalbear.co]
+  #     resources: [serverlessagentassignments]
+  #     resourceNames: [staging.api]
+  #     verbs: [proxy]
+  #   - apiGroups: [operator.metalbear.co]
+  #     resources: [serverlessdataplanes]
+  #     verbs: [get]
+  #
+  # The mirrord user ClusterRoles also cover every scope: a developer bound to one can pair with the
+  # agent of any environment and service and receive that workload's traffic. To limit developers
+  # to some scopes, grant `proxy` on `serverlessclientassignments` with `resourceNames` (e.g.
+  # `[staging.api, staging.web]`) and `get` on `serverlessdataplanes` through your own ClusterRole.
+  # RBAC is additive, so this only narrows access for developers who aren't also bound to a mirrord
+  # user ClusterRole: set `operator.sessionsManagerUserRbac: false` to leave client access out of
+  # those roles.
+  #
+  # Sessions live in the operator's memory, so an operator rollout or restart ends them: the
+  # stopping operator closes every assignment stream and data plane, and both sides register again
+  # with the new one. That drain fits in the default `operator.terminationGracePeriodSeconds`. If
+  # rollouts cut connections abruptly instead, raise `operator.terminationGracePeriodSeconds` back
+  # to at least its default, so the operator isn't killed before it finishes.
+  sessionsManager: false
+  # With `operator.sessionsManager` on, grants the mirrord user ClusterRoles
+  # (`mirrord-operator-user`, `-ci` and `-user-basic`) client access to the operator-hosted
+  # sessions-manager for every scope: `proxy` on `serverlessclientassignments` and `get` on
+  # `serverlessdataplanes`. Set to `false` to leave it out and grant developers client access
+  # through your own ClusterRoles, scoped with `resourceNames` (see `operator.sessionsManager`).
+  # The agent ClusterRole is not affected.
+  sessionsManagerUserRbac: true
   # Temporal queue splitting proxy settings.
   temporalProxy:
     # Port for the Temporal frontend proxy workers connect to via `TEMPORAL_ADDRESS`.
@@ -585,8 +636,14 @@ operator:
   ## are held longer after a client really does go away.
   # communicationTimeoutMillis: 60000
 
-  ## Controls how long (in milliseconds) a session can live when there are no pods ready to be targeted.
-  ## When this value is not set when installing the chart, the default value of 60000 (60 seconds) is used.
+  ## Controls how long (in milliseconds) a session can live without a live mirrord-agent, usually
+  ## because the target has no ready pod to run an agent on. The clock starts when the last agent
+  ## is lost (or at session start) and stops as soon as an agent connects. An agent that is still
+  ## starting on a ready pod when the time runs out gets to finish: the session waits for that
+  ## load before closing. Defaults to 60000 (60 seconds).
+  ## Raise this when a replacement target pod can take longer than that to become ready, for example
+  ## on spot or preemptible nodes with node auto-provisioning, where the replacement pod waits for a
+  ## new node to boot. Rolling updates are not affected: the new pod is ready before the old one goes.
   # noPodTargetsSessionTimeoutMillis: 60000
 
   ## Default TTL (in milliseconds) for idle Kafka splits.
@@ -602,6 +659,31 @@ operator:
   ## `mirrord-tmp-{{RANDOM}}{{FALLBACK}}{{ORIGINAL_TOPIC}}`
   ## see docs here https://metalbear.co/mirrord/docs/using-mirrord/queue-splitting/#customizing-mirrord-created-kafka-topic-names
   # kafkaSplittingTopicFormat: "mirrord-tmp-{{RANDOM}}{{FALLBACK}}{{ORIGINAL_TOPIC}}"
+
+  # kafkaBranchConfig:
+  ## example
+  ##
+  ## brokerPod:
+  ##   # Any Kafka image configured through `KAFKA_` environment variables, like `apache/kafka`.
+  ##   image: "docker.io/apache/kafka:4.1.0"
+  ##   imagePullSecrets:
+  ##     - name: "kafka-registry-secret"
+  ##   imagePullPolicy: "IfNotPresent"
+  ##   labels: { "role": "broker" }
+  ##   annotations: { "karpenter.sh/do-not-disrupt": "true" }
+  ##   # The broker's JVM heap is at most half its memory limit.
+  ##   resources:
+  ##     requests:
+  ##       cpu: "250m"
+  ##       memory: "1Gi"
+  ##     limits:
+  ##       memory: "1Gi"
+  ## # Partitions of every topic created on a branch broker.
+  ## partitions: 1
+  ## # Broker configs of every branch broker. The operator's own listener, KRaft, storage,
+  ## # and partition settings cannot be changed.
+  ## brokerConfig:
+  ##   message.max.bytes: "10485760"
 
   kafkaSplittingSidecar:
     # Enables a sidecar container responsible for Java Kafka clients.
@@ -727,6 +809,13 @@ operator:
   ##   # migrations, and the operator all connect there.
   ##   dbServerArgs:
   ##     - "--default-authentication-plugin=mysql_native_password"
+  ##   # How branch pods recreate the source database's accounts.
+  ##   # `empty` (default): only the user declared in the branch's connection config, with its
+  ##   # real password (as a hash) and every privilege; copied objects lose their definers.
+  ##   # `full`: source accounts with their grants, and copied objects keep their definers, so
+  ##   # the branch enforces the same permissions as the source. Only the declared user can log
+  ##   # in; other accounts come along only if it may read the `mysql` schema.
+  ##   roles: "empty"
 
   # mariadbBranchConfig:
   ## example
@@ -772,6 +861,13 @@ operator:
   ##   dbServerArgs:
   ##     - "--character-set-server=utf8mb4"
   ##     - "--collation-server=utf8mb4_unicode_ci"
+  ##   # How branch pods recreate the source database's accounts.
+  ##   # `empty` (default): only the user declared in the branch's connection config, with its
+  ##   # real password (as a hash) and every privilege; copied objects lose their definers.
+  ##   # `full`: source accounts with their grants, and copied objects keep their definers, so
+  ##   # the branch enforces the same permissions as the source. Only the declared user can log
+  ##   # in; other accounts come along only if it may read the `mysql` schema.
+  ##   roles: "empty"
 
   # pgBranchConfig:
   ## example
