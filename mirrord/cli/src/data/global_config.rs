@@ -139,11 +139,10 @@ impl GlobalConfig {
     /// or environment values.
     pub(crate) fn apply_to(&self, project_config: &mut LayerConfig) {
         project_config.operator = project_config.operator.or(self.config.operator);
-        if project_config.kube_context.is_none() {
-            project_config
-                .kube_context
-                .clone_from(&self.config.kube_context);
-        }
+        project_config.kube_context = project_config
+            .kube_context
+            .take()
+            .or_else(|| self.config.kube_context.clone());
     }
 
     pub(crate) fn kube_context(&self) -> Option<&str> {
