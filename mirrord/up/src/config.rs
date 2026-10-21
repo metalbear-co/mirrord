@@ -16,6 +16,7 @@ use mirrord_config::{
         copy_target::CopyTargetConfig,
         database_branches::{
             AllSplitConfigDbBranches, DatabaseBranchesConfig, SplitConfigDbBranches,
+            SplitConfigRequest,
         },
         env::{EnvConfig, EnvFileConfig},
         network::incoming::{
@@ -762,9 +763,10 @@ impl ServiceConfig {
                 && single_workload
                 && cfg.feature.db_branches.is_empty();
         if default_db_branches {
-            cfg.feature.db_branches = DatabaseBranchesConfig::FromSplitConfig(
-                SplitConfigDbBranches::All(AllSplitConfigDbBranches::All),
-            );
+            cfg.feature.db_branches =
+                DatabaseBranchesConfig::FromSplitConfig(SplitConfigRequest::Entries(
+                    SplitConfigDbBranches::All(AllSplitConfigDbBranches::All),
+                ));
         }
 
         let patch_sets_split_queues = self

@@ -34,7 +34,8 @@ use mirrord_config::{
     config::EnvKey,
     feature::{
         database_branches::{
-            DatabaseBranchConfig, SplitConfigDbBranches, default_creation_timeout_secs,
+            DatabaseBranchConfig, SplitConfigDbBranches, SplitConfigRequest,
+            default_creation_timeout_secs,
         },
         split_queues::{QueueKind, QueueSplit, SplitQueuesConfig},
     },
@@ -842,12 +843,12 @@ where
     pub async fn lookup_split_config_db_branches(
         &self,
         layer_config: &LayerConfig,
-        request: &SplitConfigDbBranches,
+        request: &SplitConfigRequest,
     ) -> OperatorApiResult<ResolveSplitConfigDbBranchesResponse> {
         self.operator
             .spec
             .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
-        let request = match request {
+        let request = match request.entries() {
             SplitConfigDbBranches::All(_) => SplitConfigDbBranchesRequest::All(AllEntries::All),
             SplitConfigDbBranches::Ids(ids) => SplitConfigDbBranchesRequest::Ids(ids.clone()),
         };
