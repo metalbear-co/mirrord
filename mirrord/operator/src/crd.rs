@@ -947,6 +947,11 @@ pub enum NewOperatorFeature {
     /// branch carrying the source kind and never reconciles it, which surfaces only as a
     /// creation timeout.
     DbBranchSsmParameter,
+    /// This operator applies the copy mode a session requests for its `MirrordSplitConfig`
+    /// entries (`feature.db_branches: { "entries": ..., "copy": { "mode": ... } }`), refusing
+    /// one an entry's `copy.allowedModes` leaves out. Gated so the CLI fails fast: an older
+    /// operator ignores the mode and seeds each branch with the entry's own.
+    DbBranchesSplitConfigCopyMode,
 
     /// This operator runs a Redis branch as a one node Redis Cluster when
     /// `feature.db_branches[].cluster` is set. Gated so the CLI fails fast: an older operator's
@@ -1153,6 +1158,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::RedisClusterBranching => "Redis Cluster branching",
             NewOperatorFeature::DbBranchSsmParameter => {
                 "DB branching connection values from AWS SSM Parameter Store"
+            }
+            NewOperatorFeature::DbBranchesSplitConfigCopyMode => {
+                "db_branches copy mode requested for MirrordSplitConfig entries"
             }
             NewOperatorFeature::Unknown => "unknown feature",
         };

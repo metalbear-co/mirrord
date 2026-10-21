@@ -152,6 +152,11 @@ pub enum OperatorApiError {
     #[error("failed to resolve db_branches from the target's MirrordSplitConfig: {0}")]
     SplitConfigDbBranches(String),
 
+    /// The requested copy mode is missing from the `copy.allowedModes` of a resolved entry. The
+    /// message comes from the operator and names the entry, the mode and the allowed ones.
+    #[error("{0}")]
+    SplitConfigCopyModeNotAllowed(String),
+
     /// A resolved `dbBranches` entry does not parse with this CLI's config version.
     #[error(
         "dbBranches entry `{id}` on MirrordSplitConfig `{split_configs}` uses a setting this \

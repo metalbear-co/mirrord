@@ -517,6 +517,14 @@ pub(crate) enum CliError {
     ))]
     SplitConfigDbBranches(String),
 
+    #[error("{0}")]
+    #[diagnostic(help(
+        "Request one of the entry's allowed modes in `feature.db_branches.copy.mode`, or drop \
+         `copy` to use each entry's own mode. Or ask the MirrordSplitConfig owner to add the mode \
+         to the entry's `copy.allowedModes`."
+    ))]
+    SplitConfigCopyModeNotAllowed(String),
+
     #[error("mirrord operator API failed: {0} failed with {1}")]
     #[diagnostic(help(
     "Please check the following:
@@ -1179,6 +1187,9 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
             OperatorApiError::SplitConfigDbBranches(msg) => Self::SplitConfigDbBranches(msg),
+            OperatorApiError::SplitConfigCopyModeNotAllowed(msg) => {
+                Self::SplitConfigCopyModeNotAllowed(msg)
+            }
             OperatorApiError::ResolvedDbBranchesInvalid(error) => {
                 Self::ResolvedDbBranchesInvalid(error)
             }
