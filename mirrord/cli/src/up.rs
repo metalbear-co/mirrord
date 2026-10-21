@@ -322,7 +322,7 @@ mod tests {
     use std::process::ExitStatus;
 
     use mirrord_config::target::TargetType;
-    use mirrord_up::{IncompatibleTarget, ModeError, SelectError, ServiceMode};
+    use mirrord_up::{IncompatibleTarget, SelectError, ServiceMode, TargetValidationError};
 
     use super::*;
 
@@ -393,7 +393,7 @@ mod tests {
     #[test]
     fn mode_error_buckets_as_config_validation() {
         let v = category(UpCliError::Up(UpError::Mode(
-            ModeError::IncompatibleTargets(vec![IncompatibleTarget {
+            TargetValidationError::IncompatibleTargets(vec![IncompatibleTarget {
                 service: "svc".into(),
                 mode: ServiceMode::Replace,
                 target_type: TargetType::Targetless,

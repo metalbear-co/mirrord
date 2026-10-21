@@ -902,30 +902,39 @@ pub struct SubprocessCfg {
 
 /// Rejects services whose resolved target cannot support the features their
 /// mode enabled.
-pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), ModeError> {
-    let incompatible = cfgs
-        .iter()
-        .filter_map(|cfg| {
-            let target_type = cfg
-                .config
-                .target
-                .path
-                .as_ref()
-                .map_or(TargetType::Targetless, TargetType::from);
+pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), TargetValidationError> {
+    let (mut incompatible, mut unsupported) = (vec![], vec![]);
+    for cfg in cfgs {
+        let target_type = cfg
+            .config
+            .target
+            .path
+            .as_ref()
+            .map_or(TargetType::Targetless, TargetType::from);
 
-            target_type
-                .compatible_with(&cfg.config.feature)
-                .not()
-                .then(|| IncompatibleTarget {
-                    service: cfg.service_name.clone(),
-                    mode: cfg.mode,
-                    target_type,
-                })
-        })
-        .collect::<Vec<_>>();
+        if target_type == TargetType::Label {
+            unsupported.push(UnsupportedTarget {
+                service: cfg.service_name.clone(),
+                target_type,
+            })
+        }
+
+        if target_type.compatible_with(&cfg.config.feature).not() {
+            incompatible.push(IncompatibleTarget {
+                service: cfg.service_name.clone(),
+                mode: cfg.mode,
+                target_type,
+            });
+        }
+    }
+
+    // prefer returning unsupported target types over incompatible targets
+    if unsupported.is_empty().not() {
+        return Err(TargetValidationError::UnsupportedTargetTypes(unsupported));
+    }
 
     if incompatible.is_empty().not() {
-        return Err(ModeError::IncompatibleTargets(incompatible));
+        return Err(TargetValidationError::IncompatibleTargets(incompatible));
     }
 
     Ok(())
@@ -957,12 +966,40 @@ impl std::fmt::Display for IncompatibleTarget {
     }
 }
 
+/// A service whose target type is not (yet) supported.
+#[derive(Debug)]
+pub struct UnsupportedTarget {
+    /// Name of the offending service.
+    pub service: Arc<str>,
+    /// Kind of the target the service resolved to.
+    pub target_type: TargetType,
+}
+
+impl std::fmt::Display for UnsupportedTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            service,
+            target_type,
+        } = self;
+
+        write!(f, "Service `{service}` has a {target_type} target")
+    }
+}
+
 /// Error produced by [`validate_targets`].
 #[derive(Debug, Error, Diagnostic)]
-pub enum ModeError {
+pub enum TargetValidationError {
     /// One or more services resolved to a target their mode cannot use.
     #[error("incompatible mode and target: {}", .0.iter().format("; "))]
     IncompatibleTargets(Vec<IncompatibleTarget>),
+
+    /// One or more services resolved to a target with a type that isn't yet supported.
+    #[error("{}. This isn't supported with `mirrord up` yet.", .0.iter().format("; "))]
+    #[diagnostic(help(
+        "If you need support for this type with `mirrord up` sooner, let us know on \
+        Slack (https://metalbear.com/slack) or GitHub (https://github.com/metalbear-co/mirrord/issues)."
+    ))]
+    UnsupportedTargetTypes(Vec<UnsupportedTarget>),
 }
 
 /// A service that `mirrord up` would refuse to run, found by [`UpConfig::verify_services`].
@@ -1068,7 +1105,9 @@ impl UpConfig {
             assembled.push(subprocess);
         }
 
-        if let Err(ModeError::IncompatibleTargets(incompatible)) = validate_targets(&assembled) {
+        if let Err(TargetValidationError::IncompatibleTargets(incompatible)) =
+            validate_targets(&assembled)
+        {
             errors.extend(
                 incompatible
                     .into_iter()
@@ -2232,8 +2271,12 @@ mod tests {
         )
         .unwrap();
 
-        let ModeError::IncompatibleTargets(incompatible) =
-            validate_targets(&services).expect_err("`a` and `c` are not usable in replace mode");
+        let incompatible = match validate_targets(&services)
+            .expect_err("`a` and `c` are not usable in replace mode")
+        {
+            TargetValidationError::IncompatibleTargets(incompatible) => incompatible,
+            _ => panic!("unexpected error while validating targets"),
+        };
 
         let mut names = incompatible
             .iter()

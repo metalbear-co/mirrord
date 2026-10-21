@@ -18,9 +18,9 @@ use std::{
 };
 
 pub use config::{
-    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, ModeError,
-    PreviewImageError, PreviewImageSource, PreviewImages, SERVICE_LAYER_PATHS, SelectError,
-    ServiceConfig, ServiceError, ServiceMode, SubprocessCfg, UpConfig, WindowsSupportError,
+    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, PreviewImageError,
+    PreviewImageSource, PreviewImages, SERVICE_LAYER_PATHS, SelectError, ServiceConfig,
+    ServiceError, ServiceMode, SubprocessCfg, TargetValidationError, UpConfig, WindowsSupportError,
     preview_image_env,
 };
 use config::{
@@ -153,7 +153,7 @@ pub enum UpError {
     /// A service's mode can't be used with the target it resolved to.
     #[error(transparent)]
     #[diagnostic(transparent)]
-    Mode(#[from] ModeError),
+    Mode(#[from] TargetValidationError),
 
     /// The selected services would delegate to commands unsupported on Windows.
     #[error(transparent)]
