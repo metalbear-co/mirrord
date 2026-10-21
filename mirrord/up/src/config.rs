@@ -113,16 +113,6 @@ impl Into<IncomingMode> for ServiceMode {
     }
 }
 
-#[allow(clippy::from_over_into)]
-impl Into<QueueMode> for ServiceMode {
-    fn into(self) -> QueueMode {
-        match self {
-            ServiceMode::Split | ServiceMode::Replace => QueueMode::Steal,
-            ServiceMode::Mirror => QueueMode::Mirror,
-        }
-    }
-}
-
 /// How a custom mode splits the service's queues.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -156,7 +146,7 @@ pub struct ModeConfig {
     pub incoming: ServiceMode,
 
     /// How the service's queues are split. When not set, every queue defined in the cluster is
-    /// split, mirrored with `incoming: mirror` and stolen otherwise.
+    /// split with `queue_mode: steal`.
     ///
     /// Ignored with `incoming: replace`, which doesn't split queues.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -198,10 +188,13 @@ impl ModeConfig {
 impl From<ServiceMode> for ModeConfig {
     /// The built-in mode as a custom one.
     fn from(incoming: ServiceMode) -> Self {
-        Self {
-            incoming,
-            queues: None,
-        }
+        let queues = match incoming {
+            ServiceMode::Split => Some(QueuesMode::Split),
+            ServiceMode::Mirror => Some(QueuesMode::Mirror),
+            // Replacing the target takes over its queues whole, so they aren't split.
+            ServiceMode::Replace => None,
+        };
+        Self { incoming, queues }
     }
 }
 
@@ -805,7 +798,7 @@ impl ServiceConfig {
                     }
                 };
 
-                let queue_mode = mode.queues.map_or(mode.incoming.into(), Into::into);
+                let queue_mode = mode.queues.map_or(QueueMode::Steal, Into::into);
                 cfg.feature.split_queues =
                     SplitQueuesConfig::all_wildcard_with_mode(key, queue_mode);
             }
@@ -2087,17 +2080,17 @@ mod tests {
             .config
     }
 
-    /// `incoming` and `queues` set the incoming and queue modes; `queues` defaults to following
-    /// `incoming`, and a mode without `incoming` is `split`.
+    /// `incoming` and `queues` set the incoming and queue modes; `queues` defaults to stealing
+    /// whatever `incoming` is, and a mode without `incoming` is `split`.
     #[rstest]
     #[case::empty("{}", IncomingMode::Steal, QueueMode::Steal)]
     #[case::split_queues("{ queues: split }", IncomingMode::Steal, QueueMode::Steal)]
     #[case::mirror_queues("{ queues: mirror }", IncomingMode::Steal, QueueMode::Mirror)]
-    #[case::mirror("{ incoming: mirror }", IncomingMode::Mirror, QueueMode::Mirror)]
-    #[case::mirror_split_queues(
-        "{ incoming: mirror, queues: split }",
+    #[case::mirror("{ incoming: mirror }", IncomingMode::Mirror, QueueMode::Steal)]
+    #[case::mirror_mirror_queues(
+        "{ incoming: mirror, queues: mirror }",
         IncomingMode::Mirror,
-        QueueMode::Steal
+        QueueMode::Mirror
     )]
     fn custom_mode_sets_incoming_and_queue_modes(
         #[case] mode: &str,
