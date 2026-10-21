@@ -30,8 +30,7 @@ use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use mirrord_protocol_api::client::{MirrordClient, MirrordClientRetry};
 #[cfg(target_os = "macos")]
 use mirrord_sip::{
-    MIRRORD_BINARIES_DIR_PATH_BUF, MIRRORD_SIP_X64_FALLBACK_ENV, SipError, SipPatchOptions,
-    extract_sip_binaries,
+    MIRRORD_BINARIES_DIR_PATH_BUF, SipError, SipPatchOptions, extract_sip_binaries,
     rosetta::{MIRRORD_ROSETTA_FALLBACKS_PATH_ENV, rosetta_fallbacks_path},
     sip_patch,
 };
@@ -387,10 +386,6 @@ impl MirrordExecution {
                         "The protected system binary `{}` is missing from mirrord's native macOS bundle. This run requires Rosetta. Run `mirrord diagnose sip-report` to send a report to the mirrord team.",
                         fallback.display(),
                     ));
-                    env_vars.insert(
-                        MIRRORD_SIP_X64_FALLBACK_ENV.to_owned(),
-                        fallback.to_string_lossy().into_owned(),
-                    );
                 }
 
                 result.map(|result| result.path_string())

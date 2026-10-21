@@ -18,8 +18,7 @@ use mirrord_layer_lib::{
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_sip::{
-    FRAMEWORKS_ENV_VAR_NAME, MIRRORD_PATCH_DIR, MIRRORD_SIP_X64_FALLBACK_ENV, SipError,
-    SipPatchOptions, sip_patch,
+    FRAMEWORKS_ENV_VAR_NAME, MIRRORD_PATCH_DIR, SipError, SipPatchOptions, sip_patch,
 };
 use null_terminated::Nul;
 use tracing::{info, trace, warn};
@@ -73,7 +72,7 @@ pub(crate) unsafe fn enable_macos_hooks(
 
 /// Check if the file that is to be executed has SIP and patch it if it does.
 #[mirrord_layer_macro::instrument(level = "trace")]
-pub(super) fn patch_if_sip(path: &str) -> Detour<(String, Option<PathBuf>)> {
+pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     let patch_binaries = PATCH_BINARIES.get().expect("patch binaries not set");
     let skip_patch_binaries = SKIP_PATCH_BINARIES
         .get()
@@ -106,7 +105,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<(String, Option<PathBuf>)> {
         log_info,
     ) {
         Ok(None) => Err(DetourError::Bypass(NoSipDetected(path.to_owned()))),
-        Ok(Some(result)) => Ok((result.path_string(), result.x64_fallback)),
+        Ok(Some(result)) => Ok(result.path_string()),
         Err(SipError::FileNotFound(non_existing_bin)) => {
             trace!(
                 "The application wants to execute {}, SIP check got FileNotFound for {}. \
@@ -237,10 +236,10 @@ pub(crate) unsafe fn patch_sip_for_new_process(
         let mut envp_vec = intercept_environment(Nul::new_unchecked(envp))?;
 
         let frameworks = env::var_os(FRAMEWORKS_ENV_VAR_NAME);
-        let (path_c_string, x64_fallback) = patch_if_sip(path_str)
-            .and_then(|(new_path, x64_fallback)| Ok((CString::new(new_path)?, x64_fallback)))
+        let path_c_string = patch_if_sip(path_str)
+            .and_then(|new_path| Ok(CString::new(new_path)?))
             // Continue also on error, use original path, don't bypass yet, try cleaning argv.
-            .unwrap_or((CString::new(path_str.to_owned())?, None));
+            .unwrap_or(CString::new(path_str.to_owned())?);
 
         // Patching a binary in an app bundle points this variable at the bundle's frameworks,
         // which the new process needs to find them.
@@ -248,12 +247,6 @@ pub(crate) unsafe fn patch_sip_for_new_process(
             && Some(&new_frameworks) != frameworks.as_ref()
         {
             envp_vec.insert_env(FRAMEWORKS_ENV_VAR_NAME, &new_frameworks.to_string_lossy())?;
-        }
-        if let Some(binary) = x64_fallback {
-            envp_vec.insert_env(
-                MIRRORD_SIP_X64_FALLBACK_ENV,
-                binary.to_string_lossy().as_ref(),
-            )?;
         }
         Ok((path_c_string, argv_vec, envp_vec))
     }

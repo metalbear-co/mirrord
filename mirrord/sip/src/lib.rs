@@ -82,6 +82,7 @@ mod main {
         error::Result,
         logger::{SipLogger, SipLoggerGuard},
         main::SipStatus::{NoSip, SipBinary, SipScript},
+        rosetta::{current_macos_version, record_rosetta_fallback},
     };
 
     /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
@@ -105,9 +106,6 @@ mod main {
     /// Must be kept in sync with the version downloaded by `xtask` (see
     /// `xtask/src/tasks/sip_binaries.rs`).
     pub const APPLE_UTILS_VERSION: &str = "v9";
-
-    /// Set on the first patched process when SIP patching had to use an x86_64 system binary.
-    pub const MIRRORD_SIP_X64_FALLBACK_ENV: &str = "MIRRORD_SIP_X64_FALLBACK";
 
     /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
     /// scripts. Uses `temp_dir()`/mirrord/ because this is where the layer is extracted
@@ -458,6 +456,13 @@ mod main {
                 bundle and requires Rosetta. Run `mirrord diagnose sip-report` to send the report \
                 to the mirrord team."
             ));
+            if let Err(error) = current_macos_version().and_then(|os_version| {
+                record_rosetta_fallback(binary.to_string_lossy().into_owned(), os_version)
+            }) {
+                logger.log(format_args!(
+                    "Failed to record the Rosetta fallback for {binary:?}: {error}"
+                ));
+            }
         }
 
         if output.exists() {

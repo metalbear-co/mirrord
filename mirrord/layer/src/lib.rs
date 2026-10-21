@@ -126,27 +126,6 @@ use crate::{
     common::make_proxy_request_with_response, load::LoadType, socket::hooks::MANAGED_ADDRINFO,
 };
 
-#[cfg(target_os = "macos")]
-fn collect_sip_x64_fallback() {
-    let Some(binary_path) = std::env::var_os(mirrord_sip::MIRRORD_SIP_X64_FALLBACK_ENV) else {
-        return;
-    };
-    // SAFETY: the layer constructor runs before user threads start, env mutation won't cause races.
-    unsafe { std::env::remove_var(mirrord_sip::MIRRORD_SIP_X64_FALLBACK_ENV) };
-
-    let _detour_guard = DetourGuard::new();
-    let result = mirrord_sip::rosetta::current_macos_version().and_then(|os_version| {
-        mirrord_sip::rosetta::record_rosetta_fallback(
-            binary_path.to_string_lossy().into_owned(),
-            os_version,
-        )
-    });
-
-    if let Err(error) = result {
-        tracing::warn!(%error, "Failed to collect the SIP x86_64 fallback");
-    }
-}
-
 /// Silences `deny(unused_crate_dependencies)`.
 ///
 /// These dependencies are only used in integration tests.
@@ -274,16 +253,6 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
             },
             log_info,
         ) {
-            if let Some(fallback) = result.x64_fallback.as_ref() {
-                // SAFETY: the layer constructor runs before user threads start, so environment
-                // mutation cannot race another thread.
-                unsafe {
-                    std::env::set_var(
-                        mirrord_sip::MIRRORD_SIP_X64_FALLBACK_ENV,
-                        fallback.as_os_str(),
-                    )
-                };
-            }
             let err = exec::execvp(result.path, args);
             tracing::error!("Couldn't execute {:?}", err);
             return Err(LayerError::ExecFailed(err));
@@ -331,9 +300,6 @@ fn load_only_layer_start(config: &LayerConfig) {
     if config.experimental.guard_std_fds {
         guard_std_fds();
     }
-
-    #[cfg(target_os = "macos")]
-    collect_sip_x64_fallback();
 
     // Check if we're in trace only mode (no agent)
     if is_trace_only_mode() {
@@ -435,9 +401,6 @@ fn layer_start(config: LayerConfig) {
     register_atfork_handlers();
 
     let _detour_guard = DetourGuard::new();
-
-    #[cfg(target_os = "macos")]
-    collect_sip_x64_fallback();
 
     // remove resolved encoded config from env vars when logging them
     let env_vars_print_only: Vec<_> = std::env::vars()
