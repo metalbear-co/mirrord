@@ -3,7 +3,7 @@ name: mirrord-db-branching
 description: Helps users configure mirrord.json for database branching, enabling isolated database copies for safe development and testing. Use when the user wants to set up MySQL, MariaDB, PostgreSQL, MSSQL, MongoDB, Redis, DynamoDB, ClickHouse, Google Spanner, Amazon S3, turbopuffer, or generic branches, configure copy modes, connection sources, schema migrations, IAM authentication, or manage database branches.
 metadata:
   author: MetalBear
-  version: "2.9"
+  version: "2.10"
 ---
 
 # Mirrord DB Branching Skill
@@ -96,7 +96,7 @@ If neither is available, validate against `references/schema.json` in the mirror
 | Database | `type` | Branch location | Copy modes | Notes |
 |----------|--------|-----------------|------------|-------|
 | MySQL | `"mysql"` | Remote | empty, schema, all, filtered | IAM auth, migrations, `dump_args` |
-| MariaDB | `"mariadb"` | Remote | empty, schema, all, filtered | IAM auth, migrations |
+| MariaDB | `"mariadb"` | Remote | empty, schema, all, filtered | IAM auth, migrations, `dump_args` |
 | PostgreSQL | `"pg"` | Remote | empty, schema, all, filtered | IAM auth, migrations, `dump_args`, `connection_settings` |
 | MSSQL | `"mssql"` | Remote | empty, schema, all, filtered | migrations (no `dump_args`) |
 | MongoDB | `"mongodb"` | Remote | empty, all, collection filters | schema-less (no `schema` mode) |
@@ -158,7 +158,9 @@ Enable the matching Helm value on the operator chart, and meet the minimum versi
 | Branch pod inherits target's `imagePullSecrets` for a custom `image` | 3.216.0 | — | 3.216.0 | (per engine above) |
 | ConfigMap connection source | 3.205.0 | 3.255.0 | 3.205.0 | (per engine above) |
 | MySQL/MariaDB copy carries over views, triggers, routines & server settings | 3.210.0 | — | — | (per engine above) |
+| MySQL/MariaDB `roles: full` (accounts, grants, definers) | 3.220.0 | — | — | (per engine above) |
 | `url` connection param as a base for other params | 3.212.0 | 3.264.0 | 3.212.0 | (per engine above) |
+| `dbBranches` defined on the workload's `MirrordSplitConfig` | — | — | — | needs an operator that resolves `dbBranches`; older ones fail the session, naming the required version |
 
 ## Branch Storage & Resources
 
@@ -340,7 +342,26 @@ Requires operator and Helm chart **3.214.0+** and CLI **3.267.0+**; an operator 
 
 ### What MySQL/MariaDB copy carries over
 
-Requires operator **3.210.0+** (earlier operators copy tables and data only, and start the branch server on the image's own settings). In `schema` and `all` modes the branch also gets the source's views, triggers, stored functions and stored procedures. Every copied object is owned by the branch's `root` user — the source's `DEFINER` is dropped, since that account doesn't exist on the branch. The copy runs as the declared connection user: a routine the connection user didn't define itself needs `SHOW_ROUTINE`/`SHOW CREATE ROUTINE` or the global `SELECT` privilege on the source, or `mysqldump`/`mariadb-dump` leaves it out with an `insufficient privileges` comment (`EXECUTE` alone isn't enough). The branch server also starts with the source's `sql_mode`, `character_set_server`, `collation_server`, `time_zone`, `group_concat_max_len`, `explicit_defaults_for_timestamp` and transaction isolation (a cluster admin's `dbServerArgs` still take precedence) — keep the branch `version` on the source's major version, since an incompatible `sql_mode` flag can stop the branch server from starting.
+Requires operator **3.210.0+** (earlier operators copy tables and data only, and start the branch server on the image's own settings). In `schema` and `all` modes the branch also gets the source's views, triggers, stored functions and stored procedures. Every copied object is owned by the branch's `root` user — the source's `DEFINER` is dropped, since that account doesn't exist on the branch (unless a cluster admin sets `roles: full`, see [Roles, Permissions, and Credentials](#roles-permissions-and-credentials-mysqlmariadb) below — then an object keeps a definer the branch recreates). The copy runs as the declared connection user: a routine the connection user didn't define itself needs `SHOW_ROUTINE`/`SHOW CREATE ROUTINE` or the global `SELECT` privilege on the source, or `mysqldump`/`mariadb-dump` leaves it out with an `insufficient privileges` comment (`EXECUTE` alone isn't enough). The branch server also starts with the source's `sql_mode`, `character_set_server`, `collation_server`, `time_zone`, `group_concat_max_len`, `explicit_defaults_for_timestamp` and transaction isolation (a cluster admin's `dbServerArgs` still take precedence) — keep the branch `version` on the source's major version, since an incompatible `sql_mode` flag can stop the branch server from starting.
+
+### Roles, Permissions, and Credentials (MySQL/MariaDB)
+
+Also cluster-admin Helm config, not a `db_branches` field. Requires operator **3.220.0+**. A branch pod is a fresh MySQL/MariaDB server, so mirrord recreates the source database's accounts in it; how much it recreates is controlled per cluster via `operator.mysqlBranchConfig.dbPod.roles` / `operator.mariadbBranchConfig.dbPod.roles`, each `"empty"` (default) or `"full"`:
+
+```yaml helm-values
+operator:
+  mysqlBranchConfig:
+    dbPod:
+      roles: "empty" # or "full"
+  mariadbBranchConfig:
+    dbPod:
+      roles: "empty" # or "full"
+```
+
+- `empty` (default): recreates only the user declared in the branch's `connection` config, with every privilege on the branch. The copy drops definers, and the app connects through mirrord's env overrides as `root`.
+- `full`: recreates the source accounts with their grants (every account when the declared user has `SELECT` on the `mysql` schema, otherwise only the declared user), and copied objects keep a definer the branch recreates. mirrord's env overrides then only redirect the connection address — the app keeps using its own user/password for a `params` connection, but a `url` connection is still replaced whole (the app ends up as `root`).
+
+The declared user can also log into the branch with its real password hash in either mode (never the plaintext). Accounts other than the declared user are recreated without a password and can't log in. Accounts are fixed at branch creation — changing the Helm value or rotating a source password affects only new branches. Accounts the server or cloud provider owns (`root`, `mysql.sys`/`mariadb.sys`, `rdsadmin`, `cloudsqladmin`, …) are always skipped. See the MySQL/MariaDB docs pages for the full login-plugin and TLS/X.509 caveats.
 
 ### Filtered clone (SQL engines: MySQL, MariaDB, PostgreSQL, MSSQL, ClickHouse, Spanner)
 
@@ -378,10 +399,10 @@ Redis supports `empty` / `all` (remote only; local always starts empty). Narrow 
 { "location": "remote", "copy": { "mode": "all", "patterns": ["user:*", "session:*"] } }
 ```
 
-### Custom dump arguments (`dump_args`) — MySQL & PostgreSQL only
+### Custom dump arguments (`dump_args`) — MySQL, MariaDB & PostgreSQL only
 
-Customize `mysqldump` / `pg_dump`. Available in all copy modes. **MSSQL, MongoDB, ClickHouse do not support `dump_args`.**
-- MySQL: default passes no args (tool uses its `--opt` defaults). Listed args are passed as-is; `[]` removes defaults.
+Customize `mysqldump` / `mariadb-dump` / `pg_dump`. Available in all copy modes. **MSSQL, MongoDB, ClickHouse do not support `dump_args`** (they use their own internal dump mechanism or don't accept custom arguments).
+- MySQL / MariaDB: default passes no args (the tool uses its own `--opt` defaults). Listed args are passed to the tool as-is and can leave out what the copy mode copies, such as stored routines with `--skip-routines`; `[]` removes the tool's built-in defaults.
 - PostgreSQL: setting `dump_args` **replaces** defaults entirely (defaults are `--no-owner --no-acl`); include them if you want to keep them; `[]` removes all.
 
 ```json mirrord=feature.db_branches[]
@@ -701,6 +722,57 @@ mirrord db-branches -A destroy --all
 mirrord db-branches connections
 ```
 
+## Branches Defined on the Workload
+
+A cluster admin can define a workload's branches once, on its `MirrordSplitConfig`, so every session takes them from there instead of repeating the same `db_branches` entry in each developer's `mirrord.json`. This is useful when several services share a database and their branches should match, or when `mirrord exec` and `mirrord up` must not drift from each other.
+
+The entries go under `dbBranches` on the workload's `MirrordSplitConfig` — the same resource used for [queue splitting](https://metalbear.com/mirrord/docs/sharing-the-cluster/queue-splitting) (see the `mirrord-kafka`/`mirrord-temporal` skills); it needs no `queues`. Each entry is a `db_branches` entry with **camelCase** keys, an `id` sessions refer to, and a `copy` block that also lists the `allowedModes` a session may pick. An entry differs from an inline `db_branches` entry in three ways, because it lives on the cluster rather than on a developer's machine:
+
+- `location` is not accepted — a split config only branches databases that run in the cluster, never a local Redis.
+- `migrations` need `name` (the source database) and can't use `path` (a local directory the operator can't read) — bake the files into an image and use `image` with `locations` (flyway) or `searchPath` (liquibase), or the `container` flavor.
+- `generic` entries have no `copy.mode` or `copy.allowedModes` — a generic branch either runs a copy Job or starts empty.
+
+```yaml crd
+apiVersion: queues.mirrord.metalbear.co/v1
+kind: MirrordSplitConfig
+metadata:
+  name: cake-maker
+  namespace: bakery
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cake-maker
+  dbBranches:
+    - id: orders-pg
+      type: pg
+      version: "16"
+      ttlSecs: 1800
+      connection:
+        url: DATABASE_URL
+      copy:
+        mode: schema
+        allowedModes: [schema, empty]
+```
+
+The operator validates every entry when the resource is applied and reports the verdict on its `Accepted` condition, so a typo shows up in `kubectl describe mirrordsplitconfig cake-maker -n bakery` instead of at the first session.
+
+A session asks for every entry with `"*"`, or for specific ones by id, under the usual `feature.db_branches`:
+
+```json mirrord
+{ "feature": { "db_branches": "*" } }
+```
+
+```json mirrord
+{ "feature": { "db_branches": ["orders-pg", "sessions-redis"] } }
+```
+
+- An id that matches no entry fails the session, naming the ids the workload actually has. A workload with no `dbBranches` gives no branches, and the session continues without them.
+- **Inline entries in `mirrord.json` win entirely** — with them, the session ignores the workload's `dbBranches` and reports which `MirrordSplitConfig` it passed over.
+- The actual branch id is the entry id plus the session key (`orders-pg-a1b2c3`), so every service started under one key that points at the same entry shares one branch: the first session creates it from its entry, later ones attach and only have their copy mode checked — a service whose entry asks for a different mode than the branch was created with fails, naming the service that created it. Two sessions that request the same branch at once end up on one branch.
+- Each branch records the source it was copied from (host, port, database) in its status, as far as the operator can see without reading Secrets. If two branches under one key were copied from different-looking sources, the session that got the second one is told; give both entries the same id if they were meant to be one branch.
+- The feature needs a mirrord Operator that resolves `dbBranches`; against an older one the session fails before it starts, naming the required operator version.
+
 ## Common Pitfalls
 
 | Issue | Solution |
@@ -721,6 +793,9 @@ mirrord db-branches connections
 | `container` migration fails re: connection variables | A `connection` via `secret`/`gcp_secret_manager`/`aws_secrets_manager` needs `env_var_name` set so the operator can redirect it into the migration Job's environment |
 | Generic branch never ready | Use an `http_get`/`exec` readiness probe; plain TCP can pass before the service is usable |
 | Branch creation slow / storage-related failure | Since operator 3.194.0 branches use per-branch PVCs by default (20Gi); an admin can tune sizes/`storageClassName` — see [Branch Storage & Resources](#branch-storage--resources) |
+| `"db_branches": "*"` / an id fails, naming ids the workload has | The id doesn't match any entry on the workload's `MirrordSplitConfig` `dbBranches` — see [Branches Defined on the Workload](#branches-defined-on-the-workload) |
+| Workload's `dbBranches` seemingly ignored | An inline `db_branches` entry in `mirrord.json` always wins over the workload's `dbBranches` — remove it to use the workload's definition |
+| MySQL/MariaDB branch login fails for the declared user | Check `operator.mysqlBranchConfig.dbPod.roles` / `mariadbBranchConfig.dbPod.roles` — `full` needs the login plugin loaded on the branch server, see [Roles, Permissions, and Credentials](#roles-permissions-and-credentials-mysqlmariadb) |
 
 ## What to Ask (only if critical)
 

@@ -11,6 +11,7 @@ This skill helps AI agents:
 - **Run** schema migrations against a branch (Flyway or Liquibase)
 - **Configure** IAM authentication for AWS RDS, GCP Cloud SQL, and DynamoDB
 - **Manage** database branches via CLI commands
+- **Reference** branches a cluster admin defined once on the workload's `MirrordSplitConfig` (`"db_branches": "*"`)
 
 ## Example prompts
 
@@ -41,7 +42,7 @@ This skill helps AI agents:
 | Database | `type` | Branch location | Notes |
 |----------|--------|-----------------|-------|
 | MySQL | `"mysql"` | Remote | IAM auth, migrations, `dump_args` |
-| MariaDB | `"mariadb"` | Remote | IAM auth, migrations |
+| MariaDB | `"mariadb"` | Remote | IAM auth, migrations, `dump_args` |
 | PostgreSQL | `"pg"` | Remote | IAM auth, migrations, `dump_args`, `connection_settings`, `query_params` |
 | MSSQL | `"mssql"` | Remote | migrations |
 | MongoDB | `"mongodb"` | Remote | collections (no `schema` mode) |
