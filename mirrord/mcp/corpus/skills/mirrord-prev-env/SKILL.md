@@ -3,7 +3,7 @@ name: mirrord-prev-env
 description: Help users create and manage mirrord preview environments — running a modified service as an isolated pod in a shared Kubernetes cluster, scoped by an environment key and HTTP/queue traffic filtering, so teams can validate and review changes against real traffic without affecting live services. Use when a developer wants to run "mirrord preview" ad hoc, share a preview via a link (mirrord-share-ingress), or wire preview environments into CI with the metalbear-co/mirrord-preview GitHub Action (e.g. per-PR previews, least-privilege cluster access).
 metadata:
   author: MetalBear
-  version: "2.7"
+  version: "2.8"
 ---
 
 # Mirrord Preview Environment Skill
@@ -191,7 +191,42 @@ md := metadata.Pairs("baggage", baggage)
 ctx := metadata.NewOutgoingContext(c, md)
 ```
 
-Using `baggage` (W3C distributed-tracing baggage) means standards-aware libraries propagate it automatically.
+Using `baggage` (W3C distributed-tracing baggage) means standards-aware libraries propagate it automatically. For per-language OpenTelemetry setup, custom headers, and troubleshooting a hop that drops the header, see the `mirrord-header-propagation` skill — it can audit and fix propagation across your services for you.
+
+### Building a Preview From Your Manifests
+
+By default the preview pod is a copy of the target's **live** pod spec. Pass `--resource` to build it from the Kubernetes manifests you already keep for the service instead — useful when a PR changes the Deployment or its ConfigMaps along with the code, and the preview should run with those changes before they're deployed:
+
+```bash
+mirrord preview start -t deployment/app -i myrepo/app:pr-123 -k pr-123 --resource ./k8s/
+```
+
+`--resource` takes a file or a directory (only the `*.yaml`/`*.yml` files directly in it are read) and can be repeated. The same list lives in config as `feature.preview.spec_resources`:
+
+```json mirrord
+{
+  "target": "deployment/app",
+  "key": "pr-123",
+  "feature": {
+    "preview": {
+      "image": "myrepo/app:pr-123",
+      "spec_resources": ["./k8s/app-deployment.yaml", "./k8s/configmap.yaml"]
+    }
+  }
+}
+```
+
+mirrord only takes what can affect the preview pod from the files: **the target itself** (its pod template becomes the preview pod's spec, with your image — the live target is used if the files don't define it) and **the ConfigMaps/Secrets the pod uses** (via `env`, `envFrom`, or volumes). Everything else (an Ingress, another Deployment) is skipped even if it changed, and objects identical to what's live are skipped too. Live objects are never modified — a changed or new ConfigMap/Secret is created as a copy owned by the preview and deleted when the preview ends; Secret values are sent to the operator the same way as `secret_mounts`, never inlined on the `PreviewSession` resource.
+
+Before creating anything, mirrord validates the files: a non-YAML file fails with its line/column before the cluster is contacted, and every changed object is dry-run validated by the cluster (creates nothing) — a rejection stops the command with the API server's reason, and a preview already running under the same key is left alone. The comparison and dry runs use **your own credentials**, not the operator's, so the operator never reads your Secrets — you need `get` on the target and its ConfigMaps/Secrets, and `create` (dry-run) on their kinds. A CI identity that deploys the service usually has both; `mirrord-operator-ci` alone has neither, but `--resource` still works without them — mirrord says which objects it couldn't read or validate, falls back to the file version for those, and a rejected object fails the preview only when the operator creates it.
+
+`mirrord preview diff` runs the same checks and prints what differs, without creating anything:
+
+```bash
+mirrord preview diff -t deployment/app --resource ./k8s/
+```
+
+Requires CLI **3.266.0+** and operator **3.213.0+** (an older operator makes the CLI refuse `--resource` rather than falling back silently), and isn't supported yet with a management-only multi-cluster operator (the target lives in another cluster than the one the CLI talks to).
 
 ## Targeting scaled-to-zero workloads (queue splitting only)
 
@@ -241,7 +276,7 @@ Requires operator **3.205.0+** and CLI **3.256.0+**, plus `create`/`delete`/`pat
 
 By default, reaching a preview requires injecting the `baggage: mirrord-session=<key>` header — fine for developers (via the [mirrord Browser Extension](https://metalbear.com/mirrord/docs/using-mirrord/incoming-traffic/debug-from-browser) or `curl`), but a non-starter for a non-technical stakeholder. **`mirrord-share-ingress`** moves that header injection to a server-side component so a plain HTTPS link works with nothing to install on the recipient's side.
 
-- Each shareable preview is reachable at its own host, `<slug>.<shareDomain>`, printed by `mirrord preview start` as the `preview URL`. The `slug` mirrors the preview's key with a random suffix (e.g. `pr-myrepo-a1b2c3`) — recognizable but unguessable ([stable share hosts](#stable-share-hosts) drop the suffix). When the TTL expires the host stops resolving and falls through to a "preview not found" page that redirects to your app domain.
+- Each shareable preview is reachable at its own host, `<slug>.<shareDomain>`, printed by `mirrord preview start` as the `preview URL`. The `slug` mirrors the preview's key with a random suffix (e.g. `pr-myrepo-a1b2c3`) — recognizable but unguessable ([stable share hosts](#stable-share-hosts) drop the suffix). When the TTL expires the host stops resolving and falls through to a "preview not found" page: by default it redirects to your app domain after a few seconds; with `shareIngress.notFound.redirect: false` (chart **3.215.0+**) it's a plain 404 with no redirect, refresh, or JavaScript, and `appDomain` isn't needed.
 - **The preview URL works with any HTTP filter.** A preview with a custom `http_filter` (a path filter, a different header, composed filters) additionally routes requests carrying the share link's injected baggage header, so its own filter keeps working for regular traffic while the link always reaches the preview.
 
 **How it works:** `mirrord-share-ingress` runs as its own Deployment + Service, watches Preview Environments, matches each request's host to a live preview, injects `baggage: mirrord-session=<key>`, and forwards to that preview's target Service in-cluster. The operator's filtered steal then routes the request to the preview pod — exactly as the browser extension's header would, matching the injected header in addition to the session's own filter.
@@ -264,6 +299,14 @@ By default, reaching a preview requires injecting the `baggage: mirrord-session=
    helm install mirrord-share-ingress metalbear/mirrord-operator-share-ingress \
      --set shareIngress.shareDomain=preview.example.com \
      --set shareIngress.appDomain=example.com
+   ```
+
+   To handle missing previews yourself instead of redirecting, turn the redirect off (chart **3.215.0+**) — then `appDomain` isn't needed:
+
+   ```bash
+   helm install mirrord-share-ingress metalbear/mirrord-operator-share-ingress \
+     --set shareIngress.shareDomain=preview.example.com \
+     --set shareIngress.notFound.redirect=false
    ```
 
 3. Point a wildcard DNS record `*.preview.example.com` at your ingress, and create an Ingress with a wildcard certificate that **preserves the `Host` header** and routes to the share-ingress Service (NGINX Ingress preserves `Host` by default).
@@ -480,6 +523,7 @@ The typical flow: on PR open/push, CI builds the image(s), pushes to a registry,
 | `preview start` fails with `no Pod is ready to be a session target` | The preview uses HTTP filtering or DB branching, which need a running target pod, but the target has zero running pods. Only a **queue-splitting-only** preview (or a [CronJob target](#targeting-cronjobs)) can target a workload with no running pods — see [Targeting scaled-to-zero workloads](#targeting-scaled-to-zero-workloads-queue-splitting-only). |
 | CronJob preview rejects `network.incoming`/`idle`/`replicas`/a `value_pattern` branch param | Expected — a CronJob preview has no long-running pod. See [Targeting CronJobs](#targeting-cronjobs). |
 | Second preview session fails with `share host <host> is already held by...` | [Stable share hosts](#stable-share-hosts) are enabled and another live session's key sanitizes to the same host. Stop that session or pick a different key. |
+| `preview start`/`diff --resource` refuses, or mirrord says it couldn't read/validate an object | Needs CLI 3.266.0+ and operator 3.213.0+; not yet supported with a management-only multi-cluster operator. Without `get`/`create` (dry-run) on the target or its ConfigMaps/Secrets, mirrord falls back to the file version for those objects and only fails the preview if the operator later rejects one — see [Building a Preview From Your Manifests](#building-a-preview-from-your-manifests). |
 
 ## Response Guidelines
 
