@@ -7,7 +7,7 @@ description: >
   or managing multiple mirrord sessions' lifecycle in one command.
 metadata:
   author: MetalBear
-  version: "1.6"
+  version: "1.8"
 ---
 
 # mirrord up Skill
@@ -48,7 +48,7 @@ Trigger on questions like:
 - One **`mirrord-up.yaml`** defines all sessions under `services`.
 - Each `services` entry is a mirrord process started as part of the `mirrord up` session.
 - Services run **in parallel**. The overall session stops on interrupt (`ctrl-c`) or when **any** child mirrord session shuts down.
-- Each service has a **mode**: `split` (default) steals incoming traffic matching an `http_filter`. If no filter is set, mirrord generates one from the session key: `baggage: .*mirrord-session={key}.*`. `replace` hands the local process the whole service instead, and `mirror` copies matching traffic to the local process while the deployed service keeps serving it — see [Service modes](#service-modes) below.
+- Each service has a **mode**: `split` (default) steals incoming traffic matching an `http_filter`. If no filter is set, mirrord generates one from the session key: `baggage: .*mirrord-session={key}.*`. `replace` hands the local process the whole service instead, and `mirror` copies matching traffic to the local process while the deployed service keeps serving it — see [Service modes](#service-modes) below. For a request to reach every service in the session, not just the first one it hits, each service must forward `baggage` to the next — see the `mirrord-header-propagation` skill, which sets this up across a codebase.
 - The whole `mirrord-up.yaml` file is rendered through Tera templating before it's parsed, so it can reference the session key or environment variables — see [Templating](#templating) below.
 
 ## Critical first steps
@@ -245,6 +245,8 @@ A service in **`replace` mode doesn't use queue splitting**: the deployed worklo
 
 - `command`: array of strings (binary + args)
 - `type`: `exec` or `container` (default `exec`) — runs via `mirrord exec` or `mirrord container`
+- `directory`: working directory for `command`. Relative paths resolve against the directory containing `mirrord-up.yaml`, and the directory must exist. Only valid with `type: exec`. When unset, `command` runs in the directory `mirrord up` was started from.
+- `pre_command`: array of strings for a command that runs to completion **before** this service's mirrord session starts (e.g. a build step) — locally, without mirrord, in the same `directory` as `command`. The session only starts if it exits successfully; a failing or unstartable `pre_command` shows its output and error, skips this service, and leaves the other services running.
 
 ```yaml mirrord-up=services.*
 run:
@@ -255,6 +257,14 @@ run:
 ```yaml mirrord-up=services.*
 run:
   command: ["node", "app.js"]
+```
+
+```yaml mirrord-up=services.*
+run:
+  directory: services/api
+  # Built locally without mirrord, before the session starts
+  pre_command: ["npm", "run", "build"]
+  command: ["node", "dist/app.js"]
 ```
 
 ### Templating
