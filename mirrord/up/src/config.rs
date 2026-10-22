@@ -514,6 +514,16 @@ pub struct ServiceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) config_patch: Option<serde_json::Value>,
 
+    /// Container image to run in this service's preview environment, as a full image ref, e.g.
+    /// `ghcr.io/acme/api:3f9a2c1`.
+    ///
+    /// Used only by `mirrord preview up`, which starts a preview for every service that has an
+    /// image. `mirrord preview up --image <service>=<ref>` and `MIRRORD_<SERVICE>_IMAGE` take
+    /// precedence over it. `mirrord up` ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
+    pub(crate) image: Option<String>,
+
     /// How to launch the service's local process.
     pub(crate) run: RunConfig,
 }
@@ -1206,6 +1216,7 @@ impl CollectAnalytics for &UpConfig {
         let mut count_skip: u32 = 0;
         let mut count_context: u32 = 0;
         let mut count_config_patch: u32 = 0;
+        let mut count_image: u32 = 0;
         let mut count_directory: u32 = 0;
         let mut count_pre_command: u32 = 0;
 
@@ -1227,6 +1238,7 @@ impl CollectAnalytics for &UpConfig {
                 run,
                 context,
                 config_patch,
+                image,
             } = svc;
 
             if *target != TargetConfig::UNSPECIFIED {
@@ -1258,6 +1270,9 @@ impl CollectAnalytics for &UpConfig {
             if config_patch.is_some() {
                 count_config_patch += 1;
             }
+            if image.is_some() {
+                count_image += 1;
+            }
             if run.directory.is_some() {
                 count_directory += 1;
             }
@@ -1280,6 +1295,7 @@ impl CollectAnalytics for &UpConfig {
         config_fields_used.add("skip", count_skip);
         config_fields_used.add("context", count_context);
         config_fields_used.add("config_patch", count_config_patch);
+        config_fields_used.add("image", count_image);
         config_fields_used.add("directory", count_directory);
         config_fields_used.add("pre_command", count_pre_command);
         analytics.add("config_fields_used", config_fields_used);
@@ -2536,6 +2552,7 @@ mod tests {
                     "skip": 0,
                     "context": 0,
                     "config_patch": 0,
+                    "image": 0,
                     "directory": 0,
                     "pre_command": 0
                 },
