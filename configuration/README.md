@@ -1,7 +1,7 @@
 ---
 title: Configuration Examples
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-10-19T00:00:00.000Z
+lastmod: 2026-10-22T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -13,7 +13,7 @@ tags:
   - open source
   - team
   - enterprise
-description: Getting started with mirrord configuration.
+description: Configure mirrord with a mirrord.json file, from a minimal setup to templated values and complete example configurations.
 ---
 
 # Getting Started

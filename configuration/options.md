@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-10-19T00:00:00.000Z
+lastmod: 2026-10-22T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -855,7 +855,7 @@ on process execution, delaying the layer startup and connection to the external 
 Controls mirrord features.
 
 See the
-[technical reference, Technical Reference](https://metalbear.com/mirrord/docs/reference/)
+[technical reference, Technical Reference](https://metalbear.com/mirrord/docs/reference/architecture)
 to learn more about what each feature does.
 
 The [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options
@@ -908,7 +908,7 @@ have support for a shortened version, that you can see [here](#root-shortened).
 ### feature.copy_target {#feature-copy_target}
 
 Creates a new copy of the target. mirrord will use this copy instead of the original target
-(e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/overview/teams/?utm_source=copytarget).
+(e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/getting-started/what-is-mirrord#mirrord-for-teams).
 
 This feature is not compatible with rollout targets and running without a target
 (`targetless` mode).
@@ -1509,7 +1509,8 @@ app's untouched credential vars stay valid against the branch:
 `token`, `org`, and `bucket` are custom params - any key works under `connection.params`,
 not just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use
 params mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and
-`gcp_secret_manager`/`aws_secrets_manager` sources are not supported for generic branches.
+`gcp_secret_manager`/`aws_secrets_manager`/`aws_ssm_parameter` sources are not supported for
+generic branches.
 
 Entrypoint args override for the branch container.
 
@@ -2470,7 +2471,7 @@ Can be set to one of the options:
 Which environment variables to load from the remote pod are controlled by setting either
 [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).
 
-See the environment variables [reference](https://metalbear.com/mirrord/docs/reference/env/) for more details.
+See the environment variables [reference](https://metalbear.com/mirrord/docs/reference/env) for more details.
 
 ```json
 {
@@ -2625,7 +2626,7 @@ The logic for choosing the behavior is as follows:
 4. If none of the above match, use the default behavior (mode).
 
 For more information, check the file operations
-[technical reference](https://metalbear.com/mirrord/docs/reference/fileops/).
+[technical reference](https://metalbear.com/mirrord/docs/reference/fileops).
 
 ```json
 {
@@ -2969,7 +2970,7 @@ Defaults to `true`.
 
 Controls mirrord network operations.
 
-See the network traffic [reference](https://metalbear.com/mirrord/docs/reference/traffic/)
+See the network traffic [reference](https://metalbear.com/mirrord/docs/reference/traffic)
 for more details.
 
 ```json
@@ -3091,7 +3092,7 @@ pod, everything else will go through local.
 
 Controls the incoming TCP traffic feature.
 
-See the incoming [reference](https://metalbear.com/mirrord/docs/reference/traffic/#incoming) for more
+See the incoming [reference](https://metalbear.com/mirrord/docs/reference/traffic#incoming) for more
 details.
 
 Incoming traffic supports 3 [modes](#feature-network-incoming-mode) of operation:
@@ -3900,7 +3901,7 @@ with `EAFNOSUPPORT`, like on a host without an IPv6 stack.
 
 Tunnel outgoing network operations through mirrord.
 
-See the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic/#outgoing) for more
+See the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic#outgoing) for more
 details.
 
 You can use either the `true` or `false` values to turn outgoing traffic tunneling on or off.
@@ -4844,7 +4845,8 @@ Priority (highest to lowest):
 ## kube_context {#root-kube_context}
 
 Kube context to use from the kubeconfig file.
-Will use current context if not specified.
+If not specified, uses `kube_context` from the global `~/.mirrord/mirrord.json`, then the
+kubeconfig's current context.
 
 ```json
 {
