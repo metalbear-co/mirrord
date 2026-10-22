@@ -918,6 +918,14 @@ pub(crate) enum CliError {
     #[error("no preview environment was started, the checks failed for: {}", .0.join(", "))]
     PreviewUpInvalid(Vec<String>),
 
+    #[error("no key to stop preview environments under")]
+    #[diagnostic(help(
+        "Without `--key` or `MIRRORD_KEY`, the key is the git branch, but on `main`, `master` or \
+         without a branch `mirrord preview up` uses a random key. Pass the key it printed with \
+         `--key <key>`."
+    ))]
+    PreviewDownKeyRequired,
+
     #[error("preview environments failed to start for: {}", .0.join(", "))]
     #[diagnostic(help(
         "Run `mirrord preview up` with the same key again, it replaces the session of every \

@@ -1,5 +1,6 @@
 //! `mirrord preview up`: starts a preview environment for every service of a `mirrord-up.yaml`
 //! that has an image, all under one key, and returns once each one is ready, idle or failed.
+//! `mirrord preview down` deletes them again.
 //!
 //! Every service's session is created the way `mirrord preview start` creates one, from the
 //! config `mirrord_up::resolve_preview_services` assembles for it. All sessions are prepared
@@ -21,10 +22,14 @@ use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_up::{SubprocessCfg, UpError, load_up_config, preview_image_env};
 
 use super::{
-    PreparedPreview, create_preview_api, load_manifests, manifest_sources, target_namespace,
+    PreparedPreview, create_preview_api, load_manifests, manifest_sources, preview_stop,
+    target_namespace,
 };
 use crate::{
-    config::{DEFAULT_PREVIEW_CONFIG_FILE, ManifestSourceArgs, PreviewCommonArgs, PreviewUpArgs},
+    config::{
+        DEFAULT_PREVIEW_CONFIG_FILE, ManifestSourceArgs, PreviewCommonArgs, PreviewStopArgs,
+        PreviewUpArgs,
+    },
     data::{GlobalConfig, UserData},
     error::{CliError, CliResult},
 };
@@ -279,6 +284,32 @@ async fn prepare_service(
         progress,
     )
     .await
+}
+
+/// Handle `mirrord preview down`: `mirrord preview stop -k <key> -A`, with the key found the
+/// way `mirrord preview up` finds it.
+///
+/// Reads no config file: every preview under the key goes, whichever services it was started
+/// for, so `-f` doesn't apply.
+pub(super) async fn preview_down(
+    common: &PreviewCommonArgs,
+    watch: drain::Watch,
+    user_data: &UserData,
+) -> CliResult<()> {
+    let key = findable_key(common.key.as_deref()).ok_or(CliError::PreviewDownKeyRequired)?;
+    let common = PreviewCommonArgs {
+        key: Some(key),
+        config_file: None,
+        context: common.context.clone(),
+    };
+    let args = PreviewStopArgs {
+        glob: None,
+        target: None,
+        namespace: None,
+        all_namespaces: true,
+    };
+
+    preview_stop(&common, args, true, watch, user_data).await
 }
 
 /// The key `mirrord preview up` runs under when it can be found again: `--key`, then

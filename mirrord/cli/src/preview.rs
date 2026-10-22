@@ -94,7 +94,10 @@ pub(crate) async fn preview_command(
         PreviewCommand::Status(status_args) => {
             preview_status(&common, status_args, watch, user_data).await
         }
-        PreviewCommand::Stop(stop_args) => preview_stop(&common, stop_args, watch, user_data).await,
+        PreviewCommand::Stop(stop_args) => {
+            preview_stop(&common, stop_args, false, watch, user_data).await
+        }
+        PreviewCommand::Down => up::preview_down(&common, watch, user_data).await,
         PreviewCommand::Logs(logs_args) => preview_logs(&common, logs_args, watch, user_data).await,
         PreviewCommand::Diff(diff_args) => preview_diff(&common, diff_args, watch, user_data).await,
     }
@@ -1176,11 +1179,12 @@ async fn print_session_logs(
 /// Handle `mirrord preview stop` command.
 ///
 /// Deletes preview environments matching the given key and, optionally, a target filter and
-/// namespace.
+/// namespace. With `missing_ok`, finding none succeeds instead of failing.
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 async fn preview_stop(
     common: &PreviewCommonArgs,
     args: PreviewStopArgs,
+    missing_ok: bool,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
@@ -1242,6 +1246,11 @@ async fn preview_stop(
         .collect();
 
     if sessions_to_delete.is_empty() {
+        if missing_ok {
+            subtask.success(Some("no sessions to delete"));
+            progress.success(None);
+            return Ok(());
+        }
         subtask.failure(None);
         return Err(CliError::PreviewNotFound(matcher.as_str().to_owned()));
     }
