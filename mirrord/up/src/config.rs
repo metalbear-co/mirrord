@@ -1146,6 +1146,101 @@ impl UpConfig {
         Ok(())
     }
 
+    /// Picks the image of every service for `mirrord preview up`, writes it into the service's
+    /// `image`, and drops the services that have none: those get no preview.
+    ///
+    /// `flags` are the `--image <service>=<ref>` values. A service's image comes from its flag,
+    /// then its `MIRRORD_<SERVICE>_IMAGE` environment variable (see [`preview_image_env`]; empty
+    /// counts as unset), then its `image`. `skip` doesn't apply: the images pick the services.
+    pub fn select_preview_images(
+        &mut self,
+        flags: &[String],
+    ) -> Result<PreviewImages, PreviewImageError> {
+        let mut from_flags: HashMap<&str, &str> = HashMap::new();
+        for flag in flags {
+            let (service, image) = flag
+                .split_once('=')
+                .filter(|(service, image)| service.is_empty().not() && image.is_empty().not())
+                .ok_or_else(|| PreviewImageError::InvalidFlag(flag.clone()))?;
+            if self.services.contains_key(service).not() {
+                return Err(PreviewImageError::UnknownService {
+                    service: service.to_owned(),
+                    available: self
+                        .services
+                        .keys()
+                        .map(|name| name.to_string())
+                        .sorted()
+                        .collect(),
+                });
+            }
+            if from_flags.insert(service, image).is_some() {
+                return Err(PreviewImageError::DuplicateFlag(service.to_owned()));
+            }
+        }
+
+        let mut env_names: HashMap<String, Vec<&Arc<str>>> = HashMap::new();
+        for service in self.services.keys() {
+            env_names
+                .entry(preview_image_env(service))
+                .or_default()
+                .push(service);
+        }
+        let mut from_env = HashMap::new();
+        for (env, services) in env_names {
+            let Some(image) = std::env::var(&env)
+                .ok()
+                .filter(|image| image.is_empty().not())
+            else {
+                continue;
+            };
+            if let [service] = services.as_slice() {
+                from_env.insert((*service).clone(), image);
+            } else {
+                return Err(PreviewImageError::AmbiguousEnv {
+                    env,
+                    services: services
+                        .iter()
+                        .map(|name| name.to_string())
+                        .sorted()
+                        .collect(),
+                });
+            }
+        }
+
+        let mut images = PreviewImages::default();
+        self.services.retain(|name, service| {
+            let picked = match from_flags.get(name.as_ref()) {
+                Some(image) => Some(((*image).to_owned(), PreviewImageSource::Flag)),
+                None => match from_env.remove(name) {
+                    Some(image) => Some((image, PreviewImageSource::Env)),
+                    None => service
+                        .image
+                        .take()
+                        .map(|image| (image, PreviewImageSource::File)),
+                },
+            };
+
+            match picked {
+                Some((image, source)) => {
+                    service.image = Some(image);
+                    images.sources.insert(name.clone(), source);
+                    true
+                }
+                None => {
+                    images.skipped.push(name.clone());
+                    false
+                }
+            }
+        });
+        images.skipped.sort();
+
+        if self.services.is_empty() {
+            return Err(PreviewImageError::NoImages);
+        }
+
+        Ok(images)
+    }
+
     /// Produces one [`SubprocessCfg`] per service defined in the configuration.
     ///
     /// `resolved_targets` must be a [`HashMap`] with an entry for
@@ -1248,6 +1343,83 @@ pub enum SelectError {
     #[error("no services to launch: every service is marked `skip: true`")]
     #[diagnostic(help("Name a service explicitly to run it, or remove a `skip: true` flag."))]
     AllSkipped,
+}
+
+/// The environment variable that sets the image of `service` for `mirrord preview up`:
+/// `MIRRORD_<SERVICE>_IMAGE`, with the service name in upper case and every character that isn't
+/// an ASCII letter or digit turned into `_` (`cake-maker` reads `MIRRORD_CAKE_MAKER_IMAGE`).
+pub fn preview_image_env(service: &str) -> String {
+    let service = service
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("MIRRORD_{service}_IMAGE")
+}
+
+/// Where `mirrord preview up` took a service's image from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewImageSource {
+    /// `--image <service>=<ref>`.
+    Flag,
+    /// `MIRRORD_<SERVICE>_IMAGE`.
+    Env,
+    /// The service's `image` in `mirrord-up.yaml`.
+    File,
+}
+
+/// What [`UpConfig::select_preview_images`] picked.
+#[derive(Debug, Default)]
+pub struct PreviewImages {
+    /// Where the image of every service left in the config came from.
+    pub sources: HashMap<Arc<str>, PreviewImageSource>,
+    /// The services dropped for having no image, sorted by name.
+    pub skipped: Vec<Arc<str>>,
+}
+
+/// Error produced by [`UpConfig::select_preview_images`].
+#[derive(Debug, Error, Diagnostic)]
+pub enum PreviewImageError {
+    /// An `--image` value isn't `<service>=<ref>` with both parts set.
+    #[error("invalid `--image {0}`: expected `<service>=<image ref>`")]
+    InvalidFlag(String),
+
+    /// An `--image` value names a service the config doesn't define.
+    #[error("`--image` for unknown service `{service}`")]
+    #[diagnostic(help("Available services: {}", available.join(", ")))]
+    UnknownService {
+        /// The name that wasn't found.
+        service: String,
+        /// The service names defined in the config.
+        available: Vec<String>,
+    },
+
+    /// Two `--image` values name the same service.
+    #[error("`--image` is given twice for service `{0}`")]
+    DuplicateFlag(String),
+
+    /// A set `MIRRORD_<SERVICE>_IMAGE` stands for more than one service.
+    #[error("`{env}` is set, but it could be the image of any of: {}", services.join(", "))]
+    #[diagnostic(help("Use `--image <service>=<image ref>` for these services instead."))]
+    AmbiguousEnv {
+        /// The environment variable.
+        env: String,
+        /// The services whose names map onto it.
+        services: Vec<String>,
+    },
+
+    /// No service got an image, so there is nothing to preview.
+    #[error("no service has an image to preview")]
+    #[diagnostic(help(
+        "Pass `--image <service>=<image ref>`, set `MIRRORD_<SERVICE>_IMAGE`, or set `image` on \
+         a service in mirrord-up.yaml."
+    ))]
+    NoImages,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
