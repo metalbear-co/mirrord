@@ -1097,6 +1097,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::KeylessCi
             | NewOperatorFeature::DbBranchesFromSplitConfig
             | NewOperatorFeature::DbBranchSecretManagerExtract
+            | NewOperatorFeature::DbBranchSsmParameter
             | NewOperatorFeature::Unknown => &[],
         }
     }
