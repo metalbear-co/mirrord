@@ -165,7 +165,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     // The extension only drives `--debug` on Windows so far; elsewhere it would wait for a hold
     // line that never comes.
     #[cfg(not(target_os = "windows"))]
-    if args.debug.is_some() {
+    if args.debug.is_empty().not() {
         return Err(UpCliError::DebugUnsupported);
     }
 
@@ -182,7 +182,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         .add("num_selected_services", args.services.len());
 
     up_config
-        .select_services(&args.services, args.debug.as_deref())
+        .select_services(&args.services, &args.debug)
         .map_err(UpError::from)?;
 
     analytics
@@ -238,13 +238,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         .map(|service| (service.service_name.clone(), service.mode))
         .collect::<Vec<_>>();
 
-    let result = mirrord_up::launch(
-        services,
-        correlation_id,
-        args.debug.as_deref(),
-        ready.clone(),
-    )
-    .await;
+    let result = mirrord_up::launch(services, correlation_id, &args.debug, ready.clone()).await;
 
     analytics.get_mut().add(
         "services",

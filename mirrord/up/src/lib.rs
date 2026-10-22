@@ -95,7 +95,7 @@ impl ReadyTracker {
 /// Environment variable used to pass the resolved configuration to child mirrord processes.
 pub const RESOLVED_CONFIG_ENV: &str = "MIRRORD_UP_RESOLVED_CONFIG";
 
-/// Set to `1` on the `mirrord exec` of the service `mirrord up --debug` names. That `exec` holds
+/// Set to `1` on the `mirrord exec` of each service `mirrord up --debug` names. That `exec` holds
 /// the program it starts at its entry point until an IDE releases it, and leaves the variable out
 /// of the program's environment.
 pub const DEBUG_HOLD_ENV: &str = "MIRRORD_DEBUG_HOLD";
@@ -803,14 +803,14 @@ pub async fn resolve_services(
 /// `ready` is filled with the time-to-ready once every session has signalled
 /// readiness, and with the branch databases the sessions report (see [`ReadyTracker`]).
 ///
-/// `debug` names the service whose program is held for a debugger (see [`DEBUG_HOLD_ENV`]).
-/// [`UpConfig::select_services`] has checked that it is one of the services launched.
+/// `debug` names the services whose programs are held for a debugger (see [`DEBUG_HOLD_ENV`]).
+/// [`UpConfig::select_services`] has checked that each is one of the services launched.
 ///
 /// Returns when the user stops the session or one of the child sessions exits.
 pub async fn launch(
     service_configs: Vec<SubprocessCfg>,
     correlation_id: Uuid,
-    debug: Option<&str>,
+    debug: &[String],
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
     let commands = service_commands(service_configs, correlation_id, debug)?;
@@ -819,11 +819,11 @@ pub async fn launch(
 
 /// The `mirrord exec`/`mirrord container` command, and `run.pre_command`, of every service.
 ///
-/// Only the service named `debug` gets [`DEBUG_HOLD_ENV`].
+/// Only the services named in `debug` get [`DEBUG_HOLD_ENV`].
 fn service_commands(
     service_configs: Vec<SubprocessCfg>,
     correlation_id: Uuid,
-    debug: Option<&str>,
+    debug: &[String],
 ) -> Result<Vec<process::ServiceCommands>, UpError> {
     service_configs
         .into_iter()
@@ -845,7 +845,7 @@ fn service_commands(
             let encoded_cfg = config.encode()?;
 
             let mut cmd = resolve_tokio_command(std::env::current_exe()?);
-            if debug == Some(&*service_name) {
+            if debug.iter().any(|name| **name == *service_name) {
                 cmd.env(DEBUG_HOLD_ENV, "1");
             }
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
@@ -1034,12 +1034,13 @@ services:
         );
     }
 
-    /// `--debug` holds one program: only the named service's `mirrord exec` gets the hold.
+    /// `--debug` holds exactly the programs it names: each named service's `mirrord exec` gets
+    /// the hold, and the one in between, not named, runs as usual.
     #[test]
-    fn only_the_debugged_service_is_held() {
+    fn only_the_debugged_services_are_held() {
         let key = EnvKey::Provided("key".to_owned());
         let config = template(
-            "services:\n  api:\n    target: none\n    run:\n      command: [api]\n  web:\n    target: none\n    run:\n      command: [web]\n",
+            "services:\n  api:\n    target: none\n    run:\n      command: [api]\n  web:\n    target: none\n    run:\n      command: [web]\n  worker:\n    target: none\n    run:\n      command: [worker]\n",
             &key,
         )
         .expect("parse the config");
@@ -1052,8 +1053,9 @@ services:
             )
             .expect("assemble the services");
 
-        let commands = service_commands(service_configs, Uuid::nil(), Some("api"))
-            .expect("build the commands");
+        let debug = ["worker".to_owned(), "api".to_owned()];
+        let commands =
+            service_commands(service_configs, Uuid::nil(), &debug).expect("build the commands");
 
         let holds: HashMap<_, _> = commands
             .iter()
@@ -1073,7 +1075,9 @@ services:
             HashMap::from([
                 ("api".to_owned(), Some("1".to_owned())),
                 ("web".to_owned(), None),
-            ])
+                ("worker".to_owned(), Some("1".to_owned())),
+            ]),
+            "only the services `--debug` names may wait for an IDE to release them"
         );
     }
 

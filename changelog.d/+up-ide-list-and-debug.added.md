@@ -1,1 +1,1 @@
-Add hidden `mirrord up` flags for IDE extensions. `--list --format json` prints the services of a `mirrord-up.yaml` without touching the cluster, and on Windows `--debug <service>` holds that service's program at its entry point until the IDE releases it.
+Add hidden `mirrord up` flags for IDE extensions. `--list --format json` prints the services of a `mirrord-up.yaml` without touching the cluster, and on Windows `--debug <service>`, which can be repeated, holds each named service's program at its entry point until the IDE releases it.
