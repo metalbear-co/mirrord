@@ -19,6 +19,7 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+mirrord-macros = { path = "../macros" }
 mirrord-console = { path = "../console", features = ["async-logger"] }
 mirrord-operator = { path = "../operator", features = ["client"] }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
@@ -52,6 +53,7 @@ futures.workspace = true
 glob.workspace = true
 which.workspace = true
 schemars.workspace = true
+secrecy.workspace = true
 semver.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 reqwest = { workspace = true, features = ["stream"] }

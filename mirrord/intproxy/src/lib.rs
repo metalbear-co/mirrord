@@ -273,6 +273,64 @@ pub(crate) async fn quiesce_and_collect_layers(
     shutdown_layers
 }
 
+/// Ends the proxy once it has gone without layer connections for too long, however busy its
+/// other tasks are.
+pub(crate) struct IdleTimeout {
+    first_timeout: Duration,
+    idle_timeout: Duration,
+    idle_since: Option<time::Instant>,
+}
+
+impl IdleTimeout {
+    pub(crate) fn new(first_timeout: Duration, idle_timeout: Duration) -> Self {
+        Self {
+            first_timeout,
+            idle_timeout,
+            idle_since: Some(time::Instant::now()),
+        }
+    }
+
+    /// Restarts the countdown when the last layer connection closes.
+    pub(crate) fn observe(&mut self, has_layer_connections: bool) {
+        if has_layer_connections {
+            self.idle_since = None;
+        } else {
+            self.idle_since.get_or_insert_with(time::Instant::now);
+        }
+    }
+
+    /// Resolves when the countdown runs out, with an error if no layer ever connected.
+    ///
+    /// A timeout too large to represent never runs out.
+    pub(crate) async fn expired(
+        &self,
+        any_connection_accepted: bool,
+    ) -> Result<(), ProxyStartupError> {
+        let timeout = if any_connection_accepted {
+            self.idle_timeout
+        } else {
+            self.first_timeout
+        };
+
+        let Some(deadline) = self
+            .idle_since
+            .and_then(|idle_since| idle_since.checked_add(timeout))
+        else {
+            return std::future::pending().await;
+        };
+
+        time::sleep_until(deadline).await;
+
+        if !any_connection_accepted {
+            return Err(ProxyStartupError::ConnectionAcceptTimeout);
+        }
+
+        tracing::info!("Reached the idle timeout with no active layer connections");
+
+        Ok(())
+    }
+}
+
 impl IntProxy {
     /// Size of channels used to communicate with main tasks (see [`MainTaskId`]).
     const CHANNEL_SIZE: usize = 512;
@@ -405,6 +463,14 @@ impl IntProxy {
         !self.task_txs.layers.is_empty()
     }
 
+    /// Check if any layer is waiting for the agent reconnect to finish before it registers.
+    fn has_queued_layers(&self) -> bool {
+        self.reconnect_task_queue
+            .iter()
+            .flatten()
+            .any(|message| matches!(message, ProxyMessage::NewLayer(_)))
+    }
+
     /// Runs the main event loop till a failure or success happens, if the failure is manageable, it
     /// goes in failover state starting to update every layer with the error content on every new or
     /// pending task. In failover state it continues to accept connection from layers
@@ -464,10 +530,13 @@ impl IntProxy {
             .await;
 
         let mut proxy = self;
+        let mut idle = IdleTimeout::new(first_timeout, idle_timeout);
 
         // A natural timeout can race with a decoded registration just as SIGTERM can. Every exit
         // must stop acceptance and drain that registration before dropping the layer connection.
         let exit_result: Option<Result<(), ProxyStartupError>> = loop {
+            idle.observe(proxy.has_layer_connections() || proxy.has_queued_layers());
+
             tokio::select! {
                 biased;
                 _ = shutdown.cancelled() => break None,
@@ -503,14 +572,7 @@ impl IntProxy {
                     );
                 }
 
-                _ = time::sleep(first_timeout), if !proxy.any_connection_accepted => {
-                    break Some(Err(ProxyStartupError::ConnectionAcceptTimeout));
-                },
-
-                _ = time::sleep(idle_timeout), if proxy.any_connection_accepted && !proxy.has_layer_connections() => {
-                    tracing::info!("Reached the idle timeout with no active layer connections");
-                    break Some(Ok(()));
-                },
+                result = idle.expired(proxy.any_connection_accepted) => break Some(result),
             }
         };
 
@@ -1316,14 +1378,33 @@ mod test {
         proxy_handle.await.unwrap().unwrap();
     }
 
-    /// Verifies that [`IntProxy`] run method return an error on a startup error
-    #[tokio::test]
+    /// Verifies that [`IntProxy::run`] gives up on its first layer in time while the agent keeps
+    /// answering pings.
+    #[tokio::test(start_paused = true)]
     async fn startup_fail() {
+        const FIRST_TIMEOUT: Duration = Duration::from_secs(60);
+
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .await
             .unwrap();
 
-        let (connection, _proxy_tx, _proxy_rx) = Connection::dummy();
+        let (connection, proxy_tx, proxy_rx) = Connection::dummy();
+
+        tokio::spawn(async move {
+            while let Some(message) = proxy_rx.next().await {
+                let response = match message {
+                    ClientMessage::SwitchProtocolVersion(version) => {
+                        DaemonMessage::SwitchProtocolVersionResponse(version)
+                    }
+                    ClientMessage::Ping => DaemonMessage::Pong,
+                    _ => continue,
+                };
+
+                if proxy_tx.send(response).await.is_err() {
+                    break;
+                }
+            }
+        });
 
         let agent_conn = AgentConnection {
             connection,
@@ -1347,13 +1428,38 @@ mod test {
             MonitorTx::disabled(),
             ChaosWatcherRx::new(chaos_rx),
         );
-        tokio::time::timeout(
-            Duration::from_millis(200),
-            proxy.run(Duration::from_millis(100), Duration::ZERO),
+        let started = tokio::time::Instant::now();
+
+        let result = tokio::time::timeout(
+            FIRST_TIMEOUT + IntProxy::PING_INTERVAL,
+            proxy.run(FIRST_TIMEOUT, Duration::ZERO),
         )
         .await
-        .unwrap()
-        .unwrap_err();
+        .expect("agent traffic kept the proxy waiting for its first layer");
+
+        assert!(matches!(
+            result,
+            Err(crate::error::ProxyStartupError::ConnectionAcceptTimeout)
+        ));
+        assert!(started.elapsed() >= FIRST_TIMEOUT);
+    }
+
+    /// Verifies that a timeout too large for a deadline never runs out instead of panicking.
+    #[tokio::test(start_paused = true)]
+    async fn unrepresentable_idle_timeout_never_expires() {
+        let unlimited = Duration::from_secs(u64::MAX);
+        let mut idle = super::IdleTimeout::new(unlimited, unlimited);
+
+        tokio::time::timeout(Duration::from_secs(3600), idle.expired(false))
+            .await
+            .expect_err("the first-connection timeout ran out");
+
+        idle.observe(true);
+        idle.observe(false);
+
+        tokio::time::timeout(Duration::from_secs(3600), idle.expired(true))
+            .await
+            .expect_err("the idle timeout ran out");
     }
 
     /// Neither natural timeout may drop a decoded layer merely because its registration is still
@@ -1596,12 +1702,14 @@ mod test {
     }
 
     struct ReconnectTestSetup {
+        proxy_addr: SocketAddr,
+        conn_tx: mpsc::Sender<(mpsc::Sender<DaemonMessage>, ConnectionOutput<Client>)>,
         conn_rx: mpsc::Receiver<(mpsc::Sender<DaemonMessage>, ConnectionOutput<Client>)>,
         from_layer: AsyncEncoder<LocalMessage<LayerToProxyMessage>, OwnedWriteHalf>,
         to_layer: AsyncDecoder<LocalMessage<ProxyToLayerMessage>, OwnedReadHalf>,
     }
 
-    async fn setup_reconnect_test() -> ReconnectTestSetup {
+    async fn setup_reconnect_test(idle_timeout: Duration) -> ReconnectTestSetup {
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .await
             .unwrap();
@@ -1614,15 +1722,15 @@ mod test {
 
         let agent_conn = AgentConnection::new(
             &config,
-            AgentConnectInfo::Dummy(conn_tx),
+            AgentConnectInfo::Dummy(conn_tx.clone()),
+            None,
             &mut NullReporter::default(),
         )
         .await
         .unwrap();
 
-        let conn = TcpStream::connect(listener.local_addr().unwrap())
-            .await
-            .unwrap();
+        let proxy_addr = listener.local_addr().unwrap();
+        let conn = TcpStream::connect(proxy_addr).await.unwrap();
 
         let (mut from_layer, mut to_layer) = mirrord_intproxy_protocol::codec::make_async_framed::<
             LocalMessage<LayerToProxyMessage>,
@@ -1663,7 +1771,7 @@ mod test {
             MonitorTx::disabled(),
             ChaosWatcherRx::new(chaos_rx),
         );
-        tokio::spawn(proxy.run(Duration::from_millis(100), Duration::ZERO));
+        tokio::spawn(proxy.run(Duration::from_millis(100), idle_timeout));
 
         match to_layer.next().await.unwrap().unwrap() {
             LocalMessage {
@@ -1674,6 +1782,8 @@ mod test {
         }
 
         ReconnectTestSetup {
+            proxy_addr,
+            conn_tx,
             from_layer,
             to_layer,
             conn_rx,
@@ -1718,7 +1828,8 @@ mod test {
             mut conn_rx,
             mut from_layer,
             mut to_layer,
-        } = setup_reconnect_test().await;
+            ..
+        } = setup_reconnect_test(Duration::ZERO).await;
 
         let (mut to_proxy, mut from_proxy) = conn_rx.recv().await.unwrap();
 
@@ -1798,8 +1909,8 @@ mod test {
             mut conn_rx,
             // Keep the connection so intproxy doesn't exit
             from_layer: _from_layer,
-            to_layer: _,
-        } = setup_reconnect_test().await;
+            ..
+        } = setup_reconnect_test(Duration::ZERO).await;
 
         let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
 
@@ -1823,6 +1934,103 @@ mod test {
         assert_eq!(from_proxy.next().await, Some(ClientMessage::Ping));
     }
 
+    /// Verifies that a layer connecting while [`IntProxy`] reconnects to the agent keeps the proxy
+    /// alive past its idle timeout.
+    #[tokio::test]
+    async fn layer_queued_during_reconnect_outlives_idle_timeout() {
+        const IDLE_TIMEOUT: Duration = Duration::from_secs(1);
+
+        let ReconnectTestSetup {
+            proxy_addr,
+            conn_tx,
+            mut conn_rx,
+            mut from_layer,
+            to_layer,
+        } = setup_reconnect_test(IDLE_TIMEOUT).await;
+
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        let file_request = FileRequest::Open(OpenFileRequest {
+            path: "/some/file".into(),
+            open_options: Default::default(),
+        });
+        from_layer
+            .send(LocalMessage {
+                message_id: 1,
+                inner: LayerToProxyMessage::File(file_request.clone()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::FileRequest(file_request.clone())
+        );
+
+        // `conn_rx` holds one connection, so a parked one stalls the reconnect until it is
+        // received.
+        let (_, parked_tx, parked_rx) = Connection::<Client>::dummy();
+        conn_tx.send((parked_tx, parked_rx)).await.unwrap();
+        std::mem::drop((to_proxy, from_proxy));
+        tokio::time::sleep(IDLE_TIMEOUT).await;
+
+        let conn = TcpStream::connect(proxy_addr).await.unwrap();
+        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+            LocalMessage<LayerToProxyMessage>,
+            LocalMessage<ProxyToLayerMessage>,
+        >(conn);
+
+        encoder
+            .send(LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                    process_info: ProcessInfo {
+                        pid: 1338,
+                        parent_pid: 1336,
+                        name: "queued layer".into(),
+                        cmdline: vec!["queued layer".into()],
+                        loaded: true,
+                    },
+                    parent_layer: None,
+                }),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            decoder.next().await.unwrap().unwrap(),
+            LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::NewSession(_),
+            }
+        ));
+
+        std::mem::drop((from_layer, to_layer));
+
+        tokio::time::timeout(IDLE_TIMEOUT * 2, decoder.next())
+            .await
+            .expect_err("the proxy dropped a layer that was waiting for the agent reconnect");
+
+        conn_rx.recv().await.unwrap();
+        let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
+
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        encoder
+            .send(LocalMessage {
+                message_id: 1,
+                inner: LayerToProxyMessage::File(file_request.clone()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::FileRequest(file_request)
+        );
+    }
+
     /// Verifies that [`IntProxy`] reconnects correctly while waiting for a fileops response.
     #[tokio::test]
     #[rstest::rstest]
@@ -1832,7 +2040,8 @@ mod test {
             // Keep the connection so intproxy doesn't exit
             mut from_layer,
             mut to_layer,
-        } = setup_reconnect_test().await;
+            ..
+        } = setup_reconnect_test(Duration::ZERO).await;
 
         let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
 
@@ -1887,7 +2096,8 @@ mod test {
             // Keep the connection so intproxy doesn't exit
             mut from_layer,
             mut to_layer,
-        } = setup_reconnect_test().await;
+            ..
+        } = setup_reconnect_test(Duration::ZERO).await;
 
         let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
 
@@ -1961,7 +2171,8 @@ mod test {
             // Keep the connection so intproxy doesn't exit
             mut from_layer,
             mut to_layer,
-        } = setup_reconnect_test().await;
+            ..
+        } = setup_reconnect_test(Duration::ZERO).await;
 
         let (to_proxy, from_proxy) = conn_rx.recv().await.unwrap();
 
@@ -2017,7 +2228,8 @@ mod test {
             // Keep the connection so intproxy doesn't exit
             mut from_layer,
             mut to_layer,
-        } = setup_reconnect_test().await;
+            ..
+        } = setup_reconnect_test(Duration::ZERO).await;
 
         let server = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = server.local_addr().unwrap();

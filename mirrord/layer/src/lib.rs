@@ -1,8 +1,6 @@
 // NOTE(gabriela): prevent compiling lib.rs so layer acts as empty
 // library to allow layer-lib as optional dependency for unix.
 #![cfg(unix)]
-#![cfg_attr(target_os = "linux", feature(c_size_t))]
-#![feature(once_cell_try)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
@@ -92,6 +90,8 @@ use hooks::HookManager;
 ))]
 use libc::c_char;
 use libc::{c_int, pid_t};
+#[cfg(target_os = "linux")]
+use libc::{c_long, statx};
 use load::ExecuteArgs;
 #[cfg(doc)]
 use mirrord_config::feature::fs::FsConfig;
@@ -99,6 +99,8 @@ use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, feature::env::mapper::EnvVarsRemapper,
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
+#[cfg(target_os = "linux")]
+use mirrord_layer_lib::detour::DetourExt;
 #[cfg(doc)]
 use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_lib::{
@@ -208,11 +210,11 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         panic!("{FAILSAFE_ENV} environment variable found, stopping execution.")
     }
 
-    let given_process = EXECUTABLE_ARGS.get_or_try_init(ExecuteArgs::from_env)?;
+    let given_process = ExecuteArgs::from_env()?;
+    let given_process = EXECUTABLE_ARGS.get_or_init(|| given_process);
 
-    EXECUTABLE_PATH.get_or_try_init(|| {
-        std::env::current_exe().map(|arg| arg.to_string_lossy().into_owned())
-    })?;
+    let executable_path = std::env::current_exe()?.to_string_lossy().into_owned();
+    EXECUTABLE_PATH.get_or_init(|| executable_path);
 
     let mut config = mirrord_config::util::read_resolved_config()?;
 
@@ -664,6 +666,17 @@ fn enable_hooks(state: &LayerSetup) {
             );
         };
 
+        #[cfg(target_os = "linux")]
+        if state.experimental().hook_libc_syscall {
+            replace!(
+                &mut hook_manager,
+                "syscall",
+                syscall_detour,
+                FnSyscall,
+                FN_SYSCALL
+            );
+        };
+
         replace!(&mut hook_manager, "fork", fork_detour, FnFork, FN_FORK);
         replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK);
     };
@@ -749,7 +762,9 @@ pub(crate) static CLOSE_FORK_LOCK: Mutex<()> = Mutex::new(());
 
 /// Shared code for closing `fd` in our data structures.
 ///
-/// Callers should call their respective close before calling this.
+/// Callers should call this before their respective close: once the kernel frees `fd`, another
+/// thread can get the same number for a new remote file, and a later call here would drop that
+/// file instead.
 ///
 /// ## Details
 ///
@@ -831,9 +846,9 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     unsafe {
-        let res = FN_CLOSE(fd);
+        // `close_layer_fd` first, then the real close.
         close_layer_fd(fd);
-        res
+        FN_CLOSE(fd)
     }
 }
 
@@ -1116,6 +1131,70 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
         // execution does not return to here after calling `FN_UV_FS_CLOSE`.
         close_layer_fd(fd);
         FN_UV_FS_CLOSE(a, b, fd, c)
+    }
+}
+
+/// ## Hook
+///
+/// Some libraries make syscalls by hand through libc's generic `syscall` instead of calling the
+/// libc export, so the named hooks never see them and the layer's placeholder fds reach the
+/// kernel. Handled here:
+///
+/// - `SYS_statx` / `statx` (COR-2032): libuv stats paths and fds this way, so it builds against
+///   libcs without a `statx` wrapper. Unhooked, remote paths fail with `ENOENT` and remote fds
+///   describe the placeholder.
+///   <https://github.com/nodejs/node/blob/80dc632040e6bada37aac1220dde9c79581c9c22/deps/uv/src/unix/linux.c#L396-L412>
+/// - `SYS_close` / `close` (COR-2032): libuv closes fds this way, to skip the cancellation point
+///   in [`libc::close`]. Unhooked, a closed fd stays in [`OPEN_FILES`], so the next local file
+///   that reuses its number reads the remote file.
+///   <https://github.com/nodejs/node/blob/80dc632040e6bada37aac1220dde9c79581c9c22/deps/uv/src/unix/core.c#L618-L619>
+///
+/// Every other syscall goes straight to the original, before taking a [`DetourGuard`]: Rust's std
+/// and tokio call `syscall` for futexes, including inside the layer.
+#[cfg(target_os = "linux")]
+#[hook_fn]
+pub(crate) unsafe extern "C" fn syscall_detour(number: c_long, mut args: ...) -> c_long {
+    unsafe {
+        // The kernel takes at most six arguments. Like glibc's own `syscall`, read all six: the
+        // ones a caller didn't pass are never used by the kernel.
+        let a1: c_long = args.next_arg();
+        let a2: c_long = args.next_arg();
+        let a3: c_long = args.next_arg();
+        let a4: c_long = args.next_arg();
+        let a5: c_long = args.next_arg();
+        let a6: c_long = args.next_arg();
+
+        match number {
+            libc::SYS_close => {
+                // `close_layer_fd` first, then the real close.
+                let guard = DetourGuard::new();
+                if guard.is_some() {
+                    close_layer_fd(a1 as c_int);
+                }
+                FN_SYSCALL(number, a1, a2, a3, a4, a5, a6)
+            }
+            libc::SYS_statx if setup().fs_config().is_active() => {
+                let guard = DetourGuard::new();
+                if guard.is_none() {
+                    return FN_SYSCALL(number, a1, a2, a3, a4, a5, a6);
+                }
+
+                let path_name = a2 as *const c_char;
+                file::ops::statx_logic(
+                    a1 as RawFd,
+                    path_name,
+                    a3 as c_int,
+                    a4 as c_int,
+                    a5 as *mut statx,
+                )
+                .map(c_long::from)
+                .unwrap_or_bypass_with(|bypass| {
+                    let path_name = file::hooks::update_ptr_from_bypass(path_name, &bypass);
+                    FN_SYSCALL(number, a1, path_name as c_long, a3, a4, a5, a6)
+                })
+            }
+            _ => FN_SYSCALL(number, a1, a2, a3, a4, a5, a6),
+        }
     }
 }
 

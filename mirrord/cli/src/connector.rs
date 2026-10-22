@@ -3,6 +3,7 @@ use std::{
     num::NonZeroUsize,
     ops::Not,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
@@ -28,6 +29,8 @@ use mirrord_sessions_manager_client::{
 };
 use tokio::io::DuplexStream;
 use tokio_util::codec::Encoder;
+
+use crate::data::StoredLogin;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -66,6 +69,7 @@ pub(crate) enum AgentConnector {
 }
 
 impl AgentConnector {
+    #[mirrord_macros::boxed_future]
     pub async fn into_client(self) -> Result<MirrordClient, ClientError> {
         MirrordClient::new(
             self,
@@ -135,7 +139,10 @@ impl SessionsManagerConnector {
                 self.connect_with(OperatorTransport::new(client.clone()))
                     .await
             }
-            None => self.connect_with(DirectTransport::from_env()?).await,
+            None => {
+                let transport = DirectTransport::intproxy_from_env(Some(Arc::new(StoredLogin)))?;
+                self.connect_with(transport).await
+            }
         }
     }
 

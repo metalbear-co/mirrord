@@ -365,6 +365,43 @@ pub enum IamAuthConfig {
     },
 }
 
+impl IamAuthConfig {
+    /// The first field set to an `aws_ssm_parameter` source. The operator reads IAM credentials
+    /// from the target pod's env only, so such a field would reach it as a source kind it cannot
+    /// resolve.
+    fn ssm_parameter_field(&self) -> Option<&'static str> {
+        let fields = match self {
+            Self::AwsRds {
+                region,
+                access_key_id,
+                secret_access_key,
+                session_token,
+            } => vec![
+                ("region", region),
+                ("access_key_id", access_key_id),
+                ("secret_access_key", secret_access_key),
+                ("session_token", session_token),
+            ],
+            Self::GcpCloudSql {
+                credentials_json,
+                credentials_path,
+                project,
+            } => vec![
+                ("credentials_json", credentials_json),
+                ("credentials_path", credentials_path),
+                ("project", project),
+            ],
+        };
+        fields.into_iter().find_map(|(field, source)| {
+            matches!(
+                source,
+                Some(TargetEnvironmentVariableSource::AwsSsmParameter { .. })
+            )
+            .then_some(field)
+        })
+    }
+}
+
 /// The branch databases a session runs with. Either defined here, or taken from the
 /// `dbBranches` entries a cluster admin put on the target's `MirrordSplitConfig`, so `mirrord
 /// exec` and `mirrord up` use one definition that does not drift.
@@ -602,6 +639,19 @@ impl DatabaseBranchesConfig {
                 for source in params.all_sources() {
                     source.verify()?;
                 }
+            }
+            for source in branch.url_sources() {
+                source.verify()?;
+            }
+            if let Some(field) = branch
+                .iam_auth()
+                .and_then(IamAuthConfig::ssm_parameter_field)
+            {
+                return Err(ConfigError::Conflict(format!(
+                    "`feature.db_branches[].iam_auth.{field}` is an `aws_ssm_parameter` source, \
+                     but IAM credentials are read from the target pod's env only; use \
+                     `{{ \"type\": \"env\", \"variable\": ... }}` instead."
+                )));
             }
 
             match branch {
@@ -897,8 +947,54 @@ impl DatabaseBranchConfig {
         })
     }
 
+    /// True when a param or the `url` is read from AWS SSM Parameter Store. The CLI uses it to
+    /// refuse the config on an operator that predates the source kind.
+    pub fn uses_ssm_parameter_source(&self) -> bool {
+        self.all_connection_params().any(|params| {
+            params
+                .all_sources()
+                .any(|source| matches!(source, ParamSource::AwsSsmParameter { .. }))
+        }) || self.url_sources().any(|source| {
+            matches!(
+                source,
+                TargetEnvironmentVariableSource::AwsSsmParameter { .. }
+            )
+        })
+    }
+
+    /// True when a Google or AWS secret manager source (a param or the `url`) narrows the
+    /// secret with `value_selector` or `value_pattern`. The CLI uses it to refuse the config
+    /// on an operator that predates the extractors.
+    pub fn uses_secret_manager_extractor(&self) -> bool {
+        self.all_connection_params().any(|params| {
+            params
+                .all_sources()
+                .any(ParamSource::extracts_from_secret_manager)
+        }) || self
+            .url_sources()
+            .any(TargetEnvironmentVariableSource::extracts_from_secret_manager)
+    }
+
     /// The more databases a PostgreSQL branch copies next to its own. Empty for every other
     /// engine.
+    fn iam_auth(&self) -> Option<&IamAuthConfig> {
+        match self {
+            DatabaseBranchConfig::Dynamodb(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Mariadb(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Mongodb(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Mysql(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Pg(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Clickhouse(_)
+            | DatabaseBranchConfig::Cockroachdb(_)
+            | DatabaseBranchConfig::Generic(_)
+            | DatabaseBranchConfig::Mssql(_)
+            | DatabaseBranchConfig::Redis(_)
+            | DatabaseBranchConfig::S3(_)
+            | DatabaseBranchConfig::Spanner(_)
+            | DatabaseBranchConfig::Turbopuffer(_) => None,
+        }
+    }
+
     pub fn pg_additional_databases(&self) -> &[PgAdditionalDatabaseConfig] {
         match self {
             DatabaseBranchConfig::Pg(cfg) => &cfg.additional_databases,
@@ -921,6 +1017,16 @@ impl DatabaseBranchConfig {
             self.additional_connections()
                 .filter_map(ConnectionSource::params),
         )
+    }
+
+    /// Typed `url` sources of the branch's own connection and of its additional databases'
+    /// app connections.
+    fn url_sources(&self) -> impl Iterator<Item = &TargetEnvironmentVariableSource> {
+        self.database()
+            .map(|database| &database.connection)
+            .into_iter()
+            .chain(self.additional_connections())
+            .filter_map(ConnectionSource::url_source)
     }
 
     /// True when any of this branch's source values is read from a Kubernetes Secret or from
@@ -995,6 +1101,14 @@ impl ConnectionSource {
         }
     }
 
+    /// The typed source of a `{ "url": { "type": ... } }` connection.
+    fn url_source(&self) -> Option<&TargetEnvironmentVariableSource> {
+        match self {
+            Self::Url { url } => Some(url),
+            Self::FlatUrl { .. } | Self::Params(_) => None,
+        }
+    }
+
     pub(crate) fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
         match self {
             Self::Url { url } => url.collect_env_keys(out),
@@ -1038,6 +1152,51 @@ impl ConnectionSource {
         keys
     }
 
+    /// The source database a literal `value` names: the `database` param when its first source
+    /// is a literal, else the path of a literal URL (`url` or the `url` param) when no
+    /// `database` param is declared.
+    ///
+    /// The CLI moves literals into a Secret the operator never reads, so when the config sets
+    /// no `name` the operator does not know the database and the app's branch URL falls back
+    /// to the engine's default database (`postgres`) while the branch holds the real one.
+    ///
+    /// Only the first source counts, because it is the one the connection uses, and a declared
+    /// `database` param overrides the URL's path. A name that depends on a non-literal source,
+    /// or a percent-encoded path, yields `None`, leaving `name` unset as before.
+    pub fn literal_database_name(&self) -> Option<&str> {
+        fn first_literal(sources: &Option<SingleOrVec<ParamSource>>) -> Option<&str> {
+            match sources.as_ref()?.0.first()? {
+                ParamSource::Env {
+                    value: Some(value), ..
+                } => Some(value),
+                _ => None,
+            }
+        }
+
+        let url = match self {
+            Self::Url {
+                url:
+                    TargetEnvironmentVariableSource::Env {
+                        value: Some(value), ..
+                    },
+            } => value.as_str(),
+            Self::Url { .. } | Self::FlatUrl { .. } => return None,
+            Self::Params(config) if config.params.database.is_some() => {
+                return first_literal(&config.params.database);
+            }
+            Self::Params(config) => first_literal(&config.params.url)?,
+        };
+
+        // Userinfo cannot hold a raw `/`, so the first `/` after the scheme ends the authority.
+        let (_authority, path) = strip_jdbc_prefix(url)
+            .split_once("://")?
+            .1
+            .split_once('/')?;
+        path.split(['?', '#', '/'])
+            .next()
+            .filter(|name| !name.is_empty() && !name.contains('%'))
+    }
+
     /// Literal `value`s this connection sets, as `(env var, value)`, extras included. The
     /// CLI moves them into one credential Secret keyed by env var name.
     pub(crate) fn literal_values(&self) -> Vec<(&str, &str)> {
@@ -1074,6 +1233,7 @@ impl ConnectionSource {
                 TargetEnvironmentVariableSource::Secret { .. }
                     | TargetEnvironmentVariableSource::GcpSecretManager { .. }
                     | TargetEnvironmentVariableSource::AwsSecretsManager { .. }
+                    | TargetEnvironmentVariableSource::AwsSsmParameter { .. }
             ),
             Self::FlatUrl { .. } => false,
             Self::Params(config) => config.params.uses_secret(),
@@ -1082,6 +1242,55 @@ impl ConnectionSource {
 }
 
 impl TargetEnvironmentVariableSource {
+    /// Rejects a secret manager `url` source that sets both extractors.
+    fn verify(&self) -> Result<(), ConfigError> {
+        match self {
+            Self::GcpSecretManager {
+                secret_ref,
+                value_selector,
+                value_pattern,
+                ..
+            } => verify_single_extractor(
+                &format!("`url` `gcp_secret_manager` source `{secret_ref}`"),
+                value_selector.is_some(),
+                value_pattern.is_some(),
+            ),
+            Self::AwsSecretsManager {
+                secret_ref,
+                value_selector,
+                value_pattern,
+                ..
+            } => verify_single_extractor(
+                &format!("`url` `aws_secrets_manager` source `{secret_ref}`"),
+                value_selector.is_some(),
+                value_pattern.is_some(),
+            ),
+            Self::AwsSsmParameter {
+                parameter,
+                value_selector,
+                value_pattern,
+                ..
+            } => verify_single_extractor(
+                &format!("`url` `aws_ssm_parameter` source `{parameter}`"),
+                value_selector.is_some(),
+                value_pattern.is_some(),
+            ),
+            Self::Env { .. } | Self::EnvFrom { .. } | Self::Secret { .. } => Ok(()),
+        }
+    }
+
+    /// True for a secret manager `url` source that narrows the secret with `value_selector`
+    /// or `value_pattern`.
+    fn extracts_from_secret_manager(&self) -> bool {
+        matches!(
+            self,
+            Self::GcpSecretManager { value_selector, value_pattern, .. }
+                | Self::AwsSecretsManager { value_selector, value_pattern, .. }
+                | Self::AwsSsmParameter { value_selector, value_pattern, .. }
+                if value_selector.is_some() || value_pattern.is_some()
+        )
+    }
+
     fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
         match self {
             Self::Env { variable, .. } | Self::EnvFrom { variable, .. } => out.push(variable),
@@ -1096,6 +1305,10 @@ impl TargetEnvironmentVariableSource {
             | Self::AwsSecretsManager {
                 env_var_name: Some(name),
                 ..
+            }
+            | Self::AwsSsmParameter {
+                env_var_name: Some(name),
+                ..
             } => out.push(name),
             Self::Secret {
                 env_var_name: None, ..
@@ -1104,6 +1317,9 @@ impl TargetEnvironmentVariableSource {
                 env_var_name: None, ..
             }
             | Self::AwsSecretsManager {
+                env_var_name: None, ..
+            }
+            | Self::AwsSsmParameter {
                 env_var_name: None, ..
             } => {}
         }
@@ -1241,6 +1457,26 @@ impl ConnectionParamsVars {
 /// { "type": "redis", "profile": "telapp", "connection": { "url": "REDIS_URL" } }
 /// ```
 ///
+/// #### feature.db_branches[].namespace (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, spanner) {#feature-db_branches-sql-namespace}
+///
+/// When `true`, the branch database runs in its own namespace named `mirrord-<key>`, where
+/// `<key>` is the session [`key`](#key). The operator creates the namespace on first use,
+/// copies the Secrets, ConfigMaps and service account the branch pod reads from the target's
+/// namespace into it, and deletes the namespace once no branch runs there anymore. Every
+/// branch started under the same key shares that namespace, which makes it easy to see and
+/// clean up everything one key created.
+///
+/// A key with characters a namespace name cannot hold (uppercase letters, `_`, ...) is turned
+/// into a valid name, with a short hash added to keep it unique. Set a `key` explicitly:
+/// without one, every run gets a fresh key and with it a fresh namespace. Cloud workload
+/// identity (GKE Workload Identity, AWS IRSA, EKS Pod Identity) is bound to a namespace, so
+/// IAM authentication and secret manager sources need a binding for the `mirrord-<key>`
+/// namespace too. Defaults to `false`.
+///
+/// ```json
+/// { "type": "pg", "namespace": true, "connection": { "url": "DATABASE_URL" } }
+/// ```
+///
 /// #### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
 ///
 /// `connection` describes how to get the connection information to the source database.
@@ -1287,6 +1523,14 @@ impl ConnectionParamsVars {
 /// only `value_pattern` and `env_var_name` is the env var pattern source instead, so a pattern
 /// against the profile's ConfigMap keeps `key`. ConfigMap sources need operator `3.204.0` and
 /// mirrord `3.255.0` or later.
+///
+/// A `gcp_secret_manager` or `aws_secrets_manager` source takes the same `value_selector` /
+/// `value_pattern` to pick one field out of a secret that holds several, such as a JSON blob
+/// of credentials. The branch init container applies it right after fetching the secret:
+///
+/// ```json
+/// { "params": { "password": { "aws_secrets_manager": "db-creds", "value_selector": ".password" } } }
+/// ```
 ///
 /// #### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}
 ///
@@ -1431,6 +1675,11 @@ pub struct BranchBaseConfig {
     /// Name of an admin-defined operator branch-config profile to use for this branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+
+    /// Run the branch in the operator-managed `mirrord-<key>` namespace instead of the
+    /// target's namespace.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub namespace: bool,
 }
 
 impl Default for BranchBaseConfig {
@@ -1441,6 +1690,7 @@ impl Default for BranchBaseConfig {
             ttl_mins: None,
             creation_timeout_secs: default_creation_timeout_secs(),
             profile: None,
+            namespace: false,
         }
     }
 }
@@ -1702,9 +1952,19 @@ pub enum ParamSource {
     /// Add `env_var_name` to also point the local app at the branch DB under that
     /// name (same semantics as `Secret`). Without it the value is only used to
     /// provision the branch and the local app keeps reading its own source.
+    ///
+    /// The whole secret is the value unless one extractor is set, for secrets that hold
+    /// several fields (`{"username": "...", "password": "..."}`): `value_selector` runs a
+    /// `.a.b` selector over the secret parsed as JSON or YAML, `value_pattern` runs a regex
+    /// over the raw text. They are mutually exclusive, and the init container applies them,
+    /// so mirrord still never reads the secret.
     GcpSecretManager {
         #[serde(rename = "gcp_secret_manager")]
         secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
@@ -1721,9 +1981,41 @@ pub enum ParamSource {
     /// Add `env_var_name` to also point the local app at the branch DB under that
     /// name (same semantics as `Secret`). Without it the value is only used to
     /// provision the branch and the local app keeps reading its own source.
+    ///
+    /// `value_selector` / `value_pattern` pick one field out of a JSON secret, same as on
+    /// `gcp_secret_manager`: `{ "aws_secrets_manager": "db-creds", "value_selector":
+    /// ".password" }`.
     AwsSecretsManager {
         #[serde(rename = "aws_secrets_manager")]
         secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
+    /// Value fetched from AWS Systems Manager Parameter Store at branch data-copy time by the
+    /// init container, using the target pod's service account (IRSA / EKS Pod Identity), for
+    /// apps that read their connection details from SSM at startup. `aws_ssm_parameter` is a
+    /// parameter name (`/dev/app/database/url`) or full ARN, passed to `GetParameter` with
+    /// decryption on, so `SecureString` parameters work. mirrord does not read the value; only
+    /// the branch init container does, so the operator needs no access to the parameter.
+    ///
+    /// Setup: the branch pod inherits the target pod's service account, so that account's IAM
+    /// role must allow `ssm:GetParameter` on the parameter, plus `kms:Decrypt` on its key for a
+    /// `SecureString`. No operator-level permissions are required.
+    ///
+    /// `env_var_name` and `value_selector` / `value_pattern` work the same as on
+    /// `aws_secrets_manager`: `{ "aws_ssm_parameter": "/dev/app/db", "value_selector":
+    /// ".password" }`.
+    AwsSsmParameter {
+        #[serde(rename = "aws_ssm_parameter")]
+        parameter: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
@@ -1778,6 +2070,23 @@ pub enum ConfigMapRef {
     Volume { volume: String },
 }
 
+/// Rejects a source that sets both `value_selector` and `value_pattern`: the operator would
+/// have to pick one silently, and the two disagree on what the value is.
+fn verify_single_extractor(
+    source: &str,
+    has_selector: bool,
+    has_pattern: bool,
+) -> Result<(), ConfigError> {
+    if has_selector && has_pattern {
+        return Err(ConfigError::Conflict(format!(
+            "`feature.db_branches[].connection` {source} sets both `value_selector` and \
+             `value_pattern`; keep the one that matches how the value is embedded (selector \
+             for a JSON/YAML field, pattern for text)."
+        )));
+    }
+    Ok(())
+}
+
 impl ParamSource {
     pub fn as_variable(&self) -> Option<&str> {
         match self {
@@ -1788,28 +2097,73 @@ impl ParamSource {
             Self::Secret { .. }
             | Self::GcpSecretManager { .. }
             | Self::AwsSecretsManager { .. }
+            | Self::AwsSsmParameter { .. }
             | Self::ConfigMap { .. } => None,
         }
     }
 
-    /// Rejects a `configmap` source that sets both extractors: the operator would have to
-    /// pick one silently, and the two disagree on what the value is.
+    /// Rejects a `configmap` or secret manager source that sets both extractors.
     fn verify(&self) -> Result<(), ConfigError> {
-        if let Self::ConfigMap {
-            value_selector: Some(_),
-            value_pattern: Some(_),
-            key,
-            ..
-        } = self
-        {
-            let key = key.as_deref().unwrap_or("<from profile>");
-            return Err(ConfigError::Conflict(format!(
-                "`feature.db_branches[].connection.params` `configmap` source for key `{key}` \
-                 sets both `value_selector` and `value_pattern`; keep the one that matches \
-                 how the value is embedded (selector for a JSON/YAML field, pattern for text)."
-            )));
+        match self {
+            Self::ConfigMap {
+                value_selector,
+                value_pattern,
+                key,
+                ..
+            } => verify_single_extractor(
+                &format!(
+                    "`configmap` source for key `{}`",
+                    key.as_deref().unwrap_or("<from profile>")
+                ),
+                value_selector.is_some(),
+                value_pattern.is_some(),
+            ),
+            Self::GcpSecretManager {
+                secret_ref,
+                value_selector,
+                value_pattern,
+                ..
+            } => verify_single_extractor(
+                &format!("`gcp_secret_manager` source `{secret_ref}`"),
+                value_selector.is_some(),
+                value_pattern.is_some(),
+            ),
+            Self::AwsSecretsManager {
+                secret_ref,
+                value_selector,
+                value_pattern,
+                ..
+            } => verify_single_extractor(
+                &format!("`aws_secrets_manager` source `{secret_ref}`"),
+                value_selector.is_some(),
+                value_pattern.is_some(),
+            ),
+            Self::AwsSsmParameter {
+                parameter,
+                value_selector,
+                value_pattern,
+                ..
+            } => verify_single_extractor(
+                &format!("`aws_ssm_parameter` source `{parameter}`"),
+                value_selector.is_some(),
+                value_pattern.is_some(),
+            ),
+            Self::Variable(_) | Self::Secret { .. } | Self::Pattern { .. } | Self::Env { .. } => {
+                Ok(())
+            }
         }
-        Ok(())
+    }
+
+    /// True for a secret manager source that narrows the secret with `value_selector` or
+    /// `value_pattern`.
+    fn extracts_from_secret_manager(&self) -> bool {
+        matches!(
+            self,
+            Self::GcpSecretManager { value_selector, value_pattern, .. }
+                | Self::AwsSecretsManager { value_selector, value_pattern, .. }
+                | Self::AwsSsmParameter { value_selector, value_pattern, .. }
+                if value_selector.is_some() || value_pattern.is_some()
+        )
     }
 
     fn collect_env_keys<'a>(&'a self, out: &mut Vec<&'a str>) {
@@ -1830,6 +2184,10 @@ impl ParamSource {
                 env_var_name: Some(name),
                 ..
             }
+            | ParamSource::AwsSsmParameter {
+                env_var_name: Some(name),
+                ..
+            }
             | ParamSource::ConfigMap {
                 env_var_name: Some(name),
                 ..
@@ -1841,6 +2199,9 @@ impl ParamSource {
                 env_var_name: None, ..
             }
             | ParamSource::AwsSecretsManager {
+                env_var_name: None, ..
+            }
+            | ParamSource::AwsSsmParameter {
                 env_var_name: None, ..
             }
             | ParamSource::ConfigMap {
@@ -1868,7 +2229,8 @@ impl ParamSource {
             | Self::ConfigMap { .. } => false,
             Self::Secret { .. }
             | Self::GcpSecretManager { .. }
-            | Self::AwsSecretsManager { .. } => true,
+            | Self::AwsSecretsManager { .. }
+            | Self::AwsSsmParameter { .. } => true,
         }
     }
 
@@ -1965,6 +2327,7 @@ pub struct ConnectionParamsVars {
 /// - `secret` read directly from a Kubernetes Secret.
 /// - `gcp_secret_manager` fetched from Google Secret Manager by the init container.
 /// - `aws_secrets_manager` fetched from AWS Secrets Manager by the init container.
+/// - `aws_ssm_parameter` fetched from AWS Systems Manager Parameter Store by the init container.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSourceKind")]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -1990,16 +2353,38 @@ pub enum TargetEnvironmentVariableSource {
         env_var_name: Option<String>,
     },
     /// Fetched from Google Secret Manager by the branch init container using the
-    /// target pod's service account. Same semantics as `ParamSource::GcpSecretManager`.
+    /// target pod's service account. Same semantics as `ParamSource::GcpSecretManager`,
+    /// `value_selector` / `value_pattern` included.
     GcpSecretManager {
         secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
     /// Fetched from AWS Secrets Manager by the branch init container using the
-    /// target pod's service account. Same semantics as `ParamSource::AwsSecretsManager`.
+    /// target pod's service account. Same semantics as `ParamSource::AwsSecretsManager`,
+    /// `value_selector` / `value_pattern` included.
     AwsSecretsManager {
         secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
+    /// Fetched from AWS Systems Manager Parameter Store by the branch init container using
+    /// the target pod's service account. Same semantics as `ParamSource::AwsSsmParameter`,
+    /// `value_selector` / `value_pattern` included.
+    AwsSsmParameter {
+        parameter: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
@@ -2881,6 +3266,8 @@ mod tests {
         let source = ConnectionSource::Url {
             url: TargetEnvironmentVariableSource::GcpSecretManager {
                 secret_ref: "projects/p/secrets/db-url/versions/latest".to_owned(),
+                value_selector: None,
+                value_pattern: None,
                 env_var_name: Some("DATABASE_URL".to_owned()),
             },
         };
@@ -2895,6 +3282,8 @@ mod tests {
             url: TargetEnvironmentVariableSource::AwsSecretsManager {
                 secret_ref: "arn:aws:secretsmanager:us-east-1:123456789012:secret:db-url"
                     .to_owned(),
+                value_selector: None,
+                value_pattern: Some("^url=(.+)$".to_owned()),
                 env_var_name: Some("DATABASE_URL".to_owned()),
             },
         };
@@ -2915,6 +3304,8 @@ mod tests {
                 password: Some(
                     ParamSource::AwsSecretsManager {
                         secret_ref: "my-db-password".to_owned(),
+                        value_selector: Some(".password".to_owned()),
+                        value_pattern: None,
                         env_var_name: Some("DB_PASSWORD".to_owned()),
                     }
                     .into(),
@@ -2926,6 +3317,68 @@ mod tests {
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized, "json was: {json}");
+    }
+
+    /// Apps often keep every DB credential in one JSON secret. `value_selector` on a secret
+    /// manager source picks one field out of it, and the CLI must flag the branch so it can
+    /// refuse an operator that would hand the whole JSON over as the password. Setting both
+    /// extractors is rejected up front, for params and for the `url` source alike.
+    #[rstest]
+    #[case::param_selector(
+        json!({ "params": { "password": {
+            "aws_secrets_manager": "db-creds", "value_selector": ".password"
+        } } }),
+        Some(true)
+    )]
+    #[case::url_pattern(
+        json!({ "url": {
+            "type": "gcp_secret_manager",
+            "secret_ref": "projects/p/secrets/db/versions/latest",
+            "value_pattern": "url=(.+)"
+        } }),
+        Some(true)
+    )]
+    #[case::no_extractor(
+        json!({ "params": { "password": { "aws_secrets_manager": "db-password" } } }),
+        Some(false)
+    )]
+    #[case::param_both(
+        json!({ "params": { "password": {
+            "gcp_secret_manager": "projects/p/secrets/db/versions/latest",
+            "value_selector": ".password",
+            "value_pattern": "(.+)"
+        } } }),
+        None
+    )]
+    #[case::url_both(
+        json!({ "url": {
+            "type": "aws_secrets_manager",
+            "secret_ref": "db-creds",
+            "value_selector": ".url",
+            "value_pattern": "(.+)"
+        } }),
+        None
+    )]
+    fn secret_manager_extractors(#[case] connection: Value, #[case] uses_extractor: Option<bool>) {
+        let branch: DatabaseBranchConfig = serde_json::from_value(json!({
+            "type": "pg",
+            "version": "16",
+            "connection": connection,
+        }))
+        .unwrap();
+
+        let verified = DatabaseBranchesConfig::Inline(vec![branch.clone()])
+            .verify(&mut config::ConfigContext::default());
+        match uses_extractor {
+            Some(uses_extractor) => {
+                verified.unwrap();
+                assert_eq!(branch.uses_secret_manager_extractor(), uses_extractor);
+            }
+            None => assert!(
+                matches!(&verified, Err(ConfigError::Conflict(message)) if message.contains("value_selector")),
+                "{verified:?}"
+            ),
+        }
     }
 
     /// A ConfigMap param source accepts both locator forms: the object name for a stable

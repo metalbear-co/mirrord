@@ -156,15 +156,23 @@ routes outgoing traffic from your process through the pod, and does the same for
 
 Container run inside the pod launched by mirrord requires additional [Linux capabilities](https://man7.org/linux/man-pages/man7/capabilities.7.html):
 
-- `CAP_NET_ADMIN` and `CAP_NET_RAW` - for modifying routing tables
-- `CAP_SYS_PTRACE` - for reading target pod environment
+- `CAP_NET_ADMIN` - for redirecting the target's incoming traffic with iptables
+- `CAP_SYS_PTRACE` - for accessing the target's network namespace, files and environment through `/proc`
 - `CAP_SYS_ADMIN` - for joining target pod network namespace
 
-However, you can disable any subset of those in the [configuration](https://metalbear.com/mirrord/docs/reference/configuration/).
+However, you can disable any subset of those with `agent.disabled_capabilities` in the [configuration](https://metalbear.com/mirrord/docs/reference/configuration/).
 This will possibly limit mirrord functionalities or even make it unusable in some setups.
 
+```json
+{
+  "agent": {
+    "disabled_capabilities": ["NET_ADMIN"]
+  }
+}
+```
+
 ```bash
-MIRRORD_AGENT_DISABLED_CAPABILITIES=CAP_NET_RAW,CAP_SYS_PTRACE mirrord exec node app.js --target pod/my-pod
+mirrord exec -f mirrord.json node app.js --target pod/my-pod
 ```
 
 <p align="center">

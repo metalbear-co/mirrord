@@ -52,6 +52,7 @@ impl KubernetesAPI {
     ///
     /// If [`LayerConfig::target`] specifies a targetless run,
     /// replaces [`AgentConfig::namespace`] with the target namespace.
+    #[mirrord_macros::boxed_future]
     pub async fn create<P: Progress>(config: &LayerConfig, progress: &P) -> Result<Self> {
         let client_config = create_kube_config(
             config.accept_invalid_certificates,
@@ -223,6 +224,7 @@ impl KubernetesAPI {
     ///
     /// Unless targetless, fetches [`RuntimeData`] for the given target and fills
     /// [`ContainerConfig::pod_ips`].
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(level = "trace", skip(self, progress))]
     pub async fn create_agent<P>(
         &self,

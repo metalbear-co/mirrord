@@ -17,7 +17,7 @@ metadata:
 
 # mirrord Temporal Splitting Configuration Skill
 
-> Temporal splitting is configured with **`MirrordSplitConfig`** (which task queues to split + how the worker finds their names) and **`MirrordPropertyList`** (the Temporal frontend connection). Temporal has no native way to split a task queue, so the operator does it with a small gRPC proxy and virtual task queues — see "How it works" below. This is an **alpha** feature. Requires operator **3.170.0+** and CLI **3.221.0+**.
+> Temporal splitting is configured with **`MirrordSplitConfig`** (which task queues to split + how the worker finds their names) and **`MirrordPropertyList`** (the Temporal frontend connection). Temporal has no native way to split a task queue, so the operator does it with a small gRPC proxy and virtual task queues — see "How it works" below. This is an **alpha** feature. Requires operator **3.170.0+**, CLI **3.221.0+**, and Kubernetes **1.30+** on the cluster running the split.
 
 ## Security Boundaries
 
@@ -149,7 +149,7 @@ Note to convey: TLS applies to the **operator → Temporal frontend** connection
 
 Rules:
 - **Same namespace as the target workload.**
-- `spec.targetRef` = `{ apiVersion, kind, name }` (Deployment/StatefulSet/Rollout).
+- `spec.targetRef` = `{ apiVersion, kind, name }` (Deployment/StatefulSet/Rollout). A config needs either `targetRef` (one workload) or `targetSelector` (a label selector matching every Deployment/StatefulSet/Rollout in the namespace whose labels match — operator **3.220.0+**), not both.
 - Each `spec.queues[]` needs `id`, `kind: temporal`, a `clientConfig` (the `MirrordPropertyList` name; or set once via `spec.clientConfigs.temporal`), and `appConfig.taskQueue`.
 - `appConfig.temporalAddress` (optional) names the env var holding the frontend address — the operator patches it so the worker connects to the operator's proxy. `appConfig.temporalNamespace` (optional) names the env var holding the Temporal namespace.
 - Each `appConfig` field uses the same source structure as other queue services: `env`, `envLike`, `volume` (read from a file mounted from a ConfigMap volume instead of an env var — operator **3.198.0+**), `podFile` (read from a file that exists only inside the running pods, e.g. Vault- or CSI-injected, with no ConfigMap/Secret behind it — operator **3.201.0+**), `fallback`, `valueSelector`, `valuePattern`, `containers`.
@@ -258,7 +258,7 @@ An empty `message_filter: {}` with no `jq_filter` is **match-none** (the local w
 A task matches if the program outputs `true`.
 
 Notes to convey:
-- **`queue_mode: "mirror"` is not supported for Temporal** — a Temporal task is always stolen (only the matching local worker gets it). Don't offer mirror mode.
+- **Temporal supports `steal` only.** Temporal hands each task to exactly one worker poll, so there's no way to deliver one task to both a local and a deployed worker. mirrord *accepts* `queue_mode: "mirror"` on a Temporal queue (or `mirrord up` in mirror mode), but runs it as `steal`: matching tasks go only to the local worker, and the deployed worker never sees them. mirrord prints a warning naming each Temporal queue this happened for when the session starts. Always set (or recommend) `steal` explicitly for Temporal queues rather than relying on this silent downgrade.
 - If a `filter`/`message_filter` and a `jq_filter` are both set, **both** must match.
 - For multiple queues (or the same ID on multiple brokers), use the array form with `queue_id` per entry.
 - With `operator.injectSessionKeyHeader` enabled, tasks routed to a session are stamped with a `mirrord-key` **activity task header**. Workflow tasks are never stamped (their header lives in replayed workflow history).
@@ -322,7 +322,7 @@ Present results as:
 ## What NOT to Do
 
 - Don't hallucinate CRD fields or properties — use only fields from the reference files.
-- Don't offer `queue_mode: "mirror"` for Temporal — it's not supported; Temporal tasks are steal-only.
+- Don't offer `queue_mode: "mirror"` for Temporal as if it mirrors — Temporal tasks are steal-only, and mirrord silently runs a mirror request as `steal` (with a startup warning) rather than rejecting it.
 - Don't use `kind: kafka` field names (`topic`, `groupId`, `appId`) in a Temporal queue — Temporal uses `taskQueue`, `temporalAddress`, `temporalNamespace`.
 - Don't set only one of `tlsClientCert`/`tlsClientKey` — the split fails at start.
 - Don't inline API keys or PEM material in the YAML — always `secretKeyRef`.

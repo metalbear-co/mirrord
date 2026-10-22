@@ -20,6 +20,7 @@ pub mod logfile_path;
 pub mod plan;
 pub mod retry;
 pub mod target;
+pub mod template;
 pub mod util;
 
 use std::{collections::HashMap, ffi::OsStr, io::Read, ops::Not, path::Path};
@@ -39,6 +40,7 @@ use feature::{
         },
         outgoing::OutgoingFilterConfig,
     },
+    split_queues::QueueKind,
 };
 use k8s_openapi::api::core::v1::PodSpec;
 use mirrord_analytics::CollectAnalytics;
@@ -51,7 +53,7 @@ use tera::Tera;
 use tracing::warn;
 
 use crate::{
-    agent::AgentConfig,
+    agent::{AgentConfig, LinuxCapability},
     ci::CiConfig,
     config::{FromFileError, source::MirrordConfigSource},
     container::ContainerConfig,
@@ -504,7 +506,8 @@ pub struct LayerConfig {
     /// ## kube_context {#root-kube_context}
     ///
     /// Kube context to use from the kubeconfig file.
-    /// Will use current context if not specified.
+    /// If not specified, uses `kube_context` from the global `~/.mirrord/mirrord.json`, then the
+    /// kubeconfig's current context.
     ///
     /// ```json
     /// {
@@ -914,7 +917,7 @@ impl LayerConfig {
                 ));
             }
 
-            if self.feature.split_queues.is_set() {
+            if self.feature.split_queues.is_set() || self.feature.kafka_branch {
                 return Err(ConfigError::Conflict(
                     "Queue splitting is not yet supported with label targets.".to_owned(),
                 ));
@@ -934,6 +937,27 @@ impl LayerConfig {
             );
         }
 
+        let known_capabilities = LinuxCapability::all()
+            .iter()
+            .map(|capability| capability.as_spec_str())
+            .collect::<Vec<_>>();
+        let ignored_caps = self
+            .agent
+            .disabled_capabilities
+            .iter()
+            .flatten()
+            .filter(|name| known_capabilities.contains(&name.as_str()).not())
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+
+        if ignored_caps.is_empty().not() {
+            context.add_warning(format!(
+                "`{}` in `agent.disabled_capabilities` is ignored, valid values are: {}.",
+                ignored_caps.join(", "),
+                known_capabilities.join(", ")
+            ));
+        }
+
         if matches!(
             self.feature.network.outgoing.filter,
             Some(OutgoingFilterConfig::Remote(_))
@@ -945,6 +969,8 @@ impl LayerConfig {
                 resolved locally. Consider enabling the remote DNS resolution feature.".to_owned(),
             );
         }
+
+        self.feature.fs.verify(context);
 
         let http_filter = &self.feature.network.incoming.http_filter;
         let used_filters = [
@@ -1219,6 +1245,28 @@ impl LayerConfig {
         self.feature.network.dns.verify(context)?;
         self.feature.network.outgoing.verify(context)?;
         self.feature.split_queues.verify(context)?;
+
+        if self.feature.kafka_branch && matches!(self.target.path, Some(Target::Serverless(_))) {
+            return Err(ConfigError::Conflict(
+                "`feature.kafka_branch` is not supported with serverless targets.".to_owned(),
+            ));
+        }
+
+        if self.feature.kafka_branch
+            && self
+                .feature
+                .split_queues
+                .of_kind(QueueKind::Kafka)
+                .next()
+                .is_some()
+        {
+            return Err(ConfigError::Conflict(
+                "`feature.kafka_branch` moves every Kafka queue to the branch: remove the Kafka \
+                 entries from `feature.split_queues`."
+                    .to_owned(),
+            ));
+        }
+
         self.verify_db_branches(context)?;
 
         self.feature.preview.verify()?;
@@ -1433,11 +1481,12 @@ impl LayerConfig {
         if self.feature.preview.idle.is_enabled()
             && matches!(self.feature.network.incoming.mode, IncomingMode::Off)
             && !self.feature.split_queues.is_set()
+            && !self.feature.kafka_branch
         {
             return Err(ConfigError::Conflict(
                 "`feature.preview.idle` requires a wake source: enable \
-                 `feature.network.incoming` or configure `feature.split_queues`, \
-                 otherwise nothing can ever wake the idle session."
+                 `feature.network.incoming` or `feature.kafka_branch`, or configure \
+                 `feature.split_queues`, otherwise nothing can ever wake the idle session."
                     .to_owned(),
             ));
         }
@@ -1530,6 +1579,10 @@ impl LayerFileConfig {
     /// Renders the Tera templates in the raw `content` of a config file, returning the text that
     /// gets deserialized. `path` only selects how the `key` field is extracted from `content`.
     ///
+    /// Besides Tera's own functions and filters, templates can use the `path_pattern` and
+    /// `regex_escape` filters of the `template` module, which print text that is safe in a
+    /// pattern.
+    ///
     /// # Key Resolution for Template Rendering
     ///
     /// Config files can reference `{{ key }}` in templates (e.g., for HTTP header filters).
@@ -1554,6 +1607,7 @@ impl LayerFileConfig {
         context: &mut ConfigContext,
     ) -> Result<String, FromFileError> {
         let mut template_engine = Tera::default();
+        template::register(&mut template_engine);
         template_engine.add_raw_template("main", content)?;
 
         let mut tera_context = tera::Context::new();
@@ -1949,6 +2003,7 @@ mod tests {
                 copy_target: None,
                 hostname: None,
                 split_queues: None,
+                kafka_branch: None,
                 db_branches: None,
                 magic: None,
                 preview: None,
@@ -3082,5 +3137,30 @@ mod tests {
     #[test]
     fn magic_auto_mount_defaults_to_enabled() {
         assert!(default_config().feature.magic.auto_mount);
+    }
+
+    /// Names that aren't one of the agent's capabilities are ignored, so the user gets a warning.
+    #[test]
+    fn unknown_disabled_capability_warns() {
+        let config = ConfigType::Json
+            .parse(r#"{ "agent": { "disabled_capabilities": ["SYS_PTRACE", "CAP_SYS_ADMIN", "CAP_NET_ADMIN"] } }"#);
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify(&mut context)
+            .expect("an unknown capability should not be an error");
+
+        let warnings = context
+            .into_warnings()
+            .into_iter()
+            .filter(|warning| warning.contains("agent.disabled_capabilities"))
+            .collect::<Vec<_>>();
+        assert!(
+            matches!(warnings.as_slice(), [warning] if warning.contains("`CAP_SYS_ADMIN, CAP_NET_ADMIN`")),
+            "unexpected warnings: {warnings:?}"
+        );
     }
 }

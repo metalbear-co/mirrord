@@ -100,3 +100,75 @@ jobs:
           uninstall
           cat scripts/install.sh | VERSION="$pinned" sh -s -- 0.0.0-should-be-ignored
           [ "$(mirrord --version)" = "mirrord $pinned" ]
+
+  # The opt-in verified path: the zip is checked against the release's checksum file and against
+  # a pinned one, and the binary lands where MIRRORD_INSTALL_DIR says, without sudo. This is the
+  # path CI installs (metalbear-co/setup-mirrord) build on.
+  verified:
+    name: verified install (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "linux x86_64", os: blacksmith-4vcpu-ubuntu-2404, asset: mirrord_linux_x86_64 }
+          # Runs without `sha256sum` on PATH, so the `shasum -a 256` fallback the script uses on
+          # macOS is the one hashing.
+          - { name: "mac aarch64 / shasum", os: blacksmith-6vcpu-macos-latest, asset: mirrord_mac_universal, hide: sha256sum }
+    env:
+      ASSET: ${{ matrix.asset }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: scripts/install.sh
+          sparse-checkout-cone-mode: false
+
+      # A PATH of links to every tool on the runner except the hidden one; the system may ship
+      # it (macOS has /sbin/sha256sum), so trimming directories is not enough.
+      - name: Hide ${{ matrix.hide }} from PATH
+        if: ${{ matrix.hide != '' }}
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/tools"
+          mkdir -p "$tools"
+          IFS=: read -ra dirs <<< "$PATH"
+          for dir in "${dirs[@]}"; do
+            for tool in "$dir"/*; do
+              # A directory is "executable" too; linking one shadows the real tool of that name.
+              [ -f "$tool" ] && [ -x "$tool" ] || continue
+              name=$(basename "$tool")
+              [ "$name" = "${{ matrix.hide }}" ] && continue
+              [ -e "$tools/$name" ] || ln -s "$tool" "$tools/$name"
+            done
+          done
+          echo "PATH=$tools" >> "$GITHUB_ENV"
+          PATH="$tools" command -v ${{ matrix.hide }} && { echo "${{ matrix.hide }} is still reachable"; exit 1; }
+          PATH="$tools" command -v shasum curl unzip sh
+
+      - name: Install into a directory, checked against the published checksum
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/mirrord-bin"
+          MIRRORD_VERIFY=1 MIRRORD_INSTALL_DIR="$dir" sh scripts/install.sh
+          [ ! -e /usr/local/bin/mirrord ] || { echo "installed outside MIRRORD_INSTALL_DIR"; exit 1; }
+          "$dir/mirrord" --version
+          echo "version=$("$dir/mirrord" --version | cut -d' ' -f2)" >> "$GITHUB_ENV"
+          echo "DIR=$dir" >> "$GITHUB_ENV"
+
+      - name: A wrong pinned checksum refuses to install
+        run: |
+          set -euo pipefail
+          rm -f "$DIR/mirrord"
+          if MIRRORD_CHECKSUM=0000000000000000000000000000000000000000000000000000000000000000 \
+             MIRRORD_INSTALL_DIR="$DIR" sh scripts/install.sh "$version"; then
+            echo "a wrong checksum must fail"; exit 1
+          fi
+          [ ! -e "$DIR/mirrord" ] || { echo "a refused download left a binary behind"; exit 1; }
+
+      - name: The published checksum, pinned, installs
+        run: |
+          set -euo pipefail
+          sums="https://github.com/metalbear-co/mirrord/releases/download/$version/$ASSET.shasum256"
+          pinned=$(curl -fsSL "$sums" | cut -d' ' -f1)
+          MIRRORD_CHECKSUM="$pinned" MIRRORD_INSTALL_DIR="$DIR" sh scripts/install.sh "$version"
+          [ "$("$DIR/mirrord" --version)" = "mirrord $version" ]

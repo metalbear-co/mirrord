@@ -11,3 +11,10 @@ disallowed-macros = [
     { path = "std::eprint", reason = "writes through std::io::stderr, which can abort a process the layer is loaded into. Log through tracing." },
     { path = "std::dbg", reason = "writes through std::io::stderr, which can abort a process the layer is loaded into. Log through tracing." },
 ]
+disallowed-methods = [
+    # Clippy reads only the nearest `clippy.toml`, so this file replaces the workspace one. These
+    # two are copied from it; copy any new workspace-wide ban here too.
+    { path = "std::process::Command::new", reason = "on Windows only `.exe` is appended to bare program names, so `.cmd`/`.bat` shims such as `npm.cmd` are never found", replacement = "mirrord_command::resolve_command" },
+    # `allow-invalid` because crates that don't depend on tokio can't resolve this path.
+    { path = "tokio::process::Command::new", reason = "on Windows only `.exe` is appended to bare program names, so `.cmd`/`.bat` shims such as `npm.cmd` are never found", replacement = "mirrord_command::resolve_tokio_command", allow-invalid = true },
+]

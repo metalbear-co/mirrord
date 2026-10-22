@@ -15,12 +15,15 @@ use mirrord_config::{
     config::{ConfigContext, ConfigError, EnvKey, MirrordConfig},
     feature::{
         copy_target::CopyTargetConfig,
+        database_branches::{
+            AllSplitConfigDbBranches, DatabaseBranchesConfig, SplitConfigDbBranches,
+        },
         env::{EnvConfig, EnvFileConfig},
         network::incoming::{
             IncomingMode,
             http_filter::{HttpFilterConfig, HttpFilterFileConfig},
         },
-        split_queues::{QueueMode, SplitQueuesConfig},
+        split_queues::{QueueKind, QueueMode, SplitQueuesConfig},
     },
     target::{Target, TargetType, deployment::DeploymentTarget},
 };
@@ -57,6 +60,10 @@ pub enum ServiceMode {
     /// Uses the service's `http_filter` if set. Otherwise, requests with a header matching the
     /// regex `baggage: .*mirrord-session={key}.*` go to the local service, where `{key}` is the
     /// session key.
+    ///
+    /// With a workload target and no `db_branches` of its own, the service requests DB branching
+    /// (`db_branches: "*"`): it runs against branches of the databases defined on the workload's
+    /// `MirrordSplitConfig`, shared with the other services of the run that use the same ones.
     #[default]
     Split,
 
@@ -73,7 +80,11 @@ pub enum ServiceMode {
     ///
     /// Uses the service's `http_filter` if set. Otherwise, requests with a header matching the
     /// regex `baggage: .*mirrord-session={key}.*` are mirrored, where `{key}` is the session key.
-    // The fallback filter is built in `ServiceConfig::assemble`.
+    ///
+    /// With a workload target and no `db_branches` of its own, the service requests DB branching
+    /// (`db_branches: "*"`): it runs against branches of the databases defined on the workload's
+    /// `MirrordSplitConfig`, shared with the other services of the run that use the same ones.
+    // The fallback filter and the DB branching request are built in `ServiceConfig::assemble`.
     Mirror,
 }
 
@@ -192,7 +203,8 @@ pub struct CommonConfig {
     /// Kube context to use for all services, from your kubeconfig.
     ///
     /// A service's own `context` takes precedence, and `mirrord up --context` takes precedence
-    /// over both.
+    /// over both. When none is set, the global config's `kube_context` is used, then the
+    /// kubeconfig's current context.
     pub(crate) context: Option<Arc<str>>,
 }
 
@@ -569,7 +581,7 @@ impl ServiceConfig {
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
-    ) -> Result<(LayerConfig, RunConfig), ConfigPatchErrorKind> {
+    ) -> Result<SubprocessCfg, ConfigPatchErrorKind> {
         let kube_context = up_context.get_context(self.context.clone());
         let mut cfg = self.unpatched_config(base, &key, kube_context.clone());
 
@@ -593,11 +605,41 @@ impl ServiceConfig {
             },
         };
 
+        // The operator resolves `"*"` against the `MirrordSplitConfig` of one targeted
+        // workload, so a targetless or label-selected service has nothing to ask for. Every
+        // service of a run shares the key, so services pointing at one entry land on one branch.
+        // Branches set in the base config, or by `config_patch` below, take precedence.
+        let single_workload = cfg.target.path.as_ref().is_some_and(|path| {
+            matches!(
+                path,
+                Target::Targetless | Target::Serverless(_) | Target::Label(_)
+            )
+            .not()
+        });
+        let mut default_db_branches =
+            matches!(self.default_mode, ServiceMode::Split | ServiceMode::Mirror)
+                && single_workload
+                && cfg.feature.db_branches.is_empty();
+        if default_db_branches {
+            cfg.feature.db_branches = DatabaseBranchesConfig::FromSplitConfig(
+                SplitConfigDbBranches::All(AllSplitConfigDbBranches::All),
+            );
+        }
+
         if let Some(patch) = self.config_patch {
+            // A patch that sets `db_branches` decides them itself, `[]` included, so whatever it
+            // holds afterwards was asked for by the user.
+            default_db_branches &= patch.pointer("/feature/db_branches").is_none();
             cfg = apply_config_patch(cfg, patch, &key)?;
         }
 
-        Ok((cfg, self.run))
+        Ok(SubprocessCfg {
+            config: cfg,
+            service_name: service_name.clone(),
+            run: self.run,
+            mode: self.default_mode,
+            default_db_branches,
+        })
     }
 
     /// The mirrord config `mirrord up` merges this service's `config_patch` into, as JSON, but
@@ -730,6 +772,13 @@ fn apply_config_patch(
     patch: serde_json::Value,
     key: &EnvKey,
 ) -> Result<LayerConfig, ConfigPatchErrorKind> {
+    let generated_kafka_splits = config
+        .feature
+        .split_queues
+        .of_kind(QueueKind::Kafka)
+        .cloned()
+        .collect::<Vec<_>>();
+
     let mut layer_config_json = patchable(config, key).map_err(ConfigPatchErrorKind::Serialize)?;
     json_patch::merge(&mut layer_config_json, &patch);
 
@@ -741,6 +790,20 @@ fn apply_config_patch(
     let mut context = ConfigContext::default().strict_env(true);
     let mut config = file_config.generate_config(&mut context)?;
     config.key = key.clone();
+
+    // A Kafka branch serves every Kafka queue, so the Kafka splits the mode generated give way.
+    if config.feature.kafka_branch {
+        config.feature.split_queues = SplitQueuesConfig::from_splits(
+            config
+                .feature
+                .split_queues
+                .splits()
+                .iter()
+                .filter(|split| generated_kafka_splits.contains(split).not())
+                .cloned(),
+        );
+    }
+
     config.verify(&mut context)?;
 
     Ok(config)
@@ -771,9 +834,12 @@ pub struct SubprocessCfg {
     pub service_name: Arc<str>,
     /// How to run this service (exec vs container, and the command).
     pub run: RunConfig,
-    /// Mode this service was assembled for. Used only to name it in
-    /// [`validate_targets`] errors; its effects are already in `config`.
+    /// Mode this service was assembled for. Its effects are already in `config`; it names the
+    /// mode in [`validate_targets`] errors and in what `mirrord up` reports about the service.
     pub mode: ServiceMode,
+    /// `config.feature.db_branches` is the `"*"` `mirrord up` adds for this service's mode, not
+    /// one the user set. An operator that can't resolve it drops it rather than failing the run.
+    pub default_db_branches: bool,
 }
 
 /// Rejects services whose resolved target cannot support the features their
@@ -876,6 +942,13 @@ impl ServiceError {
 }
 
 impl UpConfig {
+    /// Uses `context` as the common context when the config sets none.
+    pub fn default_context(&mut self, context: Option<Arc<str>>) {
+        if self.common.context.is_none() {
+            self.common.context = context;
+        }
+    }
+
     /// Verifies the config without touching the cluster, similar to
     /// what `verify_config` does for [`LayerConfig`].
     pub fn verify_services(&self, key: &EnvKey) -> Result<Vec<ServiceError>, ConfigError> {
@@ -905,8 +978,7 @@ impl UpConfig {
         let mut errors = Vec::new();
         let mut assembled = Vec::new();
         for (service_name, service) in self.services.iter().sorted_by_key(|(name, _)| *name) {
-            let mode = service.default_mode;
-            let (config, run) = match service.clone().assemble(
+            let subprocess = match service.clone().assemble(
                 service_name,
                 base.clone(),
                 key.clone(),
@@ -926,7 +998,7 @@ impl UpConfig {
             // As in the service's `mirrord exec` session, which doesn't take a missing target for
             // targetless when verifying; `validate_targets` checks the mode against it below.
             let mut context = ConfigContext::default().strict_env(true);
-            if let Err(source) = config.verify(&mut context) {
+            if let Err(source) = subprocess.config.verify(&mut context) {
                 errors.push(ServiceError::Validation {
                     service: service_name.clone(),
                     source,
@@ -934,12 +1006,7 @@ impl UpConfig {
                 continue;
             }
 
-            assembled.push(SubprocessCfg {
-                config,
-                service_name: service_name.clone(),
-                run,
-                mode,
-            });
+            assembled.push(subprocess);
         }
 
         if let Err(ModeError::IncompatibleTargets(incompatible)) = validate_targets(&assembled) {
@@ -1075,23 +1142,19 @@ impl UpConfig {
                         "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
                     );
                 }
-                let (config, run) = svc
-                    .assemble(
-                        &service_name,
-                        base_config.clone(),
-                        key.clone(),
-                        resolved_targets,
-                        up_context.clone(),
-                    )
-                    .map_err(|source| ConfigPatchError {
+                svc.assemble(
+                    &service_name,
+                    base_config.clone(),
+                    key.clone(),
+                    resolved_targets,
+                    up_context.clone(),
+                )
+                .map_err(|source| {
+                    ConfigPatchError {
                         service: service_name.clone(),
                         source,
-                    })?;
-                Ok(SubprocessCfg {
-                    config,
-                    service_name,
-                    run,
-                    mode,
+                    }
+                    .into()
                 })
             })
             .collect()

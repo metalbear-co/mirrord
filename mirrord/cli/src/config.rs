@@ -999,15 +999,20 @@ pub(super) enum OperatorCommand {
     // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
     #[clap(hide(true))]
     Setup,
-    /// Install the mirrord operator into the cluster of the current kubecontext, or of the one
-    /// given with `--context`.
+    /// Install the mirrord operator into the cluster of the kubecontext given with `--context`, else
+    /// the global config's `kube_context`, else the current kubecontext.
     ///
-    /// Without `--api-key`, starts an Enterprise trial and opens a link to claim it. Installs the
-    /// latest version of the helm chart with default values; use the helm chart directly for a
-    /// customized installation.
+    /// Without `--api-key` or `--from-signup`, logs you in and creates your organization's
+    /// operator API key, then installs the helm chart's default values (use the chart directly for
+    /// anything custom).
     Install(Box<OperatorInstallArgs>),
+    /// Start a 7-day mirrord Enterprise trial under a new organization, for AI agents.
+    ///
+    /// Saves the trial's API key on this machine for `mirrord operator install --from-signup`.
+    Signup(OperatorSignupArgs),
     /// Remove the mirrord operator that `mirrord operator install` installed from the cluster of
-    /// the current kubecontext, or of the one given with `--context`.
+    /// the kubecontext given with `--context`, else the global config's `kube_context`, else the
+    /// current kubecontext.
     ///
     /// Also removes what a failed `mirrord operator install` left behind.
     Uninstall(OperatorUninstallArgs),
@@ -1034,25 +1039,32 @@ pub(super) enum OperatorCommand {
 pub(super) struct OperatorInstallArgs {
     /// Operator API key, the same key the helm chart takes as `cloud.apiKey.key`.
     ///
-    /// Registers the operator under the key's organization instead of starting a trial.
+    /// Without it or `--from-signup`, the command logs you in to the MetalBear app (like
+    /// `mirrord login`) and creates the operator API key of your organization, which goes into the
+    /// cluster without being shown.
     #[arg(long, env = "MIRRORD_OPERATOR_API_KEY", hide_env_values = true)]
     pub api_key: Option<String>,
 
-    /// Print the trial claim URL instead of opening it in the browser.
-    #[arg(long)]
+    /// Install with the API key of the trial that `mirrord operator signup` started on this
+    /// machine.
+    #[arg(long, conflicts_with_all = ["api_key", "cluster_hint", "no_hint"])]
+    pub from_signup: bool,
+
+    /// Has no effect. Kept so that scripts written for earlier versions keep working.
+    #[arg(long, hide = true)]
     pub no_browser: bool,
 
-    /// Name shown on the trial claim page to identify this cluster.
+    /// Name of the operator API key the command creates, shown in your organization's settings.
     ///
     /// Defaults to the cluster's ID, the UID of its `default` namespace.
     #[arg(long, conflicts_with_all = ["api_key", "no_hint"])]
     pub cluster_hint: Option<String>,
 
-    /// Do not send a cluster hint to the trial claim page.
+    /// Do not name the operator API key after the cluster.
     #[arg(long, conflicts_with = "api_key")]
     pub no_hint: bool,
 
-    /// Kube context to install the operator into, instead of the current one.
+    /// Kube context to install the operator into, instead of the global or current one.
     #[arg(long)]
     pub context: Option<String>,
 
@@ -1064,14 +1076,14 @@ pub(super) struct OperatorInstallArgs {
     #[arg(long, env = "MIRRORD_OPERATOR_INSTALL_MANIFEST", hide = true)]
     pub manifest: Option<PathBuf>,
 
-    /// Base URL of the MetalBear app, used for the trial signup.
+    /// Base URL of the MetalBear app, used to log in and create the operator API key.
     #[arg(
         long,
         env = "MIRRORD_OPERATOR_INSTALL_APP_URL",
         hide = true,
         default_value = "https://app.metalbear.com"
     )]
-    pub app_url: String,
+    pub app_url: Url,
 
     /// How long to wait for the operator to become ready before the installation fails.
     ///
@@ -1087,8 +1099,33 @@ pub(super) struct OperatorInstallArgs {
 }
 
 #[derive(Args, Debug)]
+pub(super) struct OperatorSignupArgs {
+    /// Name shown on the claim page to identify the cluster, by default its `default` namespace
+    /// UID.
+    #[arg(long, conflicts_with = "no_hint")]
+    pub cluster_hint: Option<String>,
+
+    /// Do not send a cluster hint to the claim page.
+    #[arg(long)]
+    pub no_hint: bool,
+
+    /// Kube context whose cluster the hint names, instead of the current one.
+    #[arg(long)]
+    pub context: Option<String>,
+
+    /// Base URL of the MetalBear app, used for the signup.
+    #[arg(
+        long,
+        env = "MIRRORD_OPERATOR_INSTALL_APP_URL",
+        hide = true,
+        default_value = "https://app.metalbear.com"
+    )]
+    pub app_url: Url,
+}
+
+#[derive(Args, Debug)]
 pub(super) struct OperatorUninstallArgs {
-    /// Kube context to remove the operator from, instead of the current one.
+    /// Kube context to remove the operator from, instead of the global or current one.
     #[arg(long)]
     pub context: Option<String>,
 
@@ -1518,7 +1555,15 @@ pub(super) struct PreviewArgs {
 #[derive(Args, Debug)]
 pub(super) struct LoginArgs {
     /// URL of the authentication backend.
-    #[arg(long, hide = true, default_value = "https://app.metalbear.com")]
+    ///
+    /// Read from `MIRRORD_METALBEAR_CLOUD_URL` like the cloud a standalone sessions-manager
+    /// trusts, so logging in with it set gets the token that sessions-manager expects.
+    #[arg(
+        long,
+        hide = true,
+        env = "MIRRORD_METALBEAR_CLOUD_URL",
+        default_value = "https://app.metalbear.com"
+    )]
     pub url: Url,
 }
 
@@ -1691,14 +1736,8 @@ pub(super) struct PreviewStartArgs {
     #[arg(long)]
     pub force: bool,
 
-    /// Kubernetes manifest file or directory to build the preview from, instead of the
-    /// target's live spec. Repeat it to pass several.
-    ///
-    /// Only the target and the ConfigMaps and Secrets its pod uses are taken from the files,
-    /// and only where they differ from what is live. Live objects are never changed: the
-    /// preview gets its own copies. Replaces `feature.preview.spec_resources` from the config.
-    #[arg(long = "resource", value_name = "PATH", value_hint = ValueHint::AnyPath)]
-    pub resources: Vec<PathBuf>,
+    #[command(flatten)]
+    pub manifests: ManifestSourceArgs,
 }
 
 impl PreviewStartArgs {
@@ -1761,10 +1800,45 @@ pub(super) struct PreviewDiffArgs {
     #[arg(short = 'n', long)]
     pub target_namespace: Option<String>,
 
-    /// Kubernetes manifest file or directory to compare. Repeat it to pass several. Replaces
-    /// `feature.preview.spec_resources` from the config.
+    #[command(flatten)]
+    pub manifests: ManifestSourceArgs,
+}
+
+/// Where `mirrord preview start` and `mirrord preview diff` take manifests from instead of the
+/// target's live spec.
+#[derive(Args, Debug, Default)]
+pub(super) struct ManifestSourceArgs {
+    /// Kubernetes manifest file or directory to build the preview from, instead of the
+    /// target's live spec. Repeat it to pass several.
+    ///
+    /// Only the target and the ConfigMaps and Secrets its pod uses are taken from the files,
+    /// and only where they differ from what is live. Live objects are never changed: the
+    /// preview gets its own copies. Replaces `feature.preview.spec_resources` from the config.
     #[arg(long = "resource", value_name = "PATH", value_hint = ValueHint::AnyPath)]
     pub resources: Vec<PathBuf>,
+
+    /// Helm chart to render into manifests and build the preview from, like `--resource`.
+    ///
+    /// Runs `helm template` with the `helm` on your PATH, under the target's namespace and the
+    /// target's name as the release name (see `--release-name`), then handles the rendered
+    /// objects exactly like `--resource`. Can be combined with `--resource`. Replaces
+    /// `feature.preview.helm` from the config.
+    #[arg(long, value_name = "PATH", value_hint = ValueHint::AnyPath)]
+    pub chart: Option<PathBuf>,
+
+    /// Values file for `--chart`, passed to `helm template -f` in this order. Repeat it to
+    /// pass several. Without it the chart's own `values.yaml` is used, which may not match what
+    /// is deployed.
+    #[arg(long, value_name = "PATH", value_hint = ValueHint::FilePath, requires = "chart")]
+    pub values: Vec<PathBuf>,
+
+    /// Release name to render `--chart` under (`.Release.Name`), when the release is not named
+    /// after the target.
+    ///
+    /// Charts usually build object names from the release name, so with the wrong one the
+    /// rendered objects fall outside the target's scope and the preview runs the live spec.
+    #[arg(long, value_name = "NAME", requires = "chart")]
+    pub release_name: Option<String>,
 }
 
 impl PreviewDiffArgs {

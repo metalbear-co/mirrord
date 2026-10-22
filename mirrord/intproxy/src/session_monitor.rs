@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 pub mod api;
@@ -6,7 +6,7 @@ pub mod chaos;
 
 /// Wrapper around `Vec<String>` that redacts its [`Debug`] output to avoid leaking environment
 /// variable names into logs, while still serializing normally for the session monitor API.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(transparent)]
 pub struct RedactedVarNames(pub Vec<String>);
 
@@ -18,7 +18,8 @@ impl core::fmt::Debug for RedactedVarNames {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+/// Shared event schema keeps the session monitor producer and UI server's event handling typed.
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MonitorEvent {
     FileOp {

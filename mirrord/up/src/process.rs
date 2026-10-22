@@ -6,11 +6,12 @@ use std::{
     ops::Not,
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
 
+use mirrord_analytics::{UP_DB_BRANCHES_REPORT_PREFIX, UpSessionDbBranch};
 use mirrord_progress::messages::SESSION_READY_MESSAGE;
 #[cfg(unix)]
 use nix::sys::signal::killpg;
@@ -37,6 +38,11 @@ use platform::{ShutdownSignal, SignalStreams, receive_signal, signal_streams};
 // Matching that window lets container services clean up before escalation
 // kills the runtime client that is responsible for removing the container.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+
+/// How long an exited session's stdout is still read before telling whether it got as far as
+/// [`SESSION_READY_MESSAGE`]. The exit can be seen before the forwarding task has read the last
+/// lines, and a descendant still holding the pipe open must not hold up the error.
+const STDOUT_DRAIN: Duration = Duration::from_secs(1);
 
 /// Records when every service has emitted its session-ready marker.
 ///
@@ -90,6 +96,19 @@ struct Service {
     /// Unix process-group ID retained to probe surviving descendants.
     #[cfg(unix)]
     group: Pid,
+    /// Set once the session printed [`SESSION_READY_MESSAGE`], i.e. it got as far as launching
+    /// the service's process. Tells a session that failed to start from a service that crashed.
+    started: Arc<AtomicBool>,
+    /// Resolves once the forwarding of the session's stdout ended, so `started` is final.
+    stdout_closed: Option<oneshot::Receiver<()>>,
+}
+
+/// What forwarding a session's stdout (not a pre-command's) reports back.
+struct SessionOutput {
+    readiness: Arc<Readiness>,
+    started: Arc<AtomicBool>,
+    /// Dropped when forwarding ends, which resolves [`Service::stdout_closed`].
+    _closed: oneshot::Sender<()>,
 }
 
 impl Service {
@@ -118,12 +137,19 @@ impl Service {
             .id()
             .map(|pid| Pid::from_raw(pid as i32))
             .ok_or_else(|| io::Error::other("spawned child has no process ID"))?;
+        let started = Arc::new(AtomicBool::new(false));
+        let mut stdout_closed = None;
         if let Some(stdout) = child.stdout().take() {
-            output.spawn(forward_output(
-                stdout,
-                name.clone(),
-                then.is_none().then(|| readiness.clone()),
-            ));
+            let session = then.is_none().then(|| {
+                let (closed, receiver) = oneshot::channel();
+                stdout_closed = Some(receiver);
+                SessionOutput {
+                    readiness: readiness.clone(),
+                    started: started.clone(),
+                    _closed: closed,
+                }
+            });
+            output.spawn(forward_output(stdout, name.clone(), session));
         }
         if let Some(stderr) = child.stderr().take() {
             output.spawn(forward_output(stderr, name.clone(), None));
@@ -134,6 +160,8 @@ impl Service {
             child,
             #[cfg(unix)]
             group,
+            started,
+            stdout_closed,
         })
     }
 
@@ -367,14 +395,18 @@ async fn wait_for_first_exit(
                 continue;
             };
             let Some(session) = service.then.take() else {
-                return if status.success() {
-                    Ok(())
+                if status.success() {
+                    return Ok(());
+                }
+                if let Some(closed) = service.stdout_closed.take() {
+                    let _ = tokio::time::timeout(STDOUT_DRAIN, closed).await;
+                }
+                let name = service.name.clone();
+                return Err(if service.started.load(Ordering::Relaxed) {
+                    UpError::ServiceCrashed { name, status }
                 } else {
-                    Err(UpError::ServiceCrashed {
-                        name: service.name.clone(),
-                        status,
-                    })
-                };
+                    UpError::ServiceFailedToStart { name }
+                });
             };
             // Only the leader has exited. Anything it left running in its tree
             // would outlive `mirrord up`, because shutdown only reaches the
@@ -396,20 +428,34 @@ async fn wait_for_first_exit(
     }
 }
 
+/// Prints each line of `stream` prefixed with the service's name. On a session's stdout, also
+/// picks up the readiness marker and the branch databases report, which is not printed.
 async fn forward_output(
     stream: impl AsyncRead + Unpin,
     name: Arc<str>,
-    readiness: Option<Arc<Readiness>>,
+    session: Option<SessionOutput>,
 ) {
     let mut lines = BufReader::new(stream).lines();
     let mut counted = false;
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => {
-                if counted.not() && line.trim() == SESSION_READY_MESSAGE {
-                    counted = true;
-                    if let Some(readiness) = &readiness {
-                        readiness.mark();
+                if let Some(session) = &session {
+                    if counted.not() && line.trim() == SESSION_READY_MESSAGE {
+                        counted = true;
+                        session.started.store(true, Ordering::Relaxed);
+                        session.readiness.mark();
+                    } else if let Some(report) = line.strip_prefix(UP_DB_BRANCHES_REPORT_PREFIX) {
+                        // Only analytics read the report, so one that doesn't parse is dropped
+                        // rather than shown.
+                        if let Ok(branches) = serde_json::from_str::<Vec<UpSessionDbBranch>>(report)
+                        {
+                            session
+                                .readiness
+                                .tracker
+                                .record_db_branches(name.clone(), branches);
+                        }
+                        continue;
                     }
                 }
                 println!("{name}: {line}");
@@ -600,6 +646,27 @@ mod tests {
         }
     }
 
+    async fn wait_for_process_group_exit(group: Pid) {
+        // Killed descendants are adopted by an external reaper, so their group
+        // entries can outlast direct-child reaping.
+        let exited = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match killpg(group, None) {
+                    Ok(()) => tokio::time::sleep(Duration::from_millis(10)).await,
+                    Err(Errno::ESRCH) => break,
+                    Err(error) => {
+                        panic!("failed to inspect service process group {group}: {error}")
+                    }
+                }
+            }
+        })
+        .await;
+        assert!(
+            exited.is_ok(),
+            "service process group {group} must disappear after forced cleanup"
+        );
+    }
+
     #[tokio::test]
     async fn cancellation_allows_graceful_exit_and_preserves_readiness() {
         let directory = TempDir::new().unwrap();
@@ -657,7 +724,7 @@ mod tests {
     async fn second_shutdown_error_forces_cleanup_before_returning() {
         let directory = TempDir::new().unwrap();
         let command = command(
-            "trap '' TERM; echo $$ > pid; touch started; exec sleep 60",
+            "trap '' TERM; echo $$ > pid; : > started; exec sleep 60",
             directory.path(),
         );
         let first_shutdown = async {
@@ -689,7 +756,7 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(kill(pid, None), Err(Errno::ESRCH));
-        assert_eq!(killpg(pid, None), Err(Errno::ESRCH));
+        wait_for_process_group_exit(pid).await;
     }
 
     #[tokio::test]
@@ -745,16 +812,20 @@ mod tests {
             directory.path(),
         );
         let failing = command(
-            "while [ ! -f started ]; do sleep 0.02; done; exit 7",
+            "while [ ! -f started ]; do sleep 0.02; done; echo \"$READY_MESSAGE\"; exit 7",
             directory.path(),
         );
-        let result = supervise(
-            vec![sibling, failing],
-            ReadyTracker::default(),
-            std::future::pending(),
-            TEST_GRACE,
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            supervise(
+                vec![sibling, failing],
+                ReadyTracker::default(),
+                std::future::pending(),
+                TEST_GRACE,
+            ),
         )
-        .await;
+        .await
+        .expect("the crash did not end supervision");
         assert!(
             matches!(result, Err(UpError::ServiceCrashed { status, .. }) if status.code() == Some(7))
         );
@@ -818,7 +889,9 @@ mod tests {
             if natural_exit {
                 "echo \"$READY_MESSAGE\"; exit 0"
             } else if ignores_term {
-                "trap 'touch first-term' TERM; echo $$ > child_pid; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
+                // Ignoring TERM before forking keeps the persistent descendant resistant
+                // through exec, so leader-only forced cleanup cannot pass.
+                "trap '' TERM; echo $$ > child_pid; (exec sleep 60) & trap ': > first-term' TERM; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
             } else {
                 "trap 'touch stopped-int; exit 0' INT; trap 'touch stopped-term; exit 0' TERM; trap 'touch stopped-hup; exit 0' HUP; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
             },
@@ -913,7 +986,7 @@ mod tests {
             .unwrap();
         assert_eq!(status.code(), Some(130));
         assert_eq!(kill(child, None), Err(Errno::ESRCH));
-        assert_eq!(killpg(child, None), Err(Errno::ESRCH));
+        wait_for_process_group_exit(child).await;
     }
 
     #[tokio::test]

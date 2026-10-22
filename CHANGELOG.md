@@ -8,6 +8,134 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.277.0](https://github.com/metalbear-co/mirrord/tree/3.277.0) - 2026-10-21
+
+
+### Security
+
+- Update `webpki-roots`, `webpki-root-certs` and `rustls-webpki` to stop
+  trusting the compromised eMudhra intermediate certificate authorities.
+
+
+### Added
+
+- Added a tip pointing to `mirrord operator install` on mirrord runs without an
+  operator.
+- `mirrord operator signup` starts a 7-day Enterprise trial under a new
+  organization, prints its claim URL and saves its API key on the machine for
+  `mirrord operator install --from-signup`, so AI agents can set up mirrord
+  without an account.
+- `mirrord up` requests DB branching (`db_branches: "*"`) for services in
+  `split` and `mirror` mode, so services of one run that use the same database
+  share one branch. What each service requested and gets is printed before the
+  sessions start, and a session that fails before launching its service now
+  reports `Service {name} failed to start`.
+
+
+### Changed
+
+- Clarified CI command help and documentation for running without a CI API key
+  on supporting Free and Teams operators.
+- `mirrord operator install` without `--api-key` now logs you in to the
+  MetalBear app and creates your organization's operator API key, which goes
+  into the cluster without being shown, instead of starting a trial under a new
+  organization. Only organization admins can create the key, and an
+  organization that already has one is asked to install with it. It also no
+  longer prints a helm takeover command after installing.
+- `mirrord up init` picks each service's namespace and workload from the
+  cluster, follows the flow and wording of `mirrord wizard`, and asks only for
+  what has no good default.
+
+
+### Fixed
+
+- Take the source address of a connection handed off by the remote layer from
+  the transferred socket instead of the address the layer reports.
+- The workload picker of `mirrord up` offers the namespace of the kube context
+  when the user can't list all namespaces, and lists the workloads of the kinds
+  that the user can read. When the user can't read any workload of a namespace,
+  it asks for another namespace.
+
+## [3.276.0](https://github.com/metalbear-co/mirrord/tree/3.276.0) - 2026-10-19
+
+
+### Added
+
+- Add `namespace` to run DB branches in a namespace per key
+
+
+### Changed
+
+- Renamed the "License key" label in the mirrord UI session details to "Session
+  key".
+
+
+### Fixed
+
+- Fix Go programs on Linux arm64 receiving syscall results truncated to 32
+  bits, which crashed them when the result was a pointer such as an `mmap`
+  address. [#5092](https://github.com/metalbear-co/mirrord/issues/5092)
+- Avoid reporting an incorrect namespace in database branch warnings when the
+  operator uses a custom namespace pattern.
+- Fix `mirrord exec` on Windows not printing `Ready!` when the layer is
+  injected with `apc` or `iat`, so `mirrord up` never saw those services become
+  ready.
+- Fix `mirrord up` on Windows printing the "no `run.directory` set" notice when
+  run from the folder that holds `mirrord-up.yaml`.
+- Fix `mirrord up` on Windows sometimes hanging, even through Ctrl-C, after a
+  service exited or crashed on its own.
+
+## [3.275.0](https://github.com/metalbear-co/mirrord/tree/3.275.0) - 2026-10-17
+
+
+### Added
+
+- Added `--chart` and `--values` to `mirrord preview start` and `mirrord
+  preview diff` to build previews from a Helm chart.
+- Added `feature.kafka_branch`, which points a session's Kafka clients at an
+  isolated broker shared by every session with the same key.
+- On Windows, `feature.fs` patterns can name a drive, as in `^C:/Repos/`, and
+  the `path_pattern` template filter turns a path from the environment into a
+  pattern, as in `"^{{ get_env(name='TEMP') | path_pattern }}/(.*)$":
+  "/tmp/$1"`.
+- On Windows, a stack overflow in the mirrord CLI prints the stack with the
+  size of each frame, largest first, so the report shows what used the stack
+  up.
+- Select one field from JSON AWS/GCP secrets in DB branching.
+
+
+### Changed
+
+- Bundle a non-SIP-protected `zsh` in apple-utils, so `/bin/zsh` no longer
+  needs to be SIP-patched.
+- `BranchDatabase` resources record the names of the sources they copy, and
+  their spec can no longer change after creation except for `migrations`.
+
+
+### Fixed
+
+- The README and the configuration reference show how to set
+  `agent.disabled_capabilities`, and mirrord warns about values in it that it
+  ignores. [#5026](https://github.com/metalbear-co/mirrord/issues/5026)
+- A `feature.fs.mapping` pattern rewrites a path whose case differs from the
+  pattern's, as documented, instead of leaving the path unchanged.
+- A session whose process never connects ends after
+  `internal_proxy.start_idle_timeout`; IDE launches keep waiting for it unless
+  that is set.
+- Fixed `sendfile` on Linux skipping data when the output accepted fewer bytes
+  than were read.
+- On Linux, `lstat` through glibc's `__lxstat` no longer follows symlinks.
+  Node.js sees remote file metadata with the new
+  `experimental.hook_libc_syscall` and `experimental.old_glibc_support`
+  options.
+- On Windows, `%TEMP%` stays local by default even when the user name holds a
+  character such as `(` or `[`.
+- On Windows, `feature.fs.mode: "localwithoverrides"` keeps a file local unless
+  a pattern sends it to the remote, instead of reading every file remotely.
+- mirrord no longer patches `/usr/bin/security` for SIP, so tools that read
+  their credentials from the keychain through it, such as Claude Code, no
+  longer make macOS ask for the keychain password on every run.
+
 ## [3.274.0](https://github.com/metalbear-co/mirrord/tree/3.274.0) - 2026-10-14
 
 

@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:54901618bd7bdc9b4975fb7e5439e519f6469ac0 AS builder
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:a15f775caaf65c1d08224d51dc51500f826a7405 AS builder
 ARG TARGETARCH
 WORKDIR /app
 
@@ -44,11 +44,11 @@ RUN sed -i '/^default-members = \[/,/^\]/d' /app/Cargo.toml && \
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-agent-$TARGETARCH,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git-agent-$TARGETARCH,sharing=locked \
     --mount=type=cache,target=/app/target,id=target-agent-$TARGETARCH,sharing=locked \
-    cargo +nightly-2026-08-13 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
+    cargo zigbuild --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release && \
     # Copy binary out of cached target directory
     cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
-FROM ghcr.io/metalbear-co/ci-agent-runtime:54901618bd7bdc9b4975fb7e5439e519f6469ac0
+FROM ghcr.io/metalbear-co/ci-agent-runtime:a15f775caaf65c1d08224d51dc51500f826a7405
 COPY --from=builder /mirrord-agent /
 
 CMD ["./mirrord-agent"]

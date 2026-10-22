@@ -231,6 +231,12 @@ After the last session against a target ends, the operator keeps the split's tem
 | `0`            | Tear down immediately. In-flight work may be lost.        |
 | `N`            | Keep resources for up to `N` seconds, then tear down.     |
 
+## Queue mode
+
+Temporal supports `steal` only. Temporal hands each task to exactly one worker poll, so there is no way to deliver one task to both your local worker and the deployed one.
+
+A `mirror` request - `queue_mode: mirror` on a Temporal queue, or `mirrord up` in mirror mode - runs as `steal`: matching tasks go to your local worker and the deployed worker does not see them. When the session starts, mirrord prints a warning naming each Temporal queue it does this for.
+
 ## Setting a filter
 
 For the full filter reference (`queue_type`, `message_filter`, `jq_filter`), see the [overview](../queue-splitting.md#setting-a-filter-for-a-mirrord-run). Temporal uses `queue_type: Temporal`.

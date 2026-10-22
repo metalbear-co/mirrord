@@ -99,8 +99,18 @@ pub enum ConnectionSourceKind {
     /// The operator never reads the secret; it only passes `secret_ref` to the
     /// init container. When `env_var_name` is set, the local mirrord process gets
     /// the branch DB connection detail under that name (same semantics as `Secret`).
+    ///
+    /// The whole secret is the value unless one extractor is set: `value_selector` (a `.a.b`
+    /// selector over the secret parsed as JSON/YAML) or `value_pattern` (a regex over the raw
+    /// text), applied by the init container right after the fetch. Setting both is rejected
+    /// at resolution. Operators that predate the extractors drop them silently, so the CLI
+    /// gates on `NewOperatorFeature::DbBranchSecretManagerExtract`.
     GcpSecretManager {
         secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
@@ -108,9 +118,28 @@ pub enum ConnectionSourceKind {
     /// Value fetched from AWS Secrets Manager by the branch init container at
     /// data-copy time, using the target pod's service account (IRSA / EKS Pod
     /// Identity). `secret_ref` is a secret name or full ARN, passed verbatim to
-    /// `GetSecretValue`. Same semantics as `GcpSecretManager` otherwise.
+    /// `GetSecretValue`. Same semantics as `GcpSecretManager` otherwise, extractors included.
     AwsSecretsManager {
         secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
+
+    /// Value fetched from AWS Systems Manager Parameter Store by the branch init container at
+    /// data-copy time, using the target pod's service account. `parameter` is a parameter name
+    /// or full ARN, read with decryption so `SecureString` parameters work. Same semantics as
+    /// `AwsSecretsManager` otherwise, extractors included. Operators that predate it cannot
+    /// deserialize the spec, so the CLI gates on `NewOperatorFeature::DbBranchSsmParameter`.
+    AwsSsmParameter {
+        parameter: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
@@ -189,16 +218,35 @@ impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
             },
             TargetEnvironmentVariableSource::GcpSecretManager {
                 secret_ref,
+                value_selector,
+                value_pattern,
                 env_var_name,
             } => ConnectionSourceKind::GcpSecretManager {
                 secret_ref,
+                value_selector,
+                value_pattern,
                 env_var_name,
             },
             TargetEnvironmentVariableSource::AwsSecretsManager {
                 secret_ref,
+                value_selector,
+                value_pattern,
                 env_var_name,
             } => ConnectionSourceKind::AwsSecretsManager {
                 secret_ref,
+                value_selector,
+                value_pattern,
+                env_var_name,
+            },
+            TargetEnvironmentVariableSource::AwsSsmParameter {
+                parameter,
+                value_selector,
+                value_pattern,
+                env_var_name,
+            } => ConnectionSourceKind::AwsSsmParameter {
+                parameter,
+                value_selector,
+                value_pattern,
                 env_var_name,
             },
         }
@@ -234,16 +282,35 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
             },
             TargetEnvironmentVariableSource::GcpSecretManager {
                 secret_ref,
+                value_selector,
+                value_pattern,
                 env_var_name,
             } => ConnectionSourceKind::GcpSecretManager {
                 secret_ref: secret_ref.clone(),
+                value_selector: value_selector.clone(),
+                value_pattern: value_pattern.clone(),
                 env_var_name: env_var_name.clone(),
             },
             TargetEnvironmentVariableSource::AwsSecretsManager {
                 secret_ref,
+                value_selector,
+                value_pattern,
                 env_var_name,
             } => ConnectionSourceKind::AwsSecretsManager {
                 secret_ref: secret_ref.clone(),
+                value_selector: value_selector.clone(),
+                value_pattern: value_pattern.clone(),
+                env_var_name: env_var_name.clone(),
+            },
+            TargetEnvironmentVariableSource::AwsSsmParameter {
+                parameter,
+                value_selector,
+                value_pattern,
+                env_var_name,
+            } => ConnectionSourceKind::AwsSsmParameter {
+                parameter: parameter.clone(),
+                value_selector: value_selector.clone(),
+                value_pattern: value_pattern.clone(),
                 env_var_name: env_var_name.clone(),
             },
         }
@@ -288,16 +355,35 @@ pub fn param_source_to_kind(
         },
         ParamSource::GcpSecretManager {
             secret_ref,
+            value_selector,
+            value_pattern,
             env_var_name,
         } => ConnectionSourceKind::GcpSecretManager {
             secret_ref: secret_ref.clone(),
+            value_selector: value_selector.clone(),
+            value_pattern: value_pattern.clone(),
             env_var_name: env_var_name.clone(),
         },
         ParamSource::AwsSecretsManager {
             secret_ref,
+            value_selector,
+            value_pattern,
             env_var_name,
         } => ConnectionSourceKind::AwsSecretsManager {
             secret_ref: secret_ref.clone(),
+            value_selector: value_selector.clone(),
+            value_pattern: value_pattern.clone(),
+            env_var_name: env_var_name.clone(),
+        },
+        ParamSource::AwsSsmParameter {
+            parameter,
+            value_selector,
+            value_pattern,
+            env_var_name,
+        } => ConnectionSourceKind::AwsSsmParameter {
+            parameter: parameter.clone(),
+            value_selector: value_selector.clone(),
+            value_pattern: value_pattern.clone(),
             env_var_name: env_var_name.clone(),
         },
         ParamSource::ConfigMap {
@@ -424,6 +510,10 @@ pub struct BranchDatabaseStatus {
     /// apart from two that only share an entry id, without re-reading the target's env.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<BranchSourceInfo>,
+    /// Names of the sources this branch copies (databases, a bucket, or a namespace), as mirrord
+    /// policies match them. Empty until the operator has learned them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_names: Vec<String>,
 }
 
 /// Where a branch's data came from: the host, port, and database name of the source the
@@ -615,6 +705,96 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// The secret manager extractors survive every hop from the client config into the CR
+    /// and back out of its JSON: params, the owned and borrowed `url` conversions, AWS and
+    /// GCP alike. A dropped field here makes the operator copy with the whole secret as the
+    /// value. Without an extractor nothing extra is written to the CR, so an older operator
+    /// reads it unchanged.
+    #[rstest::rstest]
+    #[case::aws_selector(true, Some(".password"), None)]
+    #[case::gcp_pattern(false, None, Some("password=(.+)"))]
+    #[case::aws_none(true, None, None)]
+    fn secret_manager_extractors_map_to_crd_kind(
+        #[case] aws: bool,
+        #[case] value_selector: Option<&str>,
+        #[case] value_pattern: Option<&str>,
+    ) {
+        let secret_ref = "db-creds".to_owned();
+        let value_selector = value_selector.map(str::to_owned);
+        let value_pattern = value_pattern.map(str::to_owned);
+        let env_var_name = Some("DB_PASSWORD".to_owned());
+        let expected = if aws {
+            ConnectionSourceKind::AwsSecretsManager {
+                secret_ref: secret_ref.clone(),
+                value_selector: value_selector.clone(),
+                value_pattern: value_pattern.clone(),
+                env_var_name: env_var_name.clone(),
+            }
+        } else {
+            ConnectionSourceKind::GcpSecretManager {
+                secret_ref: secret_ref.clone(),
+                value_selector: value_selector.clone(),
+                value_pattern: value_pattern.clone(),
+                env_var_name: env_var_name.clone(),
+            }
+        };
+        let (param, url) = if aws {
+            (
+                ParamSource::AwsSecretsManager {
+                    secret_ref: secret_ref.clone(),
+                    value_selector: value_selector.clone(),
+                    value_pattern: value_pattern.clone(),
+                    env_var_name: env_var_name.clone(),
+                },
+                TargetEnvironmentVariableSource::AwsSecretsManager {
+                    secret_ref,
+                    value_selector: value_selector.clone(),
+                    value_pattern: value_pattern.clone(),
+                    env_var_name,
+                },
+            )
+        } else {
+            (
+                ParamSource::GcpSecretManager {
+                    secret_ref: secret_ref.clone(),
+                    value_selector: value_selector.clone(),
+                    value_pattern: value_pattern.clone(),
+                    env_var_name: env_var_name.clone(),
+                },
+                TargetEnvironmentVariableSource::GcpSecretManager {
+                    secret_ref,
+                    value_selector: value_selector.clone(),
+                    value_pattern: value_pattern.clone(),
+                    env_var_name,
+                },
+            )
+        };
+
+        assert_eq!(param_source_to_kind(&param, None), expected);
+        assert_eq!(ConnectionSourceKind::from(&url), expected);
+        assert_eq!(ConnectionSourceKind::from(url), expected);
+
+        let json = serde_json::to_value(&expected).unwrap();
+        assert_eq!(
+            serde_json::from_value::<ConnectionSourceKind>(json.clone()).unwrap(),
+            expected
+        );
+        let fields = json
+            .as_object()
+            .and_then(|kind| kind.values().next())
+            .unwrap();
+        assert_eq!(
+            fields.get("value_selector").is_some(),
+            value_selector.is_some(),
+            "{json}"
+        );
+        assert_eq!(
+            fields.get("value_pattern").is_some(),
+            value_pattern.is_some(),
+            "{json}"
+        );
     }
 
     #[test]

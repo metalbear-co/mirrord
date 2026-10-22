@@ -10,6 +10,7 @@ This skill helps AI agents:
 - **Share** a preview via a plain HTTPS link with `mirrord-share-ingress`, optionally with a stable (pre-existing) host
 - **Target** a CronJob, not just a Deployment/StatefulSet/Rollout
 - **Build** the `mirrord.json` that drives a preview (target, traffic filter, TTL, timeout)
+- **Build the preview pod from manifests** instead of the live target, with `--resource`/`spec_resources`, and preview the diff first with `mirrord preview diff`
 - **Explain** traffic isolation via the environment `key` + `header_filter`, and header propagation across HTTP / gRPC / Kafka / SQS
 - **Troubleshoot** preview-specific issues (licensing, registry/image pulls, `--force` replacement, traffic routing, the never-Ready readinessGate, teardown)
 

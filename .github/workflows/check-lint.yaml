@@ -18,9 +18,6 @@ on:
       run_ui_frontend:
         required: true
         type: boolean
-      rust_toolchain:
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -161,11 +158,9 @@ jobs:
         with:
           node-version: 24
       - run: corepack enable pnpm
-      - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache: false
-          toolchain: ${{ inputs.rust_toolchain }}
           components: rustfmt, clippy
           target: ${{ matrix.target }}
       - name: Rust cache

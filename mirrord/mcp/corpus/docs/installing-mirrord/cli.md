@@ -27,7 +27,7 @@ curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/i
 To install the CLI, run:
 
 ```powershell
-choco install --pre mirrord
+choco install mirrord
 ```
 {% endtab %}
 {% endtabs %}
