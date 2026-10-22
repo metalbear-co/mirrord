@@ -465,9 +465,10 @@ jobs:
             | ([.value.outputs | to_entries[] | select((.key | startswith("error")) and .value != "") | .value | gsub(" +"; " ")]
                + (if .value.result == "cancelled" then ["timed out: a step hung past the time limit of the job"] else [] end)) as $errors
             | "• \(.key) (\(.value.result))\(if $errors == [] then "" else ": " + ($errors | join("; ")) end)"' <<<"$NEEDS")"
-          # A cancelled run counts as a failure when a check job was cancelled, which only its
-          # timeout-minutes limit does (the concurrency group never cancels a run in progress); one
-          # superseded while still queued ran no jobs and says nothing about the status.
+          # A cancelled run counts as a failure when a check job was cancelled while the run went
+          # on, which only the job's timeout-minutes limit does: notify then still ran. A run
+          # cancelled by hand or superseded while queued leaves notify skipped or never created,
+          # and says nothing about the status.
           # Branch and status are filtered here rather than with --branch/--status: the API's
           # filtered run listing intermittently returns runs that are days old as the latest.
           # One full API page misses the latest completed main run only if 100 newer runs (branch
@@ -479,7 +480,7 @@ jobs:
           for run in $runs; do
             previous="${run#*:}"
             if [ "$previous" = cancelled ]; then
-              if [ "$(gh run view "${run%:*}" --json jobs --jq 'any(.jobs[]; .name != "notify" and .conclusion == "cancelled")')" = true ]; then
+              if [ "$(gh run view "${run%:*}" --json jobs --jq 'any(.jobs[]; .name != "notify" and .conclusion == "cancelled") and any(.jobs[]; .name == "notify" and .conclusion != "skipped")')" = true ]; then
                 previous=failure
               else
                 continue
