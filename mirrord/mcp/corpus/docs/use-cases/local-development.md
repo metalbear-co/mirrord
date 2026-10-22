@@ -3,7 +3,7 @@ title: Local Development with Cloud Context
 draft: false
 images: []
 toc: true
-description: Run your code locally while it communicates with real cloud services
+description: "Run your code on your machine while it talks to the services in your Kubernetes cluster."
 tags:
   - oss
   - team
@@ -18,7 +18,7 @@ We call this approach "remocal" (remote + local): local execution with remote co
 
 Want to see it in action? [Watch the demo](https://www.youtube.com/watch?v=ZR7A7cqQcFM).
 
-### The problem
+## The problem
 
 Traditionally, development happens in loops. You write and test code locally, then deploy to staging, where it meets production-like conditions for the first time. Tests fail. You fix, redeploy, repeat.
 
@@ -31,7 +31,7 @@ This is slow for two reasons:
 
 mirrord removes deployment from the loop entirely. Instead of deploying to test in the cloud, you plug your local process directly into the cloud environment.
 
-### How it works
+## How it works
 
 mirrord runs in two places - in the memory of your local process (`mirrord-layer`) and as a pod in the cluster (`mirrord-agent`).
 
@@ -48,7 +48,7 @@ The agent runs in the network namespace of the target pod and handles the remote
 
 For the full architecture, see the [Architecture reference](../reference/architecture.md).
 
-### What makes mirrord different
+## What makes mirrord different
 
 Other tools use VPNs to connect your machine to the cluster. mirrord works at the process level, overriding individual syscalls. This gives it unique advantages:
 

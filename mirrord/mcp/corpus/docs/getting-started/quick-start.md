@@ -14,8 +14,10 @@ tags:
   - team
   - enterprise
 shallowToc: true
-description: How to (very) quickly start using mirrord
+description: "Get mirrord running against your cluster in a few minutes, from the install to your first session."
 ---
+
+# Quick Start
 
 Get mirrord running in under 5 minutes. You'll need:
 

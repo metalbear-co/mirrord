@@ -194,7 +194,7 @@ Each entry in the `spec.queues` list describes one stream and the durable pull c
 * `kind` - must be `nats`.
 * `clientConfig` (optional) - name of a `MirrordPropertyList` with the NATS connection. Can also be set once for all NATS queues with `spec.clientConfigs.nats`.
 * `queueConfig` (optional) - name of a `MirrordPropertyList` with settings for the temporary stream and consumer, see [Configuring temporary streams](nats.md#configuring-temporary-streams).
-* `appConfig.stream` - how the application discovers the stream name. Each entry can use the same structure as other queue services: `env`, `envLike`, `volume`, `fallback`, `valuePattern`, `containers`.
+* `appConfig.stream` - how the application discovers the stream name. Each entry can use the same structure as other queue services: `env`, `envLike`, `volume`, `fallback`, `valuePattern`, `containerNames`.
 * `appConfig.consumer` - how the application discovers the durable consumer name. Uses the same structure as `stream`.
 
 Each queue entry must resolve to exactly one stream and one consumer. If the workload runs several consumers, add one queue entry per consumer.
@@ -330,3 +330,5 @@ In the mirrord configuration, filters use `queue_type: NATSPubSub` with the same
 * Each queue entry in the `MirrordSplitConfig` describes exactly one stream and one consumer. Add one entry per consumer.
 * Republished messages carry the subject `<temporary stream>.<original subject>` - the original subject is kept, prefixed with the temporary stream's name. An application that routes on exact subjects sees the prefixed subject while a split is active, so match on the subject's suffix (or a wildcard) instead of the full subject.
 * Delivery is at-least-once: a message is acknowledged on the original consumer only after the JetStream server acknowledged the republish, so your application may see a message twice but never miss one.
+
+For compatibility with older operator releases and the legacy `containers` spelling, see [Selecting Containers](../queue-splitting.md#selecting-containers).
