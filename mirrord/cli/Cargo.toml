@@ -53,6 +53,7 @@ futures.workspace = true
 glob.workspace = true
 which.workspace = true
 schemars.workspace = true
+secrecy.workspace = true
 semver.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 reqwest = { workspace = true, features = ["stream"] }

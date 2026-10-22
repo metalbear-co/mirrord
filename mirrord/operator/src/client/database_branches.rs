@@ -1563,7 +1563,22 @@ impl UnifiedDatabaseBranchParams {
                     extract_literal_param_values(&mut config.source, &mut literal_values)
                 }
                 other => {
+                    // Only engines whose URL path is the database name; Redis paths are a db
+                    // index and the others carry no URL-shaped literal.
+                    let names_database_by_path = matches!(
+                        other,
+                        DatabaseBranchConfig::Pg(_)
+                            | DatabaseBranchConfig::Mysql(_)
+                            | DatabaseBranchConfig::Mariadb(_)
+                            | DatabaseBranchConfig::Mongodb(_)
+                    );
                     if let Some(database) = other.database_mut() {
+                        if names_database_by_path && database.name.is_none() {
+                            database.name = database
+                                .connection
+                                .literal_database_name()
+                                .map(str::to_owned);
+                        }
                         extract_literal_values(&mut database.connection, &mut literal_values);
                     }
                 }
