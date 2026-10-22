@@ -1,12 +1,16 @@
 //! The token `mirrord login` gives the developer's CLI, with which an intproxy authenticates to
 //! sessions-manager itself.
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use futures::future::{BoxFuture, FutureExt};
 use reqwest::header::{HeaderMap, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use url::{Host, Url};
 
 use super::{CredentialProvider, ready_headers};
 use crate::error::SessionsManagerClientError;
@@ -63,17 +67,42 @@ pub trait LoginTokenSource: Send + Sync {
 /// `mirrord login` again. Without a token, requests go out unauthenticated, for a
 /// sessions-manager that does not authenticate its callers.
 ///
+/// The token identifies the developer for as long as it lasts, so it is sent only where
+/// [`LoginTokenCredentials::sends_token_to`] allows. Elsewhere requests go out without it, as
+/// they would without a login: a sessions-manager that does not authenticate its callers still
+/// works, and one that does refuses the session.
+///
 /// Control plane only, for the same reason as
 /// [`CloudTokenCredentials`](super::CloudTokenCredentials): the data-plane upgrade authenticates
 /// with the single-use credential minted for its assignment, which occupies this same header
 /// name.
 pub struct LoginTokenCredentials {
     source: Arc<dyn LoginTokenSource>,
+    sends_token: bool,
+    warned_withheld: AtomicBool,
 }
 
 impl LoginTokenCredentials {
-    pub fn new(source: Arc<dyn LoginTokenSource>) -> Self {
-        Self { source }
+    /// Credentials for requests to the sessions-manager at `base_url`.
+    pub fn new(source: Arc<dyn LoginTokenSource>, base_url: &Url) -> Self {
+        Self {
+            source,
+            sends_token: Self::sends_token_to(base_url),
+            warned_withheld: AtomicBool::new(false),
+        }
+    }
+
+    /// Whether the token may be sent to the sessions-manager at `base_url`: over TLS, or over
+    /// plain HTTP to one on this machine, as when it is run locally or reached through a
+    /// port-forward.
+    pub fn sends_token_to(base_url: &Url) -> bool {
+        base_url.scheme() == "https"
+            || match base_url.host() {
+                Some(Host::Domain(domain)) => domain == "localhost",
+                Some(Host::Ipv4(ip)) => ip.is_loopback(),
+                Some(Host::Ipv6(ip)) => ip.is_loopback(),
+                None => false,
+            }
     }
 }
 
@@ -83,13 +112,21 @@ impl CredentialProvider for LoginTokenCredentials {
     ) -> BoxFuture<'_, Result<HeaderMap, SessionsManagerClientError>> {
         async move {
             let mut headers = HeaderMap::new();
-            if let Some(token) = self.source.login_token().await? {
-                let mut header =
-                    HeaderValue::from_str(&format!("Bearer {}", token.expose_secret()))
-                        .map_err(|_| SessionsManagerClientError::InvalidLoginToken)?;
-                header.set_sensitive(true);
-                headers.insert(reqwest::header::AUTHORIZATION, header);
+            let Some(token) = self.source.login_token().await? else {
+                return Ok(headers);
+            };
+            if !self.sends_token {
+                if !self.warned_withheld.swap(true, Ordering::Relaxed) {
+                    tracing::warn!(
+                        "Not sending the mirrord login token to sessions-manager over plain HTTP"
+                    );
+                }
+                return Ok(headers);
             }
+            let mut header = HeaderValue::from_str(&format!("Bearer {}", token.expose_secret()))
+                .map_err(|_| SessionsManagerClientError::InvalidLoginToken)?;
+            header.set_sensitive(true);
+            headers.insert(reqwest::header::AUTHORIZATION, header);
             Ok(headers)
         }
         .boxed()
@@ -122,7 +159,43 @@ mod tests {
     }
 
     fn credentials(token: Option<&'static str>) -> LoginTokenCredentials {
-        LoginTokenCredentials::new(Arc::new(FixedLogin(token)))
+        LoginTokenCredentials::new(
+            Arc::new(FixedLogin(token)),
+            &Url::parse("https://sm.example.com/sm").unwrap(),
+        )
+    }
+
+    #[test]
+    fn sends_the_token_only_over_tls_or_to_this_machine() {
+        for (url, sends) in [
+            ("https://sm.example.com/sm", true),
+            ("http://localhost:8080/sm", true),
+            ("http://127.0.0.1:8080", true),
+            ("http://[::1]:8080", true),
+            ("http://sm.example.com/sm", false),
+            ("http://localhost.example.com", false),
+            ("http://10.0.0.1:8080", false),
+        ] {
+            assert_eq!(
+                LoginTokenCredentials::sends_token_to(&Url::parse(url).unwrap()),
+                sends,
+                "{url}"
+            );
+        }
+    }
+
+    /// Over plain HTTP to another host the request goes out as it would without a login, so a
+    /// sessions-manager that does not authenticate its callers keeps working.
+    #[tokio::test]
+    async fn withholds_the_token_over_plain_http_to_another_host() {
+        let credentials = LoginTokenCredentials::new(
+            Arc::new(FixedLogin(Some("abc"))),
+            &Url::parse("http://sm.example.com/sm").unwrap(),
+        );
+
+        let headers = credentials.control_plane_headers().await.unwrap();
+
+        assert!(headers.is_empty());
     }
 
     #[tokio::test]

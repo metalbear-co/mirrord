@@ -34,4 +34,5 @@ pub use error::{Result, SessionsManagerClientError};
 pub use mirrord_sessions_manager_protocol::{IntproxyIdentity, ReplicaId, ServiceScope};
 pub use transport::{
     DirectTransport, OperatorTransport, SESSIONS_MANAGER_URL_ENV, SessionsManagerTransport,
+    base_url_from_env,
 };

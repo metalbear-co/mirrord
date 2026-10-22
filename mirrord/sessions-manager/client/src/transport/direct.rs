@@ -25,7 +25,7 @@ use mirrord_sessions_manager_protocol::{
 use reqwest::StatusCode;
 use tokio::time::Instant;
 use tokio_tungstenite::WebSocketStream;
-use url::{Host, Url};
+use url::Url;
 
 use super::{SessionsManagerTransport, assignment_authorization};
 use crate::{
@@ -92,21 +92,13 @@ impl DirectTransport {
     /// Reaches the sessions-manager at [`SESSIONS_MANAGER_URL_ENV`] as an intproxy, with the
     /// shared secret the environment configures, if any, and the developer's login token from
     /// `login_tokens`.
-    ///
-    /// The login token identifies the developer for as long as it lasts, so it goes only over TLS,
-    /// or over plain HTTP to a sessions-manager on this machine, as when it is run locally or
-    /// reached through a port-forward.
     pub fn intproxy_from_env(
         login_tokens: Option<Arc<dyn LoginTokenSource>>,
     ) -> Result<Self, SessionsManagerClientError> {
         let base_url = base_url_from_env()?;
-        if login_tokens.is_some() && base_url.scheme() != "https" && !is_loopback(&base_url) {
-            return Err(SessionsManagerClientError::InsecureSessionsManagerUrl(
-                base_url,
-            ));
-        }
+        let credentials = intproxy_credentials_from_env(login_tokens, &base_url)?;
 
-        Ok(Self::new(base_url)?.with_credentials(intproxy_credentials_from_env(login_tokens)?))
+        Ok(Self::new(base_url)?.with_credentials(credentials))
     }
 
     pub fn with_credentials(mut self, credentials: Arc<dyn CredentialProvider>) -> Self {
@@ -201,6 +193,7 @@ impl SessionsManagerTransport for DirectTransport {
         // fetch something before it can answer is part of what makes subscribing slow.
         let credentials =
             with_deadline(Some(deadline), self.credentials.control_plane_headers()).await??;
+        let sent_authorization = credentials.contains_key(AUTHORIZATION);
         let request = self
             .http
             .get(endpoint)
@@ -210,6 +203,7 @@ impl SessionsManagerTransport for DirectTransport {
             .send();
         let response = with_deadline(Some(deadline), request).await??;
         if response.status() == StatusCode::UNAUTHORIZED
+            && sent_authorization
             && let Some(error) = self.credentials.unauthorized_error()
         {
             return Err(error);
@@ -242,17 +236,8 @@ fn data_plane_authorization_headers(
     Ok(headers)
 }
 
-fn is_loopback(url: &Url) -> bool {
-    match url.host() {
-        Some(Host::Domain(domain)) => domain == "localhost",
-        Some(Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(Host::Ipv6(ip)) => ip.is_loopback(),
-        None => false,
-    }
-}
-
 /// Reads the sessions-manager base URL from [`SESSIONS_MANAGER_URL_ENV`].
-fn base_url_from_env() -> Result<Url, SessionsManagerClientError> {
+pub fn base_url_from_env() -> Result<Url, SessionsManagerClientError> {
     match std::env::var(SESSIONS_MANAGER_URL_ENV) {
         Ok(raw) => Ok(Url::parse(&raw)?),
         Err(VarError::NotPresent) => Err(SessionsManagerClientError::MissingSessionsManagerUrl),
@@ -278,4 +263,65 @@ fn validate_base_url(mut base_url: Url) -> Result<Url, SessionsManagerClientErro
     }
 
     Ok(base_url)
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{Router, response::IntoResponse};
+    use futures::future::{BoxFuture, FutureExt};
+    use mirrord_sessions_manager_protocol::ServiceScope;
+    use tokio::net::TcpListener;
+
+    use super::*;
+    use crate::{IntproxyClient, LoginToken, LoginTokenCredentials, SessionsManagerConnectInfo};
+
+    struct NoLogin;
+
+    impl LoginTokenSource for NoLogin {
+        fn login_token(
+            &self,
+        ) -> BoxFuture<'_, Result<Option<LoginToken>, SessionsManagerClientError>> {
+            std::future::ready(Ok(None)).boxed()
+        }
+    }
+
+    /// No login token was sent, so `mirrord login` is not what refused the session, and the 401
+    /// is reported as is.
+    #[tokio::test]
+    async fn a_401_without_a_login_token_is_reported_as_the_bare_status() {
+        let app = Router::new().fallback(|| async { StatusCode::UNAUTHORIZED.into_response() });
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url =
+            Url::parse(&format!("http://{}/sm", listener.local_addr().unwrap())).unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let transport = DirectTransport::new(base_url.clone())
+            .unwrap()
+            .with_credentials(Arc::new(LoginTokenCredentials::new(
+                Arc::new(NoLogin),
+                &base_url,
+            )));
+        let client = IntproxyClient::with_transport(
+            SessionsManagerConnectInfo {
+                scope: ServiceScope {
+                    environment: "staging".to_owned(),
+                    service: "api".to_owned(),
+                },
+                user_session_id: "session".to_owned(),
+                replica_filter: None,
+            },
+            transport,
+        )
+        .unwrap();
+
+        let error = client.connect(Duration::from_secs(5)).await.unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                SessionsManagerClientError::HttpStatus(StatusCode::UNAUTHORIZED)
+            ),
+            "got {error:?}"
+        );
+    }
 }

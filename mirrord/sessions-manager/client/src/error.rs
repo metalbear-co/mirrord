@@ -63,15 +63,16 @@ pub enum SessionsManagerClientError {
     #[error("the mirrord login token is not a valid header value")]
     InvalidLoginToken,
     #[error(
-        "sessions-manager refused your mirrord login, which is missing, expired, or for another \
-         organization; run `mirrord login` to log in again"
+        "sessions-manager refused your mirrord login, which has expired, been revoked, or is for \
+         another organization; run `mirrord login` to log in again"
     )]
     LoginTokenRejected,
     #[error(
-        "refusing to send your mirrord login token to the sessions-manager at {0} over plain \
-         HTTP; use an https:// URL, or reach it through localhost"
+        "sessions-manager or the proxy in front of it refused this session: either your mirrord \
+         login has expired, been revoked, or is for another organization, and `mirrord login` \
+         logs you in again, or MIRRORD_SESSIONS_MANAGER_AUTH_TOKEN is wrong"
     )]
-    InsecureSessionsManagerUrl(Url),
+    LoginTokenOrSharedSecretRejected,
     #[error(
         "MIRRORD_SESSIONS_MANAGER_API_KEY must hold a MetalBear API key, which begins with \
          `metalbear_key_`"

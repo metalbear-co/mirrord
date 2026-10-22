@@ -23,6 +23,7 @@ use futures::future::{BoxFuture, FutureExt};
 pub use login_token::{LoginToken, LoginTokenCredentials, LoginTokenSource};
 use reqwest::header::HeaderMap;
 pub use shared_secret::SharedSecretCredentials;
+use url::Url;
 
 use crate::error::SessionsManagerClientError;
 
@@ -51,9 +52,10 @@ pub trait CredentialProvider: Send + Sync {
         self.control_plane_headers()
     }
 
-    /// The error to report when sessions-manager answers a control-plane request with
-    /// `401 Unauthorized`, for a credential that can tell the user how to fix it. [`None`]
-    /// reports the bare status.
+    /// The error to report when sessions-manager answers a control-plane request that carried
+    /// this provider's `Authorization` header with `401 Unauthorized`, for a credential that can
+    /// tell the user how to fix it. [`None`] reports the bare status, as does a 401 to a request
+    /// without `Authorization`, which no identity credential was sent with.
     fn unauthorized_error(&self) -> Option<SessionsManagerClientError> {
         None
     }
@@ -116,10 +118,16 @@ impl CredentialProvider for EnvCredentials {
         .boxed()
     }
 
-    /// Explains a 401 by the identity credential, the one sessions-manager itself checks; the
-    /// shared secret only gets requests past a fronting proxy.
+    /// Explains a 401 by the identity credential, the one sessions-manager itself checks. With a
+    /// shared secret configured too, the 401 may as well come from the fronting proxy refusing
+    /// that secret, so a refused login names both.
     fn unauthorized_error(&self) -> Option<SessionsManagerClientError> {
-        self.identity.as_ref()?.unauthorized_error()
+        match self.identity.as_ref()?.unauthorized_error()? {
+            SessionsManagerClientError::LoginTokenRejected if self.shared_secret.is_some() => {
+                Some(SessionsManagerClientError::LoginTokenOrSharedSecretRejected)
+            }
+            error => Some(error),
+        }
     }
 }
 
@@ -142,12 +150,13 @@ pub(crate) fn credentials_from_env()
 /// token from `login_tokens`. Never the API key, which sessions-manager refuses from an intproxy.
 pub(crate) fn intproxy_credentials_from_env(
     login_tokens: Option<Arc<dyn LoginTokenSource>>,
+    base_url: &Url,
 ) -> Result<Arc<dyn CredentialProvider>, SessionsManagerClientError> {
     let login = login_tokens.map(|source| {
         tracing::debug!(
             "authenticating sessions-manager control-plane requests with a mirrord login token"
         );
-        Box::new(LoginTokenCredentials::new(source)) as Box<dyn CredentialProvider>
+        Box::new(LoginTokenCredentials::new(source, base_url)) as Box<dyn CredentialProvider>
     });
 
     with_shared_secret_from_env(login)
@@ -200,6 +209,40 @@ mod tests {
         assert!(control_plane.contains_key(reqwest::header::AUTHORIZATION));
         assert_eq!(data_plane.get(AUTH_HEADER_NAME).unwrap(), "shhh");
         assert!(!data_plane.contains_key(reqwest::header::AUTHORIZATION));
+    }
+
+    /// A shared secret refused by the fronting proxy also comes back as a 401, so a refused login
+    /// names it too.
+    #[test]
+    fn a_refused_login_names_the_shared_secret_when_one_is_configured() {
+        struct NoLogin;
+
+        impl LoginTokenSource for NoLogin {
+            fn login_token(
+                &self,
+            ) -> BoxFuture<'_, Result<Option<LoginToken>, SessionsManagerClientError>> {
+                std::future::ready(Ok(None)).boxed()
+            }
+        }
+
+        let base_url = Url::parse("https://sm.example.com/sm").unwrap();
+        let credentials = |shared_secret: Option<&str>| EnvCredentials {
+            shared_secret: shared_secret
+                .map(|secret| SharedSecretCredentials::new(secret).unwrap()),
+            identity: Some(Box::new(LoginTokenCredentials::new(
+                Arc::new(NoLogin),
+                &base_url,
+            ))),
+        };
+
+        assert!(matches!(
+            credentials(None).unauthorized_error(),
+            Some(SessionsManagerClientError::LoginTokenRejected)
+        ));
+        assert!(matches!(
+            credentials(Some("shhh")).unauthorized_error(),
+            Some(SessionsManagerClientError::LoginTokenOrSharedSecretRejected)
+        ));
     }
 
     /// Without an API key the provider is not built at all, and a client with neither mechanism
