@@ -1,0 +1,1 @@
+Fixed concurrency issues in the layer<->intproxy connection handler, improving performance of multi-threaded applications.

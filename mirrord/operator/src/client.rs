@@ -677,18 +677,9 @@ where
     /// Create a new CI api key by generating a random key pair, creating a certificate
     /// signing request and sending it to the operator.
     pub async fn create_ci_api_key(&self) -> Result<String, OperatorApiError> {
-        if self
-            .operator()
+        self.operator()
             .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::ExtendableUserCredentials)
-            .not()
-        {
-            return Err(OperatorApiError::UnsupportedFeature {
-                feature: NewOperatorFeature::ExtendableUserCredentials,
-                operator_version: self.operator().spec.operator_version.to_string(),
-            });
-        }
+            .require_feature(NewOperatorFeature::ExtendableUserCredentials)?;
 
         let credentials = Credentials::init_ci::<MirrordClusterOperatorUserCredential>(
             self.client.clone(),
@@ -1010,18 +1001,17 @@ where
             .resolve_split_config_db_branches(layer_config, &subtask)
             .await?;
 
-        // Fail fast with a clear message when a configured branch dialect is disabled on the
-        // operator. Without this the CLI proceeds blindly: an operator with no branching serves no
-        // branch CRD at all, so the create returns a bare `404 page not found`; an operator missing
-        // just this dialect creates a CRD nothing reconciles, so the CLI times out waiting for
-        // readiness. We only check the dialects whose feature has been advertised since it was
-        // introduced (see `required_branching_feature`); the rest rely on the operator marking the
-        // branch `Failed`.
+        // Fail fast with a clear message when a configured branch dialect is missing on the
+        // operator, whether its Helm value is off or the version predates it. Without this the
+        // CLI proceeds blindly: an operator with no branching serves no branch CRD at all, so the
+        // create returns a bare `404 page not found`; an operator missing just this dialect
+        // creates a CRD nothing reconciles, so the CLI times out waiting for readiness. We only
+        // check the dialects whose feature has been advertised since it was introduced (see
+        // `required_branching_feature`); the rest rely on the operator marking the branch
+        // `Failed`.
         for branch_config in layer_config.feature.db_branches.iter() {
-            if let Some(feature) = required_branching_feature(branch_config)
-                && !self.operator.spec.supported_features().contains(&feature)
-            {
-                return Err(OperatorApiError::FeatureDisabled { feature });
+            if let Some(feature) = required_branching_feature(branch_config) {
+                self.operator.spec.require_feature(feature)?;
             }
         }
 
@@ -1214,6 +1204,19 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::DbBranchSecretManagerExtract)?;
+        }
+
+        // An `aws_ssm_parameter` source needs an operator that knows the source kind: an
+        // older one fails to deserialize the branch and never reconciles it.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_ssm_parameter_source)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchSsmParameter)?;
         }
 
         // A `url` connection param needs an operator that layers the other params over it: an

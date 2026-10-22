@@ -209,6 +209,14 @@ pub struct MirrordOperatorSpec {
     /// Used by CLI in multi-cluster management-only mode to create CRDs
     /// in the operator's namespace with a target-namespace annotation.
     pub operator_namespace: Option<String>,
+    /// Features this operator version knows but which its Helm values switch off, so the client
+    /// can tell "enable it in the chart" apart from "upgrade the operator". Only features the
+    /// license tier allows are listed, so a tier restriction is still reported as unsupported.
+    ///
+    /// Older operators do not send it; the list is then empty and a missing feature is
+    /// reported as unsupported by the version, as before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    disabled_features: Vec<NewOperatorFeature>,
 }
 
 impl MirrordOperatorSpec {
@@ -235,7 +243,20 @@ impl MirrordOperatorSpec {
             features,
             copy_target_enabled,
             operator_namespace,
+            disabled_features: Vec::new(),
         }
+    }
+
+    /// Records the features this operator knows but has switched off in its Helm values.
+    pub fn with_disabled_features(mut self, disabled_features: Vec<NewOperatorFeature>) -> Self {
+        self.disabled_features = disabled_features;
+        self
+    }
+
+    /// Features this operator version knows but has switched off in its Helm values. Empty for
+    /// operators that predate the field.
+    pub fn disabled_features(&self) -> &[NewOperatorFeature] {
+        &self.disabled_features
     }
 
     /// Get a vector with the features the operator supports.
@@ -267,16 +288,21 @@ impl MirrordOperatorSpec {
             .unwrap_or_default()
     }
 
+    /// Fails when the operator does not advertise `feature`, naming the fix: a feature the
+    /// operator lists as disabled needs its Helm value switched on, any other needs an operator
+    /// upgrade.
     #[cfg(feature = "client")]
     pub fn require_feature(&self, feature: NewOperatorFeature) -> Result<(), OperatorApiError> {
         if self.supported_features().contains(&feature) {
-            Ok(())
-        } else {
-            Err(OperatorApiError::UnsupportedFeature {
-                feature,
-                operator_version: self.operator_version.to_string(),
-            })
+            return Ok(());
         }
+        if self.disabled_features().contains(&feature) {
+            return Err(OperatorApiError::FeatureDisabled { feature });
+        }
+        Err(OperatorApiError::UnsupportedFeature {
+            feature,
+            operator_version: self.operator_version.to_string(),
+        })
     }
 }
 
@@ -879,6 +905,11 @@ pub enum NewOperatorFeature {
     /// CRD schema prunes `dedicatedNamespaceKey` and the branch silently runs in the target's
     /// namespace instead.
     DbBranchDedicatedNamespace,
+    /// This operator resolves `aws_ssm_parameter` connection sources (AWS Systems Manager
+    /// Parameter Store). Gated so the CLI fails fast: an older operator cannot deserialize a
+    /// branch carrying the source kind and never reconciles it, which surfaces only as a
+    /// creation timeout.
+    DbBranchSsmParameter,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -982,9 +1013,93 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchDedicatedNamespace => {
                 "DB branches in a dedicated namespace per key"
             }
+            NewOperatorFeature::DbBranchSsmParameter => {
+                "DB branching connection values from AWS SSM Parameter Store"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
+    }
+}
+
+impl NewOperatorFeature {
+    /// The operator Helm values that switch this feature on, for the hint shown when the
+    /// operator reports the feature as disabled. Empty for features that are always on, that come
+    /// with any of several values (the shared DB branching features turn on with any
+    /// `*Branching` value), or that need more setup than a `--set` (multi-cluster needs its
+    /// cluster list and default cluster, so a lone `multiCluster.enabled` fails startup).
+    pub fn helm_values(&self) -> &'static [&'static str] {
+        match self {
+            NewOperatorFeature::PreviewEnv
+            | NewOperatorFeature::PreviewTlsDelivery
+            | NewOperatorFeature::PreviewTlsClientAuthFromTarget
+            | NewOperatorFeature::PreviewCronJobTarget
+            | NewOperatorFeature::PreviewLabelTarget
+            | NewOperatorFeature::PreviewSpecResources => &["operator.previewEnv"],
+            NewOperatorFeature::SqsQueueSplitting
+            | NewOperatorFeature::SqsQueueSplittingDirect
+            | NewOperatorFeature::SqsQueueSplittingWithJqFilter => &["operator.sqsSplitting"],
+            NewOperatorFeature::KafkaQueueSplitting
+            | NewOperatorFeature::KafkaQueueSplittingDirect
+            | NewOperatorFeature::KafkaQueueSplittingWithJqFilter
+            | NewOperatorFeature::KafkaQueueSplittingWithProtobufDecoding => {
+                &["operator.kafkaSplitting"]
+            }
+            NewOperatorFeature::RmqQueueSplitting
+            | NewOperatorFeature::RmqQueueSplittingWithJqFilter => &["operator.rmqSplitting"],
+            NewOperatorFeature::GcpPubSubQueueSplitting => &["operator.gcpPubsubSplitting"],
+            NewOperatorFeature::RedisPubSubQueueSplitting => &["operator.redisPubsubSplitting"],
+            NewOperatorFeature::TemporalQueueSplitting => &["operator.temporalSplitting"],
+            NewOperatorFeature::BullMqQueueSplitting => &["operator.bullmqSplitting"],
+            NewOperatorFeature::NatsQueueSplitting => &["operator.natsSplitting"],
+            NewOperatorFeature::NatsPubSubQueueSplitting => &["operator.natsPubsubSplitting"],
+            NewOperatorFeature::MySqlBranching => &["operator.mysqlBranching"],
+            NewOperatorFeature::MariaDbBranching => &["operator.mariadbBranching"],
+            NewOperatorFeature::PgBranching
+            | NewOperatorFeature::PgBranchQueryParams
+            | NewOperatorFeature::PgBranchAdditionalDatabases => &["operator.pgBranching"],
+            NewOperatorFeature::MongodbBranching => &["operator.mongodbBranching"],
+            NewOperatorFeature::CockroachdbBranching => &["operator.cockroachdbBranching"],
+            NewOperatorFeature::GenericDbBranching
+            | NewOperatorFeature::GenericDbCopy
+            | NewOperatorFeature::GenericBranchProfileDefaults => &["operator.genericBranching"],
+            NewOperatorFeature::S3Branching => &["operator.s3Branching"],
+            NewOperatorFeature::TurbopufferBranching => &["operator.turbopufferBranching"],
+            // Kafka branching rides on the Kafka splitting machinery, so both must be on.
+            NewOperatorFeature::KafkaBranching => {
+                &["operator.kafkaSplitting", "operator.kafkaBranching"]
+            }
+            NewOperatorFeature::DbBranchDedicatedNamespace => &["operator.dbBranchNamespaces"],
+            NewOperatorFeature::ServerlessSessionsManager => &["operator.sessionsManager"],
+            NewOperatorFeature::ProxyApi
+            | NewOperatorFeature::CopyTarget
+            | NewOperatorFeature::CopyTargetExcludeContainers
+            | NewOperatorFeature::SessionManagement
+            | NewOperatorFeature::LayerReconnect
+            | NewOperatorFeature::ExtendableUserCredentials
+            | NewOperatorFeature::BypassCiCertificateVerification
+            | NewOperatorFeature::MultiClusterRemote
+            | NewOperatorFeature::MultiClusterPrimary
+            | NewOperatorFeature::MultiClusterSubscribe
+            | NewOperatorFeature::UnifiedBranchDbCrd
+            | NewOperatorFeature::ConnectParamsInHeader
+            | NewOperatorFeature::CopyTargetFilterIsolation
+            | NewOperatorFeature::LabelTargeting
+            | NewOperatorFeature::DbBranchCustomImage
+            | NewOperatorFeature::DbBranchProfiles
+            | NewOperatorFeature::DiagnosticPing
+            | NewOperatorFeature::SessionReadyCondition
+            | NewOperatorFeature::DbBranchConfigMapSource
+            | NewOperatorFeature::DbBranchUrlParam
+            | NewOperatorFeature::LiquibaseMigrations
+            | NewOperatorFeature::SubscribeEventOptions
+            | NewOperatorFeature::QueueSplittingWithComposedFilters
+            | NewOperatorFeature::KeylessCi
+            | NewOperatorFeature::DbBranchesFromSplitConfig
+            | NewOperatorFeature::DbBranchSecretManagerExtract
+            | NewOperatorFeature::DbBranchSsmParameter
+            | NewOperatorFeature::Unknown => &[],
+        }
     }
 }
 
@@ -1513,5 +1628,80 @@ mod tests {
         });
         let deserialized = serde_json::from_value::<SplitQueue>(unknown_queue_type).unwrap();
         assert_eq!(deserialized, SplitQueue::Unknown,);
+    }
+
+    /// An operator spec as older operators send it: no `disabled_features` field at all.
+    fn spec_without_disabled_features() -> MirrordOperatorSpec {
+        serde_json::from_value(serde_json::json!({
+            "operator_version": "3.200.0",
+            "default_namespace": "default",
+            "supported_features": [NewOperatorFeature::CopyTarget],
+            "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
+        }))
+        .unwrap()
+    }
+
+    /// Preview environments off in the chart used to read as "operator 3.200.0 does not support
+    /// preview environments", sending users to upgrade an operator that only needed
+    /// `operator.previewEnv=true`. The operator now lists what it switched off, and the client
+    /// reports that as disabled; anything not advertised either way still means an upgrade.
+    #[cfg(feature = "client")]
+    #[test]
+    fn require_feature_tells_disabled_from_unsupported() {
+        let spec = spec_without_disabled_features()
+            .with_disabled_features(vec![NewOperatorFeature::PreviewEnv]);
+
+        assert!(spec.require_feature(NewOperatorFeature::CopyTarget).is_ok());
+        assert!(matches!(
+            spec.require_feature(NewOperatorFeature::PreviewEnv),
+            Err(OperatorApiError::FeatureDisabled {
+                feature: NewOperatorFeature::PreviewEnv
+            })
+        ));
+        assert!(matches!(
+            spec.require_feature(NewOperatorFeature::PgBranching),
+            Err(OperatorApiError::UnsupportedFeature {
+                feature: NewOperatorFeature::PgBranching,
+                ..
+            })
+        ));
+    }
+
+    /// Older operators never send `disabled_features`; the client must keep reading their spec
+    /// and fall back to the unsupported-by-version error.
+    #[cfg(feature = "client")]
+    #[test]
+    fn missing_disabled_features_means_unsupported() {
+        let spec = spec_without_disabled_features();
+
+        assert!(spec.disabled_features().is_empty());
+        assert!(matches!(
+            spec.require_feature(NewOperatorFeature::PreviewEnv),
+            Err(OperatorApiError::UnsupportedFeature {
+                feature: NewOperatorFeature::PreviewEnv,
+                ..
+            })
+        ));
+    }
+
+    /// Every chart-toggled feature names the values that turn it on, so the disabled error can
+    /// show `--set`s the admin can paste. Kafka branching needs splitting too, and multi-cluster
+    /// gets no hint because a lone `multiCluster.enabled` fails startup.
+    #[test]
+    fn chart_toggled_features_name_their_helm_values() {
+        assert_eq!(
+            NewOperatorFeature::PreviewEnv.helm_values(),
+            ["operator.previewEnv"]
+        );
+        assert_eq!(
+            NewOperatorFeature::KafkaBranching.helm_values(),
+            ["operator.kafkaSplitting", "operator.kafkaBranching"]
+        );
+        assert!(
+            NewOperatorFeature::MultiClusterPrimary
+                .helm_values()
+                .is_empty()
+        );
+        assert!(NewOperatorFeature::CopyTarget.helm_values().is_empty());
     }
 }

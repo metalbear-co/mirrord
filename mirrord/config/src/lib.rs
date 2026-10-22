@@ -506,7 +506,8 @@ pub struct LayerConfig {
     /// ## kube_context {#root-kube_context}
     ///
     /// Kube context to use from the kubeconfig file.
-    /// Will use current context if not specified.
+    /// If not specified, uses `kube_context` from the global `~/.mirrord/mirrord.json`, then the
+    /// kubeconfig's current context.
     ///
     /// ```json
     /// {
