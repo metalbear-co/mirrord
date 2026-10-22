@@ -1,7 +1,9 @@
 ---
 title: Contributing
-description: How to contribute to mirrord
+description: "How to contribute to mirrord, the open source project, from your first issue to your first pull request."
 ---
+
+# Contributing
 
 mirrord is open source and we welcome contributions!
 
