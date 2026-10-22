@@ -594,6 +594,7 @@ impl PreparedPreview {
             cronjob,
             spec_resources,
             share_host,
+            auto_queue_splitting: None,
         };
 
         let annotations = operator_api

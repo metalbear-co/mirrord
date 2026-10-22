@@ -911,6 +911,16 @@ pub enum NewOperatorFeature {
     /// creation timeout.
     DbBranchSsmParameter,
 
+    /// This operator drops the queue splits of a `PreviewSession` with `autoQueueSplitting` that
+    /// it can't serve (a broker whose splitting is off), instead of failing the session, as it
+    /// does for `mirrord up` sessions. Gated so the CLI only sends the splits `mirrord preview
+    /// up` adds by default to an operator that won't fail the preview over them.
+    PreviewAutoQueueSplitting,
+    /// This operator has Azure Service Bus queue splitting on. Advertised separately from the
+    /// other brokers' features, which came first, so older operators that split Azure Service Bus
+    /// don't advertise it: a CLI can only take its presence as a yes, never its absence as a no.
+    AzureServiceBusQueueSplitting,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -982,6 +992,12 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SessionReadyCondition => "session readiness reporting",
             NewOperatorFeature::NatsQueueSplitting => "NATS queue splitting",
             NewOperatorFeature::NatsPubSubQueueSplitting => "NATS pub/sub queue splitting",
+            NewOperatorFeature::PreviewAutoQueueSplitting => {
+                "default queue splitting in preview environments"
+            }
+            NewOperatorFeature::AzureServiceBusQueueSplitting => {
+                "Azure Service Bus queue splitting"
+            }
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
@@ -1035,7 +1051,8 @@ impl NewOperatorFeature {
             | NewOperatorFeature::PreviewTlsClientAuthFromTarget
             | NewOperatorFeature::PreviewCronJobTarget
             | NewOperatorFeature::PreviewLabelTarget
-            | NewOperatorFeature::PreviewSpecResources => &["operator.previewEnv"],
+            | NewOperatorFeature::PreviewSpecResources
+            | NewOperatorFeature::PreviewAutoQueueSplitting => &["operator.previewEnv"],
             NewOperatorFeature::SqsQueueSplitting
             | NewOperatorFeature::SqsQueueSplittingDirect
             | NewOperatorFeature::SqsQueueSplittingWithJqFilter => &["operator.sqsSplitting"],
@@ -1053,6 +1070,9 @@ impl NewOperatorFeature {
             NewOperatorFeature::BullMqQueueSplitting => &["operator.bullmqSplitting"],
             NewOperatorFeature::NatsQueueSplitting => &["operator.natsSplitting"],
             NewOperatorFeature::NatsPubSubQueueSplitting => &["operator.natsPubsubSplitting"],
+            NewOperatorFeature::AzureServiceBusQueueSplitting => {
+                &["operator.azureServiceBusSplitting"]
+            }
             NewOperatorFeature::MySqlBranching => &["operator.mysqlBranching"],
             NewOperatorFeature::MariaDbBranching => &["operator.mariadbBranching"],
             NewOperatorFeature::PgBranching
