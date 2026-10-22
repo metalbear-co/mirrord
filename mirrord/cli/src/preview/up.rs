@@ -10,7 +10,7 @@
 use std::{io::ErrorKind, ops::Not, path::Path, sync::Arc};
 
 use futures::future::join_all;
-use mirrord_analytics::{AnalyticsReporter, ExecutionKind};
+use mirrord_analytics::{AnalyticsReporter, ExecutionKind, ReportTarget, Reporter};
 use mirrord_config::{
     config::{ConfigContext, EnvKey},
     env_key::MIRRORD_ENV_KEY,
@@ -19,7 +19,7 @@ use mirrord_config::{
 };
 use mirrord_operator::crd::NewOperatorFeature;
 use mirrord_progress::{Progress, ProgressTracker};
-use mirrord_up::{SubprocessCfg, UpError, load_up_config, preview_image_env};
+use mirrord_up::{PreviewImageSource, SubprocessCfg, UpError, load_up_config, preview_image_env};
 
 use super::{
     PreparedPreview, create_preview_api, load_manifests, manifest_sources, preview_stop,
@@ -34,12 +34,63 @@ use crate::{
     error::{CliError, CliResult},
 };
 
-/// Handle `mirrord preview up`.
+/// Handle `mirrord preview up`, reporting one `PreviewUp` event for the run.
 pub(super) async fn preview_up(
     common: &PreviewCommonArgs,
     args: PreviewUpArgs,
     watch: drain::Watch,
     user_data: &UserData,
+) -> CliResult<()> {
+    // The `mirrord-up.yaml` that can turn telemetry off isn't read yet. Enabled until it is, so a
+    // run that fails to read it is still reported.
+    let mut analytics = AnalyticsReporter::for_event(
+        ReportTarget::PreviewUp,
+        true,
+        watch.clone(),
+        user_data.machine_id(),
+    );
+
+    let result = run_preview_up(common, args, watch, user_data, &mut analytics).await;
+
+    analytics.get_mut().add("success", result.is_ok());
+    if let Err(error) = &result {
+        analytics
+            .get_mut()
+            .add("error_category", ErrorCategory::from(error) as u32);
+    }
+
+    result
+}
+
+/// Coarse bucket of a failed `mirrord preview up` run, for telemetry.
+#[derive(Clone, Copy, Debug)]
+#[repr(u32)]
+enum ErrorCategory {
+    /// Before any session was prepared: reading the `mirrord-up.yaml`, picking the images or
+    /// resolving the targets.
+    Setup = 1,
+    /// A service failed its checks, so no session was started.
+    Checks = 2,
+    /// A session failed to start.
+    Start = 3,
+}
+
+impl From<&CliError> for ErrorCategory {
+    fn from(error: &CliError) -> Self {
+        match error {
+            CliError::PreviewUpInvalid(_) => Self::Checks,
+            CliError::PreviewUpFailed(_) => Self::Start,
+            _ => Self::Setup,
+        }
+    }
+}
+
+async fn run_preview_up(
+    common: &PreviewCommonArgs,
+    args: PreviewUpArgs,
+    watch: drain::Watch,
+    user_data: &UserData,
+    analytics: &mut AnalyticsReporter,
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview up");
 
@@ -62,8 +113,24 @@ pub(super) async fn preview_up(
         result => result?,
     };
     up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
+    analytics.enabled = up_config.telemetry_enabled();
 
     let images = up_config.select_preview_images(&args.image)?;
+    let analytics_data = analytics.get_mut();
+    analytics_data.add("services_previewed", images.sources.len());
+    analytics_data.add("services_skipped", images.skipped.len());
+    for (property, source) in [
+        ("images_from_flag", PreviewImageSource::Flag),
+        ("images_from_env", PreviewImageSource::Env),
+        ("images_from_file", PreviewImageSource::File),
+    ] {
+        let count = images
+            .sources
+            .values()
+            .filter(|picked| **picked == source)
+            .count();
+        analytics_data.add(property, count);
+    }
     for service in &images.skipped {
         progress.info(&format!(
             "{service}: no image (`--image {service}=<image ref>` or `{}`), skipped",
@@ -140,6 +207,7 @@ pub(super) async fn preview_up(
     failed.sort();
 
     if failed.is_empty().not() {
+        analytics.get_mut().add("services_failed", failed.len());
         for (_, mut service_progress, _) in ready_to_start {
             service_progress.failure(Some("not started"));
         }
@@ -185,6 +253,7 @@ pub(super) async fn preview_up(
         }
     }
 
+    analytics.get_mut().add("services_failed", failed.len());
     if failed.is_empty().not() {
         progress.failure(Some("some preview environments failed to start"));
         return Err(CliError::PreviewUpFailed(failed));
