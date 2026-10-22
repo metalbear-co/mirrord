@@ -18,7 +18,7 @@ use mirrord_kube::{
     resolved::ResolvedTarget,
 };
 use mirrord_operator::{
-    client::{OperatorApi, OperatorSessionConnection},
+    client::{NoClientCert, OperatorApi, OperatorSessionConnection, error::OperatorApiError},
     crd::NewOperatorFeature,
 };
 use mirrord_progress::{
@@ -93,6 +93,53 @@ where
     Ok(api.client().clone())
 }
 
+/// Whether a session with a given config can use the mirrord operator, before anything is
+/// reported about it. Sessions (`try_connect_using_operator`) and `mirrord up`'s check before
+/// launch both decide through [`operator_availability`], each reporting the outcome its own way:
+/// an operator that can't be used is an error only when the config sets `operator: true`.
+pub(crate) enum OperatorAvailability {
+    /// The config sets `operator: false`.
+    Disabled,
+    /// No operator in the cluster.
+    NotInstalled,
+    /// The operator's license can't be used.
+    LicenseInvalid(OperatorApiError),
+    Usable(Box<OperatorApi<NoClientCert>>),
+}
+
+/// Looks for the operator `config` points at and checks its license. `progress` is used while
+/// connecting to the cluster, and the license check runs as a subtask of `operator_progress`.
+pub(crate) async fn operator_availability<P, Q, R>(
+    config: &LayerConfig,
+    analytics: &mut R,
+    progress: &P,
+    operator_progress: &Q,
+) -> CliResult<OperatorAvailability>
+where
+    P: Progress,
+    Q: Progress,
+    R: Reporter,
+{
+    if config.operator == Some(false) {
+        return Ok(OperatorAvailability::Disabled);
+    }
+    let Some(api) = OperatorApi::try_new(config, analytics, progress).await? else {
+        return Ok(OperatorAvailability::NotInstalled);
+    };
+
+    let mut license_subtask = operator_progress.subtask("checking license");
+    Ok(match api.check_license_validity(&license_subtask) {
+        Ok(()) => {
+            license_subtask.success(Some("operator license valid"));
+            OperatorAvailability::Usable(Box::new(api))
+        }
+        Err(error) => {
+            license_subtask.failure(Some("operator license expired"));
+            OperatorAvailability::LicenseInvalid(error)
+        }
+    })
+}
+
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], prepares an operator
 ///    session, connects to it, and returns [`Some`] [`ConnectData`] with an [`OperatorConnector`]
 ///    holding that connection.
@@ -114,46 +161,39 @@ where
     R: Reporter,
 {
     let mut operator_subtask = progress.subtask("checking operator");
-    if layer_config.operator == Some(false) {
-        operator_subtask.success(Some("operator disabled"));
-        return Ok(None);
-    }
-
-    let api = match OperatorApi::try_new(layer_config, analytics, progress).await? {
-        Some(api) => api,
-        None if layer_config.operator == Some(true) => {
-            send_upgrade_ide_message(
-                progress,
-                "mirrord operator was not found in the cluster.",
-                "operatornotinstalled",
-            )?;
-            return Err(CliError::OperatorNotInstalled);
-        }
-        None => {
-            operator_subtask.success(Some("operator not found"));
-            return Ok(None);
-        }
-    };
-
-    let mut license_subtask = operator_subtask.subtask("checking license");
-    match api.check_license_validity(&license_subtask) {
-        Ok(()) => license_subtask.success(Some("operator license valid")),
-        Err(error) => {
-            license_subtask.failure(Some("operator license expired"));
-
-            if layer_config.operator == Some(true) {
+    let required = layer_config.operator == Some(true);
+    let api =
+        match operator_availability(layer_config, analytics, progress, &operator_subtask).await? {
+            OperatorAvailability::Usable(api) => *api,
+            OperatorAvailability::Disabled => {
+                operator_subtask.success(Some("operator disabled"));
+                return Ok(None);
+            }
+            OperatorAvailability::NotInstalled if required => {
+                send_upgrade_ide_message(
+                    progress,
+                    "mirrord operator was not found in the cluster.",
+                    "operatornotinstalled",
+                )?;
+                return Err(CliError::OperatorNotInstalled);
+            }
+            OperatorAvailability::NotInstalled => {
+                operator_subtask.success(Some("operator not found"));
+                return Ok(None);
+            }
+            OperatorAvailability::LicenseInvalid(error) if required => {
                 send_upgrade_ide_message(
                     progress,
                     "mirrord operator license expired.",
                     "licenseexpired",
                 )?;
                 return Err(error.into());
-            } else {
+            }
+            OperatorAvailability::LicenseInvalid(_) => {
                 operator_subtask.failure(Some("proceeding without operator"));
                 return Ok(None);
             }
-        }
-    }
+        };
 
     if mirrord_for_ci.is_some_and(|ci| ci.api_key().is_none())
         && api
@@ -237,7 +277,7 @@ where
     }
 
     let mut session_subtask = operator_subtask.subtask("starting session");
-    let up_info = mirrord_up.map(MirrordUp::info);
+    let up_session = mirrord_up.map(MirrordUp::session);
     let ci_info = mirrord_for_ci.map(MirrordCi::info);
 
     let OperatorSessionConnection {
@@ -258,7 +298,7 @@ where
             &session_subtask,
             branch_name,
             ci_info,
-            up_info,
+            up_session,
         )
         .await?
     } else {
@@ -285,7 +325,7 @@ where
             &session_subtask,
             branch_name,
             ci_info,
-            up_info,
+            up_session,
         )
         .await?
     };

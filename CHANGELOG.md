@@ -8,6 +8,54 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.277.0](https://github.com/metalbear-co/mirrord/tree/3.277.0) - 2026-10-21
+
+
+### Security
+
+- Update `webpki-roots`, `webpki-root-certs` and `rustls-webpki` to stop
+  trusting the compromised eMudhra intermediate certificate authorities.
+
+
+### Added
+
+- Added a tip pointing to `mirrord operator install` on mirrord runs without an
+  operator.
+- `mirrord operator signup` starts a 7-day Enterprise trial under a new
+  organization, prints its claim URL and saves its API key on the machine for
+  `mirrord operator install --from-signup`, so AI agents can set up mirrord
+  without an account.
+- `mirrord up` requests DB branching (`db_branches: "*"`) for services in
+  `split` and `mirror` mode, so services of one run that use the same database
+  share one branch. What each service requested and gets is printed before the
+  sessions start, and a session that fails before launching its service now
+  reports `Service {name} failed to start`.
+
+
+### Changed
+
+- Clarified CI command help and documentation for running without a CI API key
+  on supporting Free and Teams operators.
+- `mirrord operator install` without `--api-key` now logs you in to the
+  MetalBear app and creates your organization's operator API key, which goes
+  into the cluster without being shown, instead of starting a trial under a new
+  organization. Only organization admins can create the key, and an
+  organization that already has one is asked to install with it. It also no
+  longer prints a helm takeover command after installing.
+- `mirrord up init` picks each service's namespace and workload from the
+  cluster, follows the flow and wording of `mirrord wizard`, and asks only for
+  what has no good default.
+
+
+### Fixed
+
+- Take the source address of a connection handed off by the remote layer from
+  the transferred socket instead of the address the layer reports.
+- The workload picker of `mirrord up` offers the namespace of the kube context
+  when the user can't list all namespaces, and lists the workloads of the kinds
+  that the user can read. When the user can't read any workload of a namespace,
+  it asks for another namespace.
+
 ## [3.276.0](https://github.com/metalbear-co/mirrord/tree/3.276.0) - 2026-10-19
 
 

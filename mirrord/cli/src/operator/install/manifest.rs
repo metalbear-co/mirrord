@@ -21,9 +21,6 @@ pub(super) const RELEASE_NAME: &str = "mirrord-operator";
 /// Set by `render_default_manifest.sh` in the charts repo, the two must stay in sync.
 const API_KEY_PLACEHOLDER: &str = "__MIRRORD_OPERATOR_API_KEY__";
 
-/// The operator Deployment env var the chart puts `cloud.apiKey.key` in.
-const API_KEY_ENV: &str = "OPERATOR_CLOUD_API_KEY";
-
 /// helm only creates objects with this annotation at their point in the release lifecycle. Created
 /// directly, they would run right away, e.g. the chart's pre-delete cleanup Job deletes the
 /// operator's CRDs and Deployment.
@@ -138,8 +135,6 @@ async fn fetch(http: &reqwest::Client, url: &str) -> Result<Option<String>, Oper
 #[derive(Debug)]
 pub(super) struct Manifest {
     objects: Vec<DynamicObject>,
-    /// Version of the chart the manifest was rendered from, which may differ from the operator's.
-    chart_version: semver::Version,
     operator_deployment: String,
     /// Namespace of the operator Deployment.
     operator_namespace: String,
@@ -149,7 +144,8 @@ impl Manifest {
     /// Parses a rendered manifest, leaving out helm hooks.
     ///
     /// Also validates that the operator is at least [`MIN_OPERATOR_VERSION`] and that the API key
-    /// can be set, so an unsupported or broken manifest fails before a trial is started for it.
+    /// can be set, so an unsupported or broken manifest fails before an operator API key is
+    /// created.
     pub(super) fn parse(manifest: &str) -> Result<Self, OperatorInstallError> {
         let mut objects = serde_saphyr::from_multiple::<Option<DynamicObject>>(manifest)
             .map_err(OperatorInstallError::ParseManifest)?
@@ -167,8 +163,7 @@ impl Manifest {
                     .is_some_and(|types| types.kind == "Deployment")
             })
             .ok_or(OperatorInstallError::NoDeployment)?;
-        let chart_version =
-            chart_version(deployment).ok_or(OperatorInstallError::NoChartVersionLabel)?;
+        chart_version(deployment).ok_or(OperatorInstallError::NoChartVersionLabel)?;
         let operator_version = deployment
             .labels()
             .get(APP_VERSION_LABEL)
@@ -195,7 +190,6 @@ impl Manifest {
 
         Ok(Self {
             objects,
-            chart_version,
             operator_deployment,
             operator_namespace,
         })
@@ -211,23 +205,6 @@ impl Manifest {
 
     pub(super) fn operator_deployment(&self) -> &str {
         &self.operator_deployment
-    }
-
-    pub(super) fn chart_version(&self) -> &semver::Version {
-        &self.chart_version
-    }
-
-    /// A shell command substitution that reads the installed operator's API key from the cluster.
-    ///
-    /// Lets users move the installation to helm with the key it already uses, which they may have
-    /// never seen, e.g. when it came from a trial signup. `context_arg` gives kubectl the
-    /// kubecontext of the installation.
-    pub(super) fn api_key_lookup(&self, context_arg: &str) -> String {
-        format!(
-            "$(kubectl{context_arg} -n {} get deployment {} -o \
-            jsonpath='{{.spec.template.spec.containers[*].env[?(@.name==\"{API_KEY_ENV}\")].value}}')",
-            self.operator_namespace, self.operator_deployment,
-        )
     }
 
     /// Attributes all objects to the [`RELEASE_NAME`] helm release in `release_namespace`, so
@@ -335,7 +312,6 @@ metadata:
             .collect::<Vec<_>>();
         assert_eq!(names, ["mirrord", "mirrord-operator"]);
         assert_eq!(manifest.operator_namespace(), "mirrord");
-        assert_eq!(manifest.chart_version(), &semver::Version::new(1, 35, 0));
     }
 
     #[test]

@@ -82,7 +82,7 @@ When generating the key, an org admin also chooses **identity sharing** (ticked 
 | `sessionUnusedTtlSeconds` | `30` | How long a session may sit idle after its client disconnects (the "connected" phase) before it's closed. Raise for clients on slow/unreliable networks. Requires operator/chart `3.191.0`+. |
 | `maxSessionTimeSeconds` | unset | Cap on total session lifetime, spanning both phases above. The only value that can close a session someone is actively using. |
 | `communicationTimeoutMillis` | `60000` | How long either the client or the agent may go silent on an already-connected session before it's closed — the operator times each side separately and closes as soon as **either** exceeds this. Applies regardless of chart version; requires operator Helm chart `3.210.0`+ to actually **change** the value (earlier charts always apply the 60000 default). Symptom of hitting it: session drops with `Layer Communication Timeout` in the operator log. |
-| `noPodTargetsSessionTimeoutMillis` | `60000` | Timeout when no ready target pods. |
+| `noPodTargetsSessionTimeoutMillis` | `60000` | How long a session (including a preview session) tolerates having no ready target pod before it's closed — raise it for workloads whose replacement pod can take longer, e.g. a single-replica target on a spot/preemptible node that needs a new node to boot, or a Karpenter-provisioned node pool. |
 | `subscribeEventBufferSize` | `2048` | `mirrord subscribe` event buffer depth. |
 | `copyTarget.useAgentImage` | `true` | Copy-target dummy container uses the agent image (has `sleep`). |
 | `jiraWebhookUrl` | unset | mirrord for Jira integration. |
@@ -104,6 +104,7 @@ Routing: incoming traffic and queue splitting go to **all** Workload clusters (e
 | `tls` | `false` | TLS-secure agent connections; requires agent ≥ 3.97.0. |
 | `injectHeaders` | `true` | Agent marks whether a request went through the agent / was stolen. |
 | `port` | random high port | Set a fixed port for service-mesh exclusions. |
+| `resources` | `requests: {cpu: 1m, memory: 1Mi}` · `limits: {cpu: 1, memory: 100Mi}` | Per-agent-pod resources (operator `3.197.0`+). A field set to `null` is left out of the pod spec entirely. Doesn't apply to ephemeral agents (Kubernetes doesn't allow resources on ephemeral containers). |
 | `extraEnv` | `{}` | Extra agent env vars. |
 | `priorityClass.*` | create `mirrord-agent-pod`, value `1000000000` | PriorityClass for agent pods. |
 | `extraConfig` | — | Arbitrary agent config not covered above (`json_log`, `labels`, `annotations`, `tolerations`, `privileged`, …). |

@@ -33,6 +33,9 @@ pub(crate) struct AuthStore {
     /// Issuer (`iss` claim from the token) -> organization ID -> token.
     #[serde(default)]
     issuers: BTreeMap<String, BTreeMap<String, StoredLoginToken>>,
+    /// Issuer of the app -> key of the last trial that `mirrord operator signup` started there.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    signups: BTreeMap<String, StoredSignupKey>,
 }
 
 /// A login token as stored in [`AuthStore`].
@@ -53,6 +56,12 @@ pub(crate) struct StoredLoginToken {
 #[serde(transparent)]
 pub(crate) struct LoginToken(String);
 
+impl LoginToken {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 impl From<String> for LoginToken {
     fn from(value: String) -> Self {
         Self(value)
@@ -60,6 +69,33 @@ impl From<String> for LoginToken {
 }
 
 impl fmt::Debug for LoginToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
+/// A key of a trial that `mirrord operator signup` started, as stored in [`AuthStore`].
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredSignupKey {
+    key: SignupApiKey,
+    /// When the trial ends, after which the key is dropped from the store.
+    expires_at: DateTime<Utc>,
+}
+
+/// The operator API key of a trial started by `mirrord operator signup`, which [`fmt::Debug`] does
+/// not print.
+#[derive(Serialize, Deserialize)]
+#[serde(transparent)]
+pub(crate) struct SignupApiKey(String);
+
+impl SignupApiKey {
+    pub(crate) fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl fmt::Debug for SignupApiKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("<redacted>")
     }
@@ -73,14 +109,77 @@ impl AuthStore {
         organization_id: String,
         token: StoredLoginToken,
     ) -> io::Result<()> {
-        let path = AUTH_STORE_PATH.as_deref().ok_or_else(|| {
+        Self::save_at(Self::path()?, issuer, organization_id, token, Utc::now()).await
+    }
+
+    /// The unexpired login token issued by `issuer` that expires last, if there is one.
+    ///
+    /// A user in several organizations has a token for each, and the one that expires last is the
+    /// one they logged in with most recently.
+    pub(crate) async fn login_token(issuer: &str) -> io::Result<Option<StoredLoginToken>> {
+        Ok(Self::load()
+            .await?
+            .and_then(|store| store.latest_token(issuer, Utc::now())))
+    }
+
+    /// Stores `key` as the key of the trial started with the app of `issuer`, replacing the
+    /// previous one.
+    pub(crate) async fn save_signup_key(
+        issuer: String,
+        key: SignupApiKey,
+        expires_at: DateTime<Utc>,
+    ) -> io::Result<()> {
+        let now = Utc::now();
+        update_owner_only_at_path(Self::path()?, move |store: &mut Self| {
+            store
+                .signups
+                .insert(issuer, StoredSignupKey { key, expires_at });
+            store.signups.retain(|_, stored| stored.expires_at > now);
+            Ok::<_, io::Error>(())
+        })
+        .await?;
+
+        Ok(())
+    }
+
+    /// The key of the unexpired trial started with the app of `issuer`, if there is one.
+    pub(crate) async fn signup_key(issuer: &str) -> io::Result<Option<SignupApiKey>> {
+        let now = Utc::now();
+        Ok(Self::load()
+            .await?
+            .and_then(|mut store| store.signups.remove(issuer))
+            .filter(|stored| stored.expires_at > now)
+            .map(|stored| stored.key))
+    }
+
+    fn path() -> io::Result<&'static Path> {
+        AUTH_STORE_PATH.as_deref().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
                 "could not determine the home directory",
             )
-        })?;
+        })
+    }
 
-        Self::save_at(path, issuer, organization_id, token, Utc::now()).await
+    /// The stored contents, or [`None`] when nothing is stored.
+    async fn load() -> io::Result<Option<Self>> {
+        let Some(path) = AUTH_STORE_PATH.as_deref() else {
+            return Ok(None);
+        };
+
+        match tokio::fs::read(path).await {
+            Ok(contents) => Ok(Some(serde_json::from_slice(&contents).unwrap_or_default())),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn latest_token(mut self, issuer: &str, now: DateTime<Utc>) -> Option<StoredLoginToken> {
+        self.issuers
+            .remove(issuer)?
+            .into_values()
+            .filter(|token| token.expires_at > now)
+            .max_by_key(|token| token.expires_at)
     }
 
     async fn save_at(

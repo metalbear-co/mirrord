@@ -21,25 +21,22 @@ spec:
               value: "__MIRRORD_OPERATOR_API_KEY__"
 "#;
 
-/// The printed `helm install` and its API key lookup target the kubecontext of the installation
-/// as one shell word, whatever its name is.
+/// The printed uninstall command targets the kubecontext of the installation as one shell word.
 #[test]
 fn summary_quotes_the_kubecontext() {
     let manifest = Manifest::parse(MANIFEST).unwrap();
     let version = semver::Version::new(3, 214, 0);
 
     let text = summary(&version, &manifest, Some("dev; rm -rf ~"));
-    assert!(text.contains(" --kube-context 'dev; rm -rf ~' "), "{text}");
     assert!(
-        text.contains("kubectl --context 'dev; rm -rf ~' -n"),
+        text.contains("uninstall --context 'dev; rm -rf ~'`"),
         "{text}"
     );
 
     let text = summary(&version, &manifest, Some("kind-dev"));
-    assert!(text.contains(" --kube-context kind-dev "), "{text}");
-    assert!(text.contains("kubectl --context kind-dev -n"), "{text}");
+    assert!(text.contains("uninstall --context kind-dev`"), "{text}");
 
     let text = summary(&version, &manifest, None);
-    assert!(text.contains("--kube-context").not(), "{text}");
-    assert!(text.contains("kubectl -n"), "{text}");
+    assert!(text.contains("--context").not(), "{text}");
+    assert!(text.contains("helm").not(), "{text}");
 }
