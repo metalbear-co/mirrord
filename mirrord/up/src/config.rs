@@ -584,16 +584,33 @@ pub const SERVICE_LAYER_PATHS: &[(&str, &str)] = &[
 impl ServiceConfig {
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `base` from
     /// [`CommonConfig::base_config`].
+    ///
+    /// With `preview`, the config is for the service's `mirrord preview up` session instead: it
+    /// is assembled as in `split` mode whatever the service's `default_mode`, without `env`, and
+    /// runs the service's `image`.
     fn assemble(
-        self,
+        mut self,
         service_name: &Arc<str>,
         base: LayerConfig,
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
+        preview: bool,
     ) -> Result<SubprocessCfg, ConfigPatchErrorKind> {
+        if preview {
+            self.default_mode = ServiceMode::Split;
+            self.env = EnvConfig::default();
+        }
+
         let kube_context = up_context.get_context(self.context.clone());
         let mut cfg = self.unpatched_config(base, &key, kube_context.clone());
+
+        // `PreviewIncomingConfig` falls back to the anchored `^baggage: ...$` filter only when
+        // none is set, and share ingress only serves sessions with exactly that filter, so up's
+        // own default must not get in the way.
+        if preview && self.http_filter.is_filter_set().not() {
+            cfg.feature.network.incoming.http_filter = HttpFilterConfig::default();
+        }
 
         cfg.target = match self.target.as_resolved(service_name, kube_context) {
             Ok(resolved) => resolved,
@@ -636,11 +653,35 @@ impl ServiceConfig {
             );
         }
 
+        // A preview session that asks for any queue split is refused by the operator unless its
+        // target is a workload it can look a `MirrordSplitConfig` up for, even when `"*"` would
+        // match no queue. `mirrord up` sessions skip such targets instead, so leaving the splits
+        // out ends the same way.
+        if preview
+            && matches!(
+                cfg.target.path,
+                Some(Target::Deployment(_) | Target::Rollout(_) | Target::StatefulSet(_))
+            )
+            .not()
+        {
+            cfg.feature.split_queues = SplitQueuesConfig::default();
+        }
+        let mut default_split_queues = cfg.feature.split_queues.is_set();
+
         if let Some(patch) = self.config_patch {
-            // A patch that sets `db_branches` decides them itself, `[]` included, so whatever it
-            // holds afterwards was asked for by the user.
+            if preview && patch.pointer("/feature/preview/image").is_some() {
+                return Err(ConfigPatchErrorKind::PreviewImage);
+            }
+
+            // A patch that sets `db_branches` or `split_queues` decides them itself, `[]`
+            // included, so whatever it holds afterwards was asked for by the user.
             default_db_branches &= patch.pointer("/feature/db_branches").is_none();
+            default_split_queues &= patch.pointer("/feature/split_queues").is_none();
             cfg = apply_config_patch(cfg, patch, &key)?;
+        }
+
+        if preview {
+            cfg.feature.preview.image = self.image;
         }
 
         Ok(SubprocessCfg {
@@ -649,6 +690,7 @@ impl ServiceConfig {
             run: self.run,
             mode: self.default_mode,
             default_db_branches,
+            default_split_queues,
         })
     }
 
@@ -757,6 +799,12 @@ enum ConfigPatchErrorKind {
 
     #[error("the merged mirrord config failed validation: {0}")]
     Validation(#[from] mirrord_config::config::ConfigError),
+
+    #[error(
+        "it sets `feature.preview.image`, which `mirrord preview up` takes from the service's \
+         `image`, `--image` or `MIRRORD_<SERVICE>_IMAGE` instead"
+    )]
+    PreviewImage,
 }
 
 /// Here we merge the `config` with the `patch` (`config_patch` from the `mirrord-up.yaml` config
@@ -850,6 +898,10 @@ pub struct SubprocessCfg {
     /// `config.feature.db_branches` is the `"*"` `mirrord up` adds for this service's mode, not
     /// one the user set. An operator that can't resolve it drops it rather than failing the run.
     pub default_db_branches: bool,
+    /// `config.feature.split_queues` are the `"*"` splits `mirrord up` adds for this service's
+    /// mode, not ones the user set. A preview session asks its operator to drop the ones it
+    /// can't serve rather than failing.
+    pub default_split_queues: bool,
 }
 
 /// Rejects services whose resolved target cannot support the features their
@@ -994,6 +1046,7 @@ impl UpConfig {
                 key.clone(),
                 &mut resolved_targets,
                 up_context.clone(),
+                false,
             ) {
                 Ok(assembled) => assembled,
                 Err(source) => {
@@ -1110,13 +1163,37 @@ impl UpConfig {
         up_context: UpKubeContext,
         context: &mut ConfigContext,
     ) -> Result<Vec<SubprocessCfg>, UpError> {
+        self.assemble_services(key, resolved_targets, up_context, context, false)
+    }
+
+    /// Like [`Self::service_configs`], but for the services' `mirrord preview up` sessions (see
+    /// [`ServiceConfig::assemble`]).
+    pub(crate) fn preview_configs(
+        self,
+        key: &EnvKey,
+        resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
+        up_context: UpKubeContext,
+        context: &mut ConfigContext,
+    ) -> Result<Vec<SubprocessCfg>, UpError> {
+        self.assemble_services(key, resolved_targets, up_context, context, true)
+    }
+
+    fn assemble_services(
+        self,
+        key: &EnvKey,
+        resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
+        up_context: UpKubeContext,
+        context: &mut ConfigContext,
+        preview: bool,
+    ) -> Result<Vec<SubprocessCfg>, UpError> {
         let base_config = self.common.base_config(context)?;
 
         self.services
             .into_iter()
             .map(|(service_name, svc)| {
                 let mode = svc.default_mode;
-                if mode == ServiceMode::Replace && svc.http_filter.is_filter_set() {
+                if preview.not() && mode == ServiceMode::Replace && svc.http_filter.is_filter_set()
+                {
                     eprintln!(
                         "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
                     );
@@ -1127,6 +1204,7 @@ impl UpConfig {
                     key.clone(),
                     resolved_targets,
                     up_context.clone(),
+                    preview,
                 )
                 .map_err(|source| {
                     ConfigPatchError {
