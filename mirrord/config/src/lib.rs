@@ -749,7 +749,11 @@ impl LayerConfig {
     }
 
     /// Applies the presets in `feature.magic` to the config, modifying it in-place.
-    fn apply_magic(&mut self) {
+    ///
+    /// [`resolve`](Self::resolve) runs it. A config assembled without it doesn't compare equal
+    /// to the resolved default, so call it before checks that do, like
+    /// [`verify_for_preview_env`](Self::verify_for_preview_env).
+    pub fn apply_magic(&mut self) {
         if self.feature.magic.aws {
             let mut unset: Vec<String> = self
                 .feature
@@ -1407,7 +1411,7 @@ impl LayerConfig {
             && !self.feature.network.incoming.http_filter.is_filter_set()
         {
             context.add_warning(format!(
-                "using default http header filter: 'baggage: .*mirrord-session={}.*'.",
+                "using default http header filter: '^baggage: .*mirrord-session={}.*$'.",
                 self.key.as_str(),
             ));
         }

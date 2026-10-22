@@ -468,7 +468,10 @@ async fn resolve_unresolved_workloads(
         let workloads = list_workloads(client, namespace, &INFERRED_TARGET_TYPES).await?;
         let resolved = match find_by_name(&workloads, name) {
             Some(path) => {
-                println!("{name}: using {path}");
+                // Without prompts, the caller reports the targets the way its output is set up.
+                if interactive {
+                    println!("{name}: using {path}");
+                }
                 ResolvedTarget {
                     resolved: SpecifiedTarget {
                         path: Some(Target::from_str(path)?),

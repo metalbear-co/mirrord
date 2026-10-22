@@ -75,6 +75,7 @@ use crate::{
 
 mod multicluster;
 pub(crate) mod resources;
+mod up;
 
 /// Handle commands related to preview environments: `mirrord preview ...`
 #[mirrord_macros::boxed_future]
@@ -89,6 +90,7 @@ pub(crate) async fn preview_command(
         PreviewCommand::Start(start_args) => {
             preview_start(&common, start_args, watch, user_data).await
         }
+        PreviewCommand::Up(up_args) => up::preview_up(&common, up_args, watch, user_data).await,
         PreviewCommand::Status(status_args) => {
             preview_status(&common, status_args, watch, user_data).await
         }
@@ -137,12 +139,16 @@ async fn preview_start(
         Some(layer_config.key.as_str().to_owned()),
     );
 
+    let (operator_api, api) =
+        create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
+
     let summary = PreparedPreview::prepare(
         layer_config,
+        operator_api,
+        api,
         &sources,
         supplied_objects,
         &progress,
-        &mut analytics,
     )
     .await?
     .start(&mut progress)
@@ -180,6 +186,8 @@ struct PreviewSummary {
     namespace: String,
     session_name: String,
     share_host: Option<String>,
+    /// The session started idle, its pods boot on first traffic.
+    idle: bool,
 }
 
 /// A preview session checked against the operator and the cluster, but not created yet: nothing
@@ -204,20 +212,19 @@ struct PreparedPreview {
 }
 
 impl PreparedPreview {
-    /// Connects to the operator and runs every check `mirrord preview start` can run before it
-    /// changes anything in the cluster.
+    /// Runs every check `mirrord preview start` can run before it changes anything in the
+    /// cluster, against the operator and API from [`create_preview_api`].
     ///
     /// `supplied_objects` are the manifests read from `sources.paths`, the chart in
     /// `sources.chart` is rendered here.
     async fn prepare(
         layer_config: LayerConfig,
+        operator_api: OperatorApi<NoClientCert>,
+        api: Api<PreviewSession>,
         sources: &ManifestSources,
         mut supplied_objects: Option<Vec<resources::SuppliedObject>>,
         progress: &ProgressTracker,
-        analytics: &mut AnalyticsReporter,
     ) -> CliResult<Self> {
-        let (operator_api, api) =
-            create_preview_api(&layer_config, false, progress, analytics).await?;
         operator_api.check_feature_support(&layer_config, false)?;
 
         if !sources.is_empty() {
@@ -663,8 +670,10 @@ impl PreparedPreview {
         )));
 
         let mut last_known_phase: &str = "unknown";
-        // Assigned exactly once, in the `Ready` arm below, which is the only path that leaves the loop.
+        // Assigned exactly once, in the `Ready` or `Idle` arm below, the only paths that leave the
+        // loop.
         let share_host;
+        let idle;
 
         loop {
             tokio::select! {
@@ -709,6 +718,7 @@ impl PreparedPreview {
                                     }
                                     PreviewSessionPhase::Ready => {
                                         share_host = status.share_host.clone();
+                                        idle = false;
                                         subtask.success(Some("preview session is ready"));
                                         break;
                                     }
@@ -717,6 +727,7 @@ impl PreparedPreview {
                                     // success state (pods boot on first traffic).
                                     PreviewSessionPhase::Idle => {
                                         share_host = status.share_host.clone();
+                                        idle = true;
                                         subtask.success(Some(
                                             "preview session is idle (pods will boot on first traffic)",
                                         ));
@@ -810,6 +821,7 @@ impl PreparedPreview {
             namespace: namespace.to_owned(),
             session_name,
             share_host,
+            idle,
         })
     }
 }
