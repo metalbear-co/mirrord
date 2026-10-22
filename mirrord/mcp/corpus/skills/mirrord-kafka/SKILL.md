@@ -12,7 +12,7 @@ description: >
   Kafka, or connecting mirrord to a Kafka cluster. This is a Team/Enterprise feature of mirrord.
 metadata:
   author: MetalBear
-  version: "2.6"
+  version: "2.7"
 ---
 
 # mirrord Kafka Splitting Configuration Skill
@@ -184,6 +184,8 @@ spec:
 ### 4. Generate mirrord.json split_queues section
 
 Show the developer-facing config referencing the topic IDs. Two filter kinds, and you can combine them:
+
+Before picking which Kafka header to filter on, check whether the producing services already forward tracing-related metadata for you — many stacks propagate it out of the box, especially for Kafka headers. Prefer enabling that over hand-rolled propagation code. A filter only matches past the first service if every upstream service forwards the header on its own outgoing publishes — see the `mirrord-header-propagation` skill, which finds the Kafka producer/consumer flows in a codebase and wires this up.
 
 **Filter on Kafka headers (`message_filter`):**
 ```json mirrord

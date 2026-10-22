@@ -905,6 +905,11 @@ pub enum NewOperatorFeature {
     /// CRD schema prunes `dedicatedNamespaceKey` and the branch silently runs in the target's
     /// namespace instead.
     DbBranchDedicatedNamespace,
+    /// This operator resolves `aws_ssm_parameter` connection sources (AWS Systems Manager
+    /// Parameter Store). Gated so the CLI fails fast: an older operator cannot deserialize a
+    /// branch carrying the source kind and never reconciles it, which surfaces only as a
+    /// creation timeout.
+    DbBranchSsmParameter,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -1007,6 +1012,9 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::DbBranchDedicatedNamespace => {
                 "DB branches in a dedicated namespace per key"
+            }
+            NewOperatorFeature::DbBranchSsmParameter => {
+                "DB branching connection values from AWS SSM Parameter Store"
             }
             NewOperatorFeature::Unknown => "unknown feature",
         };

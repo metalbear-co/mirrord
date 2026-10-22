@@ -92,7 +92,10 @@ export async function pingExtension(): Promise<ExtensionState> {
   }
 }
 
-export async function joinViaExtension(key: string): Promise<{
+export async function joinViaExtension(
+  key: string,
+  context: string | null,
+): Promise<{
   ok: boolean
   joinedKey?: string | null
   error?: string | undefined
@@ -105,6 +108,7 @@ export async function joinViaExtension(key: string): Promise<{
   }>({
     type: 'join',
     key,
+    ...(context && { context }),
   })
   if (!response) {
     emitUserBlocked('extension_bridge_failed', {

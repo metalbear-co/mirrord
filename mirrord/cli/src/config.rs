@@ -999,8 +999,8 @@ pub(super) enum OperatorCommand {
     // DEPRECATED: use the helm chart instead: https://github.com/metalbear-co/charts/
     #[clap(hide(true))]
     Setup,
-    /// Install the mirrord operator into the cluster of the current kubecontext, or of the one
-    /// given with `--context`.
+    /// Install the mirrord operator into the cluster of the kubecontext given with `--context`, else
+    /// the global config's `kube_context`, else the current kubecontext.
     ///
     /// Without `--api-key` or `--from-signup`, logs you in and creates your organization's
     /// operator API key, then installs the helm chart's default values (use the chart directly for
@@ -1011,7 +1011,8 @@ pub(super) enum OperatorCommand {
     /// Saves the trial's API key on this machine for `mirrord operator install --from-signup`.
     Signup(OperatorSignupArgs),
     /// Remove the mirrord operator that `mirrord operator install` installed from the cluster of
-    /// the current kubecontext, or of the one given with `--context`.
+    /// the kubecontext given with `--context`, else the global config's `kube_context`, else the
+    /// current kubecontext.
     ///
     /// Also removes what a failed `mirrord operator install` left behind.
     Uninstall(OperatorUninstallArgs),
@@ -1063,7 +1064,7 @@ pub(super) struct OperatorInstallArgs {
     #[arg(long, conflicts_with = "api_key")]
     pub no_hint: bool,
 
-    /// Kube context to install the operator into, instead of the current one.
+    /// Kube context to install the operator into, instead of the global or current one.
     #[arg(long)]
     pub context: Option<String>,
 
@@ -1124,7 +1125,7 @@ pub(super) struct OperatorSignupArgs {
 
 #[derive(Args, Debug)]
 pub(super) struct OperatorUninstallArgs {
-    /// Kube context to remove the operator from, instead of the current one.
+    /// Kube context to remove the operator from, instead of the global or current one.
     #[arg(long)]
     pub context: Option<String>,
 
