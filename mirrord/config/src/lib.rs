@@ -1368,8 +1368,10 @@ impl LayerConfig {
             format!("`{field}` is ignored in preview environments and will not be used.")
         };
 
-        let default =
-            Self::resolve(&mut ConfigContext::default()).expect("default config must be valid");
+        // Strict, so the environment can't make its `MIRRORD_*` settings (or a config file named
+        // by `MIRRORD_CONFIG_FILE`) part of what is compared against.
+        let default = Self::resolve(&mut ConfigContext::default().strict_env(true))
+            .expect("default config must be valid");
 
         // feature.env - partially supported
 
