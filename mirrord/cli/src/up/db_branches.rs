@@ -27,7 +27,7 @@ use mirrord_up::SubprocessCfg;
 
 use super::UpCliError;
 use crate::{
-    connection::{OperatorAvailability, operator_availability},
+    connection::{OperatorAvailability, operator_availability, report_local_feature_gate},
     error::CliError,
 };
 
@@ -116,8 +116,9 @@ pub(super) async fn check_db_branches(
                 .db_branches
                 .split_config_request()?
                 .clone();
-            let api = apis.get(&operator_key(&service.config))?.as_ref()?;
-            Some((service, request, api))
+            let key = operator_key(&service.config);
+            apis.get(&key)?.as_ref()?;
+            Some((service, request, key))
         })
         .collect::<Vec<_>>();
     let requested = requesting
@@ -134,15 +135,21 @@ pub(super) async fn check_db_branches(
     // The lookups are independent, so they run at once: the run waits about one round trip to
     // the operator instead of one per service. `join_all` keeps the results in service order, so
     // the failure reported below is still the first failing service's.
-    let lookups = join_all(requesting.iter().map(|(service, request, api)| async move {
-        let response = api
-            .lookup_split_config_db_branches(&service.config, request)
-            .await?;
-        // The session applies the answer to its config the same way. Applied to a copy
-        // here, it rejects what the session would (e.g. an env override clashing with a
-        // branch's connection variable), before any session starts.
-        apply_resolved_entries(&mut service.config.clone(), &response)?;
-        Ok::<_, OperatorApiError>(response)
+    let lookups = join_all(requesting.iter().map(|(service, request, key)| {
+        let api = apis
+            .get(key)
+            .and_then(Option::as_ref)
+            .expect("requesting services have a usable operator");
+        async move {
+            let response = api
+                .lookup_split_config_db_branches(&service.config, request)
+                .await?;
+            // The session applies the answer to its config the same way. Applied to a copy
+            // here, it rejects what the session would (e.g. an env override clashing with a
+            // branch's connection variable), before any session starts.
+            apply_resolved_entries(&mut service.config.clone(), &response)?;
+            Ok::<_, OperatorApiError>(response)
+        }
     }))
     .await;
 
@@ -150,11 +157,34 @@ pub(super) async fn check_db_branches(
     // branch is named for its namespace and lives in its cluster, so each pair is one branch. The
     // cluster is the API server URL, since two kube contexts can name one cluster.
     let mut entry_namespaces: BTreeMap<String, BTreeMap<_, Vec<Arc<str>>>> = BTreeMap::new();
-    for ((service, _, api), lookup) in requesting.into_iter().zip(lookups) {
-        let response = lookup.map_err(|error| UpCliError::DbBranches {
-            service: service.service_name.clone(),
-            error: Box::new(error.into()),
-        })?;
+    for ((service, _, key), lookup) in requesting.into_iter().zip(lookups) {
+        let response = match lookup {
+            Ok(response) => response,
+            Err(error) => {
+                if service.default_db_branches.not()
+                    && let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error
+                {
+                    // Lookups share a Kubernetes-only client. Only the refusal that stops the
+                    // run needs credentials for reporting; no resource action follows it.
+                    let api = apis
+                        .remove(&key)
+                        .flatten()
+                        .expect("requesting services have a usable operator");
+                    report_local_feature_gate(
+                        api,
+                        *feature,
+                        &service.config,
+                        &NullProgress,
+                        &mut NullReporter::default(),
+                    )
+                    .await;
+                }
+                return Err(UpCliError::DbBranches {
+                    service: service.service_name.clone(),
+                    error: Box::new(error.into()),
+                });
+            }
+        };
 
         if response.entries.is_empty() {
             println!(
@@ -165,6 +195,10 @@ pub(super) async fn check_db_branches(
             continue;
         }
 
+        let api = apis
+            .get(&key)
+            .and_then(Option::as_ref)
+            .expect("requesting services have a usable operator");
         let namespace = service
             .config
             .target
