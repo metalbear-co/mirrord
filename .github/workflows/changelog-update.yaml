@@ -26,7 +26,7 @@ jobs:
       contents: read
     steps:
       - name: Prepare changelog to be published at /docs/changelog
-        uses: metalbear-co/release-changelog-docs@340b376134c61eb9ed5d221fb8d1543948bcf984
+        uses: metalbear-co/release-changelog-docs@8415b309ebe9baac53f03372c21138b01927793f
         with:
           ref: ${{ inputs.ref }}
           source_token: ${{ github.token }}
@@ -39,4 +39,3 @@ jobs:
           title: mirrord Changelog
           description: The release changelog for the mirrord CLI.
           tags: oss,team,enterprise
-          date: '2026-10-21'
