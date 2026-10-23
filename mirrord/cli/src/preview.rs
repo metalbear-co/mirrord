@@ -141,6 +141,30 @@ async fn preview_start(
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
     operator_api.check_feature_support(&layer_config, false)?;
 
+    // A preview session carries only entries with a filter of their own, so an entry that leaves
+    // the filter to the `MirrordSplitConfig` would be dropped and its queue left unrequested.
+    // Refuse here, before the existing session with the same key is replaced.
+    if layer_config
+        .feature
+        .split_queues
+        .uses_split_config_filters()
+    {
+        let queue_ids = layer_config
+            .feature
+            .split_queues
+            .splits()
+            .iter()
+            .filter(|split| !split.has_filter())
+            .map(|split| format!("`{}`", split.queue_id))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(CliError::UnsupportedTargetConfig(format!(
+            "preview environments do not take the queue filter from the MirrordSplitConfig yet; \
+             set `message_filter`, `filter` or `jq_filter` on the `split_queues` entries \
+             {queue_ids}"
+        )));
+    }
+
     if !sources.is_empty() {
         require_spec_resources_support(&operator_api.operator().spec)?;
     }

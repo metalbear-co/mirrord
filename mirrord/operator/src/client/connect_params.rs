@@ -152,7 +152,9 @@ pub struct ConnectParams<'a> {
     )]
     pub nats_pubsub_jq_filters: HashMap<&'a str, &'a str>,
 
-    /// Queues requested with the composable `filter` shape, for every broker.
+    /// Queues requested with the composable `filter` shape, for every broker, plus queues
+    /// requested with no filter at all, which take the filter of their `MirrordSplitConfig`
+    /// entry.
     ///
     /// Wire invariant: an operator that predates this param reads only the per-broker
     /// `<broker>_splits` / `<broker>_jq_filters` params, which can carry nothing but the
@@ -160,9 +162,12 @@ pub struct ConnectParams<'a> {
     /// here and nowhere else, and a composed entry's jq program travels with it, never in the
     /// legacy jq params where an old operator would run it without the attribute filter. The
     /// CLI refuses to send this param to an operator that does not advertise
-    /// [`NewOperatorFeature::QueueSplittingWithComposedFilters`].
+    /// [`NewOperatorFeature::QueueSplittingWithComposedFilters`], and refuses to send an entry
+    /// without a `filter` to one that does not advertise
+    /// [`NewOperatorFeature::SplitConfigQueueFilters`].
     ///
     /// [`NewOperatorFeature::QueueSplittingWithComposedFilters`]: crate::crd::NewOperatorFeature::QueueSplittingWithComposedFilters
+    /// [`NewOperatorFeature::SplitConfigQueueFilters`]: crate::crd::NewOperatorFeature::SplitConfigQueueFilters
     #[serde(
         default,
         with = "force_json_ser",
@@ -265,19 +270,23 @@ pub struct KafkaProtobufDecoding<'a> {
     pub message_type: &'a str,
 }
 
-/// One queue requested with the composable `filter` shape, as sent in
+/// One queue requested with the composable `filter` shape, or with no filter at all, as sent in
 /// [`ConnectParams::queue_filters`].
 #[derive(Serialize, Debug)]
 pub struct ComposedQueueFilter<'a> {
     pub queue_id: &'a str,
     pub queue_type: QueueType,
-    pub filter: MessageFilter,
+    /// Absent together with `jq_filter` when the entry leaves the filter to the
+    /// `MirrordSplitConfig` queue entry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<MessageFilter>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jq_filter: Option<&'a str>,
 }
 
-/// The legacy `message_filter` maps of one broker, keyed by queue id. Entries using the
-/// composable shape are left out: they travel in [`ConnectParams::queue_filters`].
+/// The legacy `message_filter` maps of one broker, keyed by queue id, an empty map included.
+/// Entries using the composable shape and entries with no filter at all are left out: they
+/// travel in [`ConnectParams::queue_filters`].
 fn legacy_filters(
     split_queues: &SplitQueuesConfig,
     kind: QueueKind,
@@ -296,6 +305,23 @@ fn legacy_jq_filters(split_queues: &SplitQueuesConfig, kind: QueueKind) -> HashM
         .of_kind(kind)
         .filter(|split| !split.has_composed_filter())
         .filter_map(|split| Some((split.queue_id.as_str(), split.jq_filter.as_deref()?)))
+        .collect()
+}
+
+/// The entries of [`ConnectParams::queue_filters`]: every composed entry, and every entry with no
+/// filter at all. Legacy entries (a `message_filter` map and/or a jq program) travel in the
+/// per-broker params instead.
+fn queue_filters(split_queues: &SplitQueuesConfig) -> Vec<ComposedQueueFilter<'_>> {
+    split_queues
+        .splits()
+        .iter()
+        .filter(|split| split.has_composed_filter() || !split.has_filter())
+        .map(|split| ComposedQueueFilter {
+            queue_id: split.queue_id.as_str(),
+            queue_type: split.queue_type.into(),
+            filter: split.filter.as_ref().map(MessageFilter::from),
+            jq_filter: split.jq_filter.as_deref(),
+        })
         .collect()
 }
 
@@ -441,18 +467,7 @@ impl<'a> ConnectParams<'a> {
             nats_jq_filters: legacy_jq_filters(split_queues, QueueKind::Nats),
             nats_pubsub_splits: legacy_filters(split_queues, QueueKind::NatsPubSub),
             nats_pubsub_jq_filters: legacy_jq_filters(split_queues, QueueKind::NatsPubSub),
-            queue_filters: split_queues
-                .splits()
-                .iter()
-                .filter_map(|split| {
-                    Some(ComposedQueueFilter {
-                        queue_id: split.queue_id.as_str(),
-                        queue_type: split.queue_type.into(),
-                        filter: split.filter.as_ref()?.into(),
-                        jq_filter: split.jq_filter.as_deref(),
-                    })
-                })
-                .collect(),
+            queue_filters: queue_filters(split_queues),
             queue_modes: config.feature.split_queues.queue_modes().collect(),
             kafka_branch: config.feature.kafka_branch,
             branch_name,
@@ -582,20 +597,8 @@ mod tests {
             [("legacy", ".x")].into()
         );
 
-        let composed = split_queues
-            .splits()
-            .iter()
-            .filter_map(|split| {
-                Some(ComposedQueueFilter {
-                    queue_id: split.queue_id.as_str(),
-                    queue_type: split.queue_type.into(),
-                    filter: split.filter.as_ref()?.into(),
-                    jq_filter: split.jq_filter.as_deref(),
-                })
-            })
-            .collect::<Vec<_>>();
         assert_eq!(
-            serde_json::to_value(&composed).unwrap(),
+            serde_json::to_value(queue_filters(&split_queues)).unwrap(),
             serde_json::json!([{
                 "queue_id": "composed",
                 "queue_type": "SQS",
@@ -603,6 +606,44 @@ mod tests {
                     { "type": "metadata", "pattern": "^client: b$" }
                 ] },
                 "jq_filter": ".y",
+            }])
+        );
+    }
+
+    /// An entry with no filter of its own still has to reach the operator, which gives it the
+    /// `MirrordSplitConfig` filter: dropping it would make the queue look unrequested, and an
+    /// unrequested queue delivers nothing. It rides in `queue_filters` with no `filter` and no
+    /// `jq_filter`, and never in the legacy params, which have nothing to say about it. An
+    /// empty `message_filter` map is a filter of the entry's own ("deliver nothing"), so it
+    /// stays in the legacy params exactly as every operator has always read it.
+    #[test]
+    fn filterless_entries_ride_in_queue_filters_without_a_filter() {
+        let empty_map = BTreeMap::new();
+        let split_queues = SplitQueuesConfig::from_splits([
+            QueueSplit::new("from-split-config", QueueKind::Sqs),
+            QueueSplit {
+                message_filter: Some(empty_map.clone()),
+                ..QueueSplit::new("empty-map", QueueKind::Sqs)
+            },
+            QueueSplit {
+                jq_filter: Some(".x".to_owned()),
+                ..QueueSplit::new("jq-only", QueueKind::Sqs)
+            },
+        ]);
+
+        assert_eq!(
+            legacy_filters(&split_queues, QueueKind::Sqs),
+            [("empty-map", &empty_map)].into()
+        );
+        assert_eq!(
+            legacy_jq_filters(&split_queues, QueueKind::Sqs),
+            [("jq-only", ".x")].into()
+        );
+        assert_eq!(
+            serde_json::to_value(queue_filters(&split_queues)).unwrap(),
+            serde_json::json!([{
+                "queue_id": "from-split-config",
+                "queue_type": "SQS",
             }])
         );
     }
