@@ -10,8 +10,10 @@ menu:
     teams: null
 weight: 545
 toc: true
-description: Versioning and compatibility between mirrord components
+description: "Which versions of the mirrord components work together, and how to upgrade them safely."
 ---
+
+# Versioning
 
 mirrord is composed of multiple components, including the CLI, Operator, Agent, and License Server. These components may be deployed and upgraded independently, and mirrord is designed to support safe, incremental upgrades.
 

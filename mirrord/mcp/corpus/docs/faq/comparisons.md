@@ -1,6 +1,6 @@
 ---
 title: "Comparisons"
-description: "How does mirrord compare to other solutions?"
+description: "How mirrord compares to other ways of developing against a Kubernetes cluster."
 date: 2020-11-16T13:59:39+01:00
 lastmod: 2020-11-16T13:59:39+01:00
 draft: false
@@ -12,6 +12,8 @@ weight: 130
 toc: true
 tags: ["oss", "team", "enterprise"]
 ---
+
+# Comparisons
 
 ## Why not just use a remote debugger?
 

@@ -13,6 +13,8 @@ menu:
     parent: preview-environments
 ---
 
+# Preview Environments in CI
+
 This guide explains how to automate [Preview Environments](preview-environments.md) in your CI pipeline. By integrating mirrord preview with your pull request workflow, each PR gets its own ephemeral environment that reviewers can access via a shared URL and a simple header—no local mirrord setup required.
 
 {% hint style="info" %}

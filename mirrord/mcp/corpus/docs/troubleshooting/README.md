@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: Common issues and debugging utilities for mirrord
+description: "How to find and fix common mirrord problems, and what to send us when you report a bug."
 ---
 
 - **[Common Issues](common-issues.md)** - Solutions for frequently encountered problems

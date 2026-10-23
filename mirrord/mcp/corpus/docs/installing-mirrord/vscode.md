@@ -1,6 +1,6 @@
 ---
 title: VS Code
-description: Installing and using the mirrord extension in Visual Studio Code
+description: "How to install the mirrord extension in Visual Studio Code and run your app with it."
 ---
 
 # VS Code
@@ -35,7 +35,7 @@ mirrord's initial state on startup can be configured in the VSCode settings:
 }
 ```
 
-### Enabling/disabling mirrord for a specific launch configuration
+## Enabling/disabling mirrord for a specific launch configuration
 
 mirrord can be persistently enabled or disabled for a specific launch configuration, regardless of the toolbar button state. This is controlled via the `MIRRORD_ACTIVE` environment variable in your launch configuration. The value `"1"` keeps mirrord always enabled, while the value `"0"` disables it.
 
@@ -51,7 +51,7 @@ mirrord can be persistently enabled or disabled for a specific launch configurat
 }
 ```
 
-### Selecting session target
+## Selecting session target
 
 mirrord's target can be specified in two ways:
 
@@ -61,11 +61,11 @@ mirrord's target can be specified in two ways:
    * If you want to see targets in a different namespace, there is an option to "Select Another Namespace".
 2. in the mirrord config's [target section](https://metalbear.com/mirrord/docs/config#target)
 
-### Using the mirrord config
+## Using the mirrord config
 
 The extension allows for using the [mirrord config](https://metalbear.com/mirrord/docs/config). For any run/debug session, the mirrord config to be used can be specified in multiple ways:
 
-#### Active config
+### Active config
 
 The toolbar dropdown menu allows for specifying a temporary mirrord config override. This config will be used for all run/debug sessions.
 
@@ -77,19 +77,19 @@ You will be prompted with a quick pick where you can select a mirrord config fro
 
 You can remove the override using the same action.
 
-#### Config for launch configuration
+### Config for launch configuration
 
 If no active config is specified, the extension will try to read the config file path from the `MIRRORD_CONFIG_FILE` environment variable specified in the launch configuration.
 
 This path should be absolute.
 
-#### Config from default path
+### Config from default path
 
 If the config file path is not specified in the launch configuration environment, the plugin will try to find a default config.
 
 The default config is the lexicographically first file in `<PROJECT ROOT>/.mirrord` directory that ends with `mirrord`. Accepted config file extensions are: `json`, `toml`, `yml` and `yaml`.
 
-### Managing the mirrord binary
+## Managing the mirrord binary
 
 The extension relies on the standard mirrord CLI binary.
 
@@ -117,10 +117,10 @@ To use a specific mirrord binary from your filesystem:
 }
 ```
 
-### WSL
+## WSL
 
 The guide on how to use the extension with remote development on WSL can be found [here](wsl.md#using-mirrord-in-vs-code).
 
-### Viewing extension logs
+## Viewing extension logs
 
 To view mirrord extension logs in VS Code, open the **Output** panel and select **mirrord** from the dropdown menu.
