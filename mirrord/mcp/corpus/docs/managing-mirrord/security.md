@@ -13,8 +13,10 @@ toc: true
 tags:
   - team
   - enterprise
-description: Security in mirrord for Teams
+description: "How mirrord for Teams handles your data, access control, and compliance, for security teams that evaluate it."
 ---
+
+# Security
 
 {% hint style="info" %}
 This discussion is only relevant for users on the Team and Enterprise pricing plans.
@@ -22,7 +24,7 @@ This discussion is only relevant for users on the Team and Enterprise pricing pl
 
 Love using mirrord but need help getting your security team on board? Talk to one of our technical experts!
 
-<a href="https://metalbear.com/mirrord/demo/" class="button primary">Get Security Support</a>
+<a href="https://metalbear.com/contact/" class="button primary">Get Security Support</a>
 
 You can also visit our [Trust Center](https://trust.metalbear.com) for an overview of MetalBear's security posture, certifications, and compliance documentation.
 
@@ -63,7 +65,7 @@ Together with the session start and end times, these fields let you attribute mi
 
 ## Can mirrord run air-gapped?
 
-Yes, on the Enterprise plan. Run the [License Server](license-server.md) on-prem to manage seats locally. In this configuration the Operator sends no telemetry or license verification traffic to MetalBear.
+Yes, on the Enterprise plan. In an air-gapped deployment the Operator sends no telemetry or license verification traffic to MetalBear. Running the [License Server](license-server.md) on-prem is optional, but it is the recommended way to manage seats and collect usage without MetalBear's cloud.
 
 ## How is the Operator built and distributed?
 
@@ -89,7 +91,9 @@ For our vulnerability disclosure and customer notification process, see the [Tru
 
 mirrord for Teams is completely on-prem. The Operator communicates with MetalBear servers over an encrypted TLS connection only for license verification and usage metrics. What the usage metrics contain depends on your organization's identity sharing setting.
 
-### Always sent (anonymized)
+### Always sent (anonymized), except on Enterprise air-gapped
+
+These fields are always sent on every plan. The only exception is an Enterprise [air-gapped](#can-mirrord-run-air-gapped) deployment, where nothing is sent to MetalBear. Running the on-prem [License Server](license-server.md) there is optional, but it is the recommended way to collect usage without MetalBear's cloud.
 
 1. User ID (randomly generated hash, stored on user machine)
 2. Duration of session
@@ -123,7 +127,7 @@ Identity is not sent when:
 
 Changing the setting takes effect at the Operator's next cloud token refresh, without regenerating the key or restarting the Operator.
 
-In the Enterprise offering, this communication can be disabled entirely.
+Only the Enterprise plan can disable this communication entirely, through an [air-gapped](#can-mirrord-run-air-gapped) deployment (the on-prem License Server is the recommended way to collect usage there). On other plans the anonymized fields above are always sent.
 
 ## Are you SOC2/ISO27001 compliant?
 
@@ -160,7 +164,7 @@ roleRef:
 
 For CI runners, bind the runner's ServiceAccount, Kubernetes group, or other authenticated identity to `mirrord-operator-ci` instead of `mirrord-operator-user`.
 
-In addition, the Operator impersonates any user that calls its API, and thus only operates on pods or deployments for which the user has `get` permissions.
+In addition, the Operator verifies each caller's permissions with a Kubernetes `SubjectAccessReview` for the calling user's identity (user, groups and extra fields), and thus only operates on pods or deployments for which the user has `get` permissions. The Operator does not impersonate the user when making this check or when acting on their behalf.
 
 To see the latest definition, we recommend checking our [Helm chart](https://github.com/metalbear-co/charts/blob/main/mirrord-operator/templates/cluster-role.yaml).
 

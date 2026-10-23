@@ -35,7 +35,10 @@ pub use telemetry::Session as TelemetrySession;
 /// Deliberately does *not* install a tracing subscriber: the caller owns global process state, and
 /// a second `init` would panic against the one the CLI has already set up. The standalone binary
 /// sets its own up before calling this.
-pub async fn run(telemetry: Option<TelemetrySession>) -> anyhow::Result<()> {
+pub async fn run(
+    telemetry: Option<TelemetrySession>,
+    context: Option<String>,
+) -> anyhow::Result<()> {
     let telemetry = telemetry::Telemetry::new(telemetry);
     telemetry.started();
 
@@ -67,7 +70,7 @@ pub async fn run(telemetry: Option<TelemetrySession>) -> anyhow::Result<()> {
     let chained = Arc::clone(&caller_hook);
     std::panic::set_hook(Box::new(move |info| chained(info)));
 
-    let mut app = App::new(telemetry.clone());
+    let mut app = App::new(telemetry.clone(), context);
     let mut terminal = ratatui::init();
     // Best-effort for the same reason as above, and more so here: by this point stderr is captured,
     // the panic hook is replaced and the alternate screen is up, so returning through `?` would

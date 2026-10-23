@@ -22,15 +22,15 @@ mirrord for Teams is available in two license variants:
 
 | | **Team** | **Enterprise** |
 |---|---|---|
-| **Delivery** | License key (online) | Certificate file (offline-capable) |
+| **Delivery** | Cloud API key (online) | Cloud API key, or certificate file (offline-capable) |
 | **Seat enforcement** | Strict — sessions blocked when limit is reached | Configurable — overages can be allowed |
 | **Session type** | Ephemeral only | Ephemeral and persistent |
 | **Telemetry** | Required | Optional |
 | **License server** | ❌ | ✅ |
 
-**Team** licenses are subscription-based and validated against MetalBear's servers using a license key. The operator must be able to reach MetalBear's license endpoint.
+**Team** licenses are subscription-based. The Operator authenticates to the mirrord cloud with a [cloud API key](operator.md#cloud-api-key) and obtains its license over the API, so it must be able to reach MetalBear's license endpoint.
 
-**Enterprise** licenses use a certificate file (`license.pem`) and can operate without an internet connection. They also support a [self-hosted License Server](license-server.md) for air-gapped or multi-cluster environments.
+**Enterprise** licenses can use a cloud API key the same way, or a certificate file (`license.pem`) that works without an internet connection. They also support a [self-hosted License Server](license-server.md) for air-gapped or multi-cluster environments.
 
 ## Seats
 
@@ -58,9 +58,9 @@ mirrord operator status
 
 This command shows active sessions and seat information for your cluster.
 
-## License Key Validation
+## License Validation
 
-Team licenses require the Operator to validate the license key against MetalBear's servers on startup and periodically during operation. The Operator must have outbound internet access to reach the license endpoint.
+With a cloud API key, the Operator obtains its license from MetalBear's servers over the API. The Operator must have outbound internet access to reach the license endpoint (`app.metalbear.com`).
 
 File-based licenses (`.pem` certificates) are not supported for Team subscriptions — those are only valid for Enterprise licenses.
 
@@ -104,8 +104,8 @@ Enterprise licenses additionally support persistent sessions, which survive oper
 
 ## Getting a License
 
-Register at [app.metalbear.com](https://app.metalbear.com) to get a Team license key. For Enterprise licensing, [contact us](mailto:hi@metalbear.com).
+Register at [app.metalbear.com](https://app.metalbear.com) and generate a cloud API key in the dashboard. For Enterprise licensing, [contact us](mailto:hi@metalbear.com).
 
 An AI coding agent working on an unlicensed cluster can also start a trial itself and hand you a link to claim the organization. See [Agent-Started Trials](../using-mirrord-with-ai/agent-started-trials.md).
 
-Once you have a key, see the [Operator installation guide](operator.md) for setup instructions.
+Once you have a key, see [Cloud API key](operator.md#cloud-api-key) in the Operator installation guide for setup instructions.

@@ -458,10 +458,15 @@ pub(crate) enum CliError {
 
     #[error("Feature `{feature}` is not enabled on the mirrord operator.")]
     #[diagnostic(help(
-        "This feature is supported by the operator's version but turned off in its configuration. \
-        Ask your cluster administrator to enable it.{GENERAL_HELP}"
+        "This feature is supported by the operator's version but turned off in its Helm values. \
+        Ask your cluster administrator to enable it{enable_hint}.{GENERAL_HELP}"
     ))]
-    FeatureDisabledInOperatorError { feature: String },
+    FeatureDisabledInOperatorError {
+        feature: String,
+        /// How to switch the feature on, e.g. ", e.g. `helm upgrade ... --set
+        /// operator.previewEnv=true`", or empty when no single Helm value turns it on.
+        enable_hint: String,
+    },
 
     #[error("mirrord operator does not serve the operator-hosted sessions-manager.")]
     #[diagnostic(help(
@@ -471,6 +476,13 @@ pub(crate) enum CliError {
         use a standalone sessions-manager.{GENERAL_HELP}"
     ))]
     ServerlessSessionsManagerNotServed,
+
+    #[error("failed to read which MetalBear cloud the sessions-manager trusts")]
+    #[diagnostic(help(
+        "Check `MIRRORD_METALBEAR_CLOUD_URL`, or unset it to use https://app.metalbear.com.\
+        {GENERAL_HELP}"
+    ))]
+    SessionsManagerCloudUrl(#[source] mirrord_sessions_manager_client::SessionsManagerClientError),
 
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -1013,6 +1025,20 @@ impl From<OperatorApiError> for CliError {
             },
             OperatorApiError::FeatureDisabled { feature } => Self::FeatureDisabledInOperatorError {
                 feature: feature.to_string(),
+                enable_hint: match feature.helm_values() {
+                    [] => String::new(),
+                    values => {
+                        let sets = values
+                            .iter()
+                            .map(|value| format!("--set {value}=true"))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        format!(
+                            " in the operator Helm chart, e.g. `helm upgrade mirrord-operator \
+                             metalbear/mirrord-operator --reuse-values {sets}`"
+                        )
+                    }
+                },
             },
             OperatorApiError::ServerlessSessionsManagerNotServed => {
                 Self::ServerlessSessionsManagerNotServed

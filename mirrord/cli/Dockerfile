@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:eb9bdec72b5792472e3a0bbcde5659bb17aa1e87 AS builder
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:a15f775caaf65c1d08224d51dc51500f826a7405 AS builder
 ARG TARGETARCH
 WORKDIR /build
 

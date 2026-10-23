@@ -68,8 +68,8 @@ target "agent" {
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:eb9bdec72b5792472e3a0bbcde5659bb17aa1e87"  = "target:ci-agent-builder"
-    "ghcr.io/metalbear-co/ci-agent-runtime:eb9bdec72b5792472e3a0bbcde5659bb17aa1e87" = "target:ci-agent-runtime"
+    "ghcr.io/metalbear-co/ci-agent-build:a15f775caaf65c1d08224d51dc51500f826a7405"  = "target:ci-agent-builder"
+    "ghcr.io/metalbear-co/ci-agent-runtime:a15f775caaf65c1d08224d51dc51500f826a7405" = "target:ci-agent-runtime"
   }
 }
 
@@ -81,7 +81,7 @@ target "cli" {
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:eb9bdec72b5792472e3a0bbcde5659bb17aa1e87" = "target:ci-agent-builder"
+    "ghcr.io/metalbear-co/ci-agent-build:a15f775caaf65c1d08224d51dc51500f826a7405" = "target:ci-agent-builder"
   }
 }
 
@@ -94,14 +94,14 @@ target "sqs-printer" {
   cache-from = compact([PRODUCT_CACHE_FROM])
   cache-to   = compact([PRODUCT_CACHE_TO])
   contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:eb9bdec72b5792472e3a0bbcde5659bb17aa1e87" = "target:ci-agent-builder"
+    "ghcr.io/metalbear-co/ci-agent-build:a15f775caaf65c1d08224d51dc51500f826a7405" = "target:ci-agent-builder"
   }
 }
 
 # Builder image: Rust toolchain + cross-compilation tools for building the agent.
 target "ci-agent-builder" {
-  context    = "./ci"
-  dockerfile = "agent-build/builder.Dockerfile"
+  context    = "."
+  dockerfile = "ci/agent-build/builder.Dockerfile"
   platforms  = split(",", PLATFORMS)
   tags = compact([
     "${REGISTRY}/ci-agent-build:latest",
@@ -144,8 +144,8 @@ target "ci-layer-build-aarch64" {
 
 # Base Rust build image with the pinned Rust toolchain and protobuf compiler.
 target "ci-rust-build" {
-  context    = "./ci"
-  dockerfile = "rust-build/Dockerfile"
+  context    = "."
+  dockerfile = "ci/rust-build/Dockerfile"
   platforms  = ["linux/amd64"]
   tags = compact([
     "${REGISTRY}/ci-rust-build:latest",

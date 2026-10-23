@@ -180,6 +180,8 @@ towncrier
 Bubblewrap
 greptile
 Greptile
+qodo
+Qodo
 Liquibase
 Jev
 devshell
@@ -267,4 +269,5 @@ Nagle
 
 # Customer / company names
 Zooplus
+eMudhra
 ```

@@ -1,7 +1,9 @@
 ---
 title: CLI
-description: Installing and using the mirrord CLI
+description: "How to install the mirrord CLI on your machine and run your first session from the terminal."
 ---
+
+# CLI
 
 The mirrord CLI is the core tool for running mirrord from the command line.
 
@@ -27,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/i
 To install the CLI, run:
 
 ```powershell
-choco install --pre mirrord
+choco install mirrord
 ```
 {% endtab %}
 {% endtabs %}

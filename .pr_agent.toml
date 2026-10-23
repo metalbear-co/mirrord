@@ -1,0 +1,18 @@
+# Qodo code review (qodo-code-review GitHub app) configuration, read from the
+# default branch. Reviews are metered, so automatic review is skipped for PRs
+# that are not worth reviewing. Any skipped PR can still be reviewed on demand
+# by commenting `/agentic_review` on it.
+# https://docs.qodo.ai/code-review/ignore-content-from-analysis
+
+[config]
+# Exact, case-sensitive label name. With automatic draft reviews disabled
+# (Qodo's default), create a draft with `gh pr create --draft --label no-qodo`,
+# then run `gh pr ready` after creation succeeds and the label is attached.
+# `gh pr create --label no-qodo` alone is not safe: gh creates the PR before
+# adding labels, so an automatic review can start before the label is applied.
+ignore_pr_labels = ["no-qodo"]
+
+[github_app]
+# Skip PRs opened by GitHub bot accounts (release and dependency bots). This is
+# Qodo's default, stated explicitly so the intent is visible.
+ignore_bot_pr = true

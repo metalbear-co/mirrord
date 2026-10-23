@@ -1,46 +1,54 @@
 //! Interactive wizard that generates a skeleton `mirrord-up.yaml`.
 //!
 //! The wizard prompts for a small, curated subset of the full schema and
-//! writes the result as YAML.
+//! writes the result as YAML. It picks each service's target from the
+//! cluster of the current kube context.
 //!
-//! Keep the prompt set deliberately small. The values that go *into* each
-//! prompt (enum variants, defaults) must always come from the authoritative
-//! type definitions in `config.rs` (via `strum::VariantArray`, `Default`,
-//! etc.), so adding a new variant downstream never requires editing this
-//! file.
+//! Keep the prompt set deliberately small: ask only for what has no good
+//! default. The flow and the wording are meant to be the same as in the
+//! `mirrord wizard` GUI, so keep the two in sync.
 //!
 //! The generated YAML is produced by serializing the assembled [`UpConfig`]
-//! with `serde_yaml` and then dropping null/empty entries (see [`prune`]), so
-//! the skeleton contains only the fields the user actually set.
+//! with `serde_yaml` and then dropping the entries that are left at their
+//! default (see [`remove_defaults`]), so the skeleton contains only the
+//! fields the user actually set.
 
 use std::{
     collections::{BTreeSet, HashMap},
+    fmt,
     ops::Not,
-    path::PathBuf,
-    str::FromStr,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
-use inquire::{Confirm, Select, Text, validator::Validation};
+use inquire::{Confirm, MultiSelect, Select, Text, validator::Validation};
 use miette::Diagnostic;
 use mirrord_config::{
     feature::{env::EnvConfig, network::incoming::http_filter::HttpFilterConfig},
-    target::Target,
+    target::{Target, TargetDisplay, TargetType},
 };
-use strum::VariantArray;
+use mirrord_kube::{
+    api::kubernetes::create_kube_config, error::KubeApiError,
+    resolved::ResolvedTarget as KubeResolvedTarget,
+};
 use thiserror::Error;
 
-use crate::config::{
-    CommonConfig, RunConfig, RunType, ServiceConfig, ServiceMode, SpecifiedTarget, TargetConfig,
-    UpConfig,
+use crate::{
+    INFERRED_TARGET_TYPES, PickedTarget, UpError,
+    config::{
+        CommonConfig, RunConfig, RunType, ServiceConfig, ServiceMode, SpecifiedTarget,
+        TargetConfig, UpConfig,
+    },
+    list_namespaces, pick_workload, prompt,
 };
 
 /// Errors produced by the `mirrord up init` wizard.
 #[derive(Debug, Error, Diagnostic)]
 pub enum InitError {
-    /// Interactive prompt failed or was cancelled.
-    #[error("wizard prompt failed: {0}")]
-    Inquire(#[from] inquire::InquireError),
+    /// Querying the cluster or prompting the user failed.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Up(#[from] UpError),
 
     /// Failed to write the generated config file.
     #[error("failed to write config file: {0}")]
@@ -55,42 +63,93 @@ pub enum InitError {
     YamlSer(#[from] serde_saphyr::ser::Error),
 }
 
+/// The cluster that the wizard picks targets from.
+struct Cluster {
+    client: kube::Client,
+    namespaces: Vec<String>,
+}
+
+impl Cluster {
+    /// Connects to the cluster of the current kube context. The namespaces are
+    /// listed here, so that an unreachable cluster stops the wizard before it
+    /// asks anything.
+    async fn connect() -> Result<Self, UpError> {
+        let kube_config = create_kube_config(None, None::<&str>, None).await?;
+        let client = kube::Client::try_from(kube_config).map_err(KubeApiError::from)?;
+        let namespaces = list_namespaces(&client).await?;
+        Ok(Self { client, namespaces })
+    }
+}
+
 /// Run the wizard end-to-end: prompt, render, preview, write.
-pub fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
+pub async fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
     println!("Welcome to `mirrord up init`. This wizard generates a skeleton mirrord-up.yaml.\n");
 
-    println!("--- Step 1: Common settings (apply to all services) ---");
-    let common = prompt_common()?;
+    let cluster = Cluster::connect().await?;
 
-    println!("\n--- Step 2: Services ---");
     let mut services: HashMap<Arc<str>, ServiceConfig> = HashMap::new();
     loop {
-        let (name, svc) = prompt_service(&services)?;
-        services.insert(name, svc);
-        if Confirm::new("Add another service?")
-            .with_default(false)
-            .prompt()?
-            .not()
+        match prompt_service(&cluster, &services).await {
+            Ok((name, svc)) => {
+                services.insert(name, svc);
+            }
+            // A service can end with nothing to pick, or with Esc. That must
+            // not throw away the services that are done, so the user goes on
+            // to the next question. Ctrl-C still ends the wizard.
+            Err(InitError::Up(error))
+                if services.is_empty().not()
+                    && matches!(
+                        error,
+                        UpError::Inquire(inquire::InquireError::OperationInterrupted)
+                    )
+                    .not() =>
+            {
+                println!("The service was not added: {error}");
+            }
+            Err(error) => return Err(error),
+        }
+        if prompt(|| {
+            Confirm::new("Add another service?")
+                .with_default(false)
+                .prompt()
+        })
+        .await?
+        .not()
         {
             break;
         }
     }
 
-    let cfg = UpConfig { common, services };
+    let cfg = UpConfig {
+        common: CommonConfig::default(),
+        services,
+    };
     let rendered = render_yaml(&cfg)?;
 
-    println!("\n--- Step 3: Preview ---\n{rendered}");
+    println!("\n--- Preview ---\n{rendered}");
 
+    let Some(path) = prompt(move || prompt_output_path(&default_output)).await? else {
+        println!("No file written.");
+        return Ok(());
+    };
+
+    tokio::fs::write(&path, &rendered).await?;
+    println!("Wrote {}.", path.display());
+    Ok(())
+}
+
+/// Asks whether to save the config and where. Returns `None` when the user
+/// does not want to save it.
+fn prompt_output_path(default_output: &Path) -> Result<Option<PathBuf>, inquire::InquireError> {
     if Confirm::new("Save configuration to a file?")
         .with_default(true)
         .prompt()?
         .not()
     {
-        println!("No file written.");
-        return Ok(());
+        return Ok(None);
     }
 
-    let path = loop {
+    loop {
         let path: PathBuf = Text::new("Enter filename:")
             .with_default(&default_output.to_string_lossy())
             .prompt()?
@@ -106,73 +165,45 @@ pub fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
             continue;
         }
 
-        break path;
-    };
-
-    std::fs::write(&path, &rendered)?;
-    println!("Wrote {}.", path.display());
-    Ok(())
+        return Ok(Some(path));
+    }
 }
 
-fn prompt_common() -> Result<CommonConfig, InitError> {
-    let use_operator = Confirm::new("Use the mirrord operator?")
-        .with_default(true)
-        .with_help_message("Required for splitting traffic between services.")
-        .prompt()?;
-
-    let accept_invalid_certs = Confirm::new("Accept invalid TLS certificates for the operator?")
-        .with_default(false)
-        .with_help_message("Skip TLS verification. Useful for self-signed certs.")
-        .prompt()?;
-
-    let telemetry = Confirm::new("Enable anonymous telemetry?")
-        .with_default(true)
-        .with_help_message("Sends anonymous usage data to help improve mirrord.")
-        .prompt()?;
-
-    Ok(CommonConfig {
-        operator: (!use_operator).then_some(false),
-        accept_invalid_certificates: accept_invalid_certs.then_some(true),
-        telemetry: (!telemetry).then_some(false),
-        context: None,
-    })
-}
-
-fn prompt_service(
+async fn prompt_service(
+    cluster: &Cluster,
     existing: &HashMap<Arc<str>, ServiceConfig>,
 ) -> Result<(Arc<str>, ServiceConfig), InitError> {
-    let name = Text::new("Service name:")
-        .with_validator(|s: &str| {
-            let t = s.trim();
-            if t.is_empty() {
-                Ok(Validation::Invalid("name cannot be empty".into()))
-            } else if existing.contains_key(t) {
-                Ok(Validation::Invalid(
-                    "a service with that name already exists".into(),
-                ))
-            } else {
-                Ok(Validation::Valid)
-            }
-        })
-        .prompt()?
-        .trim()
-        .into();
-
-    let default_mode = prompt_mode()?;
-    let target = prompt_target(&default_mode)?;
-    let http_filter = prompt_http_filter(&default_mode)?;
-    let ignore_ports = prompt_ignore_ports()?;
-    let env = EnvConfig {
-        r#override: prompt_env_overrides()?,
-        ..Default::default()
+    let default_mode = prompt(prompt_mode).await?;
+    let (name, picked) = prompt_target(cluster, default_mode, existing).await?;
+    // A targetless service has no incoming traffic, so it is not asked about
+    // filters and ports.
+    let (target, http_filter, ignore_ports) = match picked {
+        PickedTarget::Targetless => (
+            TargetConfig::Targetless,
+            Default::default(),
+            Default::default(),
+        ),
+        PickedTarget::Workload { target, namespace } => {
+            let (http_filter, ignore_ports) =
+                prompt_traffic(&cluster.client, default_mode, &target, &namespace).await?;
+            // `mirrord up` uses the namespace of the kube context when the
+            // field is absent.
+            let namespace =
+                (namespace != cluster.client.default_namespace()).then(|| namespace.into());
+            let target = SpecifiedTarget {
+                path: Some(target),
+                namespace,
+            };
+            (target.into(), http_filter, ignore_ports)
+        }
     };
-    let run = prompt_run()?;
+    let run = prompt(prompt_run).await?;
 
     Ok((
         name,
         ServiceConfig {
             target,
-            env,
+            env: EnvConfig::default(),
             default_mode,
             http_filter,
             ignore_ports,
@@ -184,75 +215,176 @@ fn prompt_service(
     ))
 }
 
-fn prompt_target(mode: &ServiceMode) -> Result<TargetConfig, InitError> {
-    const INFER: &str = "Infer from the service name";
-    const SPECIFY: &str = "Specify a target";
-    const TARGETLESS: &str = "Run without a target (outgoing traffic only)";
+/// Picks the target of a service from the cluster, and names the service
+/// after it. A targetless service has nothing to be named after, so the user
+/// names it.
+async fn prompt_target(
+    cluster: &Cluster,
+    mode: ServiceMode,
+    existing: &HashMap<Arc<str>, ServiceConfig>,
+) -> Result<(Arc<str>, PickedTarget), InitError> {
+    // `replace` copies the workload and scales the original down. Of the kinds
+    // that a service name can resolve to, `mirrord up` allows that only for
+    // these (see `validate_targets`). A replicaset, which the operator can
+    // also scale down through its owner, can still be written in the YAML by
+    // hand. The picker does not list replicasets, because a deployment keeps
+    // its old ones, and their names change with every rollout.
+    let kinds: &[TargetType] = match mode {
+        ServiceMode::Replace => &[TargetType::Deployment, TargetType::StatefulSet],
+        ServiceMode::Split | ServiceMode::Mirror => &INFERRED_TARGET_TYPES,
+    };
+    // Without a target there is no incoming traffic to split, mirror or
+    // replace, so only `split` offers it.
+    let targetless = matches!(mode, ServiceMode::Split);
 
-    // `replace` copies the target workload, so there has to be one.
-    let mut options = vec![INFER, SPECIFY];
-    if matches!(mode, ServiceMode::Split) {
-        options.push(TARGETLESS);
-    }
+    let picked = pick_workload(&cluster.client, &cluster.namespaces, kinds, targetless).await?;
 
-    let choice = Select::new("Target:", options)
-        .with_help_message(
-            "`Infer` looks the service name up in the cluster when you run `mirrord up`.",
-        )
-        .prompt()?;
-
-    if choice == TARGETLESS {
-        return Ok(TargetConfig::Targetless);
-    }
-
-    let path = (choice == SPECIFY)
-        .then(|| {
-            let path_str = Text::new("Target (e.g. `deployment/foo`, `pod/bar`):")
-                .with_validator(|s: &str| match Target::from_str(s.trim()) {
-                    Ok(_) => Ok(Validation::Valid),
-                    Err(e) => Ok(Validation::Invalid(e.to_string().into())),
-                })
-                .prompt();
-            path_str.map(|s| Target::from_str(s.trim()).expect("validated above"))
-        })
-        .transpose()?;
-
-    let namespace_str = Text::new("Namespace (blank for cluster default):").prompt()?;
-    let namespace = match namespace_str.trim() {
-        "" => None,
-        n => Some(n.into()),
+    let name = match &picked {
+        PickedTarget::Workload { target, .. } => {
+            let workload = target.name();
+            // The services are a map by name, so a second service on the same
+            // workload would replace the first one. It is named `<workload>-2`,
+            // the next one `<workload>-3`, and so on.
+            let mut name = workload.to_owned();
+            let mut suffix = 2;
+            while existing.contains_key(name.as_str()) {
+                name = format!("{workload}-{suffix}");
+                suffix += 1;
+            }
+            println!("Service name: {name}");
+            name
+        }
+        PickedTarget::Targetless => {
+            let existing: Vec<Arc<str>> = existing.keys().cloned().collect();
+            prompt(move || {
+                Text::new("Service name:")
+                    .with_validator(move |s: &str| {
+                        let t = s.trim();
+                        if t.is_empty() {
+                            Ok(Validation::Invalid("name cannot be empty".into()))
+                        } else if existing.iter().any(|name| name.as_ref() == t) {
+                            Ok(Validation::Invalid(
+                                "a service with that name already exists".into(),
+                            ))
+                        } else {
+                            Ok(Validation::Valid)
+                        }
+                    })
+                    .prompt()
+            })
+            .await?
+            .trim()
+            .to_owned()
+        }
     };
 
-    Ok(SpecifiedTarget { path, namespace }.into())
+    Ok((name.into(), picked))
 }
 
-fn prompt_mode() -> Result<ServiceMode, InitError> {
-    if ServiceMode::VARIANTS.len() <= 1 {
-        return Ok(ServiceMode::default());
+/// A [`ServiceMode`] as an option of the mode prompt, with its label and its
+/// description. The `mirrord wizard` GUI must show the same ones for the
+/// three modes, so that both wizards present the same choice.
+///
+/// `Select` shows each option with its `Display`, and it has no field for a
+/// description, so the description goes on indented lines under the label,
+/// like the text under the title of a card in the GUI. A terminal of 80
+/// columns would break the long description in the middle of a word, so it is
+/// wrapped at 76 columns.
+struct ModeChoice(ServiceMode);
+
+impl fmt::Display for ModeChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (label, description) = match self.0 {
+            ServiceMode::Split => (
+                "Split (recommended)",
+                "Your requests reach your local process. Everyone else's keep hitting the deployed service, so you can work in a shared cluster without disrupting anyone.",
+            ),
+            ServiceMode::Mirror => (
+                "Mirror",
+                "A copy of your session's traffic is sent to your local process. The deployed service still handles every request, including yours.",
+            ),
+            ServiceMode::Replace => (
+                "Replace",
+                "Every request reaches your local process. The deployed workload is scaled to zero for the session and restored when it ends.",
+            ),
+        };
+        let options = textwrap::Options::new(76)
+            .initial_indent("    ")
+            .subsequent_indent("    ");
+        write!(f, "{label}\n{}", textwrap::fill(description, options))
     }
-    Ok(Select::new("Mode:", ServiceMode::VARIANTS.to_vec()).prompt()?)
 }
 
-fn prompt_http_filter(mode: &ServiceMode) -> Result<HttpFilterConfig, InitError> {
-    match mode {
-        ServiceMode::Split | ServiceMode::Mirror => {
-            let s = Text::new("HTTP header filter (regex; blank for auto session-key filter):")
-                .with_help_message("Example: `session-id: my-session-identifier`")
-                .prompt()?;
+fn prompt_mode() -> Result<ServiceMode, inquire::InquireError> {
+    let choices = [
+        ServiceMode::Split,
+        ServiceMode::Mirror,
+        ServiceMode::Replace,
+    ]
+    .map(ModeChoice)
+    .into();
 
-            let filter = match s.trim() {
-                "" => HttpFilterConfig::default(),
-                hf => HttpFilterConfig {
-                    header_filter: Some(hf.to_owned()),
-                    ..Default::default()
-                },
-            };
+    let choice = Select::new("How do you want to interact with remote traffic?", choices)
+        .with_formatter(&|choice| choice.value.0.to_string())
+        .prompt()?;
+    Ok(choice.0)
+}
 
-            Ok(filter)
+/// Asks for the HTTP filter and the ports to ignore, only when the user wants
+/// to set them. The defaults fit most services, so the question defaults to
+/// no.
+async fn prompt_traffic(
+    client: &kube::Client,
+    mode: ServiceMode,
+    target: &Target,
+    namespace: &str,
+) -> Result<(HttpFilterConfig, BTreeSet<u16>), InitError> {
+    // `replace` ignores the HTTP filter.
+    let message = match mode {
+        ServiceMode::Replace => "Configure ports?",
+        ServiceMode::Split | ServiceMode::Mirror => "Configure traffic filtering and ports?",
+    };
+    if prompt(move || Confirm::new(message).with_default(false).prompt())
+        .await?
+        .not()
+    {
+        return Ok(Default::default());
+    }
+
+    let http_filter = match mode {
+        ServiceMode::Replace => HttpFilterConfig::default(),
+        ServiceMode::Split | ServiceMode::Mirror => prompt(prompt_http_filter).await?,
+    };
+
+    let detected = match detect_ports(client, target, namespace).await {
+        Ok(ports) => {
+            if ports.is_empty() {
+                println!("No ports were detected on the target.");
+            }
+            ports
         }
+        Err(error) => {
+            println!("Could not detect the ports of {target} ({error}).");
+            BTreeSet::new()
+        }
+    };
+    let ignore_ports = prompt(move || prompt_ignore_ports(detected)).await?;
 
-        ServiceMode::Replace => Ok(HttpFilterConfig::default()),
-    }
+    Ok((http_filter, ignore_ports))
+}
+
+fn prompt_http_filter() -> Result<HttpFilterConfig, inquire::InquireError> {
+    let s = Text::new("HTTP header filter (regex; blank for auto session-key filter):")
+        .with_help_message("Example: `session-id: my-session-identifier`")
+        .prompt()?;
+
+    Ok(match s.trim() {
+        "" => HttpFilterConfig::default(),
+        hf => HttpFilterConfig {
+            header_filter: Some(hf.to_owned()),
+            ..Default::default()
+        },
+    })
 }
 
 /// Parses a comma-separated list of u16 ports. Whitespace and empty entries
@@ -269,77 +401,78 @@ fn parse_ports(s: &str) -> Result<BTreeSet<u16>, String> {
         .collect()
 }
 
-fn prompt_ignore_ports() -> Result<BTreeSet<u16>, InitError> {
-    let presets: [(&str, &[u16]); _] = [
-        ("None", &[]),
-        ("Istio sidecar (9090, 9091, 15090)", &[9090, 9091, 15090]),
-        ("Linkerd sidecar (4140, 4143, 4191)", &[4140, 4143, 4191]),
-        ("Custom...", &[]),
-    ];
-
-    let choice = Select::new(
-        "Ports to ignore (sidecar ports, etc.):",
-        presets.iter().map(|(label, _)| *label).collect(),
-    )
-    .prompt()?;
-
-    if choice == "Custom..." {
-        let s = Text::new("Comma-separated ports:")
-            .with_validator(|s: &str| match parse_ports(s) {
-                Ok(_) => Ok(Validation::Valid),
-                Err(e) => Ok(Validation::Invalid(e.into())),
-            })
-            .prompt()?;
-        return Ok(parse_ports(&s).expect("validated above"));
-    }
-
-    let ports = presets
-        .iter()
-        .find(|(label, _)| *label == choice)
-        .map(|(_, ports)| *ports)
-        .unwrap_or(&[]);
-    Ok(ports.iter().copied().collect())
-}
-
-fn prompt_env_overrides() -> Result<Option<HashMap<String, String>>, InitError> {
-    let mut map: HashMap<String, String> = HashMap::new();
-    while Confirm::new("Add an env-var override for the local process?")
-        .with_default(false)
-        .prompt()?
-    {
-        let key = Text::new("  Variable name:")
-            .with_validator(|s: &str| {
-                if s.trim().is_empty() {
-                    Ok(Validation::Invalid("name cannot be empty".into()))
-                } else {
-                    Ok(Validation::Valid)
-                }
-            })
-            .prompt()?
-            .trim()
-            .to_owned();
-        let value = Text::new("  Value:").prompt()?;
-        map.insert(key, value);
-    }
-
-    Ok((map.is_empty().not()).then_some(map))
-}
-
-fn prompt_run() -> Result<RunConfig, InitError> {
-    let r#type = prompt_run_type()?;
-
-    let directory = if matches!(r#type, RunType::Exec) {
-        match Text::new("Working directory (blank to inherit the current directory):")
-            .prompt()?
-            .trim()
-        {
-            "" => None,
-            path => Some(path.into()),
-        }
-    } else {
-        None
+/// The ports that the containers of `target` declare. Like `detected_ports`
+/// in the server of `mirrord ui`, which the `mirrord wizard` GUI uses, these
+/// are the container ports in the pod template of the target. When the target
+/// names a container, only the ports of that container count.
+async fn detect_ports(
+    client: &kube::Client,
+    target: &Target,
+    namespace: &str,
+) -> Result<BTreeSet<u16>, UpError> {
+    let resolved = KubeResolvedTarget::new(client, target, Some(namespace)).await?;
+    let Some(pod_spec) = resolved.resolve_pod_spec(client).await? else {
+        return Ok(BTreeSet::new());
     };
 
+    Ok(pod_spec
+        .containers
+        .iter()
+        .filter(|container| {
+            resolved
+                .container()
+                .is_none_or(|name| container.name == name)
+        })
+        .flat_map(|container| container.ports.iter().flatten())
+        .filter_map(|port| u16::try_from(port.container_port).ok())
+        .collect())
+}
+
+/// Asks which of the `detected` ports to intercept, and then for other ports
+/// to ignore. Returns the detected ports that the user did not select and the
+/// other ports, which go to `ignore_ports`.
+///
+/// `ignore_ports` only names the ports to leave alone: every other port that
+/// the local process listens on is intercepted. A port that the target does
+/// not declare, like a metrics port, can only be left alone with the second
+/// question.
+fn prompt_ignore_ports(detected: BTreeSet<u16>) -> Result<BTreeSet<u16>, inquire::InquireError> {
+    let mut ignored = BTreeSet::new();
+
+    let message = if detected.is_empty() {
+        "Ports to ignore (comma-separated, blank for none):"
+    } else {
+        let intercepted = MultiSelect::new(
+            "Ports to intercept (detected on the target):",
+            detected.iter().copied().collect(),
+        )
+        .with_all_selected_by_default()
+        .with_help_message(
+            "↑↓ to move, space to select, enter to confirm. The detected ports that you do not select are ignored.",
+        )
+        .prompt()?;
+        ignored.extend(
+            detected
+                .into_iter()
+                .filter(|port| intercepted.contains(port).not()),
+        );
+        "Other ports to ignore (comma-separated, blank for none):"
+    };
+
+    let s = Text::new(message)
+        .with_validator(|s: &str| match parse_ports(s) {
+            Ok(_) => Ok(Validation::Valid),
+            Err(e) => Ok(Validation::Invalid(e.into())),
+        })
+        .prompt()?;
+    ignored.extend(parse_ports(&s).expect("validated above"));
+
+    Ok(ignored)
+}
+
+/// The run type is not asked: `exec` fits most services, and the docs tell
+/// container users to set `run.type`.
+fn prompt_run() -> Result<RunConfig, inquire::InquireError> {
     let command_str = Text::new("Local command (e.g. `go run ./cmd/api`):")
         .with_validator(|s: &str| {
             if s.split_whitespace().next().is_none() {
@@ -354,44 +487,55 @@ fn prompt_run() -> Result<RunConfig, InitError> {
         .map(ToOwned::to_owned)
         .collect();
 
+    let directory = match Text::new("Working directory (blank for the current directory):")
+        .with_help_message(
+            "Relative to the directory of mirrord-up.yaml. Set it when the service is in a subdirectory, e.g. in a monorepo.",
+        )
+        .prompt()?
+        .trim()
+    {
+        "" => None,
+        path => Some(path.into()),
+    };
+
     Ok(RunConfig {
-        r#type,
+        r#type: RunType::Exec,
         directory,
         command,
         pre_command: Vec::new(),
     })
 }
 
-fn prompt_run_type() -> Result<RunType, InitError> {
-    #[cfg(target_os = "windows")]
-    {
-        Ok(RunType::Exec)
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        Ok(Select::new(
-            "Run with `mirrord exec` or `mirrord container`?",
-            RunType::VARIANTS.to_vec(),
-        )
-        .prompt()?)
-    }
-}
-
 /// Serializes the wizard's [`UpConfig`] to a minimal YAML skeleton.
 ///
 /// `serde_yaml` emits every field, including `null` for the many unset
-/// `Option`s in the shared `EnvConfig`/`HttpFilterConfig` types. [`prune`]
-/// strips those so the output only contains what the user actually set. We
-/// can't suppress them at the type level: those types are shared with the rest
-/// of `mirrord-config` (config sent to child processes, analytics, schema), so
-/// a `skip_serializing_if` there would have far wider reach than this wizard.
+/// `Option`s in the shared `EnvConfig`/`HttpFilterConfig` types, and fields
+/// left at their default, like `skip: false`. [`remove_defaults`] strips those
+/// so the output only contains what the user actually set. We can't suppress
+/// them at the type level: the `Option`s are in types shared with the rest of
+/// `mirrord-config` (config sent to child processes, analytics, schema), and a
+/// `skip_serializing_if` on a defaulted field also drops its `default` from
+/// the JSON schema.
 ///
 /// The `command` and `ignore_ports` lists are rendered inline (`[a, b]`)
 /// rather than as block sequences - see [`inline_lists`].
 fn render_yaml(cfg: &UpConfig) -> Result<String, InitError> {
     let mut value = serde_yaml::to_value(cfg)?;
-    prune(&mut value);
+
+    // What serde fills in for the absent fields of the file, and of a service
+    // that sets only its required field.
+    let defaults = serde_yaml::to_value(UpConfig {
+        common: CommonConfig::default(),
+        services: HashMap::new(),
+    })?;
+    remove_defaults(&mut value, &defaults);
+    let service_defaults =
+        serde_yaml::to_value(serde_yaml::from_str::<ServiceConfig>("run: {command: []}")?)?;
+    if let Some(serde_yaml::Value::Mapping(services)) = value.get_mut("services") {
+        for (_, service) in services.iter_mut() {
+            remove_defaults(service, &service_defaults);
+        }
+    }
 
     let mut flows = Vec::new();
     inline_lists(&mut value, &mut flows);
@@ -403,24 +547,23 @@ fn render_yaml(cfg: &UpConfig) -> Result<String, InitError> {
     Ok(yaml)
 }
 
-/// Recursively removes `null` mapping entries and entries that become empty
-/// maps/sequences, so the generated skeleton omits defaulted fields. Every
-/// field dropped here is `Option`-or-defaulted on [`UpConfig`], so the result
-/// still round-trips through [`crate::load_up_config`].
-fn prune(value: &mut serde_yaml::Value) {
-    let serde_yaml::Value::Mapping(map) = value else {
+/// Recursively removes the mapping entries of `value` that are equal to the
+/// entry at the same place in `defaults`. Deserializing fills the removed
+/// entries back in, so the result still round-trips through
+/// [`crate::load_up_config`].
+fn remove_defaults(value: &mut serde_yaml::Value, defaults: &serde_yaml::Value) {
+    let (serde_yaml::Value::Mapping(map), serde_yaml::Value::Mapping(defaults)) = (value, defaults)
+    else {
         return;
     };
 
-    for (_, v) in map.iter_mut() {
-        prune(v);
-    }
-
-    map.retain(|_, v| match v {
-        serde_yaml::Value::Null => false,
-        serde_yaml::Value::Mapping(m) => m.is_empty().not(),
-        serde_yaml::Value::Sequence(s) => s.is_empty().not(),
-        _ => true,
+    map.retain(|key, v| match defaults.get(key) {
+        Some(default) if default == v => false,
+        Some(default) => {
+            remove_defaults(v, default);
+            true
+        }
+        None => true,
     });
 }
 
@@ -487,6 +630,10 @@ fn is_scalar(value: &serde_yaml::Value) -> bool {
 #[cfg(test)]
 #[allow(clippy::indexing_slicing)]
 mod tests {
+    use std::str::FromStr;
+
+    use mirrord_config::target::Target;
+
     use super::*;
 
     fn sample_service() -> ServiceConfig {
@@ -515,12 +662,6 @@ mod tests {
             context: Some("popper-deskpop".into()),
             config_patch: None,
         }
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn windows_run_type_defaults_to_exec_without_prompting() {
-        assert_eq!(prompt_run_type().unwrap(), RunType::Exec);
     }
 
     #[test]
@@ -565,7 +706,7 @@ mod tests {
 
     /// A service that sets only a header filter and a command must not leak the
     /// many defaulted `Option`s of the shared config types as `null`s, nor emit
-    /// empty `env`/`ignore_ports`/`target` blocks.
+    /// empty `env`/`ignore_ports`/`target` blocks or fields left at their default.
     #[test]
     fn no_nulls_or_empty_blocks() {
         let svc = ServiceConfig {
@@ -606,6 +747,12 @@ mod tests {
         assert!(!out.contains("target:"), "no empty target block:\n{out}");
         assert!(out.contains("header_filter"), "filter retained:\n{out}");
         assert!(!out.contains("context:"), "no empty context:\n{out}");
+        assert!(!out.contains("skip:"), "no default skip:\n{out}");
+        assert!(
+            !out.contains("default_mode:"),
+            "no default default_mode:\n{out}"
+        );
+        assert!(!out.contains("type:"), "no default run type:\n{out}");
 
         let parsed: UpConfig = serde_saphyr::from_str(&out).unwrap();
         assert_eq!(parsed.services["svc"], svc);

@@ -9,10 +9,10 @@ menu:
     parent: overview
 weight: 170
 toc: true
-description: A list of third-party guides and videos about mirrord.
+description: "Guides, blog posts, and videos about mirrord written by the community."
 ---
 
-# Third-party
+# Third-Party Guides and Videos
 
 List of third-party guides and videos about mirrord:
 
@@ -23,10 +23,10 @@ List of third-party guides and videos about mirrord:
 | [A simple introduction to mirrord](https://blog.mayflower.de/15092-mirrord.html)                                                                                                            | Blog    | Overview and use cases for mirrord                                                           |
 | [Let's debug a kubernetes pod locally](https://aeb-dev.me/posts/lets-debug-a-kubernetes-pod-locally/)                                                                                       | Blog    | Short mirrord tutorial                                                                       |
 | [Empowering Backend Developers: Introducing mirrord](https://open.spotify.com/episode/35FvEcaQTdDHAf6opyIQx1)                                                                               | Podcast | Overview of mirrord, common use cases, and Q\&A                                              |
-| [CodeStory: Aviram Hassan, MetalBear & mirrord](https://codestory.co/podcast/bonus-aviram-hassan-metalbear-mirrord/)                                                                        | Podcast | Interview with [Aviram](https://github.com/aviramha) about how MetalBear and mirrord started |
+| [CodeStory: Aviram Hassan, MetalBear & mirrord](https://www.codestory.co/episodes/s8-bonus-bypassing-the-staging-queue-hooking-local-processes-into-live-kubernetes-clusters-with-aviram-hassan-co-founder-ceo-of-metalbear-creators-of-mirrord/)                                                                        | Podcast | Interview with [Aviram](https://github.com/aviramha) about how MetalBear and mirrord started |
 | [The Most Magical Kubernetes Development Loop I've Ever Seen](https://www.youtube.com/watch?v=a8vskXGRQxo)                                                                                  | Video   | Short overview and demo of mirrord                                                           |
 | [Rethinking Cloud Development](https://www.youtube.com/watch?v=6ejod1da0KY)                                                                                                                 | Video   | Overview and demo of mirrord                                                                 |
-| [Advanced Kubernetes Debugging Techniques](https://github.com/konih/kubernetes-network-debugging/blob/main/advanced-debugging.md)                                                           | Slides  | Slides about mirrord and other debugging tools                                               |
+| [Advanced Kubernetes Debugging Techniques](https://github.com/konih/kubernetes-network-debugging/blob/main/mirrord.md)                                                           | Slides  | Slides about mirrord and other debugging tools                                               |
 | [Mastering Local Microservices Debugging with Mirrord](https://medium.com/@emafuma/mastering-local-microservices-debugging-with-mirrord-0a99443c1544)                                       | Blog    | Demo of mirrord                                                                              |
 | [Local Debugging of Dotnet Web API in AKS using Mirrord](https://medium.com/@srinivasmummareddy/local-debugging-of-dotnet-web-api-in-aks-using-mirrord-84d369738b35)                        | Blog    | Demo of mirrord                                                                              |
 | [Local Development With Mirrord](https://linuxblog.xyz/posts/mirrord/)                                                                                                                      | Blog    | Demo of mirrord                                                                              |
@@ -48,5 +48,14 @@ List of third-party guides and videos about mirrord:
 | ["Let's hook up !" \~ said every LD\_PRELOAD ever 🪝⚙️](https://vibhavstechdiary.substack.com/p/lets-hook-up-said-every-ld_preload)                                                         | Blog    | Demo of mirrord                                                                              |
 | [Debug Kubernetes Pods Locally with Ease: Why You Need Mirrord](https://medium.com/@hellork1982/no-more-mocking-around-mirrord-lets-you-debug-against-real-kubernetes-traffic-dcf0b8a9b867) | Blog    | Overview of mirrord                                                                          |
 | [Running .NET Aspire on a local Kubernetes cluster](https://youtu.be/zr2O4uZ3tK8?si=3iVuM2xO4zdNFXX6)                                                                                       | Video   | Demo of mirrord                                                                              |
-| [Local Development on AKS with mirrord](https://azure.github.io/AKS/2024/12/04/mirrord-on-aks)                                                                                              | Blog    | Demo of mirrord                                                                              |
-| [Debugging LLM apps on AKS with mirrord](https://www.youtube.com/watch?v=0tf65d5rn1Y)                                                                                                       | video   | Demo of mirrord                                                                              |
+| [Local Development on AKS with mirrord](https://blog.aks.azure.com/2024/12/04/mirrord-on-aks)                                                                                              | Blog    | Demo of mirrord                                                                              |
+| [Debugging apps on AKS with mirrord](https://www.youtube.com/watch?v=0tf65d5rn1Y)                                                                                                       | Video   | Demo of mirrord                                                                              |
+| [Open Source Friday with mirrord](https://www.youtube.com/watch?v=n4SG9r3u-Tk) | Video | Live overview and demo of mirrord on the GitHub channel |
+| [Kubernetes Debugging Made Easy with mirrord](https://dev.to/mihailtd/kubernetes-debugging-made-easy-with-mirrord-105d) | Blog | Debugging a Go service that fails only in the cluster, with the VS Code extension |
+| [Isolated Local Dev Env using k3d, multi-tenant Azure services, docker containers, and mirrord](https://dev.to/deyanp/isolated-local-dev-env-using-k3d-multi-tenant-azure-services-docker-containers-and-mirrord-1k2m) | Blog | Local development setup for a .NET service with k3d, Azure services, and mirrord |
+| [E172: How MetalBear Makes Cloud Development 100x Faster](https://podcasts.apple.com/us/podcast/e172-how-metalbear-makes-cloud-development-100x-faster/id1548524534?i=1000702581179) | Podcast | Interview with [Aviram](https://github.com/aviramha) on the Open Source Startup Podcast |
+| [Mirrord Magic: Write Code Locally, See It Remotely!](https://www.youtube.com/watch?v=NLa0K5mybzo) | Video | Demo of mirror and steal modes, remote database access, and traffic filtering |
+| [One Environment to Rule Them All: How mirrord Eliminates Dev Environment Chaos](https://www.youtube.com/watch?v=pyY4xfh4ObQ) | Video | Cloud Native Live session on sharing one staging cluster between all developers |
+| [Tightening the Kubernetes Feedback Loop with Remocal Development](https://www.youtube.com/watch?v=ggoUFdd34PQ) | Video | Talk at GDG Cloud Southlake on remocal development and how mirrord works |
+| [Cloud-Native Dev Is Broken. mirrord Is the Fix.](https://www.youtube.com/watch?v=fOIT0kFC6Ws) | Video | Overview of mirrord for cloud-native development |
+| [MetalBear's mirrord: Testing AI Agents Against Your Real Infrastructure](https://podcasts.apple.com/us/podcast/metalbears-mirrord-testing-ai-agents-against-your-real/id1790169619?i=1000790902201) | Podcast | Interview with [Eyal](https://github.com/eyalb181) on testing AI agents against a real cluster, on the SoftwarePlaza IT Podcast |

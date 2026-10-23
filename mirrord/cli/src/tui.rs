@@ -5,7 +5,10 @@ use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_tui::TelemetrySession;
 use thiserror::Error;
 
-use crate::{CliResult, data::UserData};
+use crate::{
+    CliResult,
+    data::{GlobalConfig, UserData},
+};
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum TuiCliError {
@@ -38,9 +41,12 @@ pub(crate) async fn tui_command(watch: drain::Watch, user_data: &UserData) -> Cl
         watch,
     };
 
-    mirrord_tui::run(Some(telemetry))
-        .await
-        .map_err(|error| TuiCliError::Exited(error.into()))?;
+    mirrord_tui::run(
+        Some(telemetry),
+        GlobalConfig::load().await.kube_context().map(str::to_owned),
+    )
+    .await
+    .map_err(|error| TuiCliError::Exited(error.into()))?;
 
     Ok(())
 }

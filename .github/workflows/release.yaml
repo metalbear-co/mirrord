@@ -16,9 +16,6 @@ on:
   # This is intended for testing changes to this flow.
   workflow_dispatch:
 
-env:
-  PINNED_TOOLCHAIN: 1.99.0
-
 jobs:
   validate_release_request:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -94,12 +91,9 @@ jobs:
         with:
           ref: ${{ steps.precheck.outputs.sha }}
 
-      - run: rm rust-toolchain.toml
-        if: steps.precheck.outputs.sha != ''
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         if: steps.precheck.outputs.sha != ''
         with:
-          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           cache: false
           rustflags: ""
 
@@ -438,11 +432,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ needs.validate_release_request.outputs.sha }}
-      - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           target: x86_64-apple-darwin
-          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           rustflags: ""
           cache: false
       - name: Import Code-Signing Certificates
@@ -475,11 +467,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ needs.validate_release_request.outputs.sha }}
-      - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           target: aarch64-apple-darwin
-          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           rustflags: ""
           cache: false
       - name: Import Code-Signing Certificates
@@ -561,11 +551,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ needs.validate_release_request.outputs.sha }}
-      - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           target: x86_64-apple-darwin
-          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           rustflags: ""
           cache: false
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
@@ -615,11 +603,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ needs.validate_release_request.outputs.sha }}
-      - run: rm rust-toolchain.toml
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           target: aarch64-apple-darwin
-          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           rustflags: ""
           cache: false
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
@@ -993,7 +979,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
-          toolchain: ${{ env.PINNED_TOOLCHAIN }}
           cache: false
       - run: mkdir ${{ env.TEMP_DIR_NAME }}
       - name: Generate new GitBook files from our config

@@ -40,6 +40,7 @@ use mirrord_intproxy::{
         chaos::{ChaosWatcherRx, ChaosWatcherTx, analytics::ChaosAnalyticsReporter},
     },
 };
+use mirrord_kube::api::kubernetes::create_kube_config_with_context;
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use mirrord_session_monitor_protocol::SessionInfo;
 #[cfg(not(target_os = "windows"))]
@@ -59,7 +60,7 @@ use tracing::{Level, warn};
 use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
-    data::UserData,
+    data::{StoredLogin, UserData},
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     kube::kube_client_from_layer_config,
@@ -231,11 +232,19 @@ async fn start_session_monitor(
         },
     };
 
-    let context = config.kube_context.clone().or_else(|| {
-        kube::config::Kubeconfig::read()
-            .ok()
-            .and_then(|kubeconfig| kubeconfig.current_context)
-    });
+    let context = match create_kube_config_with_context(
+        config.accept_invalid_certificates,
+        config.kubeconfig.as_deref(),
+        config.kube_context.clone(),
+    )
+    .await
+    {
+        Ok((_, context)) => context,
+        Err(error) => {
+            tracing::debug!(?error, "Failed to resolve the session's kube context");
+            config.kube_context.clone()
+        }
+    };
 
     let config_value = config_as_diff(config);
 
@@ -478,7 +487,8 @@ pub(crate) async fn connect_and_ping(
     connect_info: AgentConnectInfo,
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<AgentConnection, InternalProxyError> {
-    let mut agent_conn = AgentConnection::new(config, connect_info, analytics).await?;
+    let mut agent_conn =
+        AgentConnection::new(config, connect_info, Some(Arc::new(StoredLogin)), analytics).await?;
 
     agent_conn.connection.send(ClientMessage::Ping).await;
 

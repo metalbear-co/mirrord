@@ -80,7 +80,7 @@ pub const PREFETCH_TIMEOUT_DEFAULT: u64 = 30;
 /// 4. If none of the above match, use the default behavior (mode).
 ///
 /// For more information, check the file operations
-/// [technical reference](https://metalbear.com/mirrord/docs/reference/fileops/).
+/// [technical reference](https://metalbear.com/mirrord/docs/reference/fileops).
 ///
 /// ```json
 /// {
