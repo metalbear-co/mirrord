@@ -10,11 +10,15 @@
 use std::{io::ErrorKind, ops::Not, path::Path, sync::Arc};
 
 use futures::future::join_all;
+use itertools::Itertools;
 use mirrord_analytics::{AnalyticsReporter, ExecutionKind, ReportTarget, Reporter};
 use mirrord_config::{
     config::{ConfigContext, EnvKey},
     env_key::MIRRORD_ENV_KEY,
-    feature::{database_branches::DatabaseBranchesConfig, split_queues::SplitQueuesConfig},
+    feature::{
+        database_branches::DatabaseBranchesConfig,
+        split_queues::{QueueKind, SplitQueuesConfig},
+    },
     util::GIT_BRANCH,
 };
 use mirrord_operator::crd::NewOperatorFeature;
@@ -333,15 +337,45 @@ async fn prepare_service(
         );
         config.feature.db_branches = DatabaseBranchesConfig::default();
     }
-    // The operator fails a preview session over a queue split it can't serve, instead of
-    // dropping it as it does for `mirrord up` sessions, so the splits `mirrord up` adds by
-    // default can't be sent.
+    // An operator that advertises it drops the default splits it can't serve, as it does for
+    // `mirrord up` sessions. An older one fails the session over them instead, so it gets none.
+    let mut auto_queue_splitting = false;
     if default_split_queues {
-        progress.warning(
-            "queues are not split: the mirrord operator can't split them by default for preview \
-             environments",
-        );
-        config.feature.split_queues = SplitQueuesConfig::default();
+        let supported = operator_api.operator().spec.supported_features();
+        let disabled = config
+            .feature
+            .split_queues
+            .kinds()
+            .into_iter()
+            .filter_map(|kind| {
+                let feature = queue_splitting_feature(kind)?;
+                supported.contains(&feature).not().then_some(feature)
+            })
+            .collect::<Vec<_>>();
+
+        if supported
+            .contains(&NewOperatorFeature::PreviewAutoQueueSplitting)
+            .not()
+        {
+            progress.warning(
+                "queues are not split: the mirrord operator can't split them by default for \
+                 preview environments",
+            );
+            config.feature.split_queues = SplitQueuesConfig::default();
+        } else if disabled.len() == config.feature.split_queues.kinds().len() {
+            // Sent anyway, the session would split nothing and only wait on a split session
+            // that never comes.
+            progress.warning("queues are not split: the mirrord operator has queue splitting off");
+            config.feature.split_queues = SplitQueuesConfig::default();
+        } else {
+            if disabled.is_empty().not() {
+                progress.warning(&format!(
+                    "the mirrord operator has these off, so their queues are not split: {}",
+                    disabled.iter().join(", ")
+                ));
+            }
+            auto_queue_splitting = true;
+        }
     }
 
     PreparedPreview::prepare(
@@ -350,9 +384,27 @@ async fn prepare_service(
         api,
         &sources,
         supplied_objects,
+        auto_queue_splitting,
         progress,
     )
     .await
+}
+
+/// The feature an operator advertises when splitting the queues of `kind` is on. `None` for the
+/// brokers `mirrord preview up` adds no default splits for.
+fn queue_splitting_feature(kind: QueueKind) -> Option<NewOperatorFeature> {
+    match kind {
+        QueueKind::Sqs => Some(NewOperatorFeature::SqsQueueSplitting),
+        QueueKind::Kafka => Some(NewOperatorFeature::KafkaQueueSplitting),
+        QueueKind::Rmq => Some(NewOperatorFeature::RmqQueueSplitting),
+        QueueKind::GcpPubSub => Some(NewOperatorFeature::GcpPubSubQueueSplitting),
+        QueueKind::RedisPubSub => Some(NewOperatorFeature::RedisPubSubQueueSplitting),
+        QueueKind::AzureServiceBus => Some(NewOperatorFeature::AzureServiceBusQueueSplitting),
+        QueueKind::Temporal => Some(NewOperatorFeature::TemporalQueueSplitting),
+        QueueKind::BullMq => Some(NewOperatorFeature::BullMqQueueSplitting),
+        QueueKind::Nats => Some(NewOperatorFeature::NatsQueueSplitting),
+        QueueKind::NatsPubSub | QueueKind::Unknown => None,
+    }
 }
 
 /// Handle `mirrord preview down`: `mirrord preview stop -k <key> -A`, with the key found the

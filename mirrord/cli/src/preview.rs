@@ -151,6 +151,7 @@ async fn preview_start(
         api,
         &sources,
         supplied_objects,
+        false,
         &progress,
     )
     .await?
@@ -212,6 +213,9 @@ struct PreparedPreview {
     cronjob: Option<PreviewCronJobConfig>,
     secret_values: BTreeMap<String, ByteString>,
     spec_resources: Option<PreviewSpecResources>,
+    /// `feature.split_queues` are the defaults `mirrord preview up` adds, see
+    /// [`PreviewSessionSpec::auto_queue_splitting`].
+    auto_queue_splitting: bool,
 }
 
 impl PreparedPreview {
@@ -219,16 +223,19 @@ impl PreparedPreview {
     /// cluster, against the operator and API from [`create_preview_api`].
     ///
     /// `supplied_objects` are the manifests read from `sources.paths`, the chart in
-    /// `sources.chart` is rendered here.
+    /// `sources.chart` is rendered here. With `auto_queue_splitting`, `feature.split_queues` are
+    /// defaults the operator drops what it can't serve of, so they aren't checked against its
+    /// features.
     async fn prepare(
         layer_config: LayerConfig,
         operator_api: OperatorApi<NoClientCert>,
         api: Api<PreviewSession>,
         sources: &ManifestSources,
         mut supplied_objects: Option<Vec<resources::SuppliedObject>>,
+        auto_queue_splitting: bool,
         progress: &ProgressTracker,
     ) -> CliResult<Self> {
-        operator_api.check_feature_support(&layer_config, false)?;
+        operator_api.check_feature_support(&layer_config, auto_queue_splitting)?;
 
         if !sources.is_empty() {
             require_spec_resources_support(&operator_api.operator().spec)?;
@@ -417,6 +424,7 @@ impl PreparedPreview {
             cronjob,
             secret_values,
             spec_resources,
+            auto_queue_splitting,
         })
     }
 
@@ -435,6 +443,7 @@ impl PreparedPreview {
             cronjob,
             mut secret_values,
             spec_resources,
+            auto_queue_splitting,
         } = self;
 
         // Label targets with branches were rejected above, so an empty config is the only way a
@@ -594,7 +603,7 @@ impl PreparedPreview {
             cronjob,
             spec_resources,
             share_host,
-            auto_queue_splitting: None,
+            auto_queue_splitting: auto_queue_splitting.then_some(true),
         };
 
         let annotations = operator_api
