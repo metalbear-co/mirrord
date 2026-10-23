@@ -497,6 +497,8 @@ jobs:
 
   # Stage 2: Link universal layer from pre-built layers
   link_layer_macos_universal:
+    permissions:
+      contents: read
     runs-on: blacksmith-6vcpu-macos-15
     needs: [validate_release_request, build_layer_macos_x86_64, build_layer_macos_aarch64]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
@@ -596,6 +598,8 @@ jobs:
 
   # Stage 3: Build aarch64 CLI (runs in parallel)
   build_cli_macos_aarch64:
+    permissions:
+      contents: read
     runs-on: blacksmith-6vcpu-macos-15
     needs: [validate_release_request, link_layer_macos_universal]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
@@ -648,6 +652,8 @@ jobs:
 
   # Stage 4: Merge universal CLI from pre-built CLIs
   merge_cli_macos_universal:
+    permissions:
+      contents: read
     runs-on: blacksmith-6vcpu-macos-15
     needs:
       [
@@ -1116,6 +1122,8 @@ jobs:
           files: /tmp/release/**
 
   release_homebrew:
+    permissions:
+      contents: read
     needs: [validate_release_request, release_gh]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: needs.validate_release_request.outputs.should_release == 'true'
@@ -1385,6 +1393,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   update_infra_cli_version:
+    permissions:
+      contents: read
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [validate_release_request, release_homebrew, check_for_new_docs, update_latest]
     if: needs.validate_release_request.outputs.should_release == 'true'
