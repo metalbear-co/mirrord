@@ -49,9 +49,9 @@ use mirrord_operator::{
     crd::{
         MirrordOperatorSpec, NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
-            PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvVarsConfig,
-            PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs,
-            PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
+            PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvConfigMount,
+            PreviewEnvVarsConfig, PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter,
+            PreviewPodLogs, PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
             PreviewSessionPhase, PreviewSessionSpec, PreviewSpecResources, PreviewTlsClientAuth,
             PreviewTlsClientAuthFromTarget, PreviewTlsDelivery,
             view::{PreviewEnv, PreviewMessageKind},
@@ -213,6 +213,9 @@ struct PreparedPreview {
     cronjob: Option<PreviewCronJobConfig>,
     secret_values: BTreeMap<String, ByteString>,
     spec_resources: Option<PreviewSpecResources>,
+    secret_mounts: Vec<PreviewSecretMountFile>,
+    env: Option<PreviewEnvVarsConfig>,
+    config_mounts: Vec<PreviewEnvConfigMount>,
     /// `feature.split_queues` are the defaults `mirrord preview up` adds, see
     /// [`PreviewSessionSpec::auto_queue_splitting`].
     auto_queue_splitting: bool,
@@ -227,7 +230,7 @@ impl PreparedPreview {
     /// defaults the operator drops what it can't serve of, so they aren't checked against its
     /// features.
     async fn prepare(
-        layer_config: LayerConfig,
+        mut layer_config: LayerConfig,
         operator_api: OperatorApi<NoClientCert>,
         api: Api<PreviewSession>,
         sources: &ManifestSources,
@@ -412,6 +415,34 @@ impl PreparedPreview {
             .transpose()?
             .flatten();
 
+        // The files these name are read here, so one that is missing or unreadable fails before
+        // an existing session is replaced.
+        //
+        // Secret mounts never travel on the CR. Their contents are sent to the operator (which
+        // creates the backing Secret, naming it after the session) once the session exists; the
+        // spec carries only where each key mounts. The TLS client certificate for stolen traffic
+        // rides in the same Secret.
+        let secret_mounts = resolve_secret_mounts(
+            std::mem::take(&mut layer_config.feature.preview.secret_mounts),
+            &mut secret_values,
+        )?;
+        let env =
+            PreviewEnvVarsConfig::from_config(&layer_config.feature.env).map_err(|error| {
+                CliError::EnvFileAccessError(
+                    layer_config
+                        .feature
+                        .env
+                        .env_file
+                        .clone()
+                        .unwrap_or_default(),
+                    error,
+                )
+            })?;
+        let config_mounts = std::mem::take(&mut layer_config.feature.preview.config_mounts)
+            .into_iter()
+            .map(|m| m.resolve().map(Into::into))
+            .collect::<Result<Vec<_>, _>>()?;
+
         Ok(Self {
             layer_config,
             operator_api,
@@ -424,6 +455,9 @@ impl PreparedPreview {
             cronjob,
             secret_values,
             spec_resources,
+            secret_mounts,
+            env,
+            config_mounts,
             auto_queue_splitting,
         })
     }
@@ -441,8 +475,11 @@ impl PreparedPreview {
             session_target,
             incoming,
             cronjob,
-            mut secret_values,
+            secret_values,
             spec_resources,
+            secret_mounts,
+            env,
+            config_mounts,
             auto_queue_splitting,
         } = self;
 
@@ -544,15 +581,6 @@ impl PreparedPreview {
         // The namespace the session (and therefore the preview pod) lands in.
         let session_namespace = preview_namespace(&operator_api, &layer_config);
 
-        // Secret mounts never travel on the CR. Their contents are sent to the operator (which creates
-        // the backing Secret, naming it after the session) once the session exists; the spec carries
-        // only where each key mounts. The TLS client certificate for stolen traffic rides in the same
-        // Secret.
-        let secret_mounts = resolve_secret_mounts(
-            std::mem::take(&mut layer_config.feature.preview.secret_mounts),
-            &mut secret_values,
-        )?;
-
         let idle_config = &layer_config.feature.preview.idle;
         let idle = idle_config.is_enabled().then_some(PreviewIdleConfig {
             start_idle: idle_config.start_idle,
@@ -579,25 +607,9 @@ impl PreparedPreview {
                 layer_config.feature.kafka_branch,
             ),
             db_branching: PreviewDbBranchingConfig::from_db_names(branch_db_names),
-            env: PreviewEnvVarsConfig::from_config(&layer_config.feature.env).map_err(|error| {
-                CliError::EnvFileAccessError(
-                    layer_config
-                        .feature
-                        .env
-                        .env_file
-                        .clone()
-                        .unwrap_or_default(),
-                    error,
-                )
-            })?,
+            env,
             labels: PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),
-            config_mounts: layer_config
-                .feature
-                .preview
-                .config_mounts
-                .into_iter()
-                .map(|m| m.resolve().map(Into::into))
-                .collect::<Result<Vec<_>, _>>()?,
+            config_mounts,
             secret_mounts,
             idle,
             cronjob,
