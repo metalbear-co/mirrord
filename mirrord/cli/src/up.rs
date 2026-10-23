@@ -10,13 +10,14 @@ use mirrord_analytics::{
 use mirrord_config::config::EnvKey;
 use mirrord_operator::{client::UpSession, crd::session::UpSessionInfo};
 use mirrord_up::{
-    InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, UpError, load_up_config, run_wizard,
+    InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, UpConfig, UpError, UpListing,
+    load_up_config, run_wizard,
 };
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpSubcommand},
+    config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpListFormat, UpSubcommand},
     data::{GlobalConfig, UserData},
     error::CliError,
     ui::ui_command,
@@ -87,6 +88,13 @@ pub enum UpCliError {
         "The username is used for automatically generating a session key. Please provide a session key manually or ensure your OS user has a valid username."
     ))]
     UsernameFetch(whoami::Error),
+
+    #[error("failed to write the `mirrord up --list` output")]
+    ListOutput(#[source] serde_json::Error),
+
+    #[cfg(not(target_os = "windows"))]
+    #[error("`mirrord up --debug` is not supported yet on this platform")]
+    DebugUnsupported,
 }
 
 /// The `mirrord up` command handler.
@@ -98,6 +106,11 @@ pub(crate) async fn up_command(
 ) -> Result<(), UpCliError> {
     if let Some(UpSubcommand::Init { output }) = args.command {
         return Ok(run_wizard(output).await.map_err(Box::new)?);
+    }
+
+    // No analytics: extensions list on every refresh, and no session starts.
+    if args.list {
+        return list_services(&args);
     }
 
     // We don't yet know whether the user has opted out of telemetry,
@@ -112,19 +125,52 @@ pub(crate) async fn up_command(
     result
 }
 
-async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
-    let key = match args.key {
+/// The session key: `-k`, else the OS username.
+fn session_key(key: Option<String>) -> Result<EnvKey, UpCliError> {
+    Ok(match key {
         Some(key) => EnvKey::Provided(key),
         None => EnvKey::Generated(whoami::username().map_err(UpCliError::UsernameFetch)?),
-    };
+    })
+}
 
-    let mut up_config = match load_up_config(&args.config_file, &key) {
-        Ok(cfg) => cfg,
+fn load_config(args: &UpArgs, key: &EnvKey) -> Result<UpConfig, UpCliError> {
+    match load_up_config(&args.config_file, key) {
+        Ok(cfg) => Ok(cfg),
         Err(UpError::Io(err)) if err.kind() == ErrorKind::NotFound => {
-            return Err(UpCliError::ConfigNotFound);
+            Err(UpCliError::ConfigNotFound)
         }
-        other_error => other_error?,
-    };
+        Err(other_error) => Err(other_error.into()),
+    }
+}
+
+/// `mirrord up --list`: prints every service as `mirrord up` would run it, for IDE extensions.
+fn list_services(args: &UpArgs) -> Result<(), UpCliError> {
+    let key = session_key(args.key.clone())?;
+    let mut up_config = load_config(args, &key)?;
+    if let Some(mode) = args.mode {
+        up_config.override_mode(mode);
+    }
+
+    let listing = UpListing::new(&up_config, &args.config_file, &key, args.context.clone())?;
+    match args.format {
+        UpListFormat::Json => {
+            let json = serde_json::to_string(&listing).map_err(UpCliError::ListOutput)?;
+            println!("{json}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
+    // The extension only drives `--debug` on Windows so far; elsewhere it would wait for a hold
+    // line that never comes.
+    #[cfg(not(target_os = "windows"))]
+    if args.debug.is_empty().not() {
+        return Err(UpCliError::DebugUnsupported);
+    }
+
+    let key = session_key(args.key.clone())?;
+    let mut up_config = load_config(&args, &key)?;
 
     up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
 
@@ -136,7 +182,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         .add("num_selected_services", args.services.len());
 
     up_config
-        .select_services(&args.services)
+        .select_services(&args.services, &args.debug)
         .map_err(UpError::from)?;
 
     analytics
@@ -192,7 +238,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         .map(|service| (service.service_name.clone(), service.mode))
         .collect::<Vec<_>>();
 
-    let result = mirrord_up::launch(services, correlation_id, ready.clone()).await;
+    let result = mirrord_up::launch(services, correlation_id, &args.debug, ready.clone()).await;
 
     analytics.get_mut().add(
         "services",
@@ -282,6 +328,8 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::Tera(_))
             | UpCliError::Up(UpError::Mode(_))
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
+            #[cfg(not(target_os = "windows"))]
+            UpCliError::DebugUnsupported => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::ServiceFailedToStart { .. }) => Self::ServiceStartFailed,
             UpCliError::DbBranches { .. } => Self::DbBranching,
@@ -295,7 +343,8 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::NoWorkloads(_))
             | UpCliError::Up(UpError::YamlPatch(_))
             | UpCliError::Up(UpError::YamlQuery(_))
-            | UpCliError::Init(_) => Self::InternalError,
+            | UpCliError::Init(_)
+            | UpCliError::ListOutput(_) => Self::InternalError,
         }
     }
 }

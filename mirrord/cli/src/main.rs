@@ -548,6 +548,9 @@ async fn exec_process(
 /// Environment the user's process is launched with: `inherited`, then the execution's
 /// `overrides` and progress output switched off, minus the variables in `unset`.
 ///
+/// [`mirrord_up::DEBUG_HOLD_ENV`] is always left out: it holds only the program this
+/// `mirrord exec` starts, never anything that program starts in turn.
+///
 /// Names are matched the way the platform matches them (see [`process_env`]), so on Windows an
 /// override or unset of `PATH` also applies to an inherited `Path`.
 fn compose_exec_environment(
@@ -563,7 +566,11 @@ fn compose_exec_environment(
         mirrord_progress::MIRRORD_PROGRESS_ENV,
         "off".to_owned(),
     );
-    for name in unset {
+    for name in unset
+        .iter()
+        .map(String::as_str)
+        .chain([mirrord_up::DEBUG_HOLD_ENV])
+    {
         env.remove(name);
     }
     env
@@ -691,6 +698,8 @@ where
         // `mirrord exec` runs-and-waits; bind the child tree to this process so an
         // abrupt kill can't leave the layer-loaded child (and thus the agent) alive.
         true,
+        // Set by `mirrord up --debug` on this service's `mirrord exec` only.
+        std::env::var_os(mirrord_up::DEBUG_HOLD_ENV).is_some_and(|value| value == "1"),
         Some(progress),
     )
     .and_then(|managed_process| managed_process.wait_until_exit())
@@ -1401,19 +1410,15 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(windows)]
     use std::collections::HashMap;
 
     use clap::Parser;
     #[cfg(windows)]
     use mirrord_layer_lib::process::windows::environment::WindowsEnv;
-    #[cfg(windows)]
     use mirrord_progress::MIRRORD_PROGRESS_ENV;
     use rstest::rstest;
 
-    #[cfg(windows)]
-    use crate::compose_exec_environment;
-    use crate::{Cli, Commands};
+    use crate::{Cli, Commands, compose_exec_environment};
 
     /// On Windows an override or unset reaches an inherited variable spelled in another casing,
     /// so the child gets one `PATH`, holding the override.
@@ -1431,6 +1436,28 @@ mod tests {
         assert_eq!(
             env.iter().collect::<Vec<_>>(),
             [(MIRRORD_PROGRESS_ENV, "off"), ("PATH", "C:\\override")]
+        );
+    }
+
+    /// The debug hold is for the program `mirrord exec` starts, so the program never sees it,
+    /// whether `mirrord up` set it or the execution's own environment carries it.
+    #[test]
+    fn exec_environment_never_passes_the_debug_hold_on() {
+        let inherited = [(mirrord_up::DEBUG_HOLD_ENV.to_owned(), "1".to_owned())];
+        #[cfg(windows)]
+        let inherited = WindowsEnv::from_ordered_entries(inherited);
+        #[cfg(not(windows))]
+        let inherited = inherited.into_iter().collect();
+
+        let env = compose_exec_environment(
+            inherited,
+            &HashMap::from([(mirrord_up::DEBUG_HOLD_ENV.to_owned(), "1".to_owned())]),
+            &[],
+        );
+        assert_eq!(
+            crate::process_env::names(&env),
+            [MIRRORD_PROGRESS_ENV],
+            "only the progress setting is left"
         );
     }
 

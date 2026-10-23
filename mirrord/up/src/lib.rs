@@ -27,6 +27,7 @@ use futures::TryStreamExt;
 pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
 use k8s_openapi::api::core::v1::Namespace;
+pub use list::{LISTING_VERSION, UpListing};
 use miette::Diagnostic;
 use mirrord_analytics::{MIRRORD_UP_CORRELATION_ID_ENV, UpSessionDbBranch};
 use mirrord_command::resolve_tokio_command;
@@ -53,6 +54,7 @@ use crate::kube_context::UpKubeContext;
 mod config;
 mod init;
 mod kube_context;
+mod list;
 mod process;
 
 /// Shared slot that [`launch`] fills with what the child sessions report while starting: the
@@ -92,6 +94,11 @@ impl ReadyTracker {
 
 /// Environment variable used to pass the resolved configuration to child mirrord processes.
 pub const RESOLVED_CONFIG_ENV: &str = "MIRRORD_UP_RESOLVED_CONFIG";
+
+/// Set to `1` on the `mirrord exec` of each service `mirrord up --debug` names. That `exec` holds
+/// the program it starts at its entry point until an IDE releases it, and leaves the variable out
+/// of the program's environment.
+pub const DEBUG_HOLD_ENV: &str = "MIRRORD_DEBUG_HOLD";
 
 /// Environment variable holding the name of the service a `mirrord up` session runs, so the
 /// session can name the service on the branch databases it creates.
@@ -796,13 +803,29 @@ pub async fn resolve_services(
 /// `ready` is filled with the time-to-ready once every session has signalled
 /// readiness, and with the branch databases the sessions report (see [`ReadyTracker`]).
 ///
+/// `debug` names the services whose programs are held for a debugger (see [`DEBUG_HOLD_ENV`]).
+/// [`UpConfig::select_services`] has checked that each is one of the services launched.
+///
 /// Returns when the user stops the session or one of the child sessions exits.
 pub async fn launch(
     service_configs: Vec<SubprocessCfg>,
     correlation_id: Uuid,
+    debug: &[String],
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
-    let commands: Vec<_> = service_configs
+    let commands = service_commands(service_configs, correlation_id, debug)?;
+    process::run(commands, ready).await
+}
+
+/// The `mirrord exec`/`mirrord container` command, and `run.pre_command`, of every service.
+///
+/// Only the services named in `debug` get [`DEBUG_HOLD_ENV`].
+fn service_commands(
+    service_configs: Vec<SubprocessCfg>,
+    correlation_id: Uuid,
+    debug: &[String],
+) -> Result<Vec<process::ServiceCommands>, UpError> {
+    service_configs
         .into_iter()
         .map(|config| {
             let SubprocessCfg {
@@ -822,6 +845,9 @@ pub async fn launch(
             let encoded_cfg = config.encode()?;
 
             let mut cmd = resolve_tokio_command(std::env::current_exe()?);
+            if debug.iter().any(|name| **name == *service_name) {
+                cmd.env(DEBUG_HOLD_ENV, "1");
+            }
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
@@ -855,9 +881,7 @@ pub async fn launch(
                 session: cmd,
             })
         })
-        .collect::<Result<_, UpError>>()?;
-
-    process::run(commands, ready).await
+        .collect()
 }
 
 #[cfg(test)]
@@ -1007,6 +1031,53 @@ services:
             run_directory.to_str().unwrap().starts_with(r"\\?\").not(),
             "{} is a verbatim path",
             run_directory.display()
+        );
+    }
+
+    /// `--debug` holds exactly the programs it names: each named service's `mirrord exec` gets
+    /// the hold, and the one in between, not named, runs as usual.
+    #[test]
+    fn only_the_debugged_services_are_held() {
+        let key = EnvKey::Provided("key".to_owned());
+        let config = template(
+            "services:\n  api:\n    target: none\n    run:\n      command: [api]\n  web:\n    target: none\n    run:\n      command: [web]\n  worker:\n    target: none\n    run:\n      command: [worker]\n",
+            &key,
+        )
+        .expect("parse the config");
+        let service_configs = config
+            .service_configs(
+                &key,
+                &mut HashMap::new(),
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
+            .expect("assemble the services");
+
+        let debug = ["worker".to_owned(), "api".to_owned()];
+        let commands =
+            service_commands(service_configs, Uuid::nil(), &debug).expect("build the commands");
+
+        let holds: HashMap<_, _> = commands
+            .iter()
+            .map(|commands| {
+                let hold = commands
+                    .session
+                    .as_std()
+                    .get_envs()
+                    .find(|(name, _)| *name == DEBUG_HOLD_ENV)
+                    .and_then(|(_, value)| value)
+                    .map(|value| value.to_string_lossy().into_owned());
+                (commands.name.to_string(), hold)
+            })
+            .collect();
+        assert_eq!(
+            holds,
+            HashMap::from([
+                ("api".to_owned(), Some("1".to_owned())),
+                ("web".to_owned(), None),
+                ("worker".to_owned(), Some("1".to_owned())),
+            ]),
+            "only the services `--debug` names may wait for an IDE to release them"
         );
     }
 
