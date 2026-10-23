@@ -13,8 +13,10 @@ tags:
   - oss
   - team
   - enterprise
-description: Possible targets for mirrord and how to set them
+description: "The Kubernetes resources that mirrord can target, and how to choose one for a session."
 ---
+
+# Targets
 
 ## Overview
 

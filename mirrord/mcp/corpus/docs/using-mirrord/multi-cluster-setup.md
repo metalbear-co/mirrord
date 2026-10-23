@@ -6,6 +6,8 @@ tags:
   - enterprise
 ---
 
+# Multi-Cluster Setup
+
 This guide covers how to set up multi-cluster mirrord. At a glance, the setup is:
 
 1. Install the mirrord operator on every downstream cluster with `operator.multiClusterMember=true` ([Setting Up Downstream Clusters](#setting-up-downstream-clusters)).

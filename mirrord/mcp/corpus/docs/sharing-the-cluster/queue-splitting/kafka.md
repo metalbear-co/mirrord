@@ -119,11 +119,11 @@ spec:
         topic:
           - env: KAFKA_TOPIC_NAME
             fallback: views-topic # optional, used when the variable is absent
-            containers:
+            containerNames:
               - consumer
         groupId:
           - env: KAFKA_GROUP_ID
-            containers:
+            containerNames:
               - consumer
 ```
 
@@ -156,7 +156,7 @@ Each entry in the `spec.queues` list describes one or more Kafka queues consumed
   * `fallback` - fallback topic name if the variable is absent (only valid with `env`). The env var is still rewritten to point at the temporary topic.
   * `valueSelector` - a selector extracting the topic name from the variable's value: nested keys (`.kafka.topic`) and `.[]` to iterate arrays or object values. Useful when the value holds JSON rather than a plain name. Pipes, functions, and other jq operators are not supported.
   * `valuePattern` - a regex used when the topic name is embedded in a larger string. The capture group (named `value`, otherwise the first group) marks the part that is the name; only that part is swapped for the temporary topic and the surrounding text is kept as-is.
-  * `containers` - limit to specific containers (optional, defaults to all non-infra containers).
+  * `containerNames` - limit to specific containers (optional, defaults to all non-infra containers).
 *   One of the following must be set:
 
     * `appConfig.groupId` - how the application discovers the consumer Kafka group id. Use for standard Kafka consumers. The operator's forwarder joins this group, and the consumer's environment is left untouched.
@@ -380,7 +380,7 @@ spec:
   kafkaBranch:
     bootstrapServers:
       - env: KAFKA_BOOTSTRAP_SERVERS
-        containers: [worker]
+        containerNames: [worker]
   # The queues the worker consumes, with the same fields as for splitting. When a session
   # starts, the operator creates their topics on the branch and sets each group's start offset,
   # so the worker reads messages produced before it joined, and an idle preview environment
@@ -726,3 +726,5 @@ openssl pkcs12 -in truststore.p12 -nokeys -out ca-cert.pem
 ```
 
 Then, follow the guide for [authenticating with an SSL certificate](kafka.md#how-do-i-authenticate-the-operators-kafka-client-with-an-ssl-certificate).
+
+For compatibility with older operator releases and the legacy `containers` spelling, see [Selecting Containers](../queue-splitting.md#selecting-containers).

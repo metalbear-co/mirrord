@@ -8,6 +8,35 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.278.0](https://github.com/metalbear-co/mirrord/tree/3.278.0) - 2026-10-22
+
+
+### Added
+
+- A `kube_context` set in the global `~/.mirrord/mirrord.json` (`mirrord config
+  set kube_context <context>`) is used when a command has no context of its
+  own, including `mirrord up`, `mirrord tui` and the `mirrord operator`
+  commands, and `mirrord ui` opens on it.
+- Install script verifies downloads and takes an install directory.
+- Read DB branch connection values from AWS SSM Parameter Store with
+  `aws_ssm_parameter`.
+
+
+### Changed
+
+- Point at the Helm value to enable when an operator feature is switched off in
+  the chart, instead of suggesting an upgrade.
+
+
+### Fixed
+
+- DB branches name the right database when the source URL is a literal `value`.
+- Fixed concurrency issues in the layer<->intproxy connection handler,
+  improving performance of multi-threaded applications.
+- Joining a session through the browser extension from `mirrord ui` sends the
+  session's kube context, so the extension finds the session's HTTP filter when
+  it runs outside the current context.
+
 ## [3.277.0](https://github.com/metalbear-co/mirrord/tree/3.277.0) - 2026-10-21
 
 

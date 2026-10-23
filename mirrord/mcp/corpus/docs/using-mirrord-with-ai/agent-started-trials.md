@@ -8,23 +8,26 @@ tags: ["team", "enterprise"]
 
 Some things an agent needs on a shared cluster only work with mirrord for Teams: branching a database so its writes don't reach everyone else's data, splitting a queue so it doesn't eat messages other people need, or stealing traffic from a target another session already holds.
 
-On a cluster with no license, an agent that follows [metalbear.com/agents.md](https://metalbear.com/agents.md) can start a trial itself rather than stopping and waiting for you to sign up. It ends up with a working cluster and you end up with a link to claim.
+On a cluster with no license, an agent that follows [metalbear.com/agents.md](https://metalbear.com/agents.md) can start a trial itself rather than stopping and waiting for you to sign up. It ends up with a working cluster and you end up with a link to claim. If you already have an organization, the agent installs with it instead (see [If you already have an organization](#if-you-already-have-an-organization)), so no second organization gets created.
 
 ## What the agent does
 
-It runs a single command against the cluster of its current kubecontext, or of the one it names with `--context`. No authentication, no credit card, and no API key for the agent to handle:
+It runs two commands against the cluster of its current kubecontext, or of the one it names with `--context`. No authentication, no credit card, and no API key for the agent to handle:
 
 ```bash
-mirrord operator install --no-browser
+mirrord operator signup
+mirrord operator install --from-signup
 ```
 
-In a terminal, the command first asks you to confirm the kubecontext and the namespace that it installs the Operator into, before it starts the trial or changes the cluster. `--yes` skips the question. An agent usually runs the command without a terminal, and then it doesn't ask.
+`mirrord operator signup` starts the trial and prints its end date and the claim URL for the agent to hand you. It saves the trial's API key on this machine instead of printing it, then prints the install command to run next. It also sends the cluster's ID (the UID of its `default` namespace) along with the signup, if it can read it, and MetalBear stores it with the trial. `--cluster-hint <name>` sends a different name, and `--no-hint` sends none.
 
-The command starts the trial, installs the Operator with it, and prints the trial's end date, the claim URL for the agent to hand you, and the trial's API key. `--no-browser` keeps it from opening the claim page itself, which it also skips whenever it isn't running in a terminal. If the installation fails or is stopped after the trial has started, retry without starting another trial: remove what was installed with `mirrord operator uninstall`, then run `mirrord operator install --api-key <key>` with the trial's key. If the first attempt used `--context`, give both commands the same `--context`. When the installation fails, the command prints these two commands with the kubecontext and the key filled in.
+`mirrord operator install --from-signup` installs the Operator with the saved key. In a terminal, it first asks you to confirm the kubecontext and the namespace that it installs the Operator into, before it changes the cluster. `--yes` skips the question. An agent usually runs the command without a terminal, and then it doesn't ask. If the installation fails or is stopped, retry without starting another trial: remove what was installed with `mirrord operator uninstall`, then run `mirrord operator install --from-signup` again. If the signup used `--context`, pass the same `--context` to the uninstall and the install.
 
-The trial is a **provisional organization** carrying an Enterprise trial license, good for seven days from the signup. To help you recognize the cluster on the claim page, the command sends the cluster's ID (the UID of its `default` namespace) along with the signup, if it can read it. `--cluster-hint <name>` sends a different name, and `--no-hint` sends none.
+`mirrord operator install` without `--from-signup` or `--api-key` doesn't start a trial. It logs in to an existing organization instead (see [If you already have an organization](#if-you-already-have-an-organization)).
 
-The Operator is installed from the default Helm chart, without needing Helm itself. If an Operator is already installed in the cluster, or an earlier installation left objects behind, the command stops and says so rather than touching anything, and tells you how to remove them with `mirrord operator uninstall`. For anything beyond the default installation, it prints the equivalent `helm install`, which takes the installation over along with its API key.
+The trial is a **provisional organization** carrying an Enterprise trial license, good for seven days from the signup.
+
+The Operator is installed from the default Helm chart, without needing Helm itself. If an Operator is already installed in the cluster, or an earlier installation left objects behind, the command stops and says so rather than touching anything, and tells you how to remove them with `mirrord operator uninstall`. For anything beyond the default installation, install with the [Helm chart](../managing-mirrord/operator.md#helm) instead.
 
 ### Calling the signup endpoint directly
 
@@ -36,7 +39,7 @@ curl -fsS -X POST https://app.metalbear.com/api/v1/agent/signup \
   -d '{"agent": "claude-code", "developer_email": "you@example.com", "cluster_hint": "staging"}'
 ```
 
-`developer_email` and `cluster_hint` are optional and unverified. They exist so you can recognize the organization as yours on the claim page.
+`developer_email` and `cluster_hint` are optional and unverified, and MetalBear stores them with the trial.
 
 The response describes the provisional organization:
 
@@ -68,7 +71,7 @@ Open the claim URL. You can sign in with an existing account or create one on th
 
 Claiming also deletes the provisional organization, so the cluster keeps working against your real one without reinstalling anything. A new organization inherits the agent's history along with the license, so the getting-started checklist already counts the Operator as installed and your usage shows the sessions the agent ran before you claimed. An organization that already existed keeps its own license, and so its own history.
 
-An existing organization that already holds an active Operator cloud API key will reject the claim rather than replace the key it has. Revoke or rotate the existing key first, under **API Keys**. Read-only keys are a different scope and don't collide, so they can stay.
+An existing organization that already holds an active Operator cloud API key will reject the claim rather than replace the key it has. **Revoke** under **API Keys** replaces the key with a new active one, so it doesn't clear the conflict. Instead, move the cluster onto your organization: run `mirrord operator uninstall`, then `mirrord operator install --api-key <key>` with your organization's key. Read-only keys are a different scope and don't collide, so they can stay.
 
 ## Until it is claimed
 
@@ -89,8 +92,14 @@ mirrord operator uninstall
 
 It first lets the Operator end its sessions, so that the workloads they changed are restored, and then deletes everything that the installation created. That includes the mirrord CRDs, so it also deletes the mirrord policies and profiles of the cluster. Like `mirrord operator install`, it takes `--context`, asks for confirmation in a terminal, and doesn't ask with `--yes` or without a terminal.
 
-If you moved the installation to Helm with the `helm install` that `mirrord operator install` printed, remove it with `helm uninstall` instead. `mirrord operator uninstall` stops and tells you so.
+If you moved the installation to Helm, remove it with `helm uninstall` instead. `mirrord operator uninstall` stops and tells you so.
 
 ## If you already have an organization
 
-You don't need any of this. Generate a cloud API key under **API Keys** and give it to the agent, which installs with `mirrord operator install --api-key <key>` and skips the trial, or install the Operator yourself following the [dashboard setup guide](../managing-mirrord/dashboard/cloud.md). Signing up again creates a second organization you then have to clean up.
+You don't need a trial. Run `mirrord operator install`, or let the agent run it: it asks you to approve the login to [app.metalbear.com](https://app.metalbear.com) in the browser (or reuses a `mirrord login` from the same machine), creates your organization's operator API key, and installs the Operator with it, without showing the key. If no browser opens, it prints the URL to visit, and it waits up to five minutes for the approval.
+
+- Only an admin of the organization can create the key, and only while the organization has no operator API key yet. If it already has one, install with `mirrord operator install --api-key <key>`, using the key from a cluster that already runs the Operator, or ask an admin for it.
+- If the login page says the account has no organization yet, finish setting it up at [app.metalbear.com](https://app.metalbear.com), then run the command again.
+- If the installation fails after the key was created, remove what was installed with `mirrord operator uninstall`. The created key stays active, so running the command again fails: under **API Keys**, use **Revoke** to replace the key and copy the new one, then install with `mirrord operator install --api-key <key>`.
+
+You can also generate a cloud API key under **API Keys** and install with `mirrord operator install --api-key <key>`, or install the Operator yourself following the [dashboard setup guide](../managing-mirrord/dashboard/cloud.md). Signing up again creates a second organization you then have to clean up.

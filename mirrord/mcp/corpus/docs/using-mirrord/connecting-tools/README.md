@@ -11,6 +11,8 @@ tags:
 description: Use mirrord to connect local tools like browsers, Postman, and database clients to cluster services
 ---
 
+# Connecting Tools to the Cluster
+
 Sometimes you need to use local tools like Web Browsers, Postman, or Database Clients, to interact with services that are only accessible from inside your cluster.
 
 Instead of setting up complex port-forwards or VPNs, you can use `mirrord` to create a lightweight SOCKS5 tunnel. This allows any application that supports SOCKS5 to resolve internal DNS and connect to private cluster services as if it were running inside the cluster itself.

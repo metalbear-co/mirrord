@@ -26,9 +26,13 @@ mod retry;
 mod transport;
 
 pub use client::{AgentClient, IntproxyClient, SessionsManagerConnectInfo};
-pub use credentials::{CloudTokenCredentials, CredentialProvider, SharedSecretCredentials};
+pub use credentials::{
+    CloudTokenCredentials, CredentialProvider, LoginToken, LoginTokenCredentials, LoginTokenSource,
+    SharedSecretCredentials, cloud_url_from_env,
+};
 pub use error::{Result, SessionsManagerClientError};
 pub use mirrord_sessions_manager_protocol::{IntproxyIdentity, ReplicaId, ServiceScope};
 pub use transport::{
     DirectTransport, OperatorTransport, SESSIONS_MANAGER_URL_ENV, SessionsManagerTransport,
+    base_url_from_env,
 };

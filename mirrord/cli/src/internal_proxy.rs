@@ -60,7 +60,7 @@ use tracing::{Level, warn};
 use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
-    data::UserData,
+    data::{StoredLogin, UserData},
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     kube::kube_client_from_layer_config,
@@ -487,7 +487,8 @@ pub(crate) async fn connect_and_ping(
     connect_info: AgentConnectInfo,
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<AgentConnection, InternalProxyError> {
-    let mut agent_conn = AgentConnection::new(config, connect_info, analytics).await?;
+    let mut agent_conn =
+        AgentConnection::new(config, connect_info, Some(Arc::new(StoredLogin)), analytics).await?;
 
     agent_conn.connection.send(ClientMessage::Ping).await;
 
