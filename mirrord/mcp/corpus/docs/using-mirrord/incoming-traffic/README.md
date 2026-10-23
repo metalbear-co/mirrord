@@ -4,8 +4,10 @@ tags:
   - oss
   - team
   - enterprise
-description: How mirrord handles incoming network traffic from the cluster
+description: "How mirrord sends incoming traffic from a pod in the cluster to your local process."
 ---
+
+# Incoming Traffic
 
 mirrord lets your local process receive network traffic that would normally go to a pod in the cluster. There are two modes:
 

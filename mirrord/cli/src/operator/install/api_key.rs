@@ -74,7 +74,7 @@ pub(super) async fn create(
         .expect("an http(s) base joins a relative path");
     let response = http
         .post(url)
-        .bearer_auth(token.token.as_str())
+        .bearer_auth(token.token.expose_secret())
         .json(&CreateKeyRequest { name })
         .send()
         .await

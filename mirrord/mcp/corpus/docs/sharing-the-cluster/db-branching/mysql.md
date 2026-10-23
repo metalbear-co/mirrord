@@ -1,6 +1,6 @@
 ---
 title: MySQL
-description: Spin up an isolated MySQL branch of your remote database with mirrord
+description: "Spin up an isolated MySQL branch of your remote database with mirrord."
 tags:
   - beta
   - team
