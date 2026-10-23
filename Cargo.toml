@@ -284,7 +284,7 @@ test-cdylib = "1"
 textwrap = { version = "0.16", default-features = false }
 thiserror = "2"
 throbber-widgets-tui = "0.11"
-tokio = { version = "1", features = ["fs", "net", "io-util"] }
+tokio = { version = "1.53.3", features = ["fs", "net", "io-util"] }
 tokio-retry = "0.3"
 tokio-rustls = "0.26"
 tokio-stream = { version = "0.1", features = ["sync"] }

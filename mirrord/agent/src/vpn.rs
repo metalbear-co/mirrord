@@ -90,7 +90,9 @@ impl AsyncRawSocket {
     pub fn new(socket: Socket, addr: SockAddr) -> std::io::Result<Self> {
         socket.set_nonblocking(true)?;
         Ok(Self {
-            inner: AsyncFd::new(socket)?,
+            // SAFETY: Socket owns its descriptor, and AsyncRawSocket never closes or replaces it
+            // while registered with AsyncFd.
+            inner: unsafe { AsyncFd::register(socket)? },
             addr,
         })
     }
