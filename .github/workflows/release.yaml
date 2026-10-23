@@ -1115,6 +1115,17 @@ jobs:
           body_path: /tmp/release-notes.md
           files: /tmp/release/**
 
+  update-changelog-web-docs:
+    needs: [validate_release_request, release_gh]
+    if: needs.validate_release_request.outputs.should_release == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/changelog-update.yaml
+    with:
+      ref: ${{ needs.validate_release_request.outputs.sha }}
+    secrets:
+      CHANGELOG_PAT: ${{ secrets.CHANGELOG_PAT }}
+
   release_homebrew:
     needs: [validate_release_request, release_gh]
     runs-on: blacksmith-4vcpu-ubuntu-2404
