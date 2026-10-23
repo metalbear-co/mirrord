@@ -455,8 +455,8 @@ fn queue_splitting_feature(kind: QueueKind) -> Option<NewOperatorFeature> {
 /// Handle `mirrord preview down`: `mirrord preview stop -k <key> -A`, with the key found the
 /// way `mirrord preview up` finds it.
 ///
-/// Reads no config file: every preview under the key goes, whichever services it was started
-/// for, so `-f` doesn't apply.
+/// Reads no mirrord config, neither from `-f` nor from `MIRRORD_*` variables in the environment:
+/// every preview under the key goes, whichever services it was started for.
 pub(super) async fn preview_down(
     common: &PreviewCommonArgs,
     watch: drain::Watch,

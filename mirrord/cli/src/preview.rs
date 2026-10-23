@@ -124,7 +124,8 @@ async fn preview_start(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview start");
 
-    let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
+    let mut layer_config =
+        load_preview_config(args.as_env_vars(common), false, &mut progress).await?;
 
     // Read before contacting the cluster, so a broken manifest fails without side effects.
     let sources = manifest_sources(args.manifests, &mut layer_config);
@@ -864,7 +865,7 @@ async fn preview_status(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview status");
 
-    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
+    let layer_config = load_preview_config(args.as_env_vars(common), false, &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -1086,7 +1087,7 @@ async fn preview_logs(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview logs");
 
-    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
+    let layer_config = load_preview_config(args.as_env_vars(common), false, &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -1201,18 +1202,26 @@ async fn print_session_logs(
 /// Handle `mirrord preview stop` command.
 ///
 /// Deletes preview environments matching the given key and, optionally, a target filter and
-/// namespace. With `missing_ok`, finding none succeeds instead of failing.
+/// namespace.
+///
+/// With `down`, it runs as `mirrord preview down`: the config comes from `common` and the global
+/// config alone, so neither a mirrord config nor `MIRRORD_*` variables in the environment (like
+/// `MIRRORD_IMPERSONATED_TARGET`) can narrow what it deletes, and finding nothing succeeds.
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 async fn preview_stop(
     common: &PreviewCommonArgs,
     args: PreviewStopArgs,
-    missing_ok: bool,
+    down: bool,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
-    let mut progress = ProgressTracker::from_env("mirrord preview stop");
+    let mut progress = ProgressTracker::from_env(if down {
+        "mirrord preview down"
+    } else {
+        "mirrord preview stop"
+    });
 
-    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
+    let layer_config = load_preview_config(args.as_env_vars(common), down, &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -1268,7 +1277,7 @@ async fn preview_stop(
         .collect();
 
     if sessions_to_delete.is_empty() {
-        if missing_ok {
+        if down {
             subtask.success(Some("no sessions to delete"));
             progress.success(None);
             return Ok(());
@@ -1342,7 +1351,8 @@ async fn preview_diff(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview diff");
 
-    let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
+    let mut layer_config =
+        load_preview_config(args.as_env_vars(common), false, &mut progress).await?;
 
     let sources = manifest_sources(args.manifests, &mut layer_config);
     if sources.is_empty() {
@@ -1653,13 +1663,18 @@ fn label_session_target(label_target: &LabelTarget) -> SessionTarget {
     ))
 }
 
+/// Resolves the mirrord config of a `mirrord preview` command from `env_overrides` (the CLI
+/// flags) over the process environment. With `strict_env`, only `env_overrides` are read.
 async fn load_preview_config(
     env_overrides: HashMap<&OsStr, Cow<'_, OsStr>>,
+    strict_env: bool,
     progress: &mut ProgressTracker,
 ) -> CliResult<LayerConfig> {
     let mut subtask = progress.subtask("loading configuration");
 
-    let mut cfg_context = ConfigContext::default().override_envs(env_overrides);
+    let mut cfg_context = ConfigContext::default()
+        .override_envs(env_overrides)
+        .strict_env(strict_env);
 
     let config = crate::util::resolve_layer_config(&mut cfg_context)
         .await
