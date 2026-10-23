@@ -12,8 +12,10 @@ tags:
   - beta
   - team
   - enterprise
-description: "Decrypt and steal HTTPS traffic using TLS certificates"
+description: "How to steal HTTPS traffic with mirrord when your app terminates TLS itself."
 ---
+
+# Stealing HTTPS Requests
 
 mirrord supports HTTPS stealing across all tiers.
 However, when the deployed application receives encrypted traffic directly - for example, when HTTPS is not decrypted by the mesh or load balancer and the app itself handles TLS termination - this functionality is available only in mirrord for Teams.

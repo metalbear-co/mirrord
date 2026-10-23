@@ -15,10 +15,15 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use futures::future::{BoxFuture, FutureExt};
+use mirrord_sessions_manager_client::{
+    LoginToken, LoginTokenSource, SessionsManagerClientError, cloud_url_from_env,
+};
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use super::update_owner_only_at_path;
-use crate::util::mirrord_dir;
+use crate::{login::issuer, util::mirrord_dir};
 
 /// `~/.mirrord/auth.json`, or [`None`] when the home directory is unknown.
 ///
@@ -49,31 +54,6 @@ pub(crate) struct StoredLoginToken {
     pub(crate) expires_at: DateTime<Utc>,
 }
 
-/// A signed login token.
-///
-/// Tokens must never appear in logs, so [`fmt::Debug`] does not print it.
-#[derive(Serialize, Deserialize)]
-#[serde(transparent)]
-pub(crate) struct LoginToken(String);
-
-impl LoginToken {
-    pub(crate) fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<String> for LoginToken {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-impl fmt::Debug for LoginToken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("<redacted>")
-    }
-}
-
 /// A key of a trial that `mirrord operator signup` started, as stored in [`AuthStore`].
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +81,37 @@ impl fmt::Debug for SignupApiKey {
     }
 }
 
+/// The developer's latest login to the MetalBear cloud set by `MIRRORD_METALBEAR_CLOUD_URL`,
+/// which a standalone sessions-manager trusts, read from the store at every lookup.
+pub(crate) struct StoredLogin;
+
+impl StoredLogin {
+    /// The cloud set by `MIRRORD_METALBEAR_CLOUD_URL`, parsed so its [`issuer`] matches the one
+    /// `mirrord login` stored its token under.
+    pub(crate) fn cloud_url() -> Result<Url, SessionsManagerClientError> {
+        Ok(Url::parse(&cloud_url_from_env()?)?)
+    }
+}
+
+impl LoginTokenSource for StoredLogin {
+    /// A store that cannot be read means no token, rather than failing every request, since a
+    /// sessions-manager that does not authenticate its callers does not need one.
+    fn login_token(&self) -> BoxFuture<'_, Result<Option<LoginToken>, SessionsManagerClientError>> {
+        async {
+            let cloud_url = Self::cloud_url()?;
+            let login = AuthStore::login_token(issuer(&cloud_url))
+                .await
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "Failed to read the login token store, continuing without a login token");
+                    None
+                });
+
+            Ok(login.map(|login| login.token))
+        }
+        .boxed()
+    }
+}
+
 impl AuthStore {
     /// Stores `token` as the login for `organization_id` with `issuer`, replacing the previous
     /// one.
@@ -117,9 +128,17 @@ impl AuthStore {
     /// A user in several organizations has a token for each, and the one that expires last is the
     /// one they logged in with most recently.
     pub(crate) async fn login_token(issuer: &str) -> io::Result<Option<StoredLoginToken>> {
+        let now = Utc::now();
+        Ok(Self::latest_login(issuer)
+            .await?
+            .filter(|token| token.expires_at > now))
+    }
+
+    /// Like [`Self::login_token`], but expired or not, so the user can be told when it expired.
+    pub(crate) async fn latest_login(issuer: &str) -> io::Result<Option<StoredLoginToken>> {
         Ok(Self::load()
             .await?
-            .and_then(|store| store.latest_token(issuer, Utc::now())))
+            .and_then(|store| store.latest_token(issuer)))
     }
 
     /// Stores `key` as the key of the trial started with the app of `issuer`, replacing the
@@ -174,11 +193,10 @@ impl AuthStore {
         }
     }
 
-    fn latest_token(mut self, issuer: &str, now: DateTime<Utc>) -> Option<StoredLoginToken> {
+    fn latest_token(mut self, issuer: &str) -> Option<StoredLoginToken> {
         self.issuers
             .remove(issuer)?
             .into_values()
-            .filter(|token| token.expires_at > now)
             .max_by_key(|token| token.expires_at)
     }
 
@@ -248,7 +266,7 @@ mod tests {
                     (
                         issuer.as_str(),
                         organization.as_str(),
-                        token.token.0.as_str(),
+                        token.token.expose_secret(),
                     )
                 })
             })
@@ -315,6 +333,56 @@ mod tests {
         );
 
         assert_eq!(stored_tokens(&store), [(ISSUER, "org-a", "valid")]);
+    }
+
+    /// The latest login is the one that expires last, whichever organization it is for. It is
+    /// returned even once expired, so the CLI can say when it expired.
+    #[test]
+    fn latest_login_is_the_one_that_expires_last_at_the_issuer() {
+        let now = Utc::now();
+        let mut store = AuthStore::default();
+        for (issuer, organization, value, expires_at) in [
+            (ISSUER, "org-a", "older", now + TimeDelta::hours(1)),
+            (ISSUER, "org-b", "newer", now + TimeDelta::hours(2)),
+            ("https://other", "org-a", "other", now + TimeDelta::hours(3)),
+        ] {
+            store.insert(
+                issuer.to_owned(),
+                organization.to_owned(),
+                token(value, expires_at),
+                now,
+            );
+        }
+
+        let latest = store.latest_token(ISSUER).unwrap();
+        assert_eq!(latest.token.expose_secret(), "newer");
+
+        let mut store = AuthStore::default();
+        store.insert(
+            ISSUER.to_owned(),
+            "org-a".to_owned(),
+            token("expired", now - TimeDelta::seconds(1)),
+            now - TimeDelta::hours(24),
+        );
+        assert_eq!(
+            store.latest_token(ISSUER).unwrap().token.expose_secret(),
+            "expired"
+        );
+        assert!(AuthStore::default().latest_token(ISSUER).is_none());
+    }
+
+    /// Spellings of one backend that `Url` normalizes share an issuer, so a token stored by
+    /// `mirrord login` is found whichever spelling `MIRRORD_METALBEAR_CLOUD_URL` uses.
+    #[test]
+    fn spellings_of_one_backend_share_an_issuer() {
+        for spelling in [
+            "https://app.metalbear.com",
+            "https://app.metalbear.com/",
+            "https://APP.MetalBear.com",
+            "https://app.metalbear.com:443",
+        ] {
+            assert_eq!(issuer(&Url::parse(spelling).unwrap()), ISSUER, "{spelling}");
+        }
     }
 
     #[test]
