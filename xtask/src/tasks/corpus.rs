@@ -8,7 +8,7 @@
 
 use std::{
     collections::BTreeMap,
-    env, fs,
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -181,15 +181,13 @@ fn upstream_head(repo: &str) -> Result<String> {
 /// The files of `corpus` at its pinned commit, keyed by their path relative to its root. Contents
 /// are the raw blobs, so no checkout filter or line-ending conversion touches them.
 fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
-    let checkout = env::temp_dir().join(format!("mirrord-xtask-corpus-{}", corpus.name));
-    if checkout.exists() {
-        fs::remove_dir_all(&checkout)?;
-    }
-    fs::create_dir_all(&checkout)?;
-
-    git(Some(&checkout), &["init", "--quiet"])?;
+    // Removed on drop, and unique, so runs at the same time don't share it.
+    let checkout = tempfile::Builder::new()
+        .prefix("mirrord-xtask-corpus-")
+        .tempdir()?;
+    git(Some(checkout.path()), &["init", "--quiet"])?;
     git(
-        Some(&checkout),
+        Some(checkout.path()),
         &[
             "fetch",
             "--quiet",
@@ -202,7 +200,7 @@ fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
     .with_context(|| format!("failed to fetch {}@{}", pin.repo, pin.commit))?;
 
     let listing = git(
-        Some(&checkout),
+        Some(checkout.path()),
         &[
             "ls-tree",
             "-r",
@@ -233,7 +231,7 @@ fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
         }
 
         let contents = git(
-            Some(&checkout),
+            Some(checkout.path()),
             &["cat-file", "blob", &format!("FETCH_HEAD:{path}")],
         )?;
         ensure!(
@@ -245,7 +243,6 @@ fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
         files.insert(relative.to_owned(), contents);
     }
 
-    fs::remove_dir_all(&checkout)?;
     ensure!(
         !files.is_empty(),
         "{}@{} has nothing to vendor under `{}`",
