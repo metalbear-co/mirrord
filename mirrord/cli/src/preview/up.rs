@@ -29,8 +29,8 @@ use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_up::{PreviewImageSource, SubprocessCfg, UpError, load_up_config, preview_image_env};
 
 use super::{
-    PreparedPreview, create_preview_api, load_manifests, manifest_sources, preview_stop,
-    target_namespace,
+    PreparedPreview, create_preview_api, load_manifests, manifest_sources, preview_namespace,
+    preview_stop,
 };
 use crate::{
     config::{
@@ -178,10 +178,13 @@ async fn run_preview_up(
         }
     }
 
+    // Compared the way `start` finds the session it replaces: sessions are listed in the
+    // namespace they're stored in and matched on their target. The cluster stands in for the
+    // kube context, which can have several names.
     let same_target = |a: &PreparedPreview, b: &PreparedPreview| {
-        a.layer_config.kube_context == b.layer_config.kube_context
-            && target_namespace(&a.operator_api, &a.layer_config)
-                == target_namespace(&b.operator_api, &b.layer_config)
+        a.operator_api.cluster_url() == b.operator_api.cluster_url()
+            && preview_namespace(&a.operator_api, &a.layer_config)
+                == preview_namespace(&b.operator_api, &b.layer_config)
             && a.session_target == b.session_target
     };
     let clashes = checked
