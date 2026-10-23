@@ -10,7 +10,14 @@
 //! that failed to deserialize, because it reports every problem at once, each with its location
 //! and, where the schema lists them, the allowed values, where serde stops at the first error.
 
-use std::{collections::HashSet, fmt, ops::Not, path::Path, str::FromStr};
+use std::{
+    collections::{BTreeMap, HashSet},
+    fmt,
+    ops::Not,
+    path::Path,
+    str::FromStr,
+    sync::Arc,
+};
 
 use jsonschema::{
     ValidationError,
@@ -25,7 +32,8 @@ use mirrord_config::{
     target::{TARGET_PATH_FORMATS, Target},
 };
 use mirrord_up::{
-    CommonConfig, SERVICE_LAYER_PATHS, ServiceConfig, ServiceError, UpConfig, UpError,
+    CommonConfig, ModeConfig, ModeNameError, SERVICE_LAYER_PATHS, ServiceConfig, ServiceError,
+    UpConfig, UpError,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -167,7 +175,20 @@ pub fn validate_config(
                 Ok(value) => {
                     let (mut issues, config) = match check::<UpConfig>(&value, &UP_SCHEMA)? {
                         Ok(config) => {
-                            let issues = config.verify().err().map(up_issue).into_iter().collect();
+                            // `check_services` reports an unknown mode at each service using it.
+                            let issues = config
+                                .verify()
+                                .err()
+                                .filter(|error| {
+                                    matches!(
+                                        error,
+                                        UpError::ModeName(ModeNameError::Unknown { .. })
+                                    )
+                                    .not()
+                                })
+                                .map(up_issue)
+                                .into_iter()
+                                .collect();
                             (issues, Some(config))
                         }
                         Err(issues) => (issues, None),
@@ -458,6 +479,16 @@ fn check_services(
         .get("common")
         .and_then(|common| CommonConfig::deserialize(common).ok())
         .unwrap_or_default();
+    // Each mode on its own, so that a malformed one, reported by the schema check, doesn't take
+    // the others with it.
+    let mode_entries = up_config.get("modes").and_then(Value::as_object);
+    let modes: BTreeMap<Arc<str>, ModeConfig> = mode_entries
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, mode)| {
+            Some((name.as_str().into(), ModeConfig::deserialize(mode).ok()?))
+        })
+        .collect();
     // Isolated from the environment like the merged config in `mirrord up`, whose
     // environment-derived settings come from the generated config rather than the patch.
     let check =
@@ -468,19 +499,44 @@ fn check_services(
         let service_pointer = format!("/services/{}", escape_pointer_token(service));
         let patch = settings.get("config_patch");
         let generated = match ServiceConfig::deserialize(settings) {
-            Ok(config) => {
-                match config.unpatched_config_json(&service.as_str().into(), &common, key) {
-                    Ok(generated) => Some(generated),
-                    Err(error) => {
-                        service_issues.push(ConfigIssue {
-                            path: service_pointer,
-                            message: error.to_string(),
-                            allowed_values: None,
-                        });
-                        continue;
+            Ok(config) => match ModeConfig::named(&modes, config.default_mode()) {
+                Ok(mode) => {
+                    match config.unpatched_config_json(
+                        &service.as_str().into(),
+                        &common,
+                        &mode,
+                        key,
+                    ) {
+                        Ok(generated) => Some(generated),
+                        Err(error) => {
+                            service_issues.push(ConfigIssue {
+                                path: service_pointer,
+                                message: error.to_string(),
+                                allowed_values: None,
+                            });
+                            continue;
+                        }
                     }
                 }
-            }
+                // Without its mode the service can't be assembled, but its patch is still checked
+                // on its own. A mode that is defined but malformed is the schema check's issue.
+                Err(error) => {
+                    let defined = mode_entries
+                        .is_some_and(|entries| entries.contains_key(config.default_mode()));
+                    if let ModeNameError::Unknown { known, .. } = &error
+                        && defined.not()
+                    {
+                        service_issues.push(ConfigIssue {
+                            path: format!("{service_pointer}/default_mode"),
+                            message: error.to_string(),
+                            allowed_values: Some(
+                                known.iter().map(|mode| Value::from(&**mode)).collect(),
+                            ),
+                        });
+                    }
+                    None
+                }
+            },
             Err(_) => None,
         };
         let mut layer_config = match (&generated, patch) {

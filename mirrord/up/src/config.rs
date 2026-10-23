@@ -1,12 +1,11 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     ops::Not,
     path::PathBuf,
     sync::Arc,
 };
 
-use clap::{ValueEnum, builder::PossibleValue};
 use itertools::Itertools;
 use miette::Diagnostic;
 use mirrord_analytics::{Analytics, CollectAnalytics};
@@ -88,22 +87,19 @@ pub enum ServiceMode {
     Mirror,
 }
 
-// Manual impl because we want different user-facing docs
-impl ValueEnum for ServiceMode {
-    fn value_variants<'a>() -> &'a [Self] {
-        Self::VARIANTS
+impl From<ServiceMode> for Arc<str> {
+    fn from(mode: ServiceMode) -> Self {
+        <&str>::from(mode).into()
     }
+}
 
-    fn to_possible_value(&self) -> Option<PossibleValue> {
-        let name: &'static str = self.into();
-        match self {
-            ServiceMode::Split => Some(PossibleValue::new(name).help("Incoming traffic is split between the local and original services using HTTP filtering.
-If no filter is provided, a header filter matching the regex `baggage: .*mirrord-session={session key}.*` will be used.")),
-            ServiceMode::Replace => Some(PossibleValue::new(name).help("The local service replaces the original one: the target workload is copied and scaled down to zero, so all incoming traffic reaches your local process.
-Any configured HTTP filter is ignored. Requires a target that supports copy target with scale down.")),
-            ServiceMode::Mirror => Some(PossibleValue::new(name).help("Incoming traffic is mirrored to the local service using HTTP filtering.
-If no filter is provided, a header filter matching the regex `baggage: .*mirrord-session={session key}.*` will be used.")),
-        }
+impl ServiceMode {
+    /// The built-in mode named `name`, if there is one.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::VARIANTS
+            .iter()
+            .copied()
+            .find(|mode| <&str>::from(mode) == name)
     }
 }
 
@@ -117,13 +113,88 @@ impl Into<IncomingMode> for ServiceMode {
     }
 }
 
-#[allow(clippy::from_over_into)]
-impl Into<QueueMode> for ServiceMode {
-    fn into(self) -> QueueMode {
-        match self {
-            ServiceMode::Split | ServiceMode::Replace => QueueMode::Steal,
-            ServiceMode::Mirror => QueueMode::Mirror,
+/// How a custom mode splits the service's queues.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum QueuesMode {
+    /// Messages matching the session are consumed by the local service only
+    /// (`queue_mode: steal`).
+    Split,
+
+    /// Messages matching the session reach both the local and the original service
+    /// (`queue_mode: mirror`).
+    Mirror,
+}
+
+impl From<QueuesMode> for QueueMode {
+    fn from(mode: QueuesMode) -> Self {
+        match mode {
+            QueuesMode::Split => QueueMode::Steal,
+            QueuesMode::Mirror => QueueMode::Mirror,
         }
+    }
+}
+
+/// A custom mode, defined under `modes` and selected by name with `default_mode` or
+/// `mirrord up --mode`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ModeConfig {
+    /// How incoming traffic is handled, as in the built-in mode of the same name. Defaults to
+    /// `split`.
+    #[serde(default)]
+    pub incoming: ServiceMode,
+
+    /// How the service's queues are split. When not set, every queue defined in the cluster is
+    /// split with `queue_mode: steal`.
+    ///
+    /// Ignored with `incoming: replace`, which doesn't split queues.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queues: Option<QueuesMode>,
+}
+
+impl ModeConfig {
+    /// The mode named `name`: a built-in one, or one defined under `modes`.
+    pub fn named(
+        modes: &BTreeMap<Arc<str>, ModeConfig>,
+        name: &str,
+    ) -> Result<Self, ModeNameError> {
+        if let Some(builtin) = ServiceMode::from_name(name) {
+            return Ok(builtin.into());
+        }
+
+        if let Some(mode) = modes.get(name) {
+            return Ok(mode.clone());
+        }
+
+        let known = ServiceMode::VARIANTS
+            .iter()
+            .map(|mode| Arc::from(<&str>::from(mode)))
+            .chain(modes.keys().cloned())
+            .collect::<Vec<_>>();
+
+        let suggestion =
+            crate::closest_name(name, &known.iter().map(AsRef::as_ref).collect::<Vec<_>>())
+                .map(Arc::from);
+
+        Err(ModeNameError::Unknown {
+            name: name.into(),
+            suggestion,
+            known,
+        })
+    }
+}
+
+impl From<ServiceMode> for ModeConfig {
+    /// The built-in mode as a custom one.
+    fn from(incoming: ServiceMode) -> Self {
+        let queues = match incoming {
+            ServiceMode::Split => Some(QueuesMode::Split),
+            ServiceMode::Mirror => Some(QueuesMode::Mirror),
+            // Replacing the target takes over its queues whole, so they aren't split.
+            ServiceMode::Replace => None,
+        };
+        Self { incoming, queues }
     }
 }
 
@@ -443,6 +514,23 @@ fn inline_schema_without_docs<T: JsonSchema>(generator: &mut SchemaGenerator) ->
     schema
 }
 
+fn default_mode_name() -> Arc<str> {
+    ServiceMode::default().into()
+}
+
+/// A built-in mode, documented, or the name of one under `modes`.
+fn mode_name_schema(generator: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "anyOf": [
+            generator.subschema_for::<ServiceMode>(),
+            {
+                "description": "A mode defined under `modes`.",
+                "type": "string"
+            }
+        ]
+    })
+}
+
 /// Per-service configuration.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -471,11 +559,12 @@ pub struct ServiceConfig {
     pub(crate) env: EnvConfig,
 
     /// How incoming traffic and queue messages are shared between the local and the original
-    /// service. Defaults to `split`.
+    /// service: a built-in mode or one defined under `modes`. Defaults to `split`.
     ///
     /// `mirrord up --mode` overrides this for every service.
-    #[serde(default)]
-    pub(crate) default_mode: ServiceMode,
+    #[serde(default = "default_mode_name")]
+    #[schemars(schema_with = "mode_name_schema")]
+    pub(crate) default_mode: Arc<str>,
 
     /// HTTP filter that selects which requests reach the local service in `split` and `mirror`
     /// modes.
@@ -529,6 +618,11 @@ pub struct UpConfig {
     #[serde(default)]
     #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
     pub common: CommonConfig,
+    /// Custom modes keyed by name, selected with a service's `default_mode` or
+    /// `mirrord up --mode`. The built-in names (`split`, `replace`, `mirror`) are reserved.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
+    pub modes: BTreeMap<Arc<str>, ModeConfig>,
     /// Per-service configurations keyed by service name.
     #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
     pub services: HashMap<Arc<str>, ServiceConfig>,
@@ -572,18 +666,24 @@ pub const SERVICE_LAYER_PATHS: &[(&str, &str)] = &[
 ];
 
 impl ServiceConfig {
+    /// The name of the mode this service runs in, unless `mirrord up --mode` overrides it.
+    pub fn default_mode(&self) -> &str {
+        &self.default_mode
+    }
+
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `base` from
     /// [`CommonConfig::base_config`].
     fn assemble(
         self,
         service_name: &Arc<str>,
         base: LayerConfig,
+        mode: &ModeConfig,
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
     ) -> Result<SubprocessCfg, ConfigPatchErrorKind> {
         let kube_context = up_context.get_context(self.context.clone());
-        let mut cfg = self.unpatched_config(base, &key, kube_context.clone());
+        let mut cfg = self.unpatched_config(base, mode, &key, kube_context.clone());
 
         cfg.target = match self.target.as_resolved(service_name, kube_context) {
             Ok(resolved) => resolved,
@@ -617,7 +717,7 @@ impl ServiceConfig {
             .not()
         });
         let mut default_db_branches =
-            matches!(self.default_mode, ServiceMode::Split | ServiceMode::Mirror)
+            matches!(mode.incoming, ServiceMode::Split | ServiceMode::Mirror)
                 && single_workload
                 && cfg.feature.db_branches.is_empty();
         if default_db_branches {
@@ -653,6 +753,7 @@ impl ServiceConfig {
         &self,
         service_name: &Arc<str>,
         common: &CommonConfig,
+        mode: &ModeConfig,
         key: &EnvKey,
     ) -> Result<serde_json::Value, UpError> {
         let base = common.base_config(&mut ConfigContext::default().strict_env(true))?;
@@ -661,7 +762,7 @@ impl ServiceConfig {
             common_context: common.context.clone(),
         }
         .get_context(self.context.clone());
-        let config = self.unpatched_config(base, key, kube_context);
+        let config = self.unpatched_config(base, mode, key, kube_context);
         patchable(config, key).map_err(|source| {
             ConfigPatchError {
                 service: service_name.clone(),
@@ -672,18 +773,19 @@ impl ServiceConfig {
     }
 
     /// The mirrord config of this service before its target is set and its `config_patch` is
-    /// merged in: `base` with the service's own settings and what its mode implies.
+    /// merged in: `base` with the service's own settings and what `mode` implies.
     fn unpatched_config(
         &self,
         mut cfg: LayerConfig,
+        mode: &ModeConfig,
         key: &EnvKey,
         kube_context: Option<Arc<str>>,
     ) -> LayerConfig {
         cfg.kube_context = kube_context.as_deref().map(Into::into);
         cfg.feature.env = self.env.clone();
-        cfg.feature.network.incoming.mode = self.default_mode.into();
+        cfg.feature.network.incoming.mode = mode.incoming.into();
 
-        match self.default_mode {
+        match mode.incoming {
             ServiceMode::Split | ServiceMode::Mirror => {
                 cfg.feature.network.incoming.http_filter = if self.http_filter.is_filter_set() {
                     self.http_filter.clone()
@@ -697,12 +799,13 @@ impl ServiceConfig {
                     }
                 };
 
+                let queue_mode = mode.queues.map_or(QueueMode::Steal, Into::into);
                 cfg.feature.split_queues =
-                    SplitQueuesConfig::all_wildcard_with_mode(key, self.default_mode.into());
+                    SplitQueuesConfig::all_wildcard_with_mode(key, queue_mode);
             }
 
-            // `Replace` mode should steal all traffic from the copied target, so `http_filter` is
-            // ignored; `service_configs` tells the user.
+            // `Replace` mode should steal all traffic and messages from the copied target, so
+            // `http_filter` and `queues` are ignored; `service_configs` tells the user.
             ServiceMode::Replace => {
                 cfg.feature.copy_target = CopyTargetConfig {
                     enabled: true,
@@ -834,9 +937,10 @@ pub struct SubprocessCfg {
     pub service_name: Arc<str>,
     /// How to run this service (exec vs container, and the command).
     pub run: RunConfig,
-    /// Mode this service was assembled for. Its effects are already in `config`; it names the
-    /// mode in [`validate_targets`] errors and in what `mirrord up` reports about the service.
-    pub mode: ServiceMode,
+    /// Name of the mode this service was assembled for. Its effects are already in `config`; it
+    /// names the mode in [`validate_targets`] errors and in what `mirrord up` reports about the
+    /// service.
+    pub mode: Arc<str>,
     /// `config.feature.db_branches` is the `"*"` `mirrord up` adds for this service's mode, not
     /// one the user set. An operator that can't resolve it drops it rather than failing the run.
     pub default_db_branches: bool,
@@ -860,7 +964,7 @@ pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), ModeError> 
                 .not()
                 .then(|| IncompatibleTarget {
                     service: cfg.service_name.clone(),
-                    mode: cfg.mode,
+                    mode: cfg.mode.clone(),
                     target_type,
                 })
         })
@@ -878,8 +982,8 @@ pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), ModeError> 
 pub struct IncompatibleTarget {
     /// Name of the offending service.
     pub service: Arc<str>,
-    /// Mode the service was configured to run in.
-    pub mode: ServiceMode,
+    /// Name of the mode the service was configured to run in.
+    pub mode: Arc<str>,
     /// Kind of the target the service resolved to.
     pub target_type: TargetType,
 }
@@ -978,9 +1082,14 @@ impl UpConfig {
         let mut errors = Vec::new();
         let mut assembled = Vec::new();
         for (service_name, service) in self.services.iter().sorted_by_key(|(name, _)| *name) {
+            // An unknown mode is reported by `verify`.
+            let Ok(mode) = ModeConfig::named(&self.modes, &service.default_mode) else {
+                continue;
+            };
             let subprocess = match service.clone().assemble(
                 service_name,
                 base.clone(),
+                &mode,
                 key.clone(),
                 &mut resolved_targets,
                 up_context.clone(),
@@ -1039,13 +1148,17 @@ impl UpConfig {
             .map_or(Ok(()), Err)
     }
 
-    /// Force services to run in `mode`, discarding the `default_mode` set in the config file.
+    /// Force services to run in the mode named `mode`, discarding the `default_mode` set in the
+    /// config file. Fails if no such mode exists.
     ///
     /// Meant for the `--mode` flag, so it should be called *after* [`Self::select_services`].
-    pub fn override_mode(&mut self, mode: ServiceMode) {
+    pub fn override_mode(&mut self, mode: &str) -> Result<(), ModeNameError> {
+        ModeConfig::named(&self.modes, mode)?;
+        let mode = Arc::<str>::from(mode);
         for svc in self.services.values_mut() {
-            svc.default_mode = mode;
+            svc.default_mode = mode.clone();
         }
+        Ok(())
     }
 
     /// Restrict which services will be launched.
@@ -1101,19 +1214,29 @@ impl UpConfig {
         context: &mut ConfigContext,
     ) -> Result<Vec<SubprocessCfg>, UpError> {
         let base_config = self.common.base_config(context)?;
+        let modes = self.modes;
 
         self.services
             .into_iter()
             .map(|(service_name, svc)| {
-                let mode = svc.default_mode;
-                if mode == ServiceMode::Replace && svc.http_filter.is_filter_set() {
-                    eprintln!(
-                        "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
-                    );
+                let mode = ModeConfig::named(&modes, &svc.default_mode)?;
+                if mode.incoming == ServiceMode::Replace {
+                    if svc.http_filter.is_filter_set() {
+                        eprintln!(
+                            "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
+                        );
+                    }
+                    if mode.queues.is_some() {
+                        eprintln!(
+                            "{service_name}: `queues` of mode `{}` is ignored with `incoming: replace`, all queue messages are handled locally",
+                            svc.default_mode
+                        );
+                    }
                 }
                 svc.assemble(
                     &service_name,
                     base_config.clone(),
+                    &mode,
                     key.clone(),
                     resolved_targets,
                     up_context.clone(),
@@ -1140,6 +1263,33 @@ impl UpConfig {
             .iter()
             .filter_map(move |(name, svc)| svc.resolve_target(name, up_context.clone()).err())
     }
+}
+
+/// A mode name that `mirrord up` can't use.
+#[derive(Debug, Error, Diagnostic)]
+pub enum ModeNameError {
+    /// A custom mode takes the name of a built-in one.
+    #[error("`modes.{0}` conflicts with the built-in `{0}` mode")]
+    #[diagnostic(help("Rename the mode: `split`, `replace` and `mirror` are reserved."))]
+    Builtin(Arc<str>),
+
+    /// A mode was selected that is neither built-in nor defined under `modes`.
+    #[error(
+        "unknown mode `{name}`{}",
+        suggestion
+            .as_ref()
+            .map(|closest| format!("; did you mean `{closest}`?"))
+            .unwrap_or_default()
+    )]
+    #[diagnostic(help("Known modes: {}", known.join(", ")))]
+    Unknown {
+        /// The name that was selected.
+        name: Arc<str>,
+        /// The closest known name, if one is close enough.
+        suggestion: Option<Arc<str>>,
+        /// Every mode that can be selected.
+        known: Vec<Arc<str>>,
+    },
 }
 
 /// Error produced by [`UpConfig::select_services`].
@@ -1215,6 +1365,7 @@ impl CollectAnalytics for &UpConfig {
         let mut count_mode_split: u32 = 0;
         let mut count_mode_replace: u32 = 0;
         let mut count_mode_mirror: u32 = 0;
+        let mut count_mode_custom: u32 = 0;
 
         for svc in self.services.values() {
             let ServiceConfig {
@@ -1235,13 +1386,15 @@ impl CollectAnalytics for &UpConfig {
             if *env != EnvConfig::default() {
                 count_env += 1;
             }
-            if *default_mode != ServiceMode::default() {
+            if *default_mode != default_mode_name() {
                 count_default_mode += 1;
             }
-            match default_mode {
-                ServiceMode::Split => count_mode_split += 1,
-                ServiceMode::Replace => count_mode_replace += 1,
-                ServiceMode::Mirror => count_mode_mirror += 1,
+            // Custom mode names are the user's, so they are only counted.
+            match ServiceMode::from_name(default_mode) {
+                Some(ServiceMode::Split) => count_mode_split += 1,
+                Some(ServiceMode::Replace) => count_mode_replace += 1,
+                Some(ServiceMode::Mirror) => count_mode_mirror += 1,
+                None => count_mode_custom += 1,
             }
             if http_filter.is_filter_set() {
                 count_http_filter += 1;
@@ -1293,7 +1446,9 @@ impl CollectAnalytics for &UpConfig {
         modes.add("split", count_mode_split);
         modes.add("replace", count_mode_replace);
         modes.add("mirror", count_mode_mirror);
+        modes.add("custom", count_mode_custom);
         analytics.add("modes", modes);
+        analytics.add("num_custom_modes", self.modes.len());
     }
 }
 
@@ -1480,7 +1635,7 @@ mod tests {
             svc.env.r#override.as_ref().unwrap()["NODE_ENV"],
             "development"
         );
-        assert_eq!(svc.default_mode, ServiceMode::Split);
+        assert_eq!(svc.default_mode, Arc::<str>::from(ServiceMode::Split));
         assert_eq!(
             svc.http_filter.header_filter.as_deref(),
             Some("x-session: local")
@@ -1792,7 +1947,10 @@ mod tests {
                   command: ["echo"]
             "#,
         );
-        assert_eq!(config.services["svc"].default_mode, ServiceMode::Replace);
+        assert_eq!(
+            config.services["svc"].default_mode,
+            Arc::<str>::from(ServiceMode::Replace)
+        );
     }
 
     #[test]
@@ -1889,28 +2047,283 @@ mod tests {
             "#,
         );
 
-        config.override_mode(ServiceMode::Replace);
+        config.override_mode(ServiceMode::Replace.into()).unwrap();
         assert!(
             config
                 .services
                 .values()
-                .all(|svc| svc.default_mode == ServiceMode::Replace)
+                .all(|svc| svc.default_mode == Arc::<str>::from(ServiceMode::Replace))
         );
 
-        config.override_mode(ServiceMode::Split);
+        config.override_mode(ServiceMode::Split.into()).unwrap();
         assert!(
             config
                 .services
                 .values()
-                .all(|svc| svc.default_mode == ServiceMode::Split)
+                .all(|svc| svc.default_mode == Arc::<str>::from(ServiceMode::Split))
         );
 
-        config.override_mode(ServiceMode::Mirror);
+        config.override_mode(ServiceMode::Mirror.into()).unwrap();
         assert!(
             config
                 .services
                 .values()
-                .all(|svc| svc.default_mode == ServiceMode::Mirror)
+                .all(|svc| svc.default_mode == Arc::<str>::from(ServiceMode::Mirror))
+        );
+    }
+
+    // -- Custom modes --
+
+    /// The config `mirrord up` generates for the one service of `yaml`.
+    fn only_config(yaml: &str) -> LayerConfig {
+        parse(yaml)
+            .service_configs(
+                &EnvKey::Provided("key".to_owned()),
+                &mut HashMap::new(),
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
+            .unwrap()
+            .remove(0)
+            .config
+    }
+
+    /// `incoming` and `queues` set the incoming and queue modes; `queues` defaults to stealing
+    /// whatever `incoming` is, and a mode without `incoming` is `split`.
+    #[rstest]
+    #[case::empty("{}", IncomingMode::Steal, QueueMode::Steal)]
+    #[case::split_queues("{ queues: split }", IncomingMode::Steal, QueueMode::Steal)]
+    #[case::mirror_queues("{ queues: mirror }", IncomingMode::Steal, QueueMode::Mirror)]
+    #[case::mirror("{ incoming: mirror }", IncomingMode::Mirror, QueueMode::Steal)]
+    #[case::mirror_mirror_queues(
+        "{ incoming: mirror, queues: mirror }",
+        IncomingMode::Mirror,
+        QueueMode::Mirror
+    )]
+    fn custom_mode_sets_incoming_and_queue_modes(
+        #[case] mode: &str,
+        #[case] incoming: IncomingMode,
+        #[case] queues: QueueMode,
+    ) {
+        let config = only_config(&format!(
+            r#"
+            modes:
+              custom: {mode}
+            services:
+              svc:
+                default_mode: custom
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        ));
+
+        assert_eq!(config.feature.network.incoming.mode, incoming);
+        assert_eq!(
+            config
+                .feature
+                .network
+                .incoming
+                .http_filter
+                .header_filter
+                .as_deref(),
+            Some("baggage: .*mirrord-session=key.*")
+        );
+        assert!(
+            config
+                .feature
+                .split_queues
+                .is_all_wildcard_with_mode(&EnvKey::Provided("key".to_owned()), queues)
+        );
+    }
+
+    /// A custom mode requests DB branching like the built-in mode its `incoming` names: `split`
+    /// and `mirror` ask for every `MirrordSplitConfig` entry, `replace` for none. `queues` plays
+    /// no part.
+    #[rstest]
+    #[case::split("{ incoming: split, queues: mirror }", true)]
+    #[case::mirror("{ incoming: mirror, queues: split }", true)]
+    #[case::replace("{ incoming: replace, queues: split }", false)]
+    fn custom_mode_db_branching_follows_incoming(#[case] mode: &str, #[case] branches: bool) {
+        let service = parse(&format!(
+            r#"
+            modes:
+              custom: {mode}
+            services:
+              svc:
+                default_mode: custom
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        ))
+        .service_configs(
+            &EnvKey::Provided("key".to_owned()),
+            &mut HashMap::new(),
+            UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
+        )
+        .unwrap()
+        .remove(0);
+
+        assert_eq!(service.default_db_branches, branches);
+        assert_eq!(
+            service
+                .config
+                .feature
+                .db_branches
+                .split_config_request()
+                .is_some_and(SplitConfigDbBranches::is_all),
+            branches
+        );
+        assert_eq!(
+            service.config.feature.db_branches.is_empty(),
+            branches.not()
+        );
+    }
+
+    /// `incoming: replace` copies the target like built-in `replace`, and splits no queues even
+    /// when the mode sets `queues`.
+    #[test]
+    fn custom_replace_mode_ignores_queues() {
+        let config = only_config(
+            r#"
+            modes:
+              takeover:
+                incoming: replace
+                queues: mirror
+            services:
+              svc:
+                default_mode: takeover
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        assert!(config.feature.copy_target.enabled);
+        assert!(config.feature.copy_target.scale_down);
+        assert_eq!(config.feature.split_queues, SplitQueuesConfig::default());
+    }
+
+    /// `config_patch` is applied over what the mode sets.
+    #[test]
+    fn config_patch_overrides_custom_mode() {
+        let config = only_config(
+            r#"
+            modes:
+              custom:
+                queues: mirror
+            services:
+              svc:
+                default_mode: custom
+                target:
+                  path: "deployment/web"
+                config_patch:
+                  feature:
+                    network:
+                      incoming:
+                        mode: mirror
+                    split_queues: []
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        assert_eq!(config.feature.network.incoming.mode, IncomingMode::Mirror);
+        assert_eq!(config.feature.split_queues, SplitQueuesConfig::default());
+    }
+
+    #[test]
+    fn override_mode_selects_custom_modes() {
+        let mut config = parse(
+            r#"
+            modes:
+              custom: {}
+            services:
+              a:
+                default_mode: replace
+                run:
+                  command: ["echo"]
+              b:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        config.override_mode("custom").unwrap();
+        assert!(
+            config
+                .services
+                .values()
+                .all(|svc| &*svc.default_mode == "custom")
+        );
+    }
+
+    /// An unknown `--mode` leaves every service's mode as it was.
+    #[test]
+    fn override_mode_rejects_unknown_modes() {
+        let mut config = parse(
+            r#"
+            modes:
+              custom: {}
+            services:
+              a:
+                default_mode: replace
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let ModeNameError::Unknown { name, known, .. } = config.override_mode("bogus").unwrap_err()
+        else {
+            panic!("expected an unknown mode error");
+        };
+        assert_eq!(&*name, "bogus");
+        assert!(known.iter().any(|mode| &**mode == "custom"));
+        assert_eq!(&*config.services["a"].default_mode, "replace");
+    }
+
+    /// `incoming: replace` on a targetless service fails the target check like built-in
+    /// `replace`, naming the custom mode.
+    #[test]
+    fn verify_services_rejects_targetless_custom_replace_mode() {
+        let config = parse(
+            r#"
+            modes:
+              takeover:
+                incoming: replace
+            services:
+              svc:
+                default_mode: takeover
+                target: none
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let errors = config
+            .verify_services(&EnvKey::Provided("key".to_owned()))
+            .unwrap();
+        let [ServiceError::IncompatibleTarget(target)] = errors.as_slice() else {
+            panic!("expected one incompatible target, got {errors:?}");
+        };
+        assert_eq!(&*target.mode, "takeover");
+        assert_eq!(target.target_type, TargetType::Targetless);
+    }
+
+    #[test]
+    fn unknown_mode_field_is_rejected() {
+        let err = serde_saphyr::from_str::<UpConfig>(
+            "modes:\n  custom:\n    incomming: mirror\nservices:\n  svc:\n    run:\n      command: [x]\n",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown field `incomming`"),
+            "{err}"
         );
     }
 
@@ -2463,21 +2876,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn error_invalid_mode() {
-        let result: Result<UpConfig, _> = serde_saphyr::from_str(
-            r#"
-            services:
-              svc:
-                default_mode: bogus
-                run:
-                  exec:
-                    command: ["echo"]
-            "#,
-        );
-        assert!(result.is_err());
-    }
-
     /// A typo of `target: none` gets `none` added to the message as a hint.
     #[rstest]
     #[case::typo("nnoe", "; did you mean `none`?")]
@@ -2547,9 +2945,39 @@ mod tests {
                     "split": 1,
                     "replace": 0,
                     "mirror": 0,
+                    "custom": 0,
                 },
+                "num_custom_modes": 0,
             }),
         );
+    }
+
+    /// Services in custom modes are counted, but the user's mode names are never sent.
+    #[test]
+    fn analytics_counts_custom_modes_without_their_names() {
+        let config = parse(
+            r#"
+            modes:
+              secret-name: {}
+              unused: {}
+            services:
+              a:
+                default_mode: secret-name
+                run:
+                  command: ["echo"]
+              b:
+                default_mode: mirror
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let analytics = collect(&config);
+        assert_eq!(analytics["modes"]["custom"], 1);
+        assert_eq!(analytics["modes"]["mirror"], 1);
+        assert_eq!(analytics["num_custom_modes"], 2);
+        assert_eq!(analytics["config_fields_used"]["default_mode"], 2);
+        assert!(analytics.to_string().contains("secret-name").not());
     }
 
     #[test]

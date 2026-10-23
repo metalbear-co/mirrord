@@ -321,16 +321,16 @@ fn explain_up(segments: &[&str]) -> Option<(OptionDocs, Option<String>)> {
                 None => (layer.plan, layer.plan_by_alternative),
                 Some(_) => (up.plan, up.plan_by_alternative),
             };
+            // An up setting with a type of its own takes values of its own, e.g. a mode name in
+            // `default_mode` rather than the `incoming.mode` it maps onto.
+            let (types, allowed_values) = match up.types.is_empty() {
+                true => (layer.types, layer.allowed_values),
+                false => (up.types, up.allowed_values),
+            };
             OptionDocs {
                 description: up.description.or(layer.description),
-                types: match up.types.is_empty() {
-                    true => layer.types,
-                    false => up.types,
-                },
-                allowed_values: match up.allowed_values.is_empty() {
-                    true => layer.allowed_values,
-                    false => up.allowed_values,
-                },
+                types,
+                allowed_values,
                 default: up.default.or(layer.default),
                 plan,
                 plan_by_alternative,
