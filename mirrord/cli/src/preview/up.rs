@@ -26,7 +26,9 @@ use mirrord_operator::{
     crd::NewOperatorFeature,
 };
 use mirrord_progress::{Progress, ProgressTracker};
-use mirrord_up::{PreviewImageSource, SubprocessCfg, UpError, load_up_config, preview_image_env};
+use mirrord_up::{
+    PreviewImageSource, SubprocessCfg, UpError, load_preview_up_config, preview_image_env,
+};
 
 use super::{
     PreparedPreview, create_preview_api, load_manifests, manifest_sources, preview_namespace,
@@ -113,7 +115,7 @@ async fn run_preview_up(
         Some(path) if path != Path::new(DEFAULT_PREVIEW_CONFIG_FILE) => path,
         _ => Path::new("mirrord-up.yaml"),
     };
-    let mut up_config = match load_up_config(path, &key) {
+    let mut up_config = match load_preview_up_config(path, &key) {
         Err(UpError::Io(error)) if error.kind() == ErrorKind::NotFound => {
             return Err(CliError::PreviewUpFileNotFound(path.to_owned()));
         }

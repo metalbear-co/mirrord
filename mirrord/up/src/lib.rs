@@ -375,6 +375,15 @@ fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
     )
 }
 
+/// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up`.
+///
+/// Unlike [`load_up_config`], it doesn't check the services' `run`: `mirrord preview up` never
+/// launches their local commands, so a `run.directory` that only exists on a developer's machine
+/// must not stop it (e.g. in CI).
+pub fn load_preview_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
+    template(&std::fs::read_to_string(path)?, key)
+}
+
 /// Load, parse, and resolve local paths in a `mirrord-up.yaml` configuration file.
 pub fn load_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
     let content = std::fs::read_to_string(path)?;
