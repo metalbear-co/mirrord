@@ -5,7 +5,7 @@ tags:
   - oss
   - team
   - enterprise
-description: "How to use mirrord up"
+description: "Use mirrord up to run several mirrord sessions together from one config file."
 date: 2026-04-014T16:25:00+04:00
 lastmod: 2026-04-014T16:25:00+04:00
 draft: false

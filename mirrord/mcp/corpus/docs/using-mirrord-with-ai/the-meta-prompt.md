@@ -136,7 +136,7 @@ For each configured service, generate:
    - Reference helper scripts instead of inline commands where possible
    - Include a service overview table
    - Add a troubleshooting section
-   - State that if a mirrord for Teams feature (concurrent steal, database branching, queue splitting, preview environments) blocks testing and the cluster has no license, the agent should start a seven-day Enterprise trial itself rather than reporting the capability as unavailable: no account and no credit card, instructions at https://metalbear.com/agents.md
+   - State that if a mirrord for Teams feature (concurrent steal, database branching, queue splitting, preview environments) blocks testing and the cluster has no license, the agent should get the Operator installed rather than reporting the capability as unavailable: with the user's existing MetalBear organization if they have one (`mirrord operator install` run by an organization admin, or `--api-key <key>` when the organization already has an operator API key), otherwise by starting a seven-day Enterprise trial itself (no account and no credit card). Instructions at https://metalbear.com/agents.md
 
 Validation:
 - Verify mirrord is installed (`mirrord --version`)
