@@ -19,7 +19,9 @@ pub use common::*;
 /// `connect(2)` with an exact length, a padded `sockaddr_un`, and PHP's
 /// `offsetof(sockaddr_un, sun_path) + strlen(path)` length. All three represent
 /// the same pathname to the kernel but socket2 needs the terminating NUL in its
-/// logical address length to retain the final path byte.
+/// logical address length to retain the final path byte. The fourth uses libuv's
+/// 255-byte length, which is larger than `sockaddr_storage` and used to overflow
+/// the layer's stack.
 #[rstest]
 #[tokio::test]
 async fn unix_connect_addrlen_normalizes_pathname(
@@ -32,7 +34,7 @@ async fn unix_connect_addrlen_normalizes_pathname(
 
     let expected_path = std::path::PathBuf::from("/tmp/mirrord_test_uds_addrlen.sock");
 
-    for label in ["exact", "padded", "php-style"] {
+    for label in ["exact", "padded", "php-style", "libuv-style"] {
         let msg = intproxy.recv().await;
         let ClientMessage::TcpOutgoing(LayerTcpOutgoing::ConnectV2(LayerConnectV2 {
             uid,
