@@ -46,6 +46,9 @@ pub struct FolderStep {
     /// The folders picked so far, listed first in [`Place::Projects`] so each can be unpicked
     /// there even when it was found somewhere else.
     picked: Vec<PathBuf>,
+    /// Rows above everything else in [`Place::Projects`], such as earlier runs to run again; the
+    /// owner builds them and acts on them.
+    top: Vec<Choice>,
 }
 
 impl FolderStep {
@@ -56,6 +59,7 @@ impl FolderStep {
             recent,
             found: None,
             picked: Vec::new(),
+            top: Vec::new(),
         };
         step.refresh();
         step
@@ -70,6 +74,17 @@ impl FolderStep {
         if picked != self.picked {
             self.picked = picked;
             self.refresh();
+        }
+    }
+
+    /// Sets the rows listed first in the project list, with the cursor on the first of them: the
+    /// newest run to run again is the likeliest pick.
+    pub fn set_top(&mut self, top: Vec<Choice>) {
+        let first = top.first().map(|choice| choice.id.clone());
+        self.top = top;
+        self.refresh();
+        if let Some(id) = first {
+            self.list.focus(&id);
         }
     }
 
@@ -97,18 +112,16 @@ impl FolderStep {
                         dirs.push((dir.clone(), section));
                     }
                 }
-                let mut choices: Vec<Choice> = dirs
-                    .into_iter()
-                    .map(|(dir, section)| {
-                        let recent = self.recent.contains(&dir);
-                        folder_choice(
-                            &dir,
-                            compress_home(&dir.display().to_string()),
-                            recent,
-                            Some(section),
-                        )
-                    })
-                    .collect();
+                let mut choices: Vec<Choice> = self.top.clone();
+                choices.extend(dirs.into_iter().map(|(dir, section)| {
+                    let recent = self.recent.contains(&dir);
+                    folder_choice(
+                        &dir,
+                        compress_home(&dir.display().to_string()),
+                        recent,
+                        Some(section),
+                    )
+                }));
                 choices.push(Choice {
                     id: BROWSE_HOME.to_owned(),
                     section: Some("browse"),

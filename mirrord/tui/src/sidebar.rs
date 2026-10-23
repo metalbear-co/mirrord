@@ -37,10 +37,29 @@ pub struct Item {
     pub active: bool,
 }
 
+/// The "only my sessions" switch, as the sidebar shows it.
+#[derive(Clone, Copy, Debug)]
+pub struct Switch {
+    pub on: bool,
+    /// How many mirrord sessions run on this machine.
+    pub sessions: usize,
+}
+
+/// What a click in the sidebar landed on.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Click {
+    /// A screen, by its index among the items.
+    Screen(usize),
+    /// The "only my sessions" switch.
+    Switch,
+}
+
 #[derive(Default)]
 pub struct Sidebar {
     /// Where each item landed in the last frame, by its index.
     hits: Vec<(Rect, usize)>,
+    /// Where the switch landed.
+    switch: Option<Rect>,
 }
 
 impl Sidebar {
@@ -55,6 +74,7 @@ impl Sidebar {
         frame: &mut Frame,
         area: Rect,
         items: &[Item],
+        switch: Switch,
         footer: Vec<Line<'static>>,
     ) {
         let folded = area.width < WIDE;
@@ -79,6 +99,9 @@ impl Sidebar {
             )),
             Line::raw(""),
         ];
+        self.switch = Some(Rect::new(area.x, inner.y + 2, area.width, 1));
+        lines.push(switch_line(switch, folded, width));
+        lines.push(Line::raw(""));
         self.hits.clear();
         let mut group = None;
         for (index, item) in items.iter().enumerate() {
@@ -112,17 +135,45 @@ impl Sidebar {
         frame.render_widget(Paragraph::new(lines), inner);
     }
 
-    /// The index of the item a left click landed on.
-    pub fn clicked(&self, mouse: &MouseEvent) -> Option<usize> {
+    /// What a left click landed on: a screen or the switch.
+    pub fn clicked(&self, mouse: &MouseEvent) -> Option<Click> {
         if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
             return None;
         }
         let at = Position::new(mouse.column, mouse.row);
+        if self.switch.is_some_and(|area| area.contains(at)) {
+            return Some(Click::Switch);
+        }
         self.hits
             .iter()
             .find(|(area, _)| area.contains(at))
-            .map(|(_, index)| *index)
+            .map(|(_, index)| Click::Screen(*index))
     }
+}
+
+/// The switch's row: `○ everything` while every resource shows, `◉ only mine · 2` (mint) while
+/// screens narrow to the sessions running here, amber when none does, so the empty lists that
+/// follow are explained; `m` at the right edge says how to flip it.
+fn switch_line(switch: Switch, folded: bool, width: usize) -> Line<'static> {
+    let (sign, text, color) = match (switch.on, switch.sessions) {
+        (false, _) => ("\u{25cb}", "everything".to_owned(), theme::GREY),
+        (true, 0) => ("\u{25c9}", "only mine \u{b7} none".to_owned(), theme::AMBER),
+        (true, count) => ("\u{25c9}", format!("only mine \u{b7} {count}"), theme::MINT),
+    };
+    let style = Style::default().fg(color).add_modifier(if switch.on {
+        Modifier::BOLD
+    } else {
+        Modifier::empty()
+    });
+    if folded {
+        return Line::from(vec![Span::raw(" "), Span::styled(sign, style)]);
+    }
+    let text_width = width.saturating_sub(5);
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(format!("{sign} {text:<text_width$}"), style),
+        Span::styled("m ", theme::title()),
+    ])
 }
 
 /// One screen's row: the indigo bar when it is current, its icon, its name and its count at the

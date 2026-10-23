@@ -8,11 +8,13 @@
 use std::{io::stdout, sync::Arc};
 
 use ratatui::crossterm::{
+    cursor::SetCursorStyle,
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
         KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
+    terminal::supports_keyboard_enhancement,
 };
 
 mod app;
@@ -78,16 +80,33 @@ pub async fn run(telemetry: Option<TelemetrySession>) -> anyhow::Result<()> {
     //
     // Mouse capture lets lists take clicks, double-clicks and the wheel. The terminal's own text
     // selection still works with Option (macOS) or Shift held, as in other mouse-aware TUIs.
-    let _ = execute!(stdout(), EnableBracketedPaste, EnableMouseCapture);
+    // Text fields put the terminal's own cursor where typing goes; a blinking bar reads as "type
+    // here" the way it does in any text box.
+    let _ = execute!(
+        stdout(),
+        EnableBracketedPaste,
+        EnableMouseCapture,
+        SetCursorStyle::BlinkingBar
+    );
     // `ratatui::init` installed a hook that restores the terminal; chain onto it so a panic cannot
     // leave bracketed paste enabled in the user's shell either.
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(stdout(), DisableBracketedPaste, DisableMouseCapture);
+        let _ = execute!(
+            stdout(),
+            DisableBracketedPaste,
+            DisableMouseCapture,
+            SetCursorStyle::DefaultUserShape
+        );
         // The panic message is written to stderr, which is currently a pipe into the log.
         stderr::restore();
         hook(info);
     }));
+
+    // Asked once, before the event loop starts reading: whether the terminal speaks the kitty
+    // keyboard protocol decides how text fields read Option and Cmd on arrows. A terminal that
+    // does not answer within crossterm's timeout is taken not to.
+    kit::text_input::set_keyboard_protocol(supports_keyboard_enhancement().unwrap_or(false));
 
     let result = app.run(&mut terminal).await;
 
@@ -95,7 +114,12 @@ pub async fn run(telemetry: Option<TelemetrySession>) -> anyhow::Result<()> {
     // carries are the one part of this that is allowed to go missing.
     telemetry.closed();
 
-    let _ = execute!(stdout(), DisableBracketedPaste, DisableMouseCapture);
+    let _ = execute!(
+        stdout(),
+        DisableBracketedPaste,
+        DisableMouseCapture,
+        SetCursorStyle::DefaultUserShape
+    );
     let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
 
     ratatui::restore();

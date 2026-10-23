@@ -46,7 +46,7 @@ use crate::{
 mod input;
 mod panel;
 mod pty;
-mod sessions;
+pub(crate) mod sessions;
 
 /// Lines of history the emulator keeps for `C-b PageUp`.
 const SCROLLBACK: usize = 1000;

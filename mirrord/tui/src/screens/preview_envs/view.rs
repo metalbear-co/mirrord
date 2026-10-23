@@ -21,7 +21,7 @@ use super::{
 use crate::{
     helpers::{centered, ellipsize},
     kit::{
-        panel, state_view,
+        panel, session_scope, state_view,
         tree::{Fold, TreeRow},
     },
     theme,
@@ -135,7 +135,10 @@ pub fn flatten(tree: &PreviewEnvsTree, ui: &UiState) -> Vec<Row> {
             // sessions' keys match.
             let matching: Vec<&Arc<PreviewSession>> = envs
                 .iter()
-                .filter(|session| session.spec.key.contains(filter))
+                .filter(|session| {
+                    session.spec.key.contains(filter)
+                        && session_scope::keeps(&ui.mine, session.as_ref())
+                })
                 .collect();
             if matching.is_empty() {
                 continue;
@@ -214,7 +217,8 @@ pub fn draw(frame: &mut Frame, area: Rect, tree: &PreviewEnvsTree, ui: &mut UiSt
     let [body, bar] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(bar_height)]).areas(area);
 
-    let block = panel::block("previews", Some(&count), None, None);
+    let note = ui.mine.as_ref().map(|_| "only mine");
+    let block = panel::block("previews", Some(&count), note, None);
     let inner = block.inner(body);
     frame.render_widget(block, body);
 
@@ -228,10 +232,12 @@ pub fn draw(frame: &mut Frame, area: Rect, tree: &PreviewEnvsTree, ui: &mut UiSt
 
     match ui.reconcile_selection(&rows) {
         None => {
-            let message = if ui.filter.is_empty() {
-                "No preview environments"
-            } else {
-                "No preview environments match the filter"
+            let message = match (ui.filter.is_empty(), &ui.mine) {
+                (true, Some(_)) => {
+                    "No previews with a session key running here - m shows everything"
+                }
+                (true, None) => "No preview environments",
+                (false, _) => "No preview environments match the filter",
             };
             state_view::draw_message(frame, inner, message, theme::muted());
         }

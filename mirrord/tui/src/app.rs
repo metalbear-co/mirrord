@@ -32,7 +32,7 @@ use crate::{
         preview_envs::PreviewEnvsScreen, queues::QueuesScreen, resources::ResourcesScreen,
         run::RunScreen, sessions::SessionsScreen, targets::TargetsScreen, terminal::TerminalScreen,
     },
-    sidebar::{Item, Sidebar},
+    sidebar::{Click, Item, Sidebar, Switch},
     status,
     telemetry::Telemetry,
     theme,
@@ -60,6 +60,7 @@ const GLOBAL_HINTS: &[Hint] = &[
     Hint::new("Tab / Shift+Tab", "next / previous screen"),
     Hint::new("c", "switch kube context"),
     Hint::new("n", "switch namespace"),
+    Hint::new("m", "only my sessions / everything"),
     Hint::new("e", "connection error details"),
     Hint::new("?", "this help"),
     Hint::new("q", "quit"),
@@ -131,10 +132,10 @@ pub struct App {
     quit: bool,
     scope: watch::Sender<Scope>,
     client: watch::Sender<Option<anyhow::Result<Client>>>,
-    #[expect(unused, reason = "Not yet implemented.")]
-    local_sessions: watch::Sender<Option<LocalSessions>>,
-    #[expect(unused, reason = "Not yet implemented.")]
+    /// "Only my sessions" (`m`): whether screens narrow to what this machine's sessions made.
     local_only: watch::Sender<bool>,
+    /// The sessions running here, for the sidebar's switch.
+    local_sessions: watch::Receiver<Option<LocalSessions>>,
     redraw: Arc<Notify>,
     abort_connect: Option<AbortHandle>,
     /// A context or namespace picker floating over whatever screen is
@@ -167,11 +168,14 @@ impl App {
         let local_only = watch::Sender::new(false);
 
         let redraw = Arc::new(Notify::new());
+        // The registry watch owns the sender; screens follow it through the context.
+        let local_sessions_rx = local_sessions.subscribe();
+        tokio::spawn(LocalSessions::watch(local_sessions, redraw.clone()));
 
         let context = Context::new(
             scope.subscribe(),
             client.subscribe(),
-            local_sessions.subscribe(),
+            local_sessions_rx.clone(),
             local_only.subscribe(),
             redraw.clone(),
             telemetry.clone(),
@@ -192,8 +196,8 @@ impl App {
             quit: false,
             scope,
             client,
-            local_sessions,
             local_only,
+            local_sessions: local_sessions_rx,
             redraw,
             abort_connect: None,
             picker: None,
@@ -729,7 +733,16 @@ impl App {
             })
             .collect();
         let footer = status::sidebar_footer(&scope, &client, sidebar_area.width.saturating_sub(2));
-        self.sidebar.draw(frame, sidebar_area, &items, footer);
+        let switch = Switch {
+            on: *self.local_only.borrow(),
+            sessions: self
+                .local_sessions
+                .borrow()
+                .as_ref()
+                .map_or(0, LocalSessions::count),
+        };
+        self.sidebar
+            .draw(frame, sidebar_area, &items, switch, footer);
         frame.render_widget(Paragraph::new(hints::key_bar(&self.key_hints())), keys_area);
 
         // What the status bar had to cut short, on request. Never over a picker, which owns the
@@ -746,7 +759,7 @@ impl App {
             self.draw_quit_confirm(frame, body, confirm);
         }
 
-        if let Some(bar) = &self.command_bar {
+        if let Some(bar) = &mut self.command_bar {
             bar.draw(frame, command_area);
         }
 
@@ -780,10 +793,15 @@ impl App {
             && self.command_bar.is_none()
             && self.quit_confirm.is_none()
             && !self.help
-            && let Some(index) = self.sidebar.clicked(mouse)
+            && let Some(click) = self.sidebar.clicked(mouse)
         {
-            if let Some(screen) = ActiveScreen::VARIANTS.get(index) {
-                self.go_to(*screen);
+            match click {
+                Click::Switch => self.toggle_mine(),
+                Click::Screen(index) => {
+                    if let Some(screen) = ActiveScreen::VARIANTS.get(index) {
+                        self.go_to(*screen);
+                    }
+                }
             }
             return;
         }
@@ -920,6 +938,7 @@ impl App {
                 self.open_command_palette();
             }
             KeyCode::Char(':') => self.open_command_bar(),
+            KeyCode::Char('m') => self.toggle_mine(),
             KeyCode::Char('?') => self.help = true,
             // Only worth opening over a failure - with nothing to explain, `e` is free for the
             // screens to use.
@@ -942,6 +961,12 @@ impl App {
 }
 
 impl App {
+    /// `m`, or a click on the sidebar's switch: every screen shows only what the sessions running
+    /// on this machine made, or everything again.
+    fn toggle_mine(&mut self) {
+        self.local_only.send_modify(|on| *on = !*on);
+    }
+
     /// Moves to the next or previous screen, wrapping around. The Terminal is left out: its
     /// shell takes every key, Tab included, so cycling into it would leave no way to cycle out.
     /// `:term` reaches it.

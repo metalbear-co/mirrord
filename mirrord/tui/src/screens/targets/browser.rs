@@ -25,7 +25,10 @@ use tokio::sync::Notify;
 use crate::{
     context::Context,
     helpers::ellipsize,
-    kit::{panel, text_input::TextInput},
+    kit::{
+        panel,
+        text_input::{FieldLook, TextInput},
+    },
     screens::targets::keys,
     theme,
 };
@@ -300,6 +303,11 @@ impl Browser {
         }
     }
 
+    /// Whether the filter has the keyboard, so modified arrows edit it rather than switch panes.
+    pub fn is_typing(&self) -> bool {
+        self.filter_active
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> BrowserOutcome {
         if self.filter_active {
             match key.code {
@@ -484,17 +492,18 @@ impl Browser {
                 1 => "1 hit".to_owned(),
                 count => format!("{count} hits"),
             };
-            let mut spans = vec![Span::styled("/", Style::default().fg(theme::INDIGO))];
-            spans.extend(self.filter.spans(
-                Style::default().fg(theme::LAVENDER),
-                Style::default().fg(theme::INDIGO),
-                self.filter_active,
-            ));
-            spans.push(Span::styled(
-                format!("  {hits}"),
-                Style::default().fg(theme::GREY).italic(),
-            ));
-            frame.render_widget(Line::from(spans), filter_area);
+            let active = self.filter_active;
+            self.filter.render(
+                frame,
+                filter_area,
+                FieldLook {
+                    prefix: "/",
+                    placeholder: "type to filter",
+                    note: &hits,
+                    focused: active,
+                    ..FieldLook::default()
+                },
+            );
         }
 
         if rows.is_empty() {

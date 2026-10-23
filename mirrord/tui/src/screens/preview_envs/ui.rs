@@ -5,7 +5,10 @@
 use kube::ResourceExt;
 
 use super::view::Row;
-use crate::kit::tree::{TreeId, TreeNav};
+use crate::{
+    kit::tree::{TreeId, TreeNav},
+    local_sessions::LocalSessions,
+};
 
 pub type TargetKey = (String, String);
 
@@ -146,6 +149,9 @@ pub struct UiState {
     /// `mode` is `Filtering`, so the visible list filters as you type.
     pub filter: String,
     pub scroll_offset: usize,
+    /// "Only my sessions" (`m`): the sessions to narrow to, or `None` for every preview. The
+    /// screen sets it before every draw from the interface-wide switch.
+    pub mine: Option<LocalSessions>,
 }
 
 impl UiState {

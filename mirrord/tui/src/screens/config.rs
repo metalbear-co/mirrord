@@ -5,7 +5,10 @@
 //! the config schema ([`crate::config_schema`]), so new options appear here without a change to
 //! this screen.
 
-use std::ops::ControlFlow;
+use std::{
+    ops::ControlFlow,
+    path::{Path, PathBuf},
+};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use mirrord_config::plan::Plan;
@@ -16,7 +19,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::Paragraph,
 };
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::{
     config_schema::{FIELDS, Field, Shape},
@@ -26,7 +29,7 @@ use crate::{
         hints::Hint,
         markdown, panel,
         search::{SearchBox, SearchOutcome},
-        text_input::TextInput,
+        text_input::{FieldLook, TextInput},
         tree::{TreeNav, TreeRow},
     },
     screens::Screen,
@@ -376,21 +379,38 @@ impl ConfigScreen {
         };
         let width = usize::from(area.width.saturating_sub(1)).max(1);
         let value = self.document.get(&row.path.0);
-        let mut lines = vec![Line::styled(row.path.dotted(), theme::title())];
+        let mut lines = vec![Line::styled(
+            ellipsize(&row.path.dotted(), width),
+            theme::title(),
+        )];
 
+        // The edit field sits under the option's name, framed and with the terminal's cursor in
+        // it, and the details follow below it.
+        let mut area = area;
         if let Some(editor) = self
             .editor
-            .as_ref()
+            .as_mut()
             .filter(|editor| editor.path == row.path)
         {
-            let mut spans = vec![Span::styled("edit  ", theme::warning())];
-            spans.extend(editor.input.spans(
-                Style::default().fg(theme::LAVENDER),
-                theme::title(),
-                true,
-            ));
-            lines.push(Line::raw(""));
-            lines.push(Line::from(spans));
+            let [name_area, field_area, rest] = Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(3),
+                Constraint::Fill(1),
+            ])
+            .spacing(1)
+            .areas(area);
+            frame.render_widget(Paragraph::new(lines.remove(0)), name_area);
+            editor.input.render(
+                frame,
+                field_area,
+                FieldLook {
+                    placeholder: "empty unsets it",
+                    label: Some("edit"),
+                    focused: true,
+                    ..FieldLook::default()
+                },
+            );
+            area = rest;
             match &editor.error {
                 Some(error) => lines.extend(
                     wrap(error, width)
@@ -472,10 +492,78 @@ impl ConfigScreen {
     }
 }
 
-impl Screen for ConfigScreen {
-    fn new(_context: Context) -> Self {
-        let dir = std::env::current_dir().unwrap_or_default();
+impl ConfigScreen {
+    /// The editor on the file at `path`, for editing a config from somewhere else, such as the
+    /// Run view's "All options". A new file starts with `seed`'s options, not saved yet.
+    pub fn for_file(path: PathBuf, seed: Map<String, Value>) -> Self {
+        let mut document = Document::open(path);
+        document.seed(seed);
+        Self::with_document(document)
+    }
 
+    /// The editor on a new config that is not a file yet (see [`Document::scratch`]).
+    pub fn scratch(path: PathBuf) -> Self {
+        Self::with_document(Document::scratch(path))
+    }
+
+    /// Sets the option at `path` (`["feature", "network", "incoming", "port_mapping"]`), for
+    /// values filled in on the user's behalf.
+    pub fn set(&mut self, path: &[&str], value: Value) {
+        let path: Vec<String> = path.iter().map(|part| (*part).to_owned()).collect();
+        self.document.set(&path, value);
+    }
+
+    /// Fills a new, empty config with `options`, as edits not saved yet.
+    pub fn seed(&mut self, options: Map<String, Value>) {
+        self.document.seed(options);
+    }
+
+    /// Whether the config is new and needs a name before it can be saved.
+    pub fn is_scratch(&self) -> bool {
+        self.document.is_scratch()
+    }
+
+    /// Whether there are edits not saved yet.
+    pub fn is_dirty(&self) -> bool {
+        self.document.is_dirty()
+    }
+
+    /// The options set so far.
+    pub fn options(&self) -> &Map<String, Value> {
+        self.document.options()
+    }
+
+    /// Saves the config to `path`, which it is from then on.
+    pub fn save_as(&mut self, path: PathBuf) -> Result<(), String> {
+        match self.document.save_as(path) {
+            Ok(()) => {
+                self.status = Status::Saved;
+                Ok(())
+            }
+            // Saved, but mirrord turns it down; the status says why, as with a plain save.
+            Err(SaveError::Rejected(reason)) => {
+                self.status = Status::Problem(reason);
+                Ok(())
+            }
+            Err(SaveError::Unreadable(reason)) => Err(format!("it could not be read ({reason})")),
+            Err(SaveError::Write(error)) => Err(error),
+        }
+    }
+
+    /// Saves the file if it has edits. A file mirrord rejects is still saved; the status says why.
+    pub fn save_if_edited(&mut self) -> Result<(), String> {
+        if !self.document.is_dirty() {
+            return Ok(());
+        }
+        self.save_changes()
+    }
+
+    /// The file being edited.
+    pub fn path(&self) -> &Path {
+        self.document.path()
+    }
+
+    fn with_document(document: Document) -> Self {
         // Folded to the top-level options, so the first view is short and every section opens on
         // request.
         let mut nav = TreeNav::default();
@@ -486,7 +574,7 @@ impl Screen for ConfigScreen {
         }
 
         Self {
-            document: Document::load(&dir),
+            document,
             nav,
             search: SearchBox::default(),
             set_only: false,
@@ -496,6 +584,13 @@ impl Screen for ConfigScreen {
             tree_scroll: 0,
             details_scroll: 0,
         }
+    }
+}
+
+impl Screen for ConfigScreen {
+    fn new(_context: Context) -> Self {
+        let dir = std::env::current_dir().unwrap_or_default();
+        Self::with_document(Document::load(&dir))
     }
 
     fn draw(&mut self, frame: &mut Frame, area: Rect) {
@@ -513,7 +608,8 @@ impl Screen for ConfigScreen {
         ])
         .areas(area);
 
-        let note = if self.document.is_dirty() {
+        // A new config already says it is not saved; "unsaved" is for edits to a file.
+        let note = if self.document.is_dirty() && !self.document.is_scratch() {
             format!("{} · unsaved", self.document.display_path())
         } else {
             self.document.display_path()

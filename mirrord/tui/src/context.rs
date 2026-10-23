@@ -56,13 +56,13 @@ impl Context {
     }
 
     /// The current local sessions, if any.
-    #[allow(unused, reason = "Nothing uses this yet.")]
+    #[allow(unused, reason = "Screens read the field directly.")]
     pub fn local_sessions(&mut self) -> &mut watch::Receiver<Option<LocalSessions>> {
         &mut self.local_sessions
     }
 
     /// Whether only local session resources should be shown.
-    #[allow(unused, reason = "Nothing uses this yet.")]
+    #[allow(unused, reason = "Screens read the field directly.")]
     pub fn local_only(&mut self) -> &mut watch::Receiver<bool> {
         &mut self.local_only
     }

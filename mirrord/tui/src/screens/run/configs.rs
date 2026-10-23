@@ -10,7 +10,7 @@
 
 use std::path::PathBuf;
 
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::screens::{
     config::document,
@@ -27,12 +27,9 @@ pub enum Setup {
         /// Branch every database the targets use (their team presets, when there are any).
         branch_databases: bool,
     },
-    /// A file from one folder's `.mirrord` directory. It applies to that folder; other folders
-    /// run with only their own requests.
-    File {
-        dir: PathBuf,
-        content: Map<String, Value>,
-    },
+    /// A file from a folder's `.mirrord` directory. Picking it loads its options into the config
+    /// step's option tree, where they apply to every folder.
+    File { path: PathBuf },
 }
 
 #[derive(Clone, Debug)]
@@ -149,17 +146,25 @@ pub fn options(
             }
             options.push(ConfigOption {
                 id: format!("file:{}", path.display()),
-                title: compress_home(&path.display().to_string()),
+                // The folder and the file, `checkout/.mirrord/with-db.json`: the whole path
+                // rarely fits, and the folder is what tells two `mirrord.json` apart.
+                title: format!(
+                    "{}/.mirrord/{}",
+                    dir.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    path.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                ),
                 detail,
-                keywords: leaves
-                    .iter()
-                    .map(|(key, value)| format!("{key} {value}"))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                setup: Setup::File {
-                    dir: dir.clone(),
-                    content,
-                },
+                keywords: format!("{} ", compress_home(&path.display().to_string()))
+                    + &leaves
+                        .iter()
+                        .map(|(key, value)| format!("{key} {value}"))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                setup: Setup::File { path: path.clone() },
             });
         }
     }

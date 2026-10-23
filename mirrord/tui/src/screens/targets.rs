@@ -683,9 +683,12 @@ impl Screen for TargetsScreen {
         // Modified ←/→ jumps straight between the panes from anywhere.
         // Ctrl and Alt work in every terminal; Cmd only reaches the app in
         // terminals speaking the kitty keyboard protocol, most eat it.
-        if key
-            .modifiers
-            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        // Not while the target filter is being typed: there the same keys move by word.
+        let typing = self.focus == Focus::Browser && self.browser.is_typing();
+        if !typing
+            && key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
         {
             match key.code {
                 KeyCode::Left => {

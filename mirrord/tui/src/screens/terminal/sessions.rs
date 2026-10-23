@@ -173,44 +173,18 @@ impl SessionWatcher {
     /// Reads every session in `sessions_dir` and keeps the ones running under `shell_pid`.
     #[tracing::instrument(level = Level::DEBUG, ret)]
     async fn fetch(shell_pid: u32, sessions_dir: &Path) -> State {
-        let endpoints = session_endpoints(sessions_dir);
-        if endpoints.is_empty() {
-            return State::Ready(Vec::new());
-        }
+        let all = read_all(sessions_dir).await;
 
         // What each session recorded about its own processes, which is all that is left of the
         // ones that have already exited.
         let mut recorded = HashMap::new();
-        let mut sessions = Vec::new();
-
-        for (session_id, endpoint) in endpoints {
-            let connection =
-                tokio::time::timeout(REQUEST_TIMEOUT, connect_to_session(&endpoint.sentinel_path))
-                    .await;
-
-            let info = match connection {
-                Ok(Ok(connection)) => connection.info,
-                // A sentinel whose session has ended looks exactly like one that is merely slow to
-                // answer, and removing it is `mirrord session`'s job, not a viewer's.
-                Ok(Err(error)) => {
-                    tracing::debug!(%session_id, %error, "Failed to read a local mirrord session.");
-                    continue;
-                }
-                Err(_elapsed) => {
-                    tracing::debug!(
-                        %session_id,
-                        "Local mirrord session did not answer within {REQUEST_TIMEOUT:?}.",
-                    );
-                    continue;
-                }
-            };
-
-            record_parents(&info, &mut recorded);
-
-            if descends_from(&info, shell_pid, &recorded) {
-                sessions.push(info);
-            }
+        for info in &all {
+            record_parents(info, &mut recorded);
         }
+        let mut sessions: Vec<SessionInfo> = all
+            .into_iter()
+            .filter(|info| descends_from(info, shell_pid, &recorded))
+            .collect();
 
         // Refreshes must not reshuffle the panel.
         sessions.sort_by(|left, right| {
@@ -219,6 +193,32 @@ impl SessionWatcher {
 
         State::Ready(sessions)
     }
+}
+
+/// Every mirrord session running on this machine, as each one describes itself over its socket in
+/// `sessions_dir`. A session that does not answer in time is left out: a sentinel whose session
+/// has ended looks exactly like one that is merely slow to answer, and removing it is
+/// `mirrord session`'s job, not a viewer's.
+pub async fn read_all(sessions_dir: &Path) -> Vec<SessionInfo> {
+    let mut sessions = Vec::new();
+    for (session_id, endpoint) in session_endpoints(sessions_dir) {
+        let connection =
+            tokio::time::timeout(REQUEST_TIMEOUT, connect_to_session(&endpoint.sentinel_path))
+                .await;
+        match connection {
+            Ok(Ok(connection)) => sessions.push(connection.info),
+            Ok(Err(error)) => {
+                tracing::debug!(%session_id, %error, "Failed to read a local mirrord session.");
+            }
+            Err(_elapsed) => {
+                tracing::debug!(
+                    %session_id,
+                    "Local mirrord session did not answer within {REQUEST_TIMEOUT:?}.",
+                );
+            }
+        }
+    }
+    sessions
 }
 
 /// The process a session is best described by: the topmost one it knows about.

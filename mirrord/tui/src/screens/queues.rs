@@ -28,9 +28,11 @@ use crate::{
         hints::Hint,
         panel,
         search::{SearchBox, SearchOutcome},
+        session_scope::{self, SessionScope},
         state_view::{self, EmptyText, Fetch, Listing},
         table::{Columns, DataTable},
     },
+    local_sessions::LocalSessions,
     screens::Screen,
     theme,
 };
@@ -50,6 +52,8 @@ pub struct QueuesScreen {
     describe: Option<Describe>,
     /// The `/` search over the list.
     search: SearchBox,
+    /// "Only my sessions" (`m`).
+    scope: SessionScope,
     refresh: Arc<Notify>,
 }
 
@@ -145,12 +149,18 @@ impl QueuesScreen {
     /// Draws the table of splits that match the search, or a message explaining
     /// why there is none.
     fn draw_body(&mut self, frame: &mut Frame, area: Rect, state: &State, splits: &[&QueueSplit]) {
-        let empty = EmptyText {
-            nothing: "No active queue-splitting sessions",
-            no_match: "No queue-splitting sessions match the search",
-        };
         let searching = !self.search.phrase().is_empty();
-        if state_view::draw(frame, area, state, splits.len(), searching, &empty) {
+        let filter = self.scope.current();
+        let empty = session_scope::empty_text(
+            &filter,
+            searching,
+            EmptyText {
+                nothing: "No active queue-splitting sessions",
+                no_match: "No queue-splitting sessions match the search",
+            },
+        );
+        let narrowed = session_scope::narrowed(&filter, searching);
+        if state_view::draw(frame, area, state, splits.len(), narrowed, &empty) {
             return;
         }
 
@@ -168,7 +178,7 @@ impl QueuesScreen {
             return;
         };
         // The selection indexes the rows the user can see, not every split.
-        let splits = matching(&self.search, splits);
+        let splits = matching(&self.search, &self.scope.current(), splits);
         let Some(split) = self
             .table
             .selected()
@@ -254,6 +264,7 @@ impl Screen for QueuesScreen {
     fn new(context: Context) -> Self {
         let data = Arc::new(RwLock::new(Data::default()));
         let refresh = Arc::new(Notify::new());
+        let scope = SessionScope::new(&context);
 
         tokio::spawn(Self::run(context, data.clone(), refresh.clone()));
 
@@ -263,6 +274,7 @@ impl Screen for QueuesScreen {
             details: None,
             describe: None,
             search: SearchBox::default(),
+            scope,
             refresh,
         }
     }
@@ -282,7 +294,7 @@ impl Screen for QueuesScreen {
             Layout::vertical([Constraint::Min(3), Constraint::Length(search_height)]).areas(area);
 
         let matching = match &data.state {
-            State::Ready(splits) => matching(&self.search, splits),
+            State::Ready(splits) => matching(&self.search, &self.scope.current(), splits),
             _ => Vec::new(),
         };
 
@@ -298,7 +310,7 @@ impl Screen for QueuesScreen {
             None => panel::block(
                 "queues",
                 data.count(matching.len()).as_deref(),
-                Some(&updated),
+                Some(&session_scope::note(&self.scope.current(), &updated)),
                 None,
             ),
         };
@@ -419,7 +431,9 @@ impl QueuesScreen {
             }),
             None => {
                 let index = self.table.selected()?;
-                matching(&self.search, splits).get(index).copied()
+                matching(&self.search, &self.scope.current(), splits)
+                    .get(index)
+                    .copied()
             }
         };
         found.cloned()
@@ -429,11 +443,16 @@ impl QueuesScreen {
 /// Returns the splits that match the search, in the order they were given.
 ///
 /// A split matches when any one of the searched columns contains the phrase.
-fn matching<'a>(search: &SearchBox, splits: &'a [QueueSplit]) -> Vec<&'a QueueSplit> {
+fn matching<'a>(
+    search: &SearchBox,
+    filter: &Option<LocalSessions>,
+    splits: &'a [QueueSplit],
+) -> Vec<&'a QueueSplit> {
     splits
         .iter()
         .filter(|split| {
-            search.matches_any(Column::SEARCHED.iter().map(|column| column.value(split).0))
+            session_scope::keeps(filter, *split)
+                && search.matches_any(Column::SEARCHED.iter().map(|column| column.value(split).0))
         })
         .collect()
 }

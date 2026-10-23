@@ -577,14 +577,14 @@ fn help_and_command_palette_reach_every_screen() {
     send(b"/");
     wait_for(&rx, &mut parser, "<type> to filter");
     send(b"q");
-    let screen = wait_for(&rx, &mut parser, "/q");
+    let screen = wait_for(&rx, &mut parser, "/ q");
     println!("{screen}");
 
     // Sessions is built from the same table, search and footer.
     send(b"\r");
     wait_for(&rx, &mut parser, "<esc> clear");
     send(b"\x1b");
-    wait_for_gone(&rx, &mut parser, "/q");
+    wait_for_gone(&rx, &mut parser, "/ q");
     send(b":sessions\r");
     wait_for(&rx, &mut parser, "\u{256d} sessions");
     // Read once the frame has finished arriving, rather than asserting on a half-painted one.
@@ -592,13 +592,13 @@ fn help_and_command_palette_reach_every_screen() {
     println!("{screen}");
     send(b"/");
     send(b"q");
-    wait_for(&rx, &mut parser, "/q");
+    wait_for(&rx, &mut parser, "/ q");
 
     // Previews and targets share the panel style, and `?` on targets is the shared help.
     send(b"\r");
     wait_for(&rx, &mut parser, "<esc> clear");
     send(b"\x1b");
-    wait_for_gone(&rx, &mut parser, "/q");
+    wait_for_gone(&rx, &mut parser, "/ q");
     send(b":previews\r");
     let screen = wait_for(&rx, &mut parser, "\u{256d} previews");
     println!("{screen}");
@@ -613,13 +613,13 @@ fn help_and_command_palette_reach_every_screen() {
     wait_for(&rx, &mut parser, "<ctrl-d> kill");
     send(b"/");
     send(b"q");
-    wait_for(&rx, &mut parser, "/q");
+    wait_for(&rx, &mut parser, "/ q");
 
     // `Enter` keeps the phrase and hands the keyboard back, so `Esc` clears it and `q` quits.
     send(b"\r");
     wait_for(&rx, &mut parser, "<esc> clear");
     send(b"\x1b");
-    wait_for_gone(&rx, &mut parser, "/q");
+    wait_for_gone(&rx, &mut parser, "/ q");
     send(b"q");
     child.wait().unwrap();
 }
@@ -793,13 +793,33 @@ fn run_view_works_out_the_project_and_its_command() {
     // No cluster in the test: Enter goes on without a target.
     send(b"\r");
     wait_for(&rx, &mut parser, "How should mirrord run them?");
-    wait_for(&rx, &mut parser, "No incoming traffic");
-    // The project's own name and dev script are found without asking.
-    wait_for(&rx, &mut parser, "checkout  ");
-    wait_for(&rx, &mut parser, "$ npm run dev");
-    let screen = wait_for(&rx, &mut parser, "detected - check it");
+    wait_for(&rx, &mut parser, "Start from  \u{2726} No incoming traffic");
+    // Every option, the way the Config screen shows them, tiers included.
+    wait_for(&rx, &mut parser, "\u{256d} config");
+    wait_for(&rx, &mut parser, "new config \u{b7} not saved");
+    let screen = wait_for(&rx, &mut parser, " team");
     println!("{screen}");
-    wait_for(&rx, &mut parser, "READY   enter starts it");
+    wait_for(&rx, &mut parser, "READY   ctrl+r starts it");
+    // Ctrl+Y shows exactly what will run: the project's name and dev script, found without asking.
+    send(b"\x19");
+    wait_for(&rx, &mut parser, "$ npm run dev");
+    wait_for(&rx, &mut parser, "detected - check it");
+    send(b"\x19");
+    wait_for(&rx, &mut parser, "\u{256d} config");
+
+    // Ctrl+S saves the new config: a name, then the folder's .mirrord.
+    send(b"\x13");
+    wait_for(&rx, &mut parser, "Name the config");
+    send(b"with-db\r");
+    wait_for(&rx, &mut parser, ".mirrord/with-db.json");
+    assert!(project.join(".mirrord").join("with-db.json").exists());
+    // Ctrl+O lists it among the configs to start from from now on.
+    send(b"\x0f");
+    wait_for(&rx, &mut parser, "SAVED IN YOUR FOLDERS");
+    let screen = wait_for(&rx, &mut parser, "checkout/.mirrord/with-db.json");
+    println!("{screen}");
+    send(b"\x1b");
+    wait_for_gone(&rx, &mut parser, "SAVED IN YOUR FOLDERS");
 
     // Esc goes back a step.
     send(b"\x1b");
@@ -888,11 +908,17 @@ fn run_view_picks_folders_from_anywhere_and_runs_them_together() {
     println!("{screen}");
 
     // Typing searches; Space picks, and the pick shows up in the tray with a remove button.
+    send(b"shop");
+    wait_for_gone(&rx, &mut parser, "~/billing/payments");
+    // Cmd+A, as terminals that pass Cmd on send it (kitty keyboard protocol), selects the whole
+    // search, and typing replaces it.
+    send(b"\x1b[97;9u");
     send(b"pay");
     wait_for_gone(&rx, &mut parser, "~/shop/checkout");
-    send(b" ");
+    wait_for(&rx, &mut parser, "\u{2315} pay ");
+    // While searching, Enter picks what the search found and clears the search.
+    send(b"\r");
     wait_for(&rx, &mut parser, " payments \u{2715}");
-    send(b"\x1b");
     wait_for(&rx, &mut parser, "[ ] ~/shop/checkout");
 
     // A click on a row picks it too.
@@ -917,7 +943,7 @@ fn run_view_picks_folders_from_anywhere_and_runs_them_together() {
     wait_for(&rx, &mut parser, "Folders \u{2713} 2");
     send(b"\r");
     wait_for(&rx, &mut parser, "How should mirrord run them?");
-    let screen = wait_for(&rx, &mut parser, "READY   enter starts all 2");
+    let screen = wait_for(&rx, &mut parser, "READY   ctrl+r starts all 2");
     println!("{screen}");
 
     // Back to the folders, then browse: `~` is the home folder, typing narrows it, right goes
@@ -936,6 +962,290 @@ fn run_view_picks_folders_from_anywhere_and_runs_them_together() {
     // Esc goes back to the project list.
     send(b"\x1b");
     wait_for(&rx, &mut parser, "found on this computer");
+
+    send(b"\x03");
+    child.wait().unwrap();
+}
+
+/// Every editing key, sent as the bytes real terminals send, reaches a text field and does what
+/// it does in any text box. The Run view's search is the field under test.
+#[test]
+fn text_fields_take_every_editing_key() {
+    let home = temporary_home("keys2");
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: ROWS,
+            cols: COLS,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    cmd.cwd(empty_dir());
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("HOME", &home);
+    let mut child = pair.slave.spawn_command(cmd).unwrap();
+    drop(pair.slave);
+
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                return;
+            }
+        }
+    });
+
+    let mut parser = vt100::Parser::new(ROWS, COLS, 0);
+    let mut writer = pair.master.take_writer().unwrap();
+    let mut send = |bytes: &[u8]| {
+        writer.write_all(bytes).unwrap();
+        writer.flush().unwrap();
+    };
+
+    wait_for(&rx, &mut parser, "<?> help");
+    send(b":run\r");
+    wait_for(&rx, &mut parser, "Which folders do you want to run?");
+    let field = |text: &str| format!("\u{2315} {text} ");
+
+    // Space types while searching.
+    send(b"shop chk");
+    wait_for(&rx, &mut parser, &field("shop chk"));
+    // Home, Right twice: the right arrow moves the cursor rather than opening a folder.
+    send(b"\x1b[H\x1b[C\x1b[CX");
+    wait_for(&rx, &mut parser, &field("shXop chk"));
+    // End, then Shift+Option+Left as most terminals send it selects the last word.
+    send(b"\x1b[F\x1b[1;4Dcheck");
+    wait_for(&rx, &mut parser, &field("shXop check"));
+    // The same with Option marked the old "meta" way.
+    send(b"\x1b[1;10Dchk");
+    wait_for(&rx, &mut parser, &field("shXop chk"));
+    // Option+Shift+Left as `Esc B`.
+    send(b"\x1bBout");
+    wait_for(&rx, &mut parser, &field("shXop out"));
+    // Option+Backspace deletes the word, Ctrl+Z brings it back.
+    send(b"\x1b\x7fY");
+    wait_for(&rx, &mut parser, &field("shXop Y"));
+    // Ctrl+Z steps back: first the typed `Y`, then the deleted word comes back.
+    send(b"\x1a\x1a");
+    wait_for(&rx, &mut parser, &field("shXop out"));
+    // A double-click selects the word under it.
+    let screen = wait_for(&rx, &mut parser, &field("shXop out"));
+    let (row, column) = locate(&screen, "shXop");
+    let click = format!(
+        "\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m",
+        x = column + 2,
+        y = row + 1
+    );
+    send(click.as_bytes());
+    send(click.as_bytes());
+    send(b"shop");
+    wait_for(&rx, &mut parser, &field("shop out"));
+    // Cmd+A, as terminals that pass Cmd on send it, selects everything.
+    send(b"\x1b[97;9upay");
+    wait_for(&rx, &mut parser, &field("pay"));
+    // Ctrl+A then Ctrl+X cuts it all, Ctrl+V pastes it back.
+    send(b"\x01\x18");
+    wait_for(&rx, &mut parser, "\u{2315} type to search");
+    send(b"\x16");
+    wait_for(&rx, &mut parser, &field("pay"));
+    // Ctrl+W deletes the word before the cursor.
+    send(b" now\x17X");
+    wait_for(&rx, &mut parser, &field("pay X"));
+
+    send(b"\x03");
+    child.wait().unwrap();
+}
+
+/// `m` (or a click on the sidebar's switch) narrows every screen to the sessions running on this
+/// machine, and the panels say so.
+#[test]
+fn only_my_sessions_switch_narrows_screens_and_says_so() {
+    let home = temporary_home("mine");
+    serve_session(
+        &home,
+        "3F2A9C01B4D5E6F7",
+        SessionInfo {
+            session_id: "3F2A9C01B4D5E6F7".to_owned(),
+            key: Some("alice-feature".to_owned()),
+            target: "deployment/api".to_owned(),
+            namespace: Some("staging".to_owned()),
+            context: None,
+            started_at: k8s_openapi::jiff::Timestamp::now().to_string(),
+            mirrord_version: "3.249.0".to_owned(),
+            is_operator: true,
+            processes: Vec::new(),
+            port_subscriptions: Vec::new(),
+            config: serde_json::Value::Null,
+        },
+    );
+
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: ROWS,
+            cols: COLS,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    cmd.cwd(empty_dir());
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("HOME", &home);
+    let mut child = pair.slave.spawn_command(cmd).unwrap();
+    drop(pair.slave);
+
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                return;
+            }
+        }
+    });
+
+    let mut parser = vt100::Parser::new(ROWS, COLS, 0);
+    let mut writer = pair.master.take_writer().unwrap();
+    let mut send = |bytes: &[u8]| {
+        writer.write_all(bytes).unwrap();
+        writer.flush().unwrap();
+    };
+
+    // Off to begin with: everything shows.
+    wait_for(&rx, &mut parser, "\u{25cb} everything");
+    send(b":sessions\r");
+    wait_for(&rx, &mut parser, "\u{256d} sessions");
+
+    // `m` turns it on: the sidebar counts the session running here, and the panel says the list
+    // is narrowed.
+    send(b"m");
+    wait_for(&rx, &mut parser, "\u{25c9} only mine \u{b7} 1");
+    wait_for(&rx, &mut parser, "only mine \u{b7} updated");
+
+    // A click on the switch turns it off again.
+    let screen = wait_for(&rx, &mut parser, "only mine \u{b7} 1");
+    let (row, column) = locate(&screen, "only mine \u{b7} 1");
+    send(
+        format!(
+            "\x1b[<0;{};{}M\x1b[<0;{};{}m",
+            column + 1,
+            row + 1,
+            column + 1,
+            row + 1
+        )
+        .as_bytes(),
+    );
+    wait_for(&rx, &mut parser, "\u{25cb} everything");
+
+    send(b"q");
+    child.wait().unwrap();
+}
+
+/// A run's log says how to get back, Esc returns to the steps while it keeps running, and once
+/// it stops Enter returns for good. `MIRRORD_BIN` points the run at a stand-in for mirrord.
+#[test]
+fn a_run_can_be_left_watched_again_and_closed() {
+    let home = temporary_home("runlog");
+    let project = home.join("checkout");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("package.json"),
+        r#"{ "name": "checkout", "scripts": { "dev": "node server.js" } }"#,
+    )
+    .unwrap();
+    // The folder's own config, which the config step uses without being asked.
+    std::fs::create_dir_all(project.join(".mirrord")).unwrap();
+    std::fs::write(
+        project.join(".mirrord").join("mirrord.json"),
+        r#"{ "feature": { "env": true } }"#,
+    )
+    .unwrap();
+    let fake = home.join("fake-mirrord");
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\necho fake mirrord up is running\nexec sleep 60\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: ROWS,
+            cols: COLS,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    cmd.cwd(&project);
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("HOME", &home);
+    cmd.env("MIRRORD_BIN", &fake);
+    let mut child = pair.slave.spawn_command(cmd).unwrap();
+    drop(pair.slave);
+
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                return;
+            }
+        }
+    });
+
+    let mut parser = vt100::Parser::new(ROWS, COLS, 0);
+    let mut writer = pair.master.take_writer().unwrap();
+    let mut send = |bytes: &[u8]| {
+        writer.write_all(bytes).unwrap();
+        writer.flush().unwrap();
+    };
+
+    wait_for(&rx, &mut parser, "What should they run against?");
+    send(b"\r");
+    wait_for(&rx, &mut parser, "the folder's own config");
+    wait_for(
+        &rx,
+        &mut parser,
+        "Start from  \u{2261} checkout/.mirrord/mirrord.json",
+    );
+    wait_for(&rx, &mut parser, "READY");
+    send(b"\x12");
+
+    // The log says what to do.
+    wait_for(&rx, &mut parser, "fake mirrord up is running");
+    wait_for(&rx, &mut parser, "esc  back to the steps (keeps running)");
+    // Esc: back to the steps, and the step bar says it still runs.
+    send(b"\x1b");
+    wait_for(&rx, &mut parser, "running \u{b7} ctrl+l log");
+    // Ctrl+L: the log again.
+    send(b"\x0c");
+    wait_for(&rx, &mut parser, "fake mirrord up is running");
+    // x stops it; then Enter is the way back, and the steps are ready for another run.
+    send(b"x");
+    wait_for(&rx, &mut parser, "enter  back to the steps");
+    send(b"\r");
+    let screen = wait_for(&rx, &mut parser, "How should mirrord run them?");
+    println!("{screen}");
+    wait_for(&rx, &mut parser, "\u{25b6} run");
+
+    // The run is remembered: back on the folders, it is first under "run again", and one Enter
+    // sets it all up again on the config step.
+    send(b"\x1b");
+    wait_for(&rx, &mut parser, "What should they run against?");
+    send(b"\x1b");
+    wait_for(&rx, &mut parser, "RUN AGAIN");
+    let screen = wait_for(&rx, &mut parser, "no target \u{b7} ");
+    println!("{screen}");
+    send(b"\r");
+    wait_for(&rx, &mut parser, "set up like before - ctrl+r runs it");
+    wait_for(&rx, &mut parser, "How should mirrord run them?");
 
     send(b"\x03");
     child.wait().unwrap();

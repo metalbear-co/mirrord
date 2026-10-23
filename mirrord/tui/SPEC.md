@@ -69,6 +69,31 @@ indigo, with the number of rows after it in amber brackets (`sessions[2]`, or `[
 narrows the list), and when the list was last refreshed on the right (`updated 13:01:02`, local time). A
 short-lived message, such as the outcome of killing a session, sits on the bottom border.
 
+## Only my sessions
+
+For debugging one session without the noise of everyone else's, `m` (or a click on the sidebar's
+switch) narrows every screen to what the mirrord sessions running on this machine made, and `m` again
+shows everything. It is one switch for the whole interface and starts off.
+
+- **Which sessions.** The ones in mirrord's local session registry (`~/.mirrord/sessions`, the same
+  source `mirrord session list` reads), read again every 5 seconds: a session started from the Run view,
+  the Terminal or a shell elsewhere all count. Each gives its id (the operator's session id) and its
+  session key.
+- **What belongs to them.** A resource does when any value in its labels, spec or status is one of
+  those ids or keys, or a key hashed the way labels carry it. That covers a session's own entry
+  (`spec.session.id` / `key`), queue splits (`spec.session`), SQS and RabbitMQ sessions
+  (`spec.sessionId`), database branches (`status.sessionInfo` and the `mirrord-session-key` label),
+  copies of a target (`session_key`) and previews (`spec.key`), and any other kind on the Resources
+  screen the same way. A resource's own name never counts. Kafka temporary topics and queue registries
+  carry no link to a session, so they disappear while the switch is on.
+- **Where it applies.** Sessions, Previews, Queues, Databases, every type on Resources, and the Home
+  dashboard's counts (and with them the sidebar's). Run, Targets, Config and the Terminal show the
+  user's own work anyway and are not narrowed.
+- **How a screen says so.** Its panel title gets `only mine` in front of the refresh time (`only mine ·
+  updated 13:01:02`), and a list the switch emptied says `Nothing from the sessions running here - m
+  shows everything`, so it is never mistaken for an empty cluster. With the switch on and no session
+  running here, lists are empty rather than full.
+
 ## Colors
 
 Screens that have been implemented are styled with the MetalBear brand palette: indigo `#756DF3` for panel
@@ -100,6 +125,10 @@ included, since on a terminal without 24-bit support a 24-bit color is drawn as 
 A rounded column down the left edge, top to bottom:
 
 - the `◆ mirrord` chip (indigo);
+- the **only my sessions** switch: `○ everything` (grey) while every resource shows, `◉ only mine · N`
+  (mint, N being how many mirrord sessions run on this machine) while screens narrow to them, or
+  `◉ only mine · none` (amber) when none does, with `m` at the right edge. A click or `m` flips it (see
+  [Only my sessions](#only-my-sessions));
 - `⌂ Home`, then the screens under three headings: **START** `▶ Run`, `◎ Targets`; **WATCH** `◉ Sessions`,
   `◇ Previews`, `≋ Queues`, `▤ Databases`; **SETUP** `≡ Config`, `▦ Resources`, `❯ Terminal`. Every icon is
   one column wide on every terminal (no emoji). The current screen has an indigo `▌` bar and a filled row.
@@ -219,12 +248,38 @@ consumes *every* key while the shell has the keyboard, so none of the global key
 
 Key releases are ignored; only presses and auto-repeats are acted on.
 
-**Text boxes** (search lines, the command editor, the `:` line's text) all edit the same way: `Ctrl+A`
-selects everything, `Shift` with `←` `→` `Home` `End` selects, typing or pasting replaces the selection,
-`Backspace`/`Delete` remove it, `Ctrl`/`Alt` with the arrows move by word, `Ctrl+W`, `Alt+Backspace` and
-`Ctrl+Backspace` delete the word before the cursor, `Ctrl+U`/`Ctrl+K` delete to the start/end, and `Ctrl+E`
-jumps to the end. With the mouse, a click places the cursor, a drag selects and a double-click selects a
-word.
+**Text boxes** look the same everywhere: a framed box with a label (`search`, `command`, `edit`) where a
+view's main input is, and a filled row elsewhere (the `:` line, `/` searches), brighter while it has the
+keyboard. A muted placeholder says what to type while it is empty, long text scrolls to keep the cursor in
+view, and the cursor is the terminal's own, shown as a blinking bar while the interface runs (the terminal's
+usual shape comes back on exit). They all edit the same way, with the Mac keys and their `Ctrl` twins:
+
+| Action | Mac | Also |
+| --- | --- | --- |
+| Select all | `Cmd+A` | `Ctrl+A`, triple-click |
+| Select a word | double-click, `Shift+Option+←/→` | `Shift+Ctrl+←/→` |
+| Select to the start / end | `Shift+Cmd+←/→` | `Shift+Home/End` |
+| Move by word / to the start, end | `Option+←/→` / `Cmd+←/→` | `Ctrl+←/→`, `Alt+B/F` / `Home`, `End`, `Ctrl+E` |
+| Delete a word before / after | `Option+Backspace` / `Option+Delete` | `Ctrl+W`, `Ctrl+Backspace` / `Alt+D`, `Ctrl+Delete` |
+| Delete to the start / end | `Cmd+Backspace` | `Ctrl+U` / `Ctrl+K` |
+| Copy, cut, paste | `Cmd+C`, `Cmd+X`, `Cmd+V` | `Ctrl+C` (only while something is selected; otherwise it quits as usual), `Ctrl+X`, `Ctrl+V` |
+| Undo, redo | `Cmd+Z`, `Shift+Cmd+Z` | `Ctrl+Z`, `Shift+Ctrl+Z` |
+| Place the cursor / select with the mouse | click / drag, `Shift`+click | |
+
+Typing or pasting replaces the selection, and a space is typed like any other character. Undo goes back a
+word at a time. Copy and cut put the text on the interface's own clipboard (for pasting into another box)
+and on the system clipboard, through the terminal (OSC 52) and through `pbcopy` on a Mac; a terminal's own
+paste (`Cmd+V` in most Mac terminals) arrives as a paste and works everywhere. `Cmd` keys only reach the
+interface in terminals that pass them on (kitty, WezTerm, Ghostty, iTerm2 with "Report keys using CSI u");
+Terminal.app and a default iTerm2 keep `Cmd` shortcuts for themselves, which is why every one has a twin.
+
+Terminals send these keys in different ways, and all of them are read: `Option+←/→` as `Esc b` / `Esc f`
+(with Shift, `Esc B` / `Esc F`) or as an arrow with the Option bit, and `Option+Backspace` as `Esc` and
+`Backspace`. Some terminals mark Option with the old "meta" bit, which reads the same as `Cmd` under the kitty
+keyboard protocol; at startup the interface asks the terminal whether it speaks that protocol, and when it
+does not, the bit on an arrow or `Backspace` is taken as `Option` (a word move), not `Cmd` (a jump to the
+start or end). A list never takes an arrow with a modifier for itself, so `Shift`, `Option` and `Cmd`
+with the arrows always edit its search.
 
 **The mouse** is captured while the interface runs, so lists take clicks, double-clicks and the wheel. The
 terminal's own text selection still works with `Option` (macOS) or `Shift` held.
@@ -281,17 +336,44 @@ several can be picked, `(●)` / `( )` where one is; picked rows turn mint.
 
 | Input | Does |
 | --- | --- |
-| `Space`, or a click | Picks or unpicks the row (on the config step, chooses it) |
+| `Space`, or a click | Picks or unpicks the row (on the config step, chooses it). While a search is typed, `Space` types a space instead, so searches can have several words |
 | `↑` `↓` `PgUp` `PgDn`, the mouse wheel | Moves |
 | Typing | Searches: every typed word has to appear in the row (its title, description or hidden keywords); matches in the title come first, and the matching text lights up amber. `Esc` clears the search. With nothing typed, `:` and `?` still open the command line and help. |
-| `Enter` | Goes to the next step; on the config step, runs |
-| `Esc` (nothing typed), `←` | Goes back a step |
+| `Enter` | Goes to the next step; on the config step, runs. While a search is typed, it picks the row the search found and clears the search (the legend says `enter  pick it`), so the next `Enter` goes on |
+| `Esc` (nothing typed) | Goes back a step |
 | Double-click | Opens a folder, or picks a target |
 | `Ctrl+A` (nothing typed) | Picks every folder shown, or none if all are picked |
 
 Plain letters always go to the search, so a step's own actions are on `Ctrl` chords. The search line is a
 full text box, like every other one in the interface: `Ctrl+A` selects all, `Shift`+arrows select, typing replaces
 the selection, a click places the cursor, a drag selects and a double-click selects a word.
+
+**Done for you.** What the folders, the cluster and earlier runs already say is used without a key,
+and a mint line under the question says what was done (`✔ picked for you: deployment/echo-app - esc to
+change · set for you: ...`, wrapping to a second line when long) until the next key:
+
+- **Run again.** Every run is remembered whole in the history file (last 10 per cluster, the same setup
+  run again moving to the front): its folders, each folder's target and command, what the config step
+  started from, and the options of a new config never saved. The folder step lists them first under
+  `run again` (`↻ checkout + payments  deployment/checkout, deployment/payments · only my requests  2h
+  ago`), with the cursor on the newest. `Enter` on one sets it all up again: the folders and commands at
+  once, the targets as soon as the cluster lists them, the config, and the config step, ready for
+  `Ctrl+R` (`set up like before - ctrl+r runs it`). Folders that no longer exist are skipped.
+- **Straight to the config step.** Started inside a project, once every folder's sure match (`★`) is
+  ticked, the targets step has nothing to ask, so the view goes on to the config step (`picked for you:
+  ...`). It never happens once the user has pressed a key in the view, or when a folder has no sure match.
+- **The folder's own config.** A new config step starts from the first folder's
+  `.mirrord/mirrord.json` (or `.yaml`, `.yml`, `.toml`) when it has one (`using checkout/.mirrord/mirrord.json,
+  the folder's own config`).
+- **The port.** Otherwise, when the app's local port is written in the project (a `PORT` in `.env`,
+  `.env.local` or `.env.development`, a port in the `dev`, `start` or `serve` script such as `PORT=3000`,
+  `--port 3000` or `-p 3000`, or the Dockerfile's `EXPOSE`, first found wins) and the target's container
+  declares exactly one other port, `feature.network.incoming.port_mapping` is set to map one to the other
+  (`set for you: your app's port 3000 (from package.json) maps to the target's 8080`). It shows in the
+  option tree like any other edit.
+
+A new config's options are this run's, remembered with it, so quitting with them unsaved does not ask
+first; only edits to a saved file do.
 
 **1 Folders.** Opens on `projects` (`found on this computer and used before`), in sections: `picked` (so
 each can be unpicked here even when it was found elsewhere), `used before` (folders something ran from,
@@ -304,7 +386,8 @@ folder`. Each row shows the file that makes it a project (`package.json`, `Cargo
   under the home folder, skipping hidden folders and `node_modules`, `target`, `vendor`, `dist`, `build`,
   `out`, `venv`, `Library` and the like, and stops after 4 seconds, 30,000 folders or 2,000 projects. Until
   it is done, the location line says `still looking in your home folder...`.
-- `→` or a double-click goes into a folder, `←` (or `Backspace` with nothing typed) goes up with the cursor
+- `→` (once the cursor is at the end of the search, so it never gets in the way of editing it) or a
+  double-click goes into a folder, `←` (or `Backspace`) with nothing typed goes up with the cursor
   on the folder just left, and `~` or `/` typed first jumps to the home folder or the root. Inside a folder
   the location line says `in ~/code/shop`, the first row is `.` (the folder itself, to pick it), then its
   subfolders. `Esc` goes back to the project list.
@@ -334,32 +417,54 @@ While there is nothing to list: `Waiting for the cluster... Enter goes on withou
 targets...`, the error when listing failed, or `Nothing to target here. Try :ns, or Enter to go on without a
 target.` Discovery runs again whenever the connection or the namespace changes.
 
-**3 Config.** One config is chosen, the first one by default. Configs `made from your picks` (marked `✦`):
+**3 Config.** Every option of the run, shown and edited exactly as on the [Config](#config) screen (the
+same tree, tier badges, details pane, `/` search and editors), under one line saying what it starts from:
 
-| Config | Offered | Does |
-| --- | --- | --- |
-| `Only my requests` | when a target is picked; marked ` recommended ` | `mirrord up` split mode: requests with the session key reach you, and the targets' queues split the same way |
-| `Only my requests + branch N databases` | when the picked targets use databases | the same, with every branchable database (or the team's presets) branched for this session |
-| `Take over all traffic` | when a target is picked | replace mode: every request reaches you, the original is scaled down |
-| `No incoming traffic` | always | targetless: the cluster's network, files and env only |
+```
+Start from  ✦ Only my requests  ctrl+o change   requests with your session key reach you
+╭ config[2] ───────────────────────────────────────────── new config · not saved ╮
+│ ▸ feature              …                │ feature.network.incoming              │
+│   operator    true   team               │ takes  steal | mirror | off           │
+╰─────────────────────────────────────────────────────────────────────────────────╯
+ ● READY  ctrl+r starts it
+```
 
-Then the `files in your folders` (marked `≡`): every `.json`, `.yaml`, `.yml` or `.toml` file in a picked
-folder's `.mirrord` directory, titled by its path and described by its first options
-(`feature.network.incoming: steal · +3 more`). A file applies to its own folder, as a `config_patch` with its
-whole content; other folders run with only their own requests.
+- **Start from** (`Ctrl+O`) is a searchable dialog of three kinds of rows. Made from your picks (marked
+  `✦`): the ways to run, which set how the folders run and keep the options edited below:
 
-Every config carries the words a search should find it by: the made ones what they do (`split`, `steal`,
-`takeover`, `targetless`, `db`, `database`, `branch`) plus the picked targets' engines, database variables
-and queue names; files every key and value they hold. So `db`, `postgres`, `kafka`, `steal` or a variable
-name narrows the list to the configs that do it.
+  | Config | Offered | Does |
+  | --- | --- | --- |
+  | `Only my requests` | when a target is picked; marked ` recommended `, and the default | `mirrord up` split mode: requests with the session key reach you, and the targets' queues split the same way |
+  | `Only my requests + branch N databases` | when the picked targets use databases | the same, with every branchable database (or the team's presets) branched for each folder |
+  | `Take over all traffic` | when a target is picked | replace mode: every request reaches you, the original is scaled down |
+  | `No incoming traffic` | always | targetless: the cluster's network, files and env only |
 
-The details pane (`what will run`) lists each folder: its path, `target` and `in` (namespace), `traffic`
-(`only yours (session key)`, `all, original scaled down` or `none`, in the job's color), `runs` with the
-command and where it came from under it (`ran last time` or `your pick` in mint, `detected - check it` in
-amber), and `db  N branched` or `config  from the file` when the config adds something. `Ctrl+Y` switches it
-to the exact YAML mirrord reads, and back. `Ctrl+E` changes a folder's command (asking which folder first
-when there are several): a picker of past and detected commands plus `type my own command...`, which opens a
-`Command for <folder>` box with the current command selected.
+  Saved in your folders (marked `≡`): every `.json`, `.yaml`, `.yml` or `.toml` file in a picked folder's
+  `.mirrord` directory, read again each time, titled `<folder>/.mirrord/<file>` and described by its first
+  options (`feature.network.incoming: steal · +3 more`); picking one loads its options into the tree, which
+  then edits that file. And `a config file by its path...`, which asks for a path (`~` works) and loads any
+  config on the computer. Loading is refused while the tree has unsaved edits, so none are lost: `Save your
+  edits first (ctrl+s), or undo them.` Every row carries the words a search finds it by (`db`, `postgres`,
+  `kafka`, `steal`, its variable and queue names, every key and value of a file), so typing what you want
+  narrows the list to the configs that do it. `Enter`, `Space` or a click uses a row; `Esc` closes.
+- **The tree** starts as a new config (`new config · not saved` in its title) or as the loaded file. Its
+  options apply on top of what "start from" adds, for every folder: a made config's branched databases
+  first, the tree's options over them, merged key by key.
+- **`Ctrl+S`** saves. A new config asks which folder (when there are several) and a name in a `Name the
+  config` box, prefilled with one no file there has yet (`mirrord`, `mirrord-2` ...) and selected; the line
+  under it says where it goes (`~/code/checkout/.mirrord/with-db.json`). Characters other than letters,
+  digits, `-`, `_` and `.` become `-`, and `.json` is added unless the name ends in `.json`, `.yaml`, `.yml`
+  or `.toml`. From then on, and for a loaded file, `Ctrl+S` writes to that file. Quitting with unsaved edits
+  asks first, as on the Config screen.
+- **`Ctrl+R`** runs (or shows the run going on); a click on the step bar's `▶ run` does too. `Enter` edits
+  the option under the cursor, as on the Config screen, and `Esc` with nothing open goes back a step.
+- **`Ctrl+Y`** swaps the tree for what will run, and back: each folder with its path, `target` and `in`
+  (namespace), `traffic` (`only yours (session key)`, `all, original scaled down` or `none`, in the job's
+  color), `runs` with the command and where it came from under it (`ran last time` or `your pick` in mint,
+  `detected - check it` in amber), `db  N branched` and `options  N set on the config step` when there are
+  any; then `the plan mirrord reads`, the exact YAML. `Ctrl+E` changes a folder's command (asking which
+  folder first when there are several): a picker of past and detected commands plus `type my own
+  command...`, which opens a `Command for <folder>` box with the current command selected.
 
 The plan has one service per folder, named after its target (or the project when there is none), with `-2`,
 `-3` ... added when two would share a name; each runs in its own folder. It needs a folder and, for each
@@ -416,10 +521,19 @@ its own.
 - *Commands*: the same detection the Targets view offers (`npm run dev`, `cargo run`, `go run .` ...).
 
 **Running.** `Enter` on the config step writes the plan to a temporary file and starts `mirrord up -f` on it,
-exactly as the Targets view does, records each folder's command in its target's history, and replaces the
-steps with the run's log pane, which starts with `$ mirrord  (plan: <file>)`. `x` stops it, `Up`/`Down`
-scroll, `G` follows the tail, and `Esc` returns to the steps once it has stopped. If mirrord cannot be
-started, the reason is shown on the config step instead.
+exactly as the Targets view does, records each folder's command in its target's history, and shows the
+run's log pane in place of the steps, starting with `$ mirrord  (plan: <file>)`. A legend under it always
+says what to do:
+
+| While | Legend | Keys |
+| --- | --- | --- |
+| running | `x stop · esc back to the steps (keeps running) · ↑↓ scroll` | `x` asks mirrord to stop (a second `x` forces it), `Esc` hides the log and the run goes on, `↑`/`↓` scroll, `G` follows the tail |
+| stopped | `enter back to the steps · ↑↓ scroll` | `Enter` or `Esc` closes the log for good |
+
+While a run goes on behind the steps, the step bar's last item reads `● running · ctrl+l log` (mint, and
+`■ stopped · ctrl+l log` once it ends); `Ctrl+L` or a click on it shows the log again. One run at a time:
+`Enter` on the config step while one runs shows its log. If mirrord cannot be started, the reason is shown
+on the config step instead.
 
 ### Targets
 

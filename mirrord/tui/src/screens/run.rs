@@ -18,6 +18,7 @@
 use std::{
     cmp::{Ordering, Reverse},
     collections::{BTreeMap, BTreeSet},
+    mem,
     ops::ControlFlow,
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
@@ -25,7 +26,7 @@ use std::{
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use futures_util::future::join_all;
-use k8s_openapi::api::core::v1::Namespace;
+use k8s_openapi::{api::core::v1::Namespace, jiff::Timestamp};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Margin, Position, Rect},
@@ -33,7 +34,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Padding, Paragraph, Wrap},
 };
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tokio::sync::watch;
 
 use crate::{
@@ -44,15 +45,16 @@ use crate::{
         panel,
         select_list::{Choice, ListEvent, Picks, SelectList},
         state_view::Fetch,
-        text_input::TextInput,
+        text_input::{FieldLook, TextInput},
         tray::Tray,
     },
     screens::{
         Screen,
+        config::ConfigScreen,
         targets::{
             browser::{self, TargetItem, TargetKind},
             form::split_command,
-            history,
+            history::{self, RecipeService, RunRecipe},
             launch::Launch,
             model::{
                 CommonSpec, RunSpec, RunType, ServiceEntry, ServiceMode, ServiceSpec, TargetSpec,
@@ -147,7 +149,7 @@ impl Step {
             Self::Targets => {
                 "\u{2605} sure match  \u{2606} might be it. Each pick goes to the folder it fits."
             }
-            Self::Config => "Made from your picks, or found in your folders. Type to search.",
+            Self::Config => "Every option of this run, as on the Config screen.",
         }
     }
 
@@ -242,9 +244,17 @@ struct PickedTarget {
 enum Pick {
     /// Which folder's command to change.
     Folder,
+    /// Which folder a new config is saved in.
+    SaveFolder,
     /// The command for the folder at this path.
     Command(PathBuf),
 }
+
+/// The id prefix of the folder step's "run again" rows, followed by the run's index.
+const RUN_AGAIN: &str = "run-again:";
+
+/// The start-from dialog's row that asks for a config file's path.
+const LOAD_A_FILE: &str = "action:load-a-file";
 
 /// The entry of the command picker that opens the editor instead of picking a command.
 const TYPE_OWN: &str = "type my own command...";
@@ -272,7 +282,6 @@ pub struct RunScreen {
     /// Folders whose sure match has been ticked for them once. The user's own unpicking is never
     /// undone by ticking it again.
     auto_picked: BTreeSet<PathBuf>,
-    configs: SelectList,
     /// The config picked, by [`ConfigOption::id`]; `None` follows the first one offered.
     config_choice: Option<String>,
     discovery: Arc<RwLock<Discovery>>,
@@ -289,7 +298,36 @@ pub struct RunScreen {
     picker: Option<(Pick, Picker)>,
     /// The command being typed, and the folder it is for.
     editor: Option<(PathBuf, TextInput)>,
+    /// The name being typed for a new config, and the folder it goes in.
+    naming: Option<(PathBuf, TextInput)>,
+    /// The run's options: every mirrord option, shown and edited the way the Config screen does,
+    /// on top of what "start from" picked. A new config until saved (`Ctrl+S`), or a saved one
+    /// loaded from a folder.
+    working: Option<ConfigScreen>,
+    /// The path being typed to load a config file from anywhere.
+    loading: Option<TextInput>,
+    /// The "start from" dialog (`Ctrl+O`): the made configs, the saved ones, and loading a file
+    /// by its path, searchable by what they do.
+    start_list: Option<SelectList>,
     launch: Option<Launch>,
+    /// Whether the run's log fills the view. `Esc` hides it while the run goes on, so the steps
+    /// stay reachable; `Ctrl+L` or a click on the step bar's `● running` brings it back.
+    log_open: bool,
+    /// Where the step bar's run chip landed, for clicks.
+    run_hit: Option<Rect>,
+    /// Targets of a run being set up again, by folder and [`Candidate::label`], picked as soon as
+    /// the cluster lists them.
+    pending_targets: Vec<(PathBuf, String)>,
+    /// Started inside a project: once every folder has a sure target, go straight to the config
+    /// step. Off as soon as the user presses a key here, so it never takes the wheel back.
+    auto_advance: bool,
+    /// Whether settings were already filled in for the current options (the folder's own config,
+    /// the port mapping), so they are filled in once and never fought over.
+    filled: bool,
+    /// What was just done for the user (`picked for you: ...`), shown until their next key.
+    notice: Option<String>,
+    /// Whether the folder step's "run again" rows are current; cleared by every new run.
+    ran_again_rows_set: bool,
     /// Why the last move or run could not happen.
     problem: Option<String>,
 }
@@ -633,12 +671,27 @@ impl RunScreen {
         }
     }
 
-    /// The config patch a folder runs with: its databases branched, or a file's content.
+    /// The config patch a folder runs with: what "start from" adds for it (its branched
+    /// databases), with the options edited on the config step over it.
     fn config_patch(&self, config: &ConfigOption, service: &Service) -> Option<Value> {
-        match &config.setup {
-            Setup::File { dir, content } if *dir == service.dir => {
-                Some(Value::Object(content.clone()))
+        let edits = self
+            .working
+            .as_ref()
+            .map(|working| working.options().clone())
+            .filter(|options| !options.is_empty())
+            .map(Value::Object);
+        match (self.preset_patch(config, service), edits) {
+            (Some(mut preset), Some(edits)) => {
+                merge(&mut preset, edits);
+                Some(preset)
             }
+            (preset, edits) => preset.or(edits),
+        }
+    }
+
+    /// What a made config adds for one folder: its target's databases, branched.
+    fn preset_patch(&self, config: &ConfigOption, service: &Service) -> Option<Value> {
+        match &config.setup {
             Setup::Made {
                 branch_databases: true,
                 ..
@@ -727,6 +780,11 @@ impl RunScreen {
     }
 
     fn run(&mut self) {
+        // One run at a time: a second Enter shows the one going on.
+        if self.launch.as_ref().is_some_and(Launch::running) {
+            self.log_open = true;
+            return;
+        }
         let plan = match self.plan() {
             Ok(plan) => plan,
             Err(missing) => {
@@ -749,8 +807,10 @@ impl RunScreen {
                         );
                     }
                 }
+                self.remember_run(&config);
                 self.problem = None;
                 self.launch = Some(launch);
+                self.log_open = true;
             }
             Err(error) => self.problem = Some(format!("Could not start mirrord: {error:#}")),
         }
@@ -804,6 +864,9 @@ impl RunScreen {
             (_, ListEvent::Moved) => {}
             (_, ListEvent::Next) => self.next(),
             (Step::Folders, ListEvent::Toggle(id)) => self.toggle_folder(&id),
+            (Step::Folders, ListEvent::Open(id)) if id.starts_with(RUN_AGAIN) => {
+                self.run_again(&id);
+            }
             (Step::Folders, ListEvent::Open(id)) => self.folders.open(&id),
             (Step::Folders, ListEvent::Up) => {
                 self.folders.up();
@@ -833,21 +896,230 @@ impl RunScreen {
                     self.toggle_target(&id);
                 }
             }
-            (Step::Config, ListEvent::Toggle(id) | ListEvent::Open(id)) => {
-                self.config_choice = Some(id);
-                self.problem = None;
-            }
+            (Step::Config, _) => {}
             (_, ListEvent::Back | ListEvent::Up) => self.back(),
             (_, ListEvent::ToggleAll) => {}
         }
         true
     }
 
-    fn list_mut(&mut self) -> &mut SelectList {
+    /// The list of the current step; the config step has the option tree instead.
+    fn list_mut(&mut self) -> Option<&mut SelectList> {
         match self.step {
-            Step::Folders => &mut self.folders.list,
-            Step::Targets => &mut self.targets,
-            Step::Config => &mut self.configs,
+            Step::Folders => Some(&mut self.folders.list),
+            Step::Targets => Some(&mut self.targets),
+            Step::Config => None,
+        }
+    }
+
+    /// Adds to what is shown as done for the user, after anything already said.
+    fn tell(&mut self, text: String) {
+        self.notice = Some(match self.notice.take() {
+            Some(earlier) => format!("{earlier} \u{b7} {text}"),
+            None => text,
+        });
+    }
+
+    /// Remembers this run as a whole, for running it again from the folder step.
+    fn remember_run(&mut self, config: &ConfigOption) {
+        let services = self
+            .services
+            .iter()
+            .map(|service| {
+                let job = self.job_for(config, service);
+                RecipeService {
+                    dir: service.dir_text(),
+                    target: self.target_of(&service.dir).map(Candidate::label),
+                    command: self.command(service, job).map(|(command, _)| command),
+                }
+            })
+            .collect();
+        let options = self
+            .working
+            .as_ref()
+            .filter(|working| working.is_scratch() && !working.options().is_empty())
+            .map(|working| Value::Object(working.options().clone()));
+        history::record_run(RunRecipe {
+            cluster: String::new(),
+            services,
+            start_from: Some(config.id.clone()),
+            options,
+            ran_at: Timestamp::now().as_second(),
+        });
+        self.ran_again_rows_set = false;
+    }
+
+    /// Sets up an earlier run again, by its `run-again:<index>` row: its folders and commands at
+    /// once, its targets as soon as the cluster lists them, its config, and the config step,
+    /// ready to run.
+    fn run_again(&mut self, id: &str) {
+        let Some(recipe) = id
+            .strip_prefix(RUN_AGAIN)
+            .and_then(|index| index.parse::<usize>().ok())
+            .and_then(|index| history::runs().into_iter().nth(index))
+        else {
+            return;
+        };
+        self.services.clear();
+        self.picked.clear();
+        self.pending_targets.clear();
+        for saved in &recipe.services {
+            let dir = PathBuf::from(&saved.dir);
+            if !dir.is_dir() {
+                continue;
+            }
+            let mut service = Service::new(dir.clone());
+            service.command_choice = saved.command.clone();
+            // Its target comes back below; no other guess should take its place.
+            self.auto_picked.insert(dir.clone());
+            if let Some(target) = &saved.target {
+                self.pending_targets.push((dir, target.clone()));
+            }
+            self.services.push(service);
+        }
+        if self.services.is_empty() {
+            self.problem = Some("None of that run's folders are there any more.".to_owned());
+            return;
+        }
+        self.config_choice = recipe.start_from.clone();
+        self.working = None;
+        self.ensure_working();
+        if let (Some(working), Some(Value::Object(options))) = (&mut self.working, recipe.options) {
+            working.seed(options);
+        }
+        // What was filled in then is part of what comes back; nothing to fill in again.
+        self.filled = true;
+        self.step = Step::Config;
+        self.problem = None;
+        self.notice = Some("set up like before - ctrl+r runs it".to_owned());
+    }
+
+    /// Picks a run-again target once its folder's targets are listed and it is among them.
+    fn pick_pending_targets(&mut self) {
+        let mut still = Vec::new();
+        for (dir, label) in mem::take(&mut self.pending_targets) {
+            let found = self
+                .service(&dir)
+                .and_then(|service| {
+                    service
+                        .candidates
+                        .iter()
+                        .find(|candidate| candidate.label() == label)
+                })
+                .cloned();
+            match found {
+                Some(candidate) => self.picked.push(PickedTarget { candidate, dir }),
+                None => still.push((dir, label)),
+            }
+        }
+        self.pending_targets = still;
+    }
+
+    /// Started inside a project: once every folder has its sure target, the targets step has
+    /// nothing to ask, so the view goes on to the config step and says what it picked.
+    fn auto_advance_when_known(&mut self) {
+        if !self.auto_advance || self.step != Step::Targets {
+            return;
+        }
+        let listed = self
+            .services
+            .iter()
+            .all(|service| self.auto_picked.contains(&service.dir));
+        if !listed {
+            return;
+        }
+        self.auto_advance = false;
+        let picks: Vec<String> = self
+            .picked
+            .iter()
+            .map(|picked| picked.candidate.path())
+            .collect();
+        // Nothing sure to pick: the user has a choice to make here.
+        if picks.len() < self.services.len() {
+            return;
+        }
+        self.step = Step::Config;
+        self.notice = Some(format!(
+            "picked for you: {} - esc to change",
+            picks.join(", ")
+        ));
+    }
+
+    /// Fills in, once per new config, what the folders and the cluster already say: the
+    /// folder's own `.mirrord/mirrord.json` when it has one, else a port mapping when the app
+    /// listens locally on a port the target does not.
+    fn fill_in_settings(&mut self) {
+        if self.filled {
+            return;
+        }
+        let Some(first) = self.services.first() else {
+            return;
+        };
+        let dir = first.dir.clone();
+        let working_is_new = self
+            .working
+            .as_ref()
+            .is_some_and(|working| working.is_scratch() && !working.is_dirty());
+        if !working_is_new {
+            self.filled = true;
+            return;
+        }
+
+        // The team's own config for the folder wins over anything guessed.
+        if self.config_choice.is_none() {
+            let own = [
+                "mirrord.json",
+                "mirrord.yaml",
+                "mirrord.yml",
+                "mirrord.toml",
+            ]
+            .iter()
+            .map(|name| dir.join(".mirrord").join(name))
+            .find(|path| path.is_file());
+            if let Some(path) = own {
+                let shown = format!(
+                    "{}/.mirrord/{}",
+                    dir.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    path.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                );
+                self.filled = true;
+                self.load_config(path);
+                self.tell(format!("using {shown}, the folder's own config"));
+                return;
+            }
+        }
+
+        // The port mapping needs the target's ports, which come with its inspection; until then,
+        // try again on a later frame.
+        let Some(candidate) = self.target_of(&dir).cloned() else {
+            self.filled = true;
+            return;
+        };
+        let Some(resources) = self.resources(&candidate) else {
+            return;
+        };
+        self.filled = true;
+        let Some((local, source)) = detect::local_port(&dir) else {
+            return;
+        };
+        let [remote] = resources.ports.as_slice() else {
+            return;
+        };
+        if local == *remote {
+            return;
+        }
+        if let Some(working) = &mut self.working {
+            working.set(
+                &["feature", "network", "incoming", "port_mapping"],
+                json!([[local, remote]]),
+            );
+            self.tell(format!(
+                "set for you: your app's port {local} (from {source}) maps to the target's {remote}"
+            ));
         }
     }
 
@@ -885,6 +1157,16 @@ impl RunScreen {
 
     fn picked_from_picker(&mut self, pick: Pick, choice: String) {
         match pick {
+            Pick::SaveFolder => {
+                if let Some(dir) = self
+                    .services
+                    .iter()
+                    .find(|service| service.name() == choice)
+                    .map(|service| service.dir.clone())
+                {
+                    self.ask_config_name(dir);
+                }
+            }
             Pick::Folder => {
                 if let Some(dir) = self
                     .services
@@ -1019,42 +1301,159 @@ impl RunScreen {
         choices
     }
 
-    fn config_choices(options: &[ConfigOption]) -> Vec<Choice> {
-        options
-            .iter()
-            .enumerate()
-            .map(|(index, option)| {
-                let made = matches!(option.setup, Setup::Made { .. });
-                let tone = match &option.setup {
-                    Setup::Made { job, .. } => job.tone(),
-                    Setup::File { .. } => theme::LAVENDER,
-                };
-                let note = if index == 0 && made && option.id != "made:none" {
-                    vec![Span::styled(" recommended ", theme::chip(theme::MINT))]
-                } else {
-                    Vec::new()
-                };
-                Choice {
-                    id: option.id.clone(),
-                    section: Some(if made {
-                        "made from your picks"
-                    } else {
-                        "files in your folders"
-                    }),
-                    mark: Some(if made {
-                        Span::styled("\u{2726}", Style::default().fg(theme::INDIGO))
-                    } else {
-                        Span::styled("\u{2261}", Style::default().fg(theme::INDIGO_LIGHT))
-                    }),
-                    title: option.title.clone(),
-                    tone: Some(tone),
-                    detail: option.detail.clone(),
-                    note,
-                    keywords: option.keywords.clone(),
-                    pickable: true,
+    /// The config step's options, made the first time the step is shown: a new config in the
+    /// first folder's `.mirrord`, or the saved config "start from" points at.
+    fn ensure_working(&mut self) {
+        if self.working.is_some() {
+            return;
+        }
+        let saved = self.config().and_then(|config| match config.setup {
+            Setup::File { path } => Some(path),
+            Setup::Made { .. } => None,
+        });
+        self.working = match saved {
+            Some(path) => Some(ConfigScreen::for_file(path, Map::new())),
+            None => self.services.first().map(|service| {
+                let name = free_config_name(&service.dir);
+                ConfigScreen::scratch(service.dir.join(".mirrord").join(format!("{name}.json")))
+            }),
+        };
+    }
+
+    /// `Ctrl+O`: the "start from" dialog, on the config in effect.
+    fn open_start_picker(&mut self) {
+        let options = self.config_options();
+        let mut list = SelectList::new(Picks::One, "type to search: db, kafka, steal, a file...");
+        list.set_choices(start_choices(&options));
+        if let Some(config) = self.config() {
+            list.focus(&config.id);
+        }
+        self.start_list = Some(list);
+    }
+
+    /// Acts on a "start from" choice by its id. A made config changes how the folders run and
+    /// keeps the edited options; a saved config is loaded into the option tree in their place,
+    /// unless there are edits that would be lost.
+    fn start_from(&mut self, id: &str) {
+        self.start_list = None;
+        if id == LOAD_A_FILE {
+            self.loading = Some(TextInput::default());
+            return;
+        }
+        let setup = self
+            .config_options()
+            .into_iter()
+            .find(|option| option.id == id)
+            .map(|option| option.setup);
+        match setup {
+            Some(Setup::File { path }) => self.load_config(path),
+            Some(Setup::Made { .. }) => {
+                self.config_choice = Some(id.to_owned());
+                self.problem = None;
+            }
+            None => {}
+        }
+    }
+
+    /// What the "start from" dialog asked for.
+    fn on_start_list(&mut self, event: ListEvent) {
+        match event {
+            ListEvent::Toggle(id) | ListEvent::Open(id) => self.start_from(&id),
+            ListEvent::Next => {
+                let focused = self
+                    .start_list
+                    .as_ref()
+                    .and_then(|list| list.focused())
+                    .map(|choice| choice.id.clone());
+                if let Some(id) = focused {
+                    self.start_from(&id);
                 }
-            })
-            .collect()
+            }
+            ListEvent::Back => self.start_list = None,
+            _ => {}
+        }
+    }
+
+    /// Loads the config file at `path` into the option tree, unless there are edits it would
+    /// replace.
+    fn load_config(&mut self, path: PathBuf) {
+        if self.working.as_ref().is_some_and(ConfigScreen::is_dirty) {
+            self.problem = Some("Save your edits first (ctrl+s), or undo them.".to_owned());
+            return;
+        }
+        if !path.is_file() {
+            self.problem = Some(format!("No config file at {}.", path.display()));
+            return;
+        }
+        self.config_choice = Some(format!("file:{}", path.display()));
+        self.working = Some(ConfigScreen::for_file(path, Map::new()));
+        self.problem = None;
+    }
+
+    /// `Ctrl+S`: saves the options. A new config asks for its folder (when there are several)
+    /// and its name first; a loaded one is written back to its file.
+    fn save_working(&mut self) {
+        let Some(working) = &mut self.working else {
+            return;
+        };
+        if !working.is_scratch() {
+            if let Err(error) = working.save_if_edited() {
+                self.problem = Some(format!("Could not save the config: {error}"));
+            }
+            return;
+        }
+        if let [service] = self.services.as_slice() {
+            let dir = service.dir.clone();
+            self.ask_config_name(dir);
+            return;
+        }
+        let names = self.services.iter().map(Service::name).collect();
+        self.picker = Some((
+            Pick::SaveFolder,
+            Picker::new("Save the config in which folder?", names, None),
+        ));
+    }
+
+    /// Saves the new config as `dir/.mirrord/<name>` (`.json` added when it has no extension).
+    fn save_working_as(&mut self, dir: PathBuf, name: &str) {
+        let Some(file) = config_file_name(name) else {
+            return;
+        };
+        let Some(working) = &mut self.working else {
+            return;
+        };
+        match working.save_as(dir.join(".mirrord").join(file)) {
+            Ok(()) => self.problem = None,
+            Err(error) => self.problem = Some(format!("Could not save the config: {error}")),
+        }
+    }
+
+    /// The config step's own keys first, then the option tree's. Returns whether the key was
+    /// used, so the rest of the interface gets the ones that were not.
+    fn config_key(&mut self, key: &KeyEvent) -> bool {
+        self.ensure_working();
+        let Some(working) = &mut self.working else {
+            return false;
+        };
+        match working.handle_event(Event::Key(*key)) {
+            ControlFlow::Break(()) => true,
+            // An Esc the tree leaves alone means it has nothing open: back to the targets.
+            ControlFlow::Continue(Event::Key(key)) if key.code == KeyCode::Esc => {
+                self.back();
+                true
+            }
+            ControlFlow::Continue(_) => false,
+        }
+    }
+
+    /// Opens the name box for a new config in `dir`, with a name no file there has yet, selected
+    /// so typing replaces it.
+    fn ask_config_name(&mut self, dir: PathBuf) {
+        let name = free_config_name(&dir);
+        let mut input = TextInput::default();
+        input.paste(&name);
+        input.select_all();
+        self.naming = Some((dir, input));
     }
 
     /// The step bar: each step with its number, done steps in mint with what was picked, the
@@ -1088,16 +1487,30 @@ impl RunScreen {
             spans.push(Span::styled(" \u{203a} ", theme::muted()));
             x += width + 3;
         }
-        spans.push(Span::styled(
-            "\u{25b6} run",
-            if self.step == Step::Config && self.plan().is_ok() {
+        // While a run goes on behind the steps, the chip says so and a click shows its log.
+        let (chip, style) = match &self.launch {
+            Some(launch) if launch.running() => (
+                " \u{25cf} running \u{b7} ctrl+l log ".to_owned(),
+                theme::chip(theme::MINT),
+            ),
+            Some(_) => (
+                " \u{25a0} stopped \u{b7} ctrl+l log ".to_owned(),
+                theme::chip(theme::GREY),
+            ),
+            None if self.step == Step::Config && self.plan().is_ok() => (
+                "\u{25b6} run".to_owned(),
                 Style::default()
                     .fg(theme::MINT)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                theme::muted()
-            },
-        ));
+                    .add_modifier(Modifier::BOLD),
+            ),
+            None => ("\u{25b6} run".to_owned(), theme::muted()),
+        };
+        let width = u16::try_from(chip.chars().count()).unwrap_or(0);
+        self.run_hit = self
+            .launch
+            .is_some()
+            .then(|| Rect::new(x, area.y, width, 1));
+        spans.push(Span::styled(chip, style));
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
@@ -1112,11 +1525,16 @@ impl RunScreen {
         let inner = block.inner(area).inner(Margin::new(1, 0));
         frame.render_widget(block, area);
 
+        // The notice takes the line under the question, two when it is long, so it is read whole.
+        let notice_rows = match &self.notice {
+            Some(notice) if notice.chars().count() + 2 > usize::from(inner.width) => 2,
+            _ => 1,
+        };
         let [
             bar_area,
             _,
             question_area,
-            _,
+            notice_area,
             body_area,
             _,
             tray_area,
@@ -1125,7 +1543,7 @@ impl RunScreen {
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
-            Constraint::Length(1),
+            Constraint::Length(notice_rows),
             Constraint::Fill(1),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -1146,6 +1564,17 @@ impl RunScreen {
             ])),
             question_area,
         );
+        // What was just done for the user, on its own line so it is read in full.
+        if let Some(notice) = &self.notice {
+            frame.render_widget(
+                Paragraph::new(Line::styled(
+                    format!("\u{2714} {notice}"),
+                    Style::default().fg(theme::MINT),
+                ))
+                .wrap(Wrap { trim: true }),
+                notice_area,
+            );
+        }
 
         let (list_area, details_area) = if body_area.width >= WIDE_LAYOUT {
             let [list, details] =
@@ -1235,28 +1664,34 @@ impl RunScreen {
                 );
             }
             Step::Config => {
-                let options = self.config_options();
-                self.configs.set_choices(Self::config_choices(&options));
-                let chosen = self.config().map(|config| config.id).unwrap_or_default();
-                self.configs.draw(frame, list_area, &|id| id == chosen);
-                if let Some(details_area) = details_area {
-                    let lines = self.plan_lines();
-                    details_pane(
-                        frame,
-                        details_area,
-                        if self.show_yaml {
-                            "yaml"
-                        } else {
-                            "what will run"
-                        },
-                        lines,
-                    );
+                let [start_area, editor_area] =
+                    Layout::vertical([Constraint::Length(1), Constraint::Fill(1)])
+                        .spacing(1)
+                        .areas(body_area);
+                frame.render_widget(Paragraph::new(self.start_line()), start_area);
+                self.ensure_working();
+                // Ctrl+Y swaps the option tree for exactly what mirrord will run.
+                match &mut self.working {
+                    Some(working) if !self.show_yaml => working.draw(frame, editor_area),
+                    _ => {
+                        let lines = self.plan_lines();
+                        details_pane(frame, editor_area, "what mirrord runs", lines);
+                    }
                 }
                 frame.render_widget(Paragraph::new(self.status_line()), tray_area);
             }
         }
 
+        // While a search is typed, Space is part of it and Enter picks what it found.
+        let searching = self
+            .list_mut()
+            .is_some_and(|list| !list.search().is_empty());
         let legend = match self.step {
+            _ if searching => vec![
+                Hint::new("enter", "pick it"),
+                Hint::new("\u{2191}\u{2193}", "choose"),
+                Hint::new("esc", "clear search"),
+            ],
             Step::Folders => vec![
                 Hint::new("space", "pick"),
                 Hint::new("\u{2192}", "open folder"),
@@ -1272,10 +1707,19 @@ impl RunScreen {
                 legend
             }
             Step::Config => vec![
-                Hint::new("space", "choose"),
-                Hint::new("enter", "run"),
-                Hint::new("ctrl+e", "command"),
-                Hint::new("ctrl+y", if self.show_yaml { "summary" } else { "yaml" }),
+                Hint::new("ctrl+r", "run"),
+                Hint::new("ctrl+o", "start from"),
+                Hint::new("ctrl+s", "save"),
+                Hint::new("enter", "edit"),
+                Hint::new("/", "search"),
+                Hint::new(
+                    "ctrl+y",
+                    if self.show_yaml {
+                        "options"
+                    } else {
+                        "what runs"
+                    },
+                ),
                 Hint::new("esc", "back"),
             ],
         };
@@ -1413,14 +1857,6 @@ impl RunScreen {
                 return vec![Line::styled(format!("Needs {missing}."), theme::warning())];
             }
         };
-        if self.show_yaml {
-            return plan
-                .to_yaml()
-                .unwrap_or_default()
-                .lines()
-                .map(|line| Line::styled(line.to_owned(), theme::muted()))
-                .collect();
-        }
         let Some(config) = self.config() else {
             return Vec::new();
         };
@@ -1466,19 +1902,66 @@ impl RunScreen {
                     Style::default().fg(tone),
                 ));
             }
-            if let Some(patch) = self.config_patch(&config, service) {
-                let branches = patch
-                    .pointer("/feature/db_branches")
-                    .and_then(Value::as_array)
-                    .map(Vec::len);
-                lines.push(match branches {
-                    Some(count) => row("db", format!("{count} branched"), theme::MINT),
-                    None => row("config", "from the file".to_owned(), theme::LAVENDER),
-                });
+            if let Some(count) = self
+                .config_patch(&config, service)
+                .as_ref()
+                .and_then(|patch| patch.pointer("/feature/db_branches"))
+                .and_then(Value::as_array)
+                .map(Vec::len)
+            {
+                lines.push(row("db", format!("{count} branched"), theme::MINT));
+            }
+            let edited = self
+                .working
+                .as_ref()
+                .map_or(0, |working| working.options().len());
+            if edited > 0 {
+                lines.push(row(
+                    "options",
+                    format!("{edited} set on the config step"),
+                    theme::LAVENDER,
+                ));
             }
             lines.push(Line::raw(""));
         }
+        // Then exactly what `mirrord up` reads.
+        lines.push(Line::styled(
+            "the plan mirrord reads",
+            theme::table_header(),
+        ));
+        lines.extend(
+            plan.to_yaml()
+                .unwrap_or_default()
+                .lines()
+                .map(|line| Line::styled(line.to_owned(), theme::muted())),
+        );
         lines
+    }
+
+    /// The config step's first line: what it starts from, and how to change it.
+    fn start_line(&self) -> Line<'static> {
+        let Some(config) = self.config() else {
+            return Line::default();
+        };
+        let (mark, tone) = match &config.setup {
+            Setup::Made { job, .. } => ("\u{2726}", job.tone()),
+            Setup::File { .. } => ("\u{2261}", theme::LAVENDER),
+        };
+        let mut spans = vec![
+            Span::styled("Start from  ", theme::muted()),
+            Span::styled(
+                format!("{mark} {}", config.title),
+                Style::default().fg(tone).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ctrl+o change", theme::muted()),
+        ];
+        if let Setup::Made { .. } = config.setup {
+            spans.push(Span::styled(
+                format!("   {}", config.detail),
+                theme::muted().italic(),
+            ));
+        }
+        Line::from(spans)
     }
 
     fn status_line(&self) -> Line<'static> {
@@ -1489,7 +1972,7 @@ impl RunScreen {
             ]),
             (None, Ok(plan)) => Line::from_iter([
                 Span::styled(" \u{25cf} READY ", theme::chip(theme::MINT)),
-                Span::styled("  enter ", theme::title()),
+                Span::styled("  ctrl+r ", theme::title()),
                 Span::styled(
                     match plan.services.len() {
                         1 => "starts it".to_owned(),
@@ -1507,11 +1990,17 @@ impl RunScreen {
 
     fn handle_key(&mut self, key: &KeyEvent) -> bool {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let searching = !self.list_mut().search().is_empty();
+        let searching = self
+            .list_mut()
+            .is_some_and(|list| !list.search().is_empty());
         match (self.step, key.code) {
             (Step::Targets, KeyCode::Char('f')) if ctrl => self.cycle_target_folder(),
+            (Step::Config, KeyCode::Char('r')) if ctrl => self.run(),
+            (Step::Config, KeyCode::Char('o')) if ctrl => self.open_start_picker(),
+            (Step::Config, KeyCode::Char('s')) if ctrl => self.save_working(),
             (Step::Config, KeyCode::Char('e')) if ctrl => self.edit_command(),
             (Step::Config, KeyCode::Char('y')) if ctrl => self.show_yaml = !self.show_yaml,
+            (Step::Config, _) => return self.config_key(key),
             // A path's first character jumps there, the way a shell reads it.
             (Step::Folders, KeyCode::Char('~')) if !searching => {
                 if let Some(home) = folders::home() {
@@ -1522,11 +2011,187 @@ impl RunScreen {
                 self.folders.go_to(PathBuf::from("/"), None);
             }
             _ => {
-                let event = self.list_mut().handle_key(key);
+                let Some(list) = self.list_mut() else {
+                    return false;
+                };
+                let event = list.handle_key(key);
                 return self.on_list(event);
             }
         }
         true
+    }
+}
+
+/// The "start from" dialog's rows: the made configs, the saved ones, and loading a file.
+fn start_choices(options: &[ConfigOption]) -> Vec<Choice> {
+    options
+        .iter()
+        .enumerate()
+        .map(|(index, option)| {
+            let made = matches!(option.setup, Setup::Made { .. });
+            let tone = match &option.setup {
+                Setup::Made { job, .. } => job.tone(),
+                Setup::File { .. } => theme::LAVENDER,
+            };
+            let note = if index == 0 && made && option.id != "made:none" {
+                vec![Span::styled(" recommended ", theme::chip(theme::MINT))]
+            } else {
+                Vec::new()
+            };
+            Choice {
+                id: option.id.clone(),
+                section: Some(if made {
+                    "made from your picks"
+                } else {
+                    "saved in your folders"
+                }),
+                mark: Some(if made {
+                    Span::styled("\u{2726}", Style::default().fg(theme::INDIGO))
+                } else {
+                    Span::styled("\u{2261}", Style::default().fg(theme::INDIGO_LIGHT))
+                }),
+                title: option.title.clone(),
+                tone: Some(tone),
+                detail: option.detail.clone(),
+                note,
+                keywords: option.keywords.clone(),
+                pickable: true,
+            }
+        })
+        .chain([Choice {
+            id: LOAD_A_FILE.to_owned(),
+            section: Some("load"),
+            mark: Some(Span::styled("\u{2197}", Style::default().fg(theme::INDIGO))),
+            title: "a config file by its path...".to_owned(),
+            tone: Some(theme::INDIGO_LIGHT),
+            detail: "any mirrord config on this computer".to_owned(),
+            keywords: "load open file path import".to_owned(),
+            ..Choice::default()
+        }])
+        .collect()
+}
+
+/// The folder step's "run again" rows, newest first: which folders, against what, how, and when.
+fn run_again_choices(runs: &[RunRecipe]) -> Vec<Choice> {
+    let now = Timestamp::now().as_second();
+    runs.iter()
+        .enumerate()
+        .map(|(index, run)| {
+            let names: Vec<String> = run
+                .services
+                .iter()
+                .filter_map(|service| Path::new(&service.dir).file_name())
+                .map(|name| name.to_string_lossy().into_owned())
+                .collect();
+            let targets: Vec<&str> = run
+                .services
+                .iter()
+                .map(|service| {
+                    service
+                        .target
+                        .as_deref()
+                        .and_then(|target| target.split(" (").next())
+                        .unwrap_or("no target")
+                })
+                .collect();
+            Choice {
+                id: format!("{RUN_AGAIN}{index}"),
+                section: Some("run again"),
+                mark: Some(Span::styled("\u{21bb}", Style::default().fg(theme::MINT))),
+                title: names.join(" + "),
+                tone: Some(theme::LAVENDER),
+                detail: format!(
+                    "{} \u{b7} {}",
+                    targets.join(", "),
+                    started_from(run.start_from.as_deref())
+                ),
+                note: vec![Span::styled(ago(now - run.ran_at), theme::muted())],
+                keywords: run
+                    .services
+                    .iter()
+                    .map(|service| service.dir.as_str())
+                    .chain(targets.iter().copied())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                pickable: false,
+            }
+        })
+        .collect()
+}
+
+/// How a remembered run started its config, in a few words.
+fn started_from(id: Option<&str>) -> String {
+    match id {
+        Some("made:mine") => "only my requests".to_owned(),
+        Some("made:mine+db") => "with databases branched".to_owned(),
+        Some("made:takeover") => "took over all traffic".to_owned(),
+        Some("made:none") | None => "no incoming traffic".to_owned(),
+        Some(other) => other
+            .strip_prefix("file:")
+            .and_then(|path| Path::new(path).file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| other.to_owned()),
+    }
+}
+
+/// How long ago something was, `seconds` back: `just now`, `5m ago`, `3h ago`, `2d ago`.
+fn ago(seconds: i64) -> String {
+    match seconds {
+        ..60 => "just now".to_owned(),
+        60..3600 => format!("{}m ago", seconds / 60),
+        3600..86400 => format!("{}h ago", seconds / 3600),
+        _ => format!("{}d ago", seconds / 86400),
+    }
+}
+
+/// A name for a new config in `dir` that no file in its `.mirrord` has yet: `mirrord`,
+/// `mirrord-2`, ...
+fn free_config_name(dir: &Path) -> String {
+    let taken = |name: &str| dir.join(".mirrord").join(format!("{name}.json")).exists();
+    std::iter::once("mirrord".to_owned())
+        .chain((2..).map(|number| format!("mirrord-{number}")))
+        .find(|name| !taken(name))
+        .unwrap_or_default()
+}
+
+/// The file name a typed config name is saved as: characters other than letters, digits, `-`,
+/// `_` and `.` become `-`, and `.json` is added unless it ends in `.json`, `.yaml`, `.yml` or
+/// `.toml`. `None` for an empty name.
+fn config_file_name(name: &str) -> Option<String> {
+    let name: String = name
+        .trim()
+        .chars()
+        .map(|char| {
+            if char.is_ascii_alphanumeric() || "-_.".contains(char) {
+                char
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    if name.is_empty() {
+        return None;
+    }
+    let has_extension = [".json", ".yaml", ".yml", ".toml"]
+        .iter()
+        .any(|extension| name.ends_with(extension));
+    Some(if has_extension {
+        name
+    } else {
+        format!("{name}.json")
+    })
+}
+
+/// Puts `edits` over `base` the way a JSON merge patch does: maps merge key by key, anything else
+/// is replaced.
+fn merge(base: &mut Value, edits: Value) {
+    match (base, edits) {
+        (Value::Object(base), Value::Object(edits)) => {
+            for (key, value) in edits {
+                merge(base.entry(key).or_insert(Value::Null), value);
+            }
+        }
+        (base, edits) => *base = edits,
     }
 }
 
@@ -1588,6 +2253,7 @@ impl Screen for RunScreen {
         } else {
             Step::Targets
         };
+        let auto_advance = !services.is_empty();
 
         let discovery = Arc::new(RwLock::new(Discovery::default()));
         let inspection = Arc::new(RwLock::new(Inspections::default()));
@@ -1628,12 +2294,12 @@ impl Screen for RunScreen {
                 SelectList::new(
                     Picks::Many,
                     "type to search folders, ~ for home, / for root",
-                ),
+                )
+                .with_levels(),
             ),
             targets: SelectList::new(Picks::Many, "type to search targets"),
             picked: Vec::new(),
             auto_picked: BTreeSet::new(),
-            configs: SelectList::new(Picks::One, "type to search: db, kafka, steal, a file..."),
             config_choice: None,
             discovery,
             found,
@@ -1644,19 +2310,54 @@ impl Screen for RunScreen {
             show_yaml: false,
             picker: None,
             editor: None,
+            naming: None,
+            working: None,
+            loading: None,
+            start_list: None,
             launch: None,
+            log_open: false,
+            run_hit: None,
+            pending_targets: Vec::new(),
+            auto_advance,
+            filled: false,
+            notice: None,
+            ran_again_rows_set: false,
             problem: None,
         }
     }
 
     fn draw(&mut self, frame: &mut Frame, area: Rect) {
-        if let Some(launch) = &mut self.launch {
-            launch.draw(frame, area, true);
+        if !self.ran_again_rows_set {
+            self.ran_again_rows_set = true;
+            self.folders.set_top(run_again_choices(&history::runs()));
+        }
+        if let Some(launch) = self.launch.as_mut().filter(|_| self.log_open) {
+            let [log_area, legend_area] =
+                Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(area);
+            launch.draw(frame, log_area, true);
+            let legend = if launch.running() {
+                vec![
+                    Hint::new("x", "stop"),
+                    Hint::new("esc", "back to the steps (keeps running)"),
+                    Hint::new("\u{2191}\u{2193}", "scroll"),
+                ]
+            } else {
+                vec![
+                    Hint::new("enter", "back to the steps"),
+                    Hint::new("\u{2191}\u{2193}", "scroll"),
+                ]
+            };
+            frame.render_widget(Paragraph::new(hints::legend(&legend)), legend_area);
             return;
         }
-
         self.rank_services();
+        self.pick_pending_targets();
         self.auto_pick_targets();
+        self.auto_advance_when_known();
+        if self.step == Step::Config {
+            self.ensure_working();
+            self.fill_in_settings();
+        }
         self.folders.set_picked(
             self.services
                 .iter()
@@ -1699,36 +2400,215 @@ impl Screen for RunScreen {
         if let Some((_, picker)) = &self.picker {
             picker.draw(frame, area);
         }
-        if let Some((dir, input)) = &self.editor {
+        if let Some(list) = &mut self.start_list {
+            let height = area.height.saturating_sub(4).min(22);
+            let inner = dialog(
+                frame,
+                centered(area, Constraint::Length(96), Constraint::Length(height)),
+                "Start from",
+            );
+            let [list_area, legend_area] =
+                Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(inner);
+            let chosen = self.config_choice.clone().unwrap_or_default();
+            list.draw(frame, list_area, &|id| id == chosen);
+            frame.render_widget(
+                Paragraph::new(hints::legend(&[
+                    Hint::new("enter", "use it"),
+                    Hint::new("type", "search: db, kafka, steal"),
+                    Hint::new("esc", "cancel"),
+                ])),
+                legend_area,
+            );
+        }
+        if let Some(input) = &mut self.loading {
+            let inner = dialog(
+                frame,
+                centered(area, Constraint::Length(80), Constraint::Length(7)),
+                "Load a config file",
+            );
+            let [field_area, _, legend_area] = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .areas(inner);
+            input.render(
+                frame,
+                field_area,
+                FieldLook {
+                    placeholder: "~/code/shop/.mirrord/mirrord.json",
+                    label: Some("path"),
+                    focused: true,
+                    ..FieldLook::default()
+                },
+            );
+            frame.render_widget(
+                Paragraph::new(hints::legend(&[
+                    Hint::new("enter", "load it"),
+                    Hint::new("esc", "cancel"),
+                ])),
+                legend_area,
+            );
+        }
+        if let Some((dir, input)) = &mut self.naming {
+            let inner = dialog(
+                frame,
+                centered(area, Constraint::Length(72), Constraint::Length(8)),
+                "Name the config",
+            );
+            let [field_area, saved_area, _, legend_area] = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .areas(inner);
+            let saved = format!(
+                "saved as {}/.mirrord/{}.json",
+                suggest::compress_home(&dir.display().to_string()),
+                input.value().trim()
+            );
+            input.render(
+                frame,
+                field_area,
+                FieldLook {
+                    placeholder: "a short name, such as steal or with-db",
+                    label: Some("name"),
+                    focused: true,
+                    ..FieldLook::default()
+                },
+            );
+            frame.render_widget(
+                Paragraph::new(Line::styled(format!(" {saved}"), theme::muted())),
+                saved_area,
+            );
+            frame.render_widget(
+                Paragraph::new(hints::legend(&[
+                    Hint::new("enter", "open every option"),
+                    Hint::new("esc", "cancel"),
+                ])),
+                legend_area,
+            );
+        }
+        if let Some((dir, _)) = &self.editor {
             let name = self.service(dir).map(Service::name).unwrap_or_default();
             let inner = dialog(
                 frame,
-                centered(area, Constraint::Length(72), Constraint::Length(5)),
+                centered(area, Constraint::Length(72), Constraint::Length(7)),
                 &format!("Command for {name}"),
             );
-            let mut spans = vec![Span::styled("$ ", theme::title())];
-            spans.extend(input.spans(
-                Style::default().fg(theme::LAVENDER),
-                Style::default().fg(theme::INDIGO),
-                true,
-            ));
+            let [field_area, _, legend_area] = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .areas(inner);
+            if let Some((_, input)) = &mut self.editor {
+                input.render(
+                    frame,
+                    field_area,
+                    FieldLook {
+                        prefix: "$",
+                        placeholder: "the command to run, such as npm run dev",
+                        label: Some("command"),
+                        focused: true,
+                        ..FieldLook::default()
+                    },
+                );
+            }
             frame.render_widget(
-                Paragraph::new(vec![
-                    Line::from(spans),
-                    Line::raw(""),
-                    hints::legend(&[Hint::new("enter", "keep"), Hint::new("esc", "cancel")]),
-                ]),
-                inner,
+                Paragraph::new(hints::legend(&[
+                    Hint::new("enter", "keep"),
+                    Hint::new("esc", "cancel"),
+                ])),
+                legend_area,
             );
         }
     }
 
     fn handle_event(&mut self, event: Event) -> ControlFlow<(), Event> {
-        if let Some(launch) = &mut self.launch {
-            if let Event::Key(key) = event
-                && launch.handle_key(key)
-            {
-                self.launch = None;
+        // The user has the wheel from their first key on.
+        if matches!(event, Event::Key(_)) {
+            self.auto_advance = false;
+            self.notice = None;
+        }
+        if let Some(launch) = self.launch.as_mut().filter(|_| self.log_open) {
+            let Event::Key(key) = event else {
+                return ControlFlow::Break(());
+            };
+            match key.code {
+                // While it runs, Esc only hides the log: the steps come back and the run goes on.
+                KeyCode::Esc if launch.running() => self.log_open = false,
+                // Once it stopped, Esc or Enter closes it (the pane removes its plan file).
+                KeyCode::Esc | KeyCode::Enter if !launch.running() => {
+                    if launch.handle_key(KeyEvent::from(KeyCode::Esc)) {
+                        self.launch = None;
+                    }
+                    self.log_open = false;
+                }
+                _ => {
+                    launch.handle_key(key);
+                }
+            }
+            return ControlFlow::Break(());
+        }
+        if self.launch.is_some()
+            && let Event::Key(key) = &event
+            && key.code == KeyCode::Char('l')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            self.log_open = true;
+            return ControlFlow::Break(());
+        }
+
+        if let Some(list) = &mut self.start_list {
+            let outcome = match &event {
+                Event::Key(key) => list.handle_key(key),
+                Event::Mouse(mouse) => list.handle_mouse(mouse),
+                Event::Paste(text) => {
+                    list.paste(text);
+                    ListEvent::Moved
+                }
+                _ => ListEvent::Nothing,
+            };
+            self.on_start_list(outcome);
+            return ControlFlow::Break(());
+        }
+
+        if let Some(input) = &mut self.loading {
+            match &event {
+                Event::Paste(text) => input.paste(text),
+                Event::Key(key) => match key.code {
+                    KeyCode::Enter => {
+                        let path = PathBuf::from(suggest::expand_home(input.value().trim()));
+                        self.loading = None;
+                        self.load_config(path);
+                    }
+                    KeyCode::Esc => self.loading = None,
+                    _ => {
+                        input.handle_key(key);
+                    }
+                },
+                _ => {}
+            }
+            return ControlFlow::Break(());
+        }
+
+        if let Some((dir, input)) = &mut self.naming {
+            match &event {
+                Event::Paste(text) => input.paste(text),
+                Event::Key(key) => match key.code {
+                    KeyCode::Enter => {
+                        let (dir, name) = (dir.clone(), input.value().to_owned());
+                        self.naming = None;
+                        self.save_working_as(dir, &name);
+                    }
+                    KeyCode::Esc => self.naming = None,
+                    _ => {
+                        input.handle_key(key);
+                    }
+                },
+                _ => {}
             }
             return ControlFlow::Break(());
         }
@@ -1774,10 +2654,15 @@ impl Screen for RunScreen {
 
         let handled = match &event {
             Event::Key(key) => self.handle_key(key),
-            Event::Paste(text) => {
-                self.list_mut().paste(text);
-                true
-            }
+            Event::Paste(text) => match self.list_mut() {
+                Some(list) => {
+                    list.paste(text);
+                    true
+                }
+                None => self.working.as_mut().is_some_and(|working| {
+                    working.handle_event(Event::Paste(text.clone())).is_break()
+                }),
+            },
             Event::Mouse(mouse) => {
                 let at = Position::new(mouse.column, mouse.row);
                 let step = self
@@ -1786,7 +2671,15 @@ impl Screen for RunScreen {
                     .find(|(area, _)| area.contains(at))
                     .map(|(_, step)| *step)
                     .filter(|_| mouse.kind == MouseEventKind::Down(MouseButton::Left));
-                if let Some(step) = step {
+                let on_run_chip = mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                    && self.run_hit.is_some_and(|hit| hit.contains(at));
+                if on_run_chip {
+                    match self.launch {
+                        Some(_) => self.log_open = true,
+                        None => self.run(),
+                    }
+                    true
+                } else if let Some(step) = step {
                     self.go_to(step);
                     true
                 } else if let Some(id) = self.tray.clicked(mouse) {
@@ -1796,9 +2689,13 @@ impl Screen for RunScreen {
                         Step::Config => {}
                     }
                     true
-                } else {
-                    let event = self.list_mut().handle_mouse(mouse);
+                } else if let Some(list) = self.list_mut() {
+                    let event = list.handle_mouse(mouse);
                     self.on_list(event)
+                } else {
+                    self.working.as_mut().is_some_and(|working| {
+                        working.handle_event(Event::Mouse(*mouse)).is_break()
+                    })
                 }
             }
             _ => false,
@@ -1810,20 +2707,53 @@ impl Screen for RunScreen {
         }
     }
 
+    fn unsaved_changes(&self) -> Option<String> {
+        // A new config is this run's, remembered with it for "run again"; only edits to a saved
+        // file would be lost on quitting.
+        self.working
+            .as_ref()
+            .filter(|working| working.is_dirty() && !working.is_scratch())
+            .map(|working| format!("Run: edits to {} are not saved.", working.path().display()))
+    }
+
+    fn save_changes(&mut self) -> Result<(), String> {
+        self.working
+            .as_mut()
+            .map_or(Ok(()), ConfigScreen::save_changes)
+    }
+
     fn hints(&self) -> Vec<Hint> {
-        if self.launch.is_some() {
-            return vec![
-                Hint::new("x", "stop"),
-                Hint::new("\u{2191}/\u{2193}", "scroll"),
-                Hint::new("G", "follow"),
-                Hint::new("esc", "back, once stopped"),
-            ];
+        if let Some(launch) = self.launch.as_ref().filter(|_| self.log_open) {
+            return if launch.running() {
+                vec![
+                    Hint::new("x", "stop"),
+                    Hint::new("esc", "back to the steps"),
+                    Hint::new("\u{2191}/\u{2193}", "scroll"),
+                    Hint::new("G", "follow"),
+                ]
+            } else {
+                vec![
+                    Hint::new("enter/esc", "back to the steps"),
+                    Hint::new("\u{2191}/\u{2193}", "scroll"),
+                ]
+            };
         }
-        if self.editor.is_some() {
+        if self.editor.is_some() || self.naming.is_some() || self.loading.is_some() {
             return vec![Hint::new("enter", "keep"), Hint::new("esc", "cancel")];
         }
         if self.picker.is_some() {
             return vec![Hint::new("enter", "pick"), Hint::new("esc", "cancel")];
+        }
+        if self.step == Step::Config {
+            let mut hints = vec![
+                Hint::new("ctrl+r", "run"),
+                Hint::new("ctrl+o", "start from"),
+                Hint::new("ctrl+s", "save"),
+            ];
+            if let Some(working) = &self.working {
+                hints.extend(working.hints());
+            }
+            return hints;
         }
         let mut hints = vec![
             Hint::new("space/click", "pick"),
@@ -1847,6 +2777,33 @@ impl Screen for RunScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edits_go_over_what_the_preset_adds() {
+        let mut preset = json!({ "feature": { "db_branches": [{ "type": "pg" }] } });
+        merge(
+            &mut preset,
+            json!({ "feature": { "network": { "incoming": "steal" } }, "agent": { "ttl": 30 } }),
+        );
+        assert_eq!(
+            preset,
+            json!({
+                "feature": { "db_branches": [{ "type": "pg" }], "network": { "incoming": "steal" } },
+                "agent": { "ttl": 30 }
+            })
+        );
+    }
+
+    #[test]
+    fn typed_names_become_safe_config_file_names() {
+        assert_eq!(config_file_name("with-db").as_deref(), Some("with-db.json"));
+        assert_eq!(
+            config_file_name(" steal it ").as_deref(),
+            Some("steal-it.json")
+        );
+        assert_eq!(config_file_name("team.yaml").as_deref(), Some("team.yaml"));
+        assert_eq!(config_file_name("   "), None);
+    }
 
     #[test]
     fn steps_go_forward_and_back_in_order() {

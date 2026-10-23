@@ -12,6 +12,7 @@ pub mod markdown;
 pub mod panel;
 pub mod search;
 pub mod select_list;
+pub mod session_scope;
 pub mod state_view;
 pub mod table;
 pub mod text_input;

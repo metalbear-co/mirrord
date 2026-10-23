@@ -39,6 +39,7 @@ use crate::{
         hints::Hint,
         panel,
         search::{SearchBox, SearchOutcome},
+        session_scope::{self, SessionScope},
         state_view::{self, EmptyText, Fetch, Listing},
         table::DataTable,
     },
@@ -79,6 +80,8 @@ struct Item {
     name: String,
     namespace: Option<String>,
     cells: Vec<String>,
+    /// The object itself, for telling whether it belongs to a session running here.
+    object: Value,
 }
 
 /// The objects of the open type, with the columns to show them in.
@@ -98,6 +101,8 @@ pub struct ResourcesScreen {
     objects: Arc<RwLock<Objects>>,
     table: DataTable,
     search: SearchBox,
+    /// "Only my sessions" (`m`).
+    scope: SessionScope,
     describe: Option<Describe>,
     /// A describe on its way from the API server.
     describing: Arc<RwLock<Option<Describe>>>,
@@ -206,9 +211,13 @@ impl ResourcesScreen {
     }
 
     fn matching_items<'a>(&self, items: &'a [Item]) -> Vec<&'a Item> {
+        let filter = self.scope.current();
         items
             .iter()
-            .filter(|item| self.search.matches_any(item.cells.iter()))
+            .filter(|item| {
+                session_scope::keeps(&filter, &item.object)
+                    && self.search.matches_any(item.cells.iter())
+            })
             .collect()
     }
 
@@ -399,10 +408,11 @@ impl ResourcesScreen {
         };
         let count = objects.listing.count(matching.len());
         let flash = self.current_flash();
+        let filter = self.scope.current();
         let block = panel::block(
             kind.plural(),
             count.as_deref(),
-            Some(&objects.listing.updated()),
+            Some(&session_scope::note(&filter, &objects.listing.updated())),
             flash
                 .as_ref()
                 .map(|(message, style)| (message.as_str(), *style)),
@@ -410,16 +420,21 @@ impl ResourcesScreen {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let empty = EmptyText {
-            nothing: "None in this namespace",
-            no_match: "None match the search",
-        };
+        let searching = !self.search.phrase().is_empty();
+        let empty = session_scope::empty_text(
+            &filter,
+            searching,
+            EmptyText {
+                nothing: "None in this namespace",
+                no_match: "None match the search",
+            },
+        );
         if state_view::draw(
             frame,
             inner,
             &objects.listing.state,
             matching.len(),
-            !self.search.phrase().is_empty(),
+            session_scope::narrowed(&filter, searching),
             &empty,
         ) {
             return;
@@ -494,6 +509,15 @@ async fn fetch_table(
         .map_err(kube::Error::BuildRequest)?;
     if let Ok(accept) = TABLE_ACCEPT.parse() {
         request.headers_mut().insert("accept", accept);
+    }
+    // Each row brings its whole object, not only its name, so "only my sessions" can look for a
+    // session's id or key in its spec and status.
+    let with_objects = match request.uri().query() {
+        Some(_) => format!("{}&includeObject=Object", request.uri()),
+        None => format!("{}?includeObject=Object", request.uri()),
+    };
+    if let Ok(uri) = with_objects.parse() {
+        *request.uri_mut() = uri;
     }
     let response: Value = client.request(request).await?;
     let with_namespace = kind.namespaced && namespace.is_none();
@@ -576,6 +600,7 @@ fn from_table(table: &Value, with_namespace: bool) -> (Vec<String>, Vec<Item>) {
                 name,
                 namespace,
                 cells,
+                object: row.get("object").cloned().unwrap_or_default(),
             }
         })
         .collect();
@@ -620,6 +645,7 @@ fn from_list(list: &Value, with_namespace: bool) -> (Vec<String>, Vec<Item>) {
                 name,
                 namespace,
                 cells,
+                object: object.clone(),
             }
         })
         .collect();
@@ -669,6 +695,7 @@ impl Screen for ResourcesScreen {
         ));
 
         Self {
+            scope: SessionScope::new(&context),
             context,
             kinds,
             unavailable,

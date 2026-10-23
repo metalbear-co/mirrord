@@ -26,6 +26,7 @@ use crate::{
         hints::Hint,
         panel,
         search::{SearchBox, SearchOutcome},
+        session_scope::{self, SessionScope},
         state_view::{self, EmptyText, Fetch, Listing},
         table::{Columns, DataTable},
     },
@@ -45,6 +46,8 @@ const FLASH_FOR: Duration = Duration::from_secs(6);
 /// sessions are left out; they have their own screen.
 pub struct SessionsScreen {
     data: Arc<RwLock<Listing<SessionCrd>>>,
+    /// "Only my sessions" (`m`).
+    scope: SessionScope,
     client: watch::Receiver<Option<anyhow::Result<Client>>>,
     table: DataTable,
     /// The `/` search over the list.
@@ -100,11 +103,14 @@ impl SessionsScreen {
     }
 
     fn matching<'a>(&self, sessions: &'a [SessionCrd]) -> Vec<&'a SessionCrd> {
+        let filter = self.scope.current();
         sessions
             .iter()
             .filter(|session| {
-                self.search
-                    .matches_any(Column::ALL.iter().map(|column| column.value(session).0))
+                session_scope::keeps(&filter, *session)
+                    && self
+                        .search
+                        .matches_any(Column::ALL.iter().map(|column| column.value(session).0))
             })
             .collect()
     }
@@ -183,11 +189,13 @@ impl Screen for SessionsScreen {
         let data = Arc::new(RwLock::new(Listing::default()));
         let refresh = Arc::new(Notify::new());
         let client = context.client.clone();
+        let scope = SessionScope::new(&context);
 
         tokio::spawn(Self::run(context, data.clone(), refresh.clone()));
 
         Self {
             data,
+            scope,
             client,
             table: DataTable::default(),
             search: SearchBox::default(),
@@ -224,10 +232,11 @@ impl Screen for SessionsScreen {
                 .map(|(message, style, _)| (message.clone(), *style))
         });
         let count = data.count(matching.len());
+        let filter = self.scope.current();
         let block = panel::block(
             "sessions",
             count.as_deref(),
-            Some(&data.updated()),
+            Some(&session_scope::note(&filter, &data.updated())),
             flash
                 .as_ref()
                 .map(|(message, style)| (message.as_str(), *style)),
@@ -235,12 +244,17 @@ impl Screen for SessionsScreen {
         let inner = block.inner(body);
         frame.render_widget(block, body);
 
-        let empty = EmptyText {
-            nothing: "No active sessions",
-            no_match: "No sessions match the search",
-        };
         let searching = !self.search.phrase().is_empty();
-        if !state_view::draw(frame, inner, &data.state, matching.len(), searching, &empty) {
+        let empty = session_scope::empty_text(
+            &filter,
+            searching,
+            EmptyText {
+                nothing: "No active sessions",
+                no_match: "No sessions match the search",
+            },
+        );
+        let narrowed = session_scope::narrowed(&filter, searching);
+        if !state_view::draw(frame, inner, &data.state, matching.len(), narrowed, &empty) {
             self.table.draw::<Column>(frame, inner, &matching);
         }
 

@@ -94,6 +94,70 @@ pub fn project_names(dir: &Path) -> Vec<ProjectName> {
 /// weight stays under it.
 const SURE_SCORE: u32 = 60;
 
+/// The port the project's app listens on when run locally, and the file that says so: a `PORT`
+/// in an `.env` file, a port in the package.json scripts (`PORT=3000`, `--port 3000`, `-p 3000`),
+/// or the Dockerfile's `EXPOSE`, first found wins. Used to map the local port to the target's
+/// when they differ, so the user never has to notice the mismatch.
+pub fn local_port(dir: &Path) -> Option<(u16, &'static str)> {
+    let read = |file: &str| std::fs::read_to_string(dir.join(file)).ok();
+
+    for file in [".env.local", ".env.development", ".env"] {
+        let port = read(file).and_then(|text| {
+            text.lines().find_map(|line| {
+                let value = line.trim().strip_prefix("PORT=")?;
+                value.trim().trim_matches(['"', '\'']).parse().ok()
+            })
+        });
+        if let Some(port) = port {
+            return Some((port, ".env"));
+        }
+    }
+
+    let scripts = read("package.json")
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|json| json.get("scripts").cloned());
+    for script in ["dev", "start", "serve"] {
+        let Some(line) = scripts
+            .as_ref()
+            .and_then(|scripts| scripts.get(script))
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        if let Some(port) = port_in_command(line) {
+            return Some((port, "package.json"));
+        }
+    }
+
+    read("Dockerfile").and_then(|text| {
+        text.lines().find_map(|line| {
+            let rest = line.trim().strip_prefix("EXPOSE ")?;
+            let first = rest.split_whitespace().next()?;
+            first
+                .split('/')
+                .next()?
+                .parse()
+                .ok()
+                .map(|port| (port, "Dockerfile"))
+        })
+    })
+}
+
+/// A port a command line sets: `PORT=3000`, `--port 3000`, `--port=3000` or `-p 3000`.
+fn port_in_command(line: &str) -> Option<u16> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    words.iter().enumerate().find_map(|(index, word)| {
+        let after = || words.get(index + 1).and_then(|next| next.parse().ok());
+        match *word {
+            "--port" | "-p" => after(),
+            _ => word
+                .strip_prefix("PORT=")
+                .or_else(|| word.strip_prefix("--port="))
+                .and_then(|value| value.parse().ok()),
+        }
+    })
+}
+
 /// A cluster target the project could run against, and why it is offered.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
@@ -267,7 +331,33 @@ fn pick_container(
 mod tests {
     use std::path::PathBuf;
 
-    use super::{ProjectName, project_names, rank};
+    use super::{ProjectName, local_port, port_in_command, project_names, rank};
+
+    #[test]
+    fn the_local_port_comes_from_env_then_scripts_then_the_dockerfile() {
+        let dir = std::env::temp_dir().join(format!("mirrord-tui-port-{}", std::process::id()));
+        _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Dockerfile"), "FROM node\nEXPOSE 8080/tcp\n").unwrap();
+        assert_eq!(local_port(&dir), Some((8080, "Dockerfile")));
+        std::fs::write(
+            dir.join("package.json"),
+            r#"{ "scripts": { "dev": "next dev -p 3001" } }"#,
+        )
+        .unwrap();
+        assert_eq!(local_port(&dir), Some((3001, "package.json")));
+        std::fs::write(dir.join(".env"), "NODE_ENV=dev\nPORT=\"4000\"\n").unwrap();
+        assert_eq!(local_port(&dir), Some((4000, ".env")));
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ports_in_command_lines() {
+        assert_eq!(port_in_command("PORT=3000 node server.js"), Some(3000));
+        assert_eq!(port_in_command("vite --port=5173"), Some(5173));
+        assert_eq!(port_in_command("uvicorn app:main --port 8000"), Some(8000));
+        assert_eq!(port_in_command("node server.js"), None);
+    }
     use crate::screens::targets::browser::{TargetItem, TargetKind};
 
     fn project(dir: &str, files: &[(&str, &str)]) -> PathBuf {

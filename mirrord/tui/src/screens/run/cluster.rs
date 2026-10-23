@@ -51,6 +51,9 @@ pub struct TargetResources {
     pub queues: Vec<Queue>,
     /// Things that could not be read, said plainly, so the cards can mention them.
     pub notes: Vec<String>,
+    /// The ports the targeted container listens on (every app container's, when none is
+    /// targeted), as its pod template declares them.
+    pub ports: Vec<u16>,
 }
 
 /// Inspects `candidate` in the cluster.
@@ -79,6 +82,7 @@ pub async fn inspect(client: &Client, candidate: &Candidate) -> TargetResources 
         .await;
         resources.databases = databases::detect(&facts);
         resources.unidentified = databases::unidentified(&facts);
+        resources.ports = container_ports(template, candidate.container.as_deref());
 
         let (presets, queues) =
             split_configs(client, namespace, candidate, labels, &mut resources.notes).await;
@@ -192,6 +196,25 @@ async fn workload(
     };
 
     Ok((labels.unwrap_or_default(), template.ok_or_else(missing)?))
+}
+
+/// The ports the pod template declares for `container`, or for every app container when it is
+/// `None`, without repeats.
+fn container_ports(template: &PodTemplateSpec, container: Option<&str>) -> Vec<u16> {
+    let mut ports: Vec<u16> = template
+        .spec
+        .iter()
+        .flat_map(|spec| spec.containers.iter())
+        .filter(|candidate| match container {
+            Some(name) => candidate.name == name,
+            None => !SIDECARS.contains(&candidate.name.as_str()),
+        })
+        .flat_map(|container| container.ports.iter().flatten())
+        .filter_map(|port| u16::try_from(port.container_port).ok())
+        .collect();
+    ports.sort_unstable();
+    ports.dedup();
+    ports
 }
 
 /// Container names that are never the user's app.

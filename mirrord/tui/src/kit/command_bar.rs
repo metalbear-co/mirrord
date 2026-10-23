@@ -13,7 +13,11 @@ use ratatui::{
     widgets::{Block, BorderType, Clear, Paragraph},
 };
 
-use crate::{helpers::ellipsize, kit::text_input::TextInput, theme};
+use crate::{
+    helpers::ellipsize,
+    kit::text_input::{FieldLook, TextInput},
+    theme,
+};
 
 /// Most suggestions shown at once.
 const MAX_SUGGESTIONS: usize = 8;
@@ -224,22 +228,27 @@ impl<T: Copy> CommandBar<T> {
     }
 
     /// Draws the input line into `bar`, and the suggestions in a list just above it.
-    pub fn draw(&self, frame: &mut Frame, bar: Rect) {
-        let suggestions = self.suggestions();
-
-        let mut spans = vec![Span::styled(":", theme::title())];
-        spans.extend(
-            self.input
-                .spans(Style::default().fg(theme::LAVENDER), theme::title(), true),
-        );
+    pub fn draw(&mut self, frame: &mut Frame, bar: Rect) {
         // The rest of the highlighted suggestion, ghosted after the cursor.
-        if let Some(suggestion) = suggestions.get(self.selected)
-            && let Some(rest) = suggestion.completion.strip_prefix(self.input.value())
-        {
-            spans.push(Span::styled(rest.to_owned(), theme::muted()));
-        }
-        frame.render_widget(Paragraph::new(Line::from(spans)), bar);
+        let ghost = self
+            .suggestions()
+            .get(self.selected)
+            .and_then(|suggestion| suggestion.completion.strip_prefix(self.input.value()))
+            .unwrap_or_default()
+            .to_owned();
+        self.input.render(
+            frame,
+            bar,
+            FieldLook {
+                prefix: ":",
+                placeholder: "type a screen or command",
+                ghost: &ghost,
+                focused: true,
+                ..FieldLook::default()
+            },
+        );
 
+        let suggestions = self.suggestions();
         if suggestions.is_empty() {
             return;
         }

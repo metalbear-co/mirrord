@@ -110,6 +110,9 @@ pub struct Document {
     has_comments: bool,
     /// Whether there are edits the file does not have yet.
     dirty: bool,
+    /// A new config not saved anywhere yet: `path` is only where it would go, and it needs a
+    /// name (and with it a real path) before it can be saved.
+    scratch: bool,
 }
 
 impl Document {
@@ -121,6 +124,12 @@ impl Document {
             .map(|name| directory.join(name))
             .find(|path| path.exists())
             .unwrap_or_else(|| directory.join("mirrord.json"));
+        Self::open(path)
+    }
+
+    /// Reads the config file at `path`, or starts an empty document there when there is none.
+    /// The format follows the extension, as with `mirrord exec -f`.
+    pub fn open(path: PathBuf) -> Self {
         let format = Format::of(&path);
 
         let mut document = Self {
@@ -130,6 +139,7 @@ impl Document {
             unreadable: None,
             has_comments: false,
             dirty: false,
+            scratch: false,
         };
 
         match std::fs::read_to_string(&document.path) {
@@ -157,12 +167,58 @@ impl Document {
 
     /// The file's path as the user would type it, relative to the directory the TUI started in.
     pub fn display_path(&self) -> String {
+        if self.scratch {
+            return "new config \u{b7} not saved".to_owned();
+        }
         let name = self
             .path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         format!("{DIRECTORY}/{name}")
+    }
+
+    /// A new, empty config that is not a file yet, such as the one the Run view's config step
+    /// edits before it is saved. `path` is only a default for where it would go.
+    pub fn scratch(path: PathBuf) -> Self {
+        let mut document = Self::open(path);
+        if document.root.is_empty() && document.unreadable.is_none() {
+            document.scratch = true;
+        }
+        document
+    }
+
+    /// Whether this is a new config that needs a name before it can be saved.
+    pub fn is_scratch(&self) -> bool {
+        self.scratch
+    }
+
+    /// The options set so far.
+    pub fn options(&self) -> &Map<String, Value> {
+        &self.root
+    }
+
+    /// Saves the document to `path` instead, which it is from then on: "save as".
+    pub fn save_as(&mut self, path: PathBuf) -> Result<(), SaveError> {
+        self.format = Format::of(&path);
+        self.path = path;
+        self.scratch = false;
+        self.save()
+    }
+
+    /// Fills a new, empty document with `options`, as edits not saved yet. A file that already
+    /// holds options is left as it is.
+    pub fn seed(&mut self, options: Map<String, Value>) {
+        if !self.root.is_empty() || self.unreadable.is_some() || options.is_empty() {
+            return;
+        }
+        self.root = options;
+        self.dirty = true;
+    }
+
+    /// Where the file is.
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// Whether saving will drop comments the file has.

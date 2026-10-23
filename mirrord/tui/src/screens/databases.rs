@@ -33,9 +33,11 @@ use crate::{
         hints::Hint,
         panel,
         search::{SearchBox, SearchOutcome},
+        session_scope::{self, SessionScope},
         state_view::{self, EmptyText, Fetch, Listing},
         table::{Columns, DataTable},
     },
+    local_sessions::LocalSessions,
     screens::Screen,
     theme,
 };
@@ -58,6 +60,8 @@ pub struct DatabasesScreen {
     describe: Option<Describe>,
     /// The `/` search over the list.
     search: SearchBox,
+    /// "Only my sessions" (`m`).
+    scope: SessionScope,
     refresh: Arc<Notify>,
 }
 
@@ -155,12 +159,18 @@ impl DatabasesScreen {
         state: &State,
         branches: &[&BranchDatabase],
     ) {
-        let empty = EmptyText {
-            nothing: "No active branch databases",
-            no_match: "No branch databases match the search",
-        };
         let searching = !self.search.phrase().is_empty();
-        if state_view::draw(frame, area, state, branches.len(), searching, &empty) {
+        let filter = self.scope.current();
+        let empty = session_scope::empty_text(
+            &filter,
+            searching,
+            EmptyText {
+                nothing: "No active branch databases",
+                no_match: "No branch databases match the search",
+            },
+        );
+        let narrowed = session_scope::narrowed(&filter, searching);
+        if state_view::draw(frame, area, state, branches.len(), narrowed, &empty) {
             return;
         }
 
@@ -178,7 +188,7 @@ impl DatabasesScreen {
             return;
         };
         // The selection indexes the rows the user can see, not every branch.
-        let branches = matching(&self.search, branches);
+        let branches = matching(&self.search, &self.scope.current(), branches);
         let Some(branch) = self
             .table
             .selected()
@@ -263,7 +273,7 @@ impl DatabasesScreen {
             None => panel::block(
                 "dbs",
                 data.count(matching_len).as_deref(),
-                Some(&updated),
+                Some(&session_scope::note(&self.scope.current(), &updated)),
                 None,
             ),
         }
@@ -274,6 +284,7 @@ impl Screen for DatabasesScreen {
     fn new(context: Context) -> Self {
         let data = Arc::new(RwLock::new(Data::default()));
         let refresh = Arc::new(Notify::new());
+        let scope = SessionScope::new(&context);
 
         tokio::spawn(Self::run(context, data.clone(), refresh.clone()));
 
@@ -283,6 +294,7 @@ impl Screen for DatabasesScreen {
             details: None,
             describe: None,
             search: SearchBox::default(),
+            scope,
             refresh,
         }
     }
@@ -302,7 +314,7 @@ impl Screen for DatabasesScreen {
             Layout::vertical([Constraint::Min(3), Constraint::Length(search_height)]).areas(area);
 
         let matching = match &data.state {
-            State::Ready(branches) => matching(&self.search, branches),
+            State::Ready(branches) => matching(&self.search, &self.scope.current(), branches),
             _ => Vec::new(),
         };
 
@@ -424,7 +436,9 @@ impl DatabasesScreen {
             }),
             None => {
                 let index = self.table.selected()?;
-                matching(&self.search, branches).get(index).copied()
+                matching(&self.search, &self.scope.current(), branches)
+                    .get(index)
+                    .copied()
             }
         };
         found.cloned()
@@ -434,11 +448,16 @@ impl DatabasesScreen {
 /// Returns the branches that match the search, in the order they were given.
 ///
 /// A branch matches when any one of the searched columns contains the phrase.
-fn matching<'a>(search: &SearchBox, branches: &'a [BranchDatabase]) -> Vec<&'a BranchDatabase> {
+fn matching<'a>(
+    search: &SearchBox,
+    filter: &Option<LocalSessions>,
+    branches: &'a [BranchDatabase],
+) -> Vec<&'a BranchDatabase> {
     branches
         .iter()
         .filter(|branch| {
-            search.matches_any(Column::SEARCHED.iter().map(|column| column.value(branch).0))
+            session_scope::keeps(filter, *branch)
+                && search.matches_any(Column::SEARCHED.iter().map(|column| column.value(branch).0))
         })
         .collect()
 }

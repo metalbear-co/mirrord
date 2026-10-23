@@ -31,7 +31,13 @@ use tokio::time::MissedTickBehavior;
 
 use crate::{
     context::Context,
-    kit::{hints::Hint, panel, state_view},
+    kit::{
+        hints::Hint,
+        panel,
+        session_scope::{self, SessionScope},
+        state_view,
+    },
+    local_sessions::LocalSessions,
     screens::Screen,
     theme,
 };
@@ -120,12 +126,16 @@ impl HomeScreen {
 
 impl HomeScreen {
     async fn run(mut context: Context, summary: Arc<RwLock<Summary>>) {
+        let scope = SessionScope::new(&context);
         let mut interval = tokio::time::interval(REFRESH_INTERVAL);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 changed = context.client.changed() => if changed.is_err() { break },
                 changed = context.scope.changed() => if changed.is_err() { break },
+                // The counts follow "only my sessions" (`m`) and the sessions it narrows to.
+                changed = context.local_only.changed() => if changed.is_err() { break },
+                changed = context.local_sessions.changed() => if changed.is_err() { break },
                 _ = interval.tick() => {},
             }
 
@@ -136,8 +146,9 @@ impl HomeScreen {
                 .and_then(|result| result.as_ref().ok())
                 .cloned();
             let namespace = context.scope.borrow_and_update().namespace.clone();
+            let filter = scope.current();
             let fresh = match client {
-                Some(client) => read(&client, namespace.as_deref()).await,
+                Some(client) => read(&client, namespace.as_deref(), &filter).await,
                 None => Summary::default(),
             };
             if let Ok(mut slot) = summary.write() {
@@ -162,7 +173,7 @@ where
 
 /// Reads everything the dashboard shows. Requests run one after the other: they are few, small,
 /// and every five seconds at most.
-async fn read(client: &Client, namespace: Option<&str>) -> Summary {
+async fn read(client: &Client, namespace: Option<&str>, filter: &Option<LocalSessions>) -> Summary {
     let me = std::env::var("USER").unwrap_or_default();
     let mut activity = Vec::new();
     let failed = |what: &str, error: kube::Error| state_view::explain(&error, what);
@@ -171,7 +182,8 @@ async fn read(client: &Client, namespace: Option<&str>) -> Summary {
         .list(&Default::default())
         .await
     {
-        Ok(list) => {
+        Ok(mut list) => {
+            list.items.retain(|item| session_scope::keeps(filter, item));
             let sessions: Vec<_> = list
                 .into_iter()
                 .map(|crd| crd.spec.session)
@@ -212,7 +224,8 @@ async fn read(client: &Client, namespace: Option<&str>) -> Summary {
         .list(&Default::default())
         .await
     {
-        Ok(list) => {
+        Ok(mut list) => {
+            list.items.retain(|item| session_scope::keeps(filter, item));
             let mut phases: Vec<(String, usize)> = Vec::new();
             for preview in &list.items {
                 let phase = preview
@@ -256,7 +269,8 @@ async fn read(client: &Client, namespace: Option<&str>) -> Summary {
         .list(&Default::default())
         .await
     {
-        Ok(list) => {
+        Ok(mut list) => {
+            list.items.retain(|item| session_scope::keeps(filter, item));
             let failed_count = list
                 .items
                 .iter()
@@ -301,7 +315,8 @@ async fn read(client: &Client, namespace: Option<&str>) -> Summary {
         .list(&Default::default())
         .await
     {
-        Ok(list) => {
+        Ok(mut list) => {
+            list.items.retain(|item| session_scope::keeps(filter, item));
             let mut phases: Vec<(String, usize)> = Vec::new();
             for branch in &list.items {
                 let phase = branch

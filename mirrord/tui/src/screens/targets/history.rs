@@ -39,6 +39,40 @@ pub struct TargetHistory {
 struct History {
     #[serde(default)]
     targets: BTreeMap<String, TargetHistory>,
+    /// Whole runs from the Run view, newest first, for running one again with a single key.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    runs: Vec<RunRecipe>,
+}
+
+/// How many whole runs are remembered: the handful someone switches between.
+const MAX_RUNS: usize = 10;
+
+/// One run of the Run view, everything needed to set it up again: the folders, the target and
+/// command of each, what the config step started from, and the options edited there.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RunRecipe {
+    /// The kube context it ran against; runs of other clusters are not offered.
+    pub cluster: String,
+    pub services: Vec<RecipeService>,
+    /// What the config step started from: a made config's id (`made:mine`) or `file:<path>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_from: Option<String>,
+    /// The options set on the config step, when it was a new config never saved to a file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<serde_json::Value>,
+    /// When it ran, in seconds since 1970.
+    pub ran_at: i64,
+}
+
+/// One folder of a remembered run.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RecipeService {
+    pub dir: String,
+    /// The target, as `path (namespace)`; `None` ran with no target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
 }
 
 /// The key one target's history lives under:
@@ -139,14 +173,56 @@ pub fn record(key: String, dir: Option<String>, command: String) {
         return;
     };
     remember(history.targets.entry(key).or_default(), dir, command);
+    persist(&history);
+}
 
+/// Records a whole run of the Run view (stamped with the current cluster) and persists it.
+pub fn record_run(mut recipe: RunRecipe) {
+    recipe.cluster = cluster();
+    let Ok(mut history) = store().write() else {
+        return;
+    };
+    remember_run(&mut history.runs, recipe);
+    persist(&history);
+}
+
+/// The remembered runs on the current cluster, newest first.
+pub fn runs() -> Vec<RunRecipe> {
+    let cluster = cluster();
+    store()
+        .read()
+        .map(|history| {
+            history
+                .runs
+                .iter()
+                .filter(|run| run.cluster == cluster)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Best effort, like everything here: a history that cannot be written only means a shorter
+/// memory next time.
+fn persist(history: &History) {
     let Some(path) = file() else { return };
     if let Some(parent) = path.parent() {
         _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(text) = serde_saphyr::to_string(&*history) {
+    if let Ok(text) = serde_saphyr::to_string(history) {
         _ = std::fs::write(path, text);
     }
+}
+
+/// The pure update for runs: newest first, the same setup run again moves to the front instead
+/// of repeating, and the list stays capped.
+fn remember_run(runs: &mut Vec<RunRecipe>, recipe: RunRecipe) {
+    runs.retain(|known| {
+        (&known.cluster, &known.services, &known.start_from)
+            != (&recipe.cluster, &recipe.services, &recipe.start_from)
+    });
+    runs.insert(0, recipe);
+    runs.truncate(MAX_RUNS);
 }
 
 /// The pure update: newest command first, duplicates collapse, the list
@@ -161,6 +237,38 @@ fn remember(entry: &mut TargetHistory, dir: Option<String>, command: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn run(dir: &str, at: i64) -> RunRecipe {
+        RunRecipe {
+            cluster: "kind".to_owned(),
+            services: vec![RecipeService {
+                dir: dir.to_owned(),
+                target: Some("deployment/api (shop)".to_owned()),
+                command: Some("npm run dev".to_owned()),
+            }],
+            start_from: Some("made:mine".to_owned()),
+            options: None,
+            ran_at: at,
+        }
+    }
+
+    #[test]
+    fn the_same_run_again_moves_to_the_front_and_the_list_stays_capped() {
+        let mut runs = Vec::new();
+        remember_run(&mut runs, run("/a", 1));
+        remember_run(&mut runs, run("/b", 2));
+        remember_run(&mut runs, run("/a", 3));
+        assert_eq!(
+            runs.iter()
+                .map(|run| (run.services[0].dir.as_str(), run.ran_at))
+                .collect::<Vec<_>>(),
+            vec![("/a", 3), ("/b", 2)]
+        );
+        for at in 0..20 {
+            remember_run(&mut runs, run(&format!("/{at}"), at));
+        }
+        assert_eq!(runs.len(), MAX_RUNS);
+    }
 
     #[test]
     fn remember_keeps_newest_first_deduped_and_capped() {

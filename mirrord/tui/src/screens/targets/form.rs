@@ -12,8 +12,6 @@
 //! and fields with a few fixed options draw the same `(●)` / `( )` pick column as the pick lists,
 //! with a click on an option picking it.
 
-use std::time::Instant;
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     Frame,
@@ -28,7 +26,7 @@ use crate::{
     helpers::dialog,
     kit::{
         hints::{self, Hint},
-        select_list::{DOUBLE_CLICK, Picks, pick_mark},
+        select_list::{Picks, pick_mark},
         text_input::TextInput,
     },
     screens::targets::{
@@ -202,8 +200,6 @@ pub struct SettingsForm<T: 'static> {
     editor: Option<Editor>,
     error: Option<String>,
     hits: Hits,
-    /// When and on which row the last click landed, to tell a double-click.
-    last_click: Option<(Instant, usize)>,
 }
 
 impl<T> SettingsForm<T> {
@@ -224,7 +220,6 @@ impl<T> SettingsForm<T> {
             editor: None,
             error: None,
             hits: Hits::default(),
-            last_click: None,
         }
     }
 
@@ -321,14 +316,17 @@ impl<T> SettingsForm<T> {
         if let Some(def) = visible.get(self.cursor)
             && let WidgetKind::Text { get, .. } = &def.widget
         {
-            let shift_move = key.modifiers.contains(KeyModifiers::SHIFT)
+            // Shift selects, Option/Ctrl/Cmd move by word or line: all of them are editing.
+            let modified_move = !key.modifiers.is_empty()
                 && matches!(
                     key.code,
                     KeyCode::Left | KeyCode::Right | KeyCode::Home | KeyCode::End
                 );
-            let select_all =
-                key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('a');
-            if shift_move || select_all {
+            let select_all = key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER)
+                && matches!(key.code, KeyCode::Char('a' | 'A'));
+            if modified_move || select_all {
                 let mut editor = Editor::new(&get(&self.draft));
                 editor.text.handle_key(&key);
                 self.editor = Some(editor);
@@ -424,7 +422,10 @@ impl<T> SettingsForm<T> {
                     editor.text.drag_to(char);
                 }
             }
-            MouseEventKind::Down(MouseButton::Left) => return Some(self.click(at)),
+            MouseEventKind::Down(MouseButton::Left) => {
+                let shift = mouse.modifiers.contains(KeyModifiers::SHIFT);
+                return Some(self.click(at, shift));
+            }
             _ => {}
         }
         Some(FormOutcome::Consumed)
@@ -442,7 +443,7 @@ impl<T> SettingsForm<T> {
         Some((skip + column).saturating_sub(usize::from(*skip > 0)))
     }
 
-    fn click(&mut self, at: Position) -> FormOutcome {
+    fn click(&mut self, at: Position, shift: bool) -> FormOutcome {
         if let Some(candidate) = self
             .hits
             .candidates
@@ -480,11 +481,6 @@ impl<T> SettingsForm<T> {
         else {
             return FormOutcome::Consumed;
         };
-        let double = self
-            .last_click
-            .is_some_and(|(when, last)| last == row && when.elapsed() < DOUBLE_CLICK);
-        self.last_click = Some((Instant::now(), row));
-
         let visible = self.visible();
         if row != self.cursor {
             self.apply_edit();
@@ -500,11 +496,10 @@ impl<T> SettingsForm<T> {
         let editor = self
             .editor
             .get_or_insert_with(|| Editor::new(&get(&self.draft)));
-        // A click on the label opens the field with the cursor at the end.
-        match (char, double) {
-            (Some(char), false) => editor.text.click(char),
-            (Some(char), true) => editor.text.select_word_at(char),
-            (None, _) => {}
+        // A click on the label opens the field with the cursor at the end. On the value, the text
+        // box counts the presses: one places the cursor, two pick a word, three everything.
+        if let Some(char) = char {
+            editor.text.mouse_down(char, shift);
         }
         FormOutcome::Consumed
     }
@@ -663,11 +658,11 @@ impl<T> SettingsForm<T> {
             let (value_spans, skip) = match (&def.widget, focused, &self.editor) {
                 (WidgetKind::Text { .. }, true, Some(editor)) => {
                     let skip = window_start(editor.text.cursor(), value_width);
-                    let spans = editor.text.spans(
-                        Style::default().fg(theme::LAVENDER),
-                        Style::default().fg(theme::INDIGO),
-                        true,
-                    );
+                    // The edited value sits on the field fill, so it reads as a box being typed
+                    // in; the terminal's cursor goes in it below, once the row's place is known.
+                    let spans = editor
+                        .text
+                        .spans(Style::default().fg(theme::LAVENDER).bg(theme::DEEP), true);
                     (scrolled(spans, skip), skip)
                 }
                 (WidgetKind::Text { get, .. }, ..) => {
@@ -762,6 +757,16 @@ impl<T> SettingsForm<T> {
             if let Some(y) = line_y(line) {
                 hits.rows.push((y, line, *skip));
             }
+        }
+        // The terminal's own cursor, where typing goes in the field being edited. A scrolled
+        // value starts with a `…`, which takes a column.
+        if let Some(editor) = &self.editor
+            && let Some(y) = line_y(self.cursor)
+            && let Some(skip) = skips.get(self.cursor)
+        {
+            let column = editor.text.cursor() - skip + usize::from(*skip > 0);
+            let x = value_x.saturating_add(u16::try_from(column).unwrap_or(u16::MAX));
+            frame.set_cursor_position((x, y));
         }
         if let Some(y) = line_y(finish_line) {
             hits.rows.push((y, visible.len(), 0));
@@ -1331,12 +1336,9 @@ mod tests {
         };
         let mut input = TextInput::default();
         input.paste("abcdefghij");
-        let spans = || input.spans(Style::default(), Style::default(), true);
+        let spans = || input.spans(Style::default(), true);
 
-        assert_eq!(
-            rendered(scrolled(spans(), window_start(10, 6))),
-            "…ghij\u{2588}"
-        );
+        assert_eq!(rendered(scrolled(spans(), window_start(10, 6))), "…ghij");
         assert_eq!(window_start(0, 6), 0, "the start is in view as it is");
     }
 
@@ -1360,12 +1362,15 @@ mod tests {
         assert_eq!(form.editor.as_ref().unwrap().text.value(), "shiop api");
 
         draw(&mut form);
-        mouse(
-            &mut form,
-            MouseEventKind::Down(MouseButton::Left),
-            value_x + 7,
-            name,
-        );
+        // Two presses on the same spot are a double-click.
+        for _ in 0..2 {
+            mouse(
+                &mut form,
+                MouseEventKind::Down(MouseButton::Left),
+                value_x + 7,
+                name,
+            );
+        }
         assert!(form.editor.as_ref().unwrap().text.has_selection());
         press(&mut form, KeyCode::Char('x'), KeyModifiers::NONE);
 

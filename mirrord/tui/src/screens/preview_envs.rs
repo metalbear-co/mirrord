@@ -14,7 +14,9 @@ use crate::{
     kit::{
         describe::{Describe, DescribeOutcome},
         hints::Hint,
-        panel, state_view,
+        panel,
+        session_scope::SessionScope,
+        state_view,
     },
     screens::Screen,
     telemetry::Telemetry,
@@ -38,6 +40,8 @@ pub struct PreviewEnvsScreen {
     /// not something that belongs in the long-running watch loop.
     client: watch::Receiver<Option<anyhow::Result<Client>>>,
     ui: UiState,
+    /// "Only my sessions" (`m`), copied into `ui` before rows are built.
+    scope: SessionScope,
     /// The environment opened with `Enter` or `y`, shown whole as YAML.
     describe: Option<Describe>,
     telemetry: Telemetry,
@@ -54,6 +58,7 @@ impl PreviewEnvsScreen {
         let tree = PreviewEnvsTree::build(store.state());
         drop(guard);
 
+        self.ui.mine = self.scope.current();
         let rows = view::flatten(&tree, &self.ui);
         f(&mut self.ui, &rows);
     }
@@ -127,6 +132,7 @@ impl Screen for PreviewEnvsScreen {
         let data = Arc::new(RwLock::new(None));
         let client = context.client.clone();
         let telemetry = context.telemetry.clone();
+        let scope = SessionScope::new(&context);
 
         tokio::spawn(data::run(context, data.clone()));
 
@@ -134,6 +140,7 @@ impl Screen for PreviewEnvsScreen {
             data,
             client,
             ui: UiState::default(),
+            scope,
             describe: None,
             telemetry,
         }
@@ -157,6 +164,7 @@ impl Screen for PreviewEnvsScreen {
             Some(Ok(store)) => {
                 let tree = PreviewEnvsTree::build(store.state());
                 drop(guard);
+                self.ui.mine = self.scope.current();
                 view::draw(frame, area, &tree, &mut self.ui);
             }
         }

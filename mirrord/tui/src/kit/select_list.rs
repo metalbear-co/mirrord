@@ -3,7 +3,9 @@
 //!
 //! Every row shows whether it is picked, always in the same column: `[✓]` / `[ ]` where several
 //! can be picked, `(●)` / `( )` where one is. `Space` or a click picks and unpicks, typing
-//! searches (the matching text lights up), and `Enter` means "done, go on". Plain letters always
+//! searches (the matching text lights up), and `Enter` means "done, go on". While a search is
+//! typed, `Space` is part of it (searches can have several words) and `Enter` picks the row the
+//! search found and clears it, so the next `Enter` goes on. Plain letters always
 //! go to the search, so owners put their own actions on `Ctrl` chords. The list does not own
 //! what is picked: the owner says what is picked when drawing and acts on the [`ListEvent`]s, so
 //! a pick can outlive the rows on screen (a folder ticked in one directory stays ticked after
@@ -20,13 +22,14 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-use crate::{helpers::ellipsize, kit::text_input::TextInput, theme};
+use crate::{
+    helpers::ellipsize,
+    kit::text_input::{FieldLook, TextInput},
+    theme,
+};
 
 /// Two clicks on one row closer together than this are a double-click.
-pub const DOUBLE_CLICK: Duration = Duration::from_millis(400);
-
-/// Columns before the search text: `› ` and a space.
-const SEARCH_PREFIX: u16 = 2;
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
 /// How many can be picked, which decides the look of the pick column.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -80,6 +83,9 @@ pub enum ListEvent {
 
 pub struct SelectList {
     picks: Picks,
+    /// Rows lead somewhere (folders): plain → goes into a row and ← comes back out. Without
+    /// levels the arrows only ever edit the search.
+    levels: bool,
     placeholder: &'static str,
     filter: TextInput,
     choices: Vec<Choice>,
@@ -87,8 +93,7 @@ pub struct SelectList {
     shown: Vec<usize>,
     /// Index into `shown`.
     cursor: usize,
-    /// Where the search line and each drawn row landed in the last frame, for mouse hits.
-    search_area: Rect,
+    /// Where each drawn row landed in the last frame, for mouse hits.
     rows: Vec<(u16, usize)>,
     list_area: Rect,
     last_click: Option<(Instant, usize)>,
@@ -98,16 +103,22 @@ impl SelectList {
     pub fn new(picks: Picks, placeholder: &'static str) -> Self {
         Self {
             picks,
+            levels: false,
             placeholder,
             filter: TextInput::default(),
             choices: Vec::new(),
             shown: Vec::new(),
             cursor: 0,
-            search_area: Rect::default(),
             rows: Vec::new(),
             list_area: Rect::default(),
             last_click: None,
         }
+    }
+
+    /// Turns on → and ← for going into and out of rows. See [`SelectList::levels`].
+    pub fn with_levels(mut self) -> Self {
+        self.levels = true;
+        self
     }
 
     /// Replaces the rows, keeping the cursor on the same row when it is still there.
@@ -206,20 +217,52 @@ impl SelectList {
             KeyCode::Char('n') if ctrl => self.move_by(1),
             KeyCode::PageUp => self.move_by(-page),
             KeyCode::PageDown => self.move_by(page),
-            KeyCode::Char(' ') => {
+            // With nothing typed, Space picks. While searching it is a space like any other, so a
+            // search can have several words, and Enter picks the row the search found instead.
+            KeyCode::Char(' ') if self.filter.is_empty() => {
                 return match self.focused() {
                     Some(choice) if choice.pickable => ListEvent::Toggle(choice.id.clone()),
                     _ => ListEvent::Nothing,
                 };
             }
-            KeyCode::Enter => return ListEvent::Next,
-            KeyCode::Right if !self.filter.has_selection() => {
+            KeyCode::Enter if !self.filter.is_empty() => {
+                let Some(choice) = self.focused().cloned() else {
+                    return ListEvent::Nothing;
+                };
+                self.clear_search();
+                self.focus(&choice.id);
+                return if choice.pickable {
+                    ListEvent::Toggle(choice.id)
+                } else {
+                    ListEvent::Open(choice.id)
+                };
+            }
+            // Enter on a row that acts rather than gets picked (`browse your home folder`, `All
+            // options...`) does that; anywhere else it means "done, go on".
+            KeyCode::Enter => {
+                return match self.focused() {
+                    Some(choice) if !choice.pickable => ListEvent::Open(choice.id.clone()),
+                    _ => ListEvent::Next,
+                };
+            }
+            // A plain → opens the row once the cursor is at the end of the search (with nothing
+            // typed, it always is), the way → accepts a completion in a shell; with text to the
+            // right of the cursor, or with any modifier (Shift, Option, Cmd), it edits the search.
+            // A plain ← with nothing typed goes up a level.
+            KeyCode::Right
+                if self.levels
+                    && key.modifiers.is_empty()
+                    && !self.filter.has_selection()
+                    && self.filter.cursor() == self.filter.value().chars().count() =>
+            {
                 return self
                     .focused_id()
                     .map_or(ListEvent::Nothing, ListEvent::Open);
             }
-            KeyCode::Left if self.filter.is_empty() => return ListEvent::Up,
-            KeyCode::Backspace if self.filter.is_empty() => return ListEvent::Up,
+            KeyCode::Left if self.levels && self.filter.is_empty() && key.modifiers.is_empty() => {
+                return ListEvent::Up;
+            }
+            KeyCode::Backspace if self.levels && self.filter.is_empty() => return ListEvent::Up,
             KeyCode::Esc if !self.filter.is_empty() => self.clear_search(),
             KeyCode::Esc => return ListEvent::Back,
             KeyCode::Char('a') if ctrl && self.filter.is_empty() => return ListEvent::ToggleAll,
@@ -245,27 +288,16 @@ impl SelectList {
 
     pub fn handle_mouse(&mut self, mouse: &MouseEvent) -> ListEvent {
         let at = Position::new(mouse.column, mouse.row);
-        let search_column = usize::from(
-            mouse
-                .column
-                .saturating_sub(self.search_area.x + SEARCH_PREFIX),
-        );
+        let in_search = self.filter.contains(mouse.column, mouse.row);
+        let search_column = self.filter.char_at(mouse.column);
         match mouse.kind {
             MouseEventKind::ScrollUp if self.list_area.contains(at) => self.move_by(-3),
             MouseEventKind::ScrollDown if self.list_area.contains(at) => self.move_by(3),
-            MouseEventKind::Down(MouseButton::Left) if self.search_area.contains(at) => {
-                let double = self
-                    .last_click
-                    .is_some_and(|(when, row)| row == usize::MAX && when.elapsed() < DOUBLE_CLICK);
-                // The search line is remembered as row `usize::MAX`, apart from every list row.
-                self.last_click = Some((Instant::now(), usize::MAX));
-                if double {
-                    self.filter.select_word_at(search_column);
-                } else {
-                    self.filter.click(search_column);
-                }
+            MouseEventKind::Down(MouseButton::Left) if in_search => {
+                let shift = mouse.modifiers.contains(KeyModifiers::SHIFT);
+                self.filter.mouse_down(search_column, shift);
             }
-            MouseEventKind::Drag(MouseButton::Left) if self.search_area.contains(at) => {
+            MouseEventKind::Drag(MouseButton::Left) if in_search => {
                 self.filter.drag_to(search_column);
             }
             MouseEventKind::Down(MouseButton::Left) => {
@@ -297,30 +329,30 @@ impl SelectList {
 
     /// Draws the search line, a blank line and the rows. `picked` says which rows are picked.
     pub fn draw(&mut self, frame: &mut Frame, area: Rect, picked: &dyn Fn(&str) -> bool) {
-        let [search_area, _, list_area] = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Fill(1),
-        ])
-        .areas(area);
-        self.search_area = search_area;
+        let [search_area, list_area] =
+            Layout::vertical([Constraint::Length(3), Constraint::Fill(1)])
+                .spacing(1)
+                .areas(area);
         self.list_area = list_area;
 
-        let mut search = vec![Span::styled("\u{2315} ", theme::title())];
-        if self.filter.is_empty() {
-            search.push(Span::styled(self.placeholder, theme::muted().italic()));
+        // Typing always goes to the search, so it always has the cursor.
+        let found = if self.filter.is_empty() {
+            String::new()
         } else {
-            search.extend(self.filter.spans(
-                Style::default().fg(theme::LAVENDER),
-                Style::default().fg(theme::INDIGO),
-                true,
-            ));
-            search.push(Span::styled(
-                format!("   {} found", self.shown.len()),
-                theme::muted(),
-            ));
-        }
-        frame.render_widget(Paragraph::new(Line::from(search)), search_area);
+            format!("{} found", self.shown.len())
+        };
+        self.filter.render(
+            frame,
+            search_area,
+            FieldLook {
+                prefix: "\u{2315}",
+                placeholder: self.placeholder,
+                note: &found,
+                label: Some("search"),
+                focused: true,
+                ..FieldLook::default()
+            },
+        );
 
         // Section headings take a row each, so count them in when keeping the cursor in view.
         let lines_for = |from: usize, to: usize, list: &Self| -> usize {
@@ -581,6 +613,56 @@ mod tests {
             list.handle_key(&KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)),
             ListEvent::ToggleAll
         );
+    }
+
+    #[test]
+    fn while_searching_space_types_and_enter_picks_then_clears() {
+        let mut list = SelectList::new(Picks::Many, "search");
+        list.set_choices(vec![
+            choice("a", "shop checkout", ""),
+            choice("b", "billing payments", ""),
+        ]);
+        for char in "billing pay".chars() {
+            list.handle_key(&key(KeyCode::Char(char)));
+        }
+        assert_eq!(list.search(), "billing pay");
+        assert_eq!(list.shown_ids(), vec!["b".to_owned()]);
+
+        assert_eq!(
+            list.handle_key(&key(KeyCode::Enter)),
+            ListEvent::Toggle("b".to_owned())
+        );
+        assert!(list.search().is_empty());
+        assert_eq!(list.focused().map(|choice| choice.id.as_str()), Some("b"));
+        assert_eq!(list.handle_key(&key(KeyCode::Enter)), ListEvent::Next);
+    }
+
+    #[test]
+    fn right_edits_the_search_until_the_cursor_reaches_its_end() {
+        let mut list = SelectList::new(Picks::Many, "search").with_levels();
+        list.set_choices(vec![choice("shop", "shop", "")]);
+        for char in "sh".chars() {
+            list.handle_key(&key(KeyCode::Char(char)));
+        }
+        list.handle_key(&key(KeyCode::Home));
+        // Text to the right of the cursor: → moves through it.
+        assert_eq!(list.handle_key(&key(KeyCode::Right)), ListEvent::Moved);
+        assert_eq!(list.handle_key(&key(KeyCode::Right)), ListEvent::Moved);
+        // At the end of the search, → goes into the row; with Shift it never does.
+        assert_eq!(
+            list.handle_key(&KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)),
+            ListEvent::Moved
+        );
+        assert_eq!(
+            list.handle_key(&key(KeyCode::Right)),
+            ListEvent::Open("shop".to_owned())
+        );
+
+        // Without levels, the arrows only ever edit the search.
+        let mut flat = SelectList::new(Picks::One, "search");
+        flat.set_choices(vec![choice("a", "a", "")]);
+        assert_eq!(flat.handle_key(&key(KeyCode::Right)), ListEvent::Moved);
+        assert_eq!(flat.handle_key(&key(KeyCode::Left)), ListEvent::Moved);
     }
 
     #[test]

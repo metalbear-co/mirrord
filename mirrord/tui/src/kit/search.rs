@@ -5,17 +5,11 @@
 //! screen while a phrase is applied, so a list is never narrowed without the user seeing why.
 
 use crossterm::event::{Event, KeyCode};
-use ratatui::{
-    Frame,
-    layout::Rect,
-    style::Style,
-    text::{Line, Span},
-    widgets::Paragraph,
-};
+use ratatui::{Frame, layout::Rect};
 
-use crate::{
-    kit::{hints::Hint, text_input::TextInput},
-    theme,
+use crate::kit::{
+    hints::Hint,
+    text_input::{FieldLook, TextInput},
 };
 
 /// What an event did to the search.
@@ -136,13 +130,18 @@ impl SearchBox {
     }
 
     /// Draws the box: `/`, the phrase, and the cursor while it has the keyboard.
-    pub fn draw(&self, frame: &mut Frame, area: Rect) {
-        let mut spans = vec![Span::styled("/", theme::title())];
-        spans.extend(
-            self.input
-                .spans(Style::default(), theme::title(), self.editing),
+    pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
+        let editing = self.editing;
+        self.input.render(
+            frame,
+            area,
+            FieldLook {
+                prefix: "/",
+                placeholder: "type to filter",
+                focused: editing,
+                ..FieldLook::default()
+            },
         );
-        frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 }
 
