@@ -1,5 +1,6 @@
 use std::{collections::HashSet, ops::Not, time::Duration};
 
+use chrono::{Local, Utc};
 use kube::Api;
 use mirrord_analytics::Reporter;
 use mirrord_config::{
@@ -26,14 +27,17 @@ use mirrord_progress::{
     messages::{AGENT_OPERATOR_HINT, HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     utm_medium,
 };
-use mirrord_sessions_manager_client::{ServiceScope, SessionsManagerConnectInfo};
+use mirrord_sessions_manager_client::{
+    LoginTokenCredentials, ServiceScope, SessionsManagerConnectInfo, base_url_from_env,
+};
 use tracing::Level;
 
 use crate::{
     CliError, CliResult, MirrordCi,
     ci::error::CiError,
     connector::{AgentConnector, DirectConnector, OperatorConnector, SessionsManagerConnector},
-    data::GlobalConfig,
+    data::{AuthStore, GlobalConfig, StoredLogin},
+    login::issuer,
     up::MirrordUp,
 };
 
@@ -368,6 +372,49 @@ pub(crate) struct ConnectData {
     pub(crate) target_container_ports: Vec<u16>,
 }
 
+/// Warns when the developer has no usable `mirrord login` token for the MetalBear cloud a
+/// standalone sessions-manager trusts, with which the intproxy authenticates to it, or when the
+/// sessions-manager is reached over plain HTTP, which the token is never sent over.
+///
+/// The session still starts, since a sessions-manager run for local development may not
+/// authenticate its callers.
+async fn warn_without_login_token<P: Progress>(progress: &P) -> CliResult<()> {
+    if let Ok(base_url) = base_url_from_env()
+        && !LoginTokenCredentials::sends_token_to(&base_url)
+    {
+        progress.warning(&format!(
+            "The sessions-manager at {base_url} is reached over plain HTTP, so your mirrord login \
+             is not sent to it, and a sessions-manager that authenticates its users will refuse \
+             this session. Use an https:// URL, or reach it through localhost."
+        ));
+        return Ok(());
+    }
+
+    let cloud_url = StoredLogin::cloud_url().map_err(CliError::SessionsManagerCloudUrl)?;
+    let issuer = issuer(&cloud_url);
+    let problem = match AuthStore::latest_login(issuer).await {
+        Ok(Some(login)) if login.expires_at > Utc::now() => return Ok(()),
+        Ok(Some(login)) => format!(
+            "Your login to {issuer} expired at {}",
+            login
+                .expires_at
+                .with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M %Z")
+        ),
+        Ok(None) => format!("You are not logged in to {issuer}"),
+        Err(error) => {
+            format!("Could not read your login to {issuer} from ~/.mirrord/auth.json ({error})")
+        }
+    };
+
+    progress.warning(&format!(
+        "{problem}, so a sessions-manager that authenticates its users will refuse this session. \
+         Run `mirrord login` to log in."
+    ));
+
+    Ok(())
+}
+
 /// 1. if [`LayerConfig`] targets Serverless, makes a connection to an existing agent through
 ///    mirrord-sessions-manager-client.
 /// 2. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
@@ -411,6 +458,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
                 AgentConnectInfo::OperatorSessionsManager(connect_info.clone()),
             )
         } else {
+            warn_without_login_token(progress).await?;
             (
                 None,
                 AgentConnectInfo::SessionsManager(connect_info.clone()),

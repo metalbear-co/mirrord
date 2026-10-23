@@ -15,6 +15,8 @@ tags:
 description: Steal a subset of incoming traffic using HTTP header, W3C baggage or tracestate, path or method filters
 ---
 
+# Filtering Incoming Traffic
+
 By default, mirrord mirrors **all** traffic coming into the remote target, and sends a copy to your local process. But in most cases, you don’t need _every_ request. With filtering, you can tell mirrord exactly which requests you want your local process to receive so you can test independently without affecting other developers or the shared environment.
 
 [AI agents using mirrord](../../using-mirrord-with-ai/README.md) can also take advantage of the same mechanism by setting filters, allowing them to safely target and test only the requests relevant to the changes they’re working on. This way any number of AI agents can concurrently test their code using the same shared Kubernetes environment.

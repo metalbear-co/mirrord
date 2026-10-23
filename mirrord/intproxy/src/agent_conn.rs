@@ -1,7 +1,7 @@
 //! Implementation of `proxy <-> agent` connection through [`mpsc`](tokio::sync::mpsc) channels
 //! created in different mirrord crates.
 
-use std::{fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf, time::Duration};
+use std::{fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf, sync::Arc, time::Duration};
 
 use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::{LayerConfig, container::MIRRORD_EXTERNAL_PROXY_HOSTNAME};
@@ -20,7 +20,8 @@ use mirrord_protocol::DaemonMessage;
 use mirrord_protocol_io::ConnectionOutput;
 use mirrord_protocol_io::{Client, Connection, ProtocolError};
 use mirrord_sessions_manager_client::{
-    IntproxyClient, OperatorTransport, SessionsManagerClientError, SessionsManagerConnectInfo,
+    IntproxyClient, LoginTokenSource, OperatorTransport, SessionsManagerClientError,
+    SessionsManagerConnectInfo,
 };
 #[cfg(not(test))]
 use serde::Deserialize;
@@ -128,6 +129,7 @@ pub enum ReconnectFlow {
         /// Boxed due to large size.
         config: Box<LayerConfig>,
         connect_info: AgentConnectInfo,
+        login_tokens: Option<Arc<dyn LoginTokenSource>>,
     },
 
     Break(AgentConnectInfoDiscriminants),
@@ -182,10 +184,14 @@ pub struct AgentConnection {
 impl AgentConnection {
     /// Creates a new agent connection based on the provided [`LayerConfig`] and optional
     /// [`AgentConnectInfo`].
-    #[tracing::instrument(level = Level::INFO, skip(config, analytics), ret, err)]
+    ///
+    /// `login_tokens` supplies the developer's `mirrord login` token, with which
+    /// [`AgentConnectInfo::SessionsManager`] authenticates to a standalone sessions-manager.
+    #[tracing::instrument(level = Level::INFO, skip(config, login_tokens, analytics), ret, err)]
     pub async fn new<R: Reporter>(
         config: &LayerConfig,
         connect_info: AgentConnectInfo,
+        login_tokens: Option<Arc<dyn LoginTokenSource>>,
         analytics: &mut R,
     ) -> Result<Self, AgentConnectionError> {
         let kind = connect_info.discriminant();
@@ -201,6 +207,7 @@ impl AgentConnection {
                         ReconnectFlow::ConnectInfo {
                             config: Box::new(config.clone()),
                             connect_info: AgentConnectInfo::Operator(session),
+                            login_tokens,
                         }
                     } else {
                         ReconnectFlow::Break(kind)
@@ -264,7 +271,7 @@ impl AgentConnection {
             }
 
             AgentConnectInfo::SessionsManager(connect_info) => {
-                let proxy_client = IntproxyClient::new(connect_info.clone())?;
+                let proxy_client = IntproxyClient::new(connect_info.clone(), login_tokens.clone())?;
                 let conn = Box::pin(proxy_client.connect(Duration::from_secs(60)))
                     .await
                     .map(Connection::from_channel)?;
@@ -273,6 +280,7 @@ impl AgentConnection {
                     ReconnectFlow::ConnectInfo {
                         config: Box::new(config.clone()),
                         connect_info: AgentConnectInfo::SessionsManager(connect_info),
+                        login_tokens,
                     },
                 )
             }
@@ -290,6 +298,7 @@ impl AgentConnection {
                     ReconnectFlow::ConnectInfo {
                         config: Box::new(config.clone()),
                         connect_info: AgentConnectInfo::OperatorSessionsManager(connect_info),
+                        login_tokens,
                     },
                 )
             }
@@ -302,6 +311,7 @@ impl AgentConnection {
                 let reconnect = ReconnectFlow::ConnectInfo {
                     config: Box::new(config.clone()),
                     connect_info: AgentConnectInfo::Dummy(sender),
+                    login_tokens,
                 };
 
                 (conn, reconnect)
@@ -393,6 +403,7 @@ impl RestartableBackgroundTask for AgentConnection {
             ReconnectFlow::ConnectInfo {
                 config,
                 connect_info,
+                login_tokens,
             } => {
                 match &error {
                     AgentConnectionTaskError::RequestedReconnect(..) => {
@@ -436,6 +447,7 @@ impl RestartableBackgroundTask for AgentConnection {
                             .run_until_cancelled(AgentConnection::new(
                                 config,
                                 connect_info.clone(),
+                                login_tokens.clone(),
                                 &mut NullReporter::default(),
                             ))
                             .await

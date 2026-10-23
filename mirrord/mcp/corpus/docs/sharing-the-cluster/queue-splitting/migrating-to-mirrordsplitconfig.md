@@ -68,14 +68,14 @@ spec:
       appConfig:
         queue:
           - env: INCOMING_MEME_QUEUE_NAME
-            containers:
+            containerNames:
               - main
     - id: ad-queue
       kind: sqs
       appConfig:
         queue:
           - env: AD_QUEUE_NAME
-            containers:
+            containerNames:
               - main
 ---
 apiVersion: mirrord.metalbear.co/v1
@@ -96,7 +96,7 @@ spec:
 | `MirrordWorkloadQueueRegistry` _(deprecated)_ | `MirrordSplitConfig` **(NEW)** |
 | -------------------------------------------------- | ------------------------------ |
 | `spec.consumer.name` / `workloadType` | `spec.targetRef.name` / `kind` (with `apiVersion`) |
-| `spec.consumer.container` | `appConfig.queue[].containers` |
+| `spec.consumer.container` | `appConfig.queue[].containerNames` |
 | `spec.queues.<key>` | `spec.queues[].id` |
 | `queueType: SQS` | `kind: sqs` |
 | `nameSource.envVar` | `appConfig.queue[].env` |
@@ -180,11 +180,11 @@ spec:
         topic:
           - env: KAFKA_TOPIC_NAME
             fallback: views-topic
-            containers:
+            containerNames:
               - consumer
         groupId:
           - env: KAFKA_GROUP_ID
-            containers:
+            containerNames:
               - consumer
 ---
 apiVersion: mirrord.metalbear.co/v1
@@ -204,7 +204,7 @@ Field mapping:
 | ---------------------------------------------------------------------------- | ------------------------------ |
 | `consumerApiVersion` / `consumerKind` / `consumerName` | `spec.targetRef.apiVersion` / `kind` / `name` |
 | `topics[].id` | `spec.queues[].id` |
-| `topics[].nameSources[].directEnvVar` | `appConfig.topic[]` (`variable` -> `env`, `container` -> `containers`, `fallback` -> `fallback`) |
+| `topics[].nameSources[].directEnvVar` | `appConfig.topic[]` (`variable` -> `env`, `container` -> `containerNames`, `fallback` -> `fallback`) |
 | `topics[].groupIdSources` | `appConfig.groupId[]` |
 | `topics[].applicationIdSources` | `appConfig.appId[]` |
 | `topics[].clientConfig` (a `MirrordKafkaClientConfig`) | `spec.queues[].clientConfig` (a `MirrordPropertyList` in the target namespace, or the same legacy name as a fallback) |
@@ -271,7 +271,7 @@ spec:
       appConfig:
         queue:
           - env: INCOMING_MEME_QUEUE_NAME
-            containers:
+            containerNames:
               - main
     - id: ad-queue
       kind: rmq
@@ -279,7 +279,7 @@ spec:
       appConfig:
         queue:
           - env: AD_QUEUE_NAME
-            containers:
+            containerNames:
               - main
 ```
 
@@ -288,7 +288,7 @@ Field mapping:
 | `MirrordWorkloadQueueRegistry` _(deprecated)_ | `MirrordSplitConfig` **(NEW)** |
 | -------------------------------------------------- | ------------------------------ |
 | `spec.consumer.name` / `workloadType` | `spec.targetRef.name` / `kind` (with `apiVersion`) |
-| `spec.consumer.container` | `appConfig.queue[].containers` |
+| `spec.consumer.container` | `appConfig.queue[].containerNames` |
 | `spec.queues.<key>` | `spec.queues[].id` |
 | `queueType: RMQ` | `kind: rmq` |
 | `clusterProperties` | `clientConfig` |
@@ -305,3 +305,5 @@ Field mapping:
 1. Create the new `MirrordSplitConfig` using the mapping above. Your existing `MirrordPropertyList` cluster declaration is reused as-is.
 2. Start a session and verify messages are split as expected.
 3. Delete the old `MirrordWorkloadQueueRegistry`.
+
+For compatibility with older operator releases and the legacy `containers` spelling, see [Selecting Containers](../queue-splitting.md#selecting-containers).

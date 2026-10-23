@@ -10,6 +10,8 @@ menu:
 toc: true
 tags: ["team", "enterprise"]
 ---
+# DB Branching
+
 {% hint style="info" %}
 This feature is available to users on the Team and Enterprise pricing plans.
 {% endhint %}

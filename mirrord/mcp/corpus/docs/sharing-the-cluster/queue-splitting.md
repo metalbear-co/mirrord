@@ -4,6 +4,8 @@ tags:
   - team
   - enterprise
 ---
+# Queue Splitting
+
 If your application consumes messages from a queue service, you should choose a configuration that matches your intention:
 
 1. Running your application with mirrord without any special configuration will result in your local application competing with the deployed application (and potentially other mirrord runs by teammates) for queue messages.
@@ -23,7 +25,7 @@ Queue splitting needs Kubernetes `1.30` or later.
 Queue splitting also works when your environment spans several Kubernetes clusters — see [Queue Splitting in Multi-Cluster](../using-mirrord/multi-cluster.md#queue-splitting-in-multi-cluster).
 {% endhint %}
 
-### Choose your queue service
+## Choose your queue service
 
 Setup and configuration differ per queue service. Pick the one you use to see the full guide:
 
@@ -60,6 +62,12 @@ Please note that:
 1. Temporary queues created for the deployed targets will not be deleted as long as there are any targets' pods that use them.
 2. In case of SQS splitting, deployed targets will keep reading from the temporary queues as long as their temporary queues have unconsumed messages.
 3. For Google Cloud Pub/Sub, the operator creates temporary topics and subscriptions. The target workload's subscription environment variable is patched to read from a temporary subscription, while the operator drains the original subscription and forwards messages through temporary topics.
+
+## Selecting Containers
+
+Use `containerNames` in a `MirrordSplitConfig` app-config reference to restrict it to specific containers. This spelling works with Kustomize's `images:` transformer. The legacy spelling `containers` remains supported; do not set both fields on the same reference. Omitting both preserves the default container selection; an empty list preserves the existing empty-selection behavior.
+
+Before adopting `containerNames`, upgrade both the operator and its CRD to a release that supports this field and wait for the operator rollout to complete. Older installations can reject or ignore the new field, losing the intended container restriction. Existing manifests using `containers` do not need migration. Before rolling back to an older operator, change `containerNames` back to `containers` in your manifests and applied resources.
 
 ## One Config for Several Workloads
 
@@ -148,7 +156,7 @@ The `volume` source fields:
 * `valueSelector` - a selector run over the parsed file (JSON or YAML). It supports nested keys (`.kafka.consumer.group`) and `.[]` to iterate arrays or object values (`.topics.[]`); pipes, functions, and other jq operators are not supported.
 * `valuePattern` - a regex whose capture group marks the name inside the raw file text. With neither `valueSelector` nor `valuePattern`, the whole file content is the queue name.
 
-If both a `volume` source and an `env`/`envLike` source are set on the same entry, `env`/`envLike` takes precedence and `volume` is ignored. `fallback` does not apply to `volume`. A `containers` list is not needed either - the file is shared by every container that mounts the volume.
+If both a `volume` source and an `env`/`envLike` source are set on the same entry, `env`/`envLike` takes precedence and `volume` is ignored. `fallback` does not apply to `volume`. A `containerNames` list is not needed either - the file is shared by every container that mounts the volume.
 
 The operator never modifies your ConfigMap. When a split starts, it:
 
@@ -257,7 +265,7 @@ Things to know:
 
 * The referenced file's content is pinned for the length of the split. If the same file also carries values that rotate, such as credentials, the deployed application keeps reading the values from when the split started. Other injected files are untouched.
 * If both a `podFile` source and an `env`/`envLike` or `volume` source are set on the same entry, the other source takes precedence and `podFile` is ignored. `fallback` does not apply to `podFile`.
-* A `containers` list on the entry limits which containers get the overriding mount. Without one, every application container gets it.
+* A `containerNames` list on the entry limits which containers get the overriding mount. Without one, every application container gets it.
 * The remote file system and directory file descriptor notes for `volume` sources apply here as well.
 
 ## Autoscaled Targets with KEDA
@@ -389,7 +397,7 @@ Filter definition contains the following fields:
 
 If a `filter` (or `message_filter`) and a `jq_filter` are specified for the same queue, both must match for a message to be matched.
 
-#### Composing filters
+### Composing filters
 
 `filter` takes one of three forms. A single `metadata` regex:
 
@@ -445,7 +453,7 @@ A `message_filter` of `{ "tenant": "^blue$", "region": "eu" }` is the same as `f
 
 Queue filter policies (`splitQueues` in a mirrord policy) check `message_filter` entries and `all_of` / `any_of` branches by attribute name. A `metadata` regex cannot prove which attribute it filters on, so on a queue covered by such a policy rule it is rejected the same way a lone `jq_filter` is.
 
-#### One queue or many
+### One queue or many
 
 `feature.split_queues` accepts two shapes.
 

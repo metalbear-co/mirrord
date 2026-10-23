@@ -1,6 +1,6 @@
 ---
 title: "Port Forwarding"
-description: "How to use mirrord for port forwarding"
+description: "Use mirrord port-forward to reach services in your cluster from a local port."
 date: 2024-09-03T15:39:44+01:00
 lastmod: 2024-12-19T15:39:44+01:00
 draft: false
@@ -11,6 +11,8 @@ weight: 140
 toc: true
 tags: ["oss", "team", "enterprise"]
 ---
+# Port Forwarding
+
 ## Regular port-forwarding
 
 The port-forward command allows you to forward traffic from a local port to any

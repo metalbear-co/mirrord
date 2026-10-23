@@ -133,7 +133,7 @@ Open-source mirrord works on any cluster. When several developers or several Cla
 - only its own messages from a shared queue ([queue splitting](../sharing-the-cluster/queue-splitting.md)) for Kafka, SQS, RabbitMQ, and other brokers
 - a [preview environment](../use-cases/preview-environments.md) that keeps the change running after the session ends, for review
 
-If the cluster has no license, Claude Code can start a seven-day Enterprise trial itself with `mirrord operator install --no-browser`, and give you a link to claim it. See [Agent-Started Trials](./agent-started-trials.md).
+If the cluster has no license, Claude Code can start a seven-day Enterprise trial itself with `mirrord operator signup`, install the Operator with `mirrord operator install --from-signup`, and give you a link to claim it. If you already have an organization, it installs with that instead: `mirrord operator install`, run by an organization admin, logs in and creates the key, and `--api-key <key>` uses the key your organization already has. See [Agent-Started Trials](./agent-started-trials.md).
 
 ## If a session does not start
 
