@@ -171,7 +171,8 @@ enum CorpusCommand {
         bump: bool,
     },
 
-    /// Fail unless the vendored files are byte-identical to those of the pinned commits
+    /// Fail unless the vendored files are byte-identical to those of the pinned commits, and the
+    /// config blocks at the pinned commits validate against this build's schemas (needs `uv`)
     Check,
 }
 

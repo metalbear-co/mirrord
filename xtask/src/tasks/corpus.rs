@@ -5,6 +5,12 @@
 //! byte-identical to that commit. The release PR bumps the pins (`sync --bump`), and CI checks that
 //! the vendored files still match their pins (`check`), so a release is reproducible from its
 //! commit.
+//!
+//! The skills repo checks the config blocks in its Markdown against the schemas of mirrord's
+//! default branch, but a release can be built from an older commit, whose schemas lack the options
+//! added since. So `check` also runs the skills repo's own config check, from the pinned commit,
+//! against the schemas of this build. The release PR then fails when a config block at the pinned
+//! commit uses an option that this build doesn't have.
 
 use std::{
     collections::BTreeMap,
@@ -18,6 +24,8 @@ use mirrord_command::resolve_command;
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
 
+use crate::relative_to_root;
+
 /// An upstream repo vendored into the corpus.
 struct Corpus {
     /// The directory under `mirrord/mcp/corpus` it is vendored into, and the name of its pin.
@@ -30,6 +38,10 @@ struct Corpus {
     extensions: &'static [&'static str],
     /// Files under `root` that aren't vendored.
     exclude: &'static [&'static str],
+    /// The script, relative to the repo root, that validates the config blocks in the repo's
+    /// Markdown against the schemas given as `--mirrord-schema` and `--mirrord-up-schema`. Its
+    /// Python dependencies are listed in the `requirements.txt` next to it.
+    config_check: Option<&'static str>,
 }
 
 const CORPORA: &[Corpus] = &[
@@ -40,6 +52,7 @@ const CORPORA: &[Corpus] = &[
         extensions: &["md"],
         // GitBook's navigation, not a page.
         exclude: &["SUMMARY.md"],
+        config_check: None,
     },
     Corpus {
         name: "skills",
@@ -57,6 +70,7 @@ const CORPORA: &[Corpus] = &[
             "mirrord-db-branching/references/db-branches-schema.json",
             "mirrord-up/references/schema.json",
         ],
+        config_check: Some(".github/scripts/check_fence_tags.py"),
     },
 ];
 
@@ -118,7 +132,8 @@ pub fn sync(bump: bool) -> Result<()> {
     Ok(())
 }
 
-/// Fails unless every corpus holds exactly the files of its pinned commit, byte for byte.
+/// Fails unless every corpus holds exactly the files of its pinned commit, byte for byte, and the
+/// config blocks at the pinned commits validate against the schemas of this build.
 pub fn check() -> Result<()> {
     let mut mismatches = Vec::new();
     for corpus in CORPORA {
@@ -148,6 +163,14 @@ pub fn check() -> Result<()> {
         for path in vendored.keys().filter(|path| !upstream.contains_key(*path)) {
             mismatches.push(format!("{}/{path}: not in upstream", corpus.name));
         }
+
+        // A failed config check ends the run, so it only runs once the files match their pins, and
+        // the mismatches collected so far are always reported.
+        if let Some(script) = corpus.config_check
+            && mismatches.is_empty()
+        {
+            check_configs(&pin, checkout.path(), script)?;
+        }
     }
 
     if !mismatches.is_empty() {
@@ -158,6 +181,49 @@ pub fn check() -> Result<()> {
     }
 
     println!("✓ corpus matches its pins");
+    Ok(())
+}
+
+/// Runs `script` from `checkout`, which holds the commit of `pin`, against `mirrord-schema.json`
+/// and `mirrord-up-schema.json` at the root of this repo. The `schema_file_is_up_to_date` tests of
+/// mirrord-config and mirrord-up keep those equal to the schemas that the build generates. The
+/// script prints each block that fails, with its file and line.
+///
+/// `uv` installs the script's dependencies from the `requirements.txt` of the same commit and runs
+/// it with the Python version that the skills repo's CI uses, so it behaves the same as there.
+fn check_configs(pin: &Pin, checkout: &Path, script: &str) -> Result<()> {
+    // The script lists the Markdown files with `git ls-files`, so it needs a work tree.
+    git(Some(checkout), &["checkout", "--quiet", "FETCH_HEAD"])?;
+
+    let script = checkout.join(script);
+    let status = resolve_command("uv")
+        .args([
+            "run",
+            "--no-project",
+            "--python",
+            "3.12",
+            "--with-requirements",
+        ])
+        .arg(script.with_file_name("requirements.txt"))
+        .arg("python")
+        .arg(&script)
+        .arg("--mirrord-schema")
+        .arg(relative_to_root(Path::new("mirrord-schema.json")))
+        .arg("--mirrord-up-schema")
+        .arg(relative_to_root(Path::new("mirrord-up-schema.json")))
+        .status()
+        .context("failed to run uv")?;
+    ensure!(
+        status.success(),
+        "the config check of {}@{} failed, see its output above",
+        pin.repo,
+        pin.commit
+    );
+
+    println!(
+        "✓ config blocks in {}@{} validate against the schemas of this build",
+        pin.repo, pin.commit
+    );
     Ok(())
 }
 

@@ -328,15 +328,20 @@ jobs:
     uses: ./.github/workflows/check-rust-docs.yaml
     secrets: inherit
 
-  # The vendored docs and skills must be byte-identical to their pinned upstream commits.
+  # The vendored docs and skills must be byte-identical to their pinned upstream commits, and the
+  # config blocks in the skills must validate against the schemas of this commit. Release PRs
+  # always run it, because they ship the corpus with this commit's schemas even when the pins
+  # didn't move.
   corpus_check:
     needs: [plan]
-    if: ${{ needs.plan.outputs.corpus_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    if: ${{ needs.plan.outputs.corpus_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.release_branch == 'true' }}
     runs-on: ${{ needs.plan.outputs.runner_4 }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      # `cargo xtask corpus check` runs the skills repo's config check through uv.
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache: false
