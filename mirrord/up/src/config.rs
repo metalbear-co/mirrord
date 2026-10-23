@@ -1178,8 +1178,13 @@ impl UpConfig {
             }
         }
 
+        // A service with a flag doesn't read its variable, so it can't make one ambiguous.
         let mut env_names: HashMap<String, Vec<&Arc<str>>> = HashMap::new();
-        for service in self.services.keys() {
+        for service in self
+            .services
+            .keys()
+            .filter(|service| from_flags.contains_key(service.as_ref()).not())
+        {
             env_names
                 .entry(preview_image_env(service))
                 .or_default()
