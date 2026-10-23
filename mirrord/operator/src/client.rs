@@ -1948,7 +1948,7 @@ where
 /// pre-checking them would falsely reject dialects that actually work on operators already in the
 /// field; those instead rely on the operator marking the branch `Failed` (see the branch database
 /// controller's dispatch).
-fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperatorFeature> {
+pub fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperatorFeature> {
     match config {
         DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
         DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),

@@ -493,6 +493,7 @@ mod tests {
                 cronjob: None,
                 spec_resources: None,
                 share_host: None,
+                auto_queue_splitting: None,
             },
             status: None,
         };

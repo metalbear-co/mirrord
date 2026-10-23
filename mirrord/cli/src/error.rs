@@ -907,6 +907,39 @@ pub(crate) enum CliError {
     #[diagnostic(help("Use `mirrord preview status` to see available preview environments."))]
     PreviewNotFound(String),
 
+    #[error("{} not found", .0.display())]
+    #[diagnostic(help(
+        "`mirrord preview up` reads the services to preview from a mirrord-up.yaml. Pass another \
+         path with `-f <path>`, or create one with `mirrord up init`."
+    ))]
+    PreviewUpFileNotFound(PathBuf),
+
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    PreviewUpConfig(Box<mirrord_up::UpError>),
+
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    PreviewUpImages(#[from] mirrord_up::PreviewImageError),
+
+    #[error("no preview environment was started, the checks failed for: {}", .0.join(", "))]
+    PreviewUpInvalid(Vec<String>),
+
+    #[error("no key to stop preview environments under")]
+    #[diagnostic(help(
+        "Without `--key` or `MIRRORD_KEY`, the key is the git branch, but on `main`, `master` or \
+         without a branch `mirrord preview up` uses a random key. Pass the key it printed with \
+         `--key <key>`."
+    ))]
+    PreviewDownKeyRequired,
+
+    #[error("preview environments failed to start for: {}", .0.join(", "))]
+    #[diagnostic(help(
+        "Run `mirrord preview up` with the same key again, it replaces the session of every \
+         service."
+    ))]
+    PreviewUpFailed(Vec<String>),
+
     #[error("Session key is required for this command")]
     #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
     SessionKeyRequired,
@@ -1005,6 +1038,12 @@ impl CliError {
 impl From<crate::preview::resources::ResourcesError> for CliError {
     fn from(error: crate::preview::resources::ResourcesError) -> Self {
         Self::PreviewResources(Box::new(error))
+    }
+}
+
+impl From<mirrord_up::UpError> for CliError {
+    fn from(error: mirrord_up::UpError) -> Self {
+        Self::PreviewUpConfig(Box::new(error))
     }
 }
 
