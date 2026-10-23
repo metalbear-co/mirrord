@@ -16,6 +16,7 @@ use anyhow::{Context, Result, bail, ensure};
 use chrono::{SecondsFormat, Utc};
 use mirrord_command::resolve_command;
 use serde::{Deserialize, Serialize};
+use tempfile::TempDir;
 
 /// An upstream repo vendored into the corpus.
 struct Corpus {
@@ -83,7 +84,8 @@ pub fn sync(bump: bool) -> Result<()> {
             read_pin(&pin_path)?
         };
 
-        let files = fetch(corpus, &pin)?;
+        let checkout = fetch(&pin)?;
+        let files = pinned_files(corpus, &pin, checkout.path())?;
         // Written once its commit is known to sync, so a failed sync keeps the previous pin.
         if bump {
             fs::write(&pin_path, serde_json::to_string_pretty(&pin)? + "\n")
@@ -129,7 +131,8 @@ pub fn check() -> Result<()> {
             corpus.repo
         );
 
-        let upstream = fetch(corpus, &pin)?;
+        let checkout = fetch(&pin)?;
+        let upstream = pinned_files(corpus, &pin, checkout.path())?;
         let dir = corpus_dir().join(corpus.name);
         let vendored = read_tree(&dir, &dir)?;
 
@@ -178,10 +181,9 @@ fn upstream_head(repo: &str) -> Result<String> {
         .with_context(|| format!("no HEAD in {repo}"))
 }
 
-/// The files of `corpus` at its pinned commit, keyed by their path relative to its root. Contents
-/// are the raw blobs, so no checkout filter or line-ending conversion touches them.
-fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
-    // Removed on drop, and unique, so runs at the same time don't share it.
+/// A fresh repo in the temp dir holding the commit of `pin` as `FETCH_HEAD`. It is removed on
+/// drop, and unique, so runs at the same time don't share it.
+fn fetch(pin: &Pin) -> Result<TempDir> {
     let checkout = tempfile::Builder::new()
         .prefix("mirrord-xtask-corpus-")
         .tempdir()?;
@@ -198,9 +200,15 @@ fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
         ],
     )
     .with_context(|| format!("failed to fetch {}@{}", pin.repo, pin.commit))?;
+    Ok(checkout)
+}
 
+/// The files of `corpus` at its pinned commit, fetched into `checkout`, keyed by their path
+/// relative to its root. Contents are the raw blobs, so no checkout filter or line-ending
+/// conversion touches them.
+fn pinned_files(corpus: &Corpus, pin: &Pin, checkout: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
     let listing = git(
-        Some(checkout.path()),
+        Some(checkout),
         &[
             "ls-tree",
             "-r",
@@ -231,7 +239,7 @@ fn fetch(corpus: &Corpus, pin: &Pin) -> Result<BTreeMap<String, Vec<u8>>> {
         }
 
         let contents = git(
-            Some(checkout.path()),
+            Some(checkout),
             &["cat-file", "blob", &format!("FETCH_HEAD:{path}")],
         )?;
         ensure!(
