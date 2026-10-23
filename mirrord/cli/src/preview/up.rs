@@ -16,12 +16,15 @@ use mirrord_config::{
     config::{ConfigContext, EnvKey},
     env_key::MIRRORD_ENV_KEY,
     feature::{
-        database_branches::DatabaseBranchesConfig,
+        database_branches::{DatabaseBranchesConfig, SplitConfigDbBranches},
         split_queues::{QueueKind, SplitQueuesConfig},
     },
     util::GIT_BRANCH,
 };
-use mirrord_operator::crd::NewOperatorFeature;
+use mirrord_operator::{
+    client::{required_branching_feature, split_config_branches::entries_from_response},
+    crd::NewOperatorFeature,
+};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_up::{PreviewImageSource, SubprocessCfg, UpError, load_up_config, preview_image_env};
 
@@ -337,6 +340,48 @@ async fn prepare_service(
         );
         config.feature.db_branches = DatabaseBranchesConfig::default();
     }
+
+    if let Some(request) = config.feature.db_branches.split_config_request().cloned() {
+        let response = operator_api
+            .lookup_split_config_db_branches(&config, &request)
+            .await?;
+        let resolved = entries_from_response(&response, config.key.as_str())?;
+        let supported = operator_api.operator().spec.supported_features();
+        let (branchable, off): (Vec<_>, Vec<_>) = response
+            .entries
+            .iter()
+            .zip(resolved.entries.iter().map(required_branching_feature))
+            .partition(|(_, feature)| feature.is_none_or(|feature| supported.contains(&feature)));
+
+        if off.is_empty().not() {
+            if default_db_branches.not() {
+                for feature in off.iter().filter_map(|(_, feature)| *feature) {
+                    operator_api.operator().spec.require_feature(feature)?;
+                }
+            }
+            progress.warning(&format!(
+                "the mirrord operator has these off, so their databases are not branched: {}",
+                off.iter()
+                    .filter_map(|(entry, feature)| Some(format!(
+                        "`{}` ({})",
+                        entry.id,
+                        (*feature)?
+                    )))
+                    .join(", ")
+            ));
+            config.feature.db_branches = if branchable.is_empty() {
+                DatabaseBranchesConfig::default()
+            } else {
+                DatabaseBranchesConfig::FromSplitConfig(SplitConfigDbBranches::Ids(
+                    branchable
+                        .iter()
+                        .map(|(entry, _)| entry.id.clone())
+                        .collect(),
+                ))
+            };
+        }
+    }
+
     // An operator that advertises it drops the default splits it can't serve, as it does for
     // `mirrord up` sessions. An older one fails the session over them instead, so it gets none.
     let mut auto_queue_splitting = false;
