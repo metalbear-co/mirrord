@@ -371,17 +371,6 @@ async fn prepare_service(
     let mut auto_queue_splitting = false;
     if default_split_queues {
         let supported = operator_api.operator().spec.supported_features();
-        let disabled = config
-            .feature
-            .split_queues
-            .kinds()
-            .into_iter()
-            .filter_map(|kind| {
-                let feature = NewOperatorFeature::queue_splitting(kind)?;
-                supported.contains(&feature).not().then_some(feature)
-            })
-            .collect::<Vec<_>>();
-
         if supported
             .contains(&NewOperatorFeature::PreviewAutoQueueSplitting)
             .not()
@@ -391,19 +380,34 @@ async fn prepare_service(
                  preview environments",
             );
             config.feature.split_queues = SplitQueuesConfig::default();
-        } else if disabled.len() == config.feature.split_queues.kinds().len() {
-            // Sent anyway, the session would split nothing and only wait on a split session
-            // that never comes.
-            progress.warning("queues are not split: the mirrord operator has queue splitting off");
-            config.feature.split_queues = SplitQueuesConfig::default();
         } else {
-            if disabled.is_empty().not() {
-                progress.warning(&format!(
-                    "the mirrord operator has these off, so their queues are not split: {}",
-                    disabled.iter().join(", ")
-                ));
+            // An operator that advertises `PreviewAutoQueueSplitting` is new enough to advertise
+            // every broker it has on, Azure Service Bus included, so a missing broker feature
+            // means that broker is off.
+            let kinds = config.feature.split_queues.kinds();
+            let disabled = kinds
+                .iter()
+                .filter_map(|kind| {
+                    let feature = NewOperatorFeature::queue_splitting(*kind)?;
+                    supported.contains(&feature).not().then_some(feature)
+                })
+                .collect::<Vec<_>>();
+
+            if disabled.len() == kinds.len() {
+                // Sent anyway, the session would split nothing and only wait on a split session
+                // that never comes.
+                progress
+                    .warning("queues are not split: the mirrord operator has queue splitting off");
+                config.feature.split_queues = SplitQueuesConfig::default();
+            } else {
+                if disabled.is_empty().not() {
+                    progress.warning(&format!(
+                        "the mirrord operator has these off, so their queues are not split: {}",
+                        disabled.iter().join(", ")
+                    ));
+                }
+                auto_queue_splitting = true;
             }
-            auto_queue_splitting = true;
         }
     }
 
