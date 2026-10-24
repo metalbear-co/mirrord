@@ -26,6 +26,10 @@ pub const METALBEAR_CLOUD_URL_ENV: &str = "MIRRORD_METALBEAR_CLOUD_URL";
 
 const METALBEAR_CLOUD_URL_DEFAULT: &str = "https://app.metalbear.com";
 
+/// Base URL of the MetalBear Cloud sessions-manager, reached when neither the operator nor an
+/// explicit URL selects another sessions-manager.
+pub const SESSIONS_MANAGER_URL_DEFAULT: &str = "https://sm-aws-use1.app.metalbear.com/sm";
+
 /// Development-only mirrord session key. When set, the token exchange is tagged with
 /// `baggage: mirrord-session=<value>` so it routes to a locally-run app-server under mirrord
 /// instead of the deployed one — the operator's `OPERATOR_CLOUD_BAGGAGE_SESSION` for the same
