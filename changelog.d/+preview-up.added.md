@@ -1,0 +1,1 @@
+Add `mirrord preview up`, which starts a preview environment for every service of a `mirrord-up.yaml` that has an image (from `--image <service>=<ref>`, `MIRRORD_<SERVICE>_IMAGE` or the service's `image`), all under one key, and returns once each one is ready.

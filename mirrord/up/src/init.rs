@@ -211,6 +211,7 @@ async fn prompt_service(
             run,
             context: None,
             config_patch: None,
+            image: None,
         },
     ))
 }
@@ -661,6 +662,7 @@ mod tests {
             },
             context: Some("popper-deskpop".into()),
             config_patch: None,
+            image: None,
         }
     }
 
@@ -727,6 +729,7 @@ mod tests {
             },
             context: None,
             config_patch: None,
+            image: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -777,6 +780,7 @@ mod tests {
             },
             context: None,
             config_patch: None,
+            image: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -825,6 +829,7 @@ mod tests {
             },
             context: None,
             config_patch: None,
+            image: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),

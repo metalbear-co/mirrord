@@ -6,7 +6,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::Progress;
+use crate::{Progress, ProgressTracker};
 
 #[derive(Debug)]
 pub struct JsonProgress {
@@ -283,6 +283,79 @@ impl Drop for SpinnerProgress {
 }
 
 /// Message sent when a new task is created using subtask/new
+/// Puts `"<prefix>: "` in front of every task name and message of the tracker it wraps.
+///
+/// Lets several tasks run at once under one tracker (e.g. one per service in `mirrord preview
+/// up`) and still be told apart: in `simple` mode their lines interleave, and `json` mode
+/// finishes tasks by name, so two tasks both named `waiting for preview to be ready` would be
+/// mixed up. Build one with [`ProgressTracker::prefixed`].
+#[derive(Debug)]
+pub struct PrefixedProgress {
+    prefix: String,
+    inner: Box<ProgressTracker>,
+}
+
+impl PrefixedProgress {
+    pub(crate) fn new(prefix: String, inner: ProgressTracker) -> Self {
+        Self {
+            prefix,
+            inner: Box::new(inner),
+        }
+    }
+
+    fn prefixed(&self, text: &str) -> String {
+        format!("{}: {text}", self.prefix)
+    }
+}
+
+impl Progress for PrefixedProgress {
+    fn subtask(&self, text: &str) -> PrefixedProgress {
+        PrefixedProgress {
+            prefix: self.prefix.clone(),
+            inner: Box::new(self.inner.subtask(&self.prefixed(text))),
+        }
+    }
+
+    fn success(&mut self, msg: Option<&str>) {
+        let msg = msg.map(|msg| self.prefixed(msg));
+        self.inner.success(msg.as_deref())
+    }
+
+    fn failure(&mut self, msg: Option<&str>) {
+        let msg = msg.map(|msg| self.prefixed(msg));
+        self.inner.failure(msg.as_deref())
+    }
+
+    fn warning(&self, msg: &str) {
+        self.inner.warning(&self.prefixed(msg))
+    }
+
+    fn info(&self, msg: &str) {
+        self.inner.info(&self.prefixed(msg))
+    }
+
+    fn ide(&self, value: Value) {
+        self.inner.ide(value)
+    }
+
+    fn print(&self, text: &str) {
+        self.inner.print(&self.prefixed(text))
+    }
+
+    fn add_to_print_buffer(&mut self, msg: &str) {
+        let msg = self.prefixed(msg);
+        self.inner.add_to_print_buffer(&msg)
+    }
+
+    fn set_fail_on_drop(&mut self, fail: bool) {
+        self.inner.set_fail_on_drop(fail)
+    }
+
+    fn suspend<F: FnOnce() -> R, R>(&self, f: F) -> R {
+        self.inner.suspend(f)
+    }
+}
+
 #[derive(Serialize, Debug, Clone, Default)]
 struct NewTaskMessage {
     /// Task name (identifier)
