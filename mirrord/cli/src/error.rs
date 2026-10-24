@@ -477,6 +477,13 @@ pub(crate) enum CliError {
     ))]
     ServerlessSessionsManagerNotServed,
 
+    #[error("failed to read which MetalBear cloud the sessions-manager trusts")]
+    #[diagnostic(help(
+        "Check `MIRRORD_METALBEAR_CLOUD_URL`, or unset it to use https://app.metalbear.com.\
+        {GENERAL_HELP}"
+    ))]
+    SessionsManagerCloudUrl(#[source] mirrord_sessions_manager_client::SessionsManagerClientError),
+
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorBranchCreationFailed(OperatorOperation, String),

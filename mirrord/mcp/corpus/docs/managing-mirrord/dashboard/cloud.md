@@ -1,6 +1,6 @@
 ---
 title: Cloud Setup
-description: Set up the mirrord usage dashboard served from the cloud
+description: "How to set up the mirrord Dashboard that MetalBear hosts in the cloud."
 tags:
   - alpha
   - team
@@ -80,7 +80,7 @@ A self-hosted license server is different: an operator configured with `license.
 
 1. Generate a cloud API key at [app.metalbear.com](https://app.metalbear.com), as above.
 2. In your operator Helm values, add `cloud.apiKey` as shown in the previous section and remove `license.licenseServer`, then upgrade.
-3. Sign in and run a session. Your usage shows up on the dashboard. Usage recorded by the license server stays in its database; if you want that history on the cloud dashboard, [get in touch](https://metalbear.com/mirrord/contact/) and we'll import it. Once the operator is reporting to the cloud, the mirrord-license-server chart can be uninstalled if you only ran it for the dashboard.
+3. Sign in and run a session. Your usage shows up on the dashboard. Usage recorded by the license server stays in its database; if you want that history on the cloud dashboard, [get in touch](https://metalbear.com/contact/) and we'll import it. Once the operator is reporting to the cloud, the mirrord-license-server chart can be uninstalled if you only ran it for the dashboard.
 
 {% hint style="warning" %}
 Don't migrate an air-gapped or network-restricted deployment. The cloud dashboard needs outbound connectivity to the mirrord cloud; keep those clusters on [License Server Setup](license-server.md).

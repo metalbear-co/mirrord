@@ -1556,7 +1556,15 @@ pub(super) struct PreviewArgs {
 #[derive(Args, Debug)]
 pub(super) struct LoginArgs {
     /// URL of the authentication backend.
-    #[arg(long, hide = true, default_value = "https://app.metalbear.com")]
+    ///
+    /// Read from `MIRRORD_METALBEAR_CLOUD_URL` like the cloud a standalone sessions-manager
+    /// trusts, so logging in with it set gets the token that sessions-manager expects.
+    #[arg(
+        long,
+        hide = true,
+        env = "MIRRORD_METALBEAR_CLOUD_URL",
+        default_value = "https://app.metalbear.com"
+    )]
     pub url: Url,
 }
 

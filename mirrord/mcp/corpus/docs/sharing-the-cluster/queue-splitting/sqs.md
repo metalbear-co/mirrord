@@ -169,14 +169,14 @@ spec:
       appConfig:
         queue:
           - env: INCOMING_MEME_QUEUE_NAME
-            containers:
+            containerNames:
               - main
     - id: ad-queue
       kind: sqs
       appConfig:
         queue:
           - env: AD_QUEUE_NAME
-            containers:
+            containerNames:
               - main
 ```
 
@@ -208,7 +208,7 @@ Each entry in the `spec.queues` list describes one or more SQS queues consumed b
   * `fallback` - fallback name/URL if the variable is not found (only valid with `env`). The temporary queue name is still injected into the variable.
   * `valueSelector` - a selector extracting queue names from the variable's value: nested keys (`.queues.orders`) and `.[]` to iterate arrays or object values. Use `.[]` when the variable holds a JSON object whose string values are queue names/URLs. Pipes, functions, and other jq operators are not supported.
   * `valuePattern` - a regex used when the queue name/URL is embedded in a larger string. The capture group (named `value`, otherwise the first group) marks the part that is the name; only that part is swapped for the temporary queue and the surrounding text is kept as-is.
-  * `containers` - limit resolution to specific containers (optional, defaults to all containers).
+  * `containerNames` - limit resolution to specific containers (optional, defaults to all containers).
 * `queueConfig` (optional) - name of a `MirrordPropertyList` holding per-queue options (see below).
 
 #### Per-queue options (SNS, S3 events, tags)
@@ -461,3 +461,5 @@ If you don't want to wait for the remote service to drain the temporary queue, a
 | `N`                 | Wait up to `N` seconds for the queue to drain, then delete it.                        |
 
 If that service is trying to consume messages correctly, and the temporary queue is already empty, but the target application still doesn't get restored to its original state, please try restarting the application, deleting any lingering `MirrordClusterSplitSession` objects, and if possible, restart the mirrord operator.
+
+For compatibility with older operator releases and the legacy `containers` spelling, see [Selecting Containers](../queue-splitting.md#selecting-containers).

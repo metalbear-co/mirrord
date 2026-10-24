@@ -12,8 +12,10 @@ tags:
   - oss
   - team
   - enterprise
-description: How to filter traffic by JSON body using mirrord
+description: "Steal only the HTTP requests whose JSON body matches the values you choose."
 ---
+
+# Filtering by JSON Body
 
 mirrord can steal incoming HTTP requests based on values inside a JSON request body. This allows matching on deeply nested fields and applying a regular expression to the extracted values.
 This filter is available in the following mirrord.json configuration:
@@ -49,7 +51,7 @@ This feature is available in mirrord version 3.175.0 and onwards.
 
 When using `any_of` or `all_of`, body filter fields are written directly in each condition, rather than under `body_filter`, example can be found below.
 
-### Type Handling and the `typeof` Extension
+## Type Handling and the `typeof` Extension
 
 mirrord stringifies all JSONPath query results before applying the regex.
 To filter values by JSON type, mirrord provides a custom `typeof` function extension to `RFC 9535`

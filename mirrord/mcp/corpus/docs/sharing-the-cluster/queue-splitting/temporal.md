@@ -180,7 +180,7 @@ The `MirrordSplitConfig` is a namespaced resource. The target workload reference
 
 #### Describe consumed task queues
 
-Each entry in the `spec.queues` list describes a Temporal task queue consumed by the worker. Each `appConfig` field uses the same structure as other queue services (`env`, `envLike`, `volume`, `fallback`, `valueSelector`, `valuePattern`, `containers`):
+Each entry in the `spec.queues` list describes a Temporal task queue consumed by the worker. Each `appConfig` field uses the same structure as other queue services (`env`, `envLike`, `volume`, `fallback`, `valueSelector`, `valuePattern`, `containerNames`):
 
 * `id` - arbitrary queue ID that developers [reference](temporal.md#setting-a-filter) from their mirrord config.
 * `kind` - must be `temporal`.
@@ -312,3 +312,5 @@ Filtering on a Temporal header:
 ```
 
 In the example above, the local worker will receive only tasks whose first input argument starts with `test-jq-`.
+
+For compatibility with older operator releases and the legacy `containers` spelling, see [Selecting Containers](../queue-splitting.md#selecting-containers).
