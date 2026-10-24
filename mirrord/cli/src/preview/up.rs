@@ -31,8 +31,8 @@ use mirrord_up::{
 };
 
 use super::{
-    PreparedPreview, create_preview_api, load_manifests, manifest_sources, preview_namespace,
-    preview_stop,
+    PreparedPreview, StopMode, create_preview_api, load_manifests, manifest_sources,
+    preview_namespace, preview_stop,
 };
 use crate::{
     config::{
@@ -446,7 +446,7 @@ pub(super) async fn preview_down(
         all_namespaces: true,
     };
 
-    preview_stop(&common, args, true, watch, user_data).await
+    preview_stop(&common, args, StopMode::Down, watch, user_data).await
 }
 
 /// The key `mirrord preview up` runs under when it can be found again: `--key`, then

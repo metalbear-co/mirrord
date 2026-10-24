@@ -95,7 +95,7 @@ pub(crate) async fn preview_command(
             preview_status(&common, status_args, watch, user_data).await
         }
         PreviewCommand::Stop(stop_args) => {
-            preview_stop(&common, stop_args, false, watch, user_data).await
+            preview_stop(&common, stop_args, StopMode::Stop, watch, user_data).await
         }
         PreviewCommand::Down => up::preview_down(&common, watch, user_data).await,
         PreviewCommand::Logs(logs_args) => preview_logs(&common, logs_args, watch, user_data).await,
@@ -1200,22 +1200,30 @@ async fn print_session_logs(
     Ok(())
 }
 
+/// Which command [`preview_stop`] runs as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StopMode {
+    /// `mirrord preview stop`.
+    Stop,
+    /// `mirrord preview down`: the config comes from `common` and the global config alone, so
+    /// neither a mirrord config nor `MIRRORD_*` variables in the environment (like
+    /// `MIRRORD_IMPERSONATED_TARGET`) can narrow what it deletes, and finding nothing succeeds.
+    Down,
+}
+
 /// Handle `mirrord preview stop` command.
 ///
 /// Deletes preview environments matching the given key and, optionally, a target filter and
 /// namespace.
-///
-/// With `down`, it runs as `mirrord preview down`: the config comes from `common` and the global
-/// config alone, so neither a mirrord config nor `MIRRORD_*` variables in the environment (like
-/// `MIRRORD_IMPERSONATED_TARGET`) can narrow what it deletes, and finding nothing succeeds.
 #[tracing::instrument(level = Level::TRACE, ret, skip_all)]
 async fn preview_stop(
     common: &PreviewCommonArgs,
     args: PreviewStopArgs,
-    down: bool,
+    mode: StopMode,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
+    let down = mode == StopMode::Down;
     let mut progress = ProgressTracker::from_env(if down {
         "mirrord preview down"
     } else {
