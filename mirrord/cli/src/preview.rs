@@ -296,10 +296,6 @@ impl PreparedPreview {
                 .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
         }
 
-        // Create the `PreviewSession` resource in the cluster. The CR name is derived from
-        // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).
-        // The operator watches for these resources and reconciles them into preview pods.
-
         let mut subtask = progress.subtask("preparing preview session");
 
         // Owned, like the image below: branch preparation edits the config while both are still
@@ -633,6 +629,9 @@ impl PreparedPreview {
                 BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_owned(), target_ns.to_owned())])
             });
 
+        // Create the `PreviewSession` resource in the cluster. The CR name is derived from
+        // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).
+        // The operator watches for these resources and reconciles them into preview pods.
         let session = PreviewSession {
             metadata: ObjectMeta {
                 name: Some(session_name.clone()),
