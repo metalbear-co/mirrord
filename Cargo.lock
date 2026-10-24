@@ -4509,7 +4509,7 @@ dependencies = [
 [[package]]
 name = "kube"
 version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=3cbb98d5550d1b69e515d4dac51e815f4a4481e8#3cbb98d5550d1b69e515d4dac51e815f4a4481e8"
+source = "git+https://github.com/metalbear-co/kube.git?rev=2f2b38d13e9a09491a1d1ddc6ae2cd3c6b32399f#2f2b38d13e9a09491a1d1ddc6ae2cd3c6b32399f"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -4521,7 +4521,7 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=3cbb98d5550d1b69e515d4dac51e815f4a4481e8#3cbb98d5550d1b69e515d4dac51e815f4a4481e8"
+source = "git+https://github.com/metalbear-co/kube.git?rev=2f2b38d13e9a09491a1d1ddc6ae2cd3c6b32399f#2f2b38d13e9a09491a1d1ddc6ae2cd3c6b32399f"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -4558,7 +4558,7 @@ dependencies = [
 [[package]]
 name = "kube-core"
 version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=3cbb98d5550d1b69e515d4dac51e815f4a4481e8#3cbb98d5550d1b69e515d4dac51e815f4a4481e8"
+source = "git+https://github.com/metalbear-co/kube.git?rev=2f2b38d13e9a09491a1d1ddc6ae2cd3c6b32399f#2f2b38d13e9a09491a1d1ddc6ae2cd3c6b32399f"
 dependencies = [
  "derive_more",
  "form_urlencoded",
@@ -4576,7 +4576,7 @@ dependencies = [
 [[package]]
 name = "kube-derive"
 version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=3cbb98d5550d1b69e515d4dac51e815f4a4481e8#3cbb98d5550d1b69e515d4dac51e815f4a4481e8"
+source = "git+https://github.com/metalbear-co/kube.git?rev=2f2b38d13e9a09491a1d1ddc6ae2cd3c6b32399f#2f2b38d13e9a09491a1d1ddc6ae2cd3c6b32399f"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -4589,7 +4589,7 @@ dependencies = [
 [[package]]
 name = "kube-runtime"
 version = "4.2.0"
-source = "git+https://github.com/metalbear-co/kube.git?rev=3cbb98d5550d1b69e515d4dac51e815f4a4481e8#3cbb98d5550d1b69e515d4dac51e815f4a4481e8"
+source = "git+https://github.com/metalbear-co/kube.git?rev=2f2b38d13e9a09491a1d1ddc6ae2cd3c6b32399f#2f2b38d13e9a09491a1d1ddc6ae2cd3c6b32399f"
 dependencies = [
  "ahash",
  "async-broadcast",
