@@ -46,6 +46,14 @@ async function chaosErrorMessage(r: Response): Promise<string> {
   return body || `${r.status} ${r.statusText}`
 }
 
+/**
+ * Outcome of a stop request. `status` is the response code when the server answered at all, so
+ * the caller can tell a session the server never had (404) from one it refused to stop.
+ */
+export type KillResult =
+  | { ok: true }
+  | { ok: false; error: string; status?: number }
+
 export const api = {
   listSessions: async (): Promise<SessionInfo[]> => {
     const r = await fetch(withToken('/api/v2/local/sessions'), {
@@ -82,7 +90,7 @@ export const api = {
     return data
   },
 
-  killSession: async (sessionId: string): Promise<void> => {
+  killSession: async (sessionId: string): Promise<KillResult> => {
     let r: Response
     try {
       r = await fetch(
@@ -93,11 +101,12 @@ export const api = {
         },
       )
     } catch (err) {
+      const error = err instanceof Error ? err.message : String(err)
       emitUserBlocked('session_kill_failed', {
         session_id: sessionId,
-        error: err instanceof Error ? err.message : String(err),
+        error,
       })
-      return
+      return { ok: false, error }
     }
     if (!r.ok) {
       emitUserBlocked('session_kill_failed', {
@@ -105,11 +114,16 @@ export const api = {
         status: r.status,
         error: r.statusText,
       })
-    } else {
-      emitUserSucceeded('session_killed', {
-        session_id: sessionId,
-      })
+      return {
+        ok: false,
+        error: `${r.status} ${r.statusText}`,
+        status: r.status,
+      }
     }
+    emitUserSucceeded('session_killed', {
+      session_id: sessionId,
+    })
+    return { ok: true }
   },
 
   eventStreamUrl: (sessionId: string): string =>

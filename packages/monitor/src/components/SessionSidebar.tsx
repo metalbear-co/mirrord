@@ -27,6 +27,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Trash2,
+  X,
 } from 'lucide-react'
 import type {
   OperatorSessionSummary,
@@ -79,6 +80,8 @@ interface SessionSidebarProps {
   joinedKey: string | null
   query: string
   onQueryChange: (query: string) => void
+  killError: string | null
+  onDismissKillError: () => void
 }
 
 const isMac =
@@ -102,6 +105,8 @@ export default function SessionSidebar({
   joinedKey,
   query,
   onQueryChange,
+  killError,
+  onDismissKillError,
 }: SessionSidebarProps) {
   const yoursTotal = sessions.length + yoursOperatorSessions.length
   const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth)
@@ -284,6 +289,26 @@ export default function SessionSidebar({
         />
 
         <div className="flex flex-col gap-2">
+          {killError && (
+            <div
+              role="alert"
+              className="border-destructive/40 bg-destructive/10 text-destructive flex items-start gap-2 rounded-md border px-2 py-1.5"
+            >
+              <span className="text-meta flex-1 normal-case tracking-normal">
+                {killError}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onDismissKillError}
+                title={strings.sidebar.dismiss}
+                aria-label={strings.sidebar.dismiss}
+                className="hover:bg-destructive/20 text-destructive -mr-1 h-5 w-5 shrink-0"
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          )}
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <Loader size="lg" />

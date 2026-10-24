@@ -1,0 +1,69 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: mirrord
+    - navigation [ref=e7]:
+      - button "Session Monitor" [ref=e8] [cursor=pointer]
+      - button "Events" [ref=e9] [cursor=pointer]
+      - button "Config Wizard" [ref=e10] [cursor=pointer]
+    - generic [ref=e11]:
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - button "Context docker-desktop" [ref=e16] [cursor=pointer]:
+            - generic [ref=e17]: Context
+            - generic [ref=e18]: docker-desktop
+          - button "Namespace default" [ref=e22] [cursor=pointer]:
+            - generic [ref=e23]: Namespace
+            - generic [ref=e24]: default
+        - button "Connected …" [ref=e28] [cursor=pointer]:
+          - generic "Connected" [ref=e29]
+          - generic [ref=e33]: …
+      - button "Switch to dark mode" [ref=e36] [cursor=pointer]
+  - main [ref=e39]:
+    - generic [ref=e42]:
+      - generic [ref=e43]:
+        - generic [ref=e44]:
+          - searchbox "Search" [ref=e49]
+          - generic: ⌘F
+        - generic [ref=e50]:
+          - generic [ref=e51]:
+            - text: Yours
+            - generic [ref=e55]: · 1
+          - generic [ref=e56]:
+            - button "Stop all sessions" [ref=e57] [cursor=pointer]
+            - button "Hide sidebar" [ref=e61] [cursor=pointer]
+        - generic [ref=e67]:
+          - generic [ref=e68]:
+            - generic [ref=e73]: k-demo
+            - generic [ref=e74]: "1"
+          - button "deployment/checkout 1m 11s · docker-desktop / default Stop session" [ref=e75] [cursor=pointer]:
+            - generic [ref=e79]:
+              - generic [ref=e80]: deployment/checkout
+              - generic [ref=e82]:
+                - generic [ref=e83]: 1m 11s
+                - generic [ref=e84]:
+                  - generic [ref=e85]: ·
+                  - generic "docker-desktop / default" [ref=e86]
+            - button "Stop session" [ref=e91]
+        - generic [ref=e95]: Team
+        - paragraph [ref=e107]: No teammate sessions yet.
+      - generic [ref=e111]:
+        - generic [ref=e113]:
+          - generic [ref=e114]:
+            - generic [ref=e116]: deployment/checkout
+            - generic [ref=e117]: Direct
+          - button "Stop session" [ref=e118] [cursor=pointer]
+        - generic [ref=e122]:
+          - generic [ref=e125]:
+            - generic [ref=e126]: Session ID
+            - generic [ref=e127]: sess-aaa
+          - generic [ref=e129]:
+            - generic [ref=e132]:
+              - generic [ref=e133]: Events
+              - generic [ref=e138]: Waiting for events...
+            - slider "Resize panels" [ref=e146]
+            - generic [ref=e150]:
+              - tablist [ref=e151]:
+                - tab "Config" [selected] [ref=e152] [cursor=pointer]
+                - tab "Chaos" [ref=e158] [cursor=pointer]
+                - button "Copy config" [ref=e162] [cursor=pointer]
+              - code [ref=e169]: "{ \"telemetry\": false }"
