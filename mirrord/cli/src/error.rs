@@ -873,6 +873,10 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     PreviewDeleteFailed { name: String, reason: String },
 
+    #[error("Failed to delete preview sessions: {}", .0.join("; "))]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    PreviewDeletesFailed(Vec<String>),
+
     #[error(transparent)]
     #[diagnostic(transparent)]
     PreviewResources(Box<crate::preview::resources::ResourcesError>),

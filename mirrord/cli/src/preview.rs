@@ -15,7 +15,7 @@ use std::{
 };
 
 use base64::prelude::*;
-use futures::StreamExt;
+use futures::{StreamExt, future::join_all};
 use glob::Pattern;
 use itertools::Itertools;
 use k8s_openapi::{ByteString, jiff::Timestamp};
@@ -1297,8 +1297,9 @@ async fn preview_stop(
 
     let mut delete_subtask = progress.subtask("deleting sessions");
 
-    let mut result = Ok(());
-    for session in sessions_to_delete {
+    // Deleted together: each deletion waits for the operator to finalize the session, so one at
+    // a time `mirrord preview down` would take that long once per service.
+    let deletions = sessions_to_delete.iter().map(|session| {
         let name = session
             .metadata
             .name
@@ -1309,24 +1310,36 @@ async fn preview_stop(
             .namespace
             .as_deref()
             .expect("preview session should have a namespace");
-
         let namespaced_api =
             Api::<PreviewSession>::namespaced(operator_api.client().clone(), namespace);
 
-        if let Err(e) =
-            delete::delete_and_finalize(namespaced_api.clone(), name, &DeleteParams::default())
+        async move {
+            delete::delete_and_finalize(namespaced_api, name, &DeleteParams::default())
                 .await
-        {
-            result = Err(CliError::PreviewDeleteFailed {
-                name: name.to_owned(),
-                reason: e.to_string(),
-            });
+                .map_err(|error| (name, error))
         }
-    }
+    });
+    let failures = join_all(deletions)
+        .await
+        .into_iter()
+        .filter_map(Result::err)
+        .collect::<Vec<_>>();
 
-    if result.is_err() {
+    if let [(name, error)] = failures.as_slice() {
         delete_subtask.failure(None);
-        return result;
+        return Err(CliError::PreviewDeleteFailed {
+            name: (*name).to_owned(),
+            reason: error.to_string(),
+        });
+    }
+    if failures.is_empty().not() {
+        delete_subtask.failure(None);
+        return Err(CliError::PreviewDeletesFailed(
+            failures
+                .iter()
+                .map(|(name, error)| format!("`{name}`: {error}"))
+                .collect(),
+        ));
     }
 
     delete_subtask.success(Some("all sessions deleted"));
