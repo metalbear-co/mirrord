@@ -187,7 +187,7 @@ async fn run_preview_up(
         a.operator_api.cluster_url() == b.operator_api.cluster_url()
             && preview_namespace(&a.operator_api, &a.layer_config)
                 == preview_namespace(&b.operator_api, &b.layer_config)
-            && a.session_target == b.session_target
+            && a.spec.target == b.spec.target
     };
     // Service names are the keys of `services`, so they tell the services apart.
     let clashes = checked

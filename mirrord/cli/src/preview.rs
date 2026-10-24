@@ -49,10 +49,10 @@ use mirrord_operator::{
     crd::{
         MirrordOperatorSpec, NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
-            PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvConfigMount,
-            PreviewEnvVarsConfig, PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter,
-            PreviewPodLogs, PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
-            PreviewSessionPhase, PreviewSessionSpec, PreviewSpecResources, PreviewTlsClientAuth,
+            PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvVarsConfig,
+            PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs,
+            PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
+            PreviewSessionPhase, PreviewSessionSpec, PreviewTlsClientAuth,
             PreviewTlsClientAuthFromTarget, PreviewTlsDelivery,
             view::{PreviewEnv, PreviewMessageKind},
         },
@@ -212,18 +212,11 @@ struct PreparedPreview {
     /// session resource is created.
     subtask: ProgressTracker,
     config_target: Target,
-    image: String,
-    session_target: SessionTarget,
-    incoming: Option<PreviewIncomingConfig>,
-    cronjob: Option<PreviewCronJobConfig>,
+    /// Sent to the operator once the session exists, see [`resolve_secret_mounts`].
     secret_values: BTreeMap<String, ByteString>,
-    spec_resources: Option<PreviewSpecResources>,
-    secret_mounts: Vec<PreviewSecretMountFile>,
-    env: Option<PreviewEnvVarsConfig>,
-    config_mounts: Vec<PreviewEnvConfigMount>,
-    /// `feature.split_queues` are the defaults `mirrord preview up` adds, see
-    /// [`PreviewSessionSpec::auto_queue_splitting`].
-    auto_queue_splitting: bool,
+    /// The session's spec, but for what [`PreparedPreview::start`] fills in: `db_branching`,
+    /// from the branches it prepares, and `share_host`, from the session it replaces.
+    spec: PreviewSessionSpec,
 }
 
 impl PreparedPreview {
@@ -442,22 +435,51 @@ impl PreparedPreview {
             .map(|m| m.resolve().map(Into::into))
             .collect::<Result<Vec<_>, _>>()?;
 
+        let idle_config = &layer_config.feature.preview.idle;
+        let idle = idle_config.is_enabled().then_some(PreviewIdleConfig {
+            start_idle: idle_config.start_idle,
+            sleep_after_secs: idle_config.sleep_after_secs,
+            wake_timeout_secs: idle_config.wake_timeout_secs,
+        });
+
+        // Preview start never opens an operator websocket, so `QueueSplitProgress` never runs.
+        // The config already names the Temporal queues it asked to mirror (including `*` from
+        // `mirrord up`), so warn from that before the session is created.
+        for id in temporal_mirror_requested(&layer_config.feature.split_queues) {
+            subtask.warning(&temporal_mirror_warning(&id));
+        }
+
+        let spec = PreviewSessionSpec {
+            image,
+            key: layer_config.key.as_str().to_owned(),
+            target: session_target,
+            ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
+            replicas: layer_config.feature.preview.replicas,
+            incoming,
+            queue_splitting: PreviewQueueSplittingConfig::from_config(
+                &layer_config.feature.split_queues,
+                layer_config.feature.kafka_branch,
+            ),
+            db_branching: None,
+            env,
+            labels: PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),
+            config_mounts,
+            secret_mounts,
+            idle,
+            cronjob,
+            spec_resources,
+            share_host: None,
+            auto_queue_splitting,
+        };
+
         Ok(Self {
             layer_config,
             operator_api,
             api,
             subtask,
             config_target,
-            image,
-            session_target,
-            incoming,
-            cronjob,
             secret_values,
-            spec_resources,
-            secret_mounts,
-            env,
-            config_mounts,
-            auto_queue_splitting,
+            spec,
         })
     }
 
@@ -470,16 +492,8 @@ impl PreparedPreview {
             api,
             mut subtask,
             config_target,
-            image,
-            session_target,
-            incoming,
-            cronjob,
             secret_values,
-            spec_resources,
-            secret_mounts,
-            env,
-            config_mounts,
-            auto_queue_splitting,
+            mut spec,
         } = self;
 
         // Label targets with branches were rejected in `prepare`, so an empty config is the only
@@ -504,7 +518,7 @@ impl PreparedPreview {
 
         let mut replaced_sessions = existing_sessions
             .into_iter()
-            .filter(|session| session.spec.target == session_target)
+            .filter(|session| session.spec.target == spec.target)
             .collect::<Vec<_>>();
 
         // Same key and target means the same preview, so the new session asks the operator for the
@@ -531,8 +545,8 @@ impl PreparedPreview {
             let name = session.name_any();
 
             subtask.warning(&format!("replacing existing session '{name}'"));
-            if session.spec.image == image {
-                subtask.warning(&format!("configured image and existing session's image are the same ('{image}'), this command will only restart the existing deployment"));
+            if session.spec.image == spec.image {
+                subtask.warning(&format!("configured image and existing session's image are the same ('{}'), this command will only restart the existing deployment", spec.image));
             }
 
             // Delete and wait for the existing session to be fully removed.
@@ -580,42 +594,8 @@ impl PreparedPreview {
         // The namespace the session (and therefore the preview pod) lands in.
         let session_namespace = preview_namespace(&operator_api, &layer_config);
 
-        let idle_config = &layer_config.feature.preview.idle;
-        let idle = idle_config.is_enabled().then_some(PreviewIdleConfig {
-            start_idle: idle_config.start_idle,
-            sleep_after_secs: idle_config.sleep_after_secs,
-            wake_timeout_secs: idle_config.wake_timeout_secs,
-        });
-
-        // Preview start never opens an operator websocket, so `QueueSplitProgress` never runs.
-        // The config already names the Temporal queues it asked to mirror (including `*` from
-        // `mirrord up`), so warn from that before the session is created.
-        for id in temporal_mirror_requested(&layer_config.feature.split_queues) {
-            subtask.warning(&temporal_mirror_warning(&id));
-        }
-
-        let session_spec = PreviewSessionSpec {
-            image: image.clone(),
-            key: layer_config.key.as_str().to_owned(),
-            target: session_target,
-            ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
-            replicas: layer_config.feature.preview.replicas,
-            incoming,
-            queue_splitting: PreviewQueueSplittingConfig::from_config(
-                &layer_config.feature.split_queues,
-                layer_config.feature.kafka_branch,
-            ),
-            db_branching: PreviewDbBranchingConfig::from_db_names(branch_db_names),
-            env,
-            labels: PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),
-            config_mounts,
-            secret_mounts,
-            idle,
-            cronjob,
-            spec_resources,
-            share_host,
-            auto_queue_splitting,
-        };
+        spec.db_branching = PreviewDbBranchingConfig::from_db_names(branch_db_names);
+        spec.share_host = share_host;
 
         let annotations = operator_api
             .operator()
@@ -641,7 +621,7 @@ impl PreparedPreview {
                 annotations,
                 ..Default::default()
             },
-            spec: session_spec,
+            spec,
             status: None,
         };
 
