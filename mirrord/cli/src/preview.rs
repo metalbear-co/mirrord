@@ -160,27 +160,7 @@ async fn preview_start(
     .await?;
 
     progress.success(Some("preview environment created successfully"));
-
-    // This line is parsed by the github action to generate an output,
-    // so please update it as well if you're gonna change this line.
-    // We're doing this weird .subtask().success() stuff because
-    // otherwise it messes up the ordering or looks weird in some
-    // other way :'(
-    progress
-        .subtask(&format!("key: {}", summary.key))
-        .success(None);
-    progress
-        .subtask(&format!("namespace: {}", summary.namespace))
-        .success(None);
-    progress
-        .subtask(&format!("session: {}", summary.session_name))
-        .success(None);
-
-    if let Some(share_host) = summary.share_host {
-        progress
-            .subtask(&format!("preview URL: https://{share_host}"))
-            .success(None);
-    }
+    summary.report(&progress);
 
     Ok(())
 }
@@ -193,6 +173,30 @@ struct PreviewSummary {
     share_host: Option<String>,
     /// The session started idle, its pods boot on first traffic.
     idle: bool,
+}
+
+impl PreviewSummary {
+    /// Reports the session's key, namespace, name and preview URL on `progress`, one task each.
+    fn report(&self, progress: &ProgressTracker) {
+        // These lines are parsed by the github action to generate its outputs, so please update
+        // it as well if you're gonna change them. We're doing this weird .subtask().success()
+        // stuff because otherwise it messes up the ordering or looks weird in some other way :'(
+        progress
+            .subtask(&format!("key: {}", self.key))
+            .success(None);
+        progress
+            .subtask(&format!("namespace: {}", self.namespace))
+            .success(None);
+        progress
+            .subtask(&format!("session: {}", self.session_name))
+            .success(None);
+
+        if let Some(share_host) = &self.share_host {
+            progress
+                .subtask(&format!("preview URL: https://{share_host}"))
+                .success(None);
+        }
+    }
 }
 
 /// A preview session checked against the operator and the cluster, but not created yet: nothing

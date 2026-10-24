@@ -239,20 +239,7 @@ async fn run_preview_up(
     for (name, mut service_progress, result) in started {
         match result {
             Ok(summary) => {
-                service_progress
-                    .subtask(&format!("key: {}", summary.key))
-                    .success(None);
-                service_progress
-                    .subtask(&format!("namespace: {}", summary.namespace))
-                    .success(None);
-                service_progress
-                    .subtask(&format!("session: {}", summary.session_name))
-                    .success(None);
-                if let Some(share_host) = summary.share_host {
-                    service_progress
-                        .subtask(&format!("preview URL: https://{share_host}"))
-                        .success(None);
-                }
+                summary.report(&service_progress);
                 service_progress.success(Some(if summary.idle {
                     "preview environment is idle"
                 } else {
