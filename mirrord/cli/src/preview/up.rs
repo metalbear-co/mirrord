@@ -41,6 +41,7 @@ use crate::{
     },
     data::{GlobalConfig, UserData},
     error::{CliError, CliResult},
+    up::db_branches::{DEFAULT_DB_BRANCHES_UNSUPPORTED, resolves_default_db_branches},
 };
 
 /// Handle `mirrord preview up`, reporting one `PreviewUp` event for the run.
@@ -332,17 +333,8 @@ async fn prepare_service(
     let (operator_api, api) = create_preview_api(&config, false, progress, &mut analytics).await?;
 
     // A request the user set fails in `prepare` instead, as it does for `mirrord preview start`.
-    if default_db_branches
-        && operator_api
-            .operator()
-            .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::DbBranchesFromSplitConfig)
-            .not()
-    {
-        progress.warning(
-            "the mirrord operator doesn't support DB branching, running against the source DB",
-        );
+    if default_db_branches && resolves_default_db_branches(&operator_api).not() {
+        progress.warning(DEFAULT_DB_BRANCHES_UNSUPPORTED);
         config.feature.db_branches = DatabaseBranchesConfig::default();
     }
 

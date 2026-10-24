@@ -22,7 +22,7 @@ use crate::{
     ui::ui_command,
 };
 
-mod db_branches;
+pub(crate) mod db_branches;
 
 /// Context for sessions started by `mirrord up`.
 #[derive(Clone, Debug)]
