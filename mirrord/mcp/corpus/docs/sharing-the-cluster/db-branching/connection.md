@@ -16,7 +16,7 @@ Pick the shape that matches how your application gets its connection details:
 
 * [Connection URL](#connection-url) - one variable holds the whole connection string.
 * [Individual Connection Parameters](#individual-connection-parameters-params) - host, port, user, password, and database are separate values.
-* [Value Sources](#value-sources) - where a value comes from when it is not a plain env var: a [Secret](#secret-source), a [ConfigMap](#configmap-source), [Google Secret Manager](#google-secret-manager-source), [AWS Secrets Manager](#aws-secrets-manager-source), or a [literal value](#literal-value).
+* [Value Sources](#value-sources) - where a value comes from when it is not a plain env var: a [Secret](#secret-source), a [ConfigMap](#configmap-source), [Google Secret Manager](#google-secret-manager-source), [AWS Secrets Manager](#aws-secrets-manager-source), [AWS SSM Parameter Store](#aws-ssm-parameter-store-source), or a [literal value](#literal-value).
 * [Composite Environment Variables](#composite-environment-variables) - several details packed into one variable, picked apart with a regex.
 * [Multiple Sources for the Same Parameter](#multiple-sources-for-the-same-parameter) - read/write splits and other duplicated variables.
 
@@ -153,7 +153,8 @@ By default each connection value is the name of an env var on the target pod. An
 | [`configmap`](#configmap-source) | a ConfigMap entry, optionally a field inside a mounted JSON/YAML file | no | yes |
 | [`gcp_secret_manager`](#google-secret-manager-source) | Google Secret Manager, fetched by the branch init container | yes | yes |
 | [`aws_secrets_manager`](#aws-secrets-manager-source) | AWS Secrets Manager, fetched by the branch init container | yes | yes |
-| [literal `value`](#literal-value) | the mirrord config itself | no | yes |
+| [`aws_ssm_parameter`](#aws-ssm-parameter-store-source) | AWS SSM Parameter Store, fetched by the branch init container | yes | yes |
+| [literal `value`](#literal-value) | the mirrord config itself | yes | yes |
 
 Every source accepts `env_var_name`: when set, mirrord hands the branch's value to your local process under that name.
 
@@ -364,7 +365,7 @@ A Google or AWS secret often holds several values at once, such as a JSON blob w
 { "username": "app", "password": "s3cr3t" }
 ```
 
-Add `value_selector` to a `gcp_secret_manager` or `aws_secrets_manager` source to use one field of it instead of the whole secret. The selector is a `.a.b` path into the secret parsed as JSON or YAML, the same as on the [ConfigMap source](#configmap-source):
+Add `value_selector` to a `gcp_secret_manager`, `aws_secrets_manager`, or `aws_ssm_parameter` source to use one field of it instead of the whole secret. The selector is a `.a.b` path into the secret parsed as JSON or YAML, the same as on the [ConfigMap source](#configmap-source):
 
 ```json
 {
@@ -389,6 +390,62 @@ The branch init container applies the selector or pattern right after it fetches
 
 {% hint style="info" %}
 `value_selector` and `value_pattern` on secret manager sources need an operator and a mirrord CLI that support them. An older operator would use the whole secret as the value, so the CLI refuses to start the session against one.
+{% endhint %}
+
+### AWS SSM Parameter Store Source
+
+This is useful when your application reads its connection details from [AWS Systems Manager Parameter Store](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html) at startup, so they never appear in the pod spec. It works like the AWS Secrets Manager source: the branch init container reads the parameter when it copies the data, using the target pod's service account. `SecureString` parameters are decrypted. mirrord and the operator never read the value themselves.
+
+The reference is a parameter name or a full ARN. For the full URL, use `type: aws_ssm_parameter` with a `parameter`:
+
+```json
+{
+  "feature": {
+    "db_branches": [
+      {
+        "type": "pg",
+        "version": "17",
+        "name": "app",
+        "connection": {
+          "url": {
+            "type": "aws_ssm_parameter",
+            "parameter": "/dev/app/database/url",
+            "env_var_name": "DATABASE_URL"
+          }
+        }
+      }
+    ]
+  }
+}
+```
+
+Set `name` to the database the URL names. The operator never sees the URL, so without `name` your local process gets a branch URL for the `postgres` database instead of yours.
+
+For an individual parameter, use an `aws_ssm_parameter` field. [`value_selector` and `value_pattern`](#picking-one-field-from-a-secret) pick one field out of a JSON parameter, as for the secret managers:
+
+```json
+{
+  "connection": {
+    "params": {
+      "host": "DB_HOST",
+      "user": { "aws_ssm_parameter": "/dev/app/db-creds", "value_selector": ".username" },
+      "password": {
+        "aws_ssm_parameter": "/dev/app/db-creds",
+        "value_selector": ".password",
+        "env_var_name": "DB_PASSWORD"
+      },
+      "database": "DB_NAME"
+    }
+  }
+}
+```
+
+`env_var_name` and the migration exception work exactly as described for the Google Secret Manager source above.
+
+{% hint style="info" %}
+**Setup**: the branch pod inherits the target pod's service account, so that account's AWS identity must be allowed `ssm:GetParameter` on the parameter, plus `kms:Decrypt` on its key for a `SecureString`. The region comes from the ARN when a full ARN is given; for a plain parameter name, `AWS_REGION` or `AWS_DEFAULT_REGION` must be set in the target pod spec.
+
+The SSM Parameter Store source needs operator `3.224.0` and mirrord `3.278.0` or later. An older operator cannot read it, so the CLI refuses to start the session against one.
 {% endhint %}
 
 ### Literal Value

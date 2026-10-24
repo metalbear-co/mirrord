@@ -8,6 +8,27 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.279.0](https://github.com/metalbear-co/mirrord/tree/3.279.0) - 2026-10-24
+
+
+### Added
+
+- Add `mirrord preview down`, which deletes every preview environment under a
+  key in all namespaces, finding the key the way `mirrord preview up` does.
+- Add `mirrord preview up`, which starts a preview environment for every
+  service of a `mirrord-up.yaml` that has an image (from `--image
+  <service>=<ref>`, `MIRRORD_<SERVICE>_IMAGE` or the service's `image`), all
+  under one key, and returns once each one is ready.
+- Services in `mirrord-up.yaml` accept an optional `image` field, the container
+  image `mirrord preview up` runs in the service's preview environment.
+  `mirrord up` ignores it.
+
+
+### Fixed
+
+- Fixed a SIGSEGV on macOS when apps using libuv 1.53+ (e.g. Homebrew Node)
+  connect to a unix socket.
+
 ## [3.278.0](https://github.com/metalbear-co/mirrord/tree/3.278.0) - 2026-10-22
 
 
