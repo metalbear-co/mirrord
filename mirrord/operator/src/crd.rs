@@ -12,7 +12,7 @@ use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
-    feature::split_queues::QueueMessageFilter,
+    feature::split_queues::{QueueKind, QueueMessageFilter},
     target::{Target, TargetConfig},
 };
 use schemars::JsonSchema;
@@ -1039,6 +1039,27 @@ impl Display for NewOperatorFeature {
 }
 
 impl NewOperatorFeature {
+    /// The feature an operator advertises when splitting the queues of `kind` is on.
+    ///
+    /// Older operators split Azure Service Bus without advertising
+    /// [`AzureServiceBusQueueSplitting`](Self::AzureServiceBusQueueSplitting), so only its
+    /// presence says something.
+    pub fn queue_splitting(kind: QueueKind) -> Option<Self> {
+        match kind {
+            QueueKind::Sqs => Some(Self::SqsQueueSplitting),
+            QueueKind::Kafka => Some(Self::KafkaQueueSplitting),
+            QueueKind::Rmq => Some(Self::RmqQueueSplitting),
+            QueueKind::GcpPubSub => Some(Self::GcpPubSubQueueSplitting),
+            QueueKind::RedisPubSub => Some(Self::RedisPubSubQueueSplitting),
+            QueueKind::AzureServiceBus => Some(Self::AzureServiceBusQueueSplitting),
+            QueueKind::Temporal => Some(Self::TemporalQueueSplitting),
+            QueueKind::BullMq => Some(Self::BullMqQueueSplitting),
+            QueueKind::Nats => Some(Self::NatsQueueSplitting),
+            QueueKind::NatsPubSub => Some(Self::NatsPubSubQueueSplitting),
+            QueueKind::Unknown => None,
+        }
+    }
+
     /// The operator Helm values that switch this feature on, for the hint shown when the
     /// operator reports the feature as disabled. Empty for features that are always on, that come
     /// with any of several values (the shared DB branching features turn on with any

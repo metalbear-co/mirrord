@@ -17,7 +17,7 @@ use mirrord_config::{
     env_key::MIRRORD_ENV_KEY,
     feature::{
         database_branches::{DatabaseBranchesConfig, SplitConfigDbBranches},
-        split_queues::{QueueKind, SplitQueuesConfig},
+        split_queues::SplitQueuesConfig,
     },
     util::GIT_BRANCH,
 };
@@ -398,7 +398,7 @@ async fn prepare_service(
             .kinds()
             .into_iter()
             .filter_map(|kind| {
-                let feature = queue_splitting_feature(kind)?;
+                let feature = NewOperatorFeature::queue_splitting(kind)?;
                 supported.contains(&feature).not().then_some(feature)
             })
             .collect::<Vec<_>>();
@@ -438,23 +438,6 @@ async fn prepare_service(
         progress,
     )
     .await
-}
-
-/// The feature an operator advertises when splitting the queues of `kind` is on. `None` for the
-/// brokers `mirrord preview up` adds no default splits for.
-fn queue_splitting_feature(kind: QueueKind) -> Option<NewOperatorFeature> {
-    match kind {
-        QueueKind::Sqs => Some(NewOperatorFeature::SqsQueueSplitting),
-        QueueKind::Kafka => Some(NewOperatorFeature::KafkaQueueSplitting),
-        QueueKind::Rmq => Some(NewOperatorFeature::RmqQueueSplitting),
-        QueueKind::GcpPubSub => Some(NewOperatorFeature::GcpPubSubQueueSplitting),
-        QueueKind::RedisPubSub => Some(NewOperatorFeature::RedisPubSubQueueSplitting),
-        QueueKind::AzureServiceBus => Some(NewOperatorFeature::AzureServiceBusQueueSplitting),
-        QueueKind::Temporal => Some(NewOperatorFeature::TemporalQueueSplitting),
-        QueueKind::BullMq => Some(NewOperatorFeature::BullMqQueueSplitting),
-        QueueKind::Nats => Some(NewOperatorFeature::NatsQueueSplitting),
-        QueueKind::NatsPubSub | QueueKind::Unknown => None,
-    }
 }
 
 /// Handle `mirrord preview down`: `mirrord preview stop -k <key> -A`, with the key found the
