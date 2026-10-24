@@ -585,9 +585,9 @@ impl ServiceConfig {
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `base` from
     /// [`CommonConfig::base_config`].
     ///
-    /// With `preview`, the config is for the service's `mirrord preview up` session instead: it
-    /// is assembled as in `split` mode whatever the service's `default_mode`, without `env`, and
-    /// runs the service's `image`.
+    /// For [`SessionKind::Preview`], the config is for the service's `mirrord preview up` session
+    /// instead: it is assembled as in `split` mode whatever the service's `default_mode`, without
+    /// `env`, and runs the service's `image`.
     fn assemble(
         mut self,
         service_name: &Arc<str>,
@@ -595,8 +595,9 @@ impl ServiceConfig {
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
-        preview: bool,
+        kind: SessionKind,
     ) -> Result<SubprocessCfg, ConfigPatchErrorKind> {
+        let preview = kind == SessionKind::Preview;
         if preview {
             self.default_mode = ServiceMode::Split;
             self.env = EnvConfig::default();
@@ -883,6 +884,15 @@ fn patchable(config: LayerConfig, key: &EnvKey) -> Result<serde_json::Value, ser
     Ok(json)
 }
 
+/// Which command a service's session is assembled for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SessionKind {
+    /// A `mirrord up` session, running the service's local process.
+    Up,
+    /// A `mirrord preview up` session, running the service's `image` in the cluster.
+    Preview,
+}
+
 /// All the information necessary to start and manage one of the child
 /// mirrord sessions.
 pub struct SubprocessCfg {
@@ -1046,7 +1056,7 @@ impl UpConfig {
                 key.clone(),
                 &mut resolved_targets,
                 up_context.clone(),
-                false,
+                SessionKind::Up,
             ) {
                 Ok(assembled) => assembled,
                 Err(source) => {
@@ -1263,28 +1273,18 @@ impl UpConfig {
         up_context: UpKubeContext,
         context: &mut ConfigContext,
     ) -> Result<Vec<SubprocessCfg>, UpError> {
-        self.assemble_services(key, resolved_targets, up_context, context, false)
+        self.assemble_services(key, resolved_targets, up_context, context, SessionKind::Up)
     }
 
-    /// Like [`Self::service_configs`], but for the services' `mirrord preview up` sessions (see
+    /// Like [`Self::service_configs`], for the sessions of `kind` (see
     /// [`ServiceConfig::assemble`]).
-    pub(crate) fn preview_configs(
+    pub(crate) fn assemble_services(
         self,
         key: &EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
         context: &mut ConfigContext,
-    ) -> Result<Vec<SubprocessCfg>, UpError> {
-        self.assemble_services(key, resolved_targets, up_context, context, true)
-    }
-
-    fn assemble_services(
-        self,
-        key: &EnvKey,
-        resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
-        up_context: UpKubeContext,
-        context: &mut ConfigContext,
-        preview: bool,
+        kind: SessionKind,
     ) -> Result<Vec<SubprocessCfg>, UpError> {
         let base_config = self.common.base_config(context)?;
 
@@ -1292,7 +1292,9 @@ impl UpConfig {
             .into_iter()
             .map(|(service_name, svc)| {
                 let mode = svc.default_mode;
-                if preview.not() && mode == ServiceMode::Replace && svc.http_filter.is_filter_set()
+                if kind == SessionKind::Up
+                    && mode == ServiceMode::Replace
+                    && svc.http_filter.is_filter_set()
                 {
                     eprintln!(
                         "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
@@ -1304,7 +1306,7 @@ impl UpConfig {
                     key.clone(),
                     resolved_targets,
                     up_context.clone(),
-                    preview,
+                    kind,
                 )
                 .map_err(|source| {
                     ConfigPatchError {

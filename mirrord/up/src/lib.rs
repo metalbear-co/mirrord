@@ -23,7 +23,9 @@ pub use config::{
     ServiceConfig, ServiceError, ServiceMode, SubprocessCfg, UpConfig, WindowsSupportError,
     preview_image_env,
 };
-use config::{ResolvedTarget, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets};
+use config::{
+    ResolvedTarget, SessionKind, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets,
+};
 use futures::TryStreamExt;
 pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
@@ -864,11 +866,12 @@ pub async fn resolve_preview_services(
     let mut resolved_targets =
         resolve_unresolved_workloads(&up_config, config_path, up_context.clone(), false).await?;
 
-    up_config.preview_configs(
+    up_config.assemble_services(
         key,
         &mut resolved_targets,
         up_context,
         &mut ConfigContext::default(),
+        SessionKind::Preview,
     )
 }
 
