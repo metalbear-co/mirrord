@@ -906,8 +906,9 @@ pub(crate) enum CliError {
 
     #[error("{} not found", .0.display())]
     #[diagnostic(help(
-        "`mirrord preview up` reads the services to preview from a mirrord-up.yaml. Pass another \
-         path with `-f <path>`, or create one with `mirrord up init`."
+        "`mirrord preview up` and `mirrord preview down` read the services from a \
+         mirrord-up.yaml. Pass another path with `-f <path>`, or create one with `mirrord up \
+         init`."
     ))]
     PreviewUpFileNotFound(PathBuf),
 

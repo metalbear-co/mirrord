@@ -110,12 +110,7 @@ async fn run_preview_up(
     };
     progress.info(&format!("key: {}", key.as_str()));
 
-    // `-f` is shared with the other `preview` subcommands, where a bare `-f` stands for a
-    // mirrord config, which is never a valid `mirrord-up.yaml`.
-    let path = match common.config_file.as_deref() {
-        Some(path) if path != Path::new(DEFAULT_PREVIEW_CONFIG_FILE) => path,
-        _ => Path::new("mirrord-up.yaml"),
-    };
+    let path = up_file_path(common.config_file.as_deref());
     let mut up_config = match load_preview_up_config(path, &key) {
         Err(UpError::Io(error)) if error.kind() == ErrorKind::NotFound => {
             return Err(CliError::PreviewUpFileNotFound(path.to_owned()));
@@ -431,11 +426,26 @@ async fn prepare_service(
     .await
 }
 
-/// Handle `mirrord preview down`: `mirrord preview stop -k <key> -A`, with the key found the
-/// way `mirrord preview up` finds it.
+/// The `mirrord-up.yaml` that `-f` names, `mirrord-up.yaml` by default.
 ///
-/// Reads no mirrord config, neither from `-f` nor from `MIRRORD_*` variables in the environment:
-/// every preview under the key goes, whichever services it was started for.
+/// `-f` is shared with the other `preview` subcommands, where a bare `-f` stands for a mirrord
+/// config, which is never a valid `mirrord-up.yaml`.
+fn up_file_path(config_file: Option<&Path>) -> &Path {
+    match config_file {
+        Some(path) if path != Path::new(DEFAULT_PREVIEW_CONFIG_FILE) => path,
+        _ => Path::new("mirrord-up.yaml"),
+    }
+}
+
+/// Handle `mirrord preview down`: `mirrord preview stop -k <key> -A`, with the key found the
+/// way `mirrord preview up` finds it, in every kube context the services of the
+/// `mirrord-up.yaml` run in.
+///
+/// `mirrord preview up` takes each service's context from the file, so `down` reads it too
+/// (`-f`, or `mirrord-up.yaml` when it exists) to reach them all. Without a file, it runs in the
+/// context of `--context`, the global config or the kubeconfig. Every preview under the key goes
+/// in those contexts, whichever services it was started for, and no mirrord config is read,
+/// neither from `-f` nor from `MIRRORD_*` variables in the environment.
 pub(super) async fn preview_down(
     common: &PreviewCommonArgs,
     watch: drain::Watch,
@@ -443,19 +453,47 @@ pub(super) async fn preview_down(
 ) -> CliResult<()> {
     let key =
         findable_key_from_env(common.key.as_deref()).ok_or(CliError::PreviewDownKeyRequired)?;
-    let common = PreviewCommonArgs {
-        key: Some(key),
-        config_file: None,
-        context: common.context.clone(),
-    };
-    let args = PreviewStopArgs {
-        glob: None,
-        target: None,
-        namespace: None,
-        all_namespaces: true,
-    };
+    let context_arg = common.context.as_deref().map(Arc::from);
 
-    preview_stop(&common, args, StopMode::Down, watch, user_data).await
+    let path = up_file_path(common.config_file.as_deref());
+    let mut contexts = match load_preview_up_config(path, &EnvKey::Provided(key.clone())) {
+        Ok(mut up_config) => {
+            up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
+            up_config.service_contexts(context_arg.clone())
+        }
+        Err(UpError::Io(error))
+            if error.kind() == ErrorKind::NotFound && common.config_file.is_none() =>
+        {
+            Default::default()
+        }
+        Err(UpError::Io(error)) if error.kind() == ErrorKind::NotFound => {
+            return Err(CliError::PreviewUpFileNotFound(path.to_owned()));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if contexts.is_empty() {
+        contexts.insert(context_arg);
+    }
+
+    let mut result = Ok(());
+    for context in contexts {
+        let common = PreviewCommonArgs {
+            key: Some(key.clone()),
+            config_file: None,
+            context: context.as_deref().map(ToOwned::to_owned),
+        };
+        let args = PreviewStopArgs {
+            glob: None,
+            target: None,
+            namespace: None,
+            all_namespaces: true,
+        };
+        let stopped = preview_stop(&common, args, StopMode::Down, watch.clone(), user_data).await;
+        if result.is_ok() {
+            result = stopped;
+        }
+    }
+    result
 }
 
 /// The key `mirrord preview up` runs under when it can be found again: `arg` (`--key`), then

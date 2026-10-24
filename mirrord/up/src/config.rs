@@ -1322,6 +1322,20 @@ impl UpConfig {
             .collect()
     }
 
+    /// The kube contexts the services run in, picked as for their sessions: `context_arg`
+    /// (`--context`), then the service's `context`, then `common.context`. `None` stands for the
+    /// kubeconfig's current context.
+    pub fn service_contexts(&self, context_arg: Option<Arc<str>>) -> BTreeSet<Option<Arc<str>>> {
+        let up_context = UpKubeContext {
+            command_arg: context_arg,
+            common_context: self.common.context.clone(),
+        };
+        self.services
+            .values()
+            .map(|service| up_context.get_context(service.context.clone()))
+            .collect()
+    }
+
     /// Produces an iterator of [`UnresolvedTarget`]s that yields an
     /// item for each service entry that requires querying the cluster
     /// to resolve the workload.

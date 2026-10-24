@@ -1631,6 +1631,10 @@ pub(super) enum PreviewCommand {
     /// Finds the key the way `mirrord preview up` does: `--key`, then `MIRRORD_KEY`, then the git
     /// branch (`GITHUB_HEAD_REF` when set). On `main`, `master` or without a branch, `--key` is
     /// required. Succeeds when there is nothing to delete.
+    ///
+    /// Deletes them in every kube context the services of the mirrord-up.yaml run in (`-f`, or
+    /// `mirrord-up.yaml` when it exists), as `mirrord preview up` picks them. Without a file, in
+    /// the context of `--context`, the global config or the kubeconfig.
     Down,
     /// Print the output of preview environments' pods.
     Logs(PreviewLogsArgs),
