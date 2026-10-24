@@ -173,7 +173,11 @@ async fn run_preview_up(
     let mut checked = Vec::new();
     for (name, mut service_progress, result) in prepared {
         match result {
-            Ok(preview) => checked.push((name, service_progress, preview)),
+            Ok(preview) => checked.push(ServicePreview {
+                name,
+                progress: service_progress,
+                preview,
+            }),
             Err(error) => {
                 service_progress.failure(Some(&error.to_string()));
                 failed.push(name.to_string());
@@ -190,50 +194,47 @@ async fn run_preview_up(
                 == preview_namespace(&b.operator_api, &b.layer_config)
             && a.session_target == b.session_target
     };
+    // Service names are the keys of `services`, so they tell the services apart.
     let clashes = checked
         .iter()
-        .enumerate()
-        .map(|(index, (_, _, preview))| {
+        .map(|service| {
             checked
                 .iter()
-                .enumerate()
-                .find(|(other_index, (_, _, other))| {
-                    *other_index != index && same_target(preview, other)
+                .find(|other| {
+                    other.name != service.name && same_target(&service.preview, &other.preview)
                 })
-                .map(|(_, (other, ..))| other.clone())
+                .map(|other| other.name.clone())
         })
         .collect::<Vec<_>>();
 
     let mut ready_to_start = Vec::new();
-    for ((name, mut service_progress, preview), clash) in checked.into_iter().zip(clashes) {
+    for (mut service, clash) in checked.into_iter().zip(clashes) {
         match clash {
             Some(other) => {
-                service_progress.failure(Some(&format!(
+                service.progress.failure(Some(&format!(
                     "has the same target as `{other}`: sessions under one key and target \
                      replace each other"
                 )));
-                failed.push(name.to_string());
+                failed.push(service.name.to_string());
             }
-            None => ready_to_start.push((name, service_progress, preview)),
+            None => ready_to_start.push(service),
         }
     }
     failed.sort();
 
     if failed.is_empty().not() {
         analytics.get_mut().add("services_failed", failed.len());
-        for (_, mut service_progress, _) in ready_to_start {
-            service_progress.failure(Some("not started"));
+        for mut service in ready_to_start {
+            service.progress.failure(Some("not started"));
         }
         progress.failure(Some("no preview environment was started"));
         return Err(CliError::PreviewUpInvalid(failed));
     }
 
-    let started = join_all(ready_to_start.into_iter().map(
-        |(name, mut service_progress, preview)| async move {
-            let result = preview.start(&mut service_progress).await;
-            (name, service_progress, result)
-        },
-    ))
+    let started = join_all(ready_to_start.into_iter().map(|mut service| async move {
+        let result = service.preview.start(&mut service.progress).await;
+        (service.name, service.progress, result)
+    }))
     .await;
 
     for (name, mut service_progress, result) in started {
@@ -261,6 +262,13 @@ async fn run_preview_up(
 
     progress.success(Some("preview environments are up"));
     Ok(())
+}
+
+/// A service whose preview passed its checks, with the task its progress is reported on.
+struct ServicePreview {
+    name: Arc<str>,
+    progress: ProgressTracker,
+    preview: PreparedPreview,
 }
 
 /// Applies the run's flags to one service's config and runs every check that doesn't change the
