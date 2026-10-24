@@ -298,14 +298,12 @@ impl PreparedPreview {
 
         let mut subtask = progress.subtask("preparing preview session");
 
-        // Owned, like the image below: branch preparation edits the config while both are still
-        // needed.
+        // Owned, like the image below: `PreparedPreview` keeps them for `start`.
         let config_target = layer_config.target.path.clone().ok_or_else(|| {
             subtask.failure(None);
             CliError::PreviewTargetRequired
         })?;
 
-        // Owned: branch preparation below edits the config while the image is still needed.
         let image = layer_config.feature.preview.image.clone().ok_or_else(|| {
             subtask.failure(None);
             CliError::PreviewImageRequired
