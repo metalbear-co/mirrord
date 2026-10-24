@@ -125,7 +125,7 @@ async fn run_preview_up(
     up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
     analytics.enabled = up_config.telemetry_enabled();
 
-    let images = up_config.select_preview_images(&args.image)?;
+    let images = up_config.select_preview_images(&args.image, &ConfigContext::default())?;
     let analytics_data = analytics.get_mut();
     analytics_data.add("services_previewed", images.sources.len());
     analytics_data.add("services_skipped", images.skipped.len());

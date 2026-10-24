@@ -1162,9 +1162,11 @@ impl UpConfig {
     /// `flags` are the `--image <service>=<ref>` values. A service's image comes from its flag,
     /// then its `MIRRORD_<SERVICE>_IMAGE` environment variable (see [`preview_image_env`]; empty
     /// counts as unset), then its `image`. `skip` doesn't apply: the images pick the services.
+    /// The variables are read through `context`.
     pub fn select_preview_images(
         &mut self,
         flags: &[String],
+        context: &ConfigContext,
     ) -> Result<PreviewImages, PreviewImageError> {
         let mut from_flags: HashMap<&str, &str> = HashMap::new();
         for flag in flags {
@@ -1202,7 +1204,8 @@ impl UpConfig {
         }
         let mut from_env = HashMap::new();
         for (env, services) in env_names {
-            let Some(image) = std::env::var(&env)
+            let Some(image) = context
+                .get_env(&env)
                 .ok()
                 .filter(|image| image.is_empty().not())
             else {
