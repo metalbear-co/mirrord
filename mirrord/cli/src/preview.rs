@@ -478,8 +478,8 @@ impl PreparedPreview {
             auto_queue_splitting,
         } = self;
 
-        // Label targets with branches were rejected above, so an empty config is the only way a
-        // label target gets here and it skips branch preparation entirely. The branches are
+        // Label targets with branches were rejected in `prepare`, so an empty config is the only
+        // way a label target gets here and it skips branch preparation entirely. The branches are
         // prepared before an existing preview under the same key is replaced: a lookup or
         // creation that fails must not have taken the running preview down first, and branches
         // are keyed by the session key, so the replacement attaches to the same ones.
