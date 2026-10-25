@@ -881,8 +881,8 @@ thread_local! {
 /// We acquire these locks across the `fork` syscall. The child inherits them locked right after
 /// the syscall. [`atfork_release`] unlocks them.
 ///
-/// We can't lock these in [`fork_detour`] before calling FN_FORK. Because if the user app registers
-/// a fork handler that tries acquiring these locks, the app reaches a deadlock.
+/// We can't lock these in [`fork_with_detour_guard`] before calling FN_FORK. Because if the user app
+/// registers a fork handler that tries acquiring these locks, the app reaches a deadlock.
 ///
 /// `prepare` handlers are ran in the reverse order of their registration. We register before
 /// user app starts so our handler runs after user apps' handlers.
@@ -940,6 +940,18 @@ fn register_atfork_handlers() {
 /// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
+    unsafe { fork_with_detour_guard() }
+}
+
+/// Gives forked children their own connection before application code can close inherited resources.
+/// Both fork hooks call this directly: calling another guarded hook would bypass child initialization
+/// while the caller's detour guard is active.
+///
+/// # Safety
+///
+/// The caller must hold the current thread's active detour guard throughout this call and any
+/// surrounding layer I/O, so connection initialization cannot recursively enter layer hooks.
+unsafe fn fork_with_detour_guard() -> pid_t {
     unsafe {
         tracing::debug!("Process {} forking!.", std::process::id());
 
@@ -1040,7 +1052,7 @@ pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
         }
     };
 
-    let fork_result = unsafe { fork_detour() };
+    let fork_result = unsafe { fork_with_detour_guard() };
     match fork_result.cmp(&0) {
         // We're the child.
         // Write end of the pipe will be dropped when we exit or exec,
