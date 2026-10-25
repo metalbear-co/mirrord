@@ -8,6 +8,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.279.1](https://github.com/metalbear-co/mirrord/tree/3.279.1) - 2026-10-25
+
+
+### Fixed
+
+- Keep the parent's live listening-port subscription when a short-lived child
+  spawned through `vfork` closes an inherited listening socket.
+
 ## [3.279.0](https://github.com/metalbear-co/mirrord/tree/3.279.0) - 2026-10-24
 
 
