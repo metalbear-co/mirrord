@@ -24,6 +24,7 @@ We're proud to be used by the most innovative teams around the world! If you're 
 | [Daylight Security](https://www.daylight.security) | [Case Study](https://metalbear.com/mirrord/case-study/daylight/) |
 | [Zooplus](https://www.zooplus.com) | [Case Study](https://metalbear.com/mirrord/case-study/zooplus/) |
 | [HM Courts & Tribunal Service](https://www.gov.uk/government/organisations/hm-courts-and-tribunals-service) | [Use Case](https://github.com/hmcts/civil-citizen-ui/blob/master/README.md#development--debugging-environment---preview-with-mirrord) |
+| [Wordfully](https://wordfully.ai) | |
 
 \* Optional: link to a blog post, tweet, internal write-up, or leave blank.
 
