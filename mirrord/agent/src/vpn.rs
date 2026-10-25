@@ -89,12 +89,11 @@ pub struct AsyncRawSocket {
 impl AsyncRawSocket {
     pub fn new(socket: Socket, addr: SockAddr) -> std::io::Result<Self> {
         socket.set_nonblocking(true)?;
-        Ok(Self {
-            // SAFETY: Socket owns its descriptor, and AsyncRawSocket never closes or replaces it
-            // while registered with AsyncFd.
-            inner: unsafe { AsyncFd::register(socket)? },
-            addr,
-        })
+        // SAFETY: `Socket` owns its file descriptor, so it stays open and is the same descriptor
+        // for as long as the `AsyncFd` holds the socket. `AsyncRawSocket` does not close or replace
+        // the descriptor while it is registered.
+        let inner = unsafe { AsyncFd::register(socket) }?;
+        Ok(Self { inner, addr })
     }
 
     pub async fn readable(&self) -> std::io::Result<AsyncFdReadyGuard<'_, Socket>> {
