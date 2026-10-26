@@ -212,6 +212,11 @@ fn check_configs(pin: &Pin, checkout: &Path, script: &str) -> Result<()> {
         .arg(relative_to_root(Path::new("mirrord-schema.json")))
         .arg("--mirrord-up-schema")
         .arg(relative_to_root(Path::new("mirrord-up-schema.json")))
+        // On Windows, Python writes to a redirected stdout in the ANSI code page, so a failure line
+        // with a character outside it would crash the script before it prints the rest, and it
+        // decodes the paths from `git ls-files` in that code page too. UTF-8 mode makes both UTF-8,
+        // as they are on the Linux CI of the skills repo.
+        .env("PYTHONUTF8", "1")
         .status()
         .context("failed to run uv")?;
     ensure!(
