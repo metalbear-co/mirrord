@@ -234,12 +234,15 @@ async fn fetch_profile(
     layer_config: &LayerConfig,
     profile_identifier: &ProfileIdentifier,
 ) -> Result<ProfileFetchResult, KubeApiError> {
-    let config = create_kube_config(
+    let mut config = create_kube_config(
         layer_config.accept_invalid_certificates,
         layer_config.kubeconfig.as_deref(),
         layer_config.kube_context.clone(),
     )
     .await?;
+    // `startup_retry` below is the only retry: kube's own, nested under it, turns a 503 into
+    // minutes of silent waiting.
+    config.default_retry = false;
 
     let client = ClientBuilder::try_from(config)
         .map_err(KubeApiError::from)?

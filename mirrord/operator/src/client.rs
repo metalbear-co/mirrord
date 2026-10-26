@@ -1718,6 +1718,10 @@ where
     /// 2. [`CLIENT_NAME_HEADER`]
     /// 3. [`CLIENT_HOSTNAME_HEADER`]
     /// 4. Configured baggage, when present.
+    ///
+    /// Every client built from it adds its own [`LayerConfig::startup_retry`] layer, so kube's
+    /// default retry is turned off: nested under ours, its 15 retries turn a 503 from an
+    /// unavailable operator into minutes of silent waiting.
     async fn base_client_config(
         layer_config: &LayerConfig,
     ) -> OperatorApiResult<(Config, Option<String>)> {
@@ -1728,6 +1732,7 @@ where
         )
         .await
         .map_err(OperatorApiError::CreateKubeClient)?;
+        client_config.default_retry = false;
 
         add_baggage_header(&mut client_config, layer_config.baggage.as_deref())?;
 
