@@ -5560,6 +5560,7 @@ dependencies = [
  "null-terminated",
  "num-traits",
  "objc2-core-foundation",
+ "object 0.36.7",
  "rand 0.10.2",
  "resolv-conf",
  "rstest",
