@@ -330,10 +330,10 @@ jobs:
     secrets: inherit
 
   # The vendored docs and skills must be byte-identical to their pinned upstream commits, and the
-  # config blocks in the skills must validate against the schemas of this commit. A change to the
-  # schemas runs it, so that a change that breaks a pinned skill fails on its own PR rather than on
-  # the next release PR. Release PRs always run it, because they ship the corpus with the schemas
-  # of their head even when the pins didn't move.
+  # config blocks in the skills repo at its pinned commit must validate against the schemas of this
+  # commit. A change to the schemas runs it, so that a change that breaks a pinned skill fails on
+  # its own PR rather than on the next release PR. Release PRs always run it, because they ship the
+  # corpus with the schemas of their head even when the pins didn't move.
   corpus_check:
     needs: [plan]
     if: ${{ needs.plan.outputs.corpus_changed == 'true' || needs.plan.outputs.config_schema_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.release_branch == 'true' }}

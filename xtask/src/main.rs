@@ -172,7 +172,8 @@ enum CorpusCommand {
     },
 
     /// Fail unless the vendored files are byte-identical to those of the pinned commits, and the
-    /// config blocks at the pinned commits validate against this build's schemas (needs `uv`)
+    /// config blocks in the skills repo at its pinned commit validate against this build's schemas
+    /// (needs `uv`)
     Check,
 }
 

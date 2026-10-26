@@ -132,8 +132,9 @@ pub fn sync(bump: bool) -> Result<()> {
     Ok(())
 }
 
-/// Fails unless every corpus holds exactly the files of its pinned commit, byte for byte, and the
-/// config blocks at the pinned commits validate against the schemas of this build.
+/// Fails unless every corpus holds exactly the files of its pinned commit, byte for byte, and, for
+/// each corpus with a `config_check`, the config blocks in its repo at the pinned commit validate
+/// against the schemas of this build.
 pub fn check() -> Result<()> {
     let mut mismatches = Vec::new();
     for corpus in CORPORA {
