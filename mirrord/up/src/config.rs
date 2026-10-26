@@ -644,20 +644,10 @@ impl ServiceConfig {
             );
         }
 
-        // A preview session that asks for any queue split is refused by the operator unless its
-        // target is a workload it can look a `MirrordSplitConfig` up for, even when `"*"` would
-        // match no queue. `mirrord up` sessions skip such targets instead, so leaving the splits
-        // out ends the same way.
-        if preview
-            && matches!(
-                cfg.target.path,
-                Some(Target::Deployment(_) | Target::Rollout(_) | Target::StatefulSet(_))
-            )
-            .not()
-        {
-            cfg.feature.split_queues = SplitQueuesConfig::default();
-        }
-        let mut default_split_queues = cfg.feature.split_queues.is_set();
+        let patch_sets_split_queues = self
+            .config_patch
+            .as_ref()
+            .is_some_and(|patch| patch.pointer("/feature/split_queues").is_some());
 
         if let Some(patch) = self.config_patch {
             if preview && patch.pointer("/feature/preview/image").is_some() {
@@ -667,8 +657,32 @@ impl ServiceConfig {
             // A patch that sets `db_branches` or `split_queues` decides them itself, `[]`
             // included, so whatever it holds afterwards was asked for by the user.
             default_db_branches &= patch.pointer("/feature/db_branches").is_none();
-            default_split_queues &= patch.pointer("/feature/split_queues").is_none();
             cfg = apply_config_patch(cfg, patch, &key)?;
+        }
+
+        let default_split_queues =
+            matches!(self.default_mode, ServiceMode::Split | ServiceMode::Mirror)
+                && patch_sets_split_queues.not()
+                && matches!(cfg.target.path, Some(Target::Label(_))).not()
+                && (preview.not()
+                    || matches!(
+                        cfg.target.path,
+                        Some(Target::Deployment(_) | Target::Rollout(_) | Target::StatefulSet(_))
+                    ));
+        if default_split_queues {
+            let splits = SplitQueuesConfig::all_wildcard_with_mode(&key, self.default_mode.into());
+            // A Kafka branch serves every Kafka queue, so it does not need generated Kafka splits.
+            cfg.feature.split_queues = if cfg.feature.kafka_branch {
+                SplitQueuesConfig::from_splits(
+                    splits
+                        .splits()
+                        .iter()
+                        .filter(|split| split.queue_type != QueueKind::Kafka)
+                        .cloned(),
+                )
+            } else {
+                splits
+            };
         }
 
         Ok(SubprocessCfg {
@@ -736,8 +750,7 @@ impl ServiceConfig {
                     }
                 };
 
-                cfg.feature.split_queues =
-                    SplitQueuesConfig::all_wildcard_with_mode(key, self.default_mode.into());
+                cfg.feature.split_queues = SplitQueuesConfig::default();
             }
 
             // `Replace` mode should steal all traffic from the copied target, so `http_filter` is
@@ -817,13 +830,6 @@ fn apply_config_patch(
     patch: serde_json::Value,
     key: &EnvKey,
 ) -> Result<LayerConfig, ConfigPatchErrorKind> {
-    let generated_kafka_splits = config
-        .feature
-        .split_queues
-        .of_kind(QueueKind::Kafka)
-        .cloned()
-        .collect::<Vec<_>>();
-
     let mut layer_config_json = patchable(config, key).map_err(ConfigPatchErrorKind::Serialize)?;
     json_patch::merge(&mut layer_config_json, &patch);
 
@@ -835,19 +841,6 @@ fn apply_config_patch(
     let mut context = ConfigContext::default().strict_env(true);
     let mut config = file_config.generate_config(&mut context)?;
     config.key = key.clone();
-
-    // A Kafka branch serves every Kafka queue, so the Kafka splits the mode generated give way.
-    if config.feature.kafka_branch {
-        config.feature.split_queues = SplitQueuesConfig::from_splits(
-            config
-                .feature
-                .split_queues
-                .splits()
-                .iter()
-                .filter(|split| generated_kafka_splits.contains(split).not())
-                .cloned(),
-        );
-    }
 
     config.verify(&mut context)?;
 
@@ -902,7 +895,7 @@ pub struct SubprocessCfg {
 
 /// Rejects services whose resolved target cannot support the features their
 /// mode enabled.
-pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), TargetValidationError> {
+pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), Vec<TargetValidationError>> {
     let (mut incompatible, mut unsupported) = (vec![], vec![]);
     for cfg in cfgs {
         let target_type = cfg
@@ -928,16 +921,20 @@ pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), TargetValid
         }
     }
 
-    // prefer returning unsupported target types over incompatible targets
+    if unsupported.is_empty() && incompatible.is_empty() {
+        return Ok(());
+    }
+
+    let mut errors = vec![];
     if unsupported.is_empty().not() {
-        return Err(TargetValidationError::UnsupportedTargetTypes(unsupported));
+        errors.push(TargetValidationError::UnsupportedTargetTypes(unsupported));
     }
 
     if incompatible.is_empty().not() {
-        return Err(TargetValidationError::IncompatibleTargets(incompatible));
+        errors.push(TargetValidationError::IncompatibleTargets(incompatible));
     }
 
-    Ok(())
+    Err(errors)
 }
 
 /// A service whose mode and target cannot be used together.
@@ -982,7 +979,18 @@ impl std::fmt::Display for UnsupportedTarget {
             target_type,
         } = self;
 
-        write!(f, "Service `{service}` has a {target_type} target")
+        match target_type {
+            TargetType::Label => write!(
+                f,
+                "Service `{service}` uses a label selector target, which isn't supported with \
+                 `mirrord up` yet. Target a specific workload instead."
+            ),
+            _ => write!(
+                f,
+                "Service `{service}` has a {target_type} target, which isn't supported with \
+                 `mirrord up` yet."
+            ),
+        }
     }
 }
 
@@ -994,7 +1002,7 @@ pub enum TargetValidationError {
     IncompatibleTargets(Vec<IncompatibleTarget>),
 
     /// One or more services resolved to a target with a type that isn't yet supported.
-    #[error("{}. This isn't supported with `mirrord up` yet.", .0.iter().format("; "))]
+    #[error("{}", .0.iter().format("; "))]
     #[diagnostic(help(
         "If you need support for this type with `mirrord up` sooner, let us know on \
         Slack (https://metalbear.com/slack) or GitHub (https://github.com/metalbear-co/mirrord/issues)."
@@ -1025,7 +1033,7 @@ pub enum ServiceError {
     IncompatibleTarget(IncompatibleTarget),
 
     /// The service uses a target type that `mirrord up` doesn't support.
-    #[error("{0}. This isn't supported with `mirrord up` yet.")]
+    #[error("{0}")]
     UnsupportedTarget(UnsupportedTarget),
 }
 
@@ -1110,13 +1118,15 @@ impl UpConfig {
             assembled.push(subprocess);
         }
 
-        if let Err(error) = validate_targets(&assembled) {
-            match error {
-                TargetValidationError::IncompatibleTargets(targets) => {
-                    errors.extend(targets.into_iter().map(ServiceError::IncompatibleTarget))
-                }
-                TargetValidationError::UnsupportedTargetTypes(targets) => {
-                    errors.extend(targets.into_iter().map(ServiceError::UnsupportedTarget))
+        if let Err(validation_errors) = validate_targets(&assembled) {
+            for error in validation_errors {
+                match error {
+                    TargetValidationError::IncompatibleTargets(targets) => {
+                        errors.extend(targets.into_iter().map(ServiceError::IncompatibleTarget))
+                    }
+                    TargetValidationError::UnsupportedTargetTypes(targets) => {
+                        errors.extend(targets.into_iter().map(ServiceError::UnsupportedTarget))
+                    }
                 }
             }
         }
@@ -2241,7 +2251,8 @@ mod tests {
             )
             .unwrap();
 
-            validate_targets(&services).unwrap_or_else(|err| panic!("{path} rejected: {err}"));
+            validate_targets(&services)
+                .unwrap_or_else(|errors| panic!("{path} rejected: {}", errors.iter().format("; ")));
         }
     }
 
@@ -2256,9 +2267,8 @@ mod tests {
                 run:
                   command: ["echo"]
               b:
-                default_mode: replace
                 target:
-                  path: "deployment/ok"
+                  path: "label/app=web"
                 run:
                   command: ["echo"]
               c:
@@ -2277,12 +2287,18 @@ mod tests {
         )
         .unwrap();
 
-        let incompatible = match validate_targets(&services)
-            .expect_err("`a` and `c` are not usable in replace mode")
-        {
-            TargetValidationError::IncompatibleTargets(incompatible) => incompatible,
-            _ => panic!("unexpected error while validating targets"),
+        let errors = validate_targets(&services)
+            .expect_err("`a` and `c` are incompatible and `b` is unsupported");
+        let [
+            TargetValidationError::UnsupportedTargetTypes(unsupported),
+            TargetValidationError::IncompatibleTargets(incompatible),
+        ] = errors.as_slice()
+        else {
+            panic!("unexpected errors while validating targets: {errors:?}")
         };
+
+        assert_eq!(unsupported.len(), 1);
+        assert_eq!(unsupported[0].service.as_ref(), "b");
 
         let mut names = incompatible
             .iter()
@@ -2311,6 +2327,11 @@ mod tests {
             errors.as_slice(),
             [ServiceError::UnsupportedTarget(_)]
         ));
+        assert_eq!(
+            errors[0].to_string(),
+            "Service `worker` uses a label selector target, which isn't supported with `mirrord \
+             up` yet. Target a specific workload instead."
+        );
     }
 
     #[test]

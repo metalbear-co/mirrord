@@ -150,10 +150,9 @@ pub enum UpError {
     #[diagnostic(transparent)]
     Select(#[from] SelectError),
 
-    /// A service's mode can't be used with the target it resolved to.
-    #[error(transparent)]
-    #[diagnostic(transparent)]
-    Mode(#[from] TargetValidationError),
+    /// One or more services cannot use their resolved targets.
+    #[error("target validation failed")]
+    Mode(#[related] Vec<TargetValidationError>),
 
     /// The selected services would delegate to commands unsupported on Windows.
     #[error(transparent)]
@@ -827,7 +826,7 @@ pub async fn resolve_services(
         &mut ConfigContext::default(),
     )?;
 
-    validate_targets(&service_configs)?;
+    validate_targets(&service_configs).map_err(UpError::Mode)?;
 
     Ok(service_configs)
 }

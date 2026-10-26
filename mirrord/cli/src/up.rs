@@ -392,13 +392,13 @@ mod tests {
 
     #[test]
     fn mode_error_buckets_as_config_validation() {
-        let v = category(UpCliError::Up(UpError::Mode(
+        let v = category(UpCliError::Up(UpError::Mode(vec![
             TargetValidationError::IncompatibleTargets(vec![IncompatibleTarget {
                 service: "svc".into(),
                 mode: ServiceMode::Replace,
                 target_type: TargetType::Targetless,
             }]),
-        )));
+        ])));
         assert_eq!(v["error_category"], ErrorCategory::ConfigValidation as u32);
     }
 
