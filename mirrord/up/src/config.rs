@@ -1023,6 +1023,10 @@ pub enum ServiceError {
     /// The service's mode needs features its target doesn't support.
     #[error("incompatible mode and target: {0}")]
     IncompatibleTarget(IncompatibleTarget),
+
+    /// The service uses a target type that `mirrord up` doesn't support.
+    #[error("{0}. This isn't supported with `mirrord up` yet.")]
+    UnsupportedTarget(UnsupportedTarget),
 }
 
 impl ServiceError {
@@ -1032,6 +1036,7 @@ impl ServiceError {
             Self::ConfigPatch(error) => &error.service,
             Self::Validation { service, .. } => service,
             Self::IncompatibleTarget(target) => &target.service,
+            Self::UnsupportedTarget(target) => &target.service,
         }
     }
 }
@@ -1105,14 +1110,15 @@ impl UpConfig {
             assembled.push(subprocess);
         }
 
-        if let Err(TargetValidationError::IncompatibleTargets(incompatible)) =
-            validate_targets(&assembled)
-        {
-            errors.extend(
-                incompatible
-                    .into_iter()
-                    .map(ServiceError::IncompatibleTarget),
-            );
+        if let Err(error) = validate_targets(&assembled) {
+            match error {
+                TargetValidationError::IncompatibleTargets(targets) => {
+                    errors.extend(targets.into_iter().map(ServiceError::IncompatibleTarget))
+                }
+                TargetValidationError::UnsupportedTargetTypes(targets) => {
+                    errors.extend(targets.into_iter().map(ServiceError::UnsupportedTarget))
+                }
+            }
         }
 
         Ok(errors)
@@ -2284,6 +2290,27 @@ mod tests {
             .collect::<Vec<_>>();
         names.sort();
         assert_eq!(names, ["a", "c"]);
+    }
+
+    #[test]
+    fn verify_services_rejects_label_target() {
+        let errors = parse(
+            r#"
+            services:
+              worker:
+                target:
+                  path: label/app=worker
+                run:
+                  command: ["echo"]
+            "#,
+        )
+        .verify_services(&EnvKey::Provided("a-session".to_owned()))
+        .unwrap();
+
+        assert!(matches!(
+            errors.as_slice(),
+            [ServiceError::UnsupportedTarget(_)]
+        ));
     }
 
     #[test]
