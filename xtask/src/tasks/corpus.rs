@@ -218,7 +218,9 @@ fn check_configs(pin: &Pin, checkout: &Path, script: &str) -> Result<()> {
         // as they are on the Linux CI of the skills repo.
         .env("PYTHONUTF8", "1")
         .status()
-        .context("failed to run uv")?;
+        .context(
+            "failed to run uv, is it installed? (https://docs.astral.sh/uv/getting-started/installation/)",
+        )?;
     ensure!(
         status.success(),
         "the config check of {}@{} failed, see its output above",
