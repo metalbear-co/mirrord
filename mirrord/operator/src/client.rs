@@ -3349,11 +3349,20 @@ impl OperatorApi<PreparedClientCert> {
 
 #[cfg(test)]
 mod test {
-    use std::collections::{BTreeMap, HashMap};
+    use std::{
+        collections::{BTreeMap, HashMap},
+        io::Write,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::Duration,
+    };
 
     use http::{HeaderName, HeaderValue, Request, Response, StatusCode};
     use k8s_openapi::api::apps::v1::Deployment;
     use kube::{Client, Config, api::ObjectMeta, client::Body};
+    use mirrord_analytics::NullReporter;
     use mirrord_config::{
         LayerFileConfig,
         config::{ConfigContext, MirrordConfig},
@@ -3362,9 +3371,15 @@ mod test {
             network::incoming::ConcurrentSteal,
             split_queues::{QueueKind, QueueSplit, SplitQueuesConfig},
         },
+        retry::StartupRetryConfig,
     };
     use mirrord_kube::resolved::{ResolvedResource, ResolvedTarget};
+    use mirrord_progress::NullProgress;
     use rstest::rstest;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
 
     use super::{
         BAGGAGE_HEADER, NewOperatorFeature, NoClientCert, OperatorApi, add_baggage_header,
@@ -3935,6 +3950,107 @@ mod test {
 
         // The invariant `try_reuse_copy_target` relies on: same config, same spec.
         assert_eq!(spec, OperatorApi::copy_target_spec(&layer_config, false));
+    }
+
+    /// Answers like a cluster whose operator `APIService` has no endpoints: 503 for the operator
+    /// object, 404 for its group's discovery. Counts the requests for the operator object.
+    async fn serve_unavailable_operator(
+        listener: TcpListener,
+        operator_requests: Arc<AtomicUsize>,
+    ) {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let operator_requests = operator_requests.clone();
+            tokio::spawn(async move {
+                let mut request = Vec::new();
+                while request.windows(4).all(|window| window != b"\r\n\r\n") {
+                    if let Ok(0) | Err(_) = stream.read_buf(&mut request).await {
+                        return;
+                    }
+                }
+
+                let path = String::from_utf8_lossy(&request)
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_owned();
+                let (status, reason) = if path.starts_with("/apis/operator.metalbear.co/v1/") {
+                    operator_requests.fetch_add(1, Ordering::SeqCst);
+                    (503, "ServiceUnavailable")
+                } else {
+                    (404, "NotFound")
+                };
+                let body = serde_json::json!({
+                    "kind": "Status",
+                    "apiVersion": "v1",
+                    "metadata": {},
+                    "status": "Failure",
+                    "message": reason,
+                    "reason": reason,
+                    "code": status,
+                })
+                .to_string();
+                let response = format!(
+                    "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            });
+        }
+    }
+
+    /// An operator the cluster answers 503 for (its `APIService` has no endpoints) costs one round
+    /// of `startup_retry`, not minutes: `try_new` asks for it `max_retries + 1` times, then finds
+    /// its group isn't served and reports no operator.
+    #[tokio::test]
+    async fn an_unavailable_operator_is_asked_for_only_as_often_as_startup_retry_allows() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a free local port");
+        let address = listener
+            .local_addr()
+            .expect("a bound listener has an address");
+        let operator_requests = Arc::new(AtomicUsize::new(0));
+        tokio::spawn(serve_unavailable_operator(
+            listener,
+            operator_requests.clone(),
+        ));
+
+        let mut kubeconfig = tempfile::NamedTempFile::new().expect("a temp kubeconfig");
+        write!(
+            kubeconfig,
+            "apiVersion: v1\nkind: Config\ncurrent-context: fake\n\
+             clusters: [{{name: fake, cluster: {{server: 'http://{address}'}}}}]\n\
+             contexts: [{{name: fake, context: {{cluster: fake, user: fake}}}}]\n\
+             users: [{{name: fake, user: {{token: fake}}}}]\n"
+        )
+        .expect("the kubeconfig is written");
+
+        let mut ctx = ConfigContext::default().strict_env(true);
+        let mut layer_config = LayerFileConfig::default()
+            .generate_config(&mut ctx)
+            .expect("default config generates");
+        layer_config.kubeconfig = Some(kubeconfig.path().to_string_lossy().into_owned());
+        layer_config.startup_retry = StartupRetryConfig {
+            min_ms: 1,
+            max_ms: 5,
+            max_retries: 2,
+        };
+
+        let found = tokio::time::timeout(
+            Duration::from_secs(30),
+            OperatorApi::try_new(&layer_config, &mut NullReporter::default(), &NullProgress),
+        )
+        .await
+        .expect("with `startup_retry` as the only retry, the lookup ends long before 30 s")
+        .expect("a 503, then a group discovery 404, means no operator, not an error");
+
+        assert!(found.is_none(), "the operator's group isn't served");
+        assert_eq!(
+            operator_requests.load(Ordering::SeqCst),
+            3,
+            "2 retries allowed, so the operator is asked for 3 times and no more"
+        );
     }
 
     #[test]
