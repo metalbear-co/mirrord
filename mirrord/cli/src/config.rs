@@ -1625,9 +1625,9 @@ pub(super) enum PreviewCommand {
     /// Start a preview environment for every service of a mirrord-up.yaml that has an image.
     ///
     /// Each service's image comes from `--image <service>=<image ref>`, then
-    /// `MIRRORD_<SERVICE>_IMAGE`, then the service's `image` in the file. Services without one are
-    /// skipped. All sessions run under one key: `--key`, then `MIRRORD_KEY`, then the git branch
-    /// (`GITHUB_HEAD_REF` when set), or a random key on `main`, `master` or without a branch.
+    /// `MIRRORD_<SERVICE>_IMAGE`. Services without one are skipped. All sessions run under one
+    /// key: `--key`, then `MIRRORD_KEY`, then the git branch (`GITHUB_HEAD_REF` when set), or a
+    /// random key on `main`, `master` or without a branch.
     Up(PreviewUpArgs),
     /// Show the status of preview environments.
     Status(PreviewStatusArgs),
@@ -1818,7 +1818,7 @@ pub(super) struct PreviewUpArgs {
     /// Container image for one service, as `<service>=<image ref>`, e.g.
     /// `--image api=ghcr.io/acme/api:3f9a2c1`. Repeat it once per service.
     ///
-    /// Takes precedence over `MIRRORD_<SERVICE>_IMAGE` and the service's `image`.
+    /// Takes precedence over `MIRRORD_<SERVICE>_IMAGE`.
     #[arg(long, value_name = "SERVICE=IMAGE")]
     pub image: Vec<String>,
 

@@ -834,8 +834,9 @@ pub async fn resolve_services(
 
 /// Generate the [`mirrord_config::LayerConfig`] of every service's `mirrord preview up` session,
 /// resolving the targets left to the cluster like [`resolve_services`] does, but without ever
-/// prompting. Each service runs its `image`, so the caller sets the one it picked for every
-/// service before calling this.
+/// prompting. The caller drops the services without an image with
+/// [`UpConfig::select_preview_images`] before calling this, and sets each config's
+/// `feature.preview.image` to the one it picked.
 pub async fn resolve_preview_services(
     up_config: UpConfig,
     config_path: &Path,

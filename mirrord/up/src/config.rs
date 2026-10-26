@@ -514,16 +514,6 @@ pub struct ServiceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) config_patch: Option<serde_json::Value>,
 
-    /// Container image to run in this service's preview environment, as a full image ref, e.g.
-    /// `ghcr.io/acme/api:3f9a2c1`.
-    ///
-    /// Used only by `mirrord preview up`, which starts a preview for every service that has an
-    /// image. `mirrord preview up --image <service>=<ref>` and `MIRRORD_<SERVICE>_IMAGE` take
-    /// precedence over it. `mirrord up` ignores it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
-    pub(crate) image: Option<String>,
-
     /// How to launch the service's local process.
     pub(crate) run: RunConfig,
 }
@@ -586,8 +576,8 @@ impl ServiceConfig {
     /// [`CommonConfig::base_config`].
     ///
     /// For [`SessionKind::Preview`], the config is for the service's `mirrord preview up` session
-    /// instead: it is assembled as in `split` mode whatever the service's `default_mode`, without
-    /// `env`, and runs the service's `image`.
+    /// instead: it is assembled as in `split` mode whatever the service's `default_mode`, and
+    /// without `env`.
     fn assemble(
         mut self,
         service_name: &Arc<str>,
@@ -679,10 +669,6 @@ impl ServiceConfig {
             default_db_branches &= patch.pointer("/feature/db_branches").is_none();
             default_split_queues &= patch.pointer("/feature/split_queues").is_none();
             cfg = apply_config_patch(cfg, patch, &key)?;
-        }
-
-        if preview {
-            cfg.feature.preview.image = self.image;
         }
 
         Ok(SubprocessCfg {
@@ -802,8 +788,8 @@ enum ConfigPatchErrorKind {
     Validation(#[from] mirrord_config::config::ConfigError),
 
     #[error(
-        "it sets `feature.preview.image`, which `mirrord preview up` takes from the service's \
-         `image`, `--image` or `MIRRORD_<SERVICE>_IMAGE` instead"
+        "it sets `feature.preview.image`, which `mirrord preview up` takes from `--image` or \
+         `MIRRORD_<SERVICE>_IMAGE` instead"
     )]
     PreviewImage,
 }
@@ -889,7 +875,7 @@ fn patchable(config: LayerConfig, key: &EnvKey) -> Result<serde_json::Value, ser
 pub(crate) enum SessionKind {
     /// A `mirrord up` session, running the service's local process.
     Up,
-    /// A `mirrord preview up` session, running the service's `image` in the cluster.
+    /// A `mirrord preview up` session, running the service's image in the cluster.
     Preview,
 }
 
@@ -1156,12 +1142,12 @@ impl UpConfig {
         Ok(())
     }
 
-    /// Picks the image of every service for `mirrord preview up`, writes it into the service's
-    /// `image`, and drops the services that have none: those get no preview.
+    /// Picks the image of every service for `mirrord preview up`, and drops the services that have
+    /// none: those get no preview.
     ///
     /// `flags` are the `--image <service>=<ref>` values. A service's image comes from its flag,
     /// then its `MIRRORD_<SERVICE>_IMAGE` environment variable (see [`preview_image_env`]; empty
-    /// counts as unset), then its `image`. `skip` doesn't apply: the images pick the services.
+    /// counts as unset). `skip` doesn't apply: the images pick the services.
     /// The variables are read through `context`.
     pub fn select_preview_images(
         &mut self,
@@ -1226,22 +1212,17 @@ impl UpConfig {
         }
 
         let mut images = PreviewImages::default();
-        self.services.retain(|name, service| {
+        self.services.retain(|name, _| {
             let picked = match from_flags.get(name.as_ref()) {
                 Some(image) => Some(((*image).to_owned(), PreviewImageSource::Flag)),
-                None => match from_env.remove(name) {
-                    Some(image) => Some((image, PreviewImageSource::Env)),
-                    None => service
-                        .image
-                        .take()
-                        .map(|image| (image, PreviewImageSource::File)),
-                },
+                None => from_env
+                    .remove(name)
+                    .map(|image| (image, PreviewImageSource::Env)),
             };
 
             match picked {
-                Some((image, source)) => {
-                    service.image = Some(image);
-                    images.sources.insert(name.clone(), source);
+                Some(picked) => {
+                    images.picked.insert(name.clone(), picked);
                     true
                 }
                 None => {
@@ -1393,15 +1374,13 @@ pub enum PreviewImageSource {
     Flag,
     /// `MIRRORD_<SERVICE>_IMAGE`.
     Env,
-    /// The service's `image` in `mirrord-up.yaml`.
-    File,
 }
 
 /// What [`UpConfig::select_preview_images`] picked.
 #[derive(Debug, Default)]
 pub struct PreviewImages {
-    /// Where the image of every service left in the config came from.
-    pub sources: HashMap<Arc<str>, PreviewImageSource>,
+    /// The image of every service left in the config, and where it came from.
+    pub picked: HashMap<Arc<str>, (String, PreviewImageSource)>,
     /// The services dropped for having no image, sorted by name.
     pub skipped: Vec<Arc<str>>,
 }
@@ -1439,10 +1418,7 @@ pub enum PreviewImageError {
 
     /// No service got an image, so there is nothing to preview.
     #[error("no service has an image to preview")]
-    #[diagnostic(help(
-        "Pass `--image <service>=<image ref>`, set `MIRRORD_<SERVICE>_IMAGE`, or set `image` on \
-         a service in mirrord-up.yaml."
-    ))]
+    #[diagnostic(help("Pass `--image <service>=<image ref>` or set `MIRRORD_<SERVICE>_IMAGE`."))]
     NoImages,
 }
 
@@ -1490,7 +1466,6 @@ impl CollectAnalytics for &UpConfig {
         let mut count_skip: u32 = 0;
         let mut count_context: u32 = 0;
         let mut count_config_patch: u32 = 0;
-        let mut count_image: u32 = 0;
         let mut count_directory: u32 = 0;
         let mut count_pre_command: u32 = 0;
 
@@ -1512,7 +1487,6 @@ impl CollectAnalytics for &UpConfig {
                 run,
                 context,
                 config_patch,
-                image,
             } = svc;
 
             if *target != TargetConfig::UNSPECIFIED {
@@ -1544,9 +1518,6 @@ impl CollectAnalytics for &UpConfig {
             if config_patch.is_some() {
                 count_config_patch += 1;
             }
-            if image.is_some() {
-                count_image += 1;
-            }
             if run.directory.is_some() {
                 count_directory += 1;
             }
@@ -1569,7 +1540,6 @@ impl CollectAnalytics for &UpConfig {
         config_fields_used.add("skip", count_skip);
         config_fields_used.add("context", count_context);
         config_fields_used.add("config_patch", count_config_patch);
-        config_fields_used.add("image", count_image);
         config_fields_used.add("directory", count_directory);
         config_fields_used.add("pre_command", count_pre_command);
         analytics.add("config_fields_used", config_fields_used);
@@ -2826,7 +2796,6 @@ mod tests {
                     "skip": 0,
                     "context": 0,
                     "config_patch": 0,
-                    "image": 0,
                     "directory": 0,
                     "pre_command": 0
                 },

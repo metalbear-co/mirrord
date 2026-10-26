@@ -573,14 +573,6 @@
           },
           "uniqueItems": true
         },
-        "image": {
-          "description": "Container image to run in this service's preview environment, as a full image ref, e.g.\n`ghcr.io/acme/api:3f9a2c1`.\n\nUsed only by `mirrord preview up`, which starts a preview for every service that has an\nimage. `mirrord preview up --image <service>=<ref>` and `MIRRORD_<SERVICE>_IMAGE` take\nprecedence over it. `mirrord up` ignores it.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "x-mirrord-plan": "enterprise"
-        },
         "run": {
           "description": "How to launch the service's local process.",
           "$ref": "#/$defs/RunConfig"

@@ -120,19 +120,18 @@ async fn run_preview_up(
     up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
     analytics.enabled = up_config.telemetry_enabled();
 
-    let images = up_config.select_preview_images(&args.image, &ConfigContext::default())?;
+    let mut images = up_config.select_preview_images(&args.image, &ConfigContext::default())?;
     let analytics_data = analytics.get_mut();
-    analytics_data.add("services_previewed", images.sources.len());
+    analytics_data.add("services_previewed", images.picked.len());
     analytics_data.add("services_skipped", images.skipped.len());
     for (property, source) in [
         ("images_from_flag", PreviewImageSource::Flag),
         ("images_from_env", PreviewImageSource::Env),
-        ("images_from_file", PreviewImageSource::File),
     ] {
         let count = images
-            .sources
+            .picked
             .values()
-            .filter(|picked| **picked == source)
+            .filter(|(_, picked)| *picked == source)
             .count();
         analytics_data.add(property, count);
     }
@@ -150,6 +149,12 @@ async fn run_preview_up(
         &key,
     )
     .await?;
+    for service in &mut services {
+        service.config.feature.preview.image = images
+            .picked
+            .remove(&service.service_name)
+            .map(|(image, _)| image);
+    }
     services.sort_by(|a, b| a.service_name.cmp(&b.service_name));
 
     let args = &args;
