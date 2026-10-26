@@ -7,6 +7,8 @@ description: "How mirrord runs your local code in the context of your cluster, a
 
 mirrord lets developers (or AI agents) run local code in the context of their cloud environment. Your code runs on your machine, but talks to real cloud services - databases, queues, APIs - as if it were deployed in the cluster.
 
+mirrord works for a single developer and for a whole engineering organization. The open-source CLI is free. [mirrord for Teams](#mirrord-for-teams) lets many developers and [AI agents](../using-mirrord-with-ai/) [share one staging cluster](../sharing-the-cluster/overview.md) at the same time, with [traffic filtering](../using-mirrord/incoming-traffic/filter-incoming-traffic.md), [queue splitting](../sharing-the-cluster/queue-splitting.md), and [database branching](../sharing-the-cluster/db-branching.md), and the [Enterprise plan](#enterprise-plan) adds [preview environments](../use-cases/preview-environments.md) and [mirrord for CI](../use-cases/mirrord-for-ci.md). [monday.com](https://metalbear.com/mirrord/case-study/monday) runs 350+ engineers concurrently on one shared staging cluster.
+
 When you start your process with mirrord, it overrides low-level system calls to:
 
 * **Receive incoming traffic** from a remote pod (mirrored or stolen)
