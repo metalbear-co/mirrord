@@ -1824,31 +1824,8 @@ where
 
         let split_queues = &layer_config.feature.split_queues;
 
-        // One feature per broker (Azure Service Bus shipped without one, so it has no gate);
-        // brokers added later were born with jq, so only the early ones gate jq separately.
-        const BROKER_FEATURES: [(QueueKind, NewOperatorFeature); 9] = [
-            (QueueKind::Sqs, NewOperatorFeature::SqsQueueSplitting),
-            (QueueKind::Kafka, NewOperatorFeature::KafkaQueueSplitting),
-            (QueueKind::Rmq, NewOperatorFeature::RmqQueueSplitting),
-            (
-                QueueKind::GcpPubSub,
-                NewOperatorFeature::GcpPubSubQueueSplitting,
-            ),
-            (
-                QueueKind::Temporal,
-                NewOperatorFeature::TemporalQueueSplitting,
-            ),
-            (
-                QueueKind::RedisPubSub,
-                NewOperatorFeature::RedisPubSubQueueSplitting,
-            ),
-            (QueueKind::BullMq, NewOperatorFeature::BullMqQueueSplitting),
-            (QueueKind::Nats, NewOperatorFeature::NatsQueueSplitting),
-            (
-                QueueKind::NatsPubSub,
-                NewOperatorFeature::NatsPubSubQueueSplitting,
-            ),
-        ];
+        // Brokers added after the first ones were born with jq, so only the early ones gate jq
+        // separately.
         const JQ_FEATURES: [(QueueKind, NewOperatorFeature); 3] = [
             (
                 QueueKind::Sqs,
@@ -1864,8 +1841,13 @@ where
             ),
         ];
 
-        for (kind, feature) in BROKER_FEATURES {
-            if split_queues.of_kind(kind).next().is_some() {
+        for kind in split_queues.kinds() {
+            // Azure Service Bus shipped without a feature of its own, so older operators that
+            // split it don't advertise one, and it has no gate.
+            if kind == QueueKind::AzureServiceBus {
+                continue;
+            }
+            if let Some(feature) = NewOperatorFeature::queue_splitting(kind) {
                 self.operator.spec.require_feature(feature)?;
             }
         }
@@ -1962,7 +1944,7 @@ where
 /// pre-checking them would falsely reject dialects that actually work on operators already in the
 /// field; those instead rely on the operator marking the branch `Failed` (see the branch database
 /// controller's dispatch).
-fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperatorFeature> {
+pub fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperatorFeature> {
     match config {
         DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
         DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),

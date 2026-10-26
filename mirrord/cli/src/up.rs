@@ -22,7 +22,7 @@ use crate::{
     ui::ui_command,
 };
 
-mod db_branches;
+pub(crate) mod db_branches;
 
 /// Context for sessions started by `mirrord up`.
 #[derive(Clone, Debug)]
@@ -281,6 +281,8 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::ConfigPatch(_))
             | UpCliError::Up(UpError::Tera(_))
             | UpCliError::Up(UpError::Mode(_))
+            | UpCliError::Up(UpError::NoInferredTarget { .. })
+            | UpCliError::Up(UpError::PreviewTargetless { .. })
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::ServiceFailedToStart { .. }) => Self::ServiceStartFailed,

@@ -31,6 +31,25 @@ use crate::{
     error::CliError,
 };
 
+/// What a service is told when [`resolves_default_db_branches`] says no and its default DB
+/// branching is dropped.
+pub(crate) const DEFAULT_DB_BRANCHES_UNSUPPORTED: &str =
+    "the mirrord operator doesn't support DB branching, running against the source DB";
+
+/// Whether `operator` can resolve the `"*"` `mirrord up` and `mirrord preview up` add to a
+/// service's DB branches by default.
+///
+/// The operator leaves the feature out when its branching is off, its license tier doesn't
+/// include it, or it predates it. A `"*"` the user didn't ask for must not stop the service on
+/// such an operator, so the callers drop it instead.
+pub(crate) fn resolves_default_db_branches(operator: &OperatorApi<NoClientCert>) -> bool {
+    operator
+        .operator()
+        .spec
+        .supported_features()
+        .contains(&NewOperatorFeature::DbBranchesFromSplitConfig)
+}
+
 /// Asks the operator what each service requesting DB branching gets, printing it, before any
 /// service starts.
 ///
@@ -77,21 +96,12 @@ pub(super) async fn check_db_branches(
                 );
                 service.config.feature.db_branches = DatabaseBranchesConfig::default();
             }
-            // The operator leaves the feature out when its branching is off, its license tier
-            // doesn't include it, or it predates it. A `"*"` the user didn't ask for must not stop
-            // a run on such an operator; one they set fails below, as it would in a session.
+            // One the user set fails below, as it would in a session.
             Some(Some(api))
-                if service.default_db_branches
-                    && api
-                        .operator()
-                        .spec
-                        .supported_features()
-                        .contains(&NewOperatorFeature::DbBranchesFromSplitConfig)
-                        .not() =>
+                if service.default_db_branches && resolves_default_db_branches(api).not() =>
             {
                 println!(
-                    "{}: the mirrord operator doesn't support DB branching, running against the \
-                     source DB",
+                    "{}: {DEFAULT_DB_BRANCHES_UNSUPPORTED}",
                     service.service_name
                 );
                 service.config.feature.db_branches = DatabaseBranchesConfig::default();

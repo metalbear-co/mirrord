@@ -156,6 +156,14 @@ pub struct PreviewSessionSpec {
     /// suffix by default, or the key-derived host with `shareIngress.stableSlugs`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub share_host: Option<String>,
+
+    /// The `queue_splitting` are the splits `mirrord preview up` adds by default (`"*"` for every
+    /// broker), not ones the user asked for. The operator drops those it can't serve, like a
+    /// broker whose splitting is off, instead of failing the session, as it does for `mirrord up`
+    /// sessions. Sent only to operators advertising `PreviewAutoQueueSplitting`; `false`, left
+    /// out of the resource as older CLIs do, means every split was asked for.
+    #[serde(default, skip_serializing_if = "Not::not")]
+    pub auto_queue_splitting: bool,
 }
 
 /// The user's versions of the target and the ConfigMaps and Secrets its pod uses.

@@ -364,6 +364,8 @@ pub enum ReportTarget {
     OperatorUninstall,
     /// An ARM mac had to use Rosetta for some binaries.
     MissingX86Binaries,
+    /// One run of `mirrord preview up`.
+    PreviewUp,
 }
 
 /// Header the client sets to tell the analytics-server which event a report is.
@@ -385,6 +387,7 @@ impl ReportTarget {
             ReportTarget::OperatorInstall => "operator-install",
             ReportTarget::OperatorUninstall => "operator-uninstall",
             ReportTarget::MissingX86Binaries => "missing-x86-binaries",
+            ReportTarget::PreviewUp => "preview-up",
         }
     }
 }

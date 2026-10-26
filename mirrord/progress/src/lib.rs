@@ -95,6 +95,9 @@ pub enum ProgressTracker {
 
     /// Do not output progress.
     NullProgress(NullProgress),
+
+    /// Another tracker, with a prefix on every task name and message.
+    PrefixedProgress(PrefixedProgress),
 }
 
 #[cfg(feature = "implementations")]
@@ -129,5 +132,11 @@ impl ProgressTracker {
     /// Returns a tracker with `NullProgress`.
     pub fn null() -> Self {
         Self::NullProgress(NullProgress)
+    }
+
+    /// Wraps this tracker so that every task created from it, and every message reported on
+    /// them, starts with `"<prefix>: "` (see [`PrefixedProgress`]).
+    pub fn prefixed(self, prefix: &str) -> Self {
+        PrefixedProgress::new(prefix.to_owned(), self).into()
     }
 }
