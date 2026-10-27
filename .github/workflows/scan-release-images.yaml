@@ -1,14 +1,10 @@
 name: Scan Release Images
 
-# Trivy scan of the agent and CLI images, for the latest release. Each report is attached to
-# the GitHub release, so it can be shared on request. The run fails when an image has a critical
-# or high finding with a fix available.
-# The release job uses GITHUB_TOKEN, which does not trigger `release` events, so the scan
-# follows the `Release` run instead. The daily run finds new CVEs in released images.
+# Daily Trivy scan of the agent and CLI images, for the latest release or a given one. Each
+# report is attached to the GitHub release, so it can be shared on request. The run fails when an
+# image has a critical or high finding with a fix available.
+# A daily run, not one after `Publish`: it also finds new CVEs in a release that did not change.
 on:
-  workflow_run:
-    workflows: [Release]
-    types: [completed]
   schedule:
     - cron: "30 3 * * *" # Daily 03:30 UTC
   workflow_dispatch:
@@ -19,9 +15,13 @@ on:
 
 permissions: {}
 
+# Two scans of one release would replace each other's reports on the release.
+concurrency:
+  group: scan-release-images
+  cancel-in-progress: false
+
 jobs:
   release:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -51,21 +51,24 @@ jobs:
       fail-fast: false
       matrix:
         image: [mirrord, mirrord-cli]
+        arch: [amd64, arm64]
     steps:
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/${{ matrix.arch }}
         with:
           version: v0.75.0
           image-ref: ghcr.io/metalbear-co/${{ matrix.image }}:${{ needs.release.outputs.version }}
           scanners: vuln
           severity: CRITICAL,HIGH
           format: json
-          output: ${{ matrix.image }}.json
+          output: ${{ matrix.image }}-${{ matrix.arch }}.json
           timeout: 15m
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: trivy-${{ matrix.image }}
-          path: ${{ matrix.image }}.json
+          name: trivy-${{ matrix.image }}-${{ matrix.arch }}
+          path: ${{ matrix.image }}-${{ matrix.arch }}.json
 
   # Runs no third-party code, so it is the only job with write access.
   publish:
@@ -88,23 +91,26 @@ jobs:
           set -euo pipefail
           FIXABLE=0
           for JSON in *.json; do
-            IMAGE="${JSON%.json}"
-            REPORT="trivy-$IMAGE-$VERSION.md"
+            NAME="${JSON%.json}"
+            REPORT="trivy-$NAME-$VERSION.md"
             {
-              echo "### ghcr.io/metalbear-co/$IMAGE:$VERSION"
+              echo "### ghcr.io/metalbear-co/${NAME%-*}:$VERSION (linux/${NAME##*-})"
               echo
               echo "Trivy v0.75.0, critical and high, scanned $(date -u +%Y-%m-%dT%H:%MZ)."
+              # Images built FROM scratch have no package database, so Trivy cannot see their
+              # OS libraries.
+              jq -r 'if .Metadata.OS == null then "\nNo OS package database in this image: OS libraries were not checked. Checked: \([.Results[]?.Target] | if length == 0 then "nothing" else join(", ") end)." else empty end' "$JSON"
               echo
               echo "| Severity | ID | Package | Installed | Fixed in | Target |"
               echo "|---|---|---|---|---|---|"
               jq -r '.Results[]? | .Target as $t | .Vulnerabilities[]? |
-                "| \(.Severity) | \(.VulnerabilityID) | `\(.PkgName)` | \(.InstalledVersion) | \(.FixedVersion // "no fix") | \($t) |"' "$JSON" | sort -u
+                "| \(.Severity) | \(.VulnerabilityID) | `\(.PkgName)` | \(.InstalledVersion) | \(if (.FixedVersion // "") == "" then "no fix" else .FixedVersion end) | \($t) |"' "$JSON" | sort -u
             } > "$REPORT"
             cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
             gh release upload "$VERSION" "$REPORT" --repo "$GITHUB_REPOSITORY" --clobber
             COUNT=$(jq '[.Results[]?.Vulnerabilities[]? | select((.FixedVersion // "") != "")] | length' "$JSON")
             if [ "$COUNT" -gt 0 ]; then
-              echo "::error::$IMAGE:$VERSION has $COUNT critical or high findings with a fix"
+              echo "::error::$NAME:$VERSION has $COUNT critical or high findings with a fix"
               FIXABLE=1
             fi
           done
