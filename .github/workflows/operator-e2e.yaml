@@ -38,6 +38,9 @@ on:
     branches:
       - "release/[0-9]+.[0-9]+.[0-9]+"
 
+permissions:
+  contents: read
+
 jobs:
   resolve_trigger_context:
     runs-on: blacksmith-4vcpu-ubuntu-2404

@@ -458,10 +458,15 @@ pub(crate) enum CliError {
 
     #[error("Feature `{feature}` is not enabled on the mirrord operator.")]
     #[diagnostic(help(
-        "This feature is supported by the operator's version but turned off in its configuration. \
-        Ask your cluster administrator to enable it.{GENERAL_HELP}"
+        "This feature is supported by the operator's version but turned off in its Helm values. \
+        Ask your cluster administrator to enable it{enable_hint}.{GENERAL_HELP}"
     ))]
-    FeatureDisabledInOperatorError { feature: String },
+    FeatureDisabledInOperatorError {
+        feature: String,
+        /// How to switch the feature on, e.g. ", e.g. `helm upgrade ... --set
+        /// operator.previewEnv=true`", or empty when no single Helm value turns it on.
+        enable_hint: String,
+    },
 
     #[error("mirrord operator does not serve the operator-hosted sessions-manager.")]
     #[diagnostic(help(
@@ -471,6 +476,13 @@ pub(crate) enum CliError {
         use a standalone sessions-manager.{GENERAL_HELP}"
     ))]
     ServerlessSessionsManagerNotServed,
+
+    #[error("failed to read which MetalBear cloud the sessions-manager trusts")]
+    #[diagnostic(help(
+        "Check `MIRRORD_METALBEAR_CLOUD_URL`, or unset it to use https://app.metalbear.com.\
+        {GENERAL_HELP}"
+    ))]
+    SessionsManagerCloudUrl(#[source] mirrord_sessions_manager_client::SessionsManagerClientError),
 
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -868,6 +880,10 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     PreviewDeleteFailed { name: String, reason: String },
 
+    #[error("Failed to delete preview sessions: {}", .0.join("; "))]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    PreviewDeletesFailed(Vec<String>),
+
     #[error(transparent)]
     #[diagnostic(transparent)]
     PreviewResources(Box<crate::preview::resources::ResourcesError>),
@@ -894,6 +910,40 @@ pub(crate) enum CliError {
     #[error("No preview sessions found matching key `{0}`")]
     #[diagnostic(help("Use `mirrord preview status` to see available preview environments."))]
     PreviewNotFound(String),
+
+    #[error("{} not found", .0.display())]
+    #[diagnostic(help(
+        "`mirrord preview up` and `mirrord preview down` read the services from a \
+         mirrord-up.yaml. Pass another path with `-f <path>`, or create one with `mirrord up \
+         init`."
+    ))]
+    PreviewUpFileNotFound(PathBuf),
+
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    PreviewUpConfig(Box<mirrord_up::UpError>),
+
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    PreviewUpImages(#[from] mirrord_up::PreviewImageError),
+
+    #[error("no preview environment was started, the checks failed for: {}", .0.join(", "))]
+    PreviewUpInvalid(Vec<String>),
+
+    #[error("no key to stop preview environments under")]
+    #[diagnostic(help(
+        "Without `--key` or `MIRRORD_KEY`, the key is the git branch, but on `main`, `master` or \
+         without a branch `mirrord preview up` uses a random key. Pass the key it printed with \
+         `--key <key>`."
+    ))]
+    PreviewDownKeyRequired,
+
+    #[error("preview environments failed to start for: {}", .0.join(", "))]
+    #[diagnostic(help(
+        "Run `mirrord preview up` with the same key again, it replaces the session of every \
+         service."
+    ))]
+    PreviewUpFailed(Vec<String>),
 
     #[error("Session key is required for this command")]
     #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
@@ -996,6 +1046,12 @@ impl From<crate::preview::resources::ResourcesError> for CliError {
     }
 }
 
+impl From<mirrord_up::UpError> for CliError {
+    fn from(error: mirrord_up::UpError) -> Self {
+        Self::PreviewUpConfig(Box::new(error))
+    }
+}
+
 impl From<OperatorApiError> for CliError {
     fn from(value: OperatorApiError) -> Self {
         use kube::{Error, client::AuthError};
@@ -1013,6 +1069,20 @@ impl From<OperatorApiError> for CliError {
             },
             OperatorApiError::FeatureDisabled { feature } => Self::FeatureDisabledInOperatorError {
                 feature: feature.to_string(),
+                enable_hint: match feature.helm_values() {
+                    [] => String::new(),
+                    values => {
+                        let sets = values
+                            .iter()
+                            .map(|value| format!("--set {value}=true"))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        format!(
+                            " in the operator Helm chart, e.g. `helm upgrade mirrord-operator \
+                             metalbear/mirrord-operator --reuse-values {sets}`"
+                        )
+                    }
+                },
             },
             OperatorApiError::ServerlessSessionsManagerNotServed => {
                 Self::ServerlessSessionsManagerNotServed

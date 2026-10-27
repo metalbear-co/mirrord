@@ -117,7 +117,9 @@ This is an example for a policy that gives the operator's roles the minimal perm
 *   The first statement gives the role the permissions it needs for your original queues.
 
     Instead of specifying the queues you would like to be able to split in the first statement, you could alternatively make that statement apply for all resources in the account, and limit the queues it applies to using conditions instead of resource names. For example, you could add a condition that makes the statement only apply to queues with the tag `splittable=true` or `env=dev` etc. and set those tags for all queues you would like to allow the operator to split.
-*   The second statement in the example gives the role the permissions it needs for the temporary queues. Since all the temporary queues created by mirrord are created with the name prefix `mirrord-`, that statement in the example is limited to resources with that prefix in their name.
+*   The second statement in the example gives the role the permissions it needs for the temporary queues. By default, all the temporary queues created by mirrord are created with the name prefix `mirrord-`, so that statement in the example is limited to resources with that prefix in their name.
+
+    If you set `spec.tmpNameTemplate` in a `MirrordSplitConfig`, its temporary queues are named from that template instead, both the main queue the patched workload reads and each session's queue. The second statement must then cover every name the template can produce. For example, with `tmpNameTemplate: "dev-mirrord-{{RANDOM}}{{FALLBACK}}{{ORIGINAL}}"`, use the resource `arn:aws:sqs:eu-north-1:314159265359:dev-mirrord-*`, or list one ARN pattern per prefix if different `MirrordSplitConfig`s use different templates. Keep `mirrord-*` as long as any `MirrordSplitConfig` relies on the default names.
 
     If you would like to limit the second statement with conditions instead of (only) with the resource name, you can [set a condition that requires a tag](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-abac-tagging-resource-control.html), and for each queue you can specify tags that mirrord will set on the temporary queues it creates for that original queue (see [per-queue options](sqs.md#per-queue-options-sns-s3-events-tags)).
 
@@ -169,14 +171,14 @@ spec:
       appConfig:
         queue:
           - env: INCOMING_MEME_QUEUE_NAME
-            containers:
+            containerNames:
               - main
     - id: ad-queue
       kind: sqs
       appConfig:
         queue:
           - env: AD_QUEUE_NAME
-            containers:
+            containerNames:
               - main
 ```
 
@@ -208,7 +210,7 @@ Each entry in the `spec.queues` list describes one or more SQS queues consumed b
   * `fallback` - fallback name/URL if the variable is not found (only valid with `env`). The temporary queue name is still injected into the variable.
   * `valueSelector` - a selector extracting queue names from the variable's value: nested keys (`.queues.orders`) and `.[]` to iterate arrays or object values. Use `.[]` when the variable holds a JSON object whose string values are queue names/URLs. Pipes, functions, and other jq operators are not supported.
   * `valuePattern` - a regex used when the queue name/URL is embedded in a larger string. The capture group (named `value`, otherwise the first group) marks the part that is the name; only that part is swapped for the temporary queue and the surrounding text is kept as-is.
-  * `containers` - limit resolution to specific containers (optional, defaults to all containers).
+  * `containerNames` - limit resolution to specific containers (optional, defaults to all containers).
 * `queueConfig` (optional) - name of a `MirrordPropertyList` holding per-queue options (see below).
 
 #### Per-queue options (SNS, S3 events, tags)
@@ -461,3 +463,5 @@ If you don't want to wait for the remote service to drain the temporary queue, a
 | `N`                 | Wait up to `N` seconds for the queue to drain, then delete it.                        |
 
 If that service is trying to consume messages correctly, and the temporary queue is already empty, but the target application still doesn't get restored to its original state, please try restarting the application, deleting any lingering `MirrordClusterSplitSession` objects, and if possible, restart the mirrord operator.
+
+For compatibility with older operator releases and the legacy `containers` spelling, see [Selecting Containers](../queue-splitting.md#selecting-containers).

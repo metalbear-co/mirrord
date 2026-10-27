@@ -160,7 +160,7 @@ spec:
       appConfig:
         queue:
           - env: INCOMING_MEME_QUEUE_NAME
-            containers:
+            containerNames:
               - main
     - id: ad-queue
       kind: rmq
@@ -168,7 +168,7 @@ spec:
       appConfig:
         queue:
           - env: AD_QUEUE_NAME
-            containers:
+            containerNames:
               - main
 ```
 
@@ -202,7 +202,7 @@ Each entry in the `spec.queues` list describes one or more RabbitMQ queues consu
   * `fallback` — fallback queue name if the variable is not found. The env var is still rewritten to point at the temporary queue.
   * `valueSelector` — a selector extracting the queue name from the variable's value: nested keys and `.[]` to iterate arrays or object values. Useful when the env var holds JSON rather than a plain name. Pipes, functions, and other jq operators are not supported.
   * `valuePattern` — a regex used when the queue name is embedded in a larger string. The capture group (named `value`, otherwise the first group) marks the part that is the name; only that part is swapped for the temporary queue and the surrounding text is kept as-is.
-  * `containers` — limit to specific containers (optional, defaults to all non-infra containers).
+  * `containerNames` — limit to specific containers (optional, defaults to all non-infra containers).
 * `appConfig.exchange` (optional) — when the application reads an exchange name from the environment, the operator injects a dummy exchange name there so the local app does not publish to or bind against the real exchange. Uses the same structure as `appConfig.queue`.
 
 {% hint style="warning" %}
@@ -227,6 +227,25 @@ After the last session against a target ends, the operator keeps the split's tem
 | unset (both)   | Tear down as soon as the last session ends (same as `0`). |
 | `0`            | Tear down immediately. Unread messages may be lost.       |
 | `N`            | Keep resources for up to `N` seconds, then tear down.     |
+
+## Temporary queue names
+
+By default, temporary queues are named `mirrord-<random>-<hash>` for user queues and `mirrord-main-<random>-<hash>` for the queue the patched workload reads, where `<hash>` is a hash of the original queue name. To use a different format, set `spec.tmpNameTemplate` in the `MirrordSplitConfig`:
+
+```yaml
+spec:
+  tmpNameTemplate: "dev-mirrord-{{RANDOM}}{{FALLBACK}}{{ORIGINAL}}"
+```
+
+The template can use these placeholders:
+
+* `{{RANDOM}}` (required) - random alphabetic characters for uniqueness.
+* `{{FALLBACK}}` - resolves to `-main-` for the queue the patched workload reads or `-` for user queues.
+* `{{ORIGINAL}}` - name of the original queue being split.
+
+RabbitMQ queue names can be up to 255 bytes. If the rendered name exceeds this limit, the original portion is truncated with a hash suffix.
+
+RabbitMQ reserves queue names starting with `amq.`, so the operator rejects a template that starts with `amq.`. A template that starts with `{{ORIGINAL}}` can still produce such a name: with `{{ORIGINAL}}.{{RANDOM}}`, a queue named `amq` gets temporary queues named `amq.<random>`, which RabbitMQ refuses to declare. Start the template with a fixed prefix, such as `mirrord-`, to avoid this.
 
 ## Setting a filter
 
@@ -297,3 +316,5 @@ A message matches when the program outputs `true`. To filter on the body, parse 
 In the example above, the local application receives only messages whose body is a JSON object with `"priority": "high"`. Messages whose body is not valid JSON never match.
 
 If both `message_filter` and `jq_filter` are set for a queue, a message must match both. The header filter runs first, so the jq program only sees messages that already passed it.
+
+For compatibility with older operator releases and the legacy `containers` spelling, see [Selecting Containers](../queue-splitting.md#selecting-containers).

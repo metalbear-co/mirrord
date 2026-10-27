@@ -79,6 +79,48 @@ Use this only if your pod uses non-standard variable names.
 }
 ```
 
+### Apps that build the connection URL at runtime
+
+Some applications never read a connection URL from the environment. At startup they look up the database address in AWS Systems Manager Parameter Store (SSM), sign an IAM token, and build the URL in code. mirrord cannot read SSM, and the application would ignore the branch URL mirrord sets for it anyway.
+
+This works without changing the application or the cluster, as long as the code already has a switch that makes it read a URL from an environment variable, for example a flag for local development:
+
+```json
+{
+  "feature": {
+    "env": { "override": { "USE_SSM": "false" } },
+    "db_branches": [
+      {
+        "type": "pg",
+        "version": "17",
+        "name": "app",
+        "connection": {
+          "url": {
+            "type": "env",
+            "variable": "DATABASE_URL",
+            "value": "postgresql://app_user@mydb.abc123.us-east-1.rds.amazonaws.com:5432/app?sslmode=require"
+          }
+        },
+        "iam_auth": { "type": "aws_rds" }
+      }
+    ]
+  }
+}
+```
+
+- `value` is the source URL the branch copies from. It has no password: with `iam_auth`, the branch init container signs its own IAM token with the target pod's service account. The variable does not need to exist in the pod spec.
+- `variable` is the name your local process reads. mirrord sets it to the branch URL.
+- `name` is the database name from `value`. The operator never reads the literal URL, so it needs the name to hand your process a branch URL for your database rather than `postgres`. mirrord `3.278.0` and later take it from `value` when you leave `name` out; set it yourself on older CLIs.
+- `env.override` flips the switch (`USE_SSM` here; use your application's own flag) on your machine only, so the application reads `DATABASE_URL` instead of building the URL itself. The deployed workload is not touched.
+
+To avoid copying the URL into the config, point `connection.url` at the same parameter your application reads instead, with an [AWS SSM Parameter Store source](connection.md#aws-ssm-parameter-store-source). The branch init container then reads the parameter with the target pod's service account. In that case `name` is required, because mirrord never sees the URL.
+
+When the branch copies data (`copy.mode` `schema` or `all`), use `sslmode=require` in `value`, even when the application uses `verify-full`. The branch init container has no copy of the RDS certificate authority to verify against, so `verify-full` fails the copy. `require` still encrypts it. An empty branch reads nothing from the source, so any `sslmode` works there.
+
+{% hint style="warning" %}
+Without the switch, the application keeps building its own URL and connects to the real database, not the branch. Check which database your code reaches before you run migrations through mirrord.
+{% endhint %}
+
 ## GCP Cloud SQL IAM Authentication
 
 ### Minimal Configuration

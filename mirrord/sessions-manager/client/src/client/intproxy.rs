@@ -1,4 +1,4 @@
-use std::{future::Future, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use mirrord_operator_websocket::connection::OperatorConnection;
 use mirrord_protocol_io::Client;
@@ -11,6 +11,7 @@ use tokio::time::Instant;
 use crate::{
     client::validate_scope,
     control_plane::subscriber::ControlPlaneSubscriber,
+    credentials::LoginTokenSource,
     error::SessionsManagerClientError,
     retry::{RetryBudget, with_deadline},
     transport::{DirectTransport, SessionsManagerTransport},
@@ -41,10 +42,14 @@ pub struct IntproxyClient<T = DirectTransport> {
 }
 
 impl IntproxyClient<DirectTransport> {
+    /// Reaches the standalone sessions-manager the environment configures, authenticating with
+    /// the developer's login token from `login_tokens`.
     pub fn new(
         connect_info: SessionsManagerConnectInfo,
+        login_tokens: Option<Arc<dyn LoginTokenSource>>,
     ) -> Result<Self, SessionsManagerClientError> {
-        Self::with_transport(connect_info, DirectTransport::from_env()?)
+        let transport = DirectTransport::intproxy_from_env(login_tokens)?;
+        Self::with_transport(connect_info, transport)
     }
 }
 

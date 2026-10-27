@@ -574,16 +574,34 @@ pub const SERVICE_LAYER_PATHS: &[(&str, &str)] = &[
 impl ServiceConfig {
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `base` from
     /// [`CommonConfig::base_config`].
+    ///
+    /// For [`SessionKind::Preview`], the config is for the service's `mirrord preview up` session
+    /// instead: it is assembled as in `split` mode whatever the service's `default_mode`, and
+    /// without `env`.
     fn assemble(
-        self,
+        mut self,
         service_name: &Arc<str>,
         base: LayerConfig,
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
+        kind: SessionKind,
     ) -> Result<SubprocessCfg, ConfigPatchErrorKind> {
+        let preview = kind == SessionKind::Preview;
+        if preview {
+            self.default_mode = ServiceMode::Split;
+            self.env = EnvConfig::default();
+        }
+
         let kube_context = up_context.get_context(self.context.clone());
         let mut cfg = self.unpatched_config(base, &key, kube_context.clone());
+
+        // `PreviewIncomingConfig` falls back to the anchored `^baggage: ...$` filter only when
+        // none is set, and share ingress only serves sessions with exactly that filter, so up's
+        // own default must not get in the way.
+        if preview && self.http_filter.is_filter_set().not() {
+            cfg.feature.network.incoming.http_filter = HttpFilterConfig::default();
+        }
 
         cfg.target = match self.target.as_resolved(service_name, kube_context) {
             Ok(resolved) => resolved,
@@ -626,10 +644,30 @@ impl ServiceConfig {
             );
         }
 
+        // A preview session that asks for any queue split is refused by the operator unless its
+        // target is a workload it can look a `MirrordSplitConfig` up for, even when `"*"` would
+        // match no queue. `mirrord up` sessions skip such targets instead, so leaving the splits
+        // out ends the same way.
+        if preview
+            && matches!(
+                cfg.target.path,
+                Some(Target::Deployment(_) | Target::Rollout(_) | Target::StatefulSet(_))
+            )
+            .not()
+        {
+            cfg.feature.split_queues = SplitQueuesConfig::default();
+        }
+        let mut default_split_queues = cfg.feature.split_queues.is_set();
+
         if let Some(patch) = self.config_patch {
-            // A patch that sets `db_branches` decides them itself, `[]` included, so whatever it
-            // holds afterwards was asked for by the user.
+            if preview && patch.pointer("/feature/preview/image").is_some() {
+                return Err(ConfigPatchErrorKind::PreviewImage);
+            }
+
+            // A patch that sets `db_branches` or `split_queues` decides them itself, `[]`
+            // included, so whatever it holds afterwards was asked for by the user.
             default_db_branches &= patch.pointer("/feature/db_branches").is_none();
+            default_split_queues &= patch.pointer("/feature/split_queues").is_none();
             cfg = apply_config_patch(cfg, patch, &key)?;
         }
 
@@ -639,6 +677,7 @@ impl ServiceConfig {
             run: self.run,
             mode: self.default_mode,
             default_db_branches,
+            default_split_queues,
         })
     }
 
@@ -747,6 +786,12 @@ enum ConfigPatchErrorKind {
 
     #[error("the merged mirrord config failed validation: {0}")]
     Validation(#[from] mirrord_config::config::ConfigError),
+
+    #[error(
+        "it sets `feature.preview.image`, which `mirrord preview up` takes from `--image` or \
+         `MIRRORD_<SERVICE>_IMAGE` instead"
+    )]
+    PreviewImage,
 }
 
 /// Here we merge the `config` with the `patch` (`config_patch` from the `mirrord-up.yaml` config
@@ -825,6 +870,15 @@ fn patchable(config: LayerConfig, key: &EnvKey) -> Result<serde_json::Value, ser
     Ok(json)
 }
 
+/// Which command a service's session is assembled for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SessionKind {
+    /// A `mirrord up` session, running the service's local process.
+    Up,
+    /// A `mirrord preview up` session, running the service's image in the cluster.
+    Preview,
+}
+
 /// All the information necessary to start and manage one of the child
 /// mirrord sessions.
 pub struct SubprocessCfg {
@@ -840,6 +894,10 @@ pub struct SubprocessCfg {
     /// `config.feature.db_branches` is the `"*"` `mirrord up` adds for this service's mode, not
     /// one the user set. An operator that can't resolve it drops it rather than failing the run.
     pub default_db_branches: bool,
+    /// `config.feature.split_queues` are the `"*"` splits `mirrord up` adds for this service's
+    /// mode, not ones the user set. A preview session asks its operator to drop the ones it
+    /// can't serve rather than failing.
+    pub default_split_queues: bool,
 }
 
 /// Rejects services whose resolved target cannot support the features their
@@ -984,6 +1042,7 @@ impl UpConfig {
                 key.clone(),
                 &mut resolved_targets,
                 up_context.clone(),
+                SessionKind::Up,
             ) {
                 Ok(assembled) => assembled,
                 Err(source) => {
@@ -1083,6 +1142,104 @@ impl UpConfig {
         Ok(())
     }
 
+    /// Picks the image of every service for `mirrord preview up`, and drops the services that have
+    /// none: those get no preview.
+    ///
+    /// `flags` are the `--image <service>=<ref>` values. A service's image comes from its flag,
+    /// then its `MIRRORD_<SERVICE>_IMAGE` environment variable (see [`preview_image_env`]; empty
+    /// counts as unset). `skip` doesn't apply: the images pick the services.
+    /// The variables are read through `context`.
+    pub fn select_preview_images(
+        &mut self,
+        flags: &[String],
+        context: &ConfigContext,
+    ) -> Result<PreviewImages, PreviewImageError> {
+        let mut from_flags: HashMap<&str, &str> = HashMap::new();
+        for flag in flags {
+            let (service, image) = flag
+                .split_once('=')
+                .filter(|(service, image)| service.is_empty().not() && image.is_empty().not())
+                .ok_or_else(|| PreviewImageError::InvalidFlag(flag.clone()))?;
+            if self.services.contains_key(service).not() {
+                return Err(PreviewImageError::UnknownService {
+                    service: service.to_owned(),
+                    available: self
+                        .services
+                        .keys()
+                        .map(|name| name.to_string())
+                        .sorted()
+                        .collect(),
+                });
+            }
+            if from_flags.insert(service, image).is_some() {
+                return Err(PreviewImageError::DuplicateFlag(service.to_owned()));
+            }
+        }
+
+        // A service with a flag doesn't read its variable, so it can't make one ambiguous.
+        let mut env_names: HashMap<String, Vec<&Arc<str>>> = HashMap::new();
+        for service in self
+            .services
+            .keys()
+            .filter(|service| from_flags.contains_key(service.as_ref()).not())
+        {
+            env_names
+                .entry(preview_image_env(service))
+                .or_default()
+                .push(service);
+        }
+        let mut from_env = HashMap::new();
+        for (env, services) in env_names {
+            let Some(image) = context
+                .get_env(&env)
+                .ok()
+                .filter(|image| image.is_empty().not())
+            else {
+                continue;
+            };
+            if let [service] = services.as_slice() {
+                from_env.insert((*service).clone(), image);
+            } else {
+                return Err(PreviewImageError::AmbiguousEnv {
+                    env,
+                    services: services
+                        .iter()
+                        .map(|name| name.to_string())
+                        .sorted()
+                        .collect(),
+                });
+            }
+        }
+
+        let mut images = PreviewImages::default();
+        self.services.retain(|name, _| {
+            let picked = match from_flags.get(name.as_ref()) {
+                Some(image) => Some(((*image).to_owned(), PreviewImageSource::Flag)),
+                None => from_env
+                    .remove(name)
+                    .map(|image| (image, PreviewImageSource::Env)),
+            };
+
+            match picked {
+                Some(picked) => {
+                    images.picked.insert(name.clone(), picked);
+                    true
+                }
+                None => {
+                    images.skipped.push(name.clone());
+                    false
+                }
+            }
+        });
+        images.skipped.sort();
+
+        if self.services.is_empty() {
+            return Err(PreviewImageError::NoImages);
+        }
+
+        Ok(images)
+    }
+
     /// Produces one [`SubprocessCfg`] per service defined in the configuration.
     ///
     /// `resolved_targets` must be a [`HashMap`] with an entry for
@@ -1100,13 +1257,29 @@ impl UpConfig {
         up_context: UpKubeContext,
         context: &mut ConfigContext,
     ) -> Result<Vec<SubprocessCfg>, UpError> {
+        self.assemble_services(key, resolved_targets, up_context, context, SessionKind::Up)
+    }
+
+    /// Like [`Self::service_configs`], for the sessions of `kind` (see
+    /// [`ServiceConfig::assemble`]).
+    pub(crate) fn assemble_services(
+        self,
+        key: &EnvKey,
+        resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
+        up_context: UpKubeContext,
+        context: &mut ConfigContext,
+        kind: SessionKind,
+    ) -> Result<Vec<SubprocessCfg>, UpError> {
         let base_config = self.common.base_config(context)?;
 
         self.services
             .into_iter()
             .map(|(service_name, svc)| {
                 let mode = svc.default_mode;
-                if mode == ServiceMode::Replace && svc.http_filter.is_filter_set() {
+                if kind == SessionKind::Up
+                    && mode == ServiceMode::Replace
+                    && svc.http_filter.is_filter_set()
+                {
                     eprintln!(
                         "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
                     );
@@ -1117,6 +1290,7 @@ impl UpConfig {
                     key.clone(),
                     resolved_targets,
                     up_context.clone(),
+                    kind,
                 )
                 .map_err(|source| {
                     ConfigPatchError {
@@ -1126,6 +1300,20 @@ impl UpConfig {
                     .into()
                 })
             })
+            .collect()
+    }
+
+    /// The kube contexts the services run in, picked as for their sessions: `context_arg`
+    /// (`--context`), then the service's `context`, then `common.context`. `None` stands for the
+    /// kubeconfig's current context.
+    pub fn service_contexts(&self, context_arg: Option<Arc<str>>) -> BTreeSet<Option<Arc<str>>> {
+        let up_context = UpKubeContext {
+            command_arg: context_arg,
+            common_context: self.common.context.clone(),
+        };
+        self.services
+            .values()
+            .map(|service| up_context.get_context(service.context.clone()))
             .collect()
     }
 
@@ -1160,6 +1348,78 @@ pub enum SelectError {
     #[error("no services to launch: every service is marked `skip: true`")]
     #[diagnostic(help("Name a service explicitly to run it, or remove a `skip: true` flag."))]
     AllSkipped,
+}
+
+/// The environment variable that sets the image of `service` for `mirrord preview up`:
+/// `MIRRORD_<SERVICE>_IMAGE`, with the service name in upper case and every character that isn't
+/// an ASCII letter or digit turned into `_` (`cake-maker` reads `MIRRORD_CAKE_MAKER_IMAGE`).
+pub fn preview_image_env(service: &str) -> String {
+    let service = service
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("MIRRORD_{service}_IMAGE")
+}
+
+/// Where `mirrord preview up` took a service's image from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewImageSource {
+    /// `--image <service>=<ref>`.
+    Flag,
+    /// `MIRRORD_<SERVICE>_IMAGE`.
+    Env,
+}
+
+/// What [`UpConfig::select_preview_images`] picked.
+#[derive(Debug, Default)]
+pub struct PreviewImages {
+    /// The image of every service left in the config, and where it came from.
+    pub picked: HashMap<Arc<str>, (String, PreviewImageSource)>,
+    /// The services dropped for having no image, sorted by name.
+    pub skipped: Vec<Arc<str>>,
+}
+
+/// Error produced by [`UpConfig::select_preview_images`].
+#[derive(Debug, Error, Diagnostic)]
+pub enum PreviewImageError {
+    /// An `--image` value isn't `<service>=<ref>` with both parts set.
+    #[error("invalid `--image {0}`: expected `<service>=<image ref>`")]
+    InvalidFlag(String),
+
+    /// An `--image` value names a service the config doesn't define.
+    #[error("`--image` for unknown service `{service}`")]
+    #[diagnostic(help("Available services: {}", available.join(", ")))]
+    UnknownService {
+        /// The name that wasn't found.
+        service: String,
+        /// The service names defined in the config.
+        available: Vec<String>,
+    },
+
+    /// Two `--image` values name the same service.
+    #[error("`--image` is given twice for service `{0}`")]
+    DuplicateFlag(String),
+
+    /// A set `MIRRORD_<SERVICE>_IMAGE` stands for more than one service.
+    #[error("`{env}` is set, but it could be the image of any of: {}", services.join(", "))]
+    #[diagnostic(help("Use `--image <service>=<image ref>` for these services instead."))]
+    AmbiguousEnv {
+        /// The environment variable.
+        env: String,
+        /// The services whose names map onto it.
+        services: Vec<String>,
+    },
+
+    /// No service got an image, so there is nothing to preview.
+    #[error("no service has an image to preview")]
+    #[diagnostic(help("Pass `--image <service>=<image ref>` or set `MIRRORD_<SERVICE>_IMAGE`."))]
+    NoImages,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]

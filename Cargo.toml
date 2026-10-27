@@ -72,7 +72,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.277.0"
+version = "3.280.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -148,7 +148,7 @@ futures = "0.3"
 futures-util = "0.3"
 glob = "0.3"
 hex = "0.4"
-hickory-resolver = { version = "0.26.1", features = ["serde", "tokio", "system-config"] }
+hickory-resolver = { version = "0.26.2", features = ["serde", "tokio", "system-config"] }
 http = { version = "1" }
 http-body = "1"
 http-body-util = "0.1"

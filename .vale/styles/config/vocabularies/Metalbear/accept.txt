@@ -180,6 +180,8 @@ towncrier
 Bubblewrap
 greptile
 Greptile
+qodo
+Qodo
 Liquibase
 Jev
 devshell
@@ -247,6 +249,7 @@ uvicorn
 Uvicorn
 Vue
 redis
+Redis
 turbopuffer
 nginx
 OpenAPI

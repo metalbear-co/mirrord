@@ -8,6 +8,87 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.280.0](https://github.com/metalbear-co/mirrord/tree/3.280.0) - 2026-10-27
+
+
+### Removed
+
+- Removed the `image` field from `mirrord-up.yaml` services. `mirrord preview
+  up` takes each service's image from `--image <service>=<image ref>` or
+  `MIRRORD_<SERVICE>_IMAGE`.
+
+
+### Added
+
+- Remote Redis branches accept `cluster: true` to run as a one node Redis
+  Cluster, so applications using a Redis Cluster client can connect to the
+  branch.
+
+
+### Changed
+
+- On Linux, the layer logs at startup which glibc the process runs on, which
+  glibc the executable was built against, and the kernel release, to help
+  diagnose hooks that never fire.
+
+## [3.279.1](https://github.com/metalbear-co/mirrord/tree/3.279.1) - 2026-10-25
+
+
+### Fixed
+
+- Keep the parent's live listening-port subscription when a short-lived child
+  spawned through `vfork` closes an inherited listening socket.
+
+## [3.279.0](https://github.com/metalbear-co/mirrord/tree/3.279.0) - 2026-10-24
+
+
+### Added
+
+- Add `mirrord preview down`, which deletes every preview environment under a
+  key in all namespaces, finding the key the way `mirrord preview up` does.
+- Add `mirrord preview up`, which starts a preview environment for every
+  service of a `mirrord-up.yaml` that has an image (from `--image
+  <service>=<ref>`, `MIRRORD_<SERVICE>_IMAGE` or the service's `image`), all
+  under one key, and returns once each one is ready.
+- Services in `mirrord-up.yaml` accept an optional `image` field, the container
+  image `mirrord preview up` runs in the service's preview environment.
+  `mirrord up` ignores it.
+
+
+### Fixed
+
+- Fixed a SIGSEGV on macOS when apps using libuv 1.53+ (e.g. Homebrew Node)
+  connect to a unix socket.
+
+## [3.278.0](https://github.com/metalbear-co/mirrord/tree/3.278.0) - 2026-10-22
+
+
+### Added
+
+- A `kube_context` set in the global `~/.mirrord/mirrord.json` (`mirrord config
+  set kube_context <context>`) is used when a command has no context of its
+  own, including `mirrord up`, `mirrord tui` and the `mirrord operator`
+  commands, and `mirrord ui` opens on it.
+- Install script verifies downloads and takes an install directory.
+- Read DB branch connection values from AWS SSM Parameter Store with
+  `aws_ssm_parameter`.
+
+
+### Changed
+
+- Point at the Helm value to enable when an operator feature is switched off in
+  the chart, instead of suggesting an upgrade.
+
+
+### Fixed
+
+- DB branches name the right database when the source URL is a literal `value`.
+- Fixed concurrency issues in the layer<->intproxy connection handler,
+  improving performance of multi-threaded applications.
+- Joining a session through the browser extension from `mirrord ui` sends the
+  session's kube context, so the extension finds the session's HTTP filter when
+  it runs outside the current context.
+
 ## [3.277.0](https://github.com/metalbear-co/mirrord/tree/3.277.0) - 2026-10-21
 
 

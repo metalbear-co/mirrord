@@ -677,18 +677,9 @@ where
     /// Create a new CI api key by generating a random key pair, creating a certificate
     /// signing request and sending it to the operator.
     pub async fn create_ci_api_key(&self) -> Result<String, OperatorApiError> {
-        if self
-            .operator()
+        self.operator()
             .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::ExtendableUserCredentials)
-            .not()
-        {
-            return Err(OperatorApiError::UnsupportedFeature {
-                feature: NewOperatorFeature::ExtendableUserCredentials,
-                operator_version: self.operator().spec.operator_version.to_string(),
-            });
-        }
+            .require_feature(NewOperatorFeature::ExtendableUserCredentials)?;
 
         let credentials = Credentials::init_ci::<MirrordClusterOperatorUserCredential>(
             self.client.clone(),
@@ -1010,18 +1001,17 @@ where
             .resolve_split_config_db_branches(layer_config, &subtask)
             .await?;
 
-        // Fail fast with a clear message when a configured branch dialect is disabled on the
-        // operator. Without this the CLI proceeds blindly: an operator with no branching serves no
-        // branch CRD at all, so the create returns a bare `404 page not found`; an operator missing
-        // just this dialect creates a CRD nothing reconciles, so the CLI times out waiting for
-        // readiness. We only check the dialects whose feature has been advertised since it was
-        // introduced (see `required_branching_feature`); the rest rely on the operator marking the
-        // branch `Failed`.
+        // Fail fast with a clear message when a configured branch dialect is missing on the
+        // operator, whether its Helm value is off or the version predates it. Without this the
+        // CLI proceeds blindly: an operator with no branching serves no branch CRD at all, so the
+        // create returns a bare `404 page not found`; an operator missing just this dialect
+        // creates a CRD nothing reconciles, so the CLI times out waiting for readiness. We only
+        // check the dialects whose feature has been advertised since it was introduced (see
+        // `required_branching_feature`); the rest rely on the operator marking the branch
+        // `Failed`.
         for branch_config in layer_config.feature.db_branches.iter() {
-            if let Some(feature) = required_branching_feature(branch_config)
-                && !self.operator.spec.supported_features().contains(&feature)
-            {
-                return Err(OperatorApiError::FeatureDisabled { feature });
+            if let Some(feature) = required_branching_feature(branch_config) {
+                self.operator.spec.require_feature(feature)?;
             }
         }
 
@@ -1216,6 +1206,20 @@ where
                 .require_feature(NewOperatorFeature::DbBranchSecretManagerExtract)?;
         }
 
+        // A Redis Cluster branch needs an operator that knows the `cluster` option: an older
+        // one prunes it from the CRD and brings up a standalone server, and the app's cluster
+        // client then fails on connect with no hint that the branch is the reason.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(DatabaseBranchConfig::uses_redis_cluster)
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::RedisClusterBranching)?;
+        }
+
         // An `aws_ssm_parameter` source needs an operator that knows the source kind: an
         // older one fails to deserialize the branch and never reconciles it.
         if layer_config
@@ -1373,19 +1377,25 @@ where
                 }
             }
 
-            // Where a branch runs is fixed when it is created, so a session reusing it must ask
-            // for the same placement (see `check_attach_namespace`).
-            let requested_namespace_keys: HashMap<String, Option<String>> = create_params
+            // Where a branch runs, and for Redis whether it runs as a cluster node, is fixed when
+            // it is created, so a session reusing it must ask for the same (see
+            // `check_attach_namespace` and `check_attach_redis_cluster`).
+            let requested_specs: HashMap<String, BranchDatabaseSpec> = create_params
                 .iter()
-                .map(|(name, params)| (name.clone(), params.spec.dedicated_namespace_key.clone()))
+                .map(|(name, params)| (name.clone(), params.spec.clone()))
                 .collect();
             for (name, branch) in existing.ready.iter().chain(existing.pending.iter()) {
-                if let Some(requested) = requested_namespace_keys.get(name) {
+                if let Some(requested) = requested_specs.get(name) {
                     database_branches::check_attach_namespace(
                         branch,
-                        requested.as_deref(),
+                        requested.dedicated_namespace_key.as_deref(),
                         api_namespace,
                         &subtask,
+                    )?;
+                    database_branches::check_attach_redis_cluster(
+                        branch,
+                        requested,
+                        api_namespace,
                     )?;
                 }
             }
@@ -1442,12 +1452,17 @@ where
                 if let Some(requested) = split_config_specs.get(name) {
                     check_attach_copy_mode(branch, requested)?;
                 }
-                if let Some(requested) = requested_namespace_keys.get(name) {
+                if let Some(requested) = requested_specs.get(name) {
                     database_branches::check_attach_namespace(
                         branch,
-                        requested.as_deref(),
+                        requested.dedicated_namespace_key.as_deref(),
                         api_namespace,
                         &subtask,
+                    )?;
+                    database_branches::check_attach_redis_cluster(
+                        branch,
+                        requested,
+                        api_namespace,
                     )?;
                 }
             }
@@ -1820,31 +1835,8 @@ where
 
         let split_queues = &layer_config.feature.split_queues;
 
-        // One feature per broker (Azure Service Bus shipped without one, so it has no gate);
-        // brokers added later were born with jq, so only the early ones gate jq separately.
-        const BROKER_FEATURES: [(QueueKind, NewOperatorFeature); 9] = [
-            (QueueKind::Sqs, NewOperatorFeature::SqsQueueSplitting),
-            (QueueKind::Kafka, NewOperatorFeature::KafkaQueueSplitting),
-            (QueueKind::Rmq, NewOperatorFeature::RmqQueueSplitting),
-            (
-                QueueKind::GcpPubSub,
-                NewOperatorFeature::GcpPubSubQueueSplitting,
-            ),
-            (
-                QueueKind::Temporal,
-                NewOperatorFeature::TemporalQueueSplitting,
-            ),
-            (
-                QueueKind::RedisPubSub,
-                NewOperatorFeature::RedisPubSubQueueSplitting,
-            ),
-            (QueueKind::BullMq, NewOperatorFeature::BullMqQueueSplitting),
-            (QueueKind::Nats, NewOperatorFeature::NatsQueueSplitting),
-            (
-                QueueKind::NatsPubSub,
-                NewOperatorFeature::NatsPubSubQueueSplitting,
-            ),
-        ];
+        // Brokers added after the first ones were born with jq, so only the early ones gate jq
+        // separately.
         const JQ_FEATURES: [(QueueKind, NewOperatorFeature); 3] = [
             (
                 QueueKind::Sqs,
@@ -1860,8 +1852,13 @@ where
             ),
         ];
 
-        for (kind, feature) in BROKER_FEATURES {
-            if split_queues.of_kind(kind).next().is_some() {
+        for kind in split_queues.kinds() {
+            // Azure Service Bus shipped without a feature of its own, so older operators that
+            // split it don't advertise one, and it has no gate.
+            if kind == QueueKind::AzureServiceBus {
+                continue;
+            }
+            if let Some(feature) = NewOperatorFeature::queue_splitting(kind) {
                 self.operator.spec.require_feature(feature)?;
             }
         }
@@ -1958,7 +1955,7 @@ where
 /// pre-checking them would falsely reject dialects that actually work on operators already in the
 /// field; those instead rely on the operator marking the branch `Failed` (see the branch database
 /// controller's dispatch).
-fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperatorFeature> {
+pub fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOperatorFeature> {
     match config {
         DatabaseBranchConfig::Pg(_) => Some(NewOperatorFeature::PgBranching),
         DatabaseBranchConfig::Mysql(_) => Some(NewOperatorFeature::MySqlBranching),
