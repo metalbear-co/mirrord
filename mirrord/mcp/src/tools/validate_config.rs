@@ -333,6 +333,9 @@ fn up_issue(error: UpError) -> ConfigIssue {
         UpError::ContainerRunDirectory { service } => {
             format!("/services/{}/run/directory", escape_pointer_token(service))
         }
+        UpError::ModeName(ModeNameError::Builtin(name)) => {
+            format!("/modes/{}", escape_pointer_token(name))
+        }
         _ => String::new(),
     };
 
