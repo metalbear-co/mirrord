@@ -1,0 +1,78 @@
+name: Scan Release Images
+
+# Trivy scan of the agent and CLI images, for the latest release. Each report is attached to
+# the GitHub release, so it can be shared on request. The job fails when an image has a critical
+# or high finding with a fix available.
+# The release job uses GITHUB_TOKEN, which does not trigger `release` events, so
+# the scan follows the `Release` run instead. The daily run finds new CVEs in released images.
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  schedule:
+    - cron: "30 3 * * *" # Daily 03:30 UTC
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release to scan (default is the latest)
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [mirrord, mirrord-cli]
+    steps:
+      - name: Find the release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VERSION" ]; then
+            VERSION=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.75.0
+          image-ref: ghcr.io/metalbear-co/${{ matrix.image }}:${{ steps.release.outputs.version }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          format: json
+          output: trivy.json
+          timeout: 15m
+
+      - name: Report findings
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ matrix.image }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          REPORT="trivy-$IMAGE-$VERSION.md"
+          {
+            echo "### ghcr.io/metalbear-co/$IMAGE:$VERSION"
+            echo
+            echo "Trivy v0.75.0, critical and high, scanned $(date -u +%Y-%m-%dT%H:%MZ)."
+            echo
+            echo "| Severity | ID | Package | Installed | Fixed in | Target |"
+            echo "|---|---|---|---|---|---|"
+            jq -r '.Results[]? | .Target as $t | .Vulnerabilities[]? |
+              "| \(.Severity) | \(.VulnerabilityID) | `\(.PkgName)` | \(.InstalledVersion) | \(.FixedVersion // "no fix") | \($t) |"' trivy.json | sort -u
+          } > "$REPORT"
+          cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+          gh release upload "$VERSION" "$REPORT" --repo "$GITHUB_REPOSITORY" --clobber
+          FIXABLE=$(jq '[.Results[]?.Vulnerabilities[]? | select((.FixedVersion // "") != "")] | length' trivy.json)
+          if [ "$FIXABLE" -gt 0 ]; then
+            echo "::error::$IMAGE:$VERSION has $FIXABLE critical or high findings with a fix"
+            exit 1
+          fi
