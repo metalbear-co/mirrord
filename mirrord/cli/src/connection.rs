@@ -91,10 +91,56 @@ where
         .await?
         .ok_or(CliError::OperatorNotInstalled)?;
     api.check_license_validity(&subtask)?;
-    api.check_serverless_sessions_manager_served()?;
+    if let Err(error) = api.check_serverless_sessions_manager_served() {
+        if let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error {
+            report_local_feature_gate(api, *feature, layer_config, progress, analytics).await;
+        }
+        return Err(error.into());
+    }
     subtask.success(Some("operator sessions-manager available"));
 
     Ok(api.client().clone())
+}
+
+/// Operations using Kubernetes credentials directly need a mirrord certificate only to
+/// attribute a local paid refusal. Credential or reporting failures must not hide the refusal
+/// or delay it indefinitely.
+#[mirrord_macros::boxed_future]
+pub(crate) async fn report_local_feature_gate<P, R>(
+    operator_api: OperatorApi<NoClientCert>,
+    feature: NewOperatorFeature,
+    config: &LayerConfig,
+    progress: &P,
+    analytics: &mut R,
+) where
+    P: Progress,
+    R: Reporter,
+{
+    if operator_api
+        .operator()
+        .spec
+        .supported_features()
+        .contains(&NewOperatorFeature::LicenseGateReporting)
+        .not()
+    {
+        return;
+    }
+
+    let report = async {
+        let api = operator_api
+            .with_client_certificate(analytics, progress, config)
+            .await
+            .into_certified()?;
+        api.cli_gated_feature(feature).await;
+        Ok::<(), OperatorApiError>(())
+    };
+    match tokio::time::timeout(Duration::from_secs(2), report).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            tracing::debug!(%feature, %error, "Could not prepare credentials for paid-feature reporting");
+        }
+        Err(_) => tracing::debug!(%feature, "Paid-feature reporting timed out"),
+    }
 }
 
 /// Whether a session with a given config can use the mirrord operator, before anything is
@@ -234,6 +280,17 @@ where
             "Agent configuration is ignored when using the mirrord operator. \
              Agent configuration is managed by the cluster admin.",
         );
+    }
+
+    if layer_config.multi_cluster == Some(true)
+        && let Err(error @ OperatorApiError::LocalFeatureNotLicensed { .. }) = api
+            .operator()
+            .spec
+            .require_feature(NewOperatorFeature::MultiClusterPrimary)
+    {
+        api.cli_gated_feature(NewOperatorFeature::MultiClusterPrimary)
+            .await;
+        return Err(error.into());
     }
 
     let is_multi_cluster = api
