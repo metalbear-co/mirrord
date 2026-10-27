@@ -1482,12 +1482,13 @@ impl LayerConfig {
         }
 
         // targetless with branches - the preview is its branch databases and runs no pod, so
-        // nothing can receive traffic, consume queues, scale, or idle. Without branches a
-        // missing target is the CLI's call: `preview status` and friends need none.
+        // nothing can receive traffic, consume queues, mount files, scale, or idle. Without
+        // branches a missing target is the CLI's call: `preview status` and friends need none.
 
-        let is_targetless = matches!(self.target.path, None | Some(Target::Targetless));
+        let branch_only = matches!(self.target.path, None | Some(Target::Targetless))
+            && !self.feature.db_branches.is_empty();
 
-        if is_targetless && !self.feature.db_branches.is_empty() {
+        if branch_only {
             if self.feature.preview.idle.is_enabled() {
                 return Err(ConfigError::Conflict(
                     "`feature.preview.idle` cannot be used in a preview without a target: it \
@@ -1496,28 +1497,60 @@ impl LayerConfig {
                 ));
             }
 
+            let ignored_without_target = |field: &str, because: &str| {
+                format!(
+                    "`{field}` is ignored in a preview without a target: it only provisions \
+                     branch databases and runs no pod {because}."
+                )
+            };
+
             if self.feature.network.incoming != default.feature.network.incoming {
-                context.add_warning(
-                    "`feature.network.incoming` is ignored in a preview without a target: it \
-                     only provisions branch databases and runs no pod to receive traffic."
-                        .to_owned(),
-                );
+                context.add_warning(ignored_without_target(
+                    "feature.network.incoming",
+                    "to receive traffic",
+                ));
             }
 
             if self.feature.split_queues.is_set() {
-                context.add_warning(
-                    "`feature.split_queues` is ignored in a preview without a target: it only \
-                     provisions branch databases and runs no pod to route messages to."
-                        .to_owned(),
-                );
+                context.add_warning(ignored_without_target(
+                    "feature.split_queues",
+                    "to route messages to",
+                ));
+            }
+
+            if self.feature.kafka_branch {
+                context.add_warning(ignored_without_target(
+                    "feature.kafka_branch",
+                    "to point at the branch broker",
+                ));
             }
 
             if self.feature.preview.replicas != default.feature.preview.replicas {
-                context.add_warning(ignored("feature.preview.replicas"));
+                context.add_warning(ignored_without_target(
+                    "feature.preview.replicas",
+                    "to scale",
+                ));
             }
 
             if self.feature.preview.image.is_some() {
-                context.add_warning(ignored("feature.preview.image"));
+                context.add_warning(ignored_without_target(
+                    "feature.preview.image",
+                    "to run the image in",
+                ));
+            }
+
+            if !self.feature.preview.config_mounts.is_empty() {
+                context.add_warning(ignored_without_target(
+                    "feature.preview.config_mounts",
+                    "to mount them in",
+                ));
+            }
+
+            if !self.feature.preview.secret_mounts.is_empty() {
+                context.add_warning(ignored_without_target(
+                    "feature.preview.secret_mounts",
+                    "to mount them in",
+                ));
             }
         }
 
@@ -1535,6 +1568,16 @@ impl LayerConfig {
                  `feature.split_queues`, otherwise nothing can ever wake the idle session."
                     .to_owned(),
             ));
+        }
+
+        // The general checks refuse steal for a targetless agent, but a branch-only preview
+        // sends no incoming at all (the CLI drops it, warned about above), so check the config
+        // as it is sent: with the default incoming. This keeps `target: "targetless"` and no
+        // `target` behaving the same.
+        if branch_only {
+            let mut as_sent = self.clone();
+            as_sent.feature.network.incoming = default.feature.network.incoming;
+            return as_sent.verify(context);
         }
 
         self.verify(context)
@@ -2979,40 +3022,50 @@ mod tests {
     /// settings are reported as ignored and idle, which needs a pod to scale, is refused.
     #[test]
     fn targetless_preview_with_branches_warns_about_pod_settings() {
-        let config = ConfigType::Json.parse(
-            r#"{
-                "feature": {
-                    "preview": { "replicas": 2 },
-                    "network": { "incoming": "steal" },
-                    "db_branches": [{
-                        "type": "pg",
-                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
-                    }]
-                }
-            }"#,
-        );
+        // Written both ways: `target` left out and `target: "targetless"`. Steal would be
+        // refused for a targetless agent, but a branch-only preview never sends incoming.
+        for target in ["", r#""target": "targetless","#] {
+            let config = ConfigType::Json.parse(&format!(
+                r#"{{
+                    {target}
+                    "feature": {{
+                        "preview": {{
+                            "replicas": 2,
+                            "config_mounts": [{{ "from_file": "./app.yaml", "mount_at": "/etc/app.yaml" }}]
+                        }},
+                        "network": {{ "incoming": "steal" }},
+                        "kafka_branch": true,
+                        "db_branches": [{{
+                            "type": "pg",
+                            "connection": {{ "url": {{ "type": "secret", "name": "pg", "key": "url" }} }}
+                        }}]
+                    }}
+                }}"#,
+            ));
 
-        let mut context = ConfigContext::default();
-        let resolved = config
-            .generate_config(&mut context)
-            .expect("config generation should succeed before verification");
-        resolved
-            .verify_for_preview_env(&mut context)
-            .expect("branches with self-contained sources need no target");
+            let mut context = ConfigContext::default();
+            let resolved = config
+                .generate_config(&mut context)
+                .expect("config generation should succeed before verification");
+            resolved
+                .verify_for_preview_env(&mut context)
+                .expect("branches with self-contained sources need no target");
 
-        let warnings = context.into_warnings();
-        assert!(
-            warnings
-                .iter()
-                .any(|warning| warning.contains("`feature.preview.replicas` is ignored")),
-            "unexpected warnings: {warnings:?}"
-        );
-        assert!(
-            warnings
-                .iter()
-                .any(|warning| warning.contains("`feature.network.incoming` is ignored")),
-            "unexpected warnings: {warnings:?}"
-        );
+            let warnings = context.into_warnings();
+            for field in [
+                "feature.preview.replicas",
+                "feature.network.incoming",
+                "feature.kafka_branch",
+                "feature.preview.config_mounts",
+            ] {
+                assert!(
+                    warnings
+                        .iter()
+                        .any(|warning| warning.contains(&format!("`{field}` is ignored"))),
+                    "no warning for {field} with target {target:?}: {warnings:?}"
+                );
+            }
+        }
 
         let config = ConfigType::Json.parse(
             r#"{

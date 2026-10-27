@@ -236,6 +236,35 @@ impl PreparedPreview {
         auto_queue_splitting: bool,
         progress: &ProgressTracker,
     ) -> CliResult<Self> {
+        // A preview without a target is its branch databases: the operator provisions them and
+        // keeps them for the preview's TTL, and runs no pod. So the target may only be left out
+        // when there are branches to provision, and nothing that needs a pod can come along.
+        let config_target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+        let targetless = matches!(config_target, Target::Targetless);
+        if targetless {
+            if layer_config.feature.db_branches.is_empty() {
+                return Err(CliError::PreviewTargetRequired);
+            }
+            if !sources.is_empty() {
+                return Err(CliError::UnsupportedTargetConfig(
+                    "`--resource` and `--chart` need a target workload to run the manifests \
+                     against; set a `target` or leave them out"
+                        .to_owned(),
+                ));
+            }
+            // The config check already warned about these. Dropped here, before the feature
+            // check and the file reads below, so an unused queue split is not held against the
+            // operator and an unused mount file is never opened.
+            layer_config.feature.split_queues = Default::default();
+            layer_config.feature.kafka_branch = false;
+            layer_config.feature.preview.secret_mounts.clear();
+            layer_config.feature.preview.config_mounts.clear();
+        }
+
         operator_api.check_feature_support(&layer_config, auto_queue_splitting)?;
 
         if !sources.is_empty() {
@@ -295,33 +324,8 @@ impl PreparedPreview {
 
         let mut subtask = progress.subtask("preparing preview session");
 
-        // Owned, like the image below: `PreparedPreview` keeps them for `start`.
-        //
-        // A preview without a target is its branch databases: the operator provisions them and
-        // keeps them for the preview's TTL, and runs no pod. So the target may only be left out
-        // when there are branches to provision, and nothing that needs a pod can come along.
-        let config_target = layer_config
-            .target
-            .path
-            .clone()
-            .unwrap_or(Target::Targetless);
-        let targetless = matches!(config_target, Target::Targetless);
-        if targetless {
-            if layer_config.feature.db_branches.is_empty() {
-                subtask.failure(None);
-                return Err(CliError::PreviewTargetRequired);
-            }
-            if !sources.is_empty() {
-                subtask.failure(None);
-                return Err(CliError::UnsupportedTargetConfig(
-                    "`--resource` and `--chart` need a target workload to run the manifests \
-                     against; set a `target` or leave them out"
-                        .to_owned(),
-                ));
-            }
-        }
-
-        // With no pod to run there is no image to run it from.
+        // Owned, like the target above: `PreparedPreview` keeps them for `start`. With no pod to
+        // run there is no image to run it from.
         let image = match layer_config.feature.preview.image.clone() {
             Some(image) => image,
             None if targetless => String::new(),
@@ -383,17 +387,13 @@ impl PreparedPreview {
             (incoming, None)
         };
 
-        let session_target = if targetless {
-            SessionTarget::targetless()
-        } else {
-            resolve_config_target(
-                &config_target,
-                operator_api.client(),
-                layer_config.target.namespace.as_deref(),
-            )
-            .await
-            .inspect_err(|_| subtask.failure(None))?
-        };
+        let session_target = resolve_config_target(
+            &config_target,
+            operator_api.client(),
+            layer_config.target.namespace.as_deref(),
+        )
+        .await
+        .inspect_err(|_| subtask.failure(None))?;
 
         // Planned before an existing session is replaced. `plan` dry-runs the manifests and rejects
         // a template that would widen the preview's access, so either failure leaves the running
@@ -449,7 +449,11 @@ impl PreparedPreview {
             std::mem::take(&mut layer_config.feature.preview.secret_mounts),
             &mut secret_values,
         )?;
-        let env =
+        // Env vars go to the preview pod, so without one there is nothing to send and no env
+        // file to read.
+        let env = if targetless {
+            None
+        } else {
             PreviewEnvVarsConfig::from_config(&layer_config.feature.env).map_err(|error| {
                 CliError::EnvFileAccessError(
                     layer_config
@@ -460,7 +464,8 @@ impl PreparedPreview {
                         .unwrap_or_default(),
                     error,
                 )
-            })?;
+            })?
+        };
         let config_mounts = std::mem::take(&mut layer_config.feature.preview.config_mounts)
             .into_iter()
             .map(|m| m.resolve().map(Into::into))
@@ -480,17 +485,6 @@ impl PreparedPreview {
             subtask.warning(&temporal_mirror_warning(&id));
         }
 
-        // Queue splits route messages to the preview pod, and there is none without a target
-        // (the config check already warned about them).
-        let queue_splitting = if targetless {
-            None
-        } else {
-            PreviewQueueSplittingConfig::from_config(
-                &layer_config.feature.split_queues,
-                layer_config.feature.kafka_branch,
-            )
-        };
-
         let spec = PreviewSessionSpec {
             image,
             key: layer_config.key.as_str().to_owned(),
@@ -498,7 +492,10 @@ impl PreparedPreview {
             ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
             replicas: layer_config.feature.preview.replicas,
             incoming,
-            queue_splitting,
+            queue_splitting: PreviewQueueSplittingConfig::from_config(
+                &layer_config.feature.split_queues,
+                layer_config.feature.kafka_branch,
+            ),
             db_branching: None,
             env,
             labels: PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),
@@ -1665,6 +1662,11 @@ async fn resolve_config_target(
 ) -> CliResult<SessionTarget> {
     if let Target::Label(label_target) = config_target {
         return Ok(label_session_target(label_target));
+    }
+    // A branch-only preview has no workload to look up; start, stop and logs all resolve to the
+    // same placeholder so a `target: "targetless"` config finds the sessions it started.
+    if matches!(config_target, Target::Targetless) {
+        return Ok(SessionTarget::targetless());
     }
 
     let ns = namespace.unwrap_or(client.default_namespace());
