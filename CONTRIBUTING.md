@@ -881,7 +881,7 @@ Releases are fully automated. Under normal circumstances no manual steps are req
    - There is at least one entry in `changelog.d/`.
    - The last release is older than 7 days.
 2. When both conditions are met, the [Auto Release PR workflow](/.github/workflows/auto-release-pr.yaml) opens (or updates) a PR from `releases/<version>` to `main`. The PR:
-   - Bumps the workspace version in `Cargo.toml` (patch bump if all changes are `fixed`/`internal`; minor bump otherwise).
+   - Bumps the workspace version in `Cargo.toml` (patch bump if all changes are `fixed`/`security`/`internal`; minor bump otherwise).
    - Updates `Cargo.lock`.
    - Generates `CHANGELOG.md` by consuming the `changelog.d/` fragments.
 3. Review the release PR, fix any changelog issues or typos, then merge it.
