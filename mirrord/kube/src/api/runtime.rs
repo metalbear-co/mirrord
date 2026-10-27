@@ -610,48 +610,76 @@ mod tests {
     use k8s_openapi::api::{apps::v1::Deployment, core::v1::HostIP};
     use kube::client::Body;
     use mirrord_config::target::{
-        deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, service::ServiceTarget,
+        deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget,
+        service::ServiceTarget,
     };
     use rstest::rstest;
 
     use super::*;
+    use crate::{api::kubernetes::rollout::Rollout, resolved::ResolvedResource};
+
+    fn assert_pod_list_selector(request: &Request<Body>, expected_selector: &str) {
+        assert_eq!(request.method(), Method::GET);
+        assert_eq!(request.uri().path(), "/api/v1/namespaces/workloads/pods");
+        let selectors: Vec<_> = request
+            .uri()
+            .query()
+            .unwrap_or_default()
+            .split('&')
+            .filter_map(|parameter| parameter.strip_prefix("labelSelector="))
+            .collect();
+        assert_eq!(selectors.len(), 1);
+        let mut parts = selectors.first().unwrap().split('%');
+        let mut decoded_selector = parts.next().unwrap().replace('+', " ");
+        for part in parts {
+            let (byte, rest) = part.split_at(2);
+            decoded_selector.push(char::from(u8::from_str_radix(byte, 16).unwrap()));
+            decoded_selector.push_str(&rest.replace('+', " "));
+        }
+        assert_eq!(decoded_selector, expected_selector);
+    }
+
+    fn pod_list_response() -> Response<Body> {
+        Response::new(Body::from(
+            serde_json::to_vec(&serde_json::json!({
+                "apiVersion": "v1", "kind": "PodList", "metadata": {}, "items": [],
+            }))
+            .unwrap(),
+        ))
+    }
 
     #[rstest]
-    #[case::mixed(Some(serde_json::json!({"app": "api"})), "app=api,tier in (backend,worker)")]
-    #[case::expressions_only(None, "tier in (backend,worker)")]
+    #[case::mixed(serde_json::json!({"matchLabels": {"app": "api"}, "matchExpressions": [{"key": "tier", "operator": "In", "values": ["backend", "worker"]}]}), Some("app=api,tier in (backend,worker)"))]
+    #[case::expressions_only(serde_json::json!({"matchExpressions": [{"key": "tier", "operator": "In", "values": ["backend", "worker"]}]}), Some("tier in (backend,worker)"))]
+    #[case::empty_object(serde_json::json!({}), None)]
+    #[case::empty_expressions(serde_json::json!({"matchExpressions": []}), None)]
+    #[case::empty_labels(serde_json::json!({"matchLabels": {}}), Some(""))]
     #[tokio::test]
-    async fn deployment_pod_list_preserves_selector_expressions(
-        #[case] match_labels: Option<serde_json::Value>,
-        #[case] expected_selector: &str,
+    async fn deployment_pod_list_selector(
+        #[case] selector: serde_json::Value,
+        #[case] expected_selector: Option<&str>,
+        #[values(false, true)] resolved: bool,
     ) {
-        let mut selector = serde_json::json!({
-            "matchExpressions": [{"key": "tier", "operator": "In", "values": ["backend", "worker"]}],
-        });
-        if let Some(match_labels) = match_labels {
-            selector
-                .as_object_mut()
-                .unwrap()
-                .insert("matchLabels".to_owned(), match_labels);
-        }
         let deployment: Deployment = serde_json::from_value(serde_json::json!({
             "apiVersion": "apps/v1",
             "kind": "Deployment",
             "metadata": {"name": "api", "namespace": "workloads"},
-            "spec": {
-                "selector": selector,
-                "template": {
-                    "metadata": {"labels": {"app": "api", "tier": "backend"}},
-                    "spec": {"containers": [{"name": "api", "image": "api:latest"}]},
-                },
-            },
+            "spec": {"selector": selector, "template": {}},
         }))
         .unwrap();
         let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
         let client = Client::new(service, "default");
 
         tokio::time::timeout(Duration::from_secs(5), async {
-            let (_pods, ()) =
-                tokio::try_join!(DeploymentTarget::get_pods(&deployment, &client), async {
+            let (result, ()) = tokio::join!(
+                async {
+                    if resolved {
+                        ResolvedResource::<Deployment>::get_pods(&deployment, &client).await
+                    } else {
+                        DeploymentTarget::get_pods(&deployment, &client).await
+                    }
+                },
+                async {
                     let (request, send) = handle.next_request().await.unwrap();
                     assert_eq!(request.method(), Method::GET);
                     assert_eq!(
@@ -662,37 +690,84 @@ mod tests {
                         serde_json::to_vec(&deployment).unwrap(),
                     )));
 
-                    let (request, send) = handle.next_request().await.unwrap();
-                    assert_eq!(request.method(), Method::GET);
-                    assert_eq!(request.uri().path(), "/api/v1/namespaces/workloads/pods");
-                    let selectors: Vec<_> = request
-                        .uri()
-                        .query()
-                        .unwrap()
-                        .split('&')
-                        .filter_map(|parameter| parameter.strip_prefix("labelSelector="))
-                        .collect();
-                    assert_eq!(selectors.len(), 1);
-                    let mut parts = selectors.first().unwrap().split('%');
-                    let mut decoded_selector = parts.next().unwrap().replace('+', " ");
-                    for part in parts {
-                        let (byte, rest) = part.split_at(2);
-                        decoded_selector.push(char::from(u8::from_str_radix(byte, 16).unwrap()));
-                        decoded_selector.push_str(&rest.replace('+', " "));
+                    if let Some(expected_selector) = expected_selector {
+                        let (request, send) = handle.next_request().await.unwrap();
+                        assert_pod_list_selector(&request, expected_selector);
+                        send.send_response(pod_list_response());
                     }
-                    assert_eq!(decoded_selector, expected_selector);
-                    send.send_response(Response::new(Body::from(
-                        serde_json::to_vec(&serde_json::json!({
-                            "apiVersion": "v1", "kind": "PodList", "metadata": {}, "items": [],
-                        }))
-                        .unwrap(),
-                    )));
-                    Ok(())
-                },)
-                .unwrap();
+                },
+            );
+            if expected_selector.is_some() {
+                result.unwrap();
+            } else {
+                assert!(
+                    matches!(result, Err(KubeApiError::MalformedResource(ref message))
+                    if message.contains(".spec.selector.matchLabels"))
+                );
+            }
         })
         .await
         .expect("deployment pod-list request timed out");
+    }
+
+    #[rstest]
+    #[case::mixed(Some(serde_json::json!({"app": "api"})), "app=api,tier in (backend,worker)")]
+    #[case::expressions_only(None, "tier in (backend,worker)")]
+    #[tokio::test]
+    async fn rollout_pod_list_preserves_selector_expressions(
+        #[case] match_labels: Option<serde_json::Value>,
+        #[case] expected_selector: &str,
+        #[values(false, true)] referenced: bool,
+    ) {
+        let mut selector = serde_json::json!({
+            "matchExpressions": [{"key": "tier", "operator": "In", "values": ["backend", "worker"]}],
+        });
+        if let Some(match_labels) = match_labels {
+            selector
+                .as_object_mut()
+                .unwrap()
+                .insert("matchLabels".to_owned(), match_labels);
+        }
+        let rollout: Rollout = serde_json::from_value(serde_json::json!({
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Rollout",
+            "metadata": {"name": "api", "namespace": "workloads"},
+            "spec": if referenced {
+                serde_json::json!({"workloadRef": {"apiVersion": "apps/v1", "kind": "Deployment", "name": "api"}})
+            } else {
+                serde_json::json!({"selector": selector})
+            },
+        })).unwrap();
+        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let client = Client::new(service, "default");
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (_pods, ()) = tokio::try_join!(RolloutTarget::get_pods(&rollout, &client), async {
+                if referenced {
+                    let (request, send) = handle.next_request().await.unwrap();
+                    assert_eq!(request.method(), Method::GET);
+                    assert_eq!(
+                        request.uri().path(),
+                        "/apis/apps/v1/namespaces/workloads/deployments/api"
+                    );
+                    send.send_response(Response::new(Body::from(
+                        serde_json::to_vec(&serde_json::json!({
+                            "apiVersion": "apps/v1", "kind": "Deployment",
+                            "metadata": {"name": "api", "namespace": "workloads"},
+                            "spec": {"selector": selector, "template": {}},
+                        }))
+                        .unwrap(),
+                    )));
+                }
+                let (request, send) = handle.next_request().await.unwrap();
+                assert_pod_list_selector(&request, expected_selector);
+                send.send_response(pod_list_response());
+                Ok(())
+            })
+            .unwrap();
+        })
+        .await
+        .expect("rollout pod-list request timed out");
     }
 
     #[test]
