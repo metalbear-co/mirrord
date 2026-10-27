@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::source::MirrordConfigSource;
 
+pub(crate) const JAVA_OPTIONS_ENV: &str = "JDK_JAVA_OPTIONS";
+
 /// Sensible default behaviors that help most users. Disable individual flags only if they conflict
 /// with your setup.
 ///
@@ -21,6 +23,18 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "MagicFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct MagicConfig {
+    /// #### feature.magic.java_agents {#feature-magic-java_agents}
+    ///
+    /// Remote Java agents often refer to files that do not exist on the local machine. When
+    /// enabled, mirrord removes `-javaagent:` options from the remote `JDK_JAVA_OPTIONS` value
+    /// before it starts the local process.
+    ///
+    /// Disable this only if the remote Java agent is also available locally.
+    ///
+    /// Defaults to `true`.
+    #[config(default = true)]
+    pub java_agents: bool,
+
     /// #### feature.magic.aws {#feature-magic-aws}
     ///
     /// The AWS CLI prefers local credentials (e.g. `~/.aws`, `AWS_PROFILE`) over the remote pod's
@@ -90,8 +104,13 @@ pub struct MagicConfig {
     pub turbo: bool,
 }
 
+pub(crate) fn without_java_agents(_options: &str) -> Option<String> {
+    todo!()
+}
+
 impl CollectAnalytics for &MagicConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
+        analytics.add("java_agents", self.java_agents);
         analytics.add("aws", self.aws);
         analytics.add("auto_mount", self.auto_mount);
         analytics.add("turbo", self.turbo);

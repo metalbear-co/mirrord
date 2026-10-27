@@ -560,6 +560,8 @@ fn fetch_env_vars() -> HashMap<String, String> {
         Default::default()
     };
 
+    setup().layer_config().sanitize_remote_env(&mut env_vars);
+
     if let Some(file) = &setup().env_config().env_file {
         let envs_from_file = dotenvy::from_path_iter(file)
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
