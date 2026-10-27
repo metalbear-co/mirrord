@@ -24,6 +24,9 @@ ignore = [
   "RUSTSEC-2026-0367",
   "RUSTSEC-2026-0368",
   "RUSTSEC-2026-0369",
+  # crypto-bigint timing side channels, held at 0.5 by apple-codesign's elliptic-curve 0.13. We only use it to
+  # re-sign binaries locally, with no secrets an attacker could observe.
+  "RUSTSEC-2026-0387",
 ]
 
 [licenses]
