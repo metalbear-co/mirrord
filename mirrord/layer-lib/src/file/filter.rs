@@ -363,4 +363,54 @@ mod tests {
 
         assert_eq!(mode, Some(FileMode::ReadOnly(false)));
     }
+
+    /// The working directory's patterns, built the way [`super::generate_local_set`] builds them.
+    #[cfg(unix)]
+    fn cwd_set(cwd: &str) -> regex::RegexSet {
+        regex::RegexSetBuilder::new(super::read_local_by_default::cwd_patterns(
+            std::path::Path::new(cwd),
+        ))
+        .case_insensitive(true)
+        .build()
+        .expect("the working directory patterns are valid regexes")
+    }
+
+    /// Resolving a path under the working directory walks its ancestors (Node's `realpathSync`
+    /// `lstat`s each one), so they stay local even when the target doesn't have them.
+    #[cfg(unix)]
+    #[rstest]
+    #[case::parent("/workspace/demo")]
+    #[case::grandparent("/workspace")]
+    #[case::trailing_slash("/workspace/")]
+    #[case::cwd("/workspace/demo/svc")]
+    #[case::under_cwd("/workspace/demo/svc/app.mjs")]
+    fn the_working_directory_and_its_ancestors_are_local(#[case] path: &str) {
+        assert!(
+            cwd_set("/workspace/demo/svc").is_match(path),
+            "{path} is on the way to the working directory, so it must be local"
+        );
+    }
+
+    /// Only the ancestors themselves are local: their other entries still follow the usual rules.
+    #[cfg(unix)]
+    #[rstest]
+    #[case::beside_an_ancestor("/workspace/local-only.txt")]
+    #[case::sibling_dir("/workspace/demo/other/config.json")]
+    #[case::shared_prefix("/workspace/demo-old")]
+    fn entries_beside_the_ancestors_are_not_made_local(#[case] path: &str) {
+        assert!(
+            !cwd_set("/workspace/demo/svc").is_match(path),
+            "{path} is not on the way to the working directory, so these patterns must not match it"
+        );
+    }
+
+    /// Root as the working directory adds no patterns, or every path would be local.
+    #[cfg(unix)]
+    #[test]
+    fn root_as_the_working_directory_adds_no_patterns() {
+        assert!(
+            super::read_local_by_default::cwd_patterns(std::path::Path::new("/")).is_empty(),
+            "a root working directory must not make every path local"
+        );
+    }
 }

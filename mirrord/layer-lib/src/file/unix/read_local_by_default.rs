@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, path::Path};
 
 use regex::RegexSetBuilder;
 
@@ -87,17 +87,8 @@ pub fn regex_set_builder() -> RegexSetBuilder {
     .map(|s| s.to_string())
     .collect();
 
-    if let Ok(cwd) = env::current_dir()
-        // We exclude root because a lot of containers use it as
-        // WORKDIR and that makes *everything* local, which is confusing.
-        && cwd.as_os_str().as_encoded_bytes() != b"/"
-    {
-        patterns.push(format!(
-            "^{}(/|$)",
-            // We trim any trailing '/' and add it above, so that the regex is correct whether
-            // current_dir returns a trailing '/' or not.
-            regex::escape(cwd.to_string_lossy().trim_end_matches('/'))
-        ));
+    if let Ok(cwd) = env::current_dir() {
+        patterns.extend(cwd_patterns(&cwd));
     }
     if let Ok(executable) = env::current_exe() {
         patterns.push(format!("{}$", regex::escape(&executable.to_string_lossy())));
@@ -112,4 +103,33 @@ pub fn regex_set_builder() -> RegexSetBuilder {
     }
 
     RegexSetBuilder::new(patterns)
+}
+
+/// The patterns that keep the working directory local: everything under it, and each of its
+/// ancestors by exact match.
+///
+/// Resolving a path under the working directory walks its ancestors first: Node's
+/// `realpathSync` calls `lstat` on `/workspace`, then `/workspace/app`, and so on. If an ancestor
+/// went to the remote, a target without that directory fails the whole walk with `ENOENT`. The
+/// exact match keeps only the directory itself local, so its other entries still follow the
+/// usual rules.
+///
+/// Root gives no patterns: a lot of containers use it as `WORKDIR`, and making *everything*
+/// local is confusing. It's also local by default already.
+pub(crate) fn cwd_patterns(cwd: &Path) -> Vec<String> {
+    if cwd.as_os_str().as_encoded_bytes() == b"/" {
+        return Vec::new();
+    }
+
+    // `current_dir` may or may not end in '/', so trim it and add our own.
+    let escape = |dir: &Path| regex::escape(dir.to_string_lossy().trim_end_matches('/'));
+
+    let mut patterns = vec![format!("^{}(/|$)", escape(cwd))];
+    patterns.extend(
+        cwd.ancestors()
+            .skip(1)
+            .filter(|ancestor| ancestor.parent().is_some())
+            .map(|ancestor| format!("^{}/?$", escape(ancestor))),
+    );
+    patterns
 }
