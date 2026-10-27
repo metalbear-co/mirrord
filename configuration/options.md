@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-10-22T00:00:00.000Z
+lastmod: 2026-10-27T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -2141,6 +2141,22 @@ Redis version/tag to use (default: "7-alpine").
 Used as the container image tag.
 
 Configuration for a remote Redis branch.
+
+#### feature.db_branches[].cluster (type: redis) {#feature-db_branches-redis-cluster}
+
+Run the branch as a one node Redis Cluster instead of a standalone server.
+
+Set this when the application connects with a Redis Cluster client (one that runs
+`CLUSTER SLOTS` / `CLUSTER SHARDS` on connect): such clients refuse a standalone server.
+The branch node owns all 16384 hash slots, so every key the application uses lands on
+it, and the cluster limits apply like on any Redis Cluster: only database `0` exists,
+so `name` must be unset or `0`, and multi key commands must keep all keys in one hash
+slot.
+
+With `copy.mode: all` the source may be a standalone server or a Redis Cluster; from a
+cluster, keys are copied from every master node.
+
+Defaults to `false`.
 
 #### feature.db_branches[].copy (type: redis) {#feature-db_branches-redis-copy}
 
