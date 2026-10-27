@@ -104,8 +104,76 @@ pub struct MagicConfig {
     pub turbo: bool,
 }
 
-pub(crate) fn without_java_agents(_options: &str) -> Option<String> {
-    todo!()
+/// Removes Java agents from [`JAVA_OPTIONS_ENV`] while preserving the original spelling of every
+/// other launcher argument.
+///
+/// Java separates these arguments on ASCII whitespace and removes matching quote pairs. Backslash
+/// and `#` have no special meaning, so a shell command parser cannot safely process this value.
+pub(crate) fn without_java_agents(options: &str) -> Option<String> {
+    const JAVA_AGENT_PREFIX: &str = "-javaagent:";
+
+    // quotes can splice the prefix across quoted and unquoted fragments
+    // this means we have to scan the whole thing if the value contains quotes
+    if !options.contains(JAVA_AGENT_PREFIX) && !options.contains(['\'', '"']) {
+        return None;
+    }
+
+    let mut sanitised_options = Vec::new();
+    let mut token_start = None;
+    let mut unquoted = String::new();
+    let mut quote = None;
+    let mut modified = false;
+
+    // split using the Java launcher's quote rules
+    options.char_indices().for_each(|(index, character)| {
+        if let Some(expected) = quote {
+            if character == expected {
+                quote = None;
+            } else {
+                unquoted.push(character);
+            }
+        } else {
+            match character {
+                '\'' | '"' => {
+                    token_start.get_or_insert(index);
+                    quote = Some(character);
+                }
+                _ if character.is_ascii_whitespace() => {
+                    // only split whitespace if we're not in a quoted section
+                    if let Some(start) = token_start.take() {
+                        if !unquoted.starts_with(JAVA_AGENT_PREFIX) {
+                            sanitised_options.push(&options[start..index]);
+                        } else {
+                            modified = true;
+                        }
+                        unquoted.clear();
+                    }
+                }
+                _ => {
+                    token_start.get_or_insert(index);
+                    unquoted.push(character);
+                }
+            }
+        }
+    });
+
+    // we entered a quoted section but never left, so this env is malformed and we leave it alone
+    if quote.is_some() {
+        return None;
+    }
+
+    // push the final option
+    if let Some(start) = token_start {
+        if !unquoted.starts_with(JAVA_AGENT_PREFIX) {
+            sanitised_options.push(&options[start..]);
+        } else {
+            modified = true;
+        }
+    }
+
+    // return a modified value only if we removed some option(s)
+    let sanitised_value = sanitised_options.join(" ");
+    (modified).then_some(sanitised_value)
 }
 
 impl CollectAnalytics for &MagicConfig {
