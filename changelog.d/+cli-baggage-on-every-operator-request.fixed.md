@@ -1,1 +1,0 @@
-The CLI now sends the configured `baggage` on every request to the operator, not only on the ones that create a session, so commands like `mirrord queues status` reach the same operator instance the session did.
