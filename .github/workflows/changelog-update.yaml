@@ -26,7 +26,7 @@ jobs:
       contents: read
     steps:
       - name: Prepare changelog to be published at /docs/changelog
-        uses: metalbear-co/release-changelog-docs@aaced12d7c95cabc3f126973277686b9dde0fd9d
+        uses: metalbear-co/release-changelog-docs@747e23c4fbb265ddd583a37e709549e1dbfc4e60
         with:
           ref: ${{ inputs.ref }}
           source_token: ${{ github.token }}
