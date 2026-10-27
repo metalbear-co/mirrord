@@ -1019,7 +1019,8 @@ impl NewOperatorFeature {
             | Self::DbBranchesFromSplitConfig
             | Self::DbBranchSecretManagerExtract
             | Self::DbBranchSsmParameter
-            | Self::DbBranchDedicatedNamespace => Some("feature.db_branches"),
+            | Self::DbBranchDedicatedNamespace
+            | Self::RedisClusterBranching => Some("feature.db_branches"),
             Self::PreviewEnv
             | Self::PreviewTlsDelivery
             | Self::PreviewCronJobTarget
