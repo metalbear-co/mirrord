@@ -331,33 +331,41 @@ impl UpConfig {
     /// Doesn't look at the filesystem, so it also serves to validate a config that isn't on disk
     /// (e.g. in `mirrord mcp`); [`load_up_config`] runs it before resolving the services' paths.
     pub fn verify(&self) -> Result<(), UpError> {
-        if let Some(builtin) = self
+        self.verify_all().into_iter().next().map_or(Ok(()), Err)
+    }
+
+    /// Every reason [`Self::verify`] rejects the config for, so `mirrord mcp` can report them all
+    /// at once.
+    pub fn verify_all(&self) -> Vec<UpError> {
+        let builtin_names = self
             .modes
             .keys()
-            .find(|name| ServiceMode::from_name(name).is_some())
-        {
-            return Err(ModeNameError::Builtin(builtin.clone()).into());
-        }
-        for name in self
+            .filter(|name| ServiceMode::from_name(name).is_some())
+            .map(|name| ModeNameError::Builtin(name.clone()).into());
+        let unknown_modes = self
             .services
             .values()
             .map(|service| &service.default_mode)
             .sorted()
-        {
-            ModeConfig::named(&self.modes, name)?;
-        }
+            .filter_map(|name| ModeConfig::named(&self.modes, name).err())
+            .map(UpError::from);
+        let container_directories = self
+            .services
+            .iter()
+            .filter(|(_, service)| {
+                service.run.directory.is_some()
+                    && matches!(service.run.r#type, config::RunType::Container)
+            })
+            .map(|(service, _)| service)
+            .sorted()
+            .map(|service| UpError::ContainerRunDirectory {
+                service: service.clone(),
+            });
 
-        for (service, service_config) in &self.services {
-            if service_config.run.directory.is_some()
-                && matches!(service_config.run.r#type, config::RunType::Container)
-            {
-                return Err(UpError::ContainerRunDirectory {
-                    service: service.clone(),
-                });
-            }
-        }
-
-        Ok(())
+        builtin_names
+            .chain(unknown_modes)
+            .chain(container_directories)
+            .collect()
     }
 }
 

@@ -177,8 +177,8 @@ pub fn validate_config(
                         Ok(config) => {
                             // `check_services` reports an unknown mode at each service using it.
                             let issues = config
-                                .verify()
-                                .err()
+                                .verify_all()
+                                .into_iter()
                                 .filter(|error| {
                                     matches!(
                                         error,
@@ -187,7 +187,6 @@ pub fn validate_config(
                                     .not()
                                 })
                                 .map(up_issue)
-                                .into_iter()
                                 .collect();
                             (issues, Some(config))
                         }
