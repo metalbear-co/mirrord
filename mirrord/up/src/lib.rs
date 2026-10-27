@@ -840,6 +840,7 @@ pub async fn launch(
                 service_name,
                 run,
                 mode: _,
+                incoming: _,
                 default_db_branches: _,
             } = config;
             let config::RunConfig {

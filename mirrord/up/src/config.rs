@@ -758,6 +758,7 @@ impl ServiceConfig {
             service_name: service_name.clone(),
             run: self.run,
             mode: self.default_mode,
+            incoming: mode.incoming,
             default_db_branches,
         })
     }
@@ -961,6 +962,9 @@ pub struct SubprocessCfg {
     /// names the mode in [`validate_targets`] errors and in what `mirrord up` reports about the
     /// service.
     pub mode: Arc<str>,
+    /// How the mode handles incoming traffic, for [`validate_targets`] errors on custom modes,
+    /// whose name doesn't say it.
+    pub incoming: ServiceMode,
     /// `config.feature.db_branches` is the `"*"` `mirrord up` adds for this service's mode, not
     /// one the user set. An operator that can't resolve it drops it rather than failing the run.
     pub default_db_branches: bool,
@@ -985,6 +989,7 @@ pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), ModeError> 
                 .then(|| IncompatibleTarget {
                     service: cfg.service_name.clone(),
                     mode: cfg.mode.clone(),
+                    incoming: cfg.incoming,
                     target_type,
                 })
         })
@@ -1004,6 +1009,8 @@ pub struct IncompatibleTarget {
     pub service: Arc<str>,
     /// Name of the mode the service was configured to run in.
     pub mode: Arc<str>,
+    /// How that mode handles incoming traffic.
+    pub incoming: ServiceMode,
     /// Kind of the target the service resolved to.
     pub target_type: TargetType,
 }
@@ -1013,13 +1020,21 @@ impl std::fmt::Display for IncompatibleTarget {
         let Self {
             service,
             mode,
+            incoming,
             target_type,
         } = self;
 
-        write!(
-            f,
-            "`{service}` is `{mode}` mode with a {target_type} target"
-        )
+        // A built-in mode's name already says how it handles incoming traffic.
+        match ServiceMode::from_name(mode) {
+            Some(_) => write!(
+                f,
+                "`{service}` is `{mode}` mode with a {target_type} target"
+            ),
+            None => write!(
+                f,
+                "`{service}` is `{mode}` mode (`incoming: {incoming}`) with a {target_type} target"
+            ),
+        }
     }
 }
 

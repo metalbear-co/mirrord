@@ -395,6 +395,7 @@ mod tests {
             ModeError::IncompatibleTargets(vec![IncompatibleTarget {
                 service: "svc".into(),
                 mode: ServiceMode::Replace.into(),
+                incoming: ServiceMode::Replace,
                 target_type: TargetType::Targetless,
             }]),
         )));
