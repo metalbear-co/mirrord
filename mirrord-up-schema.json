@@ -655,7 +655,7 @@
       ]
     },
     "ServiceMode": {
-      "description": "Incoming traffic mode for a service. Also used as the mode for splitting the service's queues.",
+      "description": "A built-in mode. Also the `incoming` of a custom mode: how the service handles incoming traffic.",
       "oneOf": [
         {
           "description": "Incoming traffic is split between the local and the original service using HTTP filtering.\n\nUses the service's `http_filter` if set. Otherwise, requests with a header matching the\nregex `baggage: .*mirrord-session={key}.*` go to the local service, where `{key}` is the\nsession key.\n\nWith a workload target and no `db_branches` of its own, the service requests DB branching\n(`db_branches: \"*\"`): it runs against branches of the databases defined on the workload's\n`MirrordSplitConfig`, shared with the other services of the run that use the same ones.",

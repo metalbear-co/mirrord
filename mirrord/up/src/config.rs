@@ -37,7 +37,7 @@ use thiserror::Error;
 
 use crate::{UpError, kube_context::UpKubeContext};
 
-/// Incoming traffic mode for a service. Also used as the mode for splitting the service's queues.
+/// A built-in mode. Also the `incoming` of a custom mode: how the service handles incoming traffic.
 #[derive(
     Clone,
     Copy,
