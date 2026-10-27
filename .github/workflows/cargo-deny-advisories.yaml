@@ -1,0 +1,51 @@
+name: Cargo Deny Advisories
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  push:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - deny.toml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: metalbear-co/cargo-deny-action@76cd80eb775d7bbbd2d80292136d74d39e1b4918
+        with:
+          command-arguments: advisories
+
+  notify-failure:
+    name: "Notify #ci-alerts"
+    # Manual runs report in the Actions UI only.
+    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'push') && needs.advisories.result == 'failure' }}
+    needs: [advisories]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Send Slack notification
+        env:
+          SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_CI_ALERTS_WEBHOOK_URL is not set; cannot notify #ci-alerts."
+            exit 1
+          fi
+
+          run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          text=$(printf ':rotating_light: *New RustSec advisory in `%s`*\n• *Commit:* `%s`\n• *Run:* <%s|Open GitHub Actions>\nBump the crate or add the advisory to `deny.toml` ignores.' \
+            "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$run_url")
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Content-type: application/json' \
+            --data "$payload" \
+            "$SLACK_CI_ALERTS_WEBHOOK_URL"
