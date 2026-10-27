@@ -398,6 +398,9 @@ impl ProtocolConversion<ResolveErrorKindInternal> for &NetError {
             }
             NetError::Timeout => ResolveErrorKindInternal::Timeout,
             NetError::Io(e) => e.kind().convert(),
+            NetError::Truncated | NetError::ForeignClassRecord { .. } => {
+                ResolveErrorKindInternal::Message(self.to_string())
+            }
             _ => {
                 warn!(
                     error = ?self,
