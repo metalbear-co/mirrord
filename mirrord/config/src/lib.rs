@@ -1481,6 +1481,46 @@ impl LayerConfig {
             );
         }
 
+        // targetless with branches - the preview is its branch databases and runs no pod, so
+        // nothing can receive traffic, consume queues, scale, or idle. Without branches a
+        // missing target is the CLI's call: `preview status` and friends need none.
+
+        let is_targetless = matches!(self.target.path, None | Some(Target::Targetless));
+
+        if is_targetless && !self.feature.db_branches.is_empty() {
+            if self.feature.preview.idle.is_enabled() {
+                return Err(ConfigError::Conflict(
+                    "`feature.preview.idle` cannot be used in a preview without a target: it \
+                     only provisions branch databases and has no pods to scale."
+                        .to_owned(),
+                ));
+            }
+
+            if self.feature.network.incoming != default.feature.network.incoming {
+                context.add_warning(
+                    "`feature.network.incoming` is ignored in a preview without a target: it \
+                     only provisions branch databases and runs no pod to receive traffic."
+                        .to_owned(),
+                );
+            }
+
+            if self.feature.split_queues.is_set() {
+                context.add_warning(
+                    "`feature.split_queues` is ignored in a preview without a target: it only \
+                     provisions branch databases and runs no pod to route messages to."
+                        .to_owned(),
+                );
+            }
+
+            if self.feature.preview.replicas != default.feature.preview.replicas {
+                context.add_warning(ignored("feature.preview.replicas"));
+            }
+
+            if self.feature.preview.image.is_some() {
+                context.add_warning(ignored("feature.preview.image"));
+            }
+        }
+
         // feature.preview.idle - needs a wake source, otherwise an idle session could never
         // scale back up.
 
@@ -2933,6 +2973,71 @@ mod tests {
         resolved
             .verify_for_preview_env(&mut context)
             .expect("a label target should be accepted for preview environments");
+    }
+
+    /// A preview without a target only provisions its branch databases, so the pod-bound
+    /// settings are reported as ignored and idle, which needs a pod to scale, is refused.
+    #[test]
+    fn targetless_preview_with_branches_warns_about_pod_settings() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "preview": { "replicas": 2 },
+                    "network": { "incoming": "steal" },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify_for_preview_env(&mut context)
+            .expect("branches with self-contained sources need no target");
+
+        let warnings = context.into_warnings();
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("`feature.preview.replicas` is ignored")),
+            "unexpected warnings: {warnings:?}"
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("`feature.network.incoming` is ignored")),
+            "unexpected warnings: {warnings:?}"
+        );
+
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "preview": { "idle": { "sleep_after_secs": 60 } },
+                    "network": { "incoming": "steal" },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify_for_preview_env(&mut context)
+            .expect_err("idle has no pod to scale without a target");
+        assert!(
+            matches!(&error, ConfigError::Conflict(message) if message.contains("without a target")),
+            "unexpected error: {error}"
+        );
     }
 
     /// Serializes the magic.aws tests that mutate the global `HOME` /

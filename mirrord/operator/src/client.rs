@@ -1026,6 +1026,28 @@ where
             .as_deref()
             .unwrap_or(self.client.default_namespace());
 
+        // Without a target there is no pod to read connection values from, so every source
+        // must stand on its own. Checked before the operator gate so a config that cannot work
+        // anywhere is reported as such, not as a missing operator feature.
+        if matches!(target, Target::Targetless) {
+            if let Some(position) = layer_config
+                .feature
+                .db_branches
+                .iter()
+                .position(DatabaseBranchConfig::reads_target_pod)
+            {
+                return Err(OperatorApiError::UnsupportedTargetConfig(format!(
+                    "`feature.db_branches[{position}]` reads its connection from the target \
+                     pod, but this session has no target; give each connection value as a \
+                     literal, a Kubernetes Secret or ConfigMap, or a secret manager source, or \
+                     set a `target`"
+                )));
+            }
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::TargetlessDbBranches)?;
+        }
+
         // Management-only operators set operator_namespace so the sync controller can
         // pick up CRDs and forward them to the default cluster. When the user forces
         // single-cluster mode we skip that redirect and put CRDs straight into the

@@ -947,6 +947,44 @@ impl DatabaseBranchConfig {
         })
     }
 
+    /// True when any source value is read from the target pod itself (its env, `envFrom`, or a
+    /// ConfigMap found through one of its volumes). A session without a target has no pod to
+    /// read, so the CLI refuses such a branch for it; literal values, Secrets, ConfigMaps named
+    /// directly and secret manager sources resolve without one.
+    pub fn reads_target_pod(&self) -> bool {
+        let params_read_pod = self.all_connection_params().any(|params| {
+            params.all_sources().any(|source| {
+                matches!(
+                    source,
+                    ParamSource::Variable(_)
+                        | ParamSource::Pattern { .. }
+                        | ParamSource::Env { value: None, .. }
+                        | ParamSource::ConfigMap {
+                            config_map: Some(ConfigMapRef::Volume { .. }),
+                            ..
+                        }
+                )
+            })
+        });
+        // A bare `"url": "DATABASE_URL"` names a target env var too.
+        let urls_read_pod = self
+            .database()
+            .map(|database| &database.connection)
+            .into_iter()
+            .chain(self.additional_connections())
+            .any(|connection| match connection {
+                ConnectionSource::FlatUrl { .. } => true,
+                ConnectionSource::Url { url } => matches!(
+                    url,
+                    TargetEnvironmentVariableSource::Env { value: None, .. }
+                        | TargetEnvironmentVariableSource::EnvFrom { .. }
+                ),
+                ConnectionSource::Params(_) => false,
+            });
+
+        params_read_pod || urls_read_pod
+    }
+
     /// True when a param or the `url` is read from AWS SSM Parameter Store. The CLI uses it to
     /// refuse the config on an operator that predates the source kind.
     pub fn uses_ssm_parameter_source(&self) -> bool {
@@ -2701,6 +2739,45 @@ mod tests {
         };
         assert_eq!(local.id.as_deref(), Some("my-branch"));
         assert_eq!(local.local.port, 6380);
+    }
+
+    /// A session without a target can only provision branches whose every value resolves
+    /// without a pod: literals, Secrets, ConfigMaps named directly, secret managers.
+    #[rstest]
+    #[case::flat_url(json!({ "url": "DATABASE_URL" }), true)]
+    #[case::env_url(json!({ "url": { "type": "env", "variable": "DATABASE_URL" } }), true)]
+    #[case::literal_url(
+        json!({ "url": { "type": "env", "variable": "DATABASE_URL", "value": "postgres://db/app" } }),
+        false
+    )]
+    #[case::secret_url(json!({ "url": { "type": "secret", "name": "pg", "key": "url" } }), false)]
+    #[case::variable_param(
+        json!({ "params": { "host": { "secret": "pg", "key": "host" }, "password": "DB_PASSWORD" } }),
+        true
+    )]
+    #[case::secret_params(
+        json!({ "params": { "host": { "secret": "pg", "key": "host" }, "password": { "secret": "pg", "key": "password" } } }),
+        false
+    )]
+    #[case::configmap_by_name(
+        json!({ "params": { "host": { "configmap": "app-config", "key": "host" } } }),
+        false
+    )]
+    #[case::configmap_by_volume(
+        json!({ "params": { "host": { "configmap": { "volume": "app-config" }, "key": "host" } } }),
+        true
+    )]
+    fn reads_target_pod_names_pod_bound_sources(
+        #[case] connection: Value,
+        #[case] reads_pod: bool,
+    ) {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
+            "type": "pg",
+            "connection": connection,
+        }))
+        .unwrap();
+
+        assert_eq!(branch.reads_target_pod(), reads_pod);
     }
 
     /// Checks that [`S3BranchConfig`] properly deserializes.

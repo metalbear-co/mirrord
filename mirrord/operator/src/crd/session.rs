@@ -95,6 +95,9 @@ impl PodSetTarget {
 
 impl fmt::Display for KubeResourceTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_targetless() {
+            return f.write_str("targetless");
+        }
         write!(f, "{}/{}", self.kind, self.name)?;
         if !self.container.is_empty() {
             write!(f, "/container/{}", self.container)?;
@@ -104,7 +107,31 @@ impl fmt::Display for KubeResourceTarget {
 }
 
 impl KubeResourceTarget {
+    /// `kind` of the placeholder a session without a target carries.
+    ///
+    /// The session CRDs (`PreviewSession`, `BranchDatabase`) require a `target`, and CLIs already
+    /// in the field read it as this struct, so a targetless session cannot leave the field out or
+    /// send a new shape. It sends this kind with an empty name instead: an older CLI lists and
+    /// filters it like any other target, while a current one recognizes it.
+    pub const TARGETLESS_KIND: &str = "Targetless";
+
+    /// The placeholder for a session without a target, see [`Self::TARGETLESS_KIND`].
+    pub fn targetless() -> Self {
+        Self {
+            kind: Self::TARGETLESS_KIND.to_owned(),
+            ..Default::default()
+        }
+    }
+
+    pub fn is_targetless(&self) -> bool {
+        self.kind == Self::TARGETLESS_KIND
+    }
+
     pub fn into_config(self) -> Option<Target> {
+        if self.is_targetless() {
+            return Some(Target::Targetless);
+        }
+
         let path = if self.container.is_empty() {
             format!("{}/{}", self.kind.to_ascii_lowercase(), self.name)
         } else {
@@ -146,6 +173,16 @@ impl fmt::Display for SessionTarget {
 }
 
 impl SessionTarget {
+    /// The placeholder for a session without a target, see
+    /// [`KubeResourceTarget::TARGETLESS_KIND`].
+    pub fn targetless() -> Self {
+        Self::KubeResource(KubeResourceTarget::targetless())
+    }
+
+    pub fn is_targetless(&self) -> bool {
+        matches!(self, Self::KubeResource(target) if target.is_targetless())
+    }
+
     pub fn target_type(&self) -> &str {
         match self {
             Self::KubeResource(target) => &target.kind,
@@ -315,6 +352,29 @@ mod tests {
             })
         );
         assert_eq!(serde_json::to_value(target).unwrap(), value);
+    }
+
+    /// A targetless session must look like any other `KubeResource` target on the wire, so a
+    /// CLI that predates it still lists the session.
+    #[test]
+    fn targetless_is_a_plain_kube_resource_on_the_wire() {
+        let target = SessionTarget::targetless();
+
+        let value = serde_json::to_value(&target).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "apiVersion": "",
+                "kind": "Targetless",
+                "name": "",
+                "container": "",
+            })
+        );
+
+        let read_back: SessionTarget = serde_json::from_value(value).unwrap();
+        assert!(read_back.is_targetless());
+        assert_eq!(read_back.into_config(), Some(Target::Targetless));
+        assert_eq!(target.to_string(), "targetless");
     }
 
     #[test]

@@ -296,15 +296,40 @@ impl PreparedPreview {
         let mut subtask = progress.subtask("preparing preview session");
 
         // Owned, like the image below: `PreparedPreview` keeps them for `start`.
-        let config_target = layer_config.target.path.clone().ok_or_else(|| {
-            subtask.failure(None);
-            CliError::PreviewTargetRequired
-        })?;
+        //
+        // A preview without a target is its branch databases: the operator provisions them and
+        // keeps them for the preview's TTL, and runs no pod. So the target may only be left out
+        // when there are branches to provision, and nothing that needs a pod can come along.
+        let config_target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+        let targetless = matches!(config_target, Target::Targetless);
+        if targetless {
+            if layer_config.feature.db_branches.is_empty() {
+                subtask.failure(None);
+                return Err(CliError::PreviewTargetRequired);
+            }
+            if !sources.is_empty() {
+                subtask.failure(None);
+                return Err(CliError::UnsupportedTargetConfig(
+                    "`--resource` and `--chart` need a target workload to run the manifests \
+                     against; set a `target` or leave them out"
+                        .to_owned(),
+                ));
+            }
+        }
 
-        let image = layer_config.feature.preview.image.clone().ok_or_else(|| {
-            subtask.failure(None);
-            CliError::PreviewImageRequired
-        })?;
+        // With no pod to run there is no image to run it from.
+        let image = match layer_config.feature.preview.image.clone() {
+            Some(image) => image,
+            None if targetless => String::new(),
+            None => {
+                subtask.failure(None);
+                return Err(CliError::PreviewImageRequired);
+            }
+        };
 
         // Reject unsupported or invalid delivery before replacing a running preview.
         let mut secret_values = BTreeMap::new();
@@ -323,6 +348,8 @@ impl PreparedPreview {
                         .then_some(false),
                 }),
             )
+        } else if targetless {
+            (None, None)
         } else {
             let mut incoming = PreviewIncomingConfig::from_config(
                 &layer_config.feature.network.incoming,
@@ -356,13 +383,17 @@ impl PreparedPreview {
             (incoming, None)
         };
 
-        let session_target = resolve_config_target(
-            &config_target,
-            operator_api.client(),
-            layer_config.target.namespace.as_deref(),
-        )
-        .await
-        .inspect_err(|_| subtask.failure(None))?;
+        let session_target = if targetless {
+            SessionTarget::targetless()
+        } else {
+            resolve_config_target(
+                &config_target,
+                operator_api.client(),
+                layer_config.target.namespace.as_deref(),
+            )
+            .await
+            .inspect_err(|_| subtask.failure(None))?
+        };
 
         // Planned before an existing session is replaced. `plan` dry-runs the manifests and rejects
         // a template that would widen the preview's access, so either failure leaves the running
@@ -449,6 +480,17 @@ impl PreparedPreview {
             subtask.warning(&temporal_mirror_warning(&id));
         }
 
+        // Queue splits route messages to the preview pod, and there is none without a target
+        // (the config check already warned about them).
+        let queue_splitting = if targetless {
+            None
+        } else {
+            PreviewQueueSplittingConfig::from_config(
+                &layer_config.feature.split_queues,
+                layer_config.feature.kafka_branch,
+            )
+        };
+
         let spec = PreviewSessionSpec {
             image,
             key: layer_config.key.as_str().to_owned(),
@@ -456,10 +498,7 @@ impl PreparedPreview {
             ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
             replicas: layer_config.feature.preview.replicas,
             incoming,
-            queue_splitting: PreviewQueueSplittingConfig::from_config(
-                &layer_config.feature.split_queues,
-                layer_config.feature.kafka_branch,
-            ),
+            queue_splitting,
             db_branching: None,
             env,
             labels: PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),

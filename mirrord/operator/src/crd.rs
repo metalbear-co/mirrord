@@ -921,6 +921,13 @@ pub enum NewOperatorFeature {
     /// don't advertise it: a CLI can only take its presence as a yes, never its absence as a no.
     AzureServiceBusQueueSplitting,
 
+    /// This operator provisions branch databases for a session without a target
+    /// ([`KubeResourceTarget::targetless`](crate::crd::session::KubeResourceTarget::targetless)),
+    /// such as `mirrord preview start` with `feature.db_branches` and no `target`. Gated so the
+    /// CLI fails fast: an older operator does not know the placeholder target and never
+    /// reconciles the branch, which surfaces only as a creation timeout.
+    TargetlessDbBranches,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -1032,6 +1039,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchSsmParameter => {
                 "DB branching connection values from AWS SSM Parameter Store"
             }
+            NewOperatorFeature::TargetlessDbBranches => "DB branching without a target",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -1139,6 +1147,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::DbBranchesFromSplitConfig
             | NewOperatorFeature::DbBranchSecretManagerExtract
             | NewOperatorFeature::DbBranchSsmParameter
+            | NewOperatorFeature::TargetlessDbBranches
             | NewOperatorFeature::Unknown => &[],
         }
     }
