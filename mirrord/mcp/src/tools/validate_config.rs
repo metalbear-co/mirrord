@@ -485,7 +485,10 @@ fn check_services(
         .into_iter()
         .flatten()
         .filter_map(|(name, mode)| {
-            Some((name.as_str().into(), ModeConfig::deserialize(mode).ok()?))
+            let mode = Option::<ModeConfig>::deserialize(mode)
+                .ok()?
+                .unwrap_or_default();
+            Some((name.as_str().into(), mode))
         })
         .collect();
     // Isolated from the environment like the merged config in `mirrord up`, whose

@@ -19,7 +19,14 @@
       "description": "Custom modes keyed by name, selected with a service's `default_mode` or\n`mirrord up --mode`. The built-in names (`split`, `replace`, `mirror`) are reserved.",
       "type": "object",
       "additionalProperties": {
-        "$ref": "#/$defs/ModeConfig"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ModeConfig"
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "x-mirrord-plan": "oss"
     },

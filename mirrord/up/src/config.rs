@@ -513,6 +513,20 @@ fn inline_schema_without_docs<T: JsonSchema>(generator: &mut SchemaGenerator) ->
     schema
 }
 
+/// Reads a mode entry with no value (`watch:` in YAML) as a mode with every default, as
+/// `common:` with no value is. The schema accepts it too.
+fn deserialize_modes<'de, D>(deserializer: D) -> Result<BTreeMap<Arc<str>, ModeConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(
+        BTreeMap::<Arc<str>, Option<ModeConfig>>::deserialize(deserializer)?
+            .into_iter()
+            .map(|(name, mode)| (name, mode.unwrap_or_default()))
+            .collect(),
+    )
+}
+
 fn default_mode_name() -> Arc<str> {
     ServiceMode::default().into()
 }
@@ -619,8 +633,15 @@ pub struct UpConfig {
     pub common: CommonConfig,
     /// Custom modes keyed by name, selected with a service's `default_mode` or
     /// `mirrord up --mode`. The built-in names (`split`, `replace`, `mirror`) are reserved.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_modes",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(
+        with = "BTreeMap<Arc<str>, Option<ModeConfig>>",
+        extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss)
+    )]
     pub modes: BTreeMap<Arc<str>, ModeConfig>,
     /// Per-service configurations keyed by service name.
     #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
