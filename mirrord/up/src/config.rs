@@ -1409,11 +1409,12 @@ impl CollectAnalytics for &UpConfig {
             if *env != EnvConfig::default() {
                 count_env += 1;
             }
-            if *default_mode != default_mode_name() {
+            let builtin = ServiceMode::from_name(default_mode);
+            if builtin != Some(ServiceMode::default()) {
                 count_default_mode += 1;
             }
             // Custom mode names are the user's, so they are only counted.
-            match ServiceMode::from_name(default_mode) {
+            match builtin {
                 Some(ServiceMode::Split) => count_mode_split += 1,
                 Some(ServiceMode::Replace) => count_mode_replace += 1,
                 Some(ServiceMode::Mirror) => count_mode_mirror += 1,
