@@ -911,6 +911,11 @@ pub enum NewOperatorFeature {
     /// creation timeout.
     DbBranchSsmParameter,
 
+    /// This operator runs a Redis branch as a one node Redis Cluster when
+    /// `feature.db_branches[].cluster` is set. Gated so the CLI fails fast: an older operator's
+    /// CRD schema prunes `redisOptions.cluster` and brings up a standalone server, which a
+    /// Redis Cluster client then refuses to talk to.
+    RedisClusterBranching,
     /// This operator gives a session queue that sets no filter of its own the `filter` /
     /// `jqFilter` of the matching `MirrordSplitConfig` queue entry, so the CLI sends such
     /// entries in `queue_filters` with no filter. Gated so the CLI fails fast: an older
@@ -1034,6 +1039,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchDedicatedNamespace => {
                 "DB branches in a dedicated namespace per key"
             }
+            NewOperatorFeature::RedisClusterBranching => "Redis Cluster branching",
             NewOperatorFeature::SplitConfigQueueFilters => {
                 "queue filters set on the target's MirrordSplitConfig"
             }
@@ -1114,6 +1120,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::GenericBranchProfileDefaults => &["operator.genericBranching"],
             NewOperatorFeature::S3Branching => &["operator.s3Branching"],
             NewOperatorFeature::TurbopufferBranching => &["operator.turbopufferBranching"],
+            NewOperatorFeature::RedisClusterBranching => &["operator.redisBranching"],
             // Kafka branching rides on the Kafka splitting machinery, so both must be on.
             NewOperatorFeature::KafkaBranching => {
                 &["operator.kafkaSplitting", "operator.kafkaBranching"]
