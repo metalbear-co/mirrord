@@ -184,3 +184,42 @@ impl CollectAnalytics for &MagicConfig {
         analytics.add("turbo", self.turbo);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case(
+        "-Xmx1g -javaagent:/usr/share/datadog/dd-java-agent.jar -Dfoo=bar",
+        "-Xmx1g -Dfoo=bar"
+    )]
+    #[case("-javaagent:/first.jar -Xmx1g -javaagent:/second.jar=option", "-Xmx1g")]
+    #[case("'-javaagent:/path with spaces/agent.jar' -Xmx1g", "-Xmx1g")]
+    #[case("-javaagent:\"/path with spaces/agent.jar\" -Xmx1g", "-Xmx1g")]
+    #[case("-java'ag'ent:/agent.jar -Xmx1g", "-Xmx1g")]
+    #[case("-javaagent:/agent.jar", "")]
+    #[case("-Xmx1g -Dfoo=bar", "-Xmx1g -Dfoo=bar")]
+    #[case(
+        "-Dconfig=\"/path with spaces/config\" -Xmx1g",
+        "-Dconfig=\"/path with spaces/config\" -Xmx1g"
+    )]
+    #[case(
+        "  -Dconfig=\"/path with spaces/config\"  -Xmx1g ",
+        "  -Dconfig=\"/path with spaces/config\"  -Xmx1g "
+    )]
+    #[case("-Xmx1g '-javaagent:/broken.jar", "-Xmx1g '-javaagent:/broken.jar")]
+    #[case(r"-Dpattern=\d+ -javaagent:/agent.jar", r"-Dpattern=\d+")]
+    #[case(
+        "--module-path #libs -javaagent:/agent.jar -Dfoo=bar",
+        "--module-path #libs -Dfoo=bar"
+    )]
+    fn removes_java_agents_from_jdk_java_options(#[case] options: &str, #[case] expected: &str) {
+        assert_eq!(
+            without_java_agents(options).as_deref().unwrap_or(options),
+            expected
+        );
+    }
+}
