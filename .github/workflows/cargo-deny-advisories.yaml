@@ -9,6 +9,7 @@ on:
       - Cargo.lock
       - deny.toml
   workflow_dispatch:
+  pull_request:
 
 permissions:
   contents: read
