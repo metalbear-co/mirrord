@@ -5,7 +5,7 @@ use kube::core::Selector;
 
 use super::ResolvedResource;
 use crate::{
-    api::runtime::{RuntimeDataFromLabels, has_label_selector},
+    api::runtime::{RuntimeDataFromLabels, has_match_labels_or_expressions},
     error::KubeApiError,
 };
 
@@ -30,7 +30,7 @@ impl RuntimeDataFromLabels for ResolvedResource<Deployment> {
             .spec
             .as_ref()
             .map(|spec| &spec.selector)
-            .filter(|selector| has_label_selector(selector))
+            .filter(|selector| has_match_labels_or_expressions(selector))
             .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))?;
 
         Ok(Selector::try_from(selector.clone())?)

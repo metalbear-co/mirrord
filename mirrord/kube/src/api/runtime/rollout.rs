@@ -4,7 +4,7 @@ use k8s_openapi::api::core::v1::Pod;
 use kube::{Api, Client, Resource, api::ListParams, core::Selector};
 use mirrord_config::target::rollout::RolloutTarget;
 
-use super::{RuntimeDataFromLabels, has_label_selector};
+use super::{RuntimeDataFromLabels, has_match_labels_or_expressions};
 use crate::{
     api::{kubernetes::rollout::Rollout, runtime::get_k8s_resource_api},
     error::{KubeApiError, Result},
@@ -30,7 +30,7 @@ impl RuntimeDataFromLabels for RolloutTarget {
             .selector
             .as_ref()
             .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector"))?;
-        if has_label_selector(selector).not() {
+        if has_match_labels_or_expressions(selector).not() {
             return Err(KubeApiError::missing_field(
                 resource,
                 ".spec.selector.matchLabels",
@@ -43,7 +43,7 @@ impl RuntimeDataFromLabels for RolloutTarget {
     // Workload references require an async fetch to resolve the complete selector.
     async fn get_pods(resource: &Self::Resource, client: &Client) -> Result<Vec<Pod>> {
         let selector = resource.get_match_labels(client).await?;
-        if has_label_selector(&selector).not() {
+        if has_match_labels_or_expressions(&selector).not() {
             return Err(KubeApiError::missing_field(
                 resource,
                 ".selector or .selector.match_labels",

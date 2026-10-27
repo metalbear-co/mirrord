@@ -4,7 +4,7 @@ use k8s_openapi::api::batch::v1::CronJob;
 use kube::core::Selector;
 use mirrord_config::target::cron_job::CronJobTarget;
 
-use super::{RuntimeDataFromLabels, has_label_selector};
+use super::{RuntimeDataFromLabels, has_match_labels_or_expressions};
 use crate::error::{KubeApiError, Result};
 
 impl RuntimeDataFromLabels for CronJobTarget {
@@ -23,7 +23,7 @@ impl RuntimeDataFromLabels for CronJobTarget {
             .spec
             .as_ref()
             .and_then(|spec| spec.job_template.spec.as_ref()?.selector.as_ref())
-            .filter(|selector| has_label_selector(selector))
+            .filter(|selector| has_match_labels_or_expressions(selector))
             .ok_or_else(|| {
                 KubeApiError::missing_field(
                     resource,

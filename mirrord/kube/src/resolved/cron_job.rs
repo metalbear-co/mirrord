@@ -5,7 +5,7 @@ use kube::core::Selector;
 
 use super::ResolvedResource;
 use crate::{
-    api::runtime::{RuntimeDataFromLabels, has_label_selector},
+    api::runtime::{RuntimeDataFromLabels, has_match_labels_or_expressions},
     error::{KubeApiError, Result},
 };
 
@@ -30,7 +30,7 @@ impl RuntimeDataFromLabels for ResolvedResource<CronJob> {
             .spec
             .as_ref()
             .and_then(|spec| spec.job_template.spec.as_ref()?.selector.as_ref())
-            .filter(|selector| has_label_selector(selector))
+            .filter(|selector| has_match_labels_or_expressions(selector))
             .ok_or_else(|| {
                 KubeApiError::missing_field(
                     resource,

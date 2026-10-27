@@ -480,8 +480,10 @@ pub trait RuntimeDataProvider {
     ) -> impl Future<Output = Result<RuntimeData>>;
 }
 
-/// Keeps explicitly empty matchLabels selectors compatible while accepting expression-only workloads.
-pub(crate) fn has_label_selector(selector: &LabelSelector) -> bool {
+/// Accepts label maps or nonempty expressions, including expression-only workloads.
+/// Explicitly empty `matchLabels` maps preserve unrestricted workload selectors;
+/// rejecting them would make those targets fail with missing-selector errors.
+pub(crate) fn has_match_labels_or_expressions(selector: &LabelSelector) -> bool {
     selector.match_labels.is_some()
         || selector
             .match_expressions
