@@ -601,15 +601,99 @@ impl RuntimeDataProvider for ResolvedTarget<true> {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::{
+        net::{Ipv4Addr, Ipv6Addr},
+        time::Duration,
+    };
 
-    use k8s_openapi::api::core::v1::HostIP;
+    use http::{Method, Request, Response};
+    use k8s_openapi::api::{apps::v1::Deployment, core::v1::HostIP};
+    use kube::client::Body;
     use mirrord_config::target::{
         deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, service::ServiceTarget,
     };
     use rstest::rstest;
 
     use super::*;
+
+    #[rstest]
+    #[case::mixed(Some(serde_json::json!({"app": "api"})), "app=api,tier in (backend,worker)")]
+    #[case::expressions_only(None, "tier in (backend,worker)")]
+    #[tokio::test]
+    async fn deployment_pod_list_preserves_selector_expressions(
+        #[case] match_labels: Option<serde_json::Value>,
+        #[case] expected_selector: &str,
+    ) {
+        let mut selector = serde_json::json!({
+            "matchExpressions": [{"key": "tier", "operator": "In", "values": ["backend", "worker"]}],
+        });
+        if let Some(match_labels) = match_labels {
+            selector
+                .as_object_mut()
+                .unwrap()
+                .insert("matchLabels".to_owned(), match_labels);
+        }
+        let deployment: Deployment = serde_json::from_value(serde_json::json!({
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {"name": "api", "namespace": "workloads"},
+            "spec": {
+                "selector": selector,
+                "template": {
+                    "metadata": {"labels": {"app": "api", "tier": "backend"}},
+                    "spec": {"containers": [{"name": "api", "image": "api:latest"}]},
+                },
+            },
+        }))
+        .unwrap();
+        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let client = Client::new(service, "default");
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (_pods, ()) =
+                tokio::try_join!(DeploymentTarget::get_pods(&deployment, &client), async {
+                    let (request, send) = handle.next_request().await.unwrap();
+                    assert_eq!(request.method(), Method::GET);
+                    assert_eq!(
+                        request.uri().path(),
+                        "/apis/apps/v1/namespaces/workloads/deployments/api"
+                    );
+                    send.send_response(Response::new(Body::from(
+                        serde_json::to_vec(&deployment).unwrap(),
+                    )));
+
+                    let (request, send) = handle.next_request().await.unwrap();
+                    assert_eq!(request.method(), Method::GET);
+                    assert_eq!(request.uri().path(), "/api/v1/namespaces/workloads/pods");
+                    let selectors: Vec<_> = request
+                        .uri()
+                        .query()
+                        .unwrap()
+                        .split('&')
+                        .filter_map(|parameter| parameter.strip_prefix("labelSelector="))
+                        .collect();
+                    assert_eq!(selectors.len(), 1);
+                    let mut parts = selectors.first().unwrap().split('%');
+                    let mut decoded_selector = parts.next().unwrap().replace('+', " ");
+                    for part in parts {
+                        let (byte, rest) = part.split_at(2);
+                        decoded_selector.push(char::from(u8::from_str_radix(byte, 16).unwrap()));
+                        decoded_selector.push_str(&rest.replace('+', " "));
+                    }
+                    assert_eq!(decoded_selector, expected_selector);
+                    send.send_response(Response::new(Body::from(
+                        serde_json::to_vec(&serde_json::json!({
+                            "apiVersion": "v1", "kind": "PodList", "metadata": {}, "items": [],
+                        }))
+                        .unwrap(),
+                    )));
+                    Ok(())
+                },)
+                .unwrap();
+        })
+        .await
+        .expect("deployment pod-list request timed out");
+    }
 
     #[test]
     fn host_ips_preserve_kubernetes_order_and_remove_duplicates() {
