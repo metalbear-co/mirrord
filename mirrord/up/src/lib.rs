@@ -342,6 +342,8 @@ impl UpConfig {
             .keys()
             .filter(|name| ServiceMode::from_name(name).is_some())
             .map(|name| ModeNameError::Builtin(name.clone()).into());
+        // `services` is a `HashMap`, so its entries are sorted here and below: [`Self::verify`]
+        // then reports the same first error on every run.
         let unknown_modes = self
             .services
             .values()
