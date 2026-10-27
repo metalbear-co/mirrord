@@ -32,7 +32,7 @@ use mirrord_config::{
     target::{TARGET_PATH_FORMATS, Target},
 };
 use mirrord_up::{
-    CommonConfig, ModeConfig, ModeNameError, SERVICE_LAYER_PATHS, ServiceConfig, ServiceError,
+    BuiltinModeName, CommonConfig, ModeConfig, SERVICE_LAYER_PATHS, ServiceConfig, ServiceError,
     UpConfig, UpError,
 };
 use schemars::JsonSchema;
@@ -179,13 +179,7 @@ pub fn validate_config(
                             let issues = config
                                 .verify_all()
                                 .into_iter()
-                                .filter(|error| {
-                                    matches!(
-                                        error,
-                                        UpError::ModeName(ModeNameError::Unknown { .. })
-                                    )
-                                    .not()
-                                })
+                                .filter(|error| matches!(error, UpError::UnknownMode(_)).not())
                                 .map(up_issue)
                                 .collect();
                             (issues, Some(config))
@@ -333,7 +327,7 @@ fn up_issue(error: UpError) -> ConfigIssue {
         UpError::ContainerRunDirectory { service } => {
             format!("/services/{}/run/directory", escape_pointer_token(service))
         }
-        UpError::ModeName(ModeNameError::Builtin(name)) => {
+        UpError::BuiltinModeName(BuiltinModeName(name)) => {
             format!("/modes/{}", escape_pointer_token(name))
         }
         _ => String::new(),
@@ -525,20 +519,24 @@ fn check_services(
                 }
                 // Without its mode the service can't be assembled, but its patch is still checked
                 // on its own. A mode that is defined but malformed is the schema check's issue.
+                Err(_)
+                    if mode_entries
+                        .is_some_and(|entries| entries.contains_key(config.default_mode())) =>
+                {
+                    None
+                }
                 Err(error) => {
-                    let defined = mode_entries
-                        .is_some_and(|entries| entries.contains_key(config.default_mode()));
-                    if let ModeNameError::Unknown { known, .. } = &error
-                        && defined.not()
-                    {
-                        service_issues.push(ConfigIssue {
-                            path: format!("{service_pointer}/default_mode"),
-                            message: error.to_string(),
-                            allowed_values: Some(
-                                known.iter().map(|mode| Value::from(&**mode)).collect(),
-                            ),
-                        });
-                    }
+                    service_issues.push(ConfigIssue {
+                        path: format!("{service_pointer}/default_mode"),
+                        message: error.to_string(),
+                        allowed_values: Some(
+                            error
+                                .known
+                                .iter()
+                                .map(|mode| Value::from(&**mode))
+                                .collect(),
+                        ),
+                    });
                     None
                 }
             },

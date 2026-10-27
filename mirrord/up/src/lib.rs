@@ -18,9 +18,9 @@ use std::{
 };
 
 pub use config::{
-    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, ModeConfig, ModeError,
-    ModeNameError, QueuesMode, SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError,
-    ServiceMode, SubprocessCfg, UpConfig, WindowsSupportError,
+    BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget,
+    ModeConfig, ModeError, QueuesMode, SERVICE_LAYER_PATHS, SelectError, ServiceConfig,
+    ServiceError, ServiceMode, SubprocessCfg, UnknownMode, UpConfig, WindowsSupportError,
 };
 use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
@@ -148,10 +148,15 @@ pub enum UpError {
     #[diagnostic(transparent)]
     Select(#[from] SelectError),
 
-    /// A mode is defined or selected under a name `mirrord up` can't use.
+    /// A custom mode is defined under a built-in mode's name.
     #[error(transparent)]
     #[diagnostic(transparent)]
-    ModeName(#[from] ModeNameError),
+    BuiltinModeName(#[from] BuiltinModeName),
+
+    /// A mode is selected that isn't built-in or defined under `modes`.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    UnknownMode(#[from] UnknownMode),
 
     /// A service's mode can't be used with the target it resolved to.
     #[error(transparent)]
@@ -341,7 +346,7 @@ impl UpConfig {
             .modes
             .keys()
             .filter(|name| ServiceMode::from_name(name).is_some())
-            .map(|name| ModeNameError::Builtin(name.clone()).into());
+            .map(|name| BuiltinModeName(name.clone()).into());
         // `services` is a `HashMap`, so its entries are sorted here and below: [`Self::verify`]
         // then reports the same first error on every run.
         let unknown_modes = self
@@ -982,7 +987,7 @@ mod tests {
         );
         let config = template(&yaml, &EnvKey::Provided("key".to_owned())).unwrap();
 
-        let Err(UpError::ModeName(ModeNameError::Builtin(builtin))) = config.verify() else {
+        let Err(UpError::BuiltinModeName(BuiltinModeName(builtin))) = config.verify() else {
             panic!("expected a built-in name error");
         };
         assert_eq!(&*builtin, name);
@@ -994,7 +999,7 @@ mod tests {
         let yaml = "modes:\n  fast: {}\nservices:\n  api:\n    default_mode: fsat\n    run:\n      command: [x]\n";
         let config = template(yaml, &EnvKey::Provided("key".to_owned())).unwrap();
 
-        let Err(UpError::ModeName(ModeNameError::Unknown {
+        let Err(UpError::UnknownMode(UnknownMode {
             name,
             suggestion,
             known,

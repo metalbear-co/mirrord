@@ -155,10 +155,7 @@ pub struct ModeConfig {
 
 impl ModeConfig {
     /// The mode named `name`: a built-in one, or one defined under `modes`.
-    pub fn named(
-        modes: &BTreeMap<Arc<str>, ModeConfig>,
-        name: &str,
-    ) -> Result<Self, ModeNameError> {
+    pub fn named(modes: &BTreeMap<Arc<str>, ModeConfig>, name: &str) -> Result<Self, UnknownMode> {
         if let Some(builtin) = ServiceMode::from_name(name) {
             return Ok(builtin.into());
         }
@@ -177,7 +174,7 @@ impl ModeConfig {
             crate::closest_name(name, &known.iter().map(AsRef::as_ref).collect::<Vec<_>>())
                 .map(Arc::from);
 
-        Err(ModeNameError::Unknown {
+        Err(UnknownMode {
             name: name.into(),
             suggestion,
             known,
@@ -1180,7 +1177,7 @@ impl UpConfig {
     /// config file. Fails if no such mode exists.
     ///
     /// Meant for the `--mode` flag, so it should be called *after* [`Self::select_services`].
-    pub fn override_mode(&mut self, mode: &str) -> Result<(), ModeNameError> {
+    pub fn override_mode(&mut self, mode: &str) -> Result<(), UnknownMode> {
         ModeConfig::named(&self.modes, mode)?;
         let mode = Arc::<str>::from(mode);
         for svc in self.services.values_mut() {
@@ -1293,31 +1290,29 @@ impl UpConfig {
     }
 }
 
-/// A mode name that `mirrord up` can't use.
+/// A custom mode takes the name of a built-in one.
 #[derive(Debug, Error, Diagnostic)]
-pub enum ModeNameError {
-    /// A custom mode takes the name of a built-in one.
-    #[error("`modes.{0}` conflicts with the built-in `{0}` mode")]
-    #[diagnostic(help("Rename the mode: `split`, `replace` and `mirror` are reserved."))]
-    Builtin(Arc<str>),
+#[error("`modes.{0}` conflicts with the built-in `{0}` mode")]
+#[diagnostic(help("Rename the mode: `split`, `replace` and `mirror` are reserved."))]
+pub struct BuiltinModeName(pub Arc<str>);
 
-    /// A mode was selected that is neither built-in nor defined under `modes`.
-    #[error(
-        "unknown mode `{name}`{}",
-        suggestion
-            .as_ref()
-            .map(|closest| format!("; did you mean `{closest}`?"))
-            .unwrap_or_default()
-    )]
-    #[diagnostic(help("Known modes: {}", known.join(", ")))]
-    Unknown {
-        /// The name that was selected.
-        name: Arc<str>,
-        /// The closest known name, if one is close enough.
-        suggestion: Option<Arc<str>>,
-        /// Every mode that can be selected.
-        known: Vec<Arc<str>>,
-    },
+/// A mode was selected that is neither built-in nor defined under `modes`.
+#[derive(Debug, Error, Diagnostic)]
+#[error(
+    "unknown mode `{name}`{}",
+    suggestion
+        .as_ref()
+        .map(|closest| format!("; did you mean `{closest}`?"))
+        .unwrap_or_default()
+)]
+#[diagnostic(help("Known modes: {}", known.join(", ")))]
+pub struct UnknownMode {
+    /// The name that was selected.
+    pub name: Arc<str>,
+    /// The closest known name, if one is close enough.
+    pub suggestion: Option<Arc<str>>,
+    /// Every mode that can be selected.
+    pub known: Vec<Arc<str>>,
 }
 
 /// Error produced by [`UpConfig::select_services`].
@@ -2306,10 +2301,7 @@ mod tests {
             "#,
         );
 
-        let ModeNameError::Unknown { name, known, .. } = config.override_mode("bogus").unwrap_err()
-        else {
-            panic!("expected an unknown mode error");
-        };
+        let UnknownMode { name, known, .. } = config.override_mode("bogus").unwrap_err();
         assert_eq!(&*name, "bogus");
         assert!(known.iter().any(|mode| &**mode == "custom"));
         assert_eq!(&*config.services["a"].default_mode, "replace");
