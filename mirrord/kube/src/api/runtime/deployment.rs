@@ -1,10 +1,10 @@
-use std::{borrow::Cow, ops::Not};
+use std::borrow::Cow;
 
 use k8s_openapi::api::apps::v1::Deployment;
 use kube::core::Selector;
 use mirrord_config::target::deployment::DeploymentTarget;
 
-use super::RuntimeDataFromLabels;
+use super::{RuntimeDataFromLabels, has_label_selector};
 use crate::error::{KubeApiError, Result};
 
 impl RuntimeDataFromLabels for DeploymentTarget {
@@ -23,13 +23,7 @@ impl RuntimeDataFromLabels for DeploymentTarget {
             .spec
             .as_ref()
             .map(|spec| &spec.selector)
-            .filter(|selector| {
-                selector.match_labels.is_some()
-                    || selector
-                        .match_expressions
-                        .as_ref()
-                        .is_some_and(|expressions| expressions.is_empty().not())
-            })
+            .filter(|selector| has_label_selector(selector))
             .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))?;
 
         Ok(Selector::try_from(selector.clone())?)

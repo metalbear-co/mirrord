@@ -1,10 +1,10 @@
-use std::{borrow::Cow, ops::Not};
+use std::borrow::Cow;
 
 use k8s_openapi::api::batch::v1::CronJob;
 use kube::core::Selector;
 use mirrord_config::target::cron_job::CronJobTarget;
 
-use super::RuntimeDataFromLabels;
+use super::{RuntimeDataFromLabels, has_label_selector};
 use crate::error::{KubeApiError, Result};
 
 impl RuntimeDataFromLabels for CronJobTarget {
@@ -23,13 +23,7 @@ impl RuntimeDataFromLabels for CronJobTarget {
             .spec
             .as_ref()
             .and_then(|spec| spec.job_template.spec.as_ref()?.selector.as_ref())
-            .filter(|selector| {
-                selector.match_labels.is_some()
-                    || selector
-                        .match_expressions
-                        .as_ref()
-                        .is_some_and(|expressions| expressions.is_empty().not())
-            })
+            .filter(|selector| has_label_selector(selector))
             .ok_or_else(|| {
                 KubeApiError::missing_field(
                     resource,

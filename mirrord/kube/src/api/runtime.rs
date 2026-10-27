@@ -10,7 +10,7 @@ use std::{
 use k8s_openapi::{
     NamespaceResourceScope,
     api::core::v1::{Container, ContainerPort, Node, Pod, PodStatus, Probe},
-    apimachinery::pkg::util::intstr::IntOrString,
+    apimachinery::pkg::{apis::meta::v1::LabelSelector, util::intstr::IntOrString},
 };
 use kube::{Api, Client, Resource, api::ListParams, core::Selector};
 use mirrord_agent_env::mesh::MeshVendor;
@@ -478,6 +478,15 @@ pub trait RuntimeDataProvider {
         client: &Client,
         namespace: Option<&str>,
     ) -> impl Future<Output = Result<RuntimeData>>;
+}
+
+/// Keeps explicitly empty matchLabels selectors compatible while accepting expression-only workloads.
+pub(crate) fn has_label_selector(selector: &LabelSelector) -> bool {
+    selector.match_labels.is_some()
+        || selector
+            .match_expressions
+            .as_ref()
+            .is_some_and(|expressions| expressions.is_empty().not())
 }
 
 /// Trait for resources that abstract a set of pods
