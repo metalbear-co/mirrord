@@ -64,7 +64,7 @@ jobs:
     if: github.event.pull_request.draft == false
     outputs:
       rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
-      lockfile_changed: ${{ steps.changed-lockfile.outputs.any_changed }}
+      deps_changed: ${{ steps.changed-deps.outputs.any_changed }}
       vale_changed: ${{ steps.changed-vale.outputs.any_changed }}
       windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
@@ -135,11 +135,13 @@ jobs:
             rustfmt.toml
             deny.toml
             .cargo/**
-      - name: get lockfile changes
-        id: changed-lockfile
+      - name: get dependency changes
+        id: changed-deps
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
+            Cargo.toml
+            **/Cargo.toml
             Cargo.lock
             deny.toml
       - name: get CI runner image changes
@@ -325,7 +327,7 @@ jobs:
     uses: ./.github/workflows/check-cargo-deny.yaml
     with:
       # New advisories against an unchanged lockfile are reported by cargo-deny-advisories.yaml instead.
-      advisories: ${{ needs.plan.outputs.lockfile_changed == 'true' }}
+      advisories: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.plan.outputs.deps_changed == 'true' }}
 
   check-flaky-report:
     needs: [plan]

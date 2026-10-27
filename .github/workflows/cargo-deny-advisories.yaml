@@ -41,7 +41,7 @@ jobs:
           fi
 
           run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          text=$(printf ':rotating_light: *New RustSec advisory in `%s`*\n• *Commit:* `%s`\n• *Run:* <%s|Open GitHub Actions>\nBump the crate or add the advisory to `deny.toml` ignores.' \
+          text=$(printf ':rotating_light: *cargo-deny advisories check failed for `%s`*\n• *Commit:* `%s`\n• *Run:* <%s|Open GitHub Actions>' \
             "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$run_url")
           payload=$(jq -Rn --arg text "$text" '{text: $text}')
 
