@@ -1,6 +1,5 @@
 use std::{
     borrow::Cow,
-    collections::BTreeMap,
     fmt::{self, Display, Formatter},
     future::Future,
     net::IpAddr,
@@ -13,7 +12,7 @@ use k8s_openapi::{
     api::core::v1::{Container, ContainerPort, Node, Pod, PodStatus, Probe},
     apimachinery::pkg::util::intstr::IntOrString,
 };
-use kube::{Api, Client, Resource, api::ListParams};
+use kube::{Api, Client, Resource, api::ListParams, core::Selector};
 use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::target::Target;
 use serde::de::DeserializeOwned;
@@ -482,18 +481,18 @@ pub trait RuntimeDataProvider {
 }
 
 /// Trait for resources that abstract a set of pods
-/// defined by a label selector.
+/// defined by a label selector, including both label equalities and expressions.
 ///
 /// Implementors are provided with an implementation of [`RuntimeDataProvider`].
 /// When resolving [`RuntimeData`], the set of pods is fetched and [`RuntimeData`] is extracted from
-/// the first pod on the list. If the set is empty, resolution fails.
+/// the first pod ready to be targeted. If the set is empty or no pod is ready, resolution fails.
 pub trait RuntimeDataFromLabels {
     type Resource: Resource<DynamicType = (), Scope = NamespaceResourceScope>
         + Clone
         + DeserializeOwned
         + fmt::Debug;
 
-    fn get_selector_match_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>>;
+    fn get_selector(resource: &Self::Resource) -> Result<Selector>;
 
     /// Returns a list of pods matching the selector of the given `resource`.
     fn get_pods(
@@ -510,17 +509,8 @@ pub trait RuntimeDataFromLabels {
                 .ok_or_else(|| KubeApiError::missing_field(resource, ".metadata.name"))?;
             let resource = api.get(name).await?;
 
-            let labels = Self::get_selector_match_labels(&resource)?;
-
-            let formatted_labels = labels
-                .iter()
-                .map(|(key, value)| format!("{key}={value}"))
-                .collect::<Vec<String>>()
-                .join(",");
-            let list_params = ListParams {
-                label_selector: Some(formatted_labels),
-                ..Default::default()
-            };
+            let selector = Self::get_selector(&resource)?;
+            let list_params = ListParams::default().labels_from(&selector);
 
             let pod_api: Api<Pod> =
                 get_k8s_resource_api(client, resource.meta().namespace.as_deref());

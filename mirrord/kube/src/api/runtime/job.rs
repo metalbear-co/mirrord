@@ -1,6 +1,7 @@
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, ops::Not};
 
 use k8s_openapi::api::batch::v1::Job;
+use kube::core::Selector;
 use mirrord_config::target::job::JobTarget;
 
 use super::RuntimeDataFromLabels;
@@ -17,16 +18,25 @@ impl RuntimeDataFromLabels for JobTarget {
         self.container.as_deref()
     }
 
-    fn get_selector_match_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
-        resource
+    fn get_selector(resource: &Self::Resource) -> Result<Selector> {
+        let selector = resource
             .spec
             .as_ref()
-            .and_then(|spec| spec.selector.as_ref()?.match_labels.clone())
+            .and_then(|spec| spec.selector.as_ref())
+            .filter(|selector| {
+                selector.match_labels.is_some()
+                    || selector
+                        .match_expressions
+                        .as_ref()
+                        .is_some_and(|expressions| expressions.is_empty().not())
+            })
             .ok_or_else(|| {
                 KubeApiError::missing_field(
                     resource,
                     ".spec.selector or .spec.selector.match_labels",
                 )
-            })
+            })?;
+
+        Ok(Selector::try_from(selector.clone())?)
     }
 }

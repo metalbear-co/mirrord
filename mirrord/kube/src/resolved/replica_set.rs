@@ -1,6 +1,7 @@
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, ops::Not};
 
 use k8s_openapi::api::apps::v1::ReplicaSet;
+use kube::core::Selector;
 
 use super::{ResolvedResource, RuntimeDataFromLabels};
 use crate::error::{KubeApiError, Result};
@@ -21,11 +22,20 @@ impl RuntimeDataFromLabels for ResolvedResource<ReplicaSet> {
         self.container.as_deref()
     }
 
-    fn get_selector_match_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
-        resource
+    fn get_selector(resource: &Self::Resource) -> Result<Selector> {
+        let selector = resource
             .spec
             .as_ref()
-            .and_then(|spec| spec.selector.match_labels.clone())
-            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))
+            .map(|spec| &spec.selector)
+            .filter(|selector| {
+                selector.match_labels.is_some()
+                    || selector
+                        .match_expressions
+                        .as_ref()
+                        .is_some_and(|expressions| expressions.is_empty().not())
+            })
+            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))?;
+
+        Ok(Selector::try_from(selector.clone())?)
     }
 }
