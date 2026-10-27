@@ -278,10 +278,12 @@ impl SocketAddrExt for SockAddr {
     fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SockAddr> {
         unsafe {
             SockAddr::try_init(|storage, len| {
-                // storage and raw_address size is dynamic.
+                // `storage` is a fixed-size `sockaddr_storage` (its size is in `*len`), but callers
+                // may pass a larger buffer.
+                let copy_length = address_length.min(*len);
                 (storage as *mut u8)
-                    .copy_from_nonoverlapping(raw_address as *const u8, address_length as usize);
-                *len = address_length;
+                    .copy_from_nonoverlapping(raw_address as *const u8, copy_length as usize);
+                *len = copy_length;
                 Ok(())
             })
         }

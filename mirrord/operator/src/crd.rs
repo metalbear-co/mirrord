@@ -12,7 +12,7 @@ use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
-    feature::split_queues::QueueMessageFilter,
+    feature::split_queues::{QueueKind, QueueMessageFilter},
     target::{Target, TargetConfig},
 };
 use schemars::JsonSchema;
@@ -916,6 +916,15 @@ pub enum NewOperatorFeature {
     /// CRD schema prunes `redisOptions.cluster` and brings up a standalone server, which a
     /// Redis Cluster client then refuses to talk to.
     RedisClusterBranching,
+    /// This operator drops the queue splits of a `PreviewSession` with `autoQueueSplitting` that
+    /// it can't serve (a broker whose splitting is off), instead of failing the session, as it
+    /// does for `mirrord up` sessions. Gated so the CLI only sends the splits `mirrord preview
+    /// up` adds by default to an operator that won't fail the preview over them.
+    PreviewAutoQueueSplitting,
+    /// This operator has Azure Service Bus queue splitting on. Advertised separately from the
+    /// other brokers' features, which came first, so older operators that split Azure Service Bus
+    /// don't advertise it: a CLI can only take its presence as a yes, never its absence as a no.
+    AzureServiceBusQueueSplitting,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -988,6 +997,12 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SessionReadyCondition => "session readiness reporting",
             NewOperatorFeature::NatsQueueSplitting => "NATS queue splitting",
             NewOperatorFeature::NatsPubSubQueueSplitting => "NATS pub/sub queue splitting",
+            NewOperatorFeature::PreviewAutoQueueSplitting => {
+                "default queue splitting in preview environments"
+            }
+            NewOperatorFeature::AzureServiceBusQueueSplitting => {
+                "Azure Service Bus queue splitting"
+            }
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
@@ -1030,6 +1045,27 @@ impl Display for NewOperatorFeature {
 }
 
 impl NewOperatorFeature {
+    /// The feature an operator advertises when splitting the queues of `kind` is on.
+    ///
+    /// Older operators split Azure Service Bus without advertising
+    /// [`AzureServiceBusQueueSplitting`](Self::AzureServiceBusQueueSplitting), so only its
+    /// presence says something.
+    pub fn queue_splitting(kind: QueueKind) -> Option<Self> {
+        match kind {
+            QueueKind::Sqs => Some(Self::SqsQueueSplitting),
+            QueueKind::Kafka => Some(Self::KafkaQueueSplitting),
+            QueueKind::Rmq => Some(Self::RmqQueueSplitting),
+            QueueKind::GcpPubSub => Some(Self::GcpPubSubQueueSplitting),
+            QueueKind::RedisPubSub => Some(Self::RedisPubSubQueueSplitting),
+            QueueKind::AzureServiceBus => Some(Self::AzureServiceBusQueueSplitting),
+            QueueKind::Temporal => Some(Self::TemporalQueueSplitting),
+            QueueKind::BullMq => Some(Self::BullMqQueueSplitting),
+            QueueKind::Nats => Some(Self::NatsQueueSplitting),
+            QueueKind::NatsPubSub => Some(Self::NatsPubSubQueueSplitting),
+            QueueKind::Unknown => None,
+        }
+    }
+
     /// The operator Helm values that switch this feature on, for the hint shown when the
     /// operator reports the feature as disabled. Empty for features that are always on, that come
     /// with any of several values (the shared DB branching features turn on with any
@@ -1042,7 +1078,8 @@ impl NewOperatorFeature {
             | NewOperatorFeature::PreviewTlsClientAuthFromTarget
             | NewOperatorFeature::PreviewCronJobTarget
             | NewOperatorFeature::PreviewLabelTarget
-            | NewOperatorFeature::PreviewSpecResources => &["operator.previewEnv"],
+            | NewOperatorFeature::PreviewSpecResources
+            | NewOperatorFeature::PreviewAutoQueueSplitting => &["operator.previewEnv"],
             NewOperatorFeature::SqsQueueSplitting
             | NewOperatorFeature::SqsQueueSplittingDirect
             | NewOperatorFeature::SqsQueueSplittingWithJqFilter => &["operator.sqsSplitting"],
@@ -1060,6 +1097,9 @@ impl NewOperatorFeature {
             NewOperatorFeature::BullMqQueueSplitting => &["operator.bullmqSplitting"],
             NewOperatorFeature::NatsQueueSplitting => &["operator.natsSplitting"],
             NewOperatorFeature::NatsPubSubQueueSplitting => &["operator.natsPubsubSplitting"],
+            NewOperatorFeature::AzureServiceBusQueueSplitting => {
+                &["operator.azureServiceBusSplitting"]
+            }
             NewOperatorFeature::MySqlBranching => &["operator.mysqlBranching"],
             NewOperatorFeature::MariaDbBranching => &["operator.mariadbBranching"],
             NewOperatorFeature::PgBranching
