@@ -266,7 +266,7 @@
           "description": "How the service's queues are split. When not set, every queue defined in the cluster is\nsplit with `queue_mode: steal`.\n\nIgnored with `incoming: replace`, which doesn't split queues.",
           "anyOf": [
             {
-              "$ref": "#/$defs/QueuesMode"
+              "$ref": "#/$defs/QueueSplitMode"
             },
             {
               "type": "null"
@@ -297,7 +297,7 @@
       ],
       "x-mirrord-plan": "oss"
     },
-    "QueuesMode": {
+    "QueueSplitMode": {
       "description": "How a custom mode splits the service's queues.",
       "oneOf": [
         {

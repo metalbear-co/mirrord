@@ -19,7 +19,7 @@ use std::{
 
 pub use config::{
     BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget,
-    ModeConfig, ModeError, QueuesMode, SERVICE_LAYER_PATHS, SelectError, ServiceConfig,
+    ModeConfig, ModeError, QueueSplitMode, SERVICE_LAYER_PATHS, SelectError, ServiceConfig,
     ServiceError, ServiceMode, SubprocessCfg, UnknownMode, UpConfig, WindowsSupportError,
 };
 use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};

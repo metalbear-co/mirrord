@@ -116,7 +116,7 @@ impl Into<IncomingMode> for ServiceMode {
 /// How a custom mode splits the service's queues.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum QueuesMode {
+pub enum QueueSplitMode {
     /// Messages matching the session are consumed by the local service only
     /// (`queue_mode: steal`).
     Split,
@@ -126,11 +126,11 @@ pub enum QueuesMode {
     Mirror,
 }
 
-impl From<QueuesMode> for QueueMode {
-    fn from(mode: QueuesMode) -> Self {
+impl From<QueueSplitMode> for QueueMode {
+    fn from(mode: QueueSplitMode) -> Self {
         match mode {
-            QueuesMode::Split => QueueMode::Steal,
-            QueuesMode::Mirror => QueueMode::Mirror,
+            QueueSplitMode::Split => QueueMode::Steal,
+            QueueSplitMode::Mirror => QueueMode::Mirror,
         }
     }
 }
@@ -150,7 +150,7 @@ pub struct ModeConfig {
     ///
     /// Ignored with `incoming: replace`, which doesn't split queues.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub queues: Option<QueuesMode>,
+    pub queues: Option<QueueSplitMode>,
 }
 
 impl ModeConfig {
@@ -186,8 +186,8 @@ impl From<ServiceMode> for ModeConfig {
     /// The built-in mode as a custom one.
     fn from(incoming: ServiceMode) -> Self {
         let queues = match incoming {
-            ServiceMode::Split => Some(QueuesMode::Split),
-            ServiceMode::Mirror => Some(QueuesMode::Mirror),
+            ServiceMode::Split => Some(QueueSplitMode::Split),
+            ServiceMode::Mirror => Some(QueueSplitMode::Mirror),
             // Replacing the target takes over its queues whole, so they aren't split.
             ServiceMode::Replace => None,
         };
