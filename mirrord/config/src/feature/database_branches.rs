@@ -975,6 +975,18 @@ impl DatabaseBranchConfig {
             .any(TargetEnvironmentVariableSource::extracts_from_secret_manager)
     }
 
+    /// True for a remote Redis branch that runs as a one node Redis Cluster. The CLI uses it
+    /// to refuse the config on an operator that predates cluster branches.
+    pub fn uses_redis_cluster(&self) -> bool {
+        match self {
+            DatabaseBranchConfig::Redis(cfg) => match &**cfg {
+                RedisBranchConfig::Remote(remote) => remote.cluster,
+                RedisBranchConfig::Local(_) => false,
+            },
+            _ => false,
+        }
+    }
+
     /// The more databases a PostgreSQL branch copies next to its own. Empty for every other
     /// engine.
     fn iam_auth(&self) -> Option<&IamAuthConfig> {
@@ -2701,6 +2713,51 @@ mod tests {
         };
         assert_eq!(local.id.as_deref(), Some("my-branch"));
         assert_eq!(local.local.port, 6380);
+    }
+
+    /// A Redis Cluster node only has database 0, so `cluster: true` pairs with no `name` or
+    /// `name: "0"` and nothing else.
+    #[test]
+    fn redis_cluster_branch_rejects_a_database_other_than_zero() {
+        let branch = |name: Option<&str>| {
+            let config = json!({
+                "type": "redis",
+                "cluster": true,
+                "connection": { "url": "REDIS_URL" },
+                "name": name,
+            });
+            serde_json::from_value::<DatabaseBranchConfig>(config).unwrap()
+        };
+
+        let DatabaseBranchConfig::Redis(redis) = branch(None) else {
+            panic!("expected a Redis branch");
+        };
+        let RedisBranchConfig::Remote(remote) = *redis else {
+            panic!("expected a remote Redis branch");
+        };
+        assert!(remote.cluster);
+        remote.verify().expect("no `name` is fine for a cluster");
+
+        let DatabaseBranchConfig::Redis(redis) = branch(Some("0")) else {
+            panic!("expected a Redis branch");
+        };
+        let RedisBranchConfig::Remote(remote) = *redis else {
+            panic!("expected a remote Redis branch");
+        };
+        remote
+            .verify()
+            .expect("`name: \"0\"` is fine for a cluster");
+
+        let DatabaseBranchConfig::Redis(redis) = branch(Some("3")) else {
+            panic!("expected a Redis branch");
+        };
+        let RedisBranchConfig::Remote(remote) = *redis else {
+            panic!("expected a remote Redis branch");
+        };
+        assert!(matches!(
+            remote.verify(),
+            Err(ConfigError::ConflictAt { setting, .. }) if setting == "feature.db_branches[].name"
+        ));
     }
 
     /// Checks that [`S3BranchConfig`] properly deserializes.

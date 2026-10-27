@@ -246,7 +246,14 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
     let file_path = env::temp_dir().join(file_name);
     let file_c_string = CString::new(file_path.to_string_lossy().to_string())?;
     let file_path_ptr = file_c_string.as_ptr();
-    let local_file_fd: RawFd = unsafe { FN_OPEN(file_path_ptr, O_RDONLY | O_CREAT) };
+    // `open` reads a `mode` argument when `O_CREAT` is set, so it must be passed explicitly.
+    let local_file_fd: RawFd = unsafe {
+        FN_OPEN(
+            file_path_ptr,
+            O_RDONLY | O_CREAT | libc::O_EXCL,
+            0o600 as c_int,
+        )
+    };
     if local_file_fd == -1 {
         let error = Errno::last_raw();
         // Close the remote file if creating a tmp local file failed and we have an invalid local fd

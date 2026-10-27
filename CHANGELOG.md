@@ -8,6 +8,29 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.280.0](https://github.com/metalbear-co/mirrord/tree/3.280.0) - 2026-10-27
+
+
+### Removed
+
+- Removed the `image` field from `mirrord-up.yaml` services. `mirrord preview
+  up` takes each service's image from `--image <service>=<image ref>` or
+  `MIRRORD_<SERVICE>_IMAGE`.
+
+
+### Added
+
+- Remote Redis branches accept `cluster: true` to run as a one node Redis
+  Cluster, so applications using a Redis Cluster client can connect to the
+  branch.
+
+
+### Changed
+
+- On Linux, the layer logs at startup which glibc the process runs on, which
+  glibc the executable was built against, and the kernel release, to help
+  diagnose hooks that never fire.
+
 ## [3.279.1](https://github.com/metalbear-co/mirrord/tree/3.279.1) - 2026-10-25
 
 

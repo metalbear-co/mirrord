@@ -2374,6 +2374,12 @@
               "description": "Configuration for a remote Redis branch.",
               "type": "object",
               "properties": {
+                "cluster": {
+                  "title": "feature.db_branches[].cluster (type: redis) {#feature-db_branches-redis-cluster}",
+                  "description": "Run the branch as a one node Redis Cluster instead of a standalone server.\n\nSet this when the application connects with a Redis Cluster client (one that runs\n`CLUSTER SLOTS` / `CLUSTER SHARDS` on connect): such clients refuse a standalone server.\nThe branch node owns all 16384 hash slots, so every key the application uses lands on\nit, and the cluster limits apply like on any Redis Cluster: only database `0` exists,\nso `name` must be unset or `0`, and multi key commands must keep all keys in one hash\nslot.\n\nWith `copy.mode: all` the source may be a standalone server or a Redis Cluster; from a\ncluster, keys are copied from every master node.\n\nDefaults to `false`.",
+                  "type": "boolean",
+                  "default": false
+                },
                 "connection": {
                   "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
                   "$ref": "#/$defs/DbBranchingConnectionSource"
@@ -4473,6 +4479,14 @@
         "aws": {
           "title": "feature.magic.aws {#feature-magic-aws}",
           "description": "The AWS CLI prefers local credentials (e.g. `~/.aws`, `AWS_PROFILE`) over the remote pod's\nidentity (IAM role, instance profile, IRSA). When those local credentials are present, the\npod's own identity is never used, which is rarely what you want in a mirrord session.\n\nWhen enabled, mirrord makes local AWS configuration unavailable to the process by:\n- Unsetting `AWS_PROFILE` and related AWS environment variables.\n- Mapping `~/.aws` to a temporary directory, so the AWS CLI cannot read local credentials\n  and also has a writable location for its credential cache (avoiding errors on cache\n  writes).\n\nThis allows the remote pod's IAM role / instance profile to be used as intended.\n\nDisable this only if you intentionally need local AWS credentials inside the local mirrord'\nprocess.\n\nDefaults to `true`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "java_agents": {
+          "title": "feature.magic.java_agents {#feature-magic-java_agents}",
+          "description": "Remote Java agents often refer to files that do not exist on the local machine. When\nenabled, mirrord removes `-javaagent:` options from the remote `JDK_JAVA_OPTIONS` value\nbefore it starts the local process.\n\nDisable this only if the remote Java agent is also available locally.\n\nDefaults to `true`.",
           "type": [
             "boolean",
             "null"
