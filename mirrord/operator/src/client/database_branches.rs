@@ -1069,6 +1069,46 @@ pub fn check_attach_namespace<P: Progress>(
     }
 }
 
+/// A Redis branch is started as a standalone server or as a one-node Redis Cluster when it is
+/// created, and the two speak different protocols to clients (a cluster client needs `CLUSTER
+/// SLOTS` to work, a standalone client cannot talk to a cluster node). A session reusing a Redis
+/// branch must therefore ask for the mode it runs in. Branches created before `cluster` existed
+/// read as standalone, which is what they are.
+pub fn check_attach_redis_cluster(
+    existing: &BranchDatabase,
+    requested: &BranchDatabaseSpec,
+    api_namespace: &str,
+) -> Result<(), OperatorApiError> {
+    let (Some(existing_options), Some(requested_options)) =
+        (&existing.spec.redis_options, &requested.redis_options)
+    else {
+        return Ok(());
+    };
+    if existing_options.cluster == requested_options.cluster {
+        return Ok(());
+    }
+
+    let name = existing.meta().name.as_deref().unwrap_or_default();
+    let id = &existing.spec.id;
+    let mode = |cluster: bool| {
+        if cluster {
+            "a Redis Cluster node"
+        } else {
+            "a standalone Redis server"
+        }
+    };
+    Err(OperatorApiError::BranchCreationFailed {
+        operation: OperatorOperation::DbBranching,
+        message: format!(
+            "branch database `{name}` (id `{id}`) already runs as {}, and this session asks for \
+             {}; delete it with `mirrord db-branches -n {api_namespace} destroy {name}`, or give \
+             the entry another `id`",
+            mode(existing_options.cluster),
+            mode(requested_options.cluster),
+        ),
+    })
+}
+
 /// Outcome of [`create_branches`], kept apart so the caller can say which is which. Each branch
 /// is as it was once ready, status included.
 #[derive(Debug, Default)]
@@ -2254,6 +2294,7 @@ impl UnifiedBranchParams {
             mssql_options: None,
             redis_options: Some(RedisOptions {
                 copy: config.copy.clone().into(),
+                cluster: config.cluster,
             }),
             clickhouse_options: None,
             cockroachdb_options: None,
