@@ -2018,9 +2018,11 @@ pub(super) struct UpArgs {
     /// - `split`: incoming traffic is split between the local and original services using HTTP
     ///   filtering. If no filter is provided, a header filter matching the regex `baggage:
     ///   .*mirrord-session={session key}.*` is used.
+    ///
     /// - `replace`: the local service replaces the original one: the target workload is copied and
     ///   scaled down to zero, so all incoming traffic reaches your local process. Any configured
     ///   HTTP filter is ignored. Requires a target that supports copy target with scale down.
+    ///
     /// - `mirror`: incoming traffic is mirrored to the local service using HTTP filtering, with
     ///   the same default filter as `split`.
     ///
