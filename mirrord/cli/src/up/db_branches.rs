@@ -23,7 +23,7 @@ use mirrord_operator::{
     crd::NewOperatorFeature,
 };
 use mirrord_progress::NullProgress;
-use mirrord_up::SubprocessCfg;
+use mirrord_up::{DbBranchesOrigin, SubprocessCfg};
 
 use super::UpCliError;
 use crate::{
@@ -98,7 +98,8 @@ pub(super) async fn check_db_branches(
             }
             // One the user set fails below, as it would in a session.
             Some(Some(api))
-                if service.default_db_branches && resolves_default_db_branches(api).not() =>
+                if service.db_branches_origin == DbBranchesOrigin::BuiltinMode
+                    && resolves_default_db_branches(api).not() =>
             {
                 println!(
                     "{}: {DEFAULT_DB_BRANCHES_UNSUPPORTED}",
@@ -171,7 +172,7 @@ pub(super) async fn check_db_branches(
         let response = match lookup {
             Ok(response) => response,
             Err(error) => {
-                if service.default_db_branches.not()
+                if service.db_branches_origin != DbBranchesOrigin::BuiltinMode
                     && let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error
                 {
                     // Lookups share a Kubernetes-only client. Only the refusal that stops the

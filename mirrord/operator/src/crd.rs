@@ -1022,6 +1022,7 @@ impl NewOperatorFeature {
             | Self::LiquibaseMigrations
             | Self::PgBranchAdditionalDatabases
             | Self::DbBranchesFromSplitConfig
+            | Self::DbBranchesSplitConfigCopyMode
             | Self::DbBranchSecretManagerExtract
             | Self::DbBranchSsmParameter
             | Self::DbBranchDedicatedNamespace
@@ -1269,6 +1270,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::KeylessCi
             | NewOperatorFeature::LicenseGateReporting
             | NewOperatorFeature::DbBranchesFromSplitConfig
+            | NewOperatorFeature::DbBranchesSplitConfigCopyMode
             | NewOperatorFeature::DbBranchSecretManagerExtract
             | NewOperatorFeature::DbBranchSsmParameter
             | NewOperatorFeature::Unknown => &[],

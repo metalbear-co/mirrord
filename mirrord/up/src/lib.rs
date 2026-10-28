@@ -18,10 +18,11 @@ use std::{
 };
 
 pub use config::{
-    BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget,
-    ModeConfig, PreviewImageError, PreviewImageSource, PreviewImages, QueueSplitMode,
-    SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SubprocessCfg,
-    TargetValidationError, UnknownMode, UpConfig, WindowsSupportError, preview_image_env,
+    BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, DbBranchesOrigin,
+    DbBranching, IncompatibleTarget, ModeConfig, PreviewImageError, PreviewImageSource,
+    PreviewImages, QueueSplitMode, SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError,
+    ServiceMode, SubprocessCfg, TargetValidationError, UnknownMode, UpConfig, WindowsSupportError,
+    preview_image_env,
 };
 use config::{
     ResolvedTarget, SessionKind, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets,
@@ -367,9 +368,12 @@ impl UpConfig {
     pub fn verify_all(&self) -> Vec<UpError> {
         let builtin_names = self
             .modes
-            .keys()
-            .filter(|name| ServiceMode::from_name(name).is_some())
-            .map(|name| BuiltinModeName(name.clone()).into());
+            .iter()
+            .filter(|(name, mode)| {
+                ServiceMode::from_name(name).is_some()
+                    && (mode.incoming.is_some() || mode.queues.is_some())
+            })
+            .map(|(name, _)| BuiltinModeName(name.clone()).into());
         // `services` is a `HashMap`, so its entries are sorted here and below: [`Self::verify`]
         // then reports the same first error on every run.
         let unknown_modes = self
@@ -934,7 +938,7 @@ pub async fn launch(
                 run,
                 mode: _,
                 incoming: _,
-                default_db_branches: _,
+                db_branches_origin: _,
                 default_split_queues: _,
             } = config;
             let config::RunConfig {

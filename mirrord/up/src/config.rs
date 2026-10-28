@@ -15,8 +15,8 @@ use mirrord_config::{
     feature::{
         copy_target::CopyTargetConfig,
         database_branches::{
-            AllSplitConfigDbBranches, DatabaseBranchesConfig, SplitConfigDbBranches,
-            SplitConfigRequest,
+            AllSplitConfigDbBranches, BranchCopyMode, DatabaseBranchesConfig, SplitConfigCopy,
+            SplitConfigDbBranches, SplitConfigRequest, SplitConfigRequestWithCopy,
         },
         env::{EnvConfig, EnvFileConfig},
         network::incoming::{
@@ -60,10 +60,6 @@ pub enum ServiceMode {
     /// Uses the service's `http_filter` if set. Otherwise, requests with a header matching the
     /// regex `baggage: .*mirrord-session={key}.*` go to the local service, where `{key}` is the
     /// session key.
-    ///
-    /// With a workload target and no `db_branches` of its own, the service requests DB branching
-    /// (`db_branches: "*"`): it runs against branches of the databases defined on the workload's
-    /// `MirrordSplitConfig`, shared with the other services of the run that use the same ones.
     #[default]
     Split,
 
@@ -80,11 +76,7 @@ pub enum ServiceMode {
     ///
     /// Uses the service's `http_filter` if set. Otherwise, requests with a header matching the
     /// regex `baggage: .*mirrord-session={key}.*` are mirrored, where `{key}` is the session key.
-    ///
-    /// With a workload target and no `db_branches` of its own, the service requests DB branching
-    /// (`db_branches: "*"`): it runs against branches of the databases defined on the workload's
-    /// `MirrordSplitConfig`, shared with the other services of the run that use the same ones.
-    // The fallback filter and the DB branching request are built in `ServiceConfig::assemble`.
+    // The fallback filter is built in `ServiceConfig::assemble`.
     Mirror,
 }
 
@@ -136,15 +128,35 @@ impl From<QueueSplitMode> for QueueMode {
     }
 }
 
+/// Which DB branches a mode requests.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DbBranching {
+    /// Branches of every database defined on the workload's `MirrordSplitConfig`, created empty.
+    Empty,
+    /// Like `empty`, with the source database's schema copied.
+    Schema,
+    /// Like `empty`, with the source database's schema and data copied.
+    All,
+    /// Branches of every database defined on the workload's `MirrordSplitConfig`, each copied
+    /// with its own `copy.mode`.
+    Inherit,
+    /// No branches: the service runs against the source databases.
+    Off,
+}
+
 /// A custom mode, defined under `modes` and selected by name with `default_mode` or
 /// `mirrord up --mode`.
+///
+/// An entry named after a built-in mode (`split`, `replace`, `mirror`) may set only
+/// `db_branching`, which then applies to that built-in mode for every service.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ModeConfig {
     /// How incoming traffic is handled, as in the built-in mode of the same name. Defaults to
     /// `split`.
-    #[serde(default)]
-    pub incoming: ServiceMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incoming: Option<ServiceMode>,
 
     /// How the service's queues are split. When not set, every queue defined in the cluster is
     /// split with `queue_mode: steal`.
@@ -152,13 +164,28 @@ pub struct ModeConfig {
     /// Ignored with `incoming: replace`, which doesn't split queues.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queues: Option<QueueSplitMode>,
+
+    /// Which DB branches the service requests, from the `dbBranches` defined on the workload's
+    /// `MirrordSplitConfig`: `empty`, `schema` or `all` to copy every one with that copy mode,
+    /// `inherit` to copy each with its own, `off` for none. Applies whatever `incoming` is.
+    ///
+    /// When not set, a custom mode requests no branches. The built-in `split` and `mirror` modes
+    /// request the same branches as `inherit` when the target is a single workload, but run
+    /// against the source databases instead of failing when the operator can't branch or there
+    /// is nothing to branch. A service that sets `db_branches` itself keeps them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub db_branching: Option<DbBranching>,
 }
 
 impl ModeConfig {
-    /// The mode named `name`: a built-in one, or one defined under `modes`.
+    /// The mode named `name`: a built-in one, with the `db_branching` of its entry under
+    /// `modes` if it has one, or a custom one defined under `modes`.
     pub fn named(modes: &BTreeMap<Arc<str>, ModeConfig>, name: &str) -> Result<Self, UnknownMode> {
         if let Some(builtin) = ServiceMode::from_name(name) {
-            return Ok(builtin.into());
+            return Ok(Self {
+                db_branching: modes.get(name).and_then(|entry| entry.db_branching),
+                ..builtin.into()
+            });
         }
 
         if let Some(mode) = modes.get(name) {
@@ -168,7 +195,12 @@ impl ModeConfig {
         let known = ServiceMode::VARIANTS
             .iter()
             .map(|mode| Arc::from(<&str>::from(mode)))
-            .chain(modes.keys().cloned())
+            .chain(
+                modes
+                    .keys()
+                    .filter(|name| ServiceMode::from_name(name).is_none())
+                    .cloned(),
+            )
             .collect::<Vec<_>>();
 
         let suggestion =
@@ -181,6 +213,11 @@ impl ModeConfig {
             known,
         })
     }
+
+    /// How incoming traffic is handled.
+    pub fn incoming(&self) -> ServiceMode {
+        self.incoming.unwrap_or_default()
+    }
 }
 
 impl From<ServiceMode> for ModeConfig {
@@ -192,7 +229,11 @@ impl From<ServiceMode> for ModeConfig {
             // Replacing the target takes over its queues whole, so they aren't split.
             ServiceMode::Replace => None,
         };
-        Self { incoming, queues }
+        Self {
+            incoming: Some(incoming),
+            queues,
+            db_branching: None,
+        }
     }
 }
 
@@ -631,7 +672,8 @@ pub struct UpConfig {
     #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
     pub common: CommonConfig,
     /// Custom modes keyed by name, selected with a service's `default_mode` or
-    /// `mirrord up --mode`. The built-in names (`split`, `replace`, `mirror`) are reserved.
+    /// `mirrord up --mode`. An entry named after a built-in mode (`split`, `replace`, `mirror`)
+    /// may set only `db_branching`.
     #[serde(
         default,
         deserialize_with = "deserialize_modes",
@@ -758,15 +800,35 @@ impl ServiceConfig {
             )
             .not()
         });
-        let mut default_db_branches =
-            matches!(mode.incoming, ServiceMode::Split | ServiceMode::Mirror)
-                && single_workload
-                && cfg.feature.db_branches.is_empty();
-        if default_db_branches {
-            cfg.feature.db_branches =
-                DatabaseBranchesConfig::FromSplitConfig(SplitConfigRequest::Entries(
-                    SplitConfigDbBranches::All(AllSplitConfigDbBranches::All),
-                ));
+        let all = || SplitConfigDbBranches::All(AllSplitConfigDbBranches::All);
+        let copy = |mode| {
+            SplitConfigRequest::WithCopy(SplitConfigRequestWithCopy {
+                entries: all(),
+                copy: SplitConfigCopy { mode },
+            })
+        };
+        let shares_traffic = matches!(
+            ServiceMode::from_name(&self.default_mode),
+            Some(ServiceMode::Split | ServiceMode::Mirror)
+        );
+        let request = match mode.db_branching {
+            _ if cfg.feature.db_branches.is_empty().not() => None,
+            Some(DbBranching::Empty) => Some(copy(BranchCopyMode::Empty)),
+            Some(DbBranching::Schema) => Some(copy(BranchCopyMode::Schema)),
+            Some(DbBranching::All) => Some(copy(BranchCopyMode::All)),
+            Some(DbBranching::Inherit) => Some(SplitConfigRequest::Entries(all())),
+            Some(DbBranching::Off) => None,
+            // Without the line, only the built-in modes that share traffic request branches.
+            None if shares_traffic && single_workload => Some(SplitConfigRequest::Entries(all())),
+            None => None,
+        };
+        let mut db_branches_origin = match (&request, mode.db_branching) {
+            (None, _) => DbBranchesOrigin::Config,
+            (Some(_), None) => DbBranchesOrigin::BuiltinMode,
+            (Some(_), Some(_)) => DbBranchesOrigin::ModeLine,
+        };
+        if let Some(request) = request {
+            cfg.feature.db_branches = DatabaseBranchesConfig::FromSplitConfig(request);
         }
 
         let patch_sets_split_queues = self
@@ -781,12 +843,14 @@ impl ServiceConfig {
 
             // A patch that sets `db_branches` or `split_queues` decides them itself, `[]`
             // included, so whatever it holds afterwards was asked for by the user.
-            default_db_branches &= patch.pointer("/feature/db_branches").is_none();
+            if patch.pointer("/feature/db_branches").is_some() {
+                db_branches_origin = DbBranchesOrigin::Config;
+            }
             cfg = apply_config_patch(cfg, patch, &key)?;
         }
 
         let default_split_queues =
-            matches!(mode.incoming, ServiceMode::Split | ServiceMode::Mirror)
+            matches!(mode.incoming(), ServiceMode::Split | ServiceMode::Mirror)
                 && patch_sets_split_queues.not()
                 && matches!(cfg.target.path, Some(Target::Label(_))).not()
                 && (preview.not()
@@ -816,8 +880,8 @@ impl ServiceConfig {
             service_name: service_name.clone(),
             run: self.run,
             mode: self.default_mode,
-            incoming: mode.incoming,
-            default_db_branches,
+            incoming: mode.incoming(),
+            db_branches_origin,
             default_split_queues,
         })
     }
@@ -863,9 +927,9 @@ impl ServiceConfig {
     ) -> LayerConfig {
         cfg.kube_context = kube_context.as_deref().map(Into::into);
         cfg.feature.env = self.env.clone();
-        cfg.feature.network.incoming.mode = mode.incoming.into();
+        cfg.feature.network.incoming.mode = mode.incoming().into();
 
-        match mode.incoming {
+        match mode.incoming() {
             ServiceMode::Split | ServiceMode::Mirror => {
                 cfg.feature.network.incoming.http_filter = if self.http_filter.is_filter_set() {
                     self.http_filter.clone()
@@ -1017,13 +1081,26 @@ pub struct SubprocessCfg {
     /// How the mode handles incoming traffic, for [`validate_targets`] errors on custom modes,
     /// whose name doesn't say it.
     pub incoming: ServiceMode,
-    /// `config.feature.db_branches` is the `"*"` `mirrord up` adds for this service's mode, not
-    /// one the user set. An operator that can't resolve it drops it rather than failing the run.
-    pub default_db_branches: bool,
+    /// Where `config.feature.db_branches` came from.
+    pub db_branches_origin: DbBranchesOrigin,
     /// `config.feature.split_queues` are the `"*"` splits `mirrord up` adds for this service's
     /// mode, not ones the user set. A preview session asks its operator to drop the ones it
     /// can't serve rather than failing.
     pub default_split_queues: bool,
+}
+
+/// Where a service's `feature.db_branches` came from, which decides how `mirrord up` handles a
+/// workload the operator can't branch for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DbBranchesOrigin {
+    /// The service's own config or `config_patch`, or there's no request: handled as in a plain
+    /// `mirrord.json`.
+    Config,
+    /// The `"*"` a built-in mode adds unasked: dropped when the operator can't serve it or there's
+    /// nothing to branch.
+    BuiltinMode,
+    /// The mode's `db_branching` line: fails when there's nothing to branch.
+    ModeLine,
 }
 
 /// Rejects services whose resolved target cannot support the features their
@@ -1486,7 +1563,7 @@ impl UpConfig {
             .map(|(service_name, svc)| {
                 let mode = ModeConfig::named(&modes, &svc.default_mode)?;
                 // A preview session runs as `split` whatever the mode, so nothing is ignored.
-                if kind == SessionKind::Up && mode.incoming == ServiceMode::Replace {
+                if kind == SessionKind::Up && mode.incoming() == ServiceMode::Replace {
                     if svc.http_filter.is_filter_set() {
                         eprintln!(
                             "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
@@ -1546,10 +1623,13 @@ impl UpConfig {
     }
 }
 
-/// A custom mode takes the name of a built-in one.
+/// An entry named after a built-in mode sets more than `db_branching`.
 #[derive(Debug, Error, Diagnostic)]
-#[error("`modes.{0}` conflicts with the built-in `{0}` mode")]
-#[diagnostic(help("Rename the mode: `split`, `replace` and `mirror` are reserved."))]
+#[error("`modes.{0}` overrides the built-in `{0}` mode, which may only set `db_branching`")]
+#[diagnostic(help(
+    "Remove the other settings, or rename the mode to define a custom one: `split`, `replace` \
+     and `mirror` are reserved."
+))]
 pub struct BuiltinModeName(pub Arc<str>);
 
 /// A mode was selected that is neither built-in nor defined under `modes`.
@@ -1800,7 +1880,20 @@ impl CollectAnalytics for &UpConfig {
         modes.add("mirror", count_mode_mirror);
         modes.add("custom", count_mode_custom);
         analytics.add("modes", modes);
-        analytics.add("num_custom_modes", self.modes.len());
+        analytics.add(
+            "num_custom_modes",
+            self.modes
+                .keys()
+                .filter(|name| ServiceMode::from_name(name).is_none())
+                .count(),
+        );
+        analytics.add(
+            "num_db_branching_modes",
+            self.modes
+                .values()
+                .filter(|mode| mode.db_branching.is_some())
+                .count(),
+        );
     }
 }
 
