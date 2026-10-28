@@ -82,7 +82,7 @@ use crate::{
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
-            branch_database::{BranchDatabase, BranchDatabaseSpec, DatabaseDialect},
+            branch_database::{BranchDatabase, BranchDatabaseSpec, DatabaseDialect, DialectConfig},
             mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase,
             pg::PgBranchDatabase,
@@ -1619,32 +1619,23 @@ where
                     .clone()
                     .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))?;
 
-                if branch.spec.postgres_options.is_some() {
-                    names.pg.push(name);
-                } else if branch.spec.mysql_options.is_some() {
-                    names.mysql.push(name);
-                } else if branch.spec.mariadb_options.is_some() {
-                    names.mariadb.push(name);
-                } else if branch.spec.mongodb_options.is_some() {
-                    names.mongodb.push(name);
-                } else if branch.spec.mssql_options.is_some() {
-                    names.mssql.push(name);
-                } else if branch.spec.redis_options.is_some() {
-                    names.redis.push(name);
-                } else if branch.spec.dynamodb_options.is_some() {
-                    names.dynamodb.push(name);
-                } else if branch.spec.spanner_options.is_some() {
-                    names.spanner.push(name);
-                } else if branch.spec.clickhouse_options.is_some() {
-                    names.clickhouse.push(name);
-                } else if branch.spec.cockroachdb_options.is_some() {
-                    names.cockroachdb.push(name);
-                } else if branch.spec.generic_options.is_some() {
-                    names.generic.push(name);
-                } else if branch.spec.s3_options.is_some() {
-                    names.s3.push(name);
-                } else if branch.spec.turbopuffer_options.is_some() {
-                    names.turbopuffer.push(name);
+                let Some(dialect) = branch.spec.configured_dialects().next() else {
+                    continue;
+                };
+                match dialect {
+                    DialectConfig::Postgres(_) => names.pg.push(name),
+                    DialectConfig::Mysql(_) => names.mysql.push(name),
+                    DialectConfig::Mariadb(_) => names.mariadb.push(name),
+                    DialectConfig::Dynamodb(_) => names.dynamodb.push(name),
+                    DialectConfig::Mongodb(_) => names.mongodb.push(name),
+                    DialectConfig::Mssql(_) => names.mssql.push(name),
+                    DialectConfig::Redis(_) => names.redis.push(name),
+                    DialectConfig::Spanner(_) => names.spanner.push(name),
+                    DialectConfig::Clickhouse(_) => names.clickhouse.push(name),
+                    DialectConfig::Cockroachdb(_) => names.cockroachdb.push(name),
+                    DialectConfig::S3(_) => names.s3.push(name),
+                    DialectConfig::Turbopuffer(_) => names.turbopuffer.push(name),
+                    DialectConfig::Generic(_) => names.generic.push(name),
                 }
             }
             Ok(names)
