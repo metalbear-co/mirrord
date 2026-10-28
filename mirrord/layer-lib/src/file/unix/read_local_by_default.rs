@@ -136,10 +136,10 @@ pub(crate) fn cwd_pattern(cwd: &Path) -> Option<String> {
 /// One exact-match pattern per ancestor of the working directory, so only the directory itself
 /// matches, and its other entries still follow the usual rules.
 ///
-/// Root is never among them: it's the one ancestor without a parent. Even if it got through, it
-/// would only repeat the `^/$` root entry in [`regex_set_builder`], since `/` trims to `^/?$`.
-/// The root that must stay out is root as the working directory, whose `^/(/|$)` would make
-/// every path local, and [`cwd_pattern`] skips that.
+/// Root is never among them: it's the one ancestor without a parent. Even if it got through, `/`
+/// trims to `^/?$`, which only adds the empty path to the `^/$` root entry in
+/// [`regex_set_builder`]. The root that must stay out is root as the working directory, whose
+/// `^(/|$)` would make every path local, and [`cwd_pattern`] skips that.
 pub(crate) fn cwd_ancestor_patterns(cwd: &Path) -> Vec<String> {
     cwd.ancestors()
         .skip(1)

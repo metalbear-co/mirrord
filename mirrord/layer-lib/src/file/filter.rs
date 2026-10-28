@@ -464,6 +464,16 @@ mod tests {
         );
     }
 
+    /// Root is an ancestor of every working directory, but it never gets an ancestor pattern.
+    #[cfg(unix)]
+    #[test]
+    fn root_is_not_among_the_ancestors() {
+        assert!(
+            !ancestor_set().is_match("/"),
+            "root is the one ancestor without a parent, so it must not get an ancestor pattern"
+        );
+    }
+
     /// Root as the working directory adds no patterns, or every path would be local.
     #[cfg(unix)]
     #[test]
