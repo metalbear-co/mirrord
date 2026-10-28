@@ -430,16 +430,29 @@ async fn wait_for_first_exit(
 
 /// Prints each line of `stream` prefixed with the service's name. On a session's stdout, also
 /// picks up the readiness marker and the branch databases report, which is not printed.
+///
+/// Lines are decoded lossily: a program may write in another encoding (a Windows console's code
+/// page, say), and one bad byte must not stop the forwarding, which would close the pipe on the
+/// program's next write.
 async fn forward_output(
     stream: impl AsyncRead + Unpin,
     name: Arc<str>,
     session: Option<SessionOutput>,
 ) {
-    let mut lines = BufReader::new(stream).lines();
+    let mut reader = BufReader::new(stream);
+    let mut buffer = Vec::new();
     let mut counted = false;
     loop {
-        match lines.next_line().await {
-            Ok(Some(line)) => {
+        buffer.clear();
+        match reader.read_until(b'\n', &mut buffer).await {
+            Ok(0) => break,
+            Ok(_) => {
+                let line = String::from_utf8_lossy(
+                    buffer
+                        .strip_suffix(b"\n")
+                        .map(|line| line.strip_suffix(b"\r").unwrap_or(line))
+                        .unwrap_or(&buffer),
+                );
                 if let Some(session) = &session {
                     if counted.not() && line.trim() == SESSION_READY_MESSAGE {
                         counted = true;
@@ -460,7 +473,6 @@ async fn forward_output(
                 }
                 println!("{name}: {line}");
             }
-            Ok(None) => break,
             Err(error) => {
                 eprintln!("{name} output error: {error}");
                 break;
@@ -610,6 +622,48 @@ async fn supervise_with_second_signal(
 
 #[cfg(test)]
 mod test_support;
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+
+    /// A line in another encoding (`£` in a Windows console's code page 850, here) doesn't stop
+    /// the forwarding: the readiness marker after it is still read.
+    #[tokio::test]
+    async fn a_line_that_is_not_utf8_does_not_stop_the_forwarding() {
+        let readiness = Arc::new(Readiness {
+            count: AtomicUsize::new(0),
+            total: 1,
+            start: Instant::now(),
+            tracker: ReadyTracker::default(),
+        });
+        let started = Arc::new(AtomicBool::new(false));
+        let (closed, _receiver) = oneshot::channel();
+        let output = [
+            b"price: \x9c5\r\n".as_slice(),
+            SESSION_READY_MESSAGE.as_bytes(),
+            b"\n",
+        ]
+        .concat();
+
+        forward_output(
+            output.as_slice(),
+            Arc::from("shop"),
+            Some(SessionOutput {
+                readiness: readiness.clone(),
+                started: started.clone(),
+                _closed: closed,
+            }),
+        )
+        .await;
+
+        assert!(
+            started.load(Ordering::Relaxed),
+            "the readiness marker comes after the bad byte, so it must still be read"
+        );
+        assert_eq!(readiness.count.load(Ordering::Relaxed), 1);
+    }
+}
 
 #[cfg(all(test, windows))]
 mod windows_tests;
