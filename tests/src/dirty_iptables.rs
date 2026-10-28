@@ -18,6 +18,8 @@ struct DirtyIptablesTest {
     namespace: String,
     target: String,
     kube_client: KubeClient,
+    // Keep the target alive through assertions; consumers must bind this guard.
+    namespace_guard: ResourceGuard,
 }
 
 /// This fixture only creates resources if a mirrord operator is NOT installed.
@@ -52,7 +54,7 @@ async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest
     // Create a namespace and a pod to target and check for pre-existing mirrord chain names
     // Create the namespace and wrap it in ResourceGuard
     let namespace_api: Api<Namespace> = Api::all(kube_client.get_client());
-    let _namespace_guard = ResourceGuard::create::<Namespace>(
+    let (namespace_guard, _namespace_resource) = ResourceGuard::create::<Namespace>(
         namespace_api.clone(),
         &serde_json::from_value(json!({
             "apiVersion": "v1",
@@ -71,7 +73,7 @@ async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest
     .await
     .unwrap_or_else(|error| panic!("Should be able to create namespace {namespace}: {error}"));
 
-    // Create a single pod as the target and wrap it in ResourceGuard
+    // The target pod is cleaned up with its namespace, so it needs no separate guard.
     let pod_api: Api<Pod> = Api::namespaced(kube_client.get_client(), &namespace);
     let _pod = pod_api
         .create(
@@ -134,6 +136,7 @@ async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest
         namespace,
         target,
         kube_client,
+        namespace_guard,
     }
 }
 
@@ -147,7 +150,7 @@ async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest
 /// first run.
 ///
 /// #### RELEVANT CODE
-/// Function that performs check: `SafeIpTables::ensure_iptables_clean()`
+/// Startup check: `check_leftover_rules`/`check_existing_rules` in `mirrord/agent/src/entrypoint.rs`.
 /// Static chain/ table names: `IPTABLE_PREROUTING`, `IPTABLE_MESH`, `IPTABLE_STANDARD`,
 /// `IPTABLES_TABLE_NAME`
 #[cfg_attr(target_os = "windows", ignore)]
@@ -157,7 +160,10 @@ pub async fn agent_exits_on_dirty_tables(
     #[future] oss_only_dirty_iptables_test: Option<DirtyIptablesTest>,
 ) {
     let Some(DirtyIptablesTest {
-        namespace, target, ..
+        namespace,
+        target,
+        namespace_guard: _namespace_guard,
+        ..
     }) = oss_only_dirty_iptables_test.await
     else {
         return;
@@ -208,6 +214,7 @@ pub async fn agent_cleans_up_and_starts_on_dirty_tables(
         namespace,
         target,
         kube_client,
+        namespace_guard: _namespace_guard,
     } = dirty_iptables_test.await;
     let env = if operator_installed(&kube_client).await.unwrap() {
         // if the operator is installed, cleanup should be enabled by default.
