@@ -638,7 +638,7 @@ impl PreparedPreview {
 
         let session_name = PreviewSession::make_resource_name(&config_target, key.to_owned());
 
-        // Operators compiled with a custom OPERATOR_ISOLATION_MARKER only reconcile preview
+        // Operators running with a custom OPERATOR_ISOLATION_MARKER only reconcile preview
         // sessions labeled with their marker (see the label selector in the preview-env
         // controller). The runtime env var check here allows developers to label the session
         // so it gets picked up by an isolated operator instead of the production one.

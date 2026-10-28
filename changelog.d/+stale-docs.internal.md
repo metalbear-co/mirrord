@@ -1,0 +1,1 @@
+Correct the contributing guide on `OPERATOR_ISOLATION_MARKER`, which the operator reads at runtime, on the files Vale checks, and on the changelog fragment types. The workflows README now says that merging a release pull request starts a release.
