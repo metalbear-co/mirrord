@@ -228,6 +228,25 @@ After the last session against a target ends, the operator keeps the split's tem
 | `0`            | Tear down immediately. Unread messages may be lost.       |
 | `N`            | Keep resources for up to `N` seconds, then tear down.     |
 
+## Temporary queue names
+
+By default, temporary queues are named `mirrord-<random>-<hash>` for user queues and `mirrord-main-<random>-<hash>` for the queue the patched workload reads, where `<hash>` is a hash of the original queue name. To use a different format, set `spec.tmpNameTemplate` in the `MirrordSplitConfig`:
+
+```yaml
+spec:
+  tmpNameTemplate: "dev-mirrord-{{RANDOM}}{{FALLBACK}}{{ORIGINAL}}"
+```
+
+The template can use these placeholders:
+
+* `{{RANDOM}}` (required) - random alphabetic characters for uniqueness.
+* `{{FALLBACK}}` - resolves to `-main-` for the queue the patched workload reads or `-` for user queues.
+* `{{ORIGINAL}}` - name of the original queue being split.
+
+RabbitMQ queue names can be up to 255 bytes. If the rendered name exceeds this limit, the original portion is truncated with a hash suffix.
+
+RabbitMQ reserves queue names starting with `amq.`, so the operator rejects a template that starts with `amq.`. A template that starts with `{{ORIGINAL}}` can still produce such a name: with `{{ORIGINAL}}.{{RANDOM}}`, a queue named `amq` gets temporary queues named `amq.<random>`, which RabbitMQ refuses to declare. Start the template with a fixed prefix, such as `mirrord-`, to avoid this.
+
 ## Setting a filter
 
 For the full filter reference (`queue_type`, `message_filter`, `jq_filter`), see the [overview](../queue-splitting.md#setting-a-filter-for-a-mirrord-run). RabbitMQ uses `queue_type: RMQ`, and supports both `message_filter` on message headers and `jq_filter` on the whole message.

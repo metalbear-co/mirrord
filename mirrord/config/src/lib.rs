@@ -62,6 +62,7 @@ use crate::{
     feature::{
         FeatureConfig,
         fs::{READONLY_FILE_BUFFER_HARD_LIMIT, READONLY_FILE_BUFFER_WARN_LIMIT},
+        magic::{JAVA_OPTIONS_ENV, without_java_agents},
     },
     internal_proxy::InternalProxyConfig,
     retry::StartupRetryConfig,
@@ -776,6 +777,16 @@ impl LayerConfig {
                     .entry(pattern)
                     .or_insert(replacement);
             }
+        }
+    }
+
+    /// Applies enabled fixes to environment variables fetched from the target.
+    pub fn sanitize_remote_env(&self, env: &mut HashMap<String, String>) {
+        if self.feature.magic.java_agents
+            && let Some(options) = env.get_mut(JAVA_OPTIONS_ENV)
+            && let Some(sanitized) = without_java_agents(options)
+        {
+            *options = sanitized;
         }
     }
 
@@ -3143,6 +3154,23 @@ mod tests {
     #[test]
     fn magic_auto_mount_defaults_to_enabled() {
         assert!(default_config().feature.magic.auto_mount);
+    }
+
+    #[test]
+    fn magic_java_agents_defaults_to_enabled() {
+        assert!(default_config().feature.magic.java_agents);
+    }
+
+    #[test]
+    fn java_agent_sanitisation_can_be_disabled() {
+        let mut config = default_config();
+        config.feature.magic.java_agents = false;
+        let options = "-javaagent:/agent.jar";
+        let mut env = HashMap::from([(JAVA_OPTIONS_ENV.to_owned(), options.to_owned())]);
+
+        config.sanitize_remote_env(&mut env);
+
+        assert_eq!(env.get(JAVA_OPTIONS_ENV).map(String::as_str), Some(options));
     }
 
     /// Names that aren't one of the agent's capabilities are ignored, so the user gets a warning.

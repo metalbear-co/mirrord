@@ -22,7 +22,10 @@ use mirrord_config::{
     util::GIT_BRANCH,
 };
 use mirrord_operator::{
-    client::{required_branching_feature, split_config_branches::entries_from_response},
+    client::{
+        error::OperatorApiError, required_branching_feature,
+        split_config_branches::entries_from_response,
+    },
     crd::NewOperatorFeature,
 };
 use mirrord_progress::{Progress, ProgressTracker};
@@ -32,7 +35,7 @@ use mirrord_up::{
 
 use super::{
     PreparedPreview, StopMode, create_preview_api, load_manifests, manifest_sources,
-    preview_namespace, preview_stop,
+    preview_namespace, preview_stop, report_local_feature_gate,
 };
 use crate::{
     config::{
@@ -348,7 +351,19 @@ async fn prepare_service(
         if off.is_empty().not() {
             if default_db_branches.not() {
                 for feature in off.iter().filter_map(|(_, feature)| *feature) {
-                    operator_api.operator().spec.require_feature(feature)?;
+                    if let Err(error) = operator_api.operator().spec.require_feature(feature) {
+                        if let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error {
+                            report_local_feature_gate(
+                                operator_api,
+                                *feature,
+                                &config,
+                                progress,
+                                &mut analytics,
+                            )
+                            .await;
+                        }
+                        return Err(error.into());
+                    }
                 }
             }
             progress.warning(&format!(
@@ -427,6 +442,7 @@ async fn prepare_service(
         supplied_objects,
         auto_queue_splitting,
         progress,
+        analytics,
     )
     .await
 }
