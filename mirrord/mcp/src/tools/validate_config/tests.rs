@@ -779,8 +779,8 @@ fn up_yaml_custom_mode(#[case] mode: &str, #[case] target: &str, #[case] message
     "unknown mode `fsat`; did you mean `fast`?"
 )]
 #[case::builtin(
-    "modes:\n  split: {}\nservices:\n  app:\n    run:\n      command: [\"true\"]\n",
-    "conflicts with the built-in `split` mode"
+    "modes:\n  split:\n    incoming: mirror\nservices:\n  app:\n    run:\n      command: [\"true\"]\n",
+    "overrides the built-in `split` mode, which may only set `db_branching`"
 )]
 fn up_yaml_unusable_mode_name(#[case] content: &str, #[case] message: &str) {
     let issue = single_issue(ConfigFormat::MirrordUpYaml, content);

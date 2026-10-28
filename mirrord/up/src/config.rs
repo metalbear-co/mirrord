@@ -2583,14 +2583,12 @@ mod tests {
         );
     }
 
-    /// A custom mode requests DB branching like the built-in mode its `incoming` names: `split`
-    /// and `mirror` ask for every `MirrordSplitConfig` entry, `replace` for none. `queues` plays
-    /// no part.
+    /// A custom mode without `db_branching` requests no DB branches, whatever its `incoming`.
     #[rstest]
-    #[case::split("{ incoming: split, queues: mirror }", true)]
-    #[case::mirror("{ incoming: mirror, queues: split }", true)]
-    #[case::replace("{ incoming: replace, queues: split }", false)]
-    fn custom_mode_db_branching_follows_incoming(#[case] mode: &str, #[case] branches: bool) {
+    #[case::split("{ incoming: split, queues: mirror }")]
+    #[case::mirror("{ incoming: mirror, queues: split }")]
+    #[case::replace("{ incoming: replace, queues: split }")]
+    fn custom_mode_without_db_branching_requests_none(#[case] mode: &str) {
         let service = parse(&format!(
             r#"
             modes:
@@ -2613,20 +2611,8 @@ mod tests {
         .unwrap()
         .remove(0);
 
-        assert_eq!(service.default_db_branches, branches);
-        assert_eq!(
-            service
-                .config
-                .feature
-                .db_branches
-                .split_config_request()
-                .is_some_and(SplitConfigDbBranches::is_all),
-            branches
-        );
-        assert_eq!(
-            service.config.feature.db_branches.is_empty(),
-            branches.not()
-        );
+        assert_eq!(service.db_branches_origin, DbBranchesOrigin::Config);
+        assert!(service.config.feature.db_branches.is_empty());
     }
 
     /// `incoming: replace` copies the target like built-in `replace`, and splits no queues even
@@ -3426,6 +3412,7 @@ mod tests {
                     "custom": 0,
                 },
                 "num_custom_modes": 0,
+                "num_db_branching_modes": 0,
             }),
         );
     }

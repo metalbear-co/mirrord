@@ -1068,9 +1068,9 @@ mod tests {
         );
     }
 
-    /// A custom mode can't take a built-in mode's name.
+    /// An entry named after a built-in mode may set only `db_branching`.
     #[rstest::rstest]
-    fn verify_rejects_custom_mode_named_after_builtin(
+    fn verify_rejects_builtin_entry_setting_more_than_db_branching(
         #[values("split", "replace", "mirror")] name: &str,
     ) {
         let yaml = format!(

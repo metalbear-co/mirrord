@@ -4403,16 +4403,18 @@ mod tests {
 
         assert_eq!(
             parse(json!("*")).unwrap(),
-            DatabaseBranchesConfig::FromSplitConfig(SplitConfigDbBranches::All(
-                AllSplitConfigDbBranches::All
+            DatabaseBranchesConfig::FromSplitConfig(SplitConfigRequest::Entries(
+                SplitConfigDbBranches::All(AllSplitConfigDbBranches::All)
             ))
         );
         assert_eq!(
             parse(json!(["orders-pg", "sessions-redis"])).unwrap(),
-            DatabaseBranchesConfig::FromSplitConfig(SplitConfigDbBranches::Ids(vec![
-                "orders-pg".to_owned(),
-                "sessions-redis".to_owned()
-            ]))
+            DatabaseBranchesConfig::FromSplitConfig(SplitConfigRequest::Entries(
+                SplitConfigDbBranches::Ids(vec![
+                    "orders-pg".to_owned(),
+                    "sessions-redis".to_owned()
+                ])
+            ))
         );
         assert_eq!(
             parse(json!([])).unwrap(),
