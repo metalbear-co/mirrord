@@ -87,8 +87,8 @@ pub fn regex_set_builder() -> RegexSetBuilder {
     .map(|s| s.to_string())
     .collect();
 
-    if let Ok(cwd) = env::current_dir() {
-        patterns.extend(cwd_patterns(&cwd));
+    if let Some(cwd) = env::current_dir().ok().and_then(|cwd| cwd_pattern(&cwd)) {
+        patterns.push(cwd);
     }
     if let Ok(executable) = env::current_exe() {
         patterns.push(format!("{}$", regex::escape(&executable.to_string_lossy())));
@@ -105,31 +105,51 @@ pub fn regex_set_builder() -> RegexSetBuilder {
     RegexSetBuilder::new(patterns)
 }
 
-/// The patterns that keep the working directory local: everything under it, and each of its
-/// ancestors by exact match.
+/// Path patterns whose entry is described locally by default, while opening them, or anything
+/// under them, still follows the usual rules. These are the working directory's ancestors.
 ///
 /// Resolving a path under the working directory walks its ancestors first: Node's
 /// `realpathSync` calls `lstat` on `/workspace`, then `/workspace/app`, and so on. If an ancestor
-/// went to the remote, a target without that directory fails the whole walk with `ENOENT`. The
-/// exact match keeps only the directory itself local, so its other entries still follow the
-/// usual rules.
+/// went to the remote, a target without that directory fails the whole walk with `ENOENT`.
 ///
-/// Root gives no patterns: a lot of containers use it as `WORKDIR`, and making *everything*
+/// Only calls that describe the entry (`stat`, `access`, `readlink`, `realpath`, `statfs`) use
+/// these. Opening an ancestor stays with the usual rules on purpose: an `openat` relative to a
+/// local directory fd goes to the local directory, because the layer can only follow remote fds.
+/// So a local fd for `/workspace` would send `openat(fd, "remote-only.txt")` to the local disk,
+/// while `open("/workspace/remote-only.txt")` reaches the target.
+pub fn entry_regex_set_builder() -> RegexSetBuilder {
+    let patterns = env::current_dir()
+        .map(|cwd| cwd_ancestor_patterns(&cwd))
+        .unwrap_or_default();
+
+    RegexSetBuilder::new(patterns)
+}
+
+/// The pattern that keeps the working directory and everything under it local.
+///
+/// Root gives no pattern: a lot of containers use it as `WORKDIR`, and making *everything*
 /// local is confusing. It's also local by default already.
-pub(crate) fn cwd_patterns(cwd: &Path) -> Vec<String> {
-    if cwd.as_os_str().as_encoded_bytes() == b"/" {
-        return Vec::new();
-    }
+pub(crate) fn cwd_pattern(cwd: &Path) -> Option<String> {
+    (cwd.as_os_str().as_encoded_bytes() != b"/").then(|| format!("^{}(/|$)", trimmed(cwd)))
+}
 
-    // `current_dir` may or may not end in '/', so trim it and add our own.
-    let escape = |dir: &Path| regex::escape(dir.to_string_lossy().trim_end_matches('/'));
+/// One exact-match pattern per ancestor of the working directory, so only the directory itself
+/// matches, and its other entries still follow the usual rules.
+///
+/// Root is never among them: it's the one ancestor without a parent. Even if it got through, it
+/// would only repeat the `^/$` root entry in [`regex_set_builder`], since `/` trims to `^/?$`.
+/// The root that must stay out is root as the working directory, whose `^/(/|$)` would make
+/// every path local, and [`cwd_pattern`] skips that.
+pub(crate) fn cwd_ancestor_patterns(cwd: &Path) -> Vec<String> {
+    cwd.ancestors()
+        .skip(1)
+        .filter(|ancestor| ancestor.parent().is_some())
+        .map(|ancestor| format!("^{}/?$", trimmed(ancestor)))
+        .collect()
+}
 
-    let mut patterns = vec![format!("^{}(/|$)", escape(cwd))];
-    patterns.extend(
-        cwd.ancestors()
-            .skip(1)
-            .filter(|ancestor| ancestor.parent().is_some())
-            .map(|ancestor| format!("^{}/?$", escape(ancestor))),
-    );
-    patterns
+/// `dir` escaped for a regex, without a trailing '/', so a pattern can add its own whether
+/// `current_dir` ends in one or not.
+fn trimmed(dir: &Path) -> String {
+    regex::escape(dir.to_string_lossy().trim_end_matches('/'))
 }
