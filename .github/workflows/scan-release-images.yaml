@@ -1,0 +1,116 @@
+name: Scan Release Images
+
+# Daily Trivy scan of the CLI image, for the latest release or a given one. Each report is attached
+# to the GitHub release, so it can be shared on request. The run fails when the image has a critical
+# or high finding with a fix available.
+# The agent image is not scanned: it is built FROM scratch with no package database, so Trivy
+# cannot see its libraries.
+# A daily run, not one after `Publish`: it also finds new CVEs in a release that did not change.
+on:
+  schedule:
+    - cron: "30 3 * * *" # Daily 03:30 UTC
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release to scan (default is the latest)
+        required: false
+
+permissions: {}
+
+# Two scans of one release would replace each other's reports on the release.
+concurrency:
+  group: scan-release-images
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Find the release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VERSION" ]; then
+            VERSION=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  # Trivy runs with a read-only token: a compromised Trivy release must not be able to write to
+  # the repository.
+  scan:
+    needs: release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [mirrord-cli]
+        arch: [amd64, arm64]
+    steps:
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/${{ matrix.arch }}
+        with:
+          version: v0.75.0
+          image-ref: ghcr.io/metalbear-co/${{ matrix.image }}:${{ needs.release.outputs.version }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          format: json
+          output: ${{ matrix.image }}-${{ matrix.arch }}.json
+          timeout: 15m
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-${{ matrix.image }}-${{ matrix.arch }}
+          path: ${{ matrix.image }}-${{ matrix.arch }}.json
+
+  # Runs no third-party code, so it is the only job with write access.
+  publish:
+    needs: [release, scan]
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: trivy-*
+          merge-multiple: true
+
+      - name: Attach the reports to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          FIXABLE=0
+          for JSON in *.json; do
+            NAME="${JSON%.json}"
+            REPORT="trivy-$NAME-$VERSION.md"
+            {
+              echo "### ghcr.io/metalbear-co/${NAME%-*}:$VERSION (linux/${NAME##*-})"
+              echo
+              echo "Trivy v0.75.0, critical and high, scanned $(date -u +%Y-%m-%dT%H:%MZ)."
+              echo
+              echo "| Severity | ID | Package | Installed | Fixed in | Target |"
+              echo "|---|---|---|---|---|---|"
+              jq -r '.Results[]? | .Target as $t | .Vulnerabilities[]? |
+                "| \(.Severity) | \(.VulnerabilityID) | `\(.PkgName)` | \(.InstalledVersion) | \(if (.FixedVersion // "") == "" then "no fix" else .FixedVersion end) | \($t) |"' "$JSON" | sort -u
+            } > "$REPORT"
+            cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+            gh release upload "$VERSION" "$REPORT" --repo "$GITHUB_REPOSITORY" --clobber
+            COUNT=$(jq '[.Results[]?.Vulnerabilities[]? | select((.FixedVersion // "") != "")] | length' "$JSON")
+            if [ "$COUNT" -gt 0 ]; then
+              echo "::error::$NAME:$VERSION has $COUNT critical or high findings with a fix"
+              FIXABLE=1
+            fi
+          done
+          exit "$FIXABLE"
