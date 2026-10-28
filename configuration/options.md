@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-10-27T00:00:00.000Z
+lastmod: 2026-10-28T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -172,6 +172,18 @@ Flushes existing connections when starting to steal, might fix issues where conn
 aren't stolen (due to being already established)
 
 Defaults to `true`.
+
+### agent.http2_max_header_list_size {#agent-http2_max_header_list_size}
+
+Maximum size, in bytes, of the header list the agent accepts on HTTP/2 connections it
+intercepts. Applies to request headers sent by clients of the target, and to response
+headers sent back by the target when requests are passed through to it.
+
+The agent advertises this value as `SETTINGS_MAX_HEADER_LIST_SIZE`. Clients that respect
+it refuse to send larger headers, so set this to at least the header size limit your
+services allow.
+
+Defaults to 16 Kb.
 
 ### agent.http_detection_timeout {#agent-http_detection_timeout}
 
@@ -2961,6 +2973,16 @@ This allows the remote pod's IAM role / instance profile to be used as intended.
 
 Disable this only if you intentionally need local AWS credentials inside the local mirrord'
 process.
+
+Defaults to `true`.
+
+#### feature.magic.java_agents {#feature-magic-java_agents}
+
+Remote Java agents often refer to files that do not exist on the local machine. When
+enabled, mirrord removes `-javaagent:` options from the remote `JDK_JAVA_OPTIONS` value
+before it starts the local process.
+
+Disable this only if the remote Java agent is also available locally.
 
 Defaults to `true`.
 
