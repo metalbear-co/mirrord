@@ -1,9 +1,6 @@
 use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
-use kube::{
-    self,
-    core::{Status, response::StatusSummary},
-};
+use kube::{self, Error, client::AuthError};
 use miette::Diagnostic;
 use mirrord_auth::error::{ApiKeyError, CredentialStoreError};
 use mirrord_config::config::ConfigError;
@@ -16,7 +13,8 @@ use mirrord_kube::{api::kubernetes::KubeEnvironment, error::KubeApiError};
 use mirrord_mcp::McpError;
 use mirrord_operator::{
     client::error::{HttpError, OperatorApiError, OperatorOperation},
-    crd::preview::PreviewPodLogs,
+    crd::{NewOperatorFeature, preview::PreviewPodLogs},
+    types::PaidFeatureGate,
 };
 use mirrord_progress::messages::AGENT_OPERATOR_HINT;
 use mirrord_protocol_io::ProtocolError;
@@ -536,6 +534,23 @@ pub(crate) enum CliError {
     ))]
     OperatorApiForbidden(OperatorOperation, String),
 
+    #[error("{gate}")]
+    #[diagnostic(help(
+        "Ask your cluster administrator to add a license at https://app.metalbear.com/billing?utm_source=licensegate&utm_medium=cli&utm_content={}",
+        gate.feature_config_key
+    ))]
+    LocalPaidFeatureRequiresPlan {
+        feature: NewOperatorFeature,
+        gate: PaidFeatureGate,
+    },
+
+    #[error("{gate}")]
+    #[diagnostic(help(
+        "Ask your cluster administrator to add a license at https://app.metalbear.com/billing?utm_source=licensegate&utm_medium=cli&utm_content={}",
+        gate.feature_config_key
+    ))]
+    PaidFeatureRequiresPlan { gate: PaidFeatureGate },
+
     #[error(
         "mirrord operator license expired. Visit https://app.metalbear.com to renew your license"
     )]
@@ -1014,8 +1029,6 @@ impl CliError {
         error: KubeApiError,
         fallback: F,
     ) -> Self {
-        use kube::{Error, client::AuthError};
-
         match error {
             KubeApiError::KubeError(Error::Auth(AuthError::AuthExecStart(error))) => {
                 Self::KubeAuthExecFailed(error)
@@ -1054,7 +1067,17 @@ impl From<mirrord_up::UpError> for CliError {
 
 impl From<OperatorApiError> for CliError {
     fn from(value: OperatorApiError) -> Self {
-        use kube::{Error, client::AuthError};
+        let status = match &value {
+            OperatorApiError::KubeError {
+                error: Error::Api(status),
+                ..
+            }
+            | OperatorApiError::StatusFailure { status, .. } => Some(status.as_ref()),
+            _ => None,
+        };
+        if let Some(gate) = status.and_then(PaidFeatureGate::from_status) {
+            return Self::PaidFeatureRequiresPlan { gate };
+        }
 
         match value {
             OperatorApiError::BranchCreationFailed { operation, message } => {
@@ -1084,6 +1107,10 @@ impl From<OperatorApiError> for CliError {
                     }
                 },
             },
+            OperatorApiError::LocalFeatureNotLicensed { feature, gate } => {
+                Self::LocalPaidFeatureRequiresPlan { feature, gate }
+            }
+            OperatorApiError::FeatureNotLicensed { gate } => Self::PaidFeatureRequiresPlan { gate },
             OperatorApiError::ServerlessSessionsManagerNotServed => {
                 Self::ServerlessSessionsManagerNotServed
             }
@@ -1126,15 +1153,7 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorApiForbidden(operation, status.message)
             }
             OperatorApiError::StatusFailure { operation, status } => {
-                let error = kube::Error::Api(Box::new(Status {
-                    status: Some(StatusSummary::Failure),
-                    message: status.message,
-                    reason: status.reason,
-                    code: status.code,
-                    ..Default::default()
-                }));
-
-                Self::OperatorApiFailed(operation, error)
+                Self::OperatorApiFailed(operation, Error::Api(status))
             }
             OperatorApiError::NoLicense => Self::OperatorLicenseExpired,
             OperatorApiError::ClientCertError(error) => Self::OperatorClientCertError(error),

@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::source::MirrordConfigSource;
 
+pub(crate) const JAVA_OPTIONS_ENV: &str = "JDK_JAVA_OPTIONS";
+
 /// Sensible default behaviors that help most users. Disable individual flags only if they conflict
 /// with your setup.
 ///
@@ -21,6 +23,18 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "MagicFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct MagicConfig {
+    /// #### feature.magic.java_agents {#feature-magic-java_agents}
+    ///
+    /// Remote Java agents often refer to files that do not exist on the local machine. When
+    /// enabled, mirrord removes `-javaagent:` options from the remote `JDK_JAVA_OPTIONS` value
+    /// before it starts the local process.
+    ///
+    /// Disable this only if the remote Java agent is also available locally.
+    ///
+    /// Defaults to `true`.
+    #[config(default = true)]
+    pub java_agents: bool,
+
     /// #### feature.magic.aws {#feature-magic-aws}
     ///
     /// The AWS CLI prefers local credentials (e.g. `~/.aws`, `AWS_PROFILE`) over the remote pod's
@@ -90,10 +104,122 @@ pub struct MagicConfig {
     pub turbo: bool,
 }
 
+/// Removes Java agents from [`JAVA_OPTIONS_ENV`] while preserving the original spelling of every
+/// other launcher argument.
+///
+/// Java separates these arguments on ASCII whitespace and removes matching quote pairs. Backslash
+/// and `#` have no special meaning, so a shell command parser cannot safely process this value.
+pub(crate) fn without_java_agents(options: &str) -> Option<String> {
+    const JAVA_AGENT_PREFIX: &str = "-javaagent:";
+
+    // quotes can splice the prefix across quoted and unquoted fragments
+    // this means we have to scan the whole thing if the value contains quotes
+    if !options.contains(JAVA_AGENT_PREFIX) && !options.contains(['\'', '"']) {
+        return None;
+    }
+
+    let mut sanitised_options = Vec::new();
+    let mut token_start = None;
+    let mut unquoted = String::new();
+    let mut quote = None;
+    let mut modified = false;
+
+    // split using the Java launcher's quote rules
+    options.char_indices().for_each(|(index, character)| {
+        if let Some(expected) = quote {
+            if character == expected {
+                quote = None;
+            } else {
+                unquoted.push(character);
+            }
+        } else {
+            match character {
+                '\'' | '"' => {
+                    token_start.get_or_insert(index);
+                    quote = Some(character);
+                }
+                _ if character.is_ascii_whitespace() => {
+                    // only split whitespace if we're not in a quoted section
+                    if let Some(start) = token_start.take() {
+                        if !unquoted.starts_with(JAVA_AGENT_PREFIX) {
+                            sanitised_options.push(&options[start..index]);
+                        } else {
+                            modified = true;
+                        }
+                        unquoted.clear();
+                    }
+                }
+                _ => {
+                    token_start.get_or_insert(index);
+                    unquoted.push(character);
+                }
+            }
+        }
+    });
+
+    // we entered a quoted section but never left, so this env is malformed and we leave it alone
+    if quote.is_some() {
+        return None;
+    }
+
+    // push the final option
+    if let Some(start) = token_start {
+        if !unquoted.starts_with(JAVA_AGENT_PREFIX) {
+            sanitised_options.push(&options[start..]);
+        } else {
+            modified = true;
+        }
+    }
+
+    // return a modified value only if we removed some option(s)
+    let sanitised_value = sanitised_options.join(" ");
+    (modified).then_some(sanitised_value)
+}
+
 impl CollectAnalytics for &MagicConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
+        analytics.add("java_agents", self.java_agents);
         analytics.add("aws", self.aws);
         analytics.add("auto_mount", self.auto_mount);
         analytics.add("turbo", self.turbo);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case(
+        "-Xmx1g -javaagent:/usr/share/datadog/dd-java-agent.jar -Dfoo=bar",
+        "-Xmx1g -Dfoo=bar"
+    )]
+    #[case("-javaagent:/first.jar -Xmx1g -javaagent:/second.jar=option", "-Xmx1g")]
+    #[case("'-javaagent:/path with spaces/agent.jar' -Xmx1g", "-Xmx1g")]
+    #[case("-javaagent:\"/path with spaces/agent.jar\" -Xmx1g", "-Xmx1g")]
+    #[case("-java'ag'ent:/agent.jar -Xmx1g", "-Xmx1g")]
+    #[case("-javaagent:/agent.jar", "")]
+    #[case("-Xmx1g -Dfoo=bar", "-Xmx1g -Dfoo=bar")]
+    #[case(
+        "-Dconfig=\"/path with spaces/config\" -Xmx1g",
+        "-Dconfig=\"/path with spaces/config\" -Xmx1g"
+    )]
+    #[case(
+        "  -Dconfig=\"/path with spaces/config\"  -Xmx1g ",
+        "  -Dconfig=\"/path with spaces/config\"  -Xmx1g "
+    )]
+    #[case("-Xmx1g '-javaagent:/broken.jar", "-Xmx1g '-javaagent:/broken.jar")]
+    #[case(r"-Dpattern=\d+ -javaagent:/agent.jar", r"-Dpattern=\d+")]
+    #[case(
+        "--module-path #libs -javaagent:/agent.jar -Dfoo=bar",
+        "--module-path #libs -Dfoo=bar"
+    )]
+    fn removes_java_agents_from_jdk_java_options(#[case] options: &str, #[case] expected: &str) {
+        assert_eq!(
+            without_java_agents(options).as_deref().unwrap_or(options),
+            expected
+        );
     }
 }

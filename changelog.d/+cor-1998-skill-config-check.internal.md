@@ -1,1 +1,0 @@
-Fail the release PR when a config example in the skills repository at its pinned commit is rejected by the schemas of the build, by running the skills repository's own fence-tag check in `cargo xtask corpus check`.
