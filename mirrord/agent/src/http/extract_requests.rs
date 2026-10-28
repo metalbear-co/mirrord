@@ -22,7 +22,7 @@ use mirrord_nightly_polyfill::error::Report;
 use mirrord_protocol::batched_body::{BatchedBody, Frames};
 use tokio::sync::{mpsc, oneshot};
 
-use super::{BoxResponse, HttpVersion, error::MirrordErrorResponse};
+use super::{BoxResponse, HTTP2_MAX_HEADER_LIST_SIZE, HttpVersion, error::MirrordErrorResponse};
 use crate::metrics::{MetricGuard, REDIRECTED_REQUESTS};
 
 /// An HTTP request extracted from an HTTP connection
@@ -89,8 +89,11 @@ where
             }
 
             HttpVersion::V2 => {
-                let conn =
-                    http2::Builder::new(TokioExecutor::default()).serve_connection(conn, service);
+                let mut builder = http2::Builder::new(TokioExecutor::default());
+                if let Some(size) = *HTTP2_MAX_HEADER_LIST_SIZE {
+                    builder.max_header_list_size(size);
+                }
+                let conn = builder.serve_connection(conn, service);
                 Either::Right(conn)
             }
         };
