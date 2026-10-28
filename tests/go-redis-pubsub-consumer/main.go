@@ -7,9 +7,16 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
+
+// subscribeRetryLimit bounds how long the consumer keeps retrying its first subscribe. Under
+// mirrord the Redis host is resolved and dialed through the agent, and a single slow lookup there
+// must not end the consumer before it ever subscribes; a Redis that stays unreachable still fails
+// it, the same bound the Temporal worker uses for its first dial.
+const subscribeRetryLimit = 30 * time.Second
 
 func main() {
 	channel := os.Getenv("REDIS_CHANNEL")
@@ -43,24 +50,40 @@ func main() {
 	fmt.Fprintf(os.Stderr, "  REDIS_URL=%s\n", redisURL)
 	fmt.Fprintf(os.Stderr, "  REDIS_SUBSCRIBE_MODE=%s\n", subscribeMode)
 
-	var pubsub *redis.PubSub
-	switch subscribeMode {
-	case "pattern":
-		pubsub = client.PSubscribe(ctx, channel)
-	case "sharded":
-		pubsub = client.SSubscribe(ctx, channel)
-	default:
-		pubsub = client.Subscribe(ctx, channel)
+	subscribe := func() *redis.PubSub {
+		switch subscribeMode {
+		case "pattern":
+			return client.PSubscribe(ctx, channel)
+		case "sharded":
+			return client.SSubscribe(ctx, channel)
+		default:
+			return client.Subscribe(ctx, channel)
+		}
 	}
-	defer pubsub.Close()
 
 	// Receive blocks until Redis confirms the (P/S)SUBSCRIBE, so once it returns
 	// the subscription is live. Print a marker so tests can wait for this exact
 	// point before publishing: Redis Pub/Sub drops messages sent while nobody is
 	// subscribed, so publishing any earlier would lose them.
-	if _, err := pubsub.Receive(ctx); err != nil {
-		log.Fatalf("Subscribe failed: %v", err)
+	// The limit bounds each attempt too, so a Receive that hangs instead of failing cannot hold
+	// the consumer past it.
+	subscribeCtx, cancelSubscribe := context.WithTimeout(ctx, subscribeRetryLimit)
+	defer cancelSubscribe()
+	pubsub := subscribe()
+	for {
+		_, err := pubsub.Receive(subscribeCtx)
+		if err == nil {
+			break
+		}
+		pubsub.Close()
+		if subscribeCtx.Err() != nil {
+			log.Fatalf("Subscribe failed: %v", err)
+		}
+		log.Printf("Subscribe failed, retrying: %v", err)
+		time.Sleep(time.Second)
+		pubsub = subscribe()
 	}
+	defer pubsub.Close()
 	fmt.Fprintf(os.Stderr, "go-redis-pubsub-consumer subscribed channel=%s\n", channel)
 
 	sigChan := make(chan os.Signal, 1)

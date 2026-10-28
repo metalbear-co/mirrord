@@ -143,7 +143,9 @@ func main() {
 		}
 	}
 
-	c, err := client.Dial(options)
+	// Under mirrord the first connection goes through the agent to the operator's Temporal
+	// proxy, and a slow first hop there must not end the worker before it ever polls.
+	c, err := dialWithRetry(options, 30*time.Second)
 	if err != nil {
 		log.Fatalf("failed to create Temporal client: %v", err)
 	}
@@ -209,6 +211,25 @@ func probeAlreadyStarted(c client.Client, taskQueue, workflowID string) {
 		fmt.Printf("1:already-started:untyped:%T %v\n", err, err)
 	default:
 		fmt.Printf("1:already-started:no-error\n")
+	}
+}
+
+// dialWithRetry keeps dialing until a connection succeeds or `timeout` passes, the same
+// loop the starter app uses. The deadline bounds each dial too, so one that hangs instead of
+// failing cannot hold the worker past it; it only covers connecting, not the client's lifetime.
+func dialWithRetry(options client.Options, timeout time.Duration) (client.Client, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	for {
+		c, err := client.DialContext(ctx, options)
+		if err == nil {
+			return c, nil
+		}
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		log.Printf("Temporal dial failed, retrying: %v", err)
+		time.Sleep(time.Second)
 	}
 }
 
