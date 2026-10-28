@@ -82,6 +82,44 @@ pub enum UpCliError {
         error: Box<CliError>,
     },
 
+    /// A mode's `db_branching` line asks for DB branches, but the service's cluster has no
+    /// usable mirrord operator to create them.
+    #[error(
+        "{service}: mode `{mode}` sets `db_branching`, but there is no usable mirrord operator"
+    )]
+    #[diagnostic(help(
+        "DB branching needs the mirrord operator. To run against the source databases, set \
+         `db_branching: off` for mode `{mode}` in mirrord-up.yaml."
+    ))]
+    ModeDbBranchesNoOperator { service: Arc<str>, mode: Arc<str> },
+
+    /// A mode's `db_branching` line asks for DB branches, but the service's workload has none
+    /// defined.
+    #[error(
+        "{service} has no DB branch definitions: mode `{mode}` sets `db_branching`, but no \
+         MirrordSplitConfig defines `dbBranches` for its workload"
+    )]
+    #[diagnostic(help(
+        "To run against the source databases, set `db_branching: off` for mode `{mode}` in \
+         mirrord-up.yaml. Or ask the MirrordSplitConfig owner to add `dbBranches` for the \
+         workload."
+    ))]
+    ModeDbBranchesNoDefinitions { service: Arc<str>, mode: Arc<str> },
+
+    /// The copy mode of a mode's `db_branching` line is missing from an entry's
+    /// `copy.allowedModes`. The message comes from the operator and names the entry.
+    #[error("{service}: {message}")]
+    #[diagnostic(help(
+        "Change `db_branching` for mode `{mode}` in mirrord-up.yaml (`inherit` uses each entry's \
+         own copy mode), or ask the MirrordSplitConfig owner to add the mode to the entry's \
+         `copy.allowedModes`."
+    ))]
+    ModeCopyModeNotAllowed {
+        service: Arc<str>,
+        mode: Arc<str>,
+        message: String,
+    },
+
     #[error("failed to acquire OS username for key")]
     #[diagnostic(help(
         "The username is used for automatically generating a session key. Please provide a session key manually or ensure your OS user has a valid username."
@@ -290,7 +328,10 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::ServiceFailedToStart { .. }) => Self::ServiceStartFailed,
-            UpCliError::DbBranches { .. } => Self::DbBranching,
+            UpCliError::DbBranches { .. }
+            | UpCliError::ModeDbBranchesNoOperator { .. }
+            | UpCliError::ModeDbBranchesNoDefinitions { .. }
+            | UpCliError::ModeCopyModeNotAllowed { .. } => Self::DbBranching,
             UpCliError::Up(UpError::PreCommandFailed { .. })
             | UpCliError::Up(UpError::PreCommandSpawn { .. }) => Self::PreCommandFailed,
             UpCliError::Up(UpError::Io(_))

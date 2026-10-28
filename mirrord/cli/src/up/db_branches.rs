@@ -58,6 +58,10 @@ pub(crate) fn resolves_default_db_branches(operator: &OperatorApi<NoClientCert>)
 /// in which case the run stops with the error the session would give. So do services with the
 /// default `"*"` whose operator can't resolve it, and services that get no entries back.
 ///
+/// A request from the mode's `db_branching` line is never dropped: the user asked for branches,
+/// so running against the source databases instead would be a surprise. No usable operator, no
+/// entries, or a copy mode an entry doesn't allow stops the run, naming the mode to change.
+///
 /// Services that define their branches inline (e.g. through `config_patch`) have nothing to look
 /// up; they are only announced.
 ///
@@ -89,6 +93,12 @@ pub(super) async fn check_db_branches(
             apis.insert(key.clone(), api);
         }
         match apis.get(&key) {
+            Some(None) if service.db_branches_origin == DbBranchesOrigin::ModeLine => {
+                return Err(UpCliError::ModeDbBranchesNoOperator {
+                    service: service.service_name.clone(),
+                    mode: service.mode.clone(),
+                });
+            }
             Some(None) => {
                 println!(
                     "{}: no mirrord operator, running against the source DB",
@@ -171,6 +181,15 @@ pub(super) async fn check_db_branches(
     for ((service, _, key), lookup) in requesting.into_iter().zip(lookups) {
         let response = match lookup {
             Ok(response) => response,
+            Err(OperatorApiError::SplitConfigCopyModeNotAllowed(message))
+                if service.db_branches_origin == DbBranchesOrigin::ModeLine =>
+            {
+                return Err(UpCliError::ModeCopyModeNotAllowed {
+                    service: service.service_name.clone(),
+                    mode: service.mode.clone(),
+                    message,
+                });
+            }
             Err(error) => {
                 if service.db_branches_origin != DbBranchesOrigin::BuiltinMode
                     && let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error
@@ -197,6 +216,12 @@ pub(super) async fn check_db_branches(
             }
         };
 
+        if response.entries.is_empty() && service.db_branches_origin == DbBranchesOrigin::ModeLine {
+            return Err(UpCliError::ModeDbBranchesNoDefinitions {
+                service: service.service_name.clone(),
+                mode: service.mode.clone(),
+            });
+        }
         if response.entries.is_empty() {
             println!(
                 "{}: no DB branch definitions, running against the source DB",
