@@ -1,8 +1,10 @@
 name: Scan Release Images
 
-# Daily Trivy scan of the agent and CLI images, for the latest release or a given one. Each
-# report is attached to the GitHub release, so it can be shared on request. The run fails when an
-# image has a critical or high finding with a fix available.
+# Daily Trivy scan of the CLI image, for the latest release or a given one. Each report is attached
+# to the GitHub release, so it can be shared on request. The run fails when the image has a critical
+# or high finding with a fix available.
+# The agent image is not scanned: it is built FROM scratch with no package database, so Trivy
+# cannot see its libraries.
 # A daily run, not one after `Publish`: it also finds new CVEs in a release that did not change.
 on:
   schedule:
@@ -50,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [mirrord, mirrord-cli]
+        image: [mirrord-cli]
         arch: [amd64, arm64]
     steps:
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -97,9 +99,6 @@ jobs:
               echo "### ghcr.io/metalbear-co/${NAME%-*}:$VERSION (linux/${NAME##*-})"
               echo
               echo "Trivy v0.75.0, critical and high, scanned $(date -u +%Y-%m-%dT%H:%MZ)."
-              # Images built FROM scratch have no package database, so Trivy cannot see their
-              # OS libraries.
-              jq -r 'if .Metadata.OS == null then "\nNo OS package database in this image: OS libraries were not checked. Checked: \([.Results[]?.Target] | if length == 0 then "nothing" else join(", ") end)." else empty end' "$JSON"
               echo
               echo "| Severity | ID | Package | Installed | Fixed in | Target |"
               echo "|---|---|---|---|---|---|"
