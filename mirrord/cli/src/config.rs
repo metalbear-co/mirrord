@@ -409,8 +409,9 @@ impl Commands {
             Self::Preview(args) => match &args.command {
                 PreviewCommand::Status(args) => args.all_namespaces,
                 PreviewCommand::Stop(args) => args.all_namespaces,
+                PreviewCommand::Down => true,
                 PreviewCommand::Logs(args) => args.all_namespaces,
-                PreviewCommand::Start(_) | PreviewCommand::Diff(_) => false,
+                PreviewCommand::Start(_) | PreviewCommand::Up(_) | PreviewCommand::Diff(_) => false,
             },
             Self::Session(args) => args.common.all_namespaces,
             Self::Kill(args) => args.common.all_namespaces,
@@ -1621,10 +1622,28 @@ impl SubscribeArgs {
 pub(super) enum PreviewCommand {
     /// Start a new preview environment or update an existing one.
     Start(PreviewStartArgs),
+    /// Start a preview environment for every service of a mirrord-up.yaml that has an image.
+    ///
+    /// Each service's image comes from `--image <service>=<image ref>`, then
+    /// `MIRRORD_<SERVICE>_IMAGE`. Services without one are skipped. All sessions run under one
+    /// key: `--key`, then `MIRRORD_KEY`, then the git branch (`GITHUB_HEAD_REF` when set), or a
+    /// random key on `main`, `master` or without a branch.
+    Up(PreviewUpArgs),
     /// Show the status of preview environments.
     Status(PreviewStatusArgs),
     /// Delete preview environments.
     Stop(PreviewStopArgs),
+    /// Delete every preview environment under a key, in all namespaces, like
+    /// `mirrord preview stop -k <key> -A`.
+    ///
+    /// Finds the key the way `mirrord preview up` does: `--key`, then `MIRRORD_KEY`, then the git
+    /// branch (`GITHUB_HEAD_REF` when set). On `main`, `master` or without a branch, `--key` is
+    /// required. Succeeds when there is nothing to delete.
+    ///
+    /// Deletes them in every kube context the services of the mirrord-up.yaml run in (`-f`, or
+    /// `mirrord-up.yaml` when it exists), as `mirrord preview up` picks them. Without a file, in
+    /// the context of `--context`, the global config or the kubeconfig.
+    Down,
     /// Print the output of preview environments' pods.
     Logs(PreviewLogsArgs),
     /// Show how the manifests passed with `--resource` differ from the live cluster.
@@ -1641,20 +1660,25 @@ pub(super) struct PreviewCommonArgs {
     /// Environment key for the preview environment.
     ///
     /// Can also be set with the `MIRRORD_KEY` environment variable or via the `key` field in the
-    /// mirrord config file.
+    /// mirrord config file. `mirrord preview up` and `mirrord preview down` read no mirrord
+    /// config: without either, their key is the git branch (`GITHUB_HEAD_REF` when set).
     #[arg(short = 'k', long, global = true)]
     pub key: Option<String>,
 
     /// Load config from config file.
     ///
-    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
-    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1, global = true)]
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json". For
+    /// `mirrord preview up`, the mirrord-up.yaml to read instead, `mirrord-up.yaml` by default.
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = DEFAULT_PREVIEW_CONFIG_FILE, num_args = 0..=1, global = true)]
     pub config_file: Option<PathBuf>,
 
     /// Kube context to use from Kubeconfig.
     #[arg(long, global = true)]
     pub context: Option<String>,
 }
+
+/// What a bare `-f` stands for in the `mirrord preview` subcommands.
+pub(crate) const DEFAULT_PREVIEW_CONFIG_FILE: &str = "./.mirrord/mirrord.json";
 
 impl PreviewCommonArgs {
     /// Convert the common CLI arguments to environment variable overrides.
@@ -1786,6 +1810,31 @@ impl PreviewStartArgs {
 
         envs
     }
+}
+
+/// Arguments for `mirrord preview up` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewUpArgs {
+    /// Container image for one service, as `<service>=<image ref>`, e.g.
+    /// `--image api=ghcr.io/acme/api:3f9a2c1`. Repeat it once per service.
+    ///
+    /// Takes precedence over `MIRRORD_<SERVICE>_IMAGE`.
+    #[arg(long, value_name = "SERVICE=IMAGE")]
+    pub image: Vec<String>,
+
+    /// TTL in minutes for every preview session.
+    ///
+    /// The operator will terminate each session after this time elapses.
+    ///
+    /// Set to `"infinite"` to disable TTL.
+    #[arg(long)]
+    pub ttl: Option<PreviewTtl>,
+
+    /// How long (in seconds) to wait for each preview to become ready.
+    ///
+    /// If a session hasn't reached `Ready` within this time, the CLI deletes it.
+    #[arg(long)]
+    pub timeout: Option<u64>,
 }
 
 /// Arguments for `mirrord preview diff` command.

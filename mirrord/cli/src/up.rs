@@ -22,7 +22,7 @@ use crate::{
     ui::ui_command,
 };
 
-mod db_branches;
+pub(crate) mod db_branches;
 
 /// Context for sessions started by `mirrord up`.
 #[derive(Clone, Debug)]
@@ -281,6 +281,8 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::ConfigPatch(_))
             | UpCliError::Up(UpError::Tera(_))
             | UpCliError::Up(UpError::Mode(_))
+            | UpCliError::Up(UpError::NoInferredTarget { .. })
+            | UpCliError::Up(UpError::PreviewTargetless { .. })
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::ServiceFailedToStart { .. }) => Self::ServiceStartFailed,
@@ -320,7 +322,7 @@ mod tests {
     use std::process::ExitStatus;
 
     use mirrord_config::target::TargetType;
-    use mirrord_up::{IncompatibleTarget, ModeError, SelectError, ServiceMode};
+    use mirrord_up::{IncompatibleTarget, SelectError, ServiceMode, TargetValidationError};
 
     use super::*;
 
@@ -390,13 +392,13 @@ mod tests {
 
     #[test]
     fn mode_error_buckets_as_config_validation() {
-        let v = category(UpCliError::Up(UpError::Mode(
-            ModeError::IncompatibleTargets(vec![IncompatibleTarget {
+        let v = category(UpCliError::Up(UpError::Mode(vec![
+            TargetValidationError::IncompatibleTargets(vec![IncompatibleTarget {
                 service: "svc".into(),
                 mode: ServiceMode::Replace,
                 target_type: TargetType::Targetless,
             }]),
-        )));
+        ])));
         assert_eq!(v["error_category"], ErrorCategory::ConfigValidation as u32);
     }
 

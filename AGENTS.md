@@ -65,6 +65,17 @@ cargo xtask test-ut -- resolve_url_happy_path -- --nocapture
 
 Never write unit tests unless explicitly asked. Run the existing tests to verify a change.
 
+#### A test can merge and never run
+
+CI runs only what it names: every job is package-scoped and there is no workspace-wide run. Before relying on
+a new test, pull the job log and grep for its name rather than trusting a green check.
+
+Grepping the workflows for `-p <package>` is not enough either, since some runs hide behind xtask.
+`mirrord/cli/`, whose package is plain `mirrord`, is tested on Linux by `cargo xtask test-ut` in
+`.github/workflows/test-integration.yaml` and on Windows by `cargo nextest run -p mirrord ...` in
+`test-windows.yaml`. macOS never runs those unit tests: it builds the binary and exercises it only through
+`mirrord-layer-tests`, so a macOS-gated test in `mirrord/cli/` never runs while the PR stays green.
+
 ### Styling
 
 ```bash
