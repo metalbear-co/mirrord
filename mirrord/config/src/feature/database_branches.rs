@@ -516,9 +516,13 @@ impl<'de> Deserialize<'de> for DatabaseBranchesConfig {
                     SplitConfigDbBranches::Ids(ids),
                 )))
             }
-            value @ serde_json::Value::Object(_) => serde_json::from_value(value)
-                .map(|request| Self::FromSplitConfig(SplitConfigRequest::WithCopy(request)))
-                .map_err(D::Error::custom),
+            // Only an object with `entries` is the copy form, so a single inline entry written
+            // without its list still gets the message naming every form.
+            value @ serde_json::Value::Object(_) if value.get("entries").is_some() => {
+                serde_json::from_value(value)
+                    .map(|request| Self::FromSplitConfig(SplitConfigRequest::WithCopy(request)))
+                    .map_err(D::Error::custom)
+            }
             value @ serde_json::Value::Array(_) => serde_json::from_value(value)
                 .map(Self::Inline)
                 .map_err(D::Error::custom),
