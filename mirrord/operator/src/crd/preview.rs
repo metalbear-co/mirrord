@@ -469,6 +469,51 @@ pub struct PreviewSessionStatus {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(extend("x-kubernetes-list-type" = "map", "x-kubernetes-list-map-keys" = ["type"]))]
     pub conditions: Vec<Condition>,
+
+    /// The state of code sync, for a session with `spec.sync`.
+    ///
+    /// `None` for a session without `spec.sync`, or when running against an older operator that
+    /// does not set this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync: Option<PreviewSyncStatus>,
+}
+
+/// The state of code sync in a preview session.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSyncStatus {
+    /// The kind of volume that holds the session's synced code. The operator picks it on the
+    /// session's first run and keeps it for the session's life, because the session's Deployment
+    /// keeps the code volume of its first pod template. Set on every status that the operator
+    /// writes, and optional only so that a later status update can leave it unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage: Option<PreviewCodeStorageKind>,
+
+    /// Why the session never scales to zero, although `spec.idle` asks for it. Code on an
+    /// `emptyDir` is deleted with the pod, so a session that scaled to zero would start again
+    /// without its code. `None` when nothing keeps the session from following `spec.idle`, which
+    /// includes a session without `spec.idle`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_disabled: Option<String>,
+}
+
+/// The kind of volume that holds the synced code of a preview session. A session keeps the kind
+/// of its first run. `pvc` keeps the code while the session is scaled to zero, and with `emptyDir`
+/// the code is deleted with the pod, so the session never scales to zero.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviewCodeStorageKind {
+    /// A PersistentVolumeClaim per session, which keeps the code while the session is scaled to
+    /// zero and when its pod is replaced.
+    Pvc,
+
+    /// An `emptyDir` in the pod. The code is deleted with the pod, so the session never scales to
+    /// zero, and a replaced pod waits for another push.
+    EmptyDir,
+
+    /// For future compatibility.
+    #[serde(other)]
+    Unknown,
 }
 
 /// The tail of one preview container's output.
@@ -553,6 +598,9 @@ pub struct PreviewStatusUpdate {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conditions: Option<Vec<Condition>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sync: Option<PreviewSyncStatus>,
 }
 
 impl PreviewStatusUpdate {
