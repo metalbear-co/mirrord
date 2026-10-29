@@ -20,8 +20,8 @@ use std::{
 pub use config::{
     COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, PreviewImageError,
     PreviewImageSource, PreviewImages, SERVICE_LAYER_PATHS, SelectError, ServiceConfig,
-    ServiceError, ServiceMode, SubprocessCfg, TargetValidationError, UpConfig, WindowsSupportError,
-    preview_image_env,
+    ServiceError, ServiceMode, SubprocessCfg, SyncEntry, TargetValidationError, UpConfig,
+    WindowsSupportError, preview_image_env,
 };
 use config::{
     ResolvedTarget, SessionKind, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets,
@@ -380,13 +380,27 @@ fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
     )
 }
 
-/// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up`.
+/// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up` and `mirrord
+/// preview down`, and resolve the local directories of each service's `sync` against the
+/// directory of the file.
 ///
-/// Unlike [`load_up_config`], it doesn't check the services' `run`: `mirrord preview up` never
-/// launches their local commands, so a `run.directory` that only exists on a developer's machine
-/// must not stop it (e.g. in CI).
+/// Unlike [`load_up_config`], it doesn't check that the local paths exist. `mirrord preview up`
+/// never launches the services' local commands, so a `run.directory` that only exists on a
+/// developer's machine must not stop it (e.g. in CI). `mirrord preview down` never reads the
+/// `sync` directories, so it must work in a checkout without them.
 pub fn load_preview_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
-    template(&std::fs::read_to_string(path)?, key)
+    let mut config = template(&std::fs::read_to_string(path)?, key)?;
+    let config_directory = config_directory(path)?;
+
+    for entry in config
+        .services
+        .values_mut()
+        .flat_map(|service| &mut service.sync)
+    {
+        entry.local = config_directory.join(&entry.local);
+    }
+
+    Ok(config)
 }
 
 /// Load, parse, and resolve local paths in a `mirrord-up.yaml` configuration file.
@@ -916,6 +930,7 @@ fn service_commands(
                 config,
                 service_name,
                 run,
+                sync: _,
                 mode: _,
                 default_db_branches: _,
                 default_split_queues: _,
@@ -1171,6 +1186,27 @@ services:
                 ),
             ]),
             "only the services `--debug` names may wait for an IDE to release them"
+        );
+    }
+
+    /// `mirrord preview down` loads the same config as `mirrord preview up`, and must still
+    /// delete the previews in a checkout that lacks a `sync` directory.
+    #[test]
+    fn preview_config_loads_without_the_sync_directories() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let config_path = directory.path().join("mirrord-up.yaml");
+        std::fs::write(
+            &config_path,
+            "services:\n  web:\n    run:\n      command: [x]\n    sync:\n      - local: missing\n        remote: /app\n",
+        )
+        .unwrap();
+
+        let config =
+            load_preview_up_config(&config_path, &EnvKey::Provided("key".to_owned())).unwrap();
+
+        assert_eq!(
+            config.services["web"].sync[0].local,
+            config_directory(&config_path).unwrap().join("missing")
         );
     }
 

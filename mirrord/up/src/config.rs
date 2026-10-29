@@ -516,6 +516,35 @@ pub struct ServiceConfig {
 
     /// How to launch the service's local process.
     pub(crate) run: RunConfig,
+
+    /// Local directories that `mirrord preview sync` pushes into the service's preview pod. The
+    /// preview runs the image from `--image` or `MIRRORD_<SERVICE>_IMAGE`, or the target's image
+    /// without one, with these directories in it. For example:
+    ///
+    /// ```yaml
+    /// sync:
+    ///   - local: frontend
+    ///     remote: /app
+    /// ```
+    ///
+    /// `mirrord up` and `mirrord preview up` ignore this.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
+    pub(crate) sync: Vec<SyncEntry>,
+}
+
+/// One local directory that `mirrord preview sync` pushes into a preview pod.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncEntry {
+    /// The local directory to push. A relative path is resolved against the directory that
+    /// contains `mirrord-up.yaml`. The push leaves out `.git` and the files that git ignores, so
+    /// `remote` has none of them in the pod, even where the image had them.
+    pub local: PathBuf,
+
+    /// The absolute path in the preview's container that holds the pushed directory. It replaces
+    /// what the image has at that path.
+    pub remote: String,
 }
 
 /// Top-level `mirrord-up.yaml` configuration.
@@ -689,6 +718,7 @@ impl ServiceConfig {
             config: cfg,
             service_name: service_name.clone(),
             run: self.run,
+            sync: self.sync,
             mode: self.default_mode,
             default_db_branches,
             default_split_queues,
@@ -881,6 +911,8 @@ pub struct SubprocessCfg {
     pub service_name: Arc<str>,
     /// How to run this service (exec vs container, and the command).
     pub run: RunConfig,
+    /// The directories `mirrord preview sync` pushes into the service's preview pod.
+    pub sync: Vec<SyncEntry>,
     /// Mode this service was assembled for. Its effects are already in `config`; it names the
     /// mode in [`validate_targets`] errors and in what `mirrord up` reports about the service.
     pub mode: ServiceMode,
@@ -1613,6 +1645,8 @@ impl CollectAnalytics for &UpConfig {
                 run,
                 context,
                 config_patch,
+                // `mirrord up` ignores it.
+                sync: _,
             } = svc;
 
             if *target != TargetConfig::UNSPECIFIED {
