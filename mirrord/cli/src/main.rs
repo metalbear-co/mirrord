@@ -1493,15 +1493,19 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
     use std::collections::HashMap;
 
     use clap::Parser;
     #[cfg(windows)]
     use mirrord_layer_lib::process::windows::environment::WindowsEnv;
+    #[cfg(windows)]
     use mirrord_progress::MIRRORD_PROGRESS_ENV;
     use rstest::rstest;
 
-    use crate::{Cli, Commands, compose_exec_environment};
+    #[cfg(windows)]
+    use crate::compose_exec_environment;
+    use crate::{Cli, Commands};
 
     /// On Windows an override or unset reaches an inherited variable spelled in another casing,
     /// so the child gets one `PATH`, holding the override.
