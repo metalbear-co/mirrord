@@ -947,6 +947,54 @@ impl DatabaseBranchConfig {
         })
     }
 
+    /// True when the branch cannot be provisioned without the target pod. A session without a
+    /// target has no pod, so the CLI refuses such a branch for it. The pod is needed for:
+    /// - a value read from it: its env, `envFrom`, or a ConfigMap found through one of its
+    ///   volumes
+    /// - its service account and AWS env: secret manager sources and IAM auth are fetched by
+    ///   the branch pod under the target's cloud identity
+    ///
+    /// Literal values, Secrets and ConfigMaps named directly resolve without one.
+    pub fn needs_target_pod(&self) -> bool {
+        let params_need_pod = self.all_connection_params().any(|params| {
+            params.all_sources().any(|source| {
+                matches!(
+                    source,
+                    ParamSource::Variable(_)
+                        | ParamSource::Pattern { .. }
+                        | ParamSource::Env { value: None, .. }
+                        | ParamSource::ConfigMap {
+                            config_map: Some(ConfigMapRef::Volume { .. }),
+                            ..
+                        }
+                        | ParamSource::GcpSecretManager { .. }
+                        | ParamSource::AwsSecretsManager { .. }
+                        | ParamSource::AwsSsmParameter { .. }
+                )
+            })
+        });
+        // A bare `"url": "DATABASE_URL"` names a target env var too.
+        let urls_need_pod = self
+            .database()
+            .map(|database| &database.connection)
+            .into_iter()
+            .chain(self.additional_connections())
+            .any(|connection| match connection {
+                ConnectionSource::FlatUrl { .. } => true,
+                ConnectionSource::Url { url } => matches!(
+                    url,
+                    TargetEnvironmentVariableSource::Env { value: None, .. }
+                        | TargetEnvironmentVariableSource::EnvFrom { .. }
+                        | TargetEnvironmentVariableSource::GcpSecretManager { .. }
+                        | TargetEnvironmentVariableSource::AwsSecretsManager { .. }
+                        | TargetEnvironmentVariableSource::AwsSsmParameter { .. }
+                ),
+                ConnectionSource::Params(_) => false,
+            });
+
+        params_need_pod || urls_need_pod || self.iam_auth().is_some()
+    }
+
     /// True when a param or the `url` is read from AWS SSM Parameter Store. The CLI uses it to
     /// refuse the config on an operator that predates the source kind.
     pub fn uses_ssm_parameter_source(&self) -> bool {
@@ -2713,6 +2761,68 @@ mod tests {
         };
         assert_eq!(local.id.as_deref(), Some("my-branch"));
         assert_eq!(local.local.port, 6380);
+    }
+
+    /// A session without a target can only provision branches whose every value resolves
+    /// without a pod (literals, Secrets, ConfigMaps named directly) and that borrow nothing
+    /// from the pod's cloud identity (no secret manager sources, no IAM auth).
+    #[rstest]
+    #[case::flat_url(json!({ "url": "DATABASE_URL" }), true)]
+    #[case::env_url(json!({ "url": { "type": "env", "variable": "DATABASE_URL" } }), true)]
+    #[case::literal_url(
+        json!({ "url": { "type": "env", "variable": "DATABASE_URL", "value": "postgres://db/app" } }),
+        false
+    )]
+    #[case::secret_url(json!({ "url": { "type": "secret", "name": "pg", "key": "url" } }), false)]
+    #[case::variable_param(
+        json!({ "params": { "host": { "secret": "pg", "key": "host" }, "password": "DB_PASSWORD" } }),
+        true
+    )]
+    #[case::secret_params(
+        json!({ "params": { "host": { "secret": "pg", "key": "host" }, "password": { "secret": "pg", "key": "password" } } }),
+        false
+    )]
+    #[case::configmap_by_name(
+        json!({ "params": { "host": { "configmap": "app-config", "key": "host" } } }),
+        false
+    )]
+    #[case::configmap_by_volume(
+        json!({ "params": { "host": { "configmap": { "volume": "app-config" }, "key": "host" } } }),
+        true
+    )]
+    #[case::secret_manager_param(
+        json!({ "params": { "host": { "secret": "pg", "key": "host" }, "password": { "gcp_secret_manager": "projects/p/secrets/pw" } } }),
+        true
+    )]
+    #[case::secret_manager_url(
+        json!({ "url": { "type": "aws_secrets_manager", "secret_ref": "prod/pg" } }),
+        true
+    )]
+    fn needs_target_pod_names_pod_bound_sources(
+        #[case] connection: Value,
+        #[case] needs_pod: bool,
+    ) {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
+            "type": "pg",
+            "connection": connection,
+        }))
+        .unwrap();
+
+        assert_eq!(branch.needs_target_pod(), needs_pod);
+    }
+
+    /// IAM auth signs with the target pod's keys or runs the branch pod under its service
+    /// account, so a Secret-sourced connection still needs the pod once `iam_auth` is set.
+    #[test]
+    fn needs_target_pod_for_iam_auth() {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
+            "type": "pg",
+            "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } },
+            "iam_auth": { "type": "aws_rds" },
+        }))
+        .unwrap();
+
+        assert!(branch.needs_target_pod());
     }
 
     /// A Redis Cluster node only has database 0, so `cluster: true` pairs with no `name` or

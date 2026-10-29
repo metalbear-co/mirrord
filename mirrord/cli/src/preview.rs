@@ -248,6 +248,35 @@ impl PreparedPreview {
         progress: &ProgressTracker,
         mut analytics: AnalyticsReporter,
     ) -> CliResult<Self> {
+        // A preview without a target is its branch databases: the operator provisions them and
+        // keeps them for the preview's TTL, and runs no pod. So the target may only be left out
+        // when there are branches to provision, and nothing that needs a pod can come along.
+        let config_target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+        let targetless = matches!(config_target, Target::Targetless);
+        if targetless {
+            if layer_config.feature.db_branches.is_empty() {
+                return Err(CliError::PreviewTargetRequired);
+            }
+            if !sources.is_empty() {
+                return Err(CliError::UnsupportedTargetConfig(
+                    "`--resource` and `--chart` need a target workload to run the manifests \
+                     against; set a `target` or leave them out"
+                        .to_owned(),
+                ));
+            }
+            // The config check already warned about these. Dropped here, before the feature
+            // check and the file reads below, so an unused queue split is not held against the
+            // operator and an unused mount file is never opened.
+            layer_config.feature.split_queues = Default::default();
+            layer_config.feature.kafka_branch = false;
+            layer_config.feature.preview.secret_mounts.clear();
+            layer_config.feature.preview.config_mounts.clear();
+        }
+
         let is_cronjob_target = matches!(layer_config.target.path, Some(Target::CronJob(_)));
         let feature_support = async {
             operator_api.check_feature_support(&layer_config, auto_queue_splitting)?;
@@ -324,16 +353,16 @@ impl PreparedPreview {
 
         let mut subtask = progress.subtask("preparing preview session");
 
-        // Owned, like the image below: `PreparedPreview` keeps them for `start`.
-        let config_target = layer_config.target.path.clone().ok_or_else(|| {
-            subtask.failure(None);
-            CliError::PreviewTargetRequired
-        })?;
-
-        let image = layer_config.feature.preview.image.clone().ok_or_else(|| {
-            subtask.failure(None);
-            CliError::PreviewImageRequired
-        })?;
+        // Owned, like the target above: `PreparedPreview` keeps them for `start`. With no pod to
+        // run there is no image to run it from.
+        let image = match layer_config.feature.preview.image.clone() {
+            Some(image) => image,
+            None if targetless => String::new(),
+            None => {
+                subtask.failure(None);
+                return Err(CliError::PreviewImageRequired);
+            }
+        };
 
         // Reject unsupported or invalid delivery before replacing a running preview.
         let mut secret_values = BTreeMap::new();
@@ -352,6 +381,8 @@ impl PreparedPreview {
                         .then_some(false),
                 }),
             )
+        } else if targetless {
+            (None, None)
         } else {
             let mut incoming = PreviewIncomingConfig::from_config(
                 &layer_config.feature.network.incoming,
@@ -462,7 +493,11 @@ impl PreparedPreview {
             std::mem::take(&mut layer_config.feature.preview.secret_mounts),
             &mut secret_values,
         )?;
-        let env =
+        // Env vars go to the preview pod, so without one there is nothing to send and no env
+        // file to read.
+        let env = if targetless {
+            None
+        } else {
             PreviewEnvVarsConfig::from_config(&layer_config.feature.env).map_err(|error| {
                 CliError::EnvFileAccessError(
                     layer_config
@@ -473,7 +508,8 @@ impl PreparedPreview {
                         .unwrap_or_default(),
                     error,
                 )
-            })?;
+            })?
+        };
         let config_mounts = std::mem::take(&mut layer_config.feature.preview.config_mounts)
             .into_iter()
             .map(|m| m.resolve().map(Into::into))
@@ -1688,6 +1724,11 @@ async fn resolve_config_target(
 ) -> CliResult<SessionTarget> {
     if let Target::Label(label_target) = config_target {
         return Ok(label_session_target(label_target));
+    }
+    // A branch-only preview has no workload to look up; start, stop and logs all resolve to the
+    // same placeholder so a `target: "targetless"` config finds the sessions it started.
+    if matches!(config_target, Target::Targetless) {
+        return Ok(SessionTarget::targetless());
     }
 
     let ns = namespace.unwrap_or(client.default_namespace());

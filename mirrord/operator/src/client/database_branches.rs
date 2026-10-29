@@ -1508,14 +1508,20 @@ impl UnifiedDatabaseBranchParams {
             target_with_container.set_container(String::new());
         }
         let target_display = target_with_container.to_string();
-        let session_target = match SessionTarget::from_config(target_with_container)
-            .ok_or_else(|| OperatorApiError::TargetResolutionFailed(target_display.clone()))?
-        {
-            SessionTarget::KubeResource(target) => target,
-            SessionTarget::PodSet(_) => {
-                return Err(OperatorApiError::UnsupportedTargetConfig(format!(
-                    "database branching does not support pod-set target `{target_display}`"
-                )));
+        // Without a target the branch CR carries the targetless placeholder; the caller has
+        // already checked the operator knows it (`NewOperatorFeature::TargetlessDbBranches`).
+        let session_target = if matches!(target_with_container, Target::Targetless) {
+            KubeResourceTarget::targetless()
+        } else {
+            match SessionTarget::from_config(target_with_container)
+                .ok_or_else(|| OperatorApiError::TargetResolutionFailed(target_display.clone()))?
+            {
+                SessionTarget::KubeResource(target) => target,
+                SessionTarget::PodSet(_) => {
+                    return Err(OperatorApiError::UnsupportedTargetConfig(format!(
+                        "database branching does not support pod-set target `{target_display}`"
+                    )));
+                }
             }
         };
 
