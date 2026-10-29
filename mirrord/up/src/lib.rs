@@ -30,6 +30,7 @@ use futures::TryStreamExt;
 pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
 use k8s_openapi::api::core::v1::Namespace;
+pub use list::{LISTING_VERSION, UpListing};
 use miette::Diagnostic;
 use mirrord_analytics::{MIRRORD_UP_CORRELATION_ID_ENV, UpSessionDbBranch};
 use mirrord_command::resolve_tokio_command;
@@ -57,6 +58,7 @@ use crate::kube_context::UpKubeContext;
 mod config;
 mod init;
 mod kube_context;
+mod list;
 mod process;
 
 /// Shared slot that [`launch`] fills with what the child sessions report while starting: the

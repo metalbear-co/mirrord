@@ -1,0 +1,25 @@
+services:
+  api:
+    target:
+      path: deployment/api
+      namespace: ns-original
+    context: staging
+    config_patch:
+      kube_context: production
+      target:
+        namespace: ns-patched
+    run:
+      command: ["dotnet", "Api.dll"]
+  cleared:
+    target: none
+    context: staging
+    config_patch:
+      kube_context: null
+    run:
+      command: ["python", "cleared.py"]
+  worker:
+    target: none
+    config_patch:
+      target: deployment/worker
+    run:
+      command: ["python", "worker.py"]

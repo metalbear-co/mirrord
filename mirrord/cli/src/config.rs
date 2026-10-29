@@ -2068,14 +2068,14 @@ pub(super) struct UpArgs {
     /// Path to the mirrord-up config file.
     ///
     /// When using this argument without a value, defaults to `mirrord-up.yaml`
-    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml", global = true)]
     pub config_file: PathBuf,
 
     /// Network mode to use for all defined services.
     ///
     /// Overrides the `default_mode` of every service being launched. When
     /// omitted, each service uses the mode from the config file.
-    #[arg(short = 'm', long, value_enum)]
+    #[arg(short = 'm', long, value_enum, global = true)]
     pub mode: Option<ServiceMode>,
 
     /// Session key, used as the `{{ key }}` template variable.
@@ -2083,7 +2083,7 @@ pub(super) struct UpArgs {
     /// Can also be set with the `MIRRORD_KEY` environment variable.
     /// If not provided here or through `MIRRORD_KEY`, a key is generated automatically from the
     /// system username.
-    #[arg(short = 'k', long)]
+    #[arg(short = 'k', long, global = true)]
     pub key: Option<String>,
 
     /// Start `mirrord ui` in the background.
@@ -2099,11 +2099,14 @@ pub(super) struct UpArgs {
     /// Names of the services to launch. When omitted, every service in the
     /// config is launched, except those marked `skip: true`. Naming a
     /// service explicitly overrides its `skip` flag.
+    ///
+    /// A service named like a subcommand (`init`, `list`) goes after `--`, e.g.
+    /// `mirrord up -- list`.
     #[arg(value_name = "SERVICE")]
     pub services: Vec<String>,
 
     /// Kube context to use from Kubeconfig
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub context: Option<Arc<str>>,
 
     /// Experimental: hold this service's program at its entry point until an IDE releases it, so
@@ -2117,9 +2120,21 @@ pub(super) struct UpArgs {
     pub debug: Vec<String>,
 
     /// Subcommand. When absent, `mirrord up` runs the sessions defined in
-    /// the config file. With a subcommand, the flags above are ignored.
+    /// the config file. `init` ignores the flags above, and `list` reads only `-f`, `-k`, `-m`
+    /// and `--context`.
     #[command(subcommand)]
     pub command: Option<UpSubcommand>,
+}
+
+/// Output formats of `mirrord up list`.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum, Display)]
+#[strum(serialize_all = "lowercase")]
+pub(super) enum UpListFormat {
+    /// One block per service, for people to read.
+    #[default]
+    Pretty,
+    /// One JSON document for IDE extensions, in the shape `mirrord_up::UpListing` defines.
+    Json,
 }
 
 #[derive(Subcommand, Debug)]
@@ -2129,6 +2144,16 @@ pub(super) enum UpSubcommand {
         /// Default path for the generated config (overrideable in the wizard).
         #[arg(short = 'o', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
         output: PathBuf,
+    },
+
+    /// Print every service in the config file as `mirrord up` would run it, without starting
+    /// anything.
+    ///
+    /// Touches no cluster and asks nothing. Skipped services are listed too.
+    List {
+        /// Format output for terminal display or IDE extensions.
+        #[arg(long, default_value_t)]
+        format: UpListFormat,
     },
 }
 /// `mirrord attach` args.
@@ -2619,6 +2644,45 @@ mod tests {
             panic!("expected `up` command");
         };
         *args
+    }
+
+    #[test]
+    fn up_list_defaults_to_pretty_output() {
+        let args = up_args(&["mirrord", "up", "list"]);
+        assert!(args.services.is_empty(), "`list` is the subcommand");
+        assert!(matches!(
+            args.command,
+            Some(UpSubcommand::List {
+                format: UpListFormat::Pretty
+            })
+        ));
+    }
+
+    /// After `--`, `list` is a service to launch, which is how a service named `list` runs.
+    #[test]
+    fn up_list_after_double_dash_is_a_service() {
+        let args = up_args(&["mirrord", "up", "--", "list"]);
+        assert_eq!(args.services, ["list"]);
+        assert!(args.command.is_none(), "{:?}", args.command);
+    }
+
+    /// `-f`, `-k`, `-m` and `--context` reach `up list` whether they come before or after it.
+    #[rstest]
+    #[case::before(&["mirrord", "up", "-f", "x.yaml", "-k", "demo", "-m", "mirror", "--context", "staging", "list", "--format", "json"])]
+    #[case::after(&["mirrord", "up", "list", "-f", "x.yaml", "-k", "demo", "-m", "mirror", "--context", "staging", "--format", "json"])]
+    fn up_list_reads_the_up_flags_on_either_side(#[case] args: &[&str]) {
+        let args = up_args(args);
+        assert_eq!(args.config_file, PathBuf::from("x.yaml"));
+        assert_eq!(args.key.as_deref(), Some("demo"));
+        assert!(matches!(args.mode, Some(ServiceMode::Mirror)));
+        assert_eq!(args.context.as_deref(), Some("staging"));
+        assert!(args.services.is_empty());
+        assert!(matches!(
+            args.command,
+            Some(UpSubcommand::List {
+                format: UpListFormat::Json
+            })
+        ));
     }
 
     #[test]
