@@ -514,6 +514,7 @@ impl PreparedPreview {
             spec_resources,
             share_host: None,
             auto_queue_splitting,
+            sync: None,
         };
 
         Ok(Self {
