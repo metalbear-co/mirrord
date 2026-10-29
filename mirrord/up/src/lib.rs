@@ -383,7 +383,7 @@ fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
 
 /// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up`, `mirrord
 /// preview sync` and `mirrord preview down`, and resolve the local directories of each service's
-/// `sync` against the directory of the file.
+/// `sync` and the globs of its `install.on_change` against the directory of the file.
 ///
 /// Unlike [`load_up_config`], it doesn't check that the local paths exist. The `preview`
 /// commands never launch the services' local commands, so a `run.directory` that only exists on
@@ -394,12 +394,18 @@ pub fn load_preview_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpE
     let mut config = template(&std::fs::read_to_string(path)?, key)?;
     let config_directory = config_directory(path)?;
 
-    for entry in config
-        .services
-        .values_mut()
-        .flat_map(|service| &mut service.sync)
-    {
-        entry.local = config_directory.join(&entry.local);
+    for service in config.services.values_mut() {
+        for entry in &mut service.sync {
+            entry.local = config_directory.join(&entry.local);
+        }
+
+        for glob in service
+            .install
+            .iter_mut()
+            .flat_map(|install| &mut install.on_change)
+        {
+            *glob = config_directory.join(&*glob);
+        }
     }
 
     Ok(config)
@@ -933,6 +939,8 @@ fn service_commands(
                 service_name,
                 run,
                 sync: _,
+                install: _,
+                restart_on_change: _,
                 mode: _,
                 default_db_branches: _,
                 default_split_queues: _,
@@ -942,6 +950,8 @@ fn service_commands(
                 directory,
                 command,
                 pre_command,
+                // Only the preview pod of a service with `sync` uses it.
+                remote_directory: _,
             } = run;
 
             let encoded_cfg = config.encode()?;
@@ -1194,21 +1204,26 @@ services:
     /// `mirrord preview down` loads the same config as `mirrord preview up`, and must still
     /// delete the previews in a checkout that lacks a `sync` directory.
     #[test]
-    fn preview_config_loads_without_the_sync_directories() {
+    fn preview_config_resolves_sync_paths_without_reading_them() {
         let directory = tempfile::TempDir::new().unwrap();
         let config_path = directory.path().join("mirrord-up.yaml");
         std::fs::write(
             &config_path,
-            "services:\n  web:\n    run:\n      command: [x]\n    sync:\n      - local: missing\n        remote: /app\n",
+            "services:\n  web:\n    run:\n      command: [x]\n    sync:\n      - local: missing\n        remote: /app\n    install:\n      command: [npm, ci]\n      on_change: [missing/package-lock.json]\n",
         )
         .unwrap();
 
         let config =
             load_preview_up_config(&config_path, &EnvKey::Provided("key".to_owned())).unwrap();
 
+        // `mirrord preview sync` translates each glob into the container by its place under a
+        // `local`, so both must be resolved against the same directory.
+        let config_directory = config_directory(&config_path).unwrap();
+        let web = &config.services["web"];
+        assert_eq!(web.sync[0].local, config_directory.join("missing"));
         assert_eq!(
-            config.services["web"].sync[0].local,
-            config_directory(&config_path).unwrap().join("missing")
+            web.install.as_ref().unwrap().on_change,
+            [config_directory.join("missing/package-lock.json")]
         );
     }
 

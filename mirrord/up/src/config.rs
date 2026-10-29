@@ -183,6 +183,15 @@ pub struct RunConfig {
     /// services keep running.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pre_command: Vec<String>,
+
+    /// The absolute working directory of `command` and `install.command` in the preview pod of a
+    /// service with `sync`, e.g. `/app`. When not set, they run in the working directory of the
+    /// preview's container, which is `/` for an image without a `WORKDIR`.
+    ///
+    /// `mirrord up` and `mirrord preview up` ignore this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
+    pub remote_directory: Option<String>,
 }
 
 /// Settings applied to every service.
@@ -533,6 +542,59 @@ pub struct ServiceConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
     pub(crate) sync: Vec<SyncEntry>,
+
+    /// The command that installs the dependencies of a service with `sync` in its preview pod.
+    /// For example:
+    ///
+    /// ```yaml
+    /// install:
+    ///   command: ["npm", "ci"]
+    ///   on_change: ["frontend/package-lock.json"]
+    /// ```
+    ///
+    /// `mirrord up` and `mirrord preview up` ignore this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
+    pub(crate) install: Option<InstallConfig>,
+
+    /// Whether the preview pod of a service with `sync` restarts `run.command` after each push.
+    /// Set it to `false` for a dev server that reloads changed files on its own. Defaults to
+    /// `true`.
+    ///
+    /// `mirrord up` and `mirrord preview up` ignore this.
+    #[serde(default = "default_restart_on_change")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
+    pub(crate) restart_on_change: bool,
+}
+
+fn default_restart_on_change() -> bool {
+    true
+}
+
+/// The command that installs a service's dependencies in its preview pod.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InstallConfig {
+    /// The command to run, as a list of the program and its arguments, e.g. `["npm", "ci"]`. It
+    /// runs in the preview's container before `run.command` starts, and again after a push that
+    /// changes a file that `on_change` matches.
+    pub command: Vec<String>,
+
+    /// The files whose changes run `command` again, as globs relative to the directory that
+    /// contains `mirrord-up.yaml`, e.g. `frontend/package-lock.json`. Each must lie under the
+    /// `local` of a `sync` entry. The preview pod reads every file that a glob matches after
+    /// each push, including the files that `command` wrote, so a glob with `**` over a
+    /// directory such as `node_modules` hashes every match on every push. Name the files, such
+    /// as `frontend/package-lock.json` or `packages/*/package.json`, to keep that cheap.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub on_change: Vec<PathBuf>,
+
+    /// The absolute paths in the container that `command` writes to outside every `sync`
+    /// `remote`, e.g. `/usr/local/lib/python3.12/site-packages`. The preview keeps them on the
+    /// volume that holds the pushed code, so the installed files survive a restart of the pod. A
+    /// path under a `remote` is on that volume already and needs no entry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub persist: Vec<String>,
 }
 
 /// One local directory that `mirrord preview sync` pushes into a preview pod.
@@ -721,6 +783,8 @@ impl ServiceConfig {
             service_name: service_name.clone(),
             run: self.run,
             sync: self.sync,
+            install: self.install,
+            restart_on_change: self.restart_on_change,
             mode: self.default_mode,
             default_db_branches,
             default_split_queues,
@@ -915,6 +979,10 @@ pub struct SubprocessCfg {
     pub run: RunConfig,
     /// The directories `mirrord preview sync` pushes into the service's preview pod.
     pub sync: Vec<SyncEntry>,
+    /// The command that installs the dependencies in the service's preview pod.
+    pub install: Option<InstallConfig>,
+    /// Whether the service's preview pod restarts `run.command` after each push.
+    pub restart_on_change: bool,
     /// Mode this service was assembled for. Its effects are already in `config`; it names the
     /// mode in [`validate_targets`] errors and in what `mirrord up` reports about the service.
     pub mode: ServiceMode,
@@ -1700,8 +1768,10 @@ impl CollectAnalytics for &UpConfig {
                 run,
                 context,
                 config_patch,
-                // `mirrord up` ignores it.
+                // `mirrord up` ignores them.
                 sync: _,
+                install: _,
+                restart_on_change: _,
             } = svc;
 
             if *target != TargetConfig::UNSPECIFIED {
@@ -1973,6 +2043,7 @@ mod tests {
                     "web:latest".into(),
                 ],
                 pre_command: Vec::new(),
+                remote_directory: None,
             }
         );
     }

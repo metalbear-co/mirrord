@@ -195,6 +195,37 @@
         }
       ]
     },
+    "InstallConfig": {
+      "description": "The command that installs a service's dependencies in its preview pod.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "description": "The command to run, as a list of the program and its arguments, e.g. `[\"npm\", \"ci\"]`. It\nruns in the preview's container before `run.command` starts, and again after a push that\nchanges a file that `on_change` matches.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "on_change": {
+          "description": "The files whose changes run `command` again, as globs relative to the directory that\ncontains `mirrord-up.yaml`, e.g. `frontend/package-lock.json`. Each must lie under the\n`local` of a `sync` entry. The preview pod reads every file that a glob matches after\neach push, including the files that `command` wrote, so a glob with `**` over a\ndirectory such as `node_modules` hashes every match on every push. Name the files, such\nas `frontend/package-lock.json` or `packages/*/package.json`, to keep that cheap.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "persist": {
+          "description": "The absolute paths in the container that `command` writes to outside every `sync`\n`remote`, e.g. `/usr/local/lib/python3.12/site-packages`. The preview keeps them on the\nvolume that holds the pushed code, so the installed files survive a restart of the pod. A\npath under a `remote` is on that volume already and needs no entry.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ]
+    },
     "JobTarget": {
       "type": "object",
       "properties": {
@@ -323,6 +354,14 @@
           "items": {
             "type": "string"
           }
+        },
+        "remote_directory": {
+          "description": "The absolute working directory of `command` and `install.command` in the preview pod of a\nservice with `sync`, e.g. `/app`. When not set, they run in the working directory of the\npreview's container, which is `/` for an image without a `WORKDIR`.\n\n`mirrord up` and `mirrord preview up` ignore this.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-mirrord-plan": "enterprise"
         },
         "type": {
           "description": "Whether to run `command` with `mirrord exec` or `mirrord container`.\n\nDefaults to `exec`.",
@@ -572,6 +611,24 @@
             "minimum": 0
           },
           "uniqueItems": true
+        },
+        "install": {
+          "description": "The command that installs the dependencies of a service with `sync` in its preview pod.\nFor example:\n\n```yaml\ninstall:\n  command: [\"npm\", \"ci\"]\n  on_change: [\"frontend/package-lock.json\"]\n```\n\n`mirrord up` and `mirrord preview up` ignore this.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InstallConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-mirrord-plan": "enterprise"
+        },
+        "restart_on_change": {
+          "description": "Whether the preview pod of a service with `sync` restarts `run.command` after each push.\nSet it to `false` for a dev server that reloads changed files on its own. Defaults to\n`true`.\n\n`mirrord up` and `mirrord preview up` ignore this.",
+          "type": "boolean",
+          "default": true,
+          "x-mirrord-plan": "enterprise"
         },
         "run": {
           "description": "How to launch the service's local process.",
