@@ -1,6 +1,134 @@
+use std::{borrow::Cow, fmt, sync::LazyLock};
+
 use chrono::NaiveDate;
+#[cfg(feature = "crd")]
+use chrono::{DateTime, Utc};
+#[cfg(feature = "crd")]
+use kube::core::response::StatusCause;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "crd")]
+use uuid::Uuid;
+
+#[cfg(feature = "crd")]
+use crate::crd::NewOperatorFeature;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RequiredPlan {
+    Team,
+    Enterprise,
+    #[serde(other)]
+    Unknown,
+}
+
+impl fmt::Display for RequiredPlan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Team => "Team",
+            Self::Enterprise => "Enterprise",
+            Self::Unknown => "unknown",
+        })
+    }
+}
+
+/// Identifies known features denied by the license regardless of operator configuration, so clients
+/// can explain paid restrictions even when the features are disabled.
+#[cfg(feature = "crd")]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GatedFeature {
+    pub feature: NewOperatorFeature,
+    pub required_plan: RequiredPlan,
+}
+
+#[cfg(feature = "crd")]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PaidFeatureGate {
+    pub feature_config_key: String,
+    pub required_plan: RequiredPlan,
+}
+
+#[cfg(feature = "crd")]
+impl fmt::Display for PaidFeatureGate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Feature `{}` requires a mirrord {} plan.",
+            self.feature_config_key, self.required_plan
+        )
+    }
+}
+
+#[cfg(feature = "crd")]
+impl PaidFeatureGate {
+    /// Distinguishes license refusals from ordinary Kubernetes authorization errors.
+    pub const STATUS_REASON: &'static str = "FeatureNotLicensed";
+
+    const STATUS_CAUSE_REASON: &'static str = "PaidFeatureGate";
+
+    /// A marked, serialized payload lets clients recognize paid gates without parsing the
+    /// human-readable diagnostic or independently encoding the plan and configuration key.
+    pub fn to_status_cause(&self) -> Result<StatusCause, serde_json::Error> {
+        Ok(StatusCause {
+            reason: Self::STATUS_CAUSE_REASON.to_owned(),
+            message: serde_json::to_string(self)?,
+            field: String::new(),
+        })
+    }
+}
+
+#[cfg(feature = "client")]
+impl PaidFeatureGate {
+    /// Only the structured operator contract identifies a license refusal. Ordinary Kubernetes
+    /// authorization errors and legacy reason-only responses keep their original diagnostics.
+    pub fn from_status(status: &kube::core::Status) -> Option<Self> {
+        if status.code != 403 || status.reason != Self::STATUS_REASON {
+            return None;
+        }
+        let mut causes = status
+            .details
+            .as_ref()?
+            .causes
+            .iter()
+            .filter(|cause| cause.reason == Self::STATUS_CAUSE_REASON);
+        let cause = causes.next()?;
+        if causes.next().is_some() {
+            return None;
+        }
+        let gate: Self = serde_json::from_str(&cause.message).ok()?;
+        // These finite keys also keep billing links independent of arbitrary server input.
+        if matches!(
+            gate.required_plan,
+            RequiredPlan::Team | RequiredPlan::Enterprise
+        ) && matches!(
+            gate.feature_config_key.as_str(),
+            "feature.copy_target"
+                | "feature.split_queues"
+                | "feature.kafka_branch"
+                | "feature.db_branches"
+                | "feature.preview"
+                | "target.path"
+                | "multi_cluster"
+                | "ci"
+        ) {
+            Some(gate)
+        } else {
+            None
+        }
+    }
+}
+
+/// Reporting carries no resource authority or caller-supplied license/user attribution. The
+/// event identity survives transport retries so downstream stores can absorb replays.
+#[cfg(feature = "crd")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureGateHitRequest {
+    pub event_id: Uuid,
+    pub timestamp: DateTime<Utc>,
+    pub feature: NewOperatorFeature,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_id: Option<Uuid>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LicenseInfoOwned {
@@ -71,6 +199,148 @@ pub const OPERATOR_ISOLATION_MARKER_ENV: &str = "OPERATOR_ISOLATION_MARKER";
 /// Default value for the [`OPERATOR_OWNERSHIP_LABEL`] when
 /// [`OPERATOR_ISOLATION_MARKER_ENV`] is not set.
 pub const DEFAULT_OPERATOR_ISOLATION_MARKER: &str = "mirrord-operator";
+
+static OPERATOR_ISOLATION_MARKER: LazyLock<String> = LazyLock::new(|| {
+    std::env::var(OPERATOR_ISOLATION_MARKER_ENV)
+        .unwrap_or_else(|_| DEFAULT_OPERATOR_ISOLATION_MARKER.to_owned())
+});
+
+/// The isolation marker of this process: [`OPERATOR_ISOLATION_MARKER_ENV`] when set, the
+/// default otherwise. Read once, so every kind and label in the process agrees on it.
+pub fn isolation_marker() -> &'static str {
+    &OPERATOR_ISOLATION_MARKER
+}
+
+/// Whether this process runs under a marker of its own rather than the default one.
+pub fn is_isolated() -> bool {
+    isolation_marker() != DEFAULT_OPERATOR_ISOLATION_MARKER
+}
+
+/// Set to `true` for an isolated operator to keep its objects under CRDs of its own rather
+/// than under the shared ones with an owner label. Off by default: the deployed operator's
+/// role has to allow the keyed groups first, and until it does a copy that keyed them would
+/// only get Forbidden.
+pub const OPERATOR_KEYED_CRDS_ENV: &str = "OPERATOR_KEYED_CRDS";
+
+static OPERATOR_KEYED_CRDS: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var(OPERATOR_KEYED_CRDS_ENV).is_ok_and(|value| value == "true" || value == "1")
+});
+
+/// Whether this process keeps its objects under CRDs of its own: isolated, and switched on.
+pub fn keyed_crds() -> bool {
+    is_isolated() && *OPERATOR_KEYED_CRDS
+}
+
+/// The root every stored mirrord kind's group ends with; a keyed group keeps it as its
+/// suffix so the keyed CRDs of every copy list together under it.
+pub const MIRRORD_GROUP_ROOT: &str = "mirrord.metalbear.co";
+
+/// The label between a copy's key and [`MIRRORD_GROUP_ROOT`] in its keyed groups, marking
+/// the whole set as test-only CRDs at a glance.
+pub const KEYED_GROUP_LABEL: &str = "test";
+
+/// The API group a stored mirrord kind lives under in this process, for
+/// `#[kube(group_resolver)]`.
+///
+/// With the default marker the group is the declared one. An isolated operator, a copy
+/// stolen onto a deployed one under a key of its own, gets `<key>.test` in front of the
+/// root, `queues.gem.test.mirrord.metalbear.co`, so its objects live in a separate set of
+/// CRDs: the deployed operator never sees them, two copies never collide, and each copy's
+/// CRDs carry its own schema. Only stored kinds resolve their group; the served
+/// `operator.metalbear.co` group is an APIService registration and stays fixed.
+pub fn keyed_group(base: &'static str) -> Cow<'static, str> {
+    if keyed_crds() {
+        keyed_group_for(isolation_marker(), base)
+    } else {
+        Cow::Borrowed(base)
+    }
+}
+
+/// The declared group behind a resolved one: what [`keyed_group`] put this process's key
+/// into, or the group itself when it carries no key. An isolated copy reads the shared set
+/// of CRDs through it. Whether a group is keyed at all is whether this changes it.
+pub fn shared_group(group: &str) -> Cow<'_, str> {
+    let keyed_root = keyed_root(isolation_marker());
+    match group.strip_suffix(keyed_root.as_str()) {
+        Some(sub) => Cow::Owned(format!("{sub}{MIRRORD_GROUP_ROOT}")),
+        None => Cow::Borrowed(group),
+    }
+}
+
+/// What replaces [`MIRRORD_GROUP_ROOT`] in the groups of a copy under `marker`.
+fn keyed_root(marker: &str) -> String {
+    format!("{marker}.{KEYED_GROUP_LABEL}.{MIRRORD_GROUP_ROOT}")
+}
+
+#[cfg(test)]
+mod shared_group_tests {
+    use super::*;
+
+    #[test]
+    fn strips_only_this_process_key() {
+        // The test process runs with the default marker, so nothing is stripped, and a group
+        // carrying another key is left alone.
+        assert_eq!(
+            shared_group("queues.mirrord.metalbear.co"),
+            "queues.mirrord.metalbear.co"
+        );
+        assert_eq!(
+            shared_group("queues.gem.test.mirrord.metalbear.co"),
+            "queues.gem.test.mirrord.metalbear.co"
+        );
+    }
+}
+
+/// [`keyed_group`] for a given marker: the declared group under the default marker, the
+/// marker and the test label in front of the root otherwise. A group that does not end with
+/// the root gets them in front of the whole group, so it is still set apart from the
+/// declared one.
+pub fn keyed_group_for(marker: &str, base: &'static str) -> Cow<'static, str> {
+    if marker == DEFAULT_OPERATOR_ISOLATION_MARKER {
+        return Cow::Borrowed(base);
+    }
+    let keyed_root = keyed_root(marker);
+    match base.strip_suffix(MIRRORD_GROUP_ROOT) {
+        Some(sub) => Cow::Owned(format!("{sub}{keyed_root}")),
+        None => Cow::Owned(format!("{marker}.{KEYED_GROUP_LABEL}.{base}")),
+    }
+}
+
+#[cfg(test)]
+mod keyed_group_tests {
+    use super::*;
+
+    #[test]
+    fn default_marker_keeps_the_declared_group() {
+        assert_eq!(
+            keyed_group_for(
+                DEFAULT_OPERATOR_ISOLATION_MARKER,
+                "queues.mirrord.metalbear.co"
+            ),
+            "queues.mirrord.metalbear.co"
+        );
+    }
+
+    #[test]
+    fn a_copy_gets_its_key_in_front_of_the_root() {
+        assert_eq!(
+            keyed_group_for("gem", "queues.mirrord.metalbear.co"),
+            "queues.gem.test.mirrord.metalbear.co"
+        );
+        assert_eq!(
+            keyed_group_for("ci-18234", "mirrord.metalbear.co"),
+            "ci-18234.test.mirrord.metalbear.co"
+        );
+    }
+
+    #[test]
+    fn a_group_outside_the_root_is_still_set_apart() {
+        assert_eq!(
+            keyed_group_for("gem", "other.example.com"),
+            "gem.test.other.example.com"
+        );
+    }
+}
 
 /// Label applied to CRDs created during single-cluster sessions on a multi-cluster Primary.
 /// The sync controllers check for this label and skip syncing the resource to other clusters,

@@ -84,7 +84,7 @@
           ]
         },
         "context": {
-          "description": "Kube context to use for all services, from your kubeconfig.\n\nA service's own `context` takes precedence, and `mirrord up --context` takes precedence\nover both.",
+          "description": "Kube context to use for all services, from your kubeconfig.\n\nA service's own `context` takes precedence, and `mirrord up --context` takes precedence\nover both. When none is set, the global config's `kube_context` is used, then the\nkubeconfig's current context.",
           "type": [
             "string",
             "null"

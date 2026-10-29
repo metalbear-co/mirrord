@@ -28,14 +28,14 @@ graph TD
 
 ## 2. Release Process Flow (`release.yaml`)
 
-**Trigger**: Pushing a tag (e.g. `1.2.3`).
+**Trigger**: Merging a release PR (from a `releases/<version>` branch) into `main`. See "Release mirrord" in `CONTRIBUTING.md`.
 
 This workflow handles the official release process. It builds signed artifacts for all platforms and publishes them.
 
 ```mermaid
 %%{init: {'theme': 'neutral', 'themeVariables': {'lineColor': '#00f'}}}%%
 graph TD
-    A["Push Tag v*"] --> B["Release Workflow (release.yaml)"]
+    A["Merge Release PR"] --> B["Release Workflow (release.yaml)"]
     
     subgraph "Linux & Mac"
         B --> C["Build Linux (x64/arm64)"]

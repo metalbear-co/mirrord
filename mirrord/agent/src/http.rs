@@ -1,9 +1,10 @@
-use std::{io, ops::Not, time::Duration};
+use std::{io, ops::Not, sync::LazyLock, time::Duration};
 
 use bytes::{Bytes, BytesMut};
 use http::{HeaderValue, Response};
 use http_body_util::combinators::BoxBody;
 use httparse::Status;
+use mirrord_agent_env::envs;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tracing::Level;
 
@@ -26,6 +27,24 @@ pub(crate) const MIRRORD_AGENT_HTTP_HEADER_NAME: &str = "Mirrord-Agent";
 /// details.
 pub(crate) const NO_CACHE_CACHE_CONTROL_VALUE: HeaderValue =
     HeaderValue::from_static("no-cache, no-store, must-revalidate");
+
+/// Max size (in bytes) of the HTTP/2 header list accepted by the agent, both from clients of the
+/// target ([`extract_requests`]) and from the target itself on passthrough ([`sender`]).
+///
+/// [`None`] when [`envs::HTTP2_MAX_HEADER_LIST_SIZE`] is not set, in which case hyper's default
+/// (16kb) is used.
+pub(crate) static HTTP2_MAX_HEADER_LIST_SIZE: LazyLock<Option<u32>> = LazyLock::new(|| {
+    envs::HTTP2_MAX_HEADER_LIST_SIZE
+        .try_from_env()
+        .unwrap_or_else(|error| {
+            tracing::warn!(
+                ?error,
+                "failed to parse {}, using default",
+                envs::HTTP2_MAX_HEADER_LIST_SIZE.name
+            );
+            None
+        })
+});
 
 /// [`Response`] type with a boxed body.
 pub type BoxResponse = Response<BoxBody<Bytes, hyper::Error>>;

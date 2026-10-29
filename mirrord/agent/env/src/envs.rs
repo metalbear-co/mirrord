@@ -154,6 +154,10 @@ pub const OVERRIDE_CACHE_CONTROL: CheckedEnv<bool> =
 pub const HTTP_DETECTION_TIMEOUT: CheckedEnv<u64> =
     CheckedEnv::new("MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT");
 
+/// Sets the max size (in bytes) of the HTTP/2 header list accepted by the agent.
+pub const HTTP2_MAX_HEADER_LIST_SIZE: CheckedEnv<u32> =
+    CheckedEnv::new("MIRRORD_AGENT_HTTP2_MAX_HEADER_LIST_SIZE");
+
 /// Sets how long (in seconds) to keep an unused incoming port redirection before removing it.
 pub const UNUSED_PORT_LINGER: CheckedEnv<u64> =
     CheckedEnv::new("MIRRORD_AGENT_UNUSED_PORT_LINGER_SECS");

@@ -17,12 +17,12 @@ use uuid::Uuid;
 
 use crate::{
     config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpSubcommand},
-    data::UserData,
+    data::{GlobalConfig, UserData},
     error::CliError,
     ui::ui_command,
 };
 
-mod db_branches;
+pub(crate) mod db_branches;
 
 /// Context for sessions started by `mirrord up`.
 #[derive(Clone, Debug)]
@@ -125,6 +125,8 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         }
         other_error => other_error?,
     };
+
+    up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
 
     analytics.enabled = up_config.telemetry_enabled();
 
@@ -283,6 +285,8 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::Mode(_))
             | UpCliError::Up(UpError::BuiltinModeName(_))
             | UpCliError::Up(UpError::UnknownMode(_))
+            | UpCliError::Up(UpError::NoInferredTarget { .. })
+            | UpCliError::Up(UpError::PreviewTargetless { .. })
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::ServiceFailedToStart { .. }) => Self::ServiceStartFailed,
@@ -322,7 +326,7 @@ mod tests {
     use std::process::ExitStatus;
 
     use mirrord_config::target::TargetType;
-    use mirrord_up::{IncompatibleTarget, ModeError, SelectError, ServiceMode};
+    use mirrord_up::{IncompatibleTarget, SelectError, ServiceMode, TargetValidationError};
 
     use super::*;
 
@@ -392,14 +396,14 @@ mod tests {
 
     #[test]
     fn mode_error_buckets_as_config_validation() {
-        let v = category(UpCliError::Up(UpError::Mode(
-            ModeError::IncompatibleTargets(vec![IncompatibleTarget {
+        let v = category(UpCliError::Up(UpError::Mode(vec![
+            TargetValidationError::IncompatibleTargets(vec![IncompatibleTarget {
                 service: "svc".into(),
                 mode: ServiceMode::Replace.into(),
                 incoming: ServiceMode::Replace,
                 target_type: TargetType::Targetless,
             }]),
-        )));
+        ])));
         assert_eq!(v["error_category"], ErrorCategory::ConfigValidation as u32);
     }
 

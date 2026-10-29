@@ -505,6 +505,20 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT", default = 2)]
     pub http_detection_timeout: u64,
 
+    /// ### agent.http2_max_header_list_size {#agent-http2_max_header_list_size}
+    ///
+    /// Maximum size, in bytes, of the header list the agent accepts on HTTP/2 connections it
+    /// intercepts. Applies to request headers sent by clients of the target, and to response
+    /// headers sent back by the target when requests are passed through to it.
+    ///
+    /// The agent advertises this value as `SETTINGS_MAX_HEADER_LIST_SIZE`. Clients that respect
+    /// it refuse to send larger headers, so set this to at least the header size limit your
+    /// services allow.
+    ///
+    /// Defaults to 16 Kb.
+    #[config(env = "MIRRORD_AGENT_HTTP2_MAX_HEADER_LIST_SIZE")]
+    pub http2_max_header_list_size: Option<u32>,
+
     /// ### agent.security_context {#agent-security_context}
     ///
     /// Agent pod security context (not with ephemeral agents).

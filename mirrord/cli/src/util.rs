@@ -70,44 +70,44 @@ pub(crate) fn apply_test_env_overrides(mut cfg_context: ConfigContext) -> Config
 /// resolved from (if any).
 fn resolve_project_or_up_config(
     cfg_context: &mut ConfigContext,
-) -> CliResult<(Option<String>, LayerConfig)> {
+) -> CliResult<(Option<String>, LayerConfig, ConfigSource)> {
     match std::env::var(mirrord_up::RESOLVED_CONFIG_ENV) {
-        Ok(encoded) => {
-            let config = LayerConfig::decode(&encoded)?;
-            record_run_kube_environment(ConfigSource::MirrordUp, &config);
-            Ok((None, config))
-        }
-        Err(..) => resolve_and_record(cfg_context),
+        Ok(encoded) => Ok((
+            None,
+            LayerConfig::decode(&encoded)?,
+            ConfigSource::MirrordUp,
+        )),
+        Err(..) => resolve_project_config(cfg_context),
     }
 }
 
-/// Resolves a [`LayerConfig`], recording the Kubernetes environment it selects for the final CLI
-/// error. Returns the config file path it was resolved from (if any) along with the config.
-fn resolve_and_record(cfg_context: &mut ConfigContext) -> CliResult<(Option<String>, LayerConfig)> {
+/// Resolves a [`LayerConfig`], returning the config file path it was resolved from (if any) and
+/// where the config came from.
+fn resolve_project_config(
+    cfg_context: &mut ConfigContext,
+) -> CliResult<(Option<String>, LayerConfig, ConfigSource)> {
     let config_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
 
     let config = LayerConfig::resolve(cfg_context)?;
-    record_run_kube_environment(
-        config_path
-            .clone()
-            .map(ConfigSource::File)
-            .unwrap_or(ConfigSource::None),
-        &config,
-    );
+    let source = config_path
+        .clone()
+        .map(ConfigSource::File)
+        .unwrap_or(ConfigSource::None);
 
-    Ok((config_path, config))
+    Ok((config_path, config, source))
 }
 
-async fn apply_global_defaults(config: &mut LayerConfig) {
+async fn apply_global_defaults_and_record(config: &mut LayerConfig, source: ConfigSource) {
     GlobalConfig::load().await.apply_to(config);
+    record_run_kube_environment(source, config);
 }
 
 /// Resolves an exec config and fills unset fields from the global mirrord configuration.
 pub(crate) async fn resolve_config(
     cfg_context: &mut ConfigContext,
 ) -> CliResult<(Option<String>, LayerConfig)> {
-    let (path, mut config) = resolve_project_or_up_config(cfg_context)?;
-    apply_global_defaults(&mut config).await;
+    let (path, mut config, source) = resolve_project_or_up_config(cfg_context)?;
+    apply_global_defaults_and_record(&mut config, source).await;
     Ok((path, config))
 }
 
@@ -115,8 +115,8 @@ pub(crate) async fn resolve_config(
 pub(crate) async fn resolve_layer_config(
     cfg_context: &mut ConfigContext,
 ) -> CliResult<LayerConfig> {
-    let (_, mut config) = resolve_and_record(cfg_context)?;
-    apply_global_defaults(&mut config).await;
+    let (_, mut config, source) = resolve_project_config(cfg_context)?;
+    apply_global_defaults_and_record(&mut config, source).await;
     Ok(config)
 }
 

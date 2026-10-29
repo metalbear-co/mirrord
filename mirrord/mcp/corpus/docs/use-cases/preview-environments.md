@@ -4,7 +4,7 @@ tags:
   - beta
   - enterprise
 lastmod: 2026-04-15T00:00:00.000Z
-description: Ephemeral, isolated environments connected to your cluster
+description: "Run new or changed services in short-lived preview environments inside your existing cluster."
 ---
 
 # Preview Environments
@@ -25,7 +25,7 @@ This enables realistic validation workflows without cloning an entire environmen
 This feature is available to users on the Enterprise pricing plan.
 {% endhint %}
 
-#### Prerequisites
+## Prerequisites
 
 * **An Enterprise license.** A [free trial](https://app.metalbear.com/account/sign-up) is minted as an Enterprise one, so preview environments work for its duration. An AI agent on a cluster with no license can provision that trial itself, without waiting for a person: see [Agent-Started Trials](../using-mirrord-with-ai/agent-started-trials.md).
 * **Operator 3.142.0 or later** — the feature was introduced in this version.
@@ -38,7 +38,7 @@ This feature is available to users on the Enterprise pricing plan.
       previewEnv: true
     ```
 
-### What Is a Preview Environment?
+## What Is a Preview Environment?
 
 Today, mirrord sessions are tightly coupled to a developer's local process. When that process stops, the testing environment disappears. Preview Environments solve this by allowing you to spin up isolated, temporary pods in the cluster that:
 
@@ -53,7 +53,7 @@ With [multi-cluster](../using-mirrord/multi-cluster.md) mirrord, previews can ru
 
 ***
 
-#### Environment Key
+### Environment Key
 
 Each Preview Environment is identified by an **environment key**. The key is used to:
 
@@ -66,7 +66,7 @@ If no key is provided, mirrord generates one automatically
 
 ***
 
-### Starting a Preview Environment
+## Starting a Preview Environment
 
 Create a new Preview Environment using a mirrord configuration file and a container image:
 
@@ -95,7 +95,7 @@ Example output:
 
 ***
 
-#### Managing Preview Environments
+### Managing Preview Environments
 
 1. **Status:** Check the current state of Preview Environments, including which environments are active, which preview pods they contain, and how long they will remain available.
 
@@ -134,7 +134,7 @@ mirrord preview stop --key <environment-key>
 mirrord preview start -f <mirrord.json> -i <image> -k <key> --force
 ```
 
-#### GitHub Action
+### GitHub Action
 
 We also provide the [`metalbear-co/mirrord-preview` GitHub Action](https://github.com/metalbear-co/mirrord-preview) for managing preview environments from your GitHub Actions pipeline. This can be used to, for example, automatically start a preview environment when a PR is opened and stop it when the PR is closed.
 
@@ -173,7 +173,101 @@ jobs:
 
 Each PR gets an isolated preview keyed by its number. The `{{ key }}` template in the filter is replaced by mirrord with the session key at runtime, routing only matching traffic to the preview pod. When the PR is closed, the session is stopped and the preview pod is cleaned up. For the full list of inputs and configuration options, see the [action documentation](https://github.com/metalbear-co/mirrord-preview).
 
-### Sharing a Preview via a Link
+## Previewing Several Services
+
+`mirrord preview up` starts a preview for every service in a [`mirrord-up.yaml`](../using-mirrord/multiple-concurrent-sessions.md) that has an image, all under one key. It reads the same file as `mirrord up`, so services already defined there need no separate `mirrord.json`. `mirrord preview down` stops them again.
+
+{% hint style="info" %}
+`mirrord preview up` and `mirrord preview down` require mirrord `3.279.0` or later.
+{% endhint %}
+
+```yaml
+services:
+  user-auth-service:
+    run:
+      command: ["python", "-m", "http.server"]
+  stage-user-dashboard-app:
+    run:
+      command: ["node", "app.js"]
+```
+
+```bash
+mirrord preview up \
+  --image user-auth-service=ghcr.io/org/user-auth-service:preview-pr-123-abc1234 \
+  --image stage-user-dashboard-app=ghcr.io/org/stage-user-dashboard-app:preview-pr-123-abc1234 \
+  -k pr-123
+```
+
+This starts two previews under the key `pr-123`, one per `--image`. The previews start in parallel, and the command returns once every preview is ready, idle or failed. Each preview reports its key, namespace, session and preview URL as `mirrord preview start` does, with every line prefixed by the service name.
+
+Use `-f` to read a file other than `mirrord-up.yaml`. The file is [rendered](../using-mirrord/multiple-concurrent-sessions.md#templating) as it is for `mirrord up`, with the preview's key as `{{ key }}`.
+
+### Images
+
+A service's image comes from the first of these two that is set:
+
+1. `--image <service>=<image ref>`, repeated once per service. Everything after the first `=` is the image ref.
+2. The `MIRRORD_<SERVICE>_IMAGE` environment variable. `<SERVICE>` is the service name in upper case, with every character that isn't a letter or digit turned into `_`, so `user-auth-service` reads `MIRRORD_USER_AUTH_SERVICE_IMAGE`.
+
+If a service has no image, `mirrord preview up` skips it.
+
+### Key
+
+Without `--key` (`-k`) or `MIRRORD_KEY`, `mirrord preview up` uses the branch name as the key: `GITHUB_HEAD_REF` in a GitHub pull request, otherwise the current git branch. On `main` or `master`, or with no branch checked out, it generates a random key. The output prints the key.
+
+### How Each Preview Is Set Up
+
+Each preview is created as `mirrord preview start` would create it for the service's target, in `split` mode.
+
+| Service field | In `mirrord preview up` |
+|---|---|
+| `target`, `context`, `ignore_ports`, `config_patch` | Used as in `mirrord up` |
+| `http_filter` | Replaces the default `baggage: mirrord-session=<key>` filter, as in [`split` mode](../using-mirrord/multiple-concurrent-sessions.md#service-modes) |
+| `default_mode`, `env`, `run`, `skip` | Ignored |
+
+* `config_patch` can set any `mirrord.json` option except `feature.preview.image`, which is rejected.
+* Queues are [split by the key](../using-mirrord/multiple-concurrent-sessions.md#queue-splitting), as in `mirrord up`'s `split` mode. This only applies to deployment, rollout and statefulset targets.
+* When the target is a single workload, not a label selector, the preview uses the [database branches defined on its `MirrordSplitConfig`](../sharing-the-cluster/db-branching.md#branches-defined-on-the-workload).
+* To change either default, set `feature.split_queues` or `feature.db_branches` in `config_patch`. Set it to `[]` to turn it off.
+* If the operator can't split a queue or branch a database, the preview starts without it and prints a warning. Default queue splitting requires mirrord operator `3.225.0` or later.
+* `--ttl <minutes>` (or `infinite`) and `--timeout <seconds>` set every preview's TTL and how long to wait for it to become ready, overriding a `config_patch`. `--context` applies to every service, following the [`mirrord up` context precedence](../using-mirrord/multiple-concurrent-sessions.md#context-precedence).
+
+A request reaches a second previewed service only when the first one forwards the `baggage` header on its outgoing calls. See [Header Propagation](preview-environments-in-ci.md#header-propagation-for-backend-testing).
+
+### Checks Before Anything Starts
+
+Every service is checked first. If any check fails, the command exits non-zero and changes nothing in the cluster. Among the checks, the command fails when:
+
+* `--image` names a service that isn't in the file, names one service twice, or isn't in the `<service>=<image ref>` form
+* no service has an image
+* a `MIRRORD_<SERVICE>_IMAGE` variable maps to two services, for example `user-auth-service` and `user_auth_service`
+* a previewed service has `target: none`, or a target that can't be found. `mirrord preview up` never prompts for one.
+* two previewed services have the same target in the same namespace
+* a `config_patch` is invalid, or requests a feature the operator doesn't support
+
+### Results
+
+The command exits with `0` when every preview is ready or idle. If a preview fails to start, the command exits non-zero and names the failed services. Previews that did start keep running.
+
+Running `mirrord preview up` again with the same key replaces each previewed service's session and keeps its preview URL. The old session goes before the new one is ready, so a service whose new preview fails is left with no preview. Services that get no image on a rerun keep their earlier preview until its TTL runs out or you stop it.
+
+### Sharing Previews via a Link
+
+As with `mirrord preview start`, each service gets its own preview URL when [sharing via a link](#sharing-a-preview-via-a-link) is set up.
+
+The one limitation is [stable share hosts](#stable-share-hosts): leave `operator.shareIngress.stableSlugs` off, the default. A stable slug comes from the key alone, so all services under one key get the same slug, and every service's preview except the first one fails.
+
+### Stopping
+
+```bash
+mirrord preview down -k pr-123
+```
+
+`mirrord preview down` stops every preview under the key in all namespaces, like `mirrord preview stop -k <key> -A`. It finds the key the way `mirrord preview up` does. On `main` or `master`, or with no branch checked out, pass the key with `--key` or `MIRRORD_KEY`, since the random key `mirrord preview up` generated there can't be found again.
+
+When `mirrord-up.yaml` (or the file passed with `-f`) exists, `mirrord preview down` stops the previews in every kube context its services use. It exits with `0` when there is nothing to stop.
+
+## Sharing a Preview via a Link
 
 By default, opening a Preview Environment as a recipient requires the mirrord browser extension, which injects the `baggage: mirrord-session=<key>` header the operator routes on. That works for developers, but it's a non-starter for sharing a preview with a non-technical stakeholder.
 
@@ -187,13 +281,13 @@ Keeping a random-suffix host across a replacement requires mirrord `3.274.0` or 
 The preview URL works with any HTTP filter. A preview with a custom filter (a path filter, a different header, composed filters) additionally routes requests carrying the share link's injected baggage header, so its own filter keeps working for regular traffic while the link always reaches the preview.
 {% endhint %}
 
-#### How it works
+### How it works
 
 `mirrord-share-ingress` runs as its own Deployment and Service. It watches Preview Environments and, on each request, matches the request host to a live preview, injects `baggage: mirrord-session=<key>`, and forwards to that preview's target Service in-cluster. The operator's filtered steal at the target then routes the request to the preview pod, exactly as the browser extension's header would - the operator matches the injected header in addition to the session's own filter.
 
 TLS and the public-facing ingress are owned by your platform team. You put an Ingress (or equivalent gateway) in front of the share-ingress Service that terminates TLS with a wildcard `*.<shareDomain>` certificate, preserves the `Host` header, and routes to the Service. Access control to the link is your responsibility as part of configuring that ingress.
 
-#### Setup
+### Setup
 
 1.  Configure the operator with the domain share hosts are minted under. This must match the `shareDomain` you give the share-ingress chart:
 
@@ -257,7 +351,7 @@ TLS and the public-facing ingress are owned by your platform team. You put an In
       --cert=wildcard.crt --key=wildcard.key -n mirrord
     ```
 
-#### Stable share hosts
+### Stable share hosts
 
 By default the slug carries a random suffix, so the link only exists once `mirrord preview start` prints it (replacing the session with a new image keeps it, stopping the session does not). Set `operator.shareIngress.stableSlugs` when you need the link before that - for example when a PR bot posts the preview URL built from the PR number:
 
@@ -275,7 +369,7 @@ Since anyone who knows the key can build the link, it is guessable. Only enable 
 
 A cluster allows one live session per host. Starting a second session whose key gives the same host fails right away with `share host <host> is already held by live preview session <namespace>/<name>`; stop that session or pick a different key. Failed sessions and sessions being deleted do not hold their host, so restarting a preview under the same key reuses the same link. Sessions that already have a host keep it when you turn the option on or off.
 
-### Auto Scaling Idle Mode
+## Auto Scaling Idle Mode
 
 Preview Environments can scale down to **zero pods while they receive no traffic**, then scale back up automatically when matching traffic arrives - without dropping that traffic. This makes long-lived
 previews (for example, one per open PR) essentially free until someone actually uses them.
@@ -302,8 +396,11 @@ Enable it in the mirrord configuration:
 * `sleep_after_secs` - scale the preview pods to zero after this many seconds without traffic
   (minimum 30). When unset, the environment never idles automatically.
 * `wake_timeout_secs` - How long an incoming request is held while the preview pods start before the request fails (default: 90 seconds).
+  It also gives the image pull of a waking pod that long to succeed: a failed pull is retried
+  instead of ending the environment, and only a pull still failing after `wake_timeout_secs`
+  does. Raise it when your registry is slow or the image is large.
 
-#### Idle Behavior
+### Idle Behavior
 
 An idle Preview Environment keeps listening: the traffic interception on the target and any
 queue splits stay active even though the preview's pods are gone. When a request carrying the
@@ -330,7 +427,7 @@ operator:
 
 ***
 
-### Targeting Scaled-to-Zero Services
+## Targeting Scaled-to-Zero Services
 
 A Preview Environment that only splits queues can target a workload (Deployment, Argo Rollout,
 or StatefulSet) with **no running pods**. (A [CronJob target](#targeting-cronjobs) never needs
@@ -352,7 +449,7 @@ the *preview's* pods to zero; this is about the *target's* pods, and the two com
 
 ***
 
-### Targeting CronJobs
+## Targeting CronJobs
 
 A Preview Environment can target a CronJob, so a flow that depends on a scheduled job (a
 nightly scan, a report generator, a cleanup) can be previewed with your image too:
@@ -420,7 +517,7 @@ grants when `operator.previewEnv` is enabled.
 
 ***
 
-### Building a Preview From Your Manifests
+## Building a Preview From Your Manifests
 
 By default the preview pod is a copy of the target's live pod spec. Pass `--resource` to build
 it from the Kubernetes manifests you already keep for the service instead. This is useful when
@@ -493,7 +590,7 @@ fails the preview when the operator creates it, instead of before anything is cr
 Running `mirrord preview start` again with the same key replaces the preview, built from the
 current files.
 
-#### Comparing Your Manifests With the Cluster
+### Comparing Your Manifests With the Cluster
 
 `mirrord preview diff` runs the same checks and prints what differs for each object, without
 creating anything:
@@ -523,7 +620,7 @@ starting a preview from the live spec.
 
 ***
 
-### Preview Environment Workflow
+## Preview Environment Workflow
 
 ![Preview Environment Creation Workflow](../.gitbook/assets/create-env.svg)
 
@@ -531,19 +628,19 @@ starting a preview from the live spec.
 
 ***
 
-### Details
+## Details
 
-#### Readiness
+### Readiness
 
 Pods created by Preview Environments will never be in the "Ready" state, this is intentional. mirrord inserts a [`readinessGate`](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-readiness-gate) in the created pod that will never evaluate to `"True"` to prevent the target's `Service` from routing traffic to it, since that requires the pod to be ready. This allows the preview pod to copy all the labels/annotations present in the target's pod spec without worrying about the `Service`'s selector(s).
 
-#### Service Meshes
+### Service Meshes
 
 On mesh-injected targets the preview pod gets a sidecar like any other pod, and the sidecar would normally capture the operator's incoming connections - the ones delivering the session's matched requests - and reject them (for example under `STRICT` mTLS). The operator therefore annotates the preview pod with [`traffic.sidecar.istio.io/excludeInboundPorts`](https://istio.io/latest/docs/reference/config/annotations/) (Istio) and [`config.linkerd.io/skip-inbound-ports`](https://linkerd.io/2/reference/proxy-configuration/) (Linkerd) for the session's subscribed ports. The sidecar stays in the pod, so the preview app's outgoing traffic still goes through the mesh, and ports already excluded on the target's template are preserved.
 
 Only Istio and Linkerd are handled automatically. On another mesh (for example Kuma), the preview pod's sidecar still captures the operator's incoming connections and preview-matched requests fail. If you run a mesh we don't handle yet, please [reach out](https://metalbear.com/slack) so we can add support for it. In the meantime, if your mesh has an inbound-port-exclusion annotation, a cluster administrator can set it for all preview pods through the operator's preview pod configuration, pointing it at the ports your previews serve.
 
-#### Pod Labels and Annotations
+### Pod Labels and Annotations
 
 Preview pods start from the target's pod template, so they keep its labels and annotations. Cluster admins can add their own to every preview pod with `operator.preview.labels` and `operator.preview.annotations` in the operator's Helm values. This is useful when a cluster-wide tool reads pod metadata - for example Karpenter, which otherwise deletes a preview pod while it consolidates an underutilized node:
 
@@ -558,13 +655,13 @@ operator:
 
 A value set here wins over the same key from the target's template. Previews started after the change pick them up; the operator reads these values when it starts, so restart it after changing them. Database branches a preview creates take their metadata from the branch config instead - see [Branch Pod Labels and Annotations](../sharing-the-cluster/db-branching.md#branch-pod-labels-and-annotations).
 
-#### Resources
+### Resources
 
 Preview Environments consist of a Deployment, to manage and maintain the underlying pods, and a [Headless Service](https://kubernetes.io/docs/concepts/services-networking/service/#headless-services), to route traffic to the dynamic set of pods. Because the Service doesn't have a Cluster IP, exhaustion of IP addresses when deploying a large number of Preview Environments is not a concern.
 
 A preview of a [CronJob target](#targeting-cronjobs) consists of a CronJob and the Jobs it creates instead, with no Service.
 
-#### Interaction with `mirrord exec`
+### Interaction with `mirrord exec`
 
 If you start a local `mirrord exec` session against the same target and with the same Environment Key as an active Preview Environment, the local session takes precedence.
 

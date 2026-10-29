@@ -19,10 +19,13 @@ use std::{
 
 pub use config::{
     BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget,
-    ModeConfig, ModeError, QueueSplitMode, SERVICE_LAYER_PATHS, SelectError, ServiceConfig,
-    ServiceError, ServiceMode, SubprocessCfg, UnknownMode, UpConfig, WindowsSupportError,
+    ModeConfig, PreviewImageError, PreviewImageSource, PreviewImages, QueueSplitMode,
+    SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SubprocessCfg,
+    TargetValidationError, UnknownMode, UpConfig, WindowsSupportError, preview_image_env,
 };
-use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
+use config::{
+    ResolvedTarget, SessionKind, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets,
+};
 use futures::TryStreamExt;
 pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
@@ -158,10 +161,9 @@ pub enum UpError {
     #[diagnostic(transparent)]
     UnknownMode(#[from] UnknownMode),
 
-    /// A service's mode can't be used with the target it resolved to.
-    #[error(transparent)]
-    #[diagnostic(transparent)]
-    Mode(#[from] ModeError),
+    /// One or more services cannot use their resolved targets.
+    #[error("target validation failed")]
+    Mode(#[related] Vec<TargetValidationError>),
 
     /// The selected services would delegate to commands unsupported on Windows.
     #[error(transparent)]
@@ -221,6 +223,27 @@ pub enum UpError {
     /// The user chose to exit from the target-resolution wizard.
     #[error("exited")]
     Exited,
+
+    /// A service without a `target.path` has no workload named after it, and the command can't
+    /// prompt for one.
+    #[error("no workload named `{service}` found in namespace `{namespace}`")]
+    #[diagnostic(help(
+        "Set `target.path` (and `target.namespace` if needed) for the service in mirrord-up.yaml."
+    ))]
+    NoInferredTarget {
+        /// Name of the service whose target couldn't be inferred.
+        service: Arc<str>,
+        /// Namespace the workload was looked up in.
+        namespace: String,
+    },
+
+    /// A service previewed by `mirrord preview up` has no target (`target: none` or
+    /// `path: targetless`). A preview runs a copy of its target's pod, so there has to be one.
+    #[error("service `{service}` has no target, but a preview environment needs one")]
+    PreviewTargetless {
+        /// Name of the targetless service.
+        service: Arc<str>,
+    },
 
     /// The only namespace that the user can pick has no workload that the user can list.
     #[error("found no workloads that you can list in namespace \"{0}\"")]
@@ -390,6 +413,15 @@ fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
     )
 }
 
+/// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up`.
+///
+/// Unlike [`load_up_config`], it doesn't check the services' `run`: `mirrord preview up` never
+/// launches their local commands, so a `run.directory` that only exists on a developer's machine
+/// must not stop it (e.g. in CI).
+pub fn load_preview_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
+    template(&std::fs::read_to_string(path)?, key)
+}
+
 /// Load, parse, and resolve local paths in a `mirrord-up.yaml` configuration file.
 pub fn load_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
     let content = std::fs::read_to_string(path)?;
@@ -432,8 +464,8 @@ const INFERRED_TARGET_TYPES: [TargetType; 4] = [
 
 /// Resolve every service whose `target.path` is absent by looking the service
 /// key up in the cluster (see [`INFERRED_TARGET_TYPES`] for the search order).
-/// When no workload matches, an interactive wizard lets the user pick a
-/// different namespace and workload, or exit.
+/// When no workload matches and `interactive` is set, a wizard lets the user
+/// pick a different namespace and workload, or exit. Otherwise that fails.
 ///
 /// If the user has specified a kube context via `--context`, `config.services.*.context` or
 /// `config.common.context`, use this to resolve targets.
@@ -441,6 +473,7 @@ async fn resolve_unresolved_workloads(
     up_config: &UpConfig,
     config_path: &Path,
     up_context: UpKubeContext,
+    interactive: bool,
 ) -> Result<HashMap<UnresolvedTarget, ResolvedTarget>, UpError> {
     let unresolved = up_config.unresolved_targets(up_context.clone());
 
@@ -482,13 +515,22 @@ async fn resolve_unresolved_workloads(
         let workloads = list_workloads(client, namespace, &INFERRED_TARGET_TYPES).await?;
         let resolved = match find_by_name(&workloads, name) {
             Some(path) => {
-                println!("{name}: using {path}");
+                // Without prompts, the caller reports the targets the way its output is set up.
+                if interactive {
+                    println!("{name}: using {path}");
+                }
                 ResolvedTarget {
                     resolved: SpecifiedTarget {
                         path: Some(Target::from_str(path)?),
                         namespace: unresolved_target.namespace.clone(),
                     },
                 }
+            }
+            None if interactive.not() => {
+                return Err(UpError::NoInferredTarget {
+                    service: name.clone(),
+                    namespace: namespace.to_owned(),
+                });
             }
             None => {
                 println!(
@@ -812,7 +854,7 @@ pub async fn resolve_services(
     };
 
     let mut resolved_targets =
-        resolve_unresolved_workloads(&up_config, config_path, up_context.clone()).await?;
+        resolve_unresolved_workloads(&up_config, config_path, up_context.clone(), true).await?;
 
     let service_configs = up_config.service_configs(
         key,
@@ -821,9 +863,53 @@ pub async fn resolve_services(
         &mut ConfigContext::default(),
     )?;
 
-    validate_targets(&service_configs)?;
+    validate_targets(&service_configs).map_err(UpError::Mode)?;
 
     Ok(service_configs)
+}
+
+/// Generate the [`mirrord_config::LayerConfig`] of every service's `mirrord preview up` session,
+/// resolving the targets left to the cluster like [`resolve_services`] does, but without ever
+/// prompting. The caller drops the services without an image with
+/// [`UpConfig::select_preview_images`] before calling this, and sets each config's
+/// `feature.preview.image` to the one it picked.
+pub async fn resolve_preview_services(
+    up_config: UpConfig,
+    config_path: &Path,
+    kube_context_arg: Option<Arc<str>>,
+    key: &EnvKey,
+) -> Result<Vec<SubprocessCfg>, UpError> {
+    let targetless = up_config.services.iter().find(|(_, service)| {
+        matches!(
+            &service.target,
+            TargetConfig::Targetless
+                | TargetConfig::Specified(SpecifiedTarget {
+                    path: Some(Target::Targetless),
+                    ..
+                })
+        )
+    });
+    if let Some((service, _)) = targetless {
+        return Err(UpError::PreviewTargetless {
+            service: service.clone(),
+        });
+    }
+
+    let up_context = UpKubeContext {
+        command_arg: kube_context_arg,
+        common_context: up_config.common.context.clone(),
+    };
+
+    let mut resolved_targets =
+        resolve_unresolved_workloads(&up_config, config_path, up_context.clone(), false).await?;
+
+    up_config.assemble_services(
+        key,
+        &mut resolved_targets,
+        up_context,
+        &mut ConfigContext::default(),
+        SessionKind::Preview,
+    )
 }
 
 /// Spawn a child mirrord process for each of `service_configs`. Stdout/stderr from
@@ -849,6 +935,7 @@ pub async fn launch(
                 mode: _,
                 incoming: _,
                 default_db_branches: _,
+                default_split_queues: _,
             } = config;
             let config::RunConfig {
                 r#type,

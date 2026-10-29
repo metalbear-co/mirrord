@@ -1723,6 +1723,7 @@ mod test {
         let agent_conn = AgentConnection::new(
             &config,
             AgentConnectInfo::Dummy(conn_tx.clone()),
+            None,
             &mut NullReporter::default(),
         )
         .await

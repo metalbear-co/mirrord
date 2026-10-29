@@ -62,6 +62,7 @@ use crate::{
     feature::{
         FeatureConfig,
         fs::{READONLY_FILE_BUFFER_HARD_LIMIT, READONLY_FILE_BUFFER_WARN_LIMIT},
+        magic::{JAVA_OPTIONS_ENV, without_java_agents},
     },
     internal_proxy::InternalProxyConfig,
     retry::StartupRetryConfig,
@@ -506,7 +507,8 @@ pub struct LayerConfig {
     /// ## kube_context {#root-kube_context}
     ///
     /// Kube context to use from the kubeconfig file.
-    /// Will use current context if not specified.
+    /// If not specified, uses `kube_context` from the global `~/.mirrord/mirrord.json`, then the
+    /// kubeconfig's current context.
     ///
     /// ```json
     /// {
@@ -748,7 +750,11 @@ impl LayerConfig {
     }
 
     /// Applies the presets in `feature.magic` to the config, modifying it in-place.
-    fn apply_magic(&mut self) {
+    ///
+    /// [`resolve`](Self::resolve) runs it. A config assembled without it doesn't compare equal
+    /// to the resolved default, so call it before checks that do, like
+    /// [`verify_for_preview_env`](Self::verify_for_preview_env).
+    pub fn apply_magic(&mut self) {
         if self.feature.magic.aws {
             let mut unset: Vec<String> = self
                 .feature
@@ -771,6 +777,16 @@ impl LayerConfig {
                     .entry(pattern)
                     .or_insert(replacement);
             }
+        }
+    }
+
+    /// Applies enabled fixes to environment variables fetched from the target.
+    pub fn sanitize_remote_env(&self, env: &mut HashMap<String, String>) {
+        if self.feature.magic.java_agents
+            && let Some(options) = env.get_mut(JAVA_OPTIONS_ENV)
+            && let Some(sanitized) = without_java_agents(options)
+        {
+            *options = sanitized;
         }
     }
 
@@ -1363,8 +1379,10 @@ impl LayerConfig {
             format!("`{field}` is ignored in preview environments and will not be used.")
         };
 
-        let default =
-            Self::resolve(&mut ConfigContext::default()).expect("default config must be valid");
+        // Strict, so the environment can't make its `MIRRORD_*` settings (or a config file named
+        // by `MIRRORD_CONFIG_FILE`) part of what is compared against.
+        let default = Self::resolve(&mut ConfigContext::default().strict_env(true))
+            .expect("default config must be valid");
 
         // feature.env - partially supported
 
@@ -1406,7 +1424,7 @@ impl LayerConfig {
             && !self.feature.network.incoming.http_filter.is_filter_set()
         {
             context.add_warning(format!(
-                "using default http header filter: 'baggage: .*mirrord-session={}.*'.",
+                "using default http header filter: '^baggage: .*mirrord-session={}.*$'.",
                 self.key.as_str(),
             ));
         }
@@ -3136,6 +3154,23 @@ mod tests {
     #[test]
     fn magic_auto_mount_defaults_to_enabled() {
         assert!(default_config().feature.magic.auto_mount);
+    }
+
+    #[test]
+    fn magic_java_agents_defaults_to_enabled() {
+        assert!(default_config().feature.magic.java_agents);
+    }
+
+    #[test]
+    fn java_agent_sanitisation_can_be_disabled() {
+        let mut config = default_config();
+        config.feature.magic.java_agents = false;
+        let options = "-javaagent:/agent.jar";
+        let mut env = HashMap::from([(JAVA_OPTIONS_ENV.to_owned(), options.to_owned())]);
+
+        config.sanitize_remote_env(&mut env);
+
+        assert_eq!(env.get(JAVA_OPTIONS_ENV).map(String::as_str), Some(options));
     }
 
     /// Names that aren't one of the agent's capabilities are ignored, so the user gets a warning.

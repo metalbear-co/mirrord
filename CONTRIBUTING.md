@@ -595,8 +595,9 @@ reconciling resources created by the other. The marker is set via the `OPERATOR_
 environment variable and defaults to `mirrord-operator`. Its value is used as a special label on
 operator-managed resources (agents, copy-targets, preview sessions, etc.).
 
-The operator reads this env var at **compile time** (via `option_env!`), while the CLI reads it at
-**runtime** (via `std::env::var`).
+Both the operator and the CLI read this env var at runtime. The CLI labels the resources it creates
+with the marker only when the variable is set, so to have an operator running with a custom marker
+pick up a session's resources, run the CLI with the same `OPERATOR_ISOLATION_MARKER`.
 
 # New Hook Guidelines
 
@@ -732,7 +733,7 @@ an exception in the [typos configuration file](typos.toml) at the root of the re
 
 ## Prose Checks (Vale)
 
-mirrord uses [Vale](https://vale.sh) to enforce writing style in Markdown files and Rust doc comments. It runs in CI on changed files. To run it locally:
+mirrord uses [Vale](https://vale.sh) to enforce writing style in Markdown files and Rust doc comments. CI runs it on the Markdown files at the root of the repository, except `CHANGELOG.md`, and on every Markdown file in `changelog.d/`. To run it locally:
 
 ```bash
 vale .
@@ -769,9 +770,12 @@ Add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
 - Use `+some-name` if no issue exists
 - Don't use Linear issues or private repository issue numbers
 
-**Category:**
+**Category** (the types in [towncrier.toml](towncrier.toml)):
 - `added` for new functionality
 - `fixed` for fixed bugs
+- `security` for security fixes
+- `deprecated` for functionality that a later release will remove
+- `removed` for removed functionality
 - `internal` for anything users don't care about, e.g. changes in tests or CI
 - `changed` for anything else
 
@@ -881,7 +885,7 @@ Releases are fully automated. Under normal circumstances no manual steps are req
    - There is at least one entry in `changelog.d/`.
    - The last release is older than 7 days.
 2. When both conditions are met, the [Auto Release PR workflow](/.github/workflows/auto-release-pr.yaml) opens (or updates) a PR from `releases/<version>` to `main`. The PR:
-   - Bumps the workspace version in `Cargo.toml` (patch bump if all changes are `fixed`/`internal`; minor bump otherwise).
+   - Bumps the workspace version in `Cargo.toml` (patch bump if all changes are `fixed`/`security`/`internal`; minor bump otherwise).
    - Updates `Cargo.lock`.
    - Generates `CHANGELOG.md` by consuming the `changelog.d/` fragments.
 3. Review the release PR, fix any changelog issues or typos, then merge it.

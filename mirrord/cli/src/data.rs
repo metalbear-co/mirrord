@@ -20,7 +20,7 @@ mod auth_store;
 mod global_config;
 mod user_data;
 
-pub(crate) use auth_store::{AuthStore, SignupApiKey, StoredLoginToken};
+pub(crate) use auth_store::{AuthStore, SignupApiKey, StoredLogin, StoredLoginToken};
 pub(crate) use global_config::{GlobalConfig, GlobalConfigError, global_config_command};
 pub(crate) use user_data::UserData;
 
