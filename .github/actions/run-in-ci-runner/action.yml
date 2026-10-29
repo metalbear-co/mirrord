@@ -41,6 +41,8 @@ runs:
           -e KUBECONFIG="$HOME/.kube/config" \
           -e CARGO_TERM_COLOR=always \
           -e CARGO_INCREMENTAL=0 \
+          -e CARGO_PROFILE_DEV_DEBUG \
+          -e CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS \
           -e GITHUB_ACTIONS \
           -e MIRRORD_TELEMETRY=false \
           -e MIRRORD_AGENT_RUST_LOG="$MIRRORD_AGENT_RUST_LOG" \

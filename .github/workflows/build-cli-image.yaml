@@ -8,11 +8,6 @@ on:
         required: false
         type: string
         default: "blacksmith-8vcpu-ubuntu-2404"
-      runner_arm:
-        description: "arm64 runner label. Callers pass the one `plan` picked."
-        required: false
-        type: string
-        default: "blacksmith-8vcpu-ubuntu-2404-arm"
 
 permissions:
   contents: read
@@ -20,18 +15,21 @@ permissions:
 
 jobs:
   build-cli-image:
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ inputs.runner }}
     strategy:
       matrix:
         include:
           - platform: linux/amd64
             arch: amd64
-            runner: ${{ inputs.runner }}
           - platform: linux/arm64
             arch: arm64
-            runner: ${{ inputs.runner_arm }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up QEMU
+        if: ${{ matrix.arch == 'arm64' }}
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
       - name: Login to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
@@ -49,5 +47,8 @@ jobs:
         with:
           files: ci/docker-bake.hcl
           targets: cli
+          # Without this the builder image follows `PLATFORMS`, so an arm64 build would compile Rust
+          # under QEMU.
           set: |
             cli.output=type=docker,dest=${{ github.workspace }}/cli_image.tar
+            ci-agent-builder.platform=linux/${{ runner.arch == 'ARM64' && 'arm64' || 'amd64' }}
