@@ -29,8 +29,8 @@ use tracing::{error, info};
 use winapi::shared::winerror::{WSAHOST_NOT_FOUND, WSANO_RECOVERY, WSATRY_AGAIN};
 
 use crate::{
-    detour::DetourError, graceful_exit, proxy_connection::ProxyError, setup::setup,
-    socket::sockets::SocketDescriptor,
+    detour::DetourError, graceful_exit, process::hold::HoldError, proxy_connection::ProxyError,
+    setup::setup, socket::sockets::SocketDescriptor,
 };
 
 mod ignore_codes {
@@ -341,6 +341,11 @@ pub enum LayerError {
     #[cfg(target_os = "windows")]
     #[error("Process synchronization failed: {0}")]
     ProcessSynchronization(String),
+
+    /// The program couldn't be held for a debugger: by `mirrord exec` on Windows, by the layer
+    /// itself on Unix.
+    #[error(transparent)]
+    DebugHold(#[from] HoldError),
 
     #[cfg(target_os = "windows")]
     #[error("Process with PID {0} not found")]

@@ -99,6 +99,16 @@ pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
 /// Environment variable to indicate towards layer to wait for debugger.
 pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGGER";
 
+/// Environment variable asking `mirrord exec` to hold the program it starts before the program's
+/// own code runs, until an IDE releases it. `mirrord up --debug` sets it on each named service's
+/// `mirrord exec`.
+///
+/// Experimental, like `--debug`. The program's children never see it: on Windows `exec` holds the
+/// program and never passes the variable on. On Linux and macOS the layer holds it, so `exec`
+/// sets the variable to its own pid, which the program keeps across `execve`, and the layer holds
+/// only the process with that pid, then removes the variable.
+pub const MIRRORD_DEBUG_HOLD: &str = "MIRRORD_DEBUG_HOLD";
+
 /// Environment variable controlling Windows layer crash reporting.
 ///
 /// Crash reporting defaults to enabled. IDE extensions set this to `false` because stopping an
