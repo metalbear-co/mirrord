@@ -11,6 +11,7 @@ pub mod agent;
 pub mod ci;
 pub mod config;
 pub mod container;
+pub mod debug_hold;
 pub mod env_key;
 pub mod experimental;
 pub mod external_proxy;
@@ -113,13 +114,17 @@ pub const MIRRORD_LAYER_READY: &str = "MIRRORD_LAYER_READY";
 
 /// Environment variable asking `mirrord exec` to hold the program it starts before the program's
 /// own code runs, until an IDE releases it. `mirrord up --debug` sets it on each named service's
-/// `mirrord exec`.
+/// `mirrord exec`, and only `exec` reads it.
 ///
-/// Experimental, like `--debug`. The program's children never see it: on Windows `exec` holds the
-/// program and never passes the variable on. On Linux and macOS the layer holds it, so `exec`
-/// sets the variable to its own pid, which the program keeps across `execve`, and the layer holds
-/// only the process with that pid, then removes the variable.
+/// Experimental, like `--debug`. [`debug_hold`] has how the hold travels on.
 pub const MIRRORD_DEBUG_HOLD: &str = "MIRRORD_DEBUG_HOLD";
+
+/// Environment variable asking the layer to hold the program for a debugger: the pid of the one
+/// process whose layer holds. Linux and macOS `mirrord exec` sets it to its own pid, which
+/// `execve` hands to the program, and the layer removes it.
+///
+/// Experimental, like `--debug`. [`debug_hold`] has how the hold travels.
+pub const MIRRORD_LAYER_DEBUG_HOLD: &str = "MIRRORD_LAYER_DEBUG_HOLD";
 
 /// Environment variable controlling Windows layer crash reporting.
 ///

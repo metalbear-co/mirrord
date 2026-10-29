@@ -8,7 +8,7 @@
 //! internal proxy included). In a terminal, `exec` still prints it in its own tree.
 //!
 //! When `mirrord up --debug` asked for it, the layer then holds the program here for a debugger,
-//! before `main` and the executable's own initializers run (see [`MIRRORD_DEBUG_HOLD`]).
+//! before `main` and the executable's own initializers run (see [`MIRRORD_LAYER_DEBUG_HOLD`]).
 
 use std::{
     ffi::OsStr,
@@ -16,7 +16,7 @@ use std::{
     ops::Not,
 };
 
-use mirrord_config::{MIRRORD_DEBUG_HOLD, MIRRORD_LAYER_READY};
+use mirrord_config::{MIRRORD_LAYER_DEBUG_HOLD, MIRRORD_LAYER_READY, debug_hold};
 use mirrord_layer_lib::{
     detour::DetourGuard,
     error::LayerError,
@@ -63,25 +63,25 @@ pub(crate) fn layer_ready() -> Result<(), LayerError> {
     debug_hold().map_err(LayerError::from)
 }
 
-/// Holds the program until an IDE releases it, when `mirrord exec` bound [`MIRRORD_DEBUG_HOLD`]
-/// to this process.
+/// Holds the program until an IDE releases it, when `mirrord exec` set
+/// [`MIRRORD_LAYER_DEBUG_HOLD`] to this process's pid.
 ///
 /// `mirrord exec` sets the variable to its own pid, then replaces itself with the program through
 /// `execve`, which keeps the pid. So the value names the program, and a process that still
 /// inherits it, such as a child an earlier library constructor started, has another pid and runs
 /// on.
 fn debug_hold() -> Result<(), HoldError> {
-    let Some(bound_to) = std::env::var_os(MIRRORD_DEBUG_HOLD) else {
+    let Some(bound_to) = std::env::var_os(MIRRORD_LAYER_DEBUG_HOLD) else {
         return Ok(());
     };
     // Only this process is held, so its children must never get the variable. The macOS env
     // backup in `mirrord_layer_lib::setup` leaves it out too.
     // SAFETY: the constructor runs before the program's own threads start, so environment
     // mutation cannot race another thread.
-    unsafe { std::env::remove_var(MIRRORD_DEBUG_HOLD) };
+    unsafe { std::env::remove_var(MIRRORD_LAYER_DEBUG_HOLD) };
 
     let pid = std::process::id();
-    if bound_to.to_str().and_then(|value| value.parse().ok()) != Some(pid) {
+    if debug_hold::layer_pid(&bound_to) != Some(pid) {
         tracing::debug!(?bound_to, pid, "the debug hold is bound to another process");
         return Ok(());
     }

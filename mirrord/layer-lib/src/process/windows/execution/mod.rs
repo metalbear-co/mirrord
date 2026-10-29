@@ -182,8 +182,9 @@ const SYSTEM_VARIABLES: &[&str] = &["SystemRoot", "windir"];
 /// `mirrord exec` that block is the session's composed environment, whose log directory, monitor
 /// address and proxy address are fresher than the ones in the CLI's own environment.
 ///
-/// Never `MIRRORD_DEBUG_HOLD`: only the program `mirrord exec` starts is held, so no child may
-/// get it. The Unix layer removes it, and `MIRRORD_LAYER_READY`, for the same reason.
+/// Never the debug hold's variables: only the program `mirrord exec` starts is held, so no child
+/// may get them. The Unix layer removes `MIRRORD_LAYER_DEBUG_HOLD`, and `MIRRORD_LAYER_READY`, for
+/// the same reason.
 const FORWARDED_ENV_VARS: &[&str] = &[
     MIRRORD_LAYER_INTPROXY_ADDR,
     MIRRORD_LAYER_TARGET_CONTAINER_PORTS,
@@ -447,8 +448,9 @@ impl LayerManagedProcess {
     /// `progress` succeeds before the program's primary thread first runs, so a caller that shares
     /// its console with the program can end its own output there.
     ///
-    /// `debug_hold` keeps the program suspended once its layer is ready, until an IDE releases it
-    /// (see [`hold::hold`]). The hold is announced on stdout.
+    /// `hold_for_debugger` makes this launcher hold the program: it keeps the program suspended
+    /// once its layer is ready, until an IDE releases it (see [`hold::hold`]), and announces the
+    /// hold on stdout. The program's layer takes no part in it.
     #[allow(clippy::too_many_arguments)]
     pub fn execute<P>(
         application_name: Option<String>,
@@ -457,7 +459,7 @@ impl LayerManagedProcess {
         env_vars: WindowsEnv,
         injection_method: InjectionMethod,
         kill_children_on_exit: bool,
-        debug_hold: bool,
+        hold_for_debugger: bool,
         progress: Option<P>,
     ) -> LayerResult<Self>
     where
@@ -539,7 +541,7 @@ impl LayerManagedProcess {
             create_process_fn,
             kill_children_on_exit,
             LayerFailurePolicy::Terminate,
-            debug_hold.then_some(&mut stdout as &mut dyn Write),
+            hold_for_debugger.then_some(&mut stdout as &mut dyn Write),
             progress,
         )
         .map_err(|launch| launch.error)
@@ -980,8 +982,9 @@ impl LayerManagedProcess {
             }
         }
 
-        // A held program is still at its entry point here: load-library ran the layer's startup
-        // on a thread of its own.
+        // NOTE: this runs in the launcher (`mirrord exec`), not in the program's layer: on Windows
+        // the launcher holds the program from outside. A held program is still at its entry
+        // point here, since load-library ran the layer's startup on a thread of its own.
         if let Some(announce_to) = plan.debug_hold.as_mut()
             && hold::hold::<Gate>(child_pid, self.process_handle(), announce_to)?
                 == HoldOutcome::ProcessExited

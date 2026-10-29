@@ -45,16 +45,28 @@ pub(crate) fn set(env: &mut ProcessEnv, name: &str, value: String) {
     }
 }
 
-/// The variable names in `env`, in no particular order.
+/// The value of `name`, under any spelling the platform treats as the same name.
 #[cfg(test)]
-pub(crate) fn names(env: &ProcessEnv) -> Vec<&str> {
+pub(crate) fn get<'env>(env: &'env ProcessEnv, name: &str) -> Option<&'env str> {
     #[cfg(windows)]
     {
-        env.iter().map(|(name, _)| name).collect()
+        env.get(name)
     }
 
     #[cfg(not(windows))]
     {
-        env.keys().map(String::as_str).collect()
+        env.get(name).map(String::as_str)
     }
+}
+
+/// An environment holding exactly `entries`.
+#[cfg(test)]
+pub(crate) fn from_entries<'name>(
+    entries: impl IntoIterator<Item = (&'name str, String)>,
+) -> ProcessEnv {
+    let mut env = ProcessEnv::default();
+    for (name, value) in entries {
+        set(&mut env, name, value);
+    }
+    env
 }

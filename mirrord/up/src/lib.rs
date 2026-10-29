@@ -37,6 +37,7 @@ use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
     MIRRORD_DEBUG_HOLD,
     config::{ConfigContext, ConfigError, EnvKey},
+    debug_hold,
     target::{Target, TargetType},
     util::GIT_BRANCH,
 };
@@ -931,7 +932,7 @@ fn service_commands(
             let mut cmd = resolve_tokio_command(std::env::current_exe()?);
             let debugged = debug.iter().any(|name| **name == *service_name);
             if debugged {
-                cmd.env(MIRRORD_DEBUG_HOLD, "1");
+                cmd.env(MIRRORD_DEBUG_HOLD, debug_hold::REQUESTED);
             } else {
                 cmd.env_remove(MIRRORD_DEBUG_HOLD);
             }
@@ -1159,9 +1160,15 @@ services:
         assert_eq!(
             holds,
             HashMap::from([
-                ("api".to_owned(), Some(Some("1".to_owned()))),
+                (
+                    "api".to_owned(),
+                    Some(Some(debug_hold::REQUESTED.to_owned()))
+                ),
                 ("web".to_owned(), Some(None)),
-                ("worker".to_owned(), Some(Some("1".to_owned()))),
+                (
+                    "worker".to_owned(),
+                    Some(Some(debug_hold::REQUESTED.to_owned()))
+                ),
             ]),
             "only the services `--debug` names may wait for an IDE to release them"
         );

@@ -274,6 +274,7 @@ use config::*;
 use connection::create_and_connect;
 use container::{container_command, container_ext_command};
 use db_branches::db_branches_command;
+use debug_hold::ExecHold;
 use diagnose::diagnose_command;
 use dump::dump_command;
 use execution::{CrashReporting, MirrordExecution};
@@ -286,7 +287,7 @@ use mirrord_analytics::{
 #[cfg(not(target_os = "windows"))]
 use mirrord_config::MIRRORD_LAYER_READY;
 use mirrord_config::{
-    LayerConfig, LayerFileConfig, MIRRORD_DEBUG_HOLD,
+    LayerConfig, LayerFileConfig,
     config::ConfigContext,
     feature::{
         database_branches::{DatabaseBranchConfig, RedisBranchConfig},
@@ -334,6 +335,7 @@ mod container;
 mod crash_monitor;
 mod data;
 mod db_branches;
+mod debug_hold;
 mod diagnose;
 mod dump;
 mod error;
@@ -443,11 +445,12 @@ async fn exec_process(
     let no_layer = no_layer
         .or_else(|| no_layer::changes_identity(&binary_path).then_some(NoLayer::ChangesIdentity));
 
-    // Set by `mirrord up --debug` on this service's `mirrord exec` only.
+    // `mirrord up --debug` asks this on the `mirrord exec` of each service it names.
+    let debug_hold = ExecHold::from_env();
     #[cfg(not(target_os = "windows"))]
-    let debug_hold = std::env::var_os(MIRRORD_DEBUG_HOLD).is_some_and(|value| value == "1");
-    #[cfg(not(target_os = "windows"))]
-    if debug_hold && let Some(reason) = no_layer {
+    if debug_hold == ExecHold::Requested
+        && let Some(reason) = no_layer
+    {
         return Err(CliError::DebugHoldWithoutLayer {
             binary: args.binary.clone(),
             reason,
@@ -455,7 +458,7 @@ async fn exec_process(
     }
     // The hold is bound to this pid, which only an `execve`d program keeps.
     #[cfg(not(target_os = "windows"))]
-    if debug_hold
+    if debug_hold == ExecHold::Requested
         && mirrord_for_ci
             .as_ref()
             .is_some_and(|ci| ci.spawns_the_program(&config.ci))
@@ -508,7 +511,9 @@ async fn exec_process(
             .then_some(NoLayer::UnpatchedSip)
     });
     #[cfg(target_os = "macos")]
-    if debug_hold && let Some(reason) = no_layer {
+    if debug_hold == ExecHold::Requested
+        && let Some(reason) = no_layer
+    {
         return Err(CliError::DebugHoldWithoutLayer {
             binary: args.binary.clone(),
             reason,
@@ -518,27 +523,12 @@ async fn exec_process(
     #[cfg(not(target_os = "macos"))]
     let (_did_sip_patch, binary) = (false, args.binary.clone());
 
-    let env_vars = compose_exec_environment(
+    let mut env_vars = compose_exec_environment(
         process_env::inherited(),
         &execution_info.environment,
         &execution_info.env_to_unset,
     );
-    // TRICK: the `execve` below replaces this process's image with the program's, but keeps its
-    // pid, its stdio pipes and the environment it's handed. So this pid becomes the program's pid.
-    // The layer holds only the process whose pid this names: the program holds, and a child that
-    // inherits the variable never does.
-    #[cfg(not(target_os = "windows"))]
-    let env_vars = {
-        let mut env_vars = env_vars;
-        if debug_hold {
-            process_env::set(
-                &mut env_vars,
-                MIRRORD_DEBUG_HOLD,
-                std::process::id().to_string(),
-            );
-        }
-        env_vars
-    };
+    debug_hold.hand_to_program(&mut env_vars);
 
     // Put original executable in argv[0] even if actually running patched version.
     let binary_args = std::iter::once(&args.binary)
@@ -624,16 +614,14 @@ async fn exec_process(
         mirrord_for_ci,
         #[cfg(not(target_os = "windows"))]
         layer_ready,
+        #[cfg(target_os = "windows")]
+        debug_hold,
     )
     .await
 }
 
 /// Environment the user's process is launched with: `inherited`, then the execution's
 /// `overrides` and progress output switched off, minus the variables in `unset`.
-///
-/// [`MIRRORD_DEBUG_HOLD`] is always left out: it holds only the program this
-/// `mirrord exec` starts, never anything that program starts in turn. On Unix, `exec_process`
-/// sets it again afterwards, bound to this process's pid.
 ///
 /// Names are matched the way the platform matches them (see [`process_env`]), so on Windows an
 /// override or unset of `PATH` also applies to an inherited `Path`.
@@ -650,7 +638,7 @@ fn compose_exec_environment(
         mirrord_progress::MIRRORD_PROGRESS_ENV,
         "off".to_owned(),
     );
-    for name in unset.iter().map(String::as_str).chain([MIRRORD_DEBUG_HOLD]) {
+    for name in unset {
         env.remove(name);
     }
     env
@@ -757,6 +745,7 @@ async fn run_process_with_mirrord<P>(
     progress: P,
     analytics: &mut AnalyticsReporter,
     _config: &LayerConfig,
+    debug_hold: ExecHold,
 ) -> CliResult<()>
 where
     P: Progress,
@@ -791,8 +780,9 @@ where
         // `mirrord exec` runs-and-waits; bind the child tree to this process so an
         // abrupt kill can't leave the layer-loaded child (and thus the agent) alive.
         true,
-        // Set by `mirrord up --debug` on this service's `mirrord exec` only.
-        std::env::var_os(MIRRORD_DEBUG_HOLD).is_some_and(|value| value == "1"),
+        // On Windows `exec` holds the program itself, from outside: the launch keeps it suspended
+        // once its layer is ready, until an IDE releases it.
+        debug_hold == ExecHold::Requested,
         Some(progress),
     )
     .and_then(|managed_process| managed_process.wait_until_exit())
@@ -1506,7 +1496,6 @@ mod tests {
     use std::collections::HashMap;
 
     use clap::Parser;
-    use mirrord_config::MIRRORD_DEBUG_HOLD;
     #[cfg(windows)]
     use mirrord_layer_lib::process::windows::environment::WindowsEnv;
     use mirrord_progress::MIRRORD_PROGRESS_ENV;
@@ -1530,28 +1519,6 @@ mod tests {
         assert_eq!(
             env.iter().collect::<Vec<_>>(),
             [(MIRRORD_PROGRESS_ENV, "off"), ("PATH", "C:\\override")]
-        );
-    }
-
-    /// The debug hold is for the program `mirrord exec` starts, so the program never sees it,
-    /// whether `mirrord up` set it or the execution's own environment carries it.
-    #[test]
-    fn exec_environment_never_passes_the_debug_hold_on() {
-        let inherited = [(MIRRORD_DEBUG_HOLD.to_owned(), "1".to_owned())];
-        #[cfg(windows)]
-        let inherited = WindowsEnv::from_ordered_entries(inherited);
-        #[cfg(not(windows))]
-        let inherited = inherited.into_iter().collect();
-
-        let env = compose_exec_environment(
-            inherited,
-            &HashMap::from([(MIRRORD_DEBUG_HOLD.to_owned(), "1".to_owned())]),
-            &[],
-        );
-        assert_eq!(
-            crate::process_env::names(&env),
-            [MIRRORD_PROGRESS_ENV],
-            "only the progress setting is left"
         );
     }
 

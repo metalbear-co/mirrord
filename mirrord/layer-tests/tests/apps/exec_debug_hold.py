@@ -17,7 +17,7 @@ subprocess.run(
     [sys.executable, __file__, "child"],
     env={
         **os.environ,
-        "MIRRORD_DEBUG_HOLD": str(os.getpid()),
+        "MIRRORD_LAYER_DEBUG_HOLD": str(os.getpid()),
         "MIRRORD_LAYER_READY": f"simple:{os.getpid()}",
     },
     check=True,

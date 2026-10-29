@@ -214,7 +214,8 @@ impl LayerSetup {
         let env_backup = std::env::vars()
             .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")
             .filter(|(k, _)| {
-                k != mirrord_config::MIRRORD_LAYER_READY && k != mirrord_config::MIRRORD_DEBUG_HOLD
+                k != mirrord_config::MIRRORD_LAYER_READY
+                    && k != mirrord_config::MIRRORD_LAYER_DEBUG_HOLD
             })
             .collect();
 
