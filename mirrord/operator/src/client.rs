@@ -54,6 +54,7 @@ use mirrord_kube::{
 };
 use mirrord_operator_websocket::{connection::OperatorConnection, upgrade};
 use mirrord_progress::Progress;
+use preview_sync::PreviewSyncConnection;
 use semver::Version;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tower::{buffer::BufferLayer, retry::RetryLayer};
@@ -104,6 +105,7 @@ mod credentials;
 pub mod database_branches;
 mod discovery;
 pub mod error;
+pub mod preview_sync;
 mod queue_split_progress;
 pub mod split_config_branches;
 
@@ -807,6 +809,29 @@ where
             .map_err(|e| OperatorApiError::PreviewSecretMountCreation(e.to_string()))?;
 
         Ok(response.secret_name)
+    }
+
+    /// Opens the code sync websocket of the preview session `name` in `namespace`, through which
+    /// the CLI pushes its local tree into the preview pod.
+    pub async fn connect_preview_sync(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> OperatorApiResult<PreviewSyncConnection> {
+        let request = Request::builder()
+            .uri(format!(
+                "/apis/operator.metalbear.co/v1alpha1/namespaces/{namespace}/previews/{name}/sync"
+            ))
+            .body(vec![])
+            .map_err(OperatorApiError::ConnectRequestBuildError)?;
+
+        upgrade::connect_ws(&self.client, request)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::WebsocketConnection,
+            })
+            .map(PreviewSyncConnection::new)
     }
 
     /// The workload `layer_config` targets and its namespace, as the `splitconfigdbbranches`
