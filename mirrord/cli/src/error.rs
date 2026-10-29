@@ -894,6 +894,28 @@ pub(crate) enum CliError {
     ))]
     PreviewSyncStartIdle,
 
+    #[error("A preview environment with `sync` needs one replica, not {0}")]
+    #[diagnostic(help(
+        "Only one pod at a time can write the code volume. Set `feature.preview.replicas` to \
+        1.{GENERAL_HELP}"
+    ))]
+    PreviewSyncReplicas(i32),
+
+    #[error("A preview environment with `sync` can't target a CronJob")]
+    #[diagnostic(help(
+        "A CronJob creates its pods on a schedule, after the CLI has pushed. Preview the CronJob \
+        with `mirrord preview up` instead.{GENERAL_HELP}"
+    ))]
+    PreviewSyncCronJobTarget,
+
+    #[error("A preview environment with `sync` can't run on a multicluster operator")]
+    #[diagnostic(help(
+        "A multicluster operator runs the preview's pods in its workload clusters, and only one \
+        pod can hold the pushed code. Preview the service with \
+        `mirrord preview up` instead.{GENERAL_HELP}"
+    ))]
+    PreviewSyncMultiCluster,
+
     #[error(
         "Failed to read the TLS client certificate file `{path}` for preview delivery: {error}"
     )]

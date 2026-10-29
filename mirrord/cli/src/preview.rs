@@ -301,11 +301,7 @@ impl PreparedPreview {
             }
 
             if sync_entries.is_empty().not() {
-                check_sync_entries(
-                    &sync_entries,
-                    &operator_api.operator().spec,
-                    layer_config.feature.preview.idle.start_idle,
-                )?;
+                check_sync_entries(&sync_entries, &operator_api.operator().spec, &layer_config)?;
             }
 
             if let Some(Target::Label(label_target)) = &layer_config.target.path {
@@ -1775,20 +1771,41 @@ fn require_spec_resources_support(spec: &MirrordOperatorSpec) -> CliResult<()> {
     reject_management_only(spec)
 }
 
-/// Refuses a session with `sync_entries` that the operator `spec` can't sync, that starts idle
-/// (`start_idle`), or that names a local path that isn't a directory, before the cluster changes.
+/// Refuses a session with `sync_entries` before the cluster changes when the operator `spec`
+/// can't sync code, when `layer_config` sets something that a sync preview doesn't support, or
+/// when a `local` isn't a directory.
 ///
 /// A session that starts idle has no pod to push into, and the pod that the first request wakes
-/// would wait for a push that nobody sends.
+/// would wait for a push that nobody sends. Only one pod at a time can write the code volume, so
+/// the session needs exactly one replica. A multicluster preview runs a pod in each cluster, and a
+/// CronJob creates its pods on a schedule, after the CLI has pushed.
 fn check_sync_entries(
     sync_entries: &[SyncEntry],
     spec: &MirrordOperatorSpec,
-    start_idle: bool,
+    layer_config: &LayerConfig,
 ) -> CliResult<()> {
     spec.require_feature(NewOperatorFeature::PreviewCodeSync)?;
 
-    if start_idle {
+    let preview = &layer_config.feature.preview;
+
+    if preview.idle.start_idle {
         return Err(CliError::PreviewSyncStartIdle);
+    }
+
+    if preview.replicas != 1 {
+        return Err(CliError::PreviewSyncReplicas(preview.replicas));
+    }
+
+    if matches!(layer_config.target.path, Some(Target::CronJob(_))) {
+        return Err(CliError::PreviewSyncCronJobTarget);
+    }
+
+    // Previews ignore `multi_cluster`, so every preview of a primary operator is multicluster.
+    if spec
+        .supported_features()
+        .contains(&NewOperatorFeature::MultiClusterPrimary)
+    {
+        return Err(CliError::PreviewSyncMultiCluster);
     }
 
     if let Some(entry) = sync_entries.iter().find(|entry| entry.local.is_dir().not()) {
@@ -2250,7 +2267,7 @@ mod tests {
 
     use mirrord_config::{
         feature::network::incoming::tls_delivery::LocalClientIdentity,
-        target::deployment::DeploymentTarget,
+        target::{cron_job::CronJobTarget, deployment::DeploymentTarget},
     };
 
     use super::*;
@@ -2388,10 +2405,7 @@ mod tests {
         ));
     }
 
-    /// An operator without `PreviewCodeSync` would have the API server prune `spec.sync` and run
-    /// the empty image, a session that starts idle would never get its push, and a `local` that
-    /// isn't a directory can't be packed, so the CLI refuses all three before it changes the
-    /// cluster.
+    /// `check_sync_entries` refuses each setting that its doc lists, before the cluster changes.
     #[test]
     fn sync_is_refused_where_it_cannot_work() {
         let local = tempfile::tempdir().unwrap();
@@ -2401,24 +2415,53 @@ mod tests {
                 remote: "/app".to_owned(),
             }]
         };
+        let existing_dir = entries(local.path().to_owned());
         let supported = operator_with(&[NewOperatorFeature::PreviewCodeSync]);
+        let config = config_with_sources(&[], None);
 
-        assert!(check_sync_entries(&entries(local.path().to_owned()), &supported, false).is_ok());
+        assert!(check_sync_entries(&existing_dir, &supported, &config).is_ok());
 
-        let error = check_sync_entries(&entries(local.path().to_owned()), &operator(false), false)
-            .unwrap_err();
+        let error = check_sync_entries(&existing_dir, &operator(false), &config).unwrap_err();
         assert!(
             matches!(&error, CliError::FeatureNotSupportedInOperatorError { feature, .. } if *feature == NewOperatorFeature::PreviewCodeSync.to_string()),
             "{error}"
         );
 
+        let mut start_idle = config_with_sources(&[], None);
+        start_idle.feature.preview.idle.start_idle = true;
         assert!(matches!(
-            check_sync_entries(&entries(local.path().to_owned()), &supported, true),
+            check_sync_entries(&existing_dir, &supported, &start_idle),
             Err(CliError::PreviewSyncStartIdle)
         ));
 
+        let mut replicas = config_with_sources(&[], None);
+        replicas.feature.preview.replicas = 2;
         assert!(matches!(
-            check_sync_entries(&entries(local.path().join("missing")), &supported, false),
+            check_sync_entries(&existing_dir, &supported, &replicas),
+            Err(CliError::PreviewSyncReplicas(2))
+        ));
+
+        let mut cron_job = config_with_sources(&[], None);
+        cron_job.target.path = Some(Target::CronJob(CronJobTarget {
+            cron_job: "report".to_owned(),
+            container: None,
+        }));
+        assert!(matches!(
+            check_sync_entries(&existing_dir, &supported, &cron_job),
+            Err(CliError::PreviewSyncCronJobTarget)
+        ));
+
+        let primary = operator_with(&[
+            NewOperatorFeature::PreviewCodeSync,
+            NewOperatorFeature::MultiClusterPrimary,
+        ]);
+        assert!(matches!(
+            check_sync_entries(&existing_dir, &primary, &config),
+            Err(CliError::PreviewSyncMultiCluster)
+        ));
+
+        assert!(matches!(
+            check_sync_entries(&entries(local.path().join("missing")), &supported, &config),
             Err(CliError::PreviewSyncLocalNotADirectory(_))
         ));
     }
