@@ -145,6 +145,15 @@ pub enum UpCliError {
         feature: NewOperatorFeature,
     },
 
+    /// Services that share a DB branch ask for it with different copy modes. The branch is
+    /// created once, so all but one would fail when they attach to it.
+    #[error("DB branch `{branch}` is requested with different copy modes: {requests}")]
+    #[diagnostic(help(
+        "Services started under one key share the branch, so give them the same copy mode (e.g. \
+         the same `db_branching`), or start them under different keys."
+    ))]
+    BranchCopyModeConflict { branch: String, requests: String },
+
     /// The copy mode of a mode's `db_branching` line is missing from an entry's
     /// `copy.allowedModes`. The message comes from the operator and names the entry.
     #[error("{service}: {message}")]
@@ -373,6 +382,7 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::ModeDbBranchesNoOperator { .. }
             | UpCliError::ModeDbBranchesNoDefinitions { .. }
             | UpCliError::ModeDbBranchesFeatureDisabled { .. }
+            | UpCliError::BranchCopyModeConflict { .. }
             | UpCliError::ModeCopyModeNotAllowed { .. } => Self::DbBranching,
             UpCliError::ModeQueuesNoOperator { .. } | UpCliError::ModeQueuesUnsupported { .. } => {
                 Self::ConfigValidation

@@ -17,7 +17,10 @@ use futures::future::join_all;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
     LayerConfig,
-    feature::{database_branches::DatabaseBranchesConfig, split_queues::QueueKind},
+    feature::{
+        database_branches::{BranchCopyMode, DatabaseBranchesConfig},
+        split_queues::QueueKind,
+    },
 };
 use mirrord_operator::{
     client::{
@@ -254,6 +257,8 @@ pub(super) async fn check_db_branches(
     // branch is named for its namespace and lives in its cluster, so each pair is one branch. The
     // cluster is the API server URL, since two kube contexts can name one cluster.
     let mut entry_namespaces: BTreeMap<String, BTreeMap<_, Vec<Arc<str>>>> = BTreeMap::new();
+    // Each branch (cluster, namespace, branch id) and the copy mode every service asks it for.
+    let mut branch_modes: BTreeMap<_, Vec<(Arc<str>, BranchCopyMode)>> = BTreeMap::new();
     for ((service, _, key), lookup) in requesting.into_iter().zip(lookups) {
         let (response, resolved) = match lookup {
             Ok(lookup) => lookup,
@@ -347,6 +352,17 @@ pub(super) async fn check_db_branches(
             .as_deref()
             .unwrap_or(api.client().default_namespace())
             .to_owned();
+        for entry in &resolved.entries {
+            if let (Some(branch), Some(mode)) = (
+                entry.base().and_then(|base| base.id.clone()),
+                entry.copy_mode(),
+            ) {
+                branch_modes
+                    .entry((api.cluster_url().to_owned(), namespace.clone(), branch))
+                    .or_default()
+                    .push((service.service_name.clone(), mode));
+            }
+        }
         for entry in &response.entries {
             entry_namespaces
                 .entry(entry.id.clone())
@@ -354,6 +370,24 @@ pub(super) async fn check_db_branches(
                 .entry((api.cluster_url().to_owned(), namespace.clone()))
                 .or_default()
                 .push(service.service_name.clone());
+        }
+    }
+
+    // The first service to start creates the branch with its mode, and the others fail when they
+    // attach to it, after some have already started. Every request is known here, so the run
+    // stops before any of them.
+    for ((_, _, branch), requests) in branch_modes {
+        let mut modes = requests.iter().map(|(_, mode)| mode);
+        let first = modes.next();
+        if modes.any(|mode| Some(mode) != first) {
+            return Err(UpCliError::BranchCopyModeConflict {
+                branch,
+                requests: requests
+                    .iter()
+                    .map(|(service, mode)| format!("`{service}` {}", <&str>::from(mode)))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            });
         }
     }
 

@@ -776,8 +776,9 @@ impl DatabaseBranchesConfig {
 
 /// Engine-agnostic seeding mode of a branch: what a split-config request asks for, and what usage
 /// analytics count. Engines without copy modes (generic, local Redis) have none.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize, IntoStaticStr)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum BranchCopyMode {
     Empty,
     Schema,
