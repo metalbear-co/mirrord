@@ -18,9 +18,9 @@ use std::{
 };
 
 pub use config::{
-    BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, DbBranchesOrigin,
-    DbBranching, IncompatibleTarget, ModeConfig, PreviewImageError, PreviewImageSource,
-    PreviewImages, QueueSplitMode, SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError,
+    BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, DbBranching,
+    IncompatibleTarget, ModeConfig, PreviewImageError, PreviewImageSource, PreviewImages,
+    QueueSplitMode, RequestOrigin, SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError,
     ServiceMode, SubprocessCfg, TargetValidationError, UnknownMode, UpConfig, WindowsSupportError,
     preview_image_env,
 };
@@ -939,7 +939,7 @@ pub async fn launch(
                 mode: _,
                 incoming: _,
                 db_branches_origin: _,
-                default_split_queues: _,
+                queues_origin: _,
             } = config;
             let config::RunConfig {
                 r#type,

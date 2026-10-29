@@ -821,9 +821,9 @@ impl ServiceConfig {
             None => None,
         };
         let mut db_branches_origin = match (&request, mode.db_branching) {
-            (None, _) => DbBranchesOrigin::Config,
-            (Some(_), None) => DbBranchesOrigin::Default,
-            (Some(_), Some(_)) => DbBranchesOrigin::ModeLine,
+            (None, _) => RequestOrigin::Config,
+            (Some(_), None) => RequestOrigin::Default,
+            (Some(_), Some(_)) => RequestOrigin::ModeLine,
         };
         if let Some(request) = request {
             cfg.feature.db_branches = DatabaseBranchesConfig::FromSplitConfig(request);
@@ -842,21 +842,26 @@ impl ServiceConfig {
             // A patch that sets `db_branches` or `split_queues` decides them itself, `[]`
             // included, so whatever it holds afterwards was asked for by the user.
             if patch.pointer("/feature/db_branches").is_some() {
-                db_branches_origin = DbBranchesOrigin::Config;
+                db_branches_origin = RequestOrigin::Config;
             }
             cfg = apply_config_patch(cfg, patch, &key)?;
         }
 
-        let default_split_queues =
-            matches!(mode.incoming(), ServiceMode::Split | ServiceMode::Mirror)
-                && patch_sets_split_queues.not()
-                && matches!(cfg.target.path, Some(Target::Label(_))).not()
-                && (preview.not()
-                    || matches!(
-                        cfg.target.path,
-                        Some(Target::Deployment(_) | Target::Rollout(_) | Target::StatefulSet(_))
-                    ));
-        if default_split_queues {
+        // `incoming: replace` splits no queues.
+        let splits_queues = matches!(mode.incoming(), ServiceMode::Split | ServiceMode::Mirror)
+            && patch_sets_split_queues.not()
+            && matches!(cfg.target.path, Some(Target::Label(_))).not()
+            && (preview.not()
+                || matches!(
+                    cfg.target.path,
+                    Some(Target::Deployment(_) | Target::Rollout(_) | Target::StatefulSet(_))
+                ));
+        let queues_origin = match mode.queues {
+            _ if splits_queues.not() => RequestOrigin::Config,
+            None => RequestOrigin::Default,
+            Some(_) => RequestOrigin::ModeLine,
+        };
+        if splits_queues {
             let queue_mode = mode.queues.map_or(QueueMode::Steal, Into::into);
             let splits = SplitQueuesConfig::all_wildcard_with_mode(&key, queue_mode);
             // A Kafka branch serves every Kafka queue, so it does not need generated Kafka splits.
@@ -880,7 +885,7 @@ impl ServiceConfig {
             mode: self.default_mode,
             incoming: mode.incoming(),
             db_branches_origin,
-            default_split_queues,
+            queues_origin,
         })
     }
 
@@ -1080,24 +1085,25 @@ pub struct SubprocessCfg {
     /// whose name doesn't say it.
     pub incoming: ServiceMode,
     /// Where `config.feature.db_branches` came from.
-    pub db_branches_origin: DbBranchesOrigin,
-    /// `config.feature.split_queues` are the `"*"` splits `mirrord up` adds for this service's
-    /// mode, not ones the user set. A preview session asks its operator to drop the ones it
-    /// can't serve rather than failing.
-    pub default_split_queues: bool,
+    pub db_branches_origin: RequestOrigin,
+    /// Where `config.feature.split_queues` came from. Unless it's [`RequestOrigin::Config`], they
+    /// are the `"*"` splits `mirrord up` adds, which a preview session asks its operator to drop
+    /// where it can't serve them rather than failing.
+    pub queues_origin: RequestOrigin,
 }
 
-/// Where a service's `feature.db_branches` came from, which decides how `mirrord up` handles a
-/// workload the operator can't branch for.
+/// Where a service's DB branches or queue splits came from, which decides what `mirrord up` does
+/// when the operator can't serve them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DbBranchesOrigin {
-    /// The service's own config or `config_patch`, or there's no request: handled as in a plain
-    /// `mirrord.json`.
+pub enum RequestOrigin {
+    /// The service's own config or `config_patch`, or nothing is requested: handled as in a
+    /// plain `mirrord.json`.
     Config,
-    /// The `"*"` a mode without a `db_branching` line adds unasked: dropped when the operator
-    /// can't serve it or there's nothing to branch.
+    /// What a mode adds without the matching line (`db_branching`, `queues`): the run goes on
+    /// without it when the operator can't serve it.
     Default,
-    /// The mode's `db_branching` line: fails when there's nothing to branch.
+    /// The mode's own `db_branching` or `queues` line: the run fails when the operator can't
+    /// serve it.
     ModeLine,
 }
 
@@ -2612,8 +2618,8 @@ mod tests {
         .remove(0);
 
         let origin = match branches {
-            true => DbBranchesOrigin::Default,
-            false => DbBranchesOrigin::Config,
+            true => RequestOrigin::Default,
+            false => RequestOrigin::Config,
         };
         assert_eq!(service.db_branches_origin, origin);
         assert_eq!(

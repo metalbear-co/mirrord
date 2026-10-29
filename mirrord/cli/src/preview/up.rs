@@ -30,7 +30,7 @@ use mirrord_operator::{
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_up::{
-    DbBranchesOrigin, PreviewImageSource, SubprocessCfg, UpError, load_preview_up_config,
+    PreviewImageSource, RequestOrigin, SubprocessCfg, UpError, load_preview_up_config,
     preview_image_env,
 };
 
@@ -287,10 +287,11 @@ async fn prepare_service(
     let SubprocessCfg {
         mut config,
         db_branches_origin,
-        default_split_queues,
+        queues_origin,
         ..
     } = service;
-    let default_db_branches = db_branches_origin == DbBranchesOrigin::Default;
+    let default_db_branches = db_branches_origin == RequestOrigin::Default;
+    let default_split_queues = queues_origin != RequestOrigin::Config;
 
     // Set over the patched config, so they take precedence over the service's `config_patch`.
     if let Some(ttl) = args.ttl {

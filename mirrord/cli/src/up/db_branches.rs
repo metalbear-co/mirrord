@@ -1,7 +1,8 @@
 //! What `mirrord up` checks before it starts the services that request DB branching
-//! (`feature.db_branches: "*"`, the default of the modes that branch). The operator is asked what
-//! each service's request resolves to, so an operator that can't serve it, or rejects it, stops
-//! the run before any session starts, and what the services will get is printed up front.
+//! (`feature.db_branches: "*"`, the default of the modes that branch) or split queues. The
+//! operator is asked what each service's DB branching request resolves to, so an operator that
+//! can't serve it, or rejects it, stops the run before any session starts, and what the services
+//! will get is printed up front. A mode's `queues` line the operator can't serve stops it too.
 //!
 //! The sessions still resolve the request themselves: the lookup here creates nothing, and each
 //! session's resolution is what marks the branches as shared under the run's key.
@@ -14,7 +15,10 @@ use std::{
 
 use futures::future::join_all;
 use mirrord_analytics::NullReporter;
-use mirrord_config::{LayerConfig, feature::database_branches::DatabaseBranchesConfig};
+use mirrord_config::{
+    LayerConfig,
+    feature::{database_branches::DatabaseBranchesConfig, split_queues::QueueKind},
+};
 use mirrord_operator::{
     client::{
         NoClientCert, OperatorApi, error::OperatorApiError,
@@ -23,13 +27,95 @@ use mirrord_operator::{
     crd::NewOperatorFeature,
 };
 use mirrord_progress::NullProgress;
-use mirrord_up::{DbBranchesOrigin, SubprocessCfg};
+use mirrord_up::{RequestOrigin, SubprocessCfg};
+use strum::IntoEnumIterator;
 
 use super::UpCliError;
 use crate::{
     connection::{OperatorAvailability, operator_availability, report_local_feature_gate},
     error::CliError,
 };
+
+/// The operator each service would use, by the settings that pick it ([`OperatorKey`]), for the
+/// services that request DB branching or split queues. `None` when the service's cluster has no
+/// usable one.
+pub(super) type Operators = HashMap<OperatorKey, Option<OperatorApi<NoClientCert>>>;
+
+/// Looks up the operator of every service that requests DB branching or splits queues, once per
+/// [`OperatorKey`]. An operator the config requires (`operator: true`) but that can't be used
+/// stops the run with the error the session would give.
+pub(super) async fn usable_operators(services: &[SubprocessCfg]) -> Result<Operators, UpCliError> {
+    let mut operators = Operators::new();
+    for service in services.iter().filter(|service| {
+        service
+            .config
+            .feature
+            .db_branches
+            .split_config_request()
+            .is_some()
+            || service.queues_origin != RequestOrigin::Config
+    }) {
+        let key = operator_key(&service.config);
+        if operators.contains_key(&key) {
+            continue;
+        }
+        let operator =
+            usable_operator(&service.config)
+                .await
+                .map_err(|error| UpCliError::DbBranches {
+                    service: service.service_name.clone(),
+                    error: Box::new(error),
+                })?;
+        operators.insert(key, operator);
+    }
+    Ok(operators)
+}
+
+/// Stops the run when a mode's `queues` line can't be served: the service has no usable operator,
+/// or one that splits no queues at all. Without the line, the run goes on, saying so when the
+/// operator splits no queues. With no operator at all it says nothing, as a session wouldn't.
+///
+/// The queues are split from a wildcard over every broker, so an operator that splits some
+/// brokers serves it; only one that splits none can't.
+pub(super) fn check_queue_splits(
+    services: &[SubprocessCfg],
+    operators: &Operators,
+) -> Result<(), UpCliError> {
+    for service in services {
+        let Some(operator) = operators.get(&operator_key(&service.config)) else {
+            continue;
+        };
+        let splits_queues = operator.as_ref().is_some_and(|api| {
+            let supported = api.operator().spec.supported_features();
+            QueueKind::iter()
+                .filter_map(NewOperatorFeature::queue_splitting)
+                .any(|feature| supported.contains(&feature))
+        });
+        match (service.queues_origin, operator) {
+            (RequestOrigin::ModeLine, None) => {
+                return Err(UpCliError::ModeQueuesNoOperator {
+                    service: service.service_name.clone(),
+                    mode: service.mode.clone(),
+                });
+            }
+            (RequestOrigin::ModeLine, Some(_)) if splits_queues.not() => {
+                return Err(UpCliError::ModeQueuesUnsupported {
+                    service: service.service_name.clone(),
+                    mode: service.mode.clone(),
+                });
+            }
+            (RequestOrigin::Default, Some(_)) if splits_queues.not() => {
+                println!(
+                    "{}: the mirrord operator doesn't split queues, running without queue \
+                     splitting",
+                    service.service_name
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
 
 /// What a service is told when [`resolves_default_db_branches`] says no and its default DB
 /// branching is dropped.
@@ -69,8 +155,8 @@ pub(crate) fn resolves_default_db_branches(operator: &OperatorApi<NoClientCert>)
 /// that got no entries, and those with inline branches.
 pub(super) async fn check_db_branches(
     services: &mut [SubprocessCfg],
+    apis: &mut Operators,
 ) -> Result<Vec<Arc<str>>, UpCliError> {
-    let mut apis: HashMap<OperatorKey, Option<OperatorApi<NoClientCert>>> = HashMap::new();
     for service in services.iter_mut() {
         if service
             .config
@@ -82,18 +168,8 @@ pub(super) async fn check_db_branches(
             continue;
         }
         let key = operator_key(&service.config);
-        if apis.contains_key(&key).not() {
-            let api =
-                usable_operator(&service.config)
-                    .await
-                    .map_err(|error| UpCliError::DbBranches {
-                        service: service.service_name.clone(),
-                        error: Box::new(error),
-                    })?;
-            apis.insert(key.clone(), api);
-        }
         match apis.get(&key) {
-            Some(None) if service.db_branches_origin == DbBranchesOrigin::ModeLine => {
+            Some(None) if service.db_branches_origin == RequestOrigin::ModeLine => {
                 return Err(UpCliError::ModeDbBranchesNoOperator {
                     service: service.service_name.clone(),
                     mode: service.mode.clone(),
@@ -108,7 +184,7 @@ pub(super) async fn check_db_branches(
             }
             // One the user set fails below, as it would in a session.
             Some(Some(api))
-                if service.db_branches_origin == DbBranchesOrigin::Default
+                if service.db_branches_origin == RequestOrigin::Default
                     && resolves_default_db_branches(api).not() =>
             {
                 println!(
@@ -182,7 +258,7 @@ pub(super) async fn check_db_branches(
         let response = match lookup {
             Ok(response) => response,
             Err(OperatorApiError::SplitConfigCopyModeNotAllowed(message))
-                if service.db_branches_origin == DbBranchesOrigin::ModeLine =>
+                if service.db_branches_origin == RequestOrigin::ModeLine =>
             {
                 return Err(UpCliError::ModeCopyModeNotAllowed {
                     service: service.service_name.clone(),
@@ -191,7 +267,7 @@ pub(super) async fn check_db_branches(
                 });
             }
             Err(error) => {
-                if service.db_branches_origin != DbBranchesOrigin::Default
+                if service.db_branches_origin != RequestOrigin::Default
                     && let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error
                 {
                     // Lookups share a Kubernetes-only client. Only the refusal that stops the
@@ -216,7 +292,7 @@ pub(super) async fn check_db_branches(
             }
         };
 
-        if response.entries.is_empty() && service.db_branches_origin == DbBranchesOrigin::ModeLine {
+        if response.entries.is_empty() && service.db_branches_origin == RequestOrigin::ModeLine {
             return Err(UpCliError::ModeDbBranchesNoDefinitions {
                 service: service.service_name.clone(),
                 mode: service.mode.clone(),
@@ -288,7 +364,7 @@ pub(super) async fn check_db_branches(
 
 /// The settings that decide which operator a session finds and whether it has to use it, so
 /// services that agree on them share one [`usable_operator`] answer.
-type OperatorKey = (Option<String>, Option<String>, Option<bool>, Option<bool>);
+pub(super) type OperatorKey = (Option<String>, Option<String>, Option<bool>, Option<bool>);
 
 fn operator_key(config: &LayerConfig) -> OperatorKey {
     (
