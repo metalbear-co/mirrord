@@ -1169,8 +1169,22 @@ impl UpConfig {
     /// a service overrides its `skip` flag. When `selected` is empty,
     /// keeps every service except those marked `skip: true`.
     ///
-    /// Errors if no service remains to be launched.
-    pub fn select_services(&mut self, selected: &[String]) -> Result<(), SelectError> {
+    /// Errors if no service remains to be launched, or if any of `debug`, the services `--debug`
+    /// holds for a debugger, is unknown, not among those kept, or runs in a container. Each error
+    /// lists every offending name.
+    pub fn select_services(
+        &mut self,
+        selected: &[String],
+        debug: &[String],
+    ) -> Result<(), SelectError> {
+        let unknown = self.missing_services(debug);
+        if unknown.is_empty().not() {
+            return Err(SelectError::UnknownServices {
+                unknown,
+                available: self.service_names(),
+            });
+        }
+
         if selected.is_empty() {
             self.services.retain(|_, svc| svc.skip.not());
 
@@ -1178,23 +1192,59 @@ impl UpConfig {
                 return Err(SelectError::AllSkipped);
             }
         } else {
-            let unknown: Vec<String> = selected
-                .iter()
-                .filter(|name| self.services.contains_key(name.as_str()).not())
-                .cloned()
-                .collect();
+            let unknown = self.missing_services(selected);
             if unknown.is_empty().not() {
-                let mut available: Vec<String> =
-                    self.services.keys().map(|name| name.to_string()).collect();
-                available.sort();
-                return Err(SelectError::UnknownServices { unknown, available });
+                return Err(SelectError::UnknownServices {
+                    unknown,
+                    available: self.service_names(),
+                });
             }
 
             self.services
                 .retain(|name, _| selected.iter().any(|s| s.as_str() == name.as_ref()));
         }
 
+        let not_launched = self.missing_services(debug);
+        if not_launched.is_empty().not() {
+            return Err(SelectError::DebugNotSelected {
+                services: not_launched,
+            });
+        }
+
+        let in_containers: Vec<String> = debug
+            .iter()
+            .filter(|name| {
+                self.services
+                    .get(name.as_str())
+                    .is_some_and(|service| service.run.r#type == RunType::Container)
+            })
+            .cloned()
+            .collect();
+        if in_containers.is_empty().not() {
+            return Err(SelectError::DebugNotExec {
+                services: in_containers,
+            });
+        }
+
         Ok(())
+    }
+
+    /// Those of `names` that aren't among [`Self::services`], in the order given.
+    fn missing_services(&self, names: &[String]) -> Vec<String> {
+        names
+            .iter()
+            .filter(|name| self.services.contains_key(name.as_str()).not())
+            .cloned()
+            .collect()
+    }
+
+    /// Every service name in the config, sorted.
+    fn service_names(&self) -> Vec<String> {
+        self.services
+            .keys()
+            .map(|name| name.to_string())
+            .sorted()
+            .collect()
     }
 
     /// Picks the image of every service for `mirrord preview up`, and drops the services that have
@@ -1403,6 +1453,27 @@ pub enum SelectError {
     #[error("no services to launch: every service is marked `skip: true`")]
     #[diagnostic(help("Name a service explicitly to run it, or remove a `skip: true` flag."))]
     AllSkipped,
+
+    /// Services named by `--debug` are in the config, but not among those launched.
+    #[error("cannot debug service(s) that are not launched: {}", services.join(", "))]
+    #[diagnostic(help(
+        "Name them among the services to launch, or remove their `skip: true` flags."
+    ))]
+    DebugNotSelected {
+        /// The services named by `--debug` that aren't launched.
+        services: Vec<String>,
+    },
+
+    /// Services named by `--debug` run with `type: container`. Their local process is the
+    /// container runtime's client, not the app, so holding it gives a debugger nothing to debug.
+    #[error("cannot debug service(s) that run in a container: {}", services.join(", "))]
+    #[diagnostic(help(
+        "`--debug` only holds services that run with `type: exec`. Drop these from `--debug`."
+    ))]
+    DebugNotExec {
+        /// The services named by `--debug` that run with `type: container`.
+        services: Vec<String>,
+    },
 }
 
 /// The environment variable that sets the image of `service` for `mirrord preview up`:
@@ -1820,7 +1891,7 @@ mod tests {
     #[test]
     fn windows_validation_accepts_exec_without_ci() {
         let mut config = windows_validation_fixture();
-        config.select_services(&["exec".to_owned()]).unwrap();
+        config.select_services(&["exec".to_owned()], &[]).unwrap();
 
         config.validate_windows(false).unwrap();
     }
@@ -1840,7 +1911,7 @@ mod tests {
                   command: ["docker"]
             "#,
         );
-        config.select_services(&[]).unwrap();
+        config.select_services(&[], &[]).unwrap();
 
         config.validate_windows(false).unwrap();
     }
@@ -1849,7 +1920,7 @@ mod tests {
     fn windows_validation_rejects_selected_container_services() {
         let mut config = windows_validation_fixture();
         config
-            .select_services(&["exec".to_owned(), "zeta-container".to_owned()])
+            .select_services(&["exec".to_owned(), "zeta-container".to_owned()], &[])
             .unwrap();
 
         assert!(matches!(
@@ -1861,7 +1932,7 @@ mod tests {
     #[test]
     fn windows_validation_rejects_ci_for_exec_services() {
         let mut config = windows_validation_fixture();
-        config.select_services(&["exec".to_owned()]).unwrap();
+        config.select_services(&["exec".to_owned()], &[]).unwrap();
 
         assert!(matches!(
             config.validate_windows(true),
@@ -2719,21 +2790,7 @@ mod tests {
     // -- Service selection --
 
     fn selection_fixture() -> UpConfig {
-        parse(
-            r#"
-            services:
-              a:
-                run:
-                  command: ["echo", "a"]
-              b:
-                skip: true
-                run:
-                  command: ["echo", "b"]
-              c:
-                run:
-                  command: ["echo", "c"]
-            "#,
-        )
+        parse(include_str!("testdata/selection.yaml"))
     }
 
     fn service_names(config: &UpConfig) -> HashSet<String> {
@@ -2743,7 +2800,7 @@ mod tests {
     #[test]
     fn no_selection_drops_skipped_services() {
         let mut config = selection_fixture();
-        config.select_services(&[]).unwrap();
+        config.select_services(&[], &[]).unwrap();
         assert_eq!(
             service_names(&config),
             HashSet::from(["a".to_owned(), "c".to_owned()]),
@@ -2753,14 +2810,14 @@ mod tests {
     #[test]
     fn selection_keeps_only_named_services() {
         let mut config = selection_fixture();
-        config.select_services(&["a".to_owned()]).unwrap();
+        config.select_services(&["a".to_owned()], &[]).unwrap();
         assert_eq!(service_names(&config), HashSet::from(["a".to_owned()]));
     }
 
     #[test]
     fn explicit_selection_overrides_skip() {
         let mut config = selection_fixture();
-        config.select_services(&["b".to_owned()]).unwrap();
+        config.select_services(&["b".to_owned()], &[]).unwrap();
         assert_eq!(service_names(&config), HashSet::from(["b".to_owned()]));
     }
 
@@ -2768,7 +2825,7 @@ mod tests {
     fn unknown_service_errors_and_lists_available() {
         let mut config = selection_fixture();
         let err = config
-            .select_services(&["nope".to_owned(), "a".to_owned()])
+            .select_services(&["nope".to_owned(), "a".to_owned()], &[])
             .unwrap_err();
         match err {
             SelectError::UnknownServices { unknown, available } => {
@@ -2777,6 +2834,93 @@ mod tests {
             }
             other => panic!("expected UnknownServices, got {other:?}"),
         }
+    }
+
+    fn owned(names: &[&str]) -> Vec<String> {
+        names.iter().map(|&name| name.to_owned()).collect()
+    }
+
+    /// `--debug` takes services that run: ones named explicitly, or ones not skipped when none
+    /// are named.
+    #[rstest::rstest]
+    #[case::named(&["b"], &["b"])]
+    #[case::not_skipped(&[], &["a"])]
+    #[case::several_not_skipped(&[], &["c", "a"])]
+    #[case::several_named(&["a", "b"], &["b", "a"])]
+    fn debugging_launched_services_is_accepted(#[case] selected: &[&str], #[case] debug: &[&str]) {
+        let mut config = selection_fixture();
+        config
+            .select_services(&owned(selected), &owned(debug))
+            .expect("every debugged service is launched");
+    }
+
+    /// Every unknown `--debug` name is reported at once, and the known one among them is not.
+    #[test]
+    fn debugging_unknown_services_errors_and_lists_them_all() {
+        let mut config = selection_fixture();
+        match config
+            .select_services(&[], &owned(&["nope", "a", "gone"]))
+            .unwrap_err()
+        {
+            SelectError::UnknownServices { unknown, available } => {
+                assert_eq!(
+                    unknown,
+                    ["nope", "gone"],
+                    "only the unknown names, all of them"
+                );
+                assert_eq!(available, ["a", "b", "c"]);
+            }
+            other => panic!("expected UnknownServices, got {other:?}"),
+        }
+    }
+
+    /// A known service that does not run can't be held: the IDE would wait for a hold line
+    /// that never comes. Every such service is reported, and none that is launched.
+    #[rstest::rstest]
+    #[case::another_one_named(&["a"], &["c"], &["c"])]
+    #[case::skipped(&[], &["b"], &["b"])]
+    #[case::some_of_several(&["a"], &["b", "a", "c"], &["b", "c"])]
+    fn debugging_services_that_are_not_launched_errors(
+        #[case] selected: &[&str],
+        #[case] debug: &[&str],
+        #[case] expected: &[&str],
+    ) {
+        let mut config = selection_fixture();
+        match config
+            .select_services(&owned(selected), &owned(debug))
+            .unwrap_err()
+        {
+            SelectError::DebugNotSelected { services } => assert_eq!(services, expected),
+            other => panic!("expected DebugNotSelected, got {other:?}"),
+        }
+    }
+
+    /// A container service's local process is the container runtime's client, not the app, so
+    /// it can't be held. Every such service is reported at once, in the order given, and the exec
+    /// one among them is not.
+    #[test]
+    fn debugging_container_services_errors_and_lists_them_all() {
+        let mut config = parse(include_str!("testdata/debug-run-types.yaml"));
+        match config
+            .select_services(&[], &owned(&["queue", "api", "db"]))
+            .unwrap_err()
+        {
+            SelectError::DebugNotExec { services } => assert_eq!(
+                services,
+                ["queue", "db"],
+                "only the container services, all of them"
+            ),
+            other => panic!("expected DebugNotExec, got {other:?}"),
+        }
+    }
+
+    /// An exec service can be held while container services run next to it.
+    #[test]
+    fn debugging_an_exec_service_beside_containers_is_accepted() {
+        let mut config = parse(include_str!("testdata/debug-run-types.yaml"));
+        config
+            .select_services(&[], &owned(&["api"]))
+            .expect("`api` runs with `type: exec`, so it can be held");
     }
 
     #[test]
@@ -2791,7 +2935,7 @@ mod tests {
             "#,
         );
         assert!(matches!(
-            config.select_services(&[]).unwrap_err(),
+            config.select_services(&[], &[]).unwrap_err(),
             SelectError::AllSkipped
         ));
     }

@@ -27,6 +27,7 @@ mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = [
   "codec",
 ] }
 mirrord-layer-lib = { path = "../layer-lib" }
+mirrord-progress = { path = "../progress" }
 
 base64.workspace = true
 bincode.workspace = true

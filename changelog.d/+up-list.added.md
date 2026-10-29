@@ -1,0 +1,1 @@
+New `mirrord up list` prints every service in an up file as `mirrord up` would run it: its target, mode, command and folder, without touching the cluster. `--format json` prints the same for scripts and IDE extensions.

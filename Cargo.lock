@@ -5553,6 +5553,7 @@ dependencies = [
  "mirrord-layer-lib",
  "mirrord-layer-macro",
  "mirrord-layer-tests",
+ "mirrord-progress",
  "mirrord-protocol",
  "mirrord-sip",
  "mirrord-test-utils",
@@ -5630,6 +5631,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "utils-win",
+ "uuid",
  "winapi",
  "windows-strings 0.4.2",
 ]

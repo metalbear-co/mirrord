@@ -10,8 +10,18 @@
 //! [`CurrentUserSecurityAttributes`] applies that DACL to objects created through APIs that take a
 //! [`SECURITY_ATTRIBUTES`], like named pipes. [`restrict_path_to_current_user`] applies it to an
 //! existing file or directory.
+//!
+//! [`LowIntegrityLabel`] goes the other way for integrity, not identity: it lets a process at a
+//! lower integrity level than an object's creator still write to it.
 
-use std::{ffi::c_void, io, mem::size_of, os::windows::ffi::OsStrExt, path::Path, ptr::null_mut};
+use std::{
+    ffi::c_void,
+    io,
+    mem::{size_of, size_of_val},
+    os::windows::ffi::OsStrExt,
+    path::Path,
+    ptr::null_mut,
+};
 
 use winapi::{
     shared::{
@@ -25,14 +35,17 @@ use winapi::{
         minwinbase::SECURITY_ATTRIBUTES,
         processthreadsapi::{GetCurrentProcess, OpenProcessToken},
         securitybaseapi::{
-            AddAccessAllowedAceEx, GetLengthSid, GetTokenInformation, InitializeAcl,
-            InitializeSecurityDescriptor, SetSecurityDescriptorDacl,
+            AddAccessAllowedAceEx, AddMandatoryAce, GetLengthSid, GetTokenInformation,
+            InitializeAcl, InitializeSecurityDescriptor, SetSecurityDescriptorDacl,
+            SetSecurityDescriptorSacl,
         },
         winnt::{
             ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, CONTAINER_INHERIT_ACE,
             DACL_SECURITY_INFORMATION, FILE_ALL_ACCESS, GENERIC_ALL, HANDLE, OBJECT_INHERIT_ACE,
             PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_DESCRIPTOR,
-            SECURITY_DESCRIPTOR_REVISION, TOKEN_QUERY, TOKEN_USER, TokenUser,
+            SECURITY_DESCRIPTOR_REVISION, SECURITY_MANDATORY_LABEL_AUTHORITY,
+            SECURITY_MANDATORY_LOW_RID, SID, SID_IDENTIFIER_AUTHORITY, SID_REVISION,
+            SYSTEM_MANDATORY_LABEL_NO_WRITE_UP, TOKEN_QUERY, TOKEN_USER, TokenUser,
         },
     },
 };
@@ -219,5 +232,94 @@ impl Drop for TokenHandle {
     fn drop(&mut self) {
         // SAFETY: The handle was opened by `OpenProcessToken` and is closed only here.
         unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// A security descriptor that gives an object a low mandatory integrity label, so processes at a
+/// lower integrity level than its creator can still write to it.
+///
+/// An object takes its integrity label from its creator's token, and mandatory integrity control
+/// refuses write access, such as setting an event, to any process at a lower level. mirrord's
+/// named events use this label: a child created with a restricted or low-integrity token would
+/// otherwise open its launcher's event, fail to set it, and leave the launcher waiting.
+///
+/// Only the label is set. The descriptor has no DACL, so the object gets the creator's default
+/// DACL, which already grants access to the same user: a lower integrity level is what stands in
+/// the way, not a different identity.
+///
+/// Boxed, because the descriptor points into the ACL it holds. `AddMandatoryAce` copies the SID
+/// into the ACE, so the SID is kept only to build it.
+pub struct LowIntegrityLabel {
+    sid: SID,
+    /// Room for an `ACL` header and one mandatory-label ACE, `DWORD`-aligned as `InitializeAcl`
+    /// requires.
+    acl: [u32; 16],
+    descriptor: SECURITY_DESCRIPTOR,
+}
+
+impl LowIntegrityLabel {
+    /// Builds the descriptor.
+    ///
+    /// # Returns
+    ///
+    /// `None` when Windows refuses one of the steps. Callers then fall back to the default label,
+    /// which still serves every process at the creator's own level.
+    pub fn new() -> Option<Box<Self>> {
+        let mut label = Box::new(Self {
+            sid: SID {
+                Revision: SID_REVISION,
+                SubAuthorityCount: 1,
+                IdentifierAuthority: SID_IDENTIFIER_AUTHORITY {
+                    Value: SECURITY_MANDATORY_LABEL_AUTHORITY,
+                },
+                SubAuthority: [SECURITY_MANDATORY_LOW_RID],
+            },
+            acl: [0; 16],
+            // SAFETY: `SECURITY_DESCRIPTOR` is plain data; `InitializeSecurityDescriptor` fills it.
+            descriptor: unsafe { std::mem::zeroed() },
+        });
+
+        let label_ref = &mut *label;
+        let acl = label_ref.acl.as_mut_ptr() as *mut ACL;
+        let acl_size = size_of_val(&label_ref.acl) as DWORD;
+        let sid = &mut label_ref.sid as *mut SID as PSID;
+
+        // SAFETY: Every pointer points into `label`, which is boxed and outlives these calls.
+        let built = unsafe {
+            InitializeAcl(acl, acl_size, ACL_REVISION as DWORD) != 0
+                && AddMandatoryAce(
+                    acl,
+                    ACL_REVISION as DWORD,
+                    0,
+                    SYSTEM_MANDATORY_LABEL_NO_WRITE_UP,
+                    sid,
+                ) != 0
+                && InitializeSecurityDescriptor(
+                    &mut label_ref.descriptor as *mut SECURITY_DESCRIPTOR as PSECURITY_DESCRIPTOR,
+                    SECURITY_DESCRIPTOR_REVISION,
+                ) != 0
+                && SetSecurityDescriptorSacl(
+                    &mut label_ref.descriptor as *mut SECURITY_DESCRIPTOR as PSECURITY_DESCRIPTOR,
+                    TRUE,
+                    acl,
+                    FALSE,
+                ) != 0
+        };
+
+        built.then_some(label)
+    }
+
+    /// The low mandatory label's SID, `S-1-16-4096`.
+    pub fn sid(&self) -> SID {
+        self.sid
+    }
+
+    /// Security attributes that apply this label, valid for as long as `self` is.
+    pub fn attributes(&mut self) -> SECURITY_ATTRIBUTES {
+        SECURITY_ATTRIBUTES {
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as DWORD,
+            lpSecurityDescriptor: &mut self.descriptor as *mut SECURITY_DESCRIPTOR as *mut _,
+            bInheritHandle: FALSE,
+        }
     }
 }
