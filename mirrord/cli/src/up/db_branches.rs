@@ -21,7 +21,7 @@ use mirrord_config::{
 };
 use mirrord_operator::{
     client::{
-        NoClientCert, OperatorApi, error::OperatorApiError,
+        NoClientCert, OperatorApi, error::OperatorApiError, required_branching_feature,
         split_config_branches::apply_resolved_entries,
     },
     crd::NewOperatorFeature,
@@ -244,8 +244,8 @@ pub(super) async fn check_db_branches(
             // The session applies the answer to its config the same way. Applied to a copy
             // here, it rejects what the session would (e.g. an env override clashing with a
             // branch's connection variable), before any session starts.
-            apply_resolved_entries(&mut service.config.clone(), &response)?;
-            Ok::<_, OperatorApiError>(response)
+            let (resolved, _) = apply_resolved_entries(&mut service.config.clone(), &response)?;
+            Ok::<_, OperatorApiError>((response, resolved))
         }
     }))
     .await;
@@ -255,8 +255,8 @@ pub(super) async fn check_db_branches(
     // cluster is the API server URL, since two kube contexts can name one cluster.
     let mut entry_namespaces: BTreeMap<String, BTreeMap<_, Vec<Arc<str>>>> = BTreeMap::new();
     for ((service, _, key), lookup) in requesting.into_iter().zip(lookups) {
-        let response = match lookup {
-            Ok(response) => response,
+        let (response, resolved) = match lookup {
+            Ok(lookup) => lookup,
             Err(OperatorApiError::SplitConfigCopyModeNotAllowed(message))
                 if service.db_branches_origin == RequestOrigin::ModeLine =>
             {
@@ -311,6 +311,35 @@ pub(super) async fn check_db_branches(
             .get(&key)
             .and_then(Option::as_ref)
             .expect("requesting services have a usable operator");
+
+        // The session refuses an entry whose engine the operator has turned off, once the run
+        // has started; checked here, a request nobody asked for is dropped instead.
+        let supported = api.operator().spec.supported_features();
+        let disabled = resolved
+            .entries
+            .iter()
+            .filter_map(required_branching_feature)
+            .find(|feature| supported.contains(feature).not());
+        match (disabled, service.db_branches_origin) {
+            (Some(feature), RequestOrigin::ModeLine) => {
+                return Err(UpCliError::ModeDbBranchesFeatureDisabled {
+                    service: service.service_name.clone(),
+                    mode: service.mode.clone(),
+                    feature,
+                });
+            }
+            (Some(feature), RequestOrigin::Default) => {
+                println!(
+                    "{}: the mirrord operator doesn't support {feature}, running against the \
+                     source DB",
+                    service.service_name
+                );
+                service.config.feature.db_branches = DatabaseBranchesConfig::default();
+                continue;
+            }
+            _ => {}
+        }
+
         let namespace = service
             .config
             .target

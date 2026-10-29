@@ -8,7 +8,10 @@ use mirrord_analytics::{
     UpSessionDbBranch,
 };
 use mirrord_config::config::EnvKey;
-use mirrord_operator::{client::UpSession, crd::session::UpSessionInfo};
+use mirrord_operator::{
+    client::UpSession,
+    crd::{NewOperatorFeature, session::UpSessionInfo},
+};
 use mirrord_up::{
     InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, UpError, load_up_config, run_wizard,
 };
@@ -125,6 +128,22 @@ pub enum UpCliError {
          mirrord-up.yaml to run without requiring it."
     ))]
     ModeQueuesUnsupported { service: Arc<str>, mode: Arc<str> },
+
+    /// A mode's `db_branching` line asks for DB branches of an engine the service's operator has
+    /// turned off.
+    #[error(
+        "{service}: mode `{mode}` sets `db_branching`, but the mirrord operator doesn't support \
+         {feature}"
+    )]
+    #[diagnostic(help(
+        "Enable it in the mirrord operator, or set `db_branching: off` for mode `{mode}` in \
+         mirrord-up.yaml to run against the source databases."
+    ))]
+    ModeDbBranchesFeatureDisabled {
+        service: Arc<str>,
+        mode: Arc<str>,
+        feature: NewOperatorFeature,
+    },
 
     /// The copy mode of a mode's `db_branching` line is missing from an entry's
     /// `copy.allowedModes`. The message comes from the operator and names the entry.
@@ -353,6 +372,7 @@ impl From<&UpCliError> for ErrorCategory {
             UpCliError::DbBranches { .. }
             | UpCliError::ModeDbBranchesNoOperator { .. }
             | UpCliError::ModeDbBranchesNoDefinitions { .. }
+            | UpCliError::ModeDbBranchesFeatureDisabled { .. }
             | UpCliError::ModeCopyModeNotAllowed { .. } => Self::DbBranching,
             UpCliError::ModeQueuesNoOperator { .. } | UpCliError::ModeQueuesUnsupported { .. } => {
                 Self::ConfigValidation
