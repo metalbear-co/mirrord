@@ -12,7 +12,10 @@ use mirrord_intproxy::{
 use mirrord_kube::{api::kubernetes::KubeEnvironment, error::KubeApiError};
 use mirrord_mcp::McpError;
 use mirrord_operator::{
-    client::error::{HttpError, OperatorApiError, OperatorOperation},
+    client::{
+        error::{HttpError, OperatorApiError, OperatorOperation},
+        preview_sync::PreviewSyncError,
+    },
     crd::{NewOperatorFeature, preview::PreviewPodLogs},
     types::PaidFeatureGate,
 };
@@ -829,6 +832,28 @@ pub(crate) enum CliError {
     ))]
     PreviewSecretMountFailed(String),
 
+    #[error("Failed to push the local code into the preview environment: {0}")]
+    #[diagnostic(help(
+        "The operator relays the push to a sidecar in the preview pod. Check that the operator \
+        is running and healthy, and see its logs and the logs of the pod's `mirrord-sync` \
+        container for details.{GENERAL_HELP}"
+    ))]
+    PreviewSyncFailed(String),
+
+    #[error("The `sync` path `{}` is not a local directory", .0.display())]
+    #[diagnostic(help(
+        "`sync[].local` in `mirrord-up.yaml` is resolved against the directory that contains the \
+        file.{GENERAL_HELP}"
+    ))]
+    PreviewSyncLocalNotADirectory(PathBuf),
+
+    #[error("A preview environment with `sync` can't start idle")]
+    #[diagnostic(help(
+        "The preview pod waits for the CLI to push the local code, and an idle preview has no \
+        pod to push into. Remove `feature.preview.idle.start_idle`.{GENERAL_HELP}"
+    ))]
+    PreviewSyncStartIdle,
+
     #[error(
         "Failed to read the TLS client certificate file `{path}` for preview delivery: {error}"
     )]
@@ -1062,6 +1087,12 @@ impl From<crate::preview::resources::ResourcesError> for CliError {
 impl From<mirrord_up::UpError> for CliError {
     fn from(error: mirrord_up::UpError) -> Self {
         Self::PreviewUpConfig(Box::new(error))
+    }
+}
+
+impl From<PreviewSyncError> for CliError {
+    fn from(error: PreviewSyncError) -> Self {
+        Self::PreviewSyncFailed(error.to_string())
     }
 }
 

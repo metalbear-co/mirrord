@@ -1,5 +1,6 @@
 //! `mirrord preview up`: starts a preview environment for every service of a `mirrord-up.yaml`
-//! that has an image, all under one key, and returns once each one is ready, idle or failed.
+//! that has an image or `sync`, all under one key, and returns once each one is ready, idle or
+//! failed. With `--watch`, it then keeps pushing the `sync` directories (see [`super::sync`]).
 //! `mirrord preview down` deletes them again.
 //!
 //! Every service's session is created the way `mirrord preview start` creates one, from the
@@ -127,6 +128,7 @@ async fn run_preview_up(
     let analytics_data = analytics.get_mut();
     analytics_data.add("services_previewed", images.picked.len());
     analytics_data.add("services_skipped", images.skipped.len());
+    analytics_data.add("services_synced", images.synced.len());
     for (property, source) in [
         ("images_from_flag", PreviewImageSource::Flag),
         ("images_from_env", PreviewImageSource::Env),
@@ -240,9 +242,11 @@ async fn run_preview_up(
     }))
     .await;
 
+    let mut syncs = Vec::new();
     for (name, mut service_progress, result) in started {
         match result {
-            Ok(summary) => {
+            Ok((summary, preview_sync)) => {
+                syncs.extend(preview_sync.map(|preview_sync| (name.clone(), preview_sync)));
                 summary.report(&service_progress);
                 service_progress.success(Some(if summary.idle {
                     "preview environment is idle"
@@ -263,8 +267,33 @@ async fn run_preview_up(
         return Err(CliError::PreviewUpFailed(failed));
     }
 
-    progress.success(Some("preview environments are up"));
-    Ok(())
+    if args.watch.not() || syncs.is_empty() {
+        progress.success(Some("preview environments are up"));
+        return Ok(());
+    }
+
+    progress.info("watching the `sync` directories for changes, press Ctrl-C to stop");
+    let watches = join_all(syncs.into_iter().map(|(name, preview_sync)| {
+        let mut sync_progress = progress.subtask(&name).prefixed(&name);
+        async move {
+            let result = preview_sync.watch(&sync_progress).await;
+            if let Err(error) = &result {
+                sync_progress.failure(Some(&error.to_string()));
+            }
+            result
+        }
+    }));
+
+    tokio::select! {
+        results = watches => {
+            progress.failure(Some("stopped pushing changes"));
+            results.into_iter().collect::<CliResult<()>>()
+        }
+        _ = tokio::signal::ctrl_c() => {
+            progress.success(Some("stopped watching"));
+            Ok(())
+        }
+    }
 }
 
 /// A service whose preview passed its checks, with the task its progress is reported on.
@@ -287,6 +316,7 @@ async fn prepare_service(
         mut config,
         default_db_branches,
         default_split_queues,
+        sync,
         ..
     } = service;
 
@@ -441,6 +471,7 @@ async fn prepare_service(
         &sources,
         supplied_objects,
         auto_queue_splitting,
+        sync,
         progress,
         analytics,
     )

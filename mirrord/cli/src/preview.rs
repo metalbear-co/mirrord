@@ -55,8 +55,8 @@ use mirrord_operator::{
             PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvVarsConfig,
             PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs,
             PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
-            PreviewSessionPhase, PreviewSessionSpec, PreviewTlsClientAuth,
-            PreviewTlsClientAuthFromTarget, PreviewTlsDelivery,
+            PreviewSessionPhase, PreviewSessionSpec, PreviewSyncConfig, PreviewSyncEntry,
+            PreviewTlsClientAuth, PreviewTlsClientAuthFromTarget, PreviewTlsDelivery,
             view::{PreviewEnv, PreviewMessageKind},
         },
         session::{KubeResourceTarget, PodSetTarget, SessionTarget},
@@ -64,6 +64,7 @@ use mirrord_operator::{
     types::OPERATOR_OWNERSHIP_LABEL,
 };
 use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_up::SyncEntry;
 use prettytable::{Table, row};
 use tracing::Level;
 
@@ -79,6 +80,7 @@ use crate::{
 
 mod multicluster;
 pub(crate) mod resources;
+mod sync;
 mod up;
 
 /// Handle commands related to preview environments: `mirrord preview ...`
@@ -150,13 +152,14 @@ async fn preview_start(
     let (operator_api, api) =
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
 
-    let summary = PreparedPreview::prepare(
+    let (summary, _) = PreparedPreview::prepare(
         layer_config,
         operator_api,
         api,
         &sources,
         supplied_objects,
         false,
+        Vec::new(),
         &progress,
         analytics,
     )
@@ -224,6 +227,8 @@ struct PreparedPreview {
     /// The session's spec, but for what [`PreparedPreview::start`] fills in: `db_branching`,
     /// from the branches it prepares, and `share_host`, from the session it replaces.
     spec: PreviewSessionSpec,
+    /// The local directories that [`PreparedPreview::start`] pushes into the preview pod.
+    sync_entries: Vec<SyncEntry>,
 }
 
 impl PreparedPreview {
@@ -233,7 +238,8 @@ impl PreparedPreview {
     /// `supplied_objects` are the manifests read from `sources.paths`, the chart in
     /// `sources.chart` is rendered here. With `auto_queue_splitting`, `feature.split_queues` are
     /// defaults the operator drops what it can't serve of, so they aren't checked against its
-    /// features.
+    /// features. A session with `sync_entries` needs no `feature.preview.image`, because without
+    /// one it runs the target's image.
     #[allow(
         clippy::too_many_arguments,
         reason = "The prepared session owns its reporter so branch refusals during startup can be attributed."
@@ -245,6 +251,7 @@ impl PreparedPreview {
         sources: &ManifestSources,
         mut supplied_objects: Option<Vec<resources::SuppliedObject>>,
         auto_queue_splitting: bool,
+        sync_entries: Vec<SyncEntry>,
         progress: &ProgressTracker,
         mut analytics: AnalyticsReporter,
     ) -> CliResult<Self> {
@@ -275,6 +282,15 @@ impl PreparedPreview {
                     .spec
                     .require_feature(NewOperatorFeature::PreviewCronJobTarget)?;
             }
+
+            if sync_entries.is_empty().not() {
+                check_sync_entries(
+                    &sync_entries,
+                    &operator_api.operator().spec,
+                    layer_config.feature.preview.idle.start_idle,
+                )?;
+            }
+
             if let Some(Target::Label(label_target)) = &layer_config.target.path {
                 operator_api
                     .operator()
@@ -330,10 +346,14 @@ impl PreparedPreview {
             CliError::PreviewTargetRequired
         })?;
 
-        let image = layer_config.feature.preview.image.clone().ok_or_else(|| {
-            subtask.failure(None);
-            CliError::PreviewImageRequired
-        })?;
+        let image = match layer_config.feature.preview.image.clone() {
+            Some(image) => image,
+            None if sync_entries.is_empty().not() => String::new(),
+            None => {
+                subtask.failure(None);
+                return Err(CliError::PreviewImageRequired);
+            }
+        };
 
         // Reject unsupported or invalid delivery before replacing a running preview.
         let mut secret_values = BTreeMap::new();
@@ -514,7 +534,14 @@ impl PreparedPreview {
             spec_resources,
             share_host: None,
             auto_queue_splitting,
-            sync: None,
+            sync: sync_entries.is_empty().not().then(|| PreviewSyncConfig {
+                entries: sync_entries
+                    .iter()
+                    .map(|entry| PreviewSyncEntry {
+                        remote: entry.remote.clone(),
+                    })
+                    .collect(),
+            }),
         };
 
         Ok(Self {
@@ -526,12 +553,17 @@ impl PreparedPreview {
             config_target,
             secret_values,
             spec,
+            sync_entries,
         })
     }
 
     /// Creates the session, replacing the preview under the same key and target, and waits for
-    /// it to be ready.
-    async fn start(self, progress: &mut ProgressTracker) -> CliResult<PreviewSummary> {
+    /// it to be ready. Returns the sync connection of a session with `sync_entries` beside the
+    /// summary, after the first push.
+    async fn start(
+        self,
+        progress: &mut ProgressTracker,
+    ) -> CliResult<(PreviewSummary, Option<sync::PreviewSync>)> {
         let Self {
             mut layer_config,
             operator_api,
@@ -541,6 +573,7 @@ impl PreparedPreview {
             config_target,
             secret_values,
             mut spec,
+            sync_entries,
         } = self;
 
         // Label targets with branches were rejected in `prepare`, so an empty config is the only
@@ -745,8 +778,37 @@ impl PreparedPreview {
         let share_host;
         let idle;
 
+        // The pod of a session with `sync_entries` becomes ready only once its sidecar holds a
+        // push, so the push runs while the loop below waits for `Ready`.
+        let mut preview_sync = None;
+        let mut sync_pending = sync_entries.is_empty().not();
+        let sync_progress = sync_pending.then(|| progress.subtask("pushing the local code"));
+        let mut sync_push = Box::pin(async {
+            match sync_progress {
+                Some(sync_progress) => sync::PreviewSync::start(
+                    &operator_api,
+                    &session_namespace,
+                    &session_name,
+                    sync_entries,
+                    sync_progress,
+                )
+                .await
+                .map(Some),
+                None => Ok(None),
+            }
+        });
+
         loop {
             tokio::select! {
+                result = &mut sync_push, if sync_pending => {
+                    sync_pending = false;
+                    match result {
+                        Ok(pushed) => preview_sync = pushed,
+                        Err(error) => {
+                            return Err(abandon_session(&api, &session_name, &mut subtask, error).await);
+                        }
+                    }
+                }
                 _ = &mut timeout => {
                     // Read the pods before deleting the session: the delete tears down the
                     // deployment, and their output goes with it.
@@ -757,16 +819,8 @@ impl PreparedPreview {
                     )
                     .await;
 
-                    if let Err(err) = delete::delete_and_finalize(api, &session.name_any(), &DeleteParams::default()).await {
-                        subtask.warning(&format!(
-                            "failed to delete timed out session '{}': {err}, \
-                             you may need to delete it manually or with `mirrord preview stop`",
-                            session.name_any(),
-                        ));
-                    }
-
-                    subtask.failure(None);
-                    return Err(CliError::PreviewTimeout { logs });
+                    let error = CliError::PreviewTimeout { logs };
+                    return Err(abandon_session(&api, &session_name, &mut subtask, error).await);
                 }
                 _ = long_initialization_timer.tick() => {
                     subtask.warning(&format!(
@@ -847,6 +901,20 @@ impl PreparedPreview {
             }
         }
 
+        // The session can turn `Ready` before the CLI reads the sidecar's answer to the push, so
+        // the loop can end first.
+        if sync_pending {
+            match sync_push.await {
+                Ok(pushed) => preview_sync = pushed,
+                Err(error) => {
+                    return Err(abandon_session(&api, &session_name, &mut subtask, error).await);
+                }
+            }
+        } else {
+            // The push borrows the session's name, which the summary takes below.
+            drop(sync_push);
+        }
+
         // Display summary of the created preview environment.
 
         let namespace = layer_config
@@ -886,14 +954,37 @@ impl PreparedPreview {
             }
         }
 
-        Ok(PreviewSummary {
+        let summary = PreviewSummary {
             key: layer_config.key.as_str().to_owned(),
             namespace: namespace.to_owned(),
             session_name,
             share_host,
             idle,
-        })
+        };
+
+        Ok((summary, preview_sync))
     }
+}
+
+/// Deletes the session `session_name`, whose start failed with `error`, and fails `subtask`.
+/// Returns `error`, so that the caller can return it.
+async fn abandon_session(
+    api: &Api<PreviewSession>,
+    session_name: &str,
+    subtask: &mut ProgressTracker,
+    error: CliError,
+) -> CliError {
+    if let Err(err) =
+        delete::delete_and_finalize(api.clone(), session_name, &DeleteParams::default()).await
+    {
+        subtask.warning(&format!(
+            "failed to delete session '{session_name}': {err}, you may need to delete it manually \
+             or with `mirrord preview stop`",
+        ));
+    }
+
+    subtask.failure(None);
+    error
 }
 
 /// Handle `mirrord preview status` command.
@@ -1640,6 +1731,29 @@ fn require_spec_resources_support(spec: &MirrordOperatorSpec) -> CliResult<()> {
     reject_management_only(spec)
 }
 
+/// Refuses a session with `sync_entries` that the operator `spec` can't sync, that starts idle
+/// (`start_idle`), or that names a local path that isn't a directory, before the cluster changes.
+///
+/// A session that starts idle has no pod to push into, and the pod that the first request wakes
+/// would wait for a push that nobody sends.
+fn check_sync_entries(
+    sync_entries: &[SyncEntry],
+    spec: &MirrordOperatorSpec,
+    start_idle: bool,
+) -> CliResult<()> {
+    spec.require_feature(NewOperatorFeature::PreviewCodeSync)?;
+
+    if start_idle {
+        return Err(CliError::PreviewSyncStartIdle);
+    }
+
+    if let Some(entry) = sync_entries.iter().find(|entry| entry.local.is_dir().not()) {
+        return Err(CliError::PreviewSyncLocalNotADirectory(entry.local.clone()));
+    }
+
+    Ok(())
+}
+
 fn reject_management_only(spec: &MirrordOperatorSpec) -> CliResult<()> {
     if spec.operator_namespace.is_some() {
         return Err(CliError::PreviewResourcesManagementOnly);
@@ -2227,6 +2341,41 @@ mod tests {
         assert!(matches!(
             require_spec_resources_support(&supported),
             Err(CliError::PreviewResourcesManagementOnly)
+        ));
+    }
+
+    /// An operator without `PreviewCodeSync` would have the API server prune `spec.sync` and run
+    /// the empty image, a session that starts idle would never get its push, and a `local` that
+    /// isn't a directory can't be packed, so the CLI refuses all three before it changes the
+    /// cluster.
+    #[test]
+    fn sync_is_refused_where_it_cannot_work() {
+        let local = tempfile::tempdir().unwrap();
+        let entries = |local: PathBuf| {
+            vec![SyncEntry {
+                local,
+                remote: "/app".to_owned(),
+            }]
+        };
+        let supported = operator_with(&[NewOperatorFeature::PreviewCodeSync]);
+
+        assert!(check_sync_entries(&entries(local.path().to_owned()), &supported, false).is_ok());
+
+        let error = check_sync_entries(&entries(local.path().to_owned()), &operator(false), false)
+            .unwrap_err();
+        assert!(
+            matches!(&error, CliError::FeatureNotSupportedInOperatorError { feature, .. } if *feature == NewOperatorFeature::PreviewCodeSync.to_string()),
+            "{error}"
+        );
+
+        assert!(matches!(
+            check_sync_entries(&entries(local.path().to_owned()), &supported, true),
+            Err(CliError::PreviewSyncStartIdle)
+        ));
+
+        assert!(matches!(
+            check_sync_entries(&entries(local.path().join("missing")), &supported, false),
+            Err(CliError::PreviewSyncLocalNotADirectory(_))
         ));
     }
 

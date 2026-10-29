@@ -383,7 +383,8 @@ fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
 /// Unlike [`load_up_config`], it doesn't check that the local paths exist. `mirrord preview up`
 /// never launches the services' local commands, so a `run.directory` that only exists on a
 /// developer's machine must not stop it (e.g. in CI). `mirrord preview down` never reads the
-/// `sync` directories, so it must work in a checkout without them.
+/// `sync` directories, so it must work in a checkout without them. `mirrord preview up` checks the
+/// `sync` directories of the services that it previews.
 pub fn load_preview_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
     let mut config = template(&std::fs::read_to_string(path)?, key)?;
     let config_directory = config_directory(path)?;

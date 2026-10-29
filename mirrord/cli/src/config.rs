@@ -1622,11 +1622,13 @@ impl SubscribeArgs {
 pub(super) enum PreviewCommand {
     /// Start a new preview environment or update an existing one.
     Start(PreviewStartArgs),
-    /// Start a preview environment for every service of a mirrord-up.yaml that has an image.
+    /// Start a preview environment for every service of a mirrord-up.yaml that has an image or
+    /// `sync`.
     ///
     /// Each service's image comes from `--image <service>=<image ref>`, then
-    /// `MIRRORD_<SERVICE>_IMAGE`. Services without one are skipped. All sessions run under one
-    /// key: `--key`, then `MIRRORD_KEY`, then the git branch (`GITHUB_HEAD_REF` when set), or a
+    /// `MIRRORD_<SERVICE>_IMAGE`. A service without an image runs the target's image with its
+    /// pushed `sync` directories, unless it sets `skip`. A service with neither is skipped. All
+    /// sessions run under one key: `--key`, then `MIRRORD_KEY`, then the git branch (`GITHUB_HEAD_REF` when set), or a
     /// random key on `main`, `master` or without a branch.
     Up(PreviewUpArgs),
     /// Show the status of preview environments.
@@ -1835,6 +1837,12 @@ pub(super) struct PreviewUpArgs {
     /// If a session hasn't reached `Ready` within this time, the CLI deletes it.
     #[arg(long)]
     pub timeout: Option<u64>,
+
+    /// Keep running after the previews are up, and push the `sync` directories of each service
+    /// again whenever a file that they push changes. A change to `.git` or to a file that git
+    /// ignores pushes nothing.
+    #[arg(long)]
+    pub watch: bool,
 }
 
 /// Arguments for `mirrord preview diff` command.

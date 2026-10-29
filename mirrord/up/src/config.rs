@@ -1230,11 +1230,12 @@ impl UpConfig {
     }
 
     /// Picks the image of every service for `mirrord preview up`, and drops the services that have
-    /// none: those get no preview.
+    /// none and no `sync`: those get no preview.
     ///
     /// `flags` are the `--image <service>=<ref>` values. A service's image comes from its flag,
     /// then its `MIRRORD_<SERVICE>_IMAGE` environment variable (see [`preview_image_env`]; empty
-    /// counts as unset). `skip` doesn't apply: the images pick the services.
+    /// counts as unset). `skip` doesn't apply to a service with an image, because the images pick
+    /// the services, but a service with `sync` and no image is dropped when it has `skip`.
     /// The variables are read through `context`.
     pub fn select_preview_images(
         &mut self,
@@ -1299,7 +1300,7 @@ impl UpConfig {
         }
 
         let mut images = PreviewImages::default();
-        self.services.retain(|name, _| {
+        self.services.retain(|name, service| {
             let picked = match from_flags.get(name.as_ref()) {
                 Some(image) => Some(((*image).to_owned(), PreviewImageSource::Flag)),
                 None => from_env
@@ -1312,6 +1313,10 @@ impl UpConfig {
                     images.picked.insert(name.clone(), picked);
                     true
                 }
+                None if service.sync.is_empty().not() && service.skip.not() => {
+                    images.synced.push(name.clone());
+                    true
+                }
                 None => {
                     images.skipped.push(name.clone());
                     false
@@ -1319,6 +1324,7 @@ impl UpConfig {
             }
         });
         images.skipped.sort();
+        images.synced.sort();
 
         if self.services.is_empty() {
             return Err(PreviewImageError::NoImages);
@@ -1470,6 +1476,9 @@ pub struct PreviewImages {
     pub picked: HashMap<Arc<str>, (String, PreviewImageSource)>,
     /// The services dropped for having no image, sorted by name.
     pub skipped: Vec<Arc<str>>,
+    /// The services left in the config without an image because they have `sync`, sorted by
+    /// name. Their previews run the target's image.
+    pub synced: Vec<Arc<str>>,
 }
 
 /// Error produced by [`UpConfig::select_preview_images`].
@@ -1503,9 +1512,12 @@ pub enum PreviewImageError {
         services: Vec<String>,
     },
 
-    /// No service got an image, so there is nothing to preview.
-    #[error("no service has an image to preview")]
-    #[diagnostic(help("Pass `--image <service>=<image ref>` or set `MIRRORD_<SERVICE>_IMAGE`."))]
+    /// No service got an image or has `sync` without `skip`, so there is nothing to preview.
+    #[error("no service has an image or `sync` to preview")]
+    #[diagnostic(help(
+        "Pass `--image <service>=<image ref>`, set `MIRRORD_<SERVICE>_IMAGE`, or add `sync` to a \
+         service."
+    ))]
     NoImages,
 }
 
@@ -2827,6 +2839,70 @@ mod tests {
         assert!(matches!(
             config.select_services(&[]).unwrap_err(),
             SelectError::AllSkipped
+        ));
+    }
+
+    // -- Preview image selection --
+
+    fn preview_fixture() -> UpConfig {
+        parse(
+            r#"
+            services:
+              built:
+                run:
+                  command: ["echo"]
+              synced:
+                run:
+                  command: ["echo"]
+                sync:
+                  - local: app
+                    remote: /app
+              skipped-sync:
+                skip: true
+                run:
+                  command: ["echo"]
+                sync:
+                  - local: app
+                    remote: /app
+              plain:
+                run:
+                  command: ["echo"]
+            "#,
+        )
+    }
+
+    /// `mirrord preview up` previews each service that has an image, or `sync` and no `skip`,
+    /// and leaves out the others rather than failing on them.
+    #[test]
+    fn preview_takes_the_services_with_an_image_or_sync() {
+        let mut config = preview_fixture();
+        let context = ConfigContext::default()
+            .override_env(preview_image_env("built"), "registry.example/built:v1");
+
+        let images = config.select_preview_images(&[], &context).unwrap();
+
+        assert_eq!(
+            service_names(&config),
+            HashSet::from(["built".to_owned(), "synced".to_owned()]),
+        );
+        assert_eq!(images.synced, vec![Arc::from("synced")]);
+        assert_eq!(
+            images.skipped,
+            vec![Arc::from("plain"), Arc::from("skipped-sync")]
+        );
+    }
+
+    /// A run with nothing to preview fails, and `skip` keeps a service with `sync` out.
+    #[test]
+    fn preview_without_an_image_or_sync_fails() {
+        let mut config = preview_fixture();
+        config
+            .services
+            .retain(|name, _| ["plain", "skipped-sync"].contains(&name.as_ref()));
+
+        assert!(matches!(
+            config.select_preview_images(&[], &ConfigContext::default()),
+            Err(PreviewImageError::NoImages)
         ));
     }
 
