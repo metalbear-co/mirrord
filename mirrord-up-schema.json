@@ -582,6 +582,14 @@
           "type": "boolean",
           "default": false
         },
+        "sync": {
+          "description": "Local directories that `mirrord preview up` pushes into the service's preview pod. A\nservice with `sync` needs no image, because without one its preview runs the target's\nimage. For example:\n\n```yaml\nsync:\n  - local: frontend\n    remote: /app\n```\n\n`mirrord up` ignores this.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SyncEntry"
+          },
+          "x-mirrord-plan": "team"
+        },
         "target": {
           "description": "The remote workload this service runs against.\n\n- `none`: run targetless.\n- A mapping with `path` and/or `namespace`: run against that workload.\n- Not set: `mirrord up` looks for a deployment, statefulset, rollout or pod (in that order)\n  named after the service.",
           "$ref": "#/$defs/TargetConfig",
@@ -679,6 +687,25 @@
         "stateful_set"
       ],
       "x-mirrord-plan": "team"
+    },
+    "SyncEntry": {
+      "description": "One local directory that `mirrord preview up` pushes into a preview pod.",
+      "type": "object",
+      "properties": {
+        "local": {
+          "description": "The local directory to push. A relative path is resolved against the directory that\ncontains `mirrord-up.yaml`. The push leaves out `.git` and the files that git ignores, so\n`remote` has none of them in the pod, even where the image had them.",
+          "type": "string"
+        },
+        "remote": {
+          "description": "The absolute path in the target container that holds the pushed directory. It replaces\nwhat the image has at that path.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "local",
+        "remote"
+      ]
     },
     "Target": {
       "oneOf": [
