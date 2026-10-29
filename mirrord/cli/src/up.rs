@@ -136,7 +136,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         .add("num_selected_services", args.services.len());
 
     up_config
-        .select_services(&args.services)
+        .select_services(&args.services, &args.debug)
         .map_err(UpError::from)?;
 
     analytics
@@ -192,7 +192,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         .map(|service| (service.service_name.clone(), service.mode))
         .collect::<Vec<_>>();
 
-    let result = mirrord_up::launch(services, correlation_id, ready.clone()).await;
+    let result = mirrord_up::launch(services, correlation_id, &args.debug, ready.clone()).await;
 
     analytics.get_mut().add(
         "services",

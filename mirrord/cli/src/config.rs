@@ -2106,6 +2106,16 @@ pub(super) struct UpArgs {
     #[arg(long)]
     pub context: Option<Arc<str>>,
 
+    /// Experimental: hold this service's program at its entry point until an IDE releases it, so
+    /// a debugger attaches before its first line runs.
+    ///
+    /// Repeat it to hold several services, e.g. `--debug api --debug web`. Each one must be
+    /// among the services launched, and run with `type: exec`.
+    ///
+    /// Experimental, so it's hidden from help and may still change.
+    #[arg(long, hide = true, value_name = "SERVICE")]
+    pub debug: Vec<String>,
+
     /// Subcommand. When absent, `mirrord up` runs the sessions defined in
     /// the config file. With a subcommand, the flags above are ignored.
     #[command(subcommand)]
@@ -2601,6 +2611,22 @@ mod tests {
         };
         assert!(args.services.is_empty());
         assert!(matches!(args.command, Some(UpSubcommand::Init { .. })));
+    }
+
+    fn up_args(args: &[&str]) -> UpArgs {
+        let cli = Cli::try_parse_from(args).expect("the `up` arguments parse");
+        let Commands::Up(args) = cli.commands else {
+            panic!("expected `up` command");
+        };
+        *args
+    }
+
+    #[test]
+    fn up_debug_names_a_launched_service() {
+        let args = up_args(&["mirrord", "up", "api", "--debug", "api"]);
+        assert_eq!(args.services, ["api"]);
+        assert_eq!(args.debug, ["api"]);
+        assert!(args.command.is_none());
     }
 
     #[rstest]
