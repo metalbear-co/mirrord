@@ -108,7 +108,7 @@ pub(super) async fn check_db_branches(
             }
             // One the user set fails below, as it would in a session.
             Some(Some(api))
-                if service.db_branches_origin == DbBranchesOrigin::BuiltinMode
+                if service.db_branches_origin == DbBranchesOrigin::Default
                     && resolves_default_db_branches(api).not() =>
             {
                 println!(
@@ -191,7 +191,7 @@ pub(super) async fn check_db_branches(
                 });
             }
             Err(error) => {
-                if service.db_branches_origin != DbBranchesOrigin::BuiltinMode
+                if service.db_branches_origin != DbBranchesOrigin::Default
                     && let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error
                 {
                     // Lookups share a Kubernetes-only client. Only the refusal that stops the

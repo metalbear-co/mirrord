@@ -169,10 +169,11 @@ pub struct ModeConfig {
     /// `MirrordSplitConfig`: `empty`, `schema` or `all` to copy every one with that copy mode,
     /// `inherit` to copy each with its own, `off` for none. Applies whatever `incoming` is.
     ///
-    /// When not set, a custom mode requests no branches. The built-in `split` and `mirror` modes
-    /// request the same branches as `inherit` when the target is a single workload, but run
-    /// against the source databases instead of failing when the operator can't branch or there
-    /// is nothing to branch. A service that sets `db_branches` itself keeps them.
+    /// When not set, a mode whose `incoming` is `split` or `mirror` requests the same branches as
+    /// `inherit` when the target is a single workload, but runs against the source databases
+    /// instead of failing when the operator can't branch or there is nothing to branch. With
+    /// `incoming: replace` it requests none. A service that sets `db_branches` itself keeps
+    /// them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub db_branching: Option<DbBranching>,
 }
@@ -807,10 +808,7 @@ impl ServiceConfig {
                 copy: SplitConfigCopy { mode },
             })
         };
-        let shares_traffic = matches!(
-            ServiceMode::from_name(&self.default_mode),
-            Some(ServiceMode::Split | ServiceMode::Mirror)
-        );
+        let shares_traffic = matches!(mode.incoming(), ServiceMode::Split | ServiceMode::Mirror);
         let request = match mode.db_branching {
             _ if cfg.feature.db_branches.is_empty().not() => None,
             Some(DbBranching::Empty) => Some(copy(BranchCopyMode::Empty)),
@@ -818,13 +816,13 @@ impl ServiceConfig {
             Some(DbBranching::All) => Some(copy(BranchCopyMode::All)),
             Some(DbBranching::Inherit) => Some(SplitConfigRequest::Entries(all())),
             Some(DbBranching::Off) => None,
-            // Without the line, only the built-in modes that share traffic request branches.
+            // Without the line, modes that share traffic with the original service branch.
             None if shares_traffic && single_workload => Some(SplitConfigRequest::Entries(all())),
             None => None,
         };
         let mut db_branches_origin = match (&request, mode.db_branching) {
             (None, _) => DbBranchesOrigin::Config,
-            (Some(_), None) => DbBranchesOrigin::BuiltinMode,
+            (Some(_), None) => DbBranchesOrigin::Default,
             (Some(_), Some(_)) => DbBranchesOrigin::ModeLine,
         };
         if let Some(request) = request {
@@ -1096,9 +1094,9 @@ pub enum DbBranchesOrigin {
     /// The service's own config or `config_patch`, or there's no request: handled as in a plain
     /// `mirrord.json`.
     Config,
-    /// The `"*"` a built-in mode adds unasked: dropped when the operator can't serve it or there's
-    /// nothing to branch.
-    BuiltinMode,
+    /// The `"*"` a mode without a `db_branching` line adds unasked: dropped when the operator
+    /// can't serve it or there's nothing to branch.
+    Default,
     /// The mode's `db_branching` line: fails when there's nothing to branch.
     ModeLine,
 }
@@ -2583,12 +2581,14 @@ mod tests {
         );
     }
 
-    /// A custom mode without `db_branching` requests no DB branches, whatever its `incoming`.
+    /// A custom mode without `db_branching` requests DB branching like the built-in mode its
+    /// `incoming` names: `split` and `mirror` ask for every `MirrordSplitConfig` entry, `replace`
+    /// for none. `queues` plays no part.
     #[rstest]
-    #[case::split("{ incoming: split, queues: mirror }")]
-    #[case::mirror("{ incoming: mirror, queues: split }")]
-    #[case::replace("{ incoming: replace, queues: split }")]
-    fn custom_mode_without_db_branching_requests_none(#[case] mode: &str) {
+    #[case::split("{ incoming: split, queues: mirror }", true)]
+    #[case::mirror("{ incoming: mirror, queues: split }", true)]
+    #[case::replace("{ incoming: replace, queues: split }", false)]
+    fn custom_mode_db_branching_follows_incoming(#[case] mode: &str, #[case] branches: bool) {
         let service = parse(&format!(
             r#"
             modes:
@@ -2611,8 +2611,15 @@ mod tests {
         .unwrap()
         .remove(0);
 
-        assert_eq!(service.db_branches_origin, DbBranchesOrigin::Config);
-        assert!(service.config.feature.db_branches.is_empty());
+        let origin = match branches {
+            true => DbBranchesOrigin::Default,
+            false => DbBranchesOrigin::Config,
+        };
+        assert_eq!(service.db_branches_origin, origin);
+        assert_eq!(
+            service.config.feature.db_branches.is_empty(),
+            branches.not()
+        );
     }
 
     /// `incoming: replace` copies the target like built-in `replace`, and splits no queues even

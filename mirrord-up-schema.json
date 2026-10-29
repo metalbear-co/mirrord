@@ -288,7 +288,7 @@
       "type": "object",
       "properties": {
         "db_branching": {
-          "description": "Which DB branches the service requests, from the `dbBranches` defined on the workload's\n`MirrordSplitConfig`: `empty`, `schema` or `all` to copy every one with that copy mode,\n`inherit` to copy each with its own, `off` for none. Applies whatever `incoming` is.\n\nWhen not set, a custom mode requests no branches. The built-in `split` and `mirror` modes\nrequest the same branches as `inherit` when the target is a single workload, but run\nagainst the source databases instead of failing when the operator can't branch or there\nis nothing to branch. A service that sets `db_branches` itself keeps them.",
+          "description": "Which DB branches the service requests, from the `dbBranches` defined on the workload's\n`MirrordSplitConfig`: `empty`, `schema` or `all` to copy every one with that copy mode,\n`inherit` to copy each with its own, `off` for none. Applies whatever `incoming` is.\n\nWhen not set, a mode whose `incoming` is `split` or `mirror` requests the same branches as\n`inherit` when the target is a single workload, but runs against the source databases\ninstead of failing when the operator can't branch or there is nothing to branch. With\n`incoming: replace` it requests none. A service that sets `db_branches` itself keeps\nthem.",
           "anyOf": [
             {
               "$ref": "#/$defs/DbBranching"

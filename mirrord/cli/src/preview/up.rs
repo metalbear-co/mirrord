@@ -290,7 +290,7 @@ async fn prepare_service(
         default_split_queues,
         ..
     } = service;
-    let default_db_branches = db_branches_origin == DbBranchesOrigin::BuiltinMode;
+    let default_db_branches = db_branches_origin == DbBranchesOrigin::Default;
 
     // Set over the patched config, so they take precedence over the service's `config_patch`.
     if let Some(ttl) = args.ttl {
