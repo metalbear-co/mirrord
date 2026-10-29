@@ -46,7 +46,7 @@ use crate::{
 
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
 
-const GENERAL_HELP: &str = r#"
+pub(crate) const GENERAL_HELP: &str = r#"
 
 - If you're still stuck:
 

@@ -13,6 +13,7 @@ use std::{io::ErrorKind, ops::Not, path::Path, sync::Arc};
 
 use futures::future::{join_all, try_join_all};
 use itertools::Itertools;
+use miette::Diagnostic;
 use mirrord_analytics::{AnalyticsReporter, ExecutionKind, ReportTarget, Reporter};
 use mirrord_config::{
     config::{ConfigContext, EnvKey},
@@ -46,7 +47,7 @@ use crate::{
         PreviewUpArgs,
     },
     data::{GlobalConfig, UserData},
-    error::{CliError, CliResult},
+    error::{CliError, CliResult, GENERAL_HELP},
     up::db_branches::{DEFAULT_DB_BRANCHES_UNSUPPORTED, resolves_default_db_branches},
 };
 
@@ -208,7 +209,18 @@ async fn run_preview_up(
                 preview,
             }),
             Err(error) => {
-                service_progress.failure(Some(&error.to_string()));
+                // The run fails with `PreviewUpInvalid`, which only names the services, so each
+                // service's line also says how to fix it, without the general help that every
+                // `CliError` appends, which would repeat on every line.
+                let help = Diagnostic::help(&error).map(|help| help.to_string());
+                let message = match help
+                    .as_deref()
+                    .map(|help| help.trim_end_matches(GENERAL_HELP))
+                {
+                    Some(help) if help.is_empty().not() => format!("{error}\n{help}"),
+                    _ => error.to_string(),
+                };
+                service_progress.failure(Some(&message));
                 failed.push(name.to_string());
             }
         }
