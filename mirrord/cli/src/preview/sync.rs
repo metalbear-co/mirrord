@@ -1,17 +1,24 @@
 //! Code sync for `mirrord preview sync`: pushes the local directories of a service's `sync` into
 //! its preview pod, once after the session is created, and again on every change under `--watch`.
 
-use std::{ops::Not, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    ops::Not,
+    path::{Component, Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
+use mirrord_config::target::Target;
 use mirrord_operator::{
     client::{
         NoClientCert, OperatorApi,
         preview_sync::{PreviewSyncConnection, TreeListing, UpgradedConnection, pack_directory},
     },
+    crd::preview::{PreviewSyncConfig, PreviewSyncEntry, PreviewSyncInstall},
     sync::SidecarState,
 };
 use mirrord_progress::{Progress, ProgressTracker};
-use mirrord_up::SyncEntry;
+use mirrord_up::{InstallConfig, RunType, SubprocessCfg, SyncEntry};
 use notify::{
     EventKind, RecursiveMode, Watcher,
     event::{MetadataKind, ModifyKind},
@@ -33,6 +40,147 @@ const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
 /// that a process that keeps writing, such as a dev server's log, can't hold back every push.
 const WATCH_MAX_DELAY: Duration = Duration::from_secs(2);
 
+/// The code sync of a `mirrord preview sync` service: the local directories that the CLI pushes,
+/// and the sync settings of the session.
+pub(super) struct ServiceSync {
+    /// The local directory of each entry, by its index in `config.entries`.
+    pub(super) locals: Vec<PathBuf>,
+
+    pub(super) config: PreviewSyncConfig,
+}
+
+impl ServiceSync {
+    /// The code sync of `service`, or `None` when it has no `sync`.
+    ///
+    /// Translates each `install.on_change` glob into the container, under the `remote` of the
+    /// entry whose `local` holds it, and refuses the settings that a sync preview can't run,
+    /// before anything changes in the cluster.
+    pub(super) fn of_service(service: &SubprocessCfg) -> CliResult<Option<Self>> {
+        if service.sync.is_empty() {
+            return Ok(None);
+        }
+
+        // A Windows tree has no Unix permissions, so a push would drop the executable bit of
+        // every script, and the translated `on_change` globs would hold `\`, which the pod
+        // doesn't read as a separator.
+        if cfg!(windows) {
+            return Err(CliError::PreviewSyncOnWindows);
+        }
+
+        if service.run.r#type == RunType::Container {
+            return Err(CliError::PreviewSyncContainerRun);
+        }
+
+        if service.run.pre_command.is_empty().not() {
+            return Err(CliError::PreviewSyncPreCommand);
+        }
+
+        // A session that starts idle has no pod to push into, and the pod that the first request
+        // wakes would wait for a push that nobody sends.
+        let preview = &service.config.feature.preview;
+        if preview.idle.start_idle {
+            return Err(CliError::PreviewSyncStartIdle);
+        }
+
+        // Only one pod at a time can write the code volume.
+        if preview.replicas != 1 {
+            return Err(CliError::PreviewSyncReplicas(preview.replicas));
+        }
+
+        // A CronJob creates its pods on a schedule, after the CLI has pushed.
+        if matches!(service.config.target.path, Some(Target::CronJob(_))) {
+            return Err(CliError::PreviewSyncCronJobTarget);
+        }
+
+        let install = match &service.install {
+            None => None,
+            Some(InstallConfig {
+                command,
+                on_change,
+                persist,
+            }) => {
+                let on_change = on_change
+                    .iter()
+                    .map(|glob| {
+                        container_glob(glob, &service.sync)
+                            .ok_or_else(|| CliError::PreviewSyncOnChangeOutsideLocal(glob.clone()))
+                    })
+                    .collect::<CliResult<_>>()?;
+
+                Some(PreviewSyncInstall {
+                    command: command.clone(),
+                    on_change,
+                    persist: persist.clone(),
+                })
+            }
+        };
+
+        let config = PreviewSyncConfig {
+            entries: service
+                .sync
+                .iter()
+                .map(|entry| PreviewSyncEntry {
+                    remote: entry.remote.clone(),
+                })
+                .collect(),
+            run_command: service.run.command.clone(),
+            working_dir: service.run.remote_directory.clone(),
+            install,
+            restart_on_change: service.restart_on_change,
+        };
+        config.check()?;
+
+        Ok(Some(Self {
+            locals: service
+                .sync
+                .iter()
+                .map(|entry| entry.local.clone())
+                .collect(),
+            config,
+        }))
+    }
+}
+
+/// The absolute glob in the container that matches what the local `glob` matches, or `None`
+/// when `glob` doesn't lie under the `local` of any entry in `entries`. When the `local`s of
+/// several entries hold `glob`, the deepest one decides, so that a glob under a nested entry
+/// points into that entry's `remote`.
+fn container_glob(glob: &Path, entries: &[SyncEntry]) -> Option<String> {
+    let glob = lexically_normal(glob);
+
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let local = lexically_normal(&entry.local);
+            let under_local = glob.strip_prefix(&local).ok()?;
+
+            // A glob equal to the `local` would match the `remote` directory itself, which a
+            // push never changes.
+            (under_local.as_os_str().is_empty().not())
+                .then(|| (local.components().count(), &entry.remote, under_local))
+        })
+        .max_by_key(|(depth, _, _)| *depth)
+        .map(|(_, remote, under_local)| format!("{remote}/{}", under_local.to_string_lossy()))
+}
+
+/// `path` without its `.` components, and with each `..` component removed together with the
+/// component before it, without reading the file system.
+fn lexically_normal(path: &Path) -> PathBuf {
+    let mut normal = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normal.pop();
+            }
+            component => normal.push(component),
+        }
+    }
+
+    normal
+}
+
 /// The sync connection of a preview session whose sidecar holds a push of the local directories,
 /// which `--watch` uses to push them again.
 ///
@@ -51,16 +199,16 @@ pub(super) struct PreviewSync<S = UpgradedConnection> {
 
 impl PreviewSync {
     /// Opens the sync connection of the session `name` in `namespace`, waits until the operator
-    /// pairs it with the preview pod, and pushes `entries`. Reports on `progress`, and finishes it.
+    /// pairs it with the preview pod, and pushes `locals`, the local directory of each entry of
+    /// the session's `spec.sync`. Reports on `progress`, and finishes it.
     pub(super) async fn start(
         operator_api: &OperatorApi<NoClientCert>,
         namespace: &str,
         name: &str,
-        entries: Vec<SyncEntry>,
+        locals: Vec<PathBuf>,
         mut progress: ProgressTracker,
     ) -> CliResult<Self> {
-        let result =
-            Self::connect_and_push(operator_api, namespace, name, entries, &progress).await;
+        let result = Self::connect_and_push(operator_api, namespace, name, locals, &progress).await;
 
         match &result {
             Ok(_) => progress.success(Some("pushed the local code")),
@@ -74,7 +222,7 @@ impl PreviewSync {
         operator_api: &OperatorApi<NoClientCert>,
         namespace: &str,
         name: &str,
-        entries: Vec<SyncEntry>,
+        locals: Vec<PathBuf>,
         progress: &ProgressTracker,
     ) -> CliResult<Self> {
         let mut connection = operator_api.connect_preview_sync(namespace, name).await?;
@@ -88,8 +236,7 @@ impl PreviewSync {
             })
             .await?;
 
-        let locals = entries.into_iter().map(|entry| entry.local).collect();
-        let (preview_sync, generation) = PreviewSync::first_push(connection, locals).await?;
+        let (preview_sync, generation) = PreviewSync::first_push(connection, locals.into()).await?;
         progress.info(&format!("pushed the local code (generation {generation})"));
 
         Ok(preview_sync)

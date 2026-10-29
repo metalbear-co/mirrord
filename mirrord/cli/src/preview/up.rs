@@ -39,7 +39,7 @@ use mirrord_up::{
 
 use super::{
     PreparedPreview, StopMode, create_preview_api, load_manifests, manifest_sources,
-    preview_namespace, preview_stop, report_local_feature_gate, sync,
+    preview_namespace, preview_stop, report_local_feature_gate, sync, sync::ServiceSync,
 };
 use crate::{
     config::{
@@ -351,18 +351,17 @@ async fn prepare_service(
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<PreparedPreview> {
+    // `mirrord preview up` ignores `sync`, which only `mirrord preview sync` pushes.
+    let sync = match run {
+        PreviewRun::Up => None,
+        PreviewRun::Sync => ServiceSync::of_service(&service)?,
+    };
     let SubprocessCfg {
         mut config,
         default_db_branches,
         default_split_queues,
-        sync,
         ..
     } = service;
-    // `mirrord preview up` ignores `sync`, which only `mirrord preview sync` pushes.
-    let sync = match run {
-        PreviewRun::Up => Vec::new(),
-        PreviewRun::Sync => sync,
-    };
 
     // Set over the patched config, so they take precedence over the service's `config_patch`.
     if let Some(ttl) = args.ttl {

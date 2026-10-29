@@ -16,7 +16,10 @@ use mirrord_operator::{
         error::{HttpError, OperatorApiError, OperatorOperation},
         preview_sync::PreviewSyncError,
     },
-    crd::{NewOperatorFeature, preview::PreviewPodLogs},
+    crd::{
+        NewOperatorFeature,
+        preview::{PreviewPodLogs, PreviewSyncConfigError},
+    },
     types::PaidFeatureGate,
 };
 use mirrord_progress::messages::AGENT_OPERATOR_HINT;
@@ -915,6 +918,44 @@ pub(crate) enum CliError {
         `mirrord preview up` instead.{GENERAL_HELP}"
     ))]
     PreviewSyncMultiCluster,
+
+    #[error("A preview environment with `sync` doesn't support a Windows client")]
+    #[diagnostic(help(
+        "Run `mirrord preview sync` on Linux or macOS, or preview the service with `mirrord \
+        preview up` instead.{GENERAL_HELP}"
+    ))]
+    PreviewSyncOnWindows,
+
+    #[error("A preview environment with `sync` doesn't support `run.type: container`")]
+    #[diagnostic(help(
+        "Remove `run.type`. `run.type: container` runs `run.command` locally with `mirrord \
+        container`, but a preview with `sync` runs it in the target's container in the preview \
+        pod.{GENERAL_HELP}"
+    ))]
+    PreviewSyncContainerRun,
+
+    #[error("A preview environment with `sync` doesn't support `run.pre_command`")]
+    #[diagnostic(help(
+        "Remove `run.pre_command`. It runs on your machine before the local process starts, and \
+        a preview with `sync` starts no local process.{GENERAL_HELP}"
+    ))]
+    PreviewSyncPreCommand,
+
+    #[error(
+        "The `install.on_change` glob `{}` doesn't lie under the `local` of a `sync` entry",
+        .0.display()
+    )]
+    #[diagnostic(help(
+        "The preview pod only has the files that the CLI pushes, so a glob can only match those. \
+        The globs are resolved against the directory that contains `mirrord-up.yaml`, as \
+        `sync[].local` is, and each must start with the `local` of an entry spelled out, with \
+        wildcards only below it.{GENERAL_HELP}"
+    ))]
+    PreviewSyncOnChangeOutsideLocal(PathBuf),
+
+    #[error("The settings of the service's preview with `sync` are invalid: {0}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    PreviewSyncConfigInvalid(#[from] PreviewSyncConfigError),
 
     #[error(
         "Failed to read the TLS client certificate file `{path}` for preview delivery: {error}"

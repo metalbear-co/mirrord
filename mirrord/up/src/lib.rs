@@ -18,10 +18,11 @@ use std::{
 };
 
 pub use config::{
-    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, PreviewImageError,
-    PreviewImageSource, PreviewImages, PreviewRun, SERVICE_LAYER_PATHS, SelectError, ServiceConfig,
-    ServiceError, ServiceMode, SkipReason, SubprocessCfg, SyncEntry, TargetValidationError,
-    UpConfig, WindowsSupportError, preview_image_env,
+    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, InstallConfig,
+    PreviewImageError, PreviewImageSource, PreviewImages, PreviewRun, RunConfig, RunType,
+    SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SkipReason,
+    SubprocessCfg, SyncEntry, TargetValidationError, UpConfig, WindowsSupportError,
+    preview_image_env,
 };
 use config::{
     ResolvedTarget, SessionKind, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets,

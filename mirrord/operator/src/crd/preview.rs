@@ -34,7 +34,9 @@ use crate::crd::queue_filter::{MessageFilter, QueueType, message_filter_crd_sche
 
 pub mod sync_config;
 pub mod view;
-pub use sync_config::{PreviewSyncConfig, PreviewSyncEntry};
+pub use sync_config::{
+    PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncInstall,
+};
 use uuid::Uuid;
 
 use super::{db_branching::core::ConnectionSource, session::SessionTarget};

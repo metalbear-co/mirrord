@@ -55,8 +55,8 @@ use mirrord_operator::{
             PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvVarsConfig,
             PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs,
             PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
-            PreviewSessionPhase, PreviewSessionSpec, PreviewSyncConfig, PreviewSyncEntry,
-            PreviewTlsClientAuth, PreviewTlsClientAuthFromTarget, PreviewTlsDelivery,
+            PreviewSessionPhase, PreviewSessionSpec, PreviewTlsClientAuth,
+            PreviewTlsClientAuthFromTarget, PreviewTlsDelivery,
             view::{PreviewEnv, PreviewMessageKind},
         },
         session::{KubeResourceTarget, PodSetTarget, SessionTarget},
@@ -64,7 +64,7 @@ use mirrord_operator::{
     types::OPERATOR_OWNERSHIP_LABEL,
 };
 use mirrord_progress::{Progress, ProgressTracker};
-use mirrord_up::{PreviewRun, SyncEntry};
+use mirrord_up::PreviewRun;
 use prettytable::{Table, row};
 use tracing::Level;
 
@@ -175,7 +175,7 @@ async fn preview_start(
         &sources,
         supplied_objects,
         false,
-        Vec::new(),
+        None,
         &progress,
         analytics,
     )
@@ -244,8 +244,9 @@ struct PreparedPreview {
     /// The session's spec, but for what [`PreparedPreview::start`] fills in: `db_branching`,
     /// from the branches it prepares, and `share_host`, from the session it replaces.
     spec: PreviewSessionSpec,
-    /// The local directories that [`PreparedPreview::start`] pushes into the preview pod.
-    sync_entries: Vec<SyncEntry>,
+    /// The local directory of each entry of `spec.sync`, which [`PreparedPreview::start`] pushes
+    /// into the preview pod.
+    sync_locals: Vec<PathBuf>,
 }
 
 impl PreparedPreview {
@@ -268,7 +269,7 @@ impl PreparedPreview {
         sources: &ManifestSources,
         mut supplied_objects: Option<Vec<resources::SuppliedObject>>,
         auto_queue_splitting: bool,
-        sync_entries: Vec<SyncEntry>,
+        sync: Option<sync::ServiceSync>,
         progress: &ProgressTracker,
         mut analytics: AnalyticsReporter,
     ) -> CliResult<Self> {
@@ -300,8 +301,8 @@ impl PreparedPreview {
                     .require_feature(NewOperatorFeature::PreviewCronJobTarget)?;
             }
 
-            if sync_entries.is_empty().not() {
-                check_sync_entries(&sync_entries, &operator_api.operator().spec, &layer_config)?;
+            if let Some(sync) = &sync {
+                check_sync(sync, &operator_api.operator().spec)?;
             }
 
             if let Some(Target::Label(label_target)) = &layer_config.target.path {
@@ -368,7 +369,7 @@ impl PreparedPreview {
             .filter(|image| image.is_empty().not())
         {
             Some(image) => image,
-            None if sync_entries.is_empty().not() => String::new(),
+            None if sync.is_some() => String::new(),
             None => {
                 subtask.failure(None);
                 return Err(CliError::PreviewImageRequired);
@@ -533,6 +534,7 @@ impl PreparedPreview {
             subtask.warning(&temporal_mirror_warning(&id));
         }
 
+        let (sync_locals, sync_config) = sync.map(|sync| (sync.locals, sync.config)).unzip();
         let spec = PreviewSessionSpec {
             image,
             key: layer_config.key.as_str().to_owned(),
@@ -554,14 +556,7 @@ impl PreparedPreview {
             spec_resources,
             share_host: None,
             auto_queue_splitting,
-            sync: sync_entries.is_empty().not().then(|| PreviewSyncConfig {
-                entries: sync_entries
-                    .iter()
-                    .map(|entry| PreviewSyncEntry {
-                        remote: entry.remote.clone(),
-                    })
-                    .collect(),
-            }),
+            sync: sync_config,
         };
 
         Ok(Self {
@@ -573,12 +568,12 @@ impl PreparedPreview {
             config_target,
             secret_values,
             spec,
-            sync_entries,
+            sync_locals: sync_locals.unwrap_or_default(),
         })
     }
 
     /// Creates the session, replacing the preview under the same key and target, and waits for
-    /// it to be ready. Returns the sync connection of a session with `sync_entries` beside the
+    /// it to be ready. Returns the sync connection of a session with `sync` beside the
     /// summary, after the first push.
     async fn start(
         self,
@@ -593,7 +588,7 @@ impl PreparedPreview {
             config_target,
             secret_values,
             mut spec,
-            sync_entries,
+            sync_locals,
         } = self;
 
         // Label targets with branches were rejected in `prepare`, so an empty config is the only
@@ -804,10 +799,10 @@ impl PreparedPreview {
         let share_host;
         let idle;
 
-        // The pod of a session with `sync_entries` becomes ready only once its sidecar holds a
+        // The pod of a session with `sync` becomes ready only once its sidecar holds a
         // push, so the push runs while the loop below waits for `Ready`.
         let mut preview_sync = None;
-        let mut sync_pending = sync_entries.is_empty().not();
+        let mut sync_pending = sync_locals.is_empty().not();
         let sync_progress = sync_pending.then(|| progress.subtask("pushing the local code"));
         let mut sync_push = Box::pin(async {
             match sync_progress {
@@ -815,7 +810,7 @@ impl PreparedPreview {
                     &operator_api,
                     &session_namespace,
                     &session_name,
-                    sync_entries,
+                    sync_locals,
                     sync_progress,
                 )
                 .await
@@ -1771,34 +1766,13 @@ fn require_spec_resources_support(spec: &MirrordOperatorSpec) -> CliResult<()> {
     reject_management_only(spec)
 }
 
-/// Refuses a session with `sync_entries` before the cluster changes when the operator `spec`
-/// can't sync code, when `layer_config` sets something that a sync preview doesn't support, or
-/// when a `local` isn't a directory.
-///
-/// A session that starts idle has no pod to push into, and the pod that the first request wakes
-/// would wait for a push that nobody sends. Only one pod at a time can write the code volume, so
-/// the session needs exactly one replica. A multicluster preview runs a pod in each cluster, and a
-/// CronJob creates its pods on a schedule, after the CLI has pushed.
-fn check_sync_entries(
-    sync_entries: &[SyncEntry],
-    spec: &MirrordOperatorSpec,
-    layer_config: &LayerConfig,
-) -> CliResult<()> {
+/// Refuses a session with `sync` before the cluster changes when the operator `spec` lacks
+/// `PreviewCodeSync`, when the operator is a multicluster primary, or when a `local` isn't a
+/// directory. A multicluster preview runs a pod in each cluster, and only one pod at a time can
+/// write the code volume. [`sync::ServiceSync::of_service`] refuses the settings of the service
+/// that a sync preview can't run.
+fn check_sync(sync: &sync::ServiceSync, spec: &MirrordOperatorSpec) -> CliResult<()> {
     spec.require_feature(NewOperatorFeature::PreviewCodeSync)?;
-
-    let preview = &layer_config.feature.preview;
-
-    if preview.idle.start_idle {
-        return Err(CliError::PreviewSyncStartIdle);
-    }
-
-    if preview.replicas != 1 {
-        return Err(CliError::PreviewSyncReplicas(preview.replicas));
-    }
-
-    if matches!(layer_config.target.path, Some(Target::CronJob(_))) {
-        return Err(CliError::PreviewSyncCronJobTarget);
-    }
 
     // Previews ignore `multi_cluster`, so every preview of a primary operator is multicluster.
     if spec
@@ -1808,8 +1782,8 @@ fn check_sync_entries(
         return Err(CliError::PreviewSyncMultiCluster);
     }
 
-    if let Some(entry) = sync_entries.iter().find(|entry| entry.local.is_dir().not()) {
-        return Err(CliError::PreviewSyncLocalNotADirectory(entry.local.clone()));
+    if let Some(local) = sync.locals.iter().find(|local| local.is_dir().not()) {
+        return Err(CliError::PreviewSyncLocalNotADirectory(local.clone()));
     }
 
     Ok(())
@@ -2267,8 +2241,9 @@ mod tests {
 
     use mirrord_config::{
         feature::network::incoming::tls_delivery::LocalClientIdentity,
-        target::{cron_job::CronJobTarget, deployment::DeploymentTarget},
+        target::deployment::DeploymentTarget,
     };
+    use mirrord_operator::crd::preview::{PreviewSyncConfig, PreviewSyncEntry};
 
     use super::*;
 
@@ -2405,63 +2380,44 @@ mod tests {
         ));
     }
 
-    /// `check_sync_entries` refuses each setting that its doc lists, before the cluster changes.
+    /// `check_sync` refuses each setting that its doc lists, before the cluster changes.
     #[test]
     fn sync_is_refused_where_it_cannot_work() {
         let local = tempfile::tempdir().unwrap();
-        let entries = |local: PathBuf| {
-            vec![SyncEntry {
-                local,
-                remote: "/app".to_owned(),
-            }]
+        let sync = |local: PathBuf| sync::ServiceSync {
+            locals: vec![local],
+            config: PreviewSyncConfig {
+                entries: vec![PreviewSyncEntry {
+                    remote: "/app".to_owned(),
+                }],
+                run_command: vec!["npm".to_owned(), "start".to_owned()],
+                working_dir: None,
+                install: None,
+                restart_on_change: true,
+            },
         };
-        let existing_dir = entries(local.path().to_owned());
+        let existing_dir = sync(local.path().to_owned());
         let supported = operator_with(&[NewOperatorFeature::PreviewCodeSync]);
-        let config = config_with_sources(&[], None);
 
-        assert!(check_sync_entries(&existing_dir, &supported, &config).is_ok());
+        assert!(check_sync(&existing_dir, &supported).is_ok());
 
-        let error = check_sync_entries(&existing_dir, &operator(false), &config).unwrap_err();
+        let error = check_sync(&existing_dir, &operator(false)).unwrap_err();
         assert!(
             matches!(&error, CliError::FeatureNotSupportedInOperatorError { feature, .. } if *feature == NewOperatorFeature::PreviewCodeSync.to_string()),
             "{error}"
         );
-
-        let mut start_idle = config_with_sources(&[], None);
-        start_idle.feature.preview.idle.start_idle = true;
-        assert!(matches!(
-            check_sync_entries(&existing_dir, &supported, &start_idle),
-            Err(CliError::PreviewSyncStartIdle)
-        ));
-
-        let mut replicas = config_with_sources(&[], None);
-        replicas.feature.preview.replicas = 2;
-        assert!(matches!(
-            check_sync_entries(&existing_dir, &supported, &replicas),
-            Err(CliError::PreviewSyncReplicas(2))
-        ));
-
-        let mut cron_job = config_with_sources(&[], None);
-        cron_job.target.path = Some(Target::CronJob(CronJobTarget {
-            cron_job: "report".to_owned(),
-            container: None,
-        }));
-        assert!(matches!(
-            check_sync_entries(&existing_dir, &supported, &cron_job),
-            Err(CliError::PreviewSyncCronJobTarget)
-        ));
 
         let primary = operator_with(&[
             NewOperatorFeature::PreviewCodeSync,
             NewOperatorFeature::MultiClusterPrimary,
         ]);
         assert!(matches!(
-            check_sync_entries(&existing_dir, &primary, &config),
+            check_sync(&existing_dir, &primary),
             Err(CliError::PreviewSyncMultiCluster)
         ));
 
         assert!(matches!(
-            check_sync_entries(&entries(local.path().join("missing")), &supported, &config),
+            check_sync(&sync(local.path().join("missing")), &supported),
             Err(CliError::PreviewSyncLocalNotADirectory(_))
         ));
     }
