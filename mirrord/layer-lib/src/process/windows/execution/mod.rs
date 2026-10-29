@@ -1129,7 +1129,10 @@ mod tests {
             handleapi::DuplicateHandle,
             processthreadsapi::{GetCurrentProcess, OpenProcess},
             synchapi::{OpenEventA, SetEvent},
-            winnt::{DUPLICATE_SAME_ACCESS, EVENT_MODIFY_STATE, PROCESS_TERMINATE, SYNCHRONIZE},
+            winnt::{
+                DUPLICATE_SAME_ACCESS, EVENT_MODIFY_STATE, PROCESS_QUERY_INFORMATION,
+                PROCESS_TERMINATE, PROCESS_VM_READ, SYNCHRONIZE,
+            },
         },
     };
 
@@ -1263,7 +1266,7 @@ mod tests {
             }
 
             let child_pid = Arc::new(Mutex::new(None::<u32>));
-            let fake_layer = fake_layer(self.layer, Arc::clone(&child_pid));
+            let fake_layer = fake_layer(self.layer, &self.payload, Arc::clone(&child_pid));
 
             let mut creations = 0;
             let mut duplicate = None;
@@ -1347,7 +1350,18 @@ mod tests {
     }
 
     /// Plays the layer's part: waits for the child and its events, then does what `layer` says.
-    fn fake_layer(layer: Layer, child_pid: Arc<Mutex<Option<u32>>>) -> JoinHandle<()> {
+    ///
+    /// `payload` is the DLL the launcher injects, which tells a late layer when injection is done.
+    fn fake_layer(
+        layer: Layer,
+        payload: &str,
+        child_pid: Arc<Mutex<Option<u32>>>,
+    ) -> JoinHandle<()> {
+        // How the payload shows up in the child's module list: `...\version.dll`.
+        let loaded_payload = Path::new(payload)
+            .file_name()
+            .map(|name| format!(r"\{}", name.to_string_lossy().to_lowercase()))
+            .expect("the payload is a file");
         std::thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(20);
             let pid = loop {
@@ -1393,6 +1407,20 @@ mod tests {
             }
 
             if let Layer::LateReady = layer {
+                // The launcher's timeout starts once injection is done, and injection alone can
+                // outlast the timeout on a slow machine. So late is counted from the payload
+                // showing up in the child, which is when its load finished.
+                let process =
+                    unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid) };
+                assert!(!process.is_null(), "open the child to watch its modules");
+                while !utils_win::modules::module_inventory(process)
+                    .to_lowercase()
+                    .contains(&loaded_payload)
+                {
+                    assert!(Instant::now() < deadline, "the payload never loaded");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                unsafe { CloseHandle(process) };
                 std::thread::sleep(Duration::from_millis(u64::from(LAYER_INIT_TIMEOUT_MS) * 2));
             }
 
