@@ -3637,7 +3637,8 @@ mod tests {
                         filter: Some("active = true".to_owned())
                     }
                 )])),
-                dump_args: Some(vec!["--single-transaction".to_owned()])
+                dump_args: Some(vec!["--single-transaction".to_owned()]),
+                exclude_tables: None,
             }
         );
 
@@ -3647,17 +3648,24 @@ mod tests {
             schema,
             MysqlBranchCopyConfig::Schema {
                 tables: None,
-                dump_args: Some(vec![])
+                dump_args: Some(vec![]),
+                exclude_tables: None,
             }
         );
 
-        let all: MysqlBranchCopyConfig =
-            serde_json::from_str(r#"{ "mode": "all", "dump_args": ["--no-tablespaces"] }"#)
-                .unwrap();
+        let all: MysqlBranchCopyConfig = serde_json::from_str(
+            r#"{
+                "mode": "all",
+                "dump_args": ["--no-tablespaces"],
+                "exclude_tables": ["staging_*", "import_tmp"]
+            }"#,
+        )
+        .unwrap();
         assert_eq!(
             all,
             MysqlBranchCopyConfig::All {
-                dump_args: Some(vec!["--no-tablespaces".to_owned()])
+                dump_args: Some(vec!["--no-tablespaces".to_owned()]),
+                exclude_tables: Some(vec!["staging_*".to_owned(), "import_tmp".to_owned()]),
             }
         );
     }

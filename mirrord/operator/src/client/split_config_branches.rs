@@ -275,6 +275,7 @@ mod tests {
                         mode,
                         items: None,
                         dump_args: None,
+                        exclude_tables: None,
                     },
                     iam_auth: None,
                     connection_settings: Default::default(),
@@ -420,6 +421,7 @@ mod tests {
                     mode,
                     items: None,
                     dump_args: None,
+                    exclude_tables: None,
                 },
             }];
             branch
