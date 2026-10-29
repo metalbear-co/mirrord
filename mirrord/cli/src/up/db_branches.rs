@@ -40,9 +40,29 @@ use crate::{
 };
 
 /// The operator each service would use, by the settings that pick it ([`OperatorKey`]), for the
-/// services that request DB branching or split queues. `None` when the service's cluster has no
-/// usable one.
-pub(super) type Operators = HashMap<OperatorKey, Option<OperatorApi<NoClientCert>>>;
+/// services that request DB branching or split queues, or why its cluster has no usable one.
+pub(super) type Operators = HashMap<OperatorKey, Result<OperatorApi<NoClientCert>, NoOperator>>;
+
+/// Why a service has no operator to use, for the messages that say so. The license error itself
+/// isn't kept: `mirrord operator status` shows it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum NoOperator {
+    Disabled,
+    NotInstalled,
+    LicenseInvalid,
+}
+
+impl std::fmt::Display for NoOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Disabled => "`operator: false` is set",
+            Self::NotInstalled => "none is installed in the cluster",
+            Self::LicenseInvalid => {
+                "its license can't be used, see `mirrord operator status` for why"
+            }
+        })
+    }
+}
 
 /// Looks up the operator of every service that requests DB branching or splits queues, once per
 /// [`OperatorKey`]. An operator the config requires (`operator: true`) but that can't be used
@@ -88,26 +108,27 @@ pub(super) fn check_queue_splits(
         let Some(operator) = operators.get(&operator_key(&service.config)) else {
             continue;
         };
-        let splits_queues = operator.as_ref().is_some_and(|api| {
+        let splits_queues = operator.as_ref().is_ok_and(|api| {
             let supported = api.operator().spec.supported_features();
             QueueKind::iter()
                 .filter_map(NewOperatorFeature::queue_splitting)
                 .any(|feature| supported.contains(&feature))
         });
         match (service.queues_origin, operator) {
-            (RequestOrigin::ModeLine, None) => {
+            (RequestOrigin::ModeLine, Err(reason)) => {
                 return Err(UpCliError::ModeQueuesNoOperator {
                     service: service.service_name.clone(),
                     mode: service.mode.clone(),
+                    reason: *reason,
                 });
             }
-            (RequestOrigin::ModeLine, Some(_)) if splits_queues.not() => {
+            (RequestOrigin::ModeLine, Ok(_)) if splits_queues.not() => {
                 return Err(UpCliError::ModeQueuesUnsupported {
                     service: service.service_name.clone(),
                     mode: service.mode.clone(),
                 });
             }
-            (RequestOrigin::Default, Some(_)) if splits_queues.not() => {
+            (RequestOrigin::Default, Ok(_)) if splits_queues.not() => {
                 println!(
                     "{}: the mirrord operator doesn't split queues, running without queue \
                      splitting",
@@ -172,21 +193,22 @@ pub(super) async fn check_db_branches(
         }
         let key = operator_key(&service.config);
         match apis.get(&key) {
-            Some(None) if service.db_branches_origin == RequestOrigin::ModeLine => {
+            Some(Err(reason)) if service.db_branches_origin == RequestOrigin::ModeLine => {
                 return Err(UpCliError::ModeDbBranchesNoOperator {
                     service: service.service_name.clone(),
                     mode: service.mode.clone(),
+                    reason: *reason,
                 });
             }
-            Some(None) => {
+            Some(Err(reason)) => {
                 println!(
-                    "{}: no mirrord operator, running against the source DB",
+                    "{}: no usable mirrord operator ({reason}), running against the source DB",
                     service.service_name
                 );
                 service.config.feature.db_branches = DatabaseBranchesConfig::default();
             }
             // One the user set fails below, as it would in a session.
-            Some(Some(api))
+            Some(Ok(api))
                 if service.db_branches_origin == RequestOrigin::Default
                     && resolves_default_db_branches(api).not() =>
             {
@@ -217,7 +239,7 @@ pub(super) async fn check_db_branches(
                 .split_config_request()?
                 .clone();
             let key = operator_key(&service.config);
-            apis.get(&key)?.as_ref()?;
+            apis.get(&key)?.as_ref().ok()?;
             Some((service, request, key))
         })
         .collect::<Vec<_>>();
@@ -238,7 +260,7 @@ pub(super) async fn check_db_branches(
     let lookups = join_all(requesting.iter().map(|(service, request, key)| {
         let api = apis
             .get(key)
-            .and_then(Option::as_ref)
+            .and_then(|operator| operator.as_ref().ok())
             .expect("requesting services have a usable operator");
         async move {
             let response = api
@@ -279,7 +301,7 @@ pub(super) async fn check_db_branches(
                     // run needs credentials for reporting; no resource action follows it.
                     let api = apis
                         .remove(&key)
-                        .flatten()
+                        .and_then(Result::ok)
                         .expect("requesting services have a usable operator");
                     report_local_feature_gate(
                         api,
@@ -314,7 +336,7 @@ pub(super) async fn check_db_branches(
 
         let api = apis
             .get(&key)
-            .and_then(Option::as_ref)
+            .and_then(|operator| operator.as_ref().ok())
             .expect("requesting services have a usable operator");
 
         // The session refuses an entry whose engine the operator has turned off, once the run
@@ -438,13 +460,13 @@ fn operator_key(config: &LayerConfig) -> OperatorKey {
     )
 }
 
-/// The operator a session with `config` would use for branching, if any, decided as the session
+/// The operator a session with `config` would use, or why there is none, decided as the session
 /// decides it ([`operator_availability`]). So a service only requests branching when its session
 /// will be able to, and an operator the config requires but can't be used fails here, before any
 /// session starts, with the session's error.
 async fn usable_operator(
     config: &LayerConfig,
-) -> Result<Option<OperatorApi<NoClientCert>>, CliError> {
+) -> Result<Result<OperatorApi<NoClientCert>, NoOperator>, CliError> {
     let required = config.operator == Some(true);
     match operator_availability(
         config,
@@ -454,11 +476,11 @@ async fn usable_operator(
     )
     .await?
     {
-        OperatorAvailability::Usable(api) => Ok(Some(*api)),
+        OperatorAvailability::Usable(api) => Ok(Ok(*api)),
         OperatorAvailability::NotInstalled if required => Err(CliError::OperatorNotInstalled),
         OperatorAvailability::LicenseInvalid(error) if required => Err(error.into()),
-        OperatorAvailability::Disabled
-        | OperatorAvailability::NotInstalled
-        | OperatorAvailability::LicenseInvalid(_) => Ok(None),
+        OperatorAvailability::Disabled => Ok(Err(NoOperator::Disabled)),
+        OperatorAvailability::NotInstalled => Ok(Err(NoOperator::NotInstalled)),
+        OperatorAvailability::LicenseInvalid(_) => Ok(Err(NoOperator::LicenseInvalid)),
     }
 }

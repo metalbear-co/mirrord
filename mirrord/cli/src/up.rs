@@ -27,6 +27,8 @@ use crate::{
 
 pub(crate) mod db_branches;
 
+use db_branches::NoOperator;
+
 /// Context for sessions started by `mirrord up`.
 #[derive(Clone, Debug)]
 pub(crate) struct MirrordUp {
@@ -88,13 +90,18 @@ pub enum UpCliError {
     /// A mode's `db_branching` line asks for DB branches, but the service's cluster has no
     /// usable mirrord operator to create them.
     #[error(
-        "{service}: mode `{mode}` sets `db_branching`, but there is no usable mirrord operator"
+        "{service}: mode `{mode}` sets `db_branching`, but there is no usable mirrord operator: \
+         {reason}"
     )]
     #[diagnostic(help(
         "DB branching needs the mirrord operator. To run against the source databases, set \
          `db_branching: off` for mode `{mode}` in mirrord-up.yaml."
     ))]
-    ModeDbBranchesNoOperator { service: Arc<str>, mode: Arc<str> },
+    ModeDbBranchesNoOperator {
+        service: Arc<str>,
+        mode: Arc<str>,
+        reason: NoOperator,
+    },
 
     /// A mode's `db_branching` line asks for DB branches, but the service's workload has none
     /// defined.
@@ -111,12 +118,18 @@ pub enum UpCliError {
 
     /// A mode's `queues` line asks for queue splitting, but the service's cluster has no usable
     /// mirrord operator to split them.
-    #[error("{service}: mode `{mode}` sets `queues`, but there is no usable mirrord operator")]
+    #[error(
+        "{service}: mode `{mode}` sets `queues`, but there is no usable mirrord operator: {reason}"
+    )]
     #[diagnostic(help(
         "Queue splitting needs the mirrord operator. Remove `queues` from mode `{mode}` in \
          mirrord-up.yaml to run without requiring it."
     ))]
-    ModeQueuesNoOperator { service: Arc<str>, mode: Arc<str> },
+    ModeQueuesNoOperator {
+        service: Arc<str>,
+        mode: Arc<str>,
+        reason: NoOperator,
+    },
 
     /// A mode's `queues` line asks for queue splitting, but the service's operator splits no
     /// queues: its queue splitting is off, or its license doesn't include it.
