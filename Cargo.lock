@@ -5741,6 +5741,7 @@ name = "mirrord-operator"
 version = "3.282.0"
 dependencies = [
  "base64 0.22.1",
+ "bincode",
  "chrono",
  "dotenvy",
  "flate2",

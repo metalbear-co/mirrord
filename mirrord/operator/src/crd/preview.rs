@@ -61,7 +61,8 @@ use crate::client::connect_params::BranchDbNames;
 )]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewSessionSpec {
-    /// User's container image to run in the preview pod.
+    /// User's container image to run in the preview pod. An empty image keeps the target's
+    /// image. The CLI sends an empty image only for a session with `sync`.
     pub image: String,
 
     /// Environment key used to group related preview pods and for traffic filtering.
@@ -165,6 +166,29 @@ pub struct PreviewSessionSpec {
     /// out of the resource as older CLIs do, means every split was asked for.
     #[serde(default, skip_serializing_if = "Not::not")]
     pub auto_queue_splitting: bool,
+
+    /// Code sync settings. When set, the CLI pushes its local tree into the preview pod. `image`
+    /// may then be empty, and the preview runs the target's image with the pushed code. Sent
+    /// only to operators advertising `PreviewCodeSync`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync: Option<PreviewSyncConfig>,
+}
+
+/// Code sync settings of a preview session.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSyncConfig {
+    /// The directories that the CLI pushes into the preview pod. A push names each entry by its
+    /// index in this list.
+    pub entries: Vec<PreviewSyncEntry>,
+}
+
+/// One directory that the CLI pushes into the preview pod.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSyncEntry {
+    /// The absolute path in the target container that holds the pushed tree.
+    pub remote: String,
 }
 
 /// The user's versions of the target and the ConfigMaps and Secrets its pod uses.
@@ -729,6 +753,7 @@ mod tests {
 
     use super::*;
     use crate::crd::session::KubeResourceTarget;
+
 
     /// Legacy entries keep riding the per-broker maps older operators read; composed entries go
     /// to the `queues` list only, so no entry is sent twice and an older operator never sees half
