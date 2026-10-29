@@ -274,7 +274,6 @@ pub(super) enum Commands {
     Subscribe(Box<SubscribeArgs>),
 
     /// Run mirrord sessions for services defined in `mirrord-up.yaml`.
-    #[cfg_attr(target_os = "windows", command(hide = true))]
     Up(Box<UpArgs>),
 
     /// Fix issues related to mirrord.
