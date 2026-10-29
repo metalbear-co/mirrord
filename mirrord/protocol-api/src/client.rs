@@ -13,8 +13,8 @@ use mirrord_protocol::{
     outgoing::UnixAddr,
     tcp::{
         HTTP_BODY_JSON_FILTER_VERSION, HTTP_COMPOSITE_FILTER_VERSION,
-        HTTP_HEADER_JQ_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION, HttpBodyFilter, HttpFilter,
-        MIRROR_HTTP_FILTER_VERSION,
+        HTTP_HEADER_JQ_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION, HTTP_NOT_FILTER_VERSION,
+        HttpBodyFilter, HttpFilter, MIRROR_HTTP_FILTER_VERSION,
     },
 };
 use tokio::{
@@ -296,6 +296,9 @@ impl MirrordClient {
                 HttpFilter::Composite { filters, .. } => {
                     HTTP_COMPOSITE_FILTER_VERSION.matches(version)
                         && filters.iter().all(|f| filter_supported(f, version))
+                }
+                HttpFilter::Not(filter) => {
+                    HTTP_NOT_FILTER_VERSION.matches(version) && filter_supported(filter, version)
                 }
             }
         }
