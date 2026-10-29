@@ -18,13 +18,15 @@ use mirrord_config::{
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use strum_macros::EnumDiscriminants;
+use strum_macros::{EnumDiscriminants, EnumIter};
 
 #[cfg(feature = "client")]
 use crate::client::error::OperatorApiError;
+#[cfg(feature = "client")]
+use crate::types::{PaidFeatureGate, RequiredPlan};
 use crate::{
     crd::{copy_target::CopyTargetCrd, kafka::MirrordKafkaEphemeralTopicSpec},
-    types::LicenseInfoOwned,
+    types::{GatedFeature, LicenseInfoOwned},
 };
 
 pub mod copy_target;
@@ -187,14 +189,21 @@ pub struct MirrordOperatorSpec {
     features: Option<Vec<OperatorFeatures>>,
     /// Replaces both `features` and `copy_target_enabled`. Operator versions that use a version
     /// of this code that has both this and the old fields are expected to populate this field with
-    /// the full set of features they support, and the old fields with their limited info they
-    /// support, for old clients.
+    /// the features enabled in the operator's configuration and permitted by its license, and
+    /// the old fields with the corresponding limited info, for old clients. License-denied
+    /// features are described separately in `gated_features`, independently of configuration.
     ///
     /// Access this info only via `supported_features()`.
     /// Optional for backwards compatibility (new clients can talk to old operators that don't send
     /// this field).
     supported_features: Option<Vec<NewOperatorFeature>>,
     pub license: LicenseInfoOwned,
+    /// Known features denied by the current license, regardless of operator configuration.
+    /// Requirements consult these gates before support, so paid requests receive a license
+    /// diagnosis even when the operator's configuration also disables the feature.
+    /// Absence of this metadata retains older operators' feature/version diagnostics.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gated_features: Vec<GatedFeature>,
     pub protocol_version: Option<String>,
     /// Should be removed when we can stop supporting compatibility with versions from before the
     /// `supported_features` field was added.
@@ -211,7 +220,8 @@ pub struct MirrordOperatorSpec {
     pub operator_namespace: Option<String>,
     /// Features this operator version knows but which its Helm values switch off, so the client
     /// can tell "enable it in the chart" apart from "upgrade the operator". Only features the
-    /// license tier allows are listed, so a tier restriction is still reported as unsupported.
+    /// license tier allows are listed; tier restrictions are described in `gated_features` when
+    /// available and otherwise reported as unsupported.
     ///
     /// Older operators do not send it; the list is then empty and a missing feature is
     /// reported as unsupported by the version, as before.
@@ -239,6 +249,7 @@ impl MirrordOperatorSpec {
             default_namespace,
             supported_features: Some(supported_features),
             license,
+            gated_features: Vec::new(),
             protocol_version,
             features,
             copy_target_enabled,
@@ -259,8 +270,9 @@ impl MirrordOperatorSpec {
         &self.disabled_features
     }
 
-    /// Get a vector with the features the operator supports.
-    /// Handles objects sent from old and new operators.
+    /// Features enabled in the operator's configuration and permitted by its license.
+    /// Use `require_feature()` before requesting a feature so its license gate is honored.
+    /// Handles objects sent from old and new operators, including those that omit this field.
     // When the deprecated fields are removed, this can be changed to just return
     // `self.supported_features.unwrap_or_default()`.
     pub fn supported_features(&self) -> Vec<NewOperatorFeature> {
@@ -288,15 +300,33 @@ impl MirrordOperatorSpec {
             .unwrap_or_default()
     }
 
-    /// Fails when the operator does not advertise `feature`, naming the fix: a feature the
-    /// operator lists as disabled needs its Helm value switched on, any other needs an operator
-    /// upgrade.
+    /// Checks license gates before advertised support, so a license denial takes precedence over
+    /// operator configuration. Otherwise, a feature listed as disabled needs its Helm value
+    /// switched on, and a feature not advertised needs an operator upgrade.
     #[cfg(feature = "client")]
     pub fn require_feature(&self, feature: NewOperatorFeature) -> Result<(), OperatorApiError> {
-        if self.supported_features().contains(&feature) {
+        if let Some(gated) = self
+            .gated_features
+            .iter()
+            .find(|entry| entry.feature == feature)
+        {
+            if let (required_plan @ (RequiredPlan::Team | RequiredPlan::Enterprise), Some(key)) =
+                (gated.required_plan, feature.feature_config_key())
+            {
+                return Err(OperatorApiError::LocalFeatureNotLicensed {
+                    feature,
+                    gate: PaidFeatureGate {
+                        feature_config_key: key.to_owned(),
+                        required_plan,
+                    },
+                });
+            }
+            // Unrecognized gate metadata must not authorize an advertised feature.
+        } else if feature != NewOperatorFeature::Unknown
+            && self.supported_features().contains(&feature)
+        {
             return Ok(());
-        }
-        if self.disabled_features().contains(&feature) {
+        } else if self.disabled_features().contains(&feature) {
             return Err(OperatorApiError::FeatureDisabled { feature });
         }
         Err(OperatorApiError::UnsupportedFeature {
@@ -630,7 +660,7 @@ pub enum OperatorFeatures {
     // Add new features in NewOperatorFeature
 }
 
-/// Operator features advertised to clients in `MirrordOperator.status.supported_features`.
+/// Operator features advertised to clients in [`MirrordOperatorSpec::supported_features`].
 ///
 /// Unlike [`OperatorFeatures`], new variants are safe to add: a client that predates one
 /// deserializes it as [`Unknown`](NewOperatorFeature::Unknown) instead of failing.
@@ -641,19 +671,22 @@ pub enum OperatorFeatures {
 /// repository and has to be updated alongside it:
 ///
 /// - `LicenseType::allows` decides which tiers include the feature. Paid tiers generally get new
-///   variants automatically, but the free tier is an allowlist, so a new variant is withheld there
-///   until it is added explicitly. Leaving it withheld is the correct default for anything the
+///   variants automatically, but the free tier is an allowlist, so a new variant is denied there
+///   until it is added explicitly. Leaving it denied is the correct default for anything the
 ///   operator adds on top of open-source mirrord. [`KeylessCi`](Self::KeylessCi) is advertised by
 ///   Free and Teams licenses; Enterprise and legacy licenses require CI API keys for explicit CI
 ///   sessions.
-/// - Advertisement filtering is automatic, but *enforcement* is not. If clients request the feature
-///   through connect params, add it to `ConnectParams::requested_licensed_features`; if it has its
-///   own endpoint, guard that handler directly.
+/// - Configured capabilities are advertised only when allowed by the license. License-denied
+///   features are listed in separate gates regardless of configuration, so gate-aware CLI
+///   requirements can explain paid refusals. Server *enforcement* is not automatic: if clients
+///   request the feature through connect params, add it to
+///   `ConnectParams::requested_licensed_features`; if it has its own endpoint, guard that handler
+///   directly.
 ///
-/// Skipping the enforcement step fails open: the feature is hidden from
-/// `mirrord operator status` on tiers that do not include it, yet a client that requests it
-/// anyway is not rejected.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+/// Independent server guards are needed for older clients that ignore gates and for stale
+/// discovery or license races. Skipping the enforcement step leaves those requests unchecked
+/// even on tiers that do not include the feature.
+#[derive(Clone, Copy, Debug, Deserialize, EnumIter, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum NewOperatorFeature {
     ProxyApi,
     CopyTarget,
@@ -888,6 +921,10 @@ pub enum NewOperatorFeature {
 
     ServerlessSessionsManager,
 
+    /// Reporting is available on Free so locally rejected demand can be observed without granting
+    /// permission to use the rejected feature.
+    LicenseGateReporting,
+
     /// This operator runs a session's Kafka queues against an isolated per-key broker
     /// (`feature.kafka_branch`), sent in the `kafka_branch` connect param and the preview
     /// session's `kafkaBranch` field. Gated so the CLI fails fast: an older operator ignores both
@@ -937,7 +974,86 @@ pub enum NewOperatorFeature {
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
     #[serde(other, skip_serializing)]
+    #[strum(disabled)]
     Unknown,
+}
+
+impl NewOperatorFeature {
+    /// Canonical feature configuration paths group paid demand without exposing workload names,
+    /// branch IDs or broker IDs. Capability variants share their configuration root rather than
+    /// their display name.
+    pub fn feature_config_key(self) -> Option<&'static str> {
+        match self {
+            Self::CopyTarget
+            | Self::CopyTargetExcludeContainers
+            | Self::CopyTargetFilterIsolation => Some("feature.copy_target"),
+            Self::SqsQueueSplitting
+            | Self::KafkaQueueSplitting
+            | Self::KafkaQueueSplittingDirect
+            | Self::SqsQueueSplittingDirect
+            | Self::SqsQueueSplittingWithJqFilter
+            | Self::KafkaQueueSplittingWithJqFilter
+            | Self::RmqQueueSplitting
+            | Self::GcpPubSubQueueSplitting
+            | Self::RedisPubSubQueueSplitting
+            | Self::TemporalQueueSplitting
+            | Self::BullMqQueueSplitting
+            | Self::RmqQueueSplittingWithJqFilter
+            | Self::KafkaQueueSplittingWithProtobufDecoding
+            | Self::NatsQueueSplitting
+            | Self::NatsPubSubQueueSplitting
+            | Self::AzureServiceBusQueueSplitting
+            | Self::QueueSplittingWithComposedFilters => Some("feature.split_queues"),
+            Self::KafkaBranching => Some("feature.kafka_branch"),
+            Self::MySqlBranching
+            | Self::PgBranching
+            | Self::CockroachdbBranching
+            | Self::MongodbBranching
+            | Self::UnifiedBranchDbCrd
+            | Self::GenericDbBranching
+            | Self::MariaDbBranching
+            | Self::S3Branching
+            | Self::TurbopufferBranching
+            | Self::DbBranchCustomImage
+            | Self::DbBranchProfiles
+            | Self::PgBranchQueryParams
+            | Self::GenericDbCopy
+            | Self::GenericBranchProfileDefaults
+            | Self::DbBranchConfigMapSource
+            | Self::DbBranchUrlParam
+            | Self::LiquibaseMigrations
+            | Self::PgBranchAdditionalDatabases
+            | Self::DbBranchesFromSplitConfig
+            | Self::DbBranchSecretManagerExtract
+            | Self::DbBranchSsmParameter
+            | Self::DbBranchDedicatedNamespace
+            | Self::RedisClusterBranching
+            | Self::TargetlessDbBranches => Some("feature.db_branches"),
+            Self::PreviewEnv
+            | Self::PreviewTlsDelivery
+            | Self::PreviewCronJobTarget
+            | Self::PreviewLabelTarget
+            | Self::PreviewTlsClientAuthFromTarget
+            | Self::PreviewAutoQueueSplitting
+            | Self::PreviewSpecResources => Some("feature.preview"),
+            Self::LabelTargeting | Self::ServerlessSessionsManager => Some("target.path"),
+            Self::MultiClusterPrimary | Self::MultiClusterRemote | Self::MultiClusterSubscribe => {
+                Some("multi_cluster")
+            }
+            Self::ProxyApi
+            | Self::SessionManagement
+            | Self::LayerReconnect
+            | Self::ExtendableUserCredentials
+            | Self::BypassCiCertificateVerification
+            | Self::ConnectParamsInHeader
+            | Self::DiagnosticPing
+            | Self::SessionReadyCondition
+            | Self::SubscribeEventOptions
+            | Self::KeylessCi
+            | Self::LicenseGateReporting
+            | Self::Unknown => None,
+        }
+    }
 }
 
 impl Display for NewOperatorFeature {
@@ -1030,6 +1146,7 @@ impl Display for NewOperatorFeature {
                 "PostgreSQL branches with additional databases"
             }
             NewOperatorFeature::KeylessCi => "keyless CI",
+            NewOperatorFeature::LicenseGateReporting => "license gate reporting",
             NewOperatorFeature::DbBranchesFromSplitConfig => {
                 "db_branches resolved from the target's MirrordSplitConfig"
             }
@@ -1151,6 +1268,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::SubscribeEventOptions
             | NewOperatorFeature::QueueSplittingWithComposedFilters
             | NewOperatorFeature::KeylessCi
+            | NewOperatorFeature::LicenseGateReporting
             | NewOperatorFeature::DbBranchesFromSplitConfig
             | NewOperatorFeature::DbBranchSecretManagerExtract
             | NewOperatorFeature::DbBranchSsmParameter
@@ -1403,6 +1521,7 @@ pub struct WorkloadQueueRegistryStatus {
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "queues.mirrord.metalbear.co",
+    group_resolver = "crate::types::keyed_group",
     version = "v1alpha",
     kind = "MirrordWorkloadQueueRegistry",
     category = "mirrord",
@@ -1517,6 +1636,7 @@ pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "queues.mirrord.metalbear.co",
+    group_resolver = "crate::types::keyed_group",
     version = "v1alpha",
     kind = "MirrordSQSSession",
     category = "mirrord",

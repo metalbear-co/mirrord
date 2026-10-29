@@ -8,6 +8,63 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.281.0](https://github.com/metalbear-co/mirrord/tree/3.281.0) - 2026-10-28
+
+
+### Added
+
+- Paid-feature errors identify the configuration key and required plan, with
+  billing guidance for cluster administrators.
+  Local paid-feature refusals are reported to operators that support
+  license-gate reporting.
+
+
+### Changed
+
+- Added sanitization to the `JDK_JAVA_OPTIONS` environment variable by removing
+  `javaagent` options.
+  This fixes some cases of injected variables pointing to non-existent files
+  and causing errors.
+  Malformed values (those with unmatched quotes) are left unchanged.
+  Set `feature.magic.java_agents` to `false` to keep the remote value
+  unchanged.
+
+
+### Fixed
+
+- Added `agent.http2_max_header_list_size` to configure the agent's HTTP/2
+  header size limit.
+- Fix the permissions of the local placeholder file created for remote files
+  when `experimental.use_dev_null` is `false`.
+- `mirrord up` no longer stops showing a service's output, and reports the
+  service as crashed, when the service prints text that isn't UTF-8, such as a
+  Windows console code page's `£`.
+- `mirrord up` now returns a helpful error when trying to use a label selector
+  target.
+
+## [3.280.0](https://github.com/metalbear-co/mirrord/tree/3.280.0) - 2026-10-27
+
+
+### Removed
+
+- Removed the `image` field from `mirrord-up.yaml` services. `mirrord preview
+  up` takes each service's image from `--image <service>=<image ref>` or
+  `MIRRORD_<SERVICE>_IMAGE`.
+
+
+### Added
+
+- Remote Redis branches accept `cluster: true` to run as a one node Redis
+  Cluster, so applications using a Redis Cluster client can connect to the
+  branch.
+
+
+### Changed
+
+- On Linux, the layer logs at startup which glibc the process runs on, which
+  glibc the executable was built against, and the kernel release, to help
+  diagnose hooks that never fire.
+
 ## [3.279.1](https://github.com/metalbear-co/mirrord/tree/3.279.1) - 2026-10-25
 
 

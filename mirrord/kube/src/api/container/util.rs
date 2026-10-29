@@ -57,6 +57,10 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         env.push(envs::NFTABLES.as_k8s_spec(&nftables));
     }
 
+    if let Some(size) = agent.http2_max_header_list_size {
+        env.push(envs::HTTP2_MAX_HEADER_LIST_SIZE.as_k8s_spec(&size));
+    }
+
     if let Some(attempts) = agent.dns.attempts {
         env.push(envs::DNS_ATTEMPTS.as_k8s_spec(&attempts));
     }
