@@ -32,7 +32,9 @@ use serde_json::json;
 
 use crate::crd::queue_filter::{MessageFilter, QueueType, message_filter_crd_schema};
 
+pub mod sync_config;
 pub mod view;
+pub use sync_config::{PreviewSyncConfig, PreviewSyncEntry};
 use uuid::Uuid;
 
 use super::{db_branching::core::ConnectionSource, session::SessionTarget};
@@ -173,23 +175,6 @@ pub struct PreviewSessionSpec {
     /// only to operators advertising `PreviewCodeSync`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<PreviewSyncConfig>,
-}
-
-/// Code sync settings of a preview session.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct PreviewSyncConfig {
-    /// The directories that the CLI pushes into the preview pod. A push names each entry by its
-    /// index in this list.
-    pub entries: Vec<PreviewSyncEntry>,
-}
-
-/// One directory that the CLI pushes into the preview pod.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct PreviewSyncEntry {
-    /// The absolute path in the target container that holds the pushed tree.
-    pub remote: String,
 }
 
 /// The user's versions of the target and the ConfigMaps and Secrets its pod uses.
