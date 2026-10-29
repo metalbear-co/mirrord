@@ -310,7 +310,7 @@
           ]
         },
         "queues": {
-          "description": "How the service's queues are split. When not set, every queue defined in the cluster is\nsplit with `queue_mode: steal`.\n\nIgnored with `incoming: replace`, which doesn't split queues.",
+          "description": "How the service's queues are split. When not set, every queue defined in the cluster is\nsplit like `incoming`: mirrored with `incoming: mirror`, stolen (`queue_mode: steal`)\notherwise.\n\nIgnored with `incoming: replace`, which doesn't split queues.",
           "anyOf": [
             {
               "$ref": "#/$defs/QueueSplitMode"

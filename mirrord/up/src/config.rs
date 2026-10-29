@@ -159,7 +159,8 @@ pub struct ModeConfig {
     pub incoming: Option<ServiceMode>,
 
     /// How the service's queues are split. When not set, every queue defined in the cluster is
-    /// split with `queue_mode: steal`.
+    /// split like `incoming`: mirrored with `incoming: mirror`, stolen (`queue_mode: steal`)
+    /// otherwise.
     ///
     /// Ignored with `incoming: replace`, which doesn't split queues.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -865,7 +866,12 @@ impl ServiceConfig {
             _ => RequestOrigin::Default,
         };
         if splits_queues {
-            let queue_mode = mode.queues.map_or(QueueMode::Steal, Into::into);
+            // Without the line, queue messages are shared the way incoming traffic is.
+            let queue_mode = match (mode.queues, mode.incoming()) {
+                (Some(queues), _) => queues.into(),
+                (None, ServiceMode::Mirror) => QueueMode::Mirror,
+                (None, _) => QueueMode::Steal,
+            };
             let splits = SplitQueuesConfig::all_wildcard_with_mode(&key, queue_mode);
             // A Kafka branch serves every Kafka queue, so it does not need generated Kafka splits.
             cfg.feature.split_queues = if cfg.feature.kafka_branch {
@@ -2540,13 +2546,13 @@ mod tests {
             .config
     }
 
-    /// `incoming` and `queues` set the incoming and queue modes; `queues` defaults to stealing
-    /// whatever `incoming` is, and a mode without `incoming` is `split`.
+    /// `incoming` and `queues` set the incoming and queue modes; `queues` defaults to following
+    /// `incoming`, and a mode without `incoming` is `split`.
     #[rstest]
     #[case::empty("{}", IncomingMode::Steal, QueueMode::Steal)]
     #[case::split_queues("{ queues: split }", IncomingMode::Steal, QueueMode::Steal)]
     #[case::mirror_queues("{ queues: mirror }", IncomingMode::Steal, QueueMode::Mirror)]
-    #[case::mirror("{ incoming: mirror }", IncomingMode::Mirror, QueueMode::Steal)]
+    #[case::mirror("{ incoming: mirror }", IncomingMode::Mirror, QueueMode::Mirror)]
     #[case::mirror_mirror_queues(
         "{ incoming: mirror, queues: mirror }",
         IncomingMode::Mirror,
