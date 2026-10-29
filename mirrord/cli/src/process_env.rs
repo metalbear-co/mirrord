@@ -44,3 +44,17 @@ pub(crate) fn set(env: &mut ProcessEnv, name: &str, value: String) {
         env.insert(name.to_owned(), value);
     }
 }
+
+/// The variable names in `env`, in no particular order.
+#[cfg(test)]
+pub(crate) fn names(env: &ProcessEnv) -> Vec<&str> {
+    #[cfg(windows)]
+    {
+        env.iter().map(|(name, _)| name).collect()
+    }
+
+    #[cfg(not(windows))]
+    {
+        env.keys().map(String::as_str).collect()
+    }
+}

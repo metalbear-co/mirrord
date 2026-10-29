@@ -27,6 +27,8 @@ use thiserror::Error;
 use tracing::{error, info};
 #[cfg(windows)]
 use winapi::shared::winerror::{WSAHOST_NOT_FOUND, WSANO_RECOVERY, WSATRY_AGAIN};
+#[cfg(windows)]
+use windows::WindowsError;
 
 use crate::{
     detour::DetourError, graceful_exit, process::hold::HoldError, proxy_connection::ProxyError,
@@ -346,6 +348,24 @@ pub enum LayerError {
     /// itself on Unix.
     #[error(transparent)]
     DebugHold(#[from] HoldError),
+
+    #[cfg(target_os = "windows")]
+    #[error(
+        "A process held for a debugger must end with mirrord, but binding it to a kill-on-close job failed: {0}"
+    )]
+    DebugHoldWithoutJob(WindowsError),
+
+    #[cfg(target_os = "windows")]
+    #[error(
+        "A process its creator asked to keep suspended cannot also be held for a debugger: resuming it is the creator's call"
+    )]
+    DebugHoldCallerSuspended,
+
+    #[cfg(target_os = "windows")]
+    #[error(
+        "MIRRORD_LAYER_WAIT_FOR_DEBUGGER={setting} makes the layer in {program} wait for a debugger before the program is held for one, so neither would ever move on. Unset it to debug {program} with `mirrord up --debug`"
+    )]
+    DebugHoldWithDebuggerWait { setting: String, program: String },
 
     #[cfg(target_os = "windows")]
     #[error("Process with PID {0} not found")]
