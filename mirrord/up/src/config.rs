@@ -856,10 +856,13 @@ impl ServiceConfig {
                     cfg.target.path,
                     Some(Target::Deployment(_) | Target::Rollout(_) | Target::StatefulSet(_))
                 ));
+        // A built-in mode's `queues` is its own definition, not a line the user wrote: entries
+        // named after one can't set it.
+        let builtin = ServiceMode::from_name(&self.default_mode).is_some();
         let queues_origin = match mode.queues {
             _ if splits_queues.not() => RequestOrigin::Config,
-            None => RequestOrigin::Default,
-            Some(_) => RequestOrigin::ModeLine,
+            Some(_) if builtin.not() => RequestOrigin::ModeLine,
+            _ => RequestOrigin::Default,
         };
         if splits_queues {
             let queue_mode = mode.queues.map_or(QueueMode::Steal, Into::into);
