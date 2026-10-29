@@ -85,6 +85,7 @@ jobs:
       runner_4: ${{ steps.runners.outputs.runner_4 }}
       runner_8: ${{ steps.runners.outputs.runner_8 }}
       runner_8_arm: ${{ steps.runners.outputs.runner_8_arm }}
+      runner_16_arm: ${{ steps.runners.outputs.runner_16_arm }}
       runner_16: ${{ steps.runners.outputs.runner_16 }}
       blacksmith: ${{ steps.runners.outputs.blacksmith }}
     steps:
@@ -97,6 +98,7 @@ jobs:
             echo "runner_4=blacksmith-4vcpu-ubuntu-2404"
             echo "runner_8=blacksmith-8vcpu-ubuntu-2404"
             echo "runner_8_arm=blacksmith-8vcpu-ubuntu-2404-arm"
+            echo "runner_16_arm=blacksmith-16vcpu-ubuntu-2404-arm"
             echo "runner_16=blacksmith-16vcpu-ubuntu-2404"
             echo "blacksmith=true"
           } >> "$GITHUB_OUTPUT"
@@ -390,7 +392,7 @@ jobs:
       packages: write
     uses: ./.github/workflows/build-cli-image.yaml
     with:
-      runner: ${{ needs.plan.outputs.runner_8 }}
+      runner: ${{ needs.plan.outputs.runner_16 }}
 
   # ── tests ───────────────────────────────────────────────────────────
 
@@ -430,7 +432,7 @@ jobs:
     uses: ./.github/workflows/test-integration.yaml
     with:
       runner: ${{ needs.plan.outputs.runner_16 }}
-      runner_arm: ${{ needs.plan.outputs.runner_8_arm }}
+      runner_arm: ${{ needs.plan.outputs.runner_16_arm }}
       runner_image_built: ${{ needs.build-ci-runner.outputs.built == 'true' }}
 
   macos_tests:
