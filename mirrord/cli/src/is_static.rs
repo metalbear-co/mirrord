@@ -2,7 +2,12 @@ use std::{ops::Not, path::Path};
 
 use xmas_elf::{ElfFile, program::Type};
 
-/// Returns true if we can be certain that the binary under the given path is statically linked.
+/// Returns true if we can be certain that the binary under the given path is statically linked,
+/// static-PIE included: it names no program interpreter (`PT_INTERP`), so the dynamic loader never
+/// runs and never loads the mirrord layer from `LD_PRELOAD`.
+///
+/// A static-PIE binary has a `PT_DYNAMIC` segment for its own relocations, so that segment says
+/// nothing about whether the layer loads.
 ///
 /// Might yield false negatives.
 ///
@@ -35,6 +40,6 @@ pub fn is_binary_static(binary_path: &Path) -> bool {
     };
 
     elf.program_iter()
-        .any(|header| matches!(header.get_type(), Ok(Type::Dynamic)))
+        .any(|header| matches!(header.get_type(), Ok(Type::Interp)))
         .not()
 }

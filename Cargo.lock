@@ -5553,6 +5553,7 @@ dependencies = [
  "mirrord-layer-lib",
  "mirrord-layer-macro",
  "mirrord-layer-tests",
+ "mirrord-progress",
  "mirrord-protocol",
  "mirrord-sip",
  "mirrord-test-utils",

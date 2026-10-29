@@ -99,6 +99,18 @@ pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
 /// Environment variable to indicate towards layer to wait for debugger.
 pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGGER";
 
+/// Environment variable asking the layer to print `mirrord exec`'s `Ready!` once it has started.
+///
+/// `mirrord exec` on Linux and macOS replaces itself with the program before the layer exists, so
+/// in the progress modes machines read it leaves `Ready!` to the layer, where it means what it
+/// means on Windows: the layer is in and connected. In a terminal's `std` mode `exec` still prints
+/// it in its own tree, and never sets this. The value is `<mode>:<pid>`: the progress mode `exec`
+/// would have printed it in (`simple` or `json`, see `MIRRORD_PROGRESS_MODE`), and `exec`'s own
+/// pid, which `execve` hands to the program. The layer prints only in the process with that pid, and removes the
+/// variable, so the program's children never print it, not even one an earlier library
+/// constructor started before the variable was removed.
+pub const MIRRORD_LAYER_READY: &str = "MIRRORD_LAYER_READY";
+
 /// Environment variable asking `mirrord exec` to hold the program it starts before the program's
 /// own code runs, until an IDE releases it. `mirrord up --debug` sets it on each named service's
 /// `mirrord exec`.

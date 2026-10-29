@@ -208,9 +208,14 @@ impl LayerSetup {
             .filter_map(|port| port.trim().parse().ok())
             .collect();
 
+        // Only this process is held or reports `Ready!`, so children must never get these. The
+        // layer removes them once it has started (its `ready` module), for the same reason.
         #[cfg(target_os = "macos")]
         let env_backup = std::env::vars()
             .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")
+            .filter(|(k, _)| {
+                k != mirrord_config::MIRRORD_LAYER_READY && k != mirrord_config::MIRRORD_DEBUG_HOLD
+            })
             .collect();
 
         Ok(Self {

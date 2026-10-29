@@ -283,6 +283,8 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
     read_correlation_id_from_env,
 };
+#[cfg(not(target_os = "windows"))]
+use mirrord_config::MIRRORD_LAYER_READY;
 use mirrord_config::{
     LayerConfig, LayerFileConfig, MIRRORD_DEBUG_HOLD,
     config::ConfigContext,
@@ -301,10 +303,14 @@ use mirrord_progress::{
     JsonProgress, Progress, ProgressTracker,
     messages::{EXEC_CONTAINER_BINARY, SESSION_READY_MESSAGE},
 };
+#[cfg(not(target_os = "windows"))]
+use mirrord_progress::{LineMode, messages::EXEC_RUNNING_TASK};
 use mirrord_protocol_api::client::ProtocolConnector;
 use mirrord_protocol_io::Connection;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
+#[cfg(not(target_os = "windows"))]
+use no_layer::NoLayer;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
@@ -346,6 +352,8 @@ mod logging;
 mod login;
 mod mcp;
 mod newsletter;
+#[cfg(not(target_os = "windows"))]
+mod no_layer;
 mod operator;
 mod operator_tip;
 #[cfg(windows)]
@@ -406,19 +414,53 @@ async fn exec_process(
 ) -> CliResult<()> {
     let mut sub_progress = progress.subtask("preparing to launch process");
 
-    #[cfg(target_os = "linux")]
-    {
-        use std::path::Path;
+    // Resolved the way `execve` below will find it, so a bare name on `PATH` is checked too.
+    #[cfg(not(target_os = "windows"))]
+    let binary_path = process_which(&args.binary).unwrap_or_else(|_| args.binary.clone().into());
 
+    #[cfg(target_os = "linux")]
+    let binary_is_static = {
         let mut sub_progress =
             sub_progress.subtask("checking if target binary is dynamically linked");
-        if is_static::is_binary_static(Path::new(&args.binary)) {
+        let is_static = is_static::is_binary_static(&binary_path);
+        if is_static {
             sub_progress.failure(Some(
                 "target binary might not be dynamically linked, mirrord might not work!",
             ));
         } else {
             sub_progress.success(Some("target binary is dynamically linked"));
         }
+        is_static
+    };
+
+    // Why the program won't load the layer, if it won't. On Unix the layer says `Ready!` and holds
+    // the program, so without it `exec` says `Ready!` itself, and a hold is refused.
+    #[cfg(target_os = "linux")]
+    let no_layer = binary_is_static.then_some(NoLayer::Static);
+    #[cfg(target_os = "macos")]
+    let no_layer = None;
+    #[cfg(not(target_os = "windows"))]
+    let no_layer = no_layer
+        .or_else(|| no_layer::changes_identity(&binary_path).then_some(NoLayer::ChangesIdentity));
+
+    // Set by `mirrord up --debug` on this service's `mirrord exec` only.
+    #[cfg(not(target_os = "windows"))]
+    let debug_hold = std::env::var_os(MIRRORD_DEBUG_HOLD).is_some_and(|value| value == "1");
+    #[cfg(not(target_os = "windows"))]
+    if debug_hold && let Some(reason) = no_layer {
+        return Err(CliError::DebugHoldWithoutLayer {
+            binary: args.binary.clone(),
+            reason,
+        });
+    }
+    // The hold is bound to this pid, which only an `execve`d program keeps.
+    #[cfg(not(target_os = "windows"))]
+    if debug_hold
+        && mirrord_for_ci
+            .as_ref()
+            .is_some_and(|ci| ci.spawns_the_program(&config.ci))
+    {
+        return Err(CliError::DebugHoldSpawnedByCi(args.binary.clone()));
     }
 
     #[cfg(target_os = "macos")]
@@ -459,6 +501,20 @@ async fn exec_process(
         Some(ref sip_result) => (true, sip_result.to_owned()),
     };
 
+    // Known only now: `skip_sip` may have left a SIP-protected binary unpatched.
+    #[cfg(target_os = "macos")]
+    let no_layer = no_layer.or_else(|| {
+        (!_did_sip_patch && mirrord_sip::is_sip_protected(&args.binary))
+            .then_some(NoLayer::UnpatchedSip)
+    });
+    #[cfg(target_os = "macos")]
+    if debug_hold && let Some(reason) = no_layer {
+        return Err(CliError::DebugHoldWithoutLayer {
+            binary: args.binary.clone(),
+            reason,
+        });
+    }
+
     #[cfg(not(target_os = "macos"))]
     let (_did_sip_patch, binary) = (false, args.binary.clone());
 
@@ -467,6 +523,22 @@ async fn exec_process(
         &execution_info.environment,
         &execution_info.env_to_unset,
     );
+    // TRICK: the `execve` below replaces this process's image with the program's, but keeps its
+    // pid, its stdio pipes and the environment it's handed. So this pid becomes the program's pid.
+    // The layer holds only the process whose pid this names: the program holds, and a child that
+    // inherits the variable never does.
+    #[cfg(not(target_os = "windows"))]
+    let env_vars = {
+        let mut env_vars = env_vars;
+        if debug_hold {
+            process_env::set(
+                &mut env_vars,
+                MIRRORD_DEBUG_HOLD,
+                std::process::id().to_string(),
+            );
+        }
+        env_vars
+    };
 
     // Put original executable in argv[0] even if actually running patched version.
     let binary_args = std::iter::once(&args.binary)
@@ -509,7 +581,7 @@ async fn exec_process(
     suggest_newsletter_signup(run_count, progress);
 
     #[cfg(not(target_os = "windows"))]
-    let mut sub_progress = progress.subtask("running process");
+    let mut sub_progress = progress.subtask(EXEC_RUNNING_TASK);
     #[cfg(target_os = "windows")]
     let mut sub_progress = ProcessHandoffProgress::new(progress, "running process");
 
@@ -529,6 +601,15 @@ async fn exec_process(
         &mut sub_progress,
     );
 
+    // `None` when no layer will load, or when `sub_progress` is for a person or prints nothing:
+    // `exec` then reports `Ready!` through it as before, so a terminal keeps its whole tree.
+    #[cfg(not(target_os = "windows"))]
+    let layer_ready = if no_layer.is_some() {
+        None
+    } else {
+        sub_progress.line_mode()
+    };
+
     run_process_with_mirrord(
         binary,
         binary_args,
@@ -541,6 +622,8 @@ async fn exec_process(
         &config,
         #[cfg(not(target_os = "windows"))]
         mirrord_for_ci,
+        #[cfg(not(target_os = "windows"))]
+        layer_ready,
     )
     .await
 }
@@ -549,7 +632,8 @@ async fn exec_process(
 /// `overrides` and progress output switched off, minus the variables in `unset`.
 ///
 /// [`MIRRORD_DEBUG_HOLD`] is always left out: it holds only the program this
-/// `mirrord exec` starts, never anything that program starts in turn.
+/// `mirrord exec` starts, never anything that program starts in turn. On Unix, `exec_process`
+/// sets it again afterwards, bound to this process's pid.
 ///
 /// Names are matched the way the platform matches them (see [`process_env`]), so on Windows an
 /// override or unset of `PATH` also applies to an inherited `Path`.
@@ -581,16 +665,15 @@ fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
 async fn run_process_with_mirrord<P: Progress>(
     binary: String,
     binary_args: Vec<String>,
-    env_vars: HashMap<String, String>,
+    mut env_vars: HashMap<String, String>,
     _did_sip_patch: bool,
     mut progress: P,
     analytics: &mut AnalyticsReporter,
     config: &LayerConfig,
     mirrord_for_ci: Option<MirrordCi>,
+    layer_ready: Option<LineMode>,
 ) -> CliResult<()> {
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
-
-    use std::ops::Not;
     let binary_path = process_which(&binary)?;
 
     let path = CString::new(binary_path.as_os_str().as_bytes())?;
@@ -601,19 +684,12 @@ async fn run_process_with_mirrord<P: Progress>(
         .map(CString::new)
         .collect::<CliResult<Vec<_>, _>>()?;
 
-    // env vars should be formatted as "varname=value" CStrings
-    let env = env_vars
-        .clone()
-        .into_iter()
-        .map(|(k, v)| CString::new(format!("{k}={v}")))
-        .collect::<CliResult<Vec<_>, _>>()?;
-
-    progress.success(Some(SESSION_READY_MESSAGE));
-
     // Foreground CI start command with no given log output location is treated same as mirrord exec
     // upon this point, while background CI start command spawns a child process
     match mirrord_for_ci {
-        Some(mirrord_ci) if mirrord_ci.is_foreground().not() || config.ci.output_dir.is_some() => {
+        Some(mirrord_ci) if mirrord_ci.spawns_the_program(&config.ci) => {
+            // The program's output goes to files here, so `exec` says `Ready!` itself.
+            progress.success(Some(SESSION_READY_MESSAGE));
             mirrord_ci
                 .prepare_command(
                     &mut progress,
@@ -626,6 +702,27 @@ async fn run_process_with_mirrord<P: Progress>(
                 .map_err(From::from)
         }
         Some(_) | None => {
+            // TRICK: as for the debug hold, `execve` keeps this pid for the program. `Ready!`
+            // means the layer has started, which happens only after `execve`, so the layer prints
+            // it, and only in the process with this pid.
+            if let Some(ready) = layer_ready {
+                env_vars.insert(
+                    MIRRORD_LAYER_READY.to_owned(),
+                    format!("{}:{}", ready.as_str(), std::process::id()),
+                );
+            }
+
+            // env vars should be formatted as "varname=value" CStrings
+            let env = env_vars
+                .into_iter()
+                .map(|(k, v)| CString::new(format!("{k}={v}")))
+                .collect::<CliResult<Vec<_>, _>>()?;
+
+            // Otherwise the layer prints it, as asked above.
+            if layer_ready.is_none() {
+                progress.success(Some(SESSION_READY_MESSAGE));
+            }
+
             // The execve hook is not yet active and does not hijack this call.
             let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
                 .expect_err("call to execve cannot succeed");

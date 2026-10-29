@@ -121,7 +121,9 @@ fn on_execve(call: &ProbedCall<'_>) {
 /// basically stripping all of the important mirrord env.
 /// [#2500](https://github.com/metalbear-co/mirrord/issues/2500)
 /// We restore the `DYLD_INSERT_LIBRARIES` environment variable and all env vars
-/// starting with `MIRRORD_` if the dyld var can't be found in `envp`.
+/// starting with `MIRRORD_` if the dyld var can't be found in `envp`, except the ones meant
+/// for the first process alone (`MIRRORD_LAYER_READY`, `MIRRORD_DEBUG_HOLD`), which the layer's
+/// setup leaves out.
 ///
 /// If there is an error in the detour, we don't exit or anything, we just call the original libc
 /// function with the original passed arguments.
