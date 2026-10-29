@@ -487,17 +487,18 @@ pub(crate) enum CliError {
     OperatorBranchCreationFailed(OperatorOperation, String),
 
     #[error(
-        "branch `{branch_id}` exists with copy mode \"{existing_mode}\", this service asked for \
-         \"{requested_mode}\""
+        "branch `{branch_id}` was created with copy mode \"{existing_mode}\", this session asks \
+         for \"{requested_mode}\""
     )]
     #[diagnostic(help(
-        "`{creator}` created it. Put both services on modes with the same copy mode."
+        "It was created by {created_by}. Every session under one key shares the branch: ask for \
+         the copy mode it was created with, or start under a different key."
     ))]
     BranchCopyModeMismatch {
         branch_id: String,
         existing_mode: String,
         requested_mode: String,
-        creator: String,
+        created_by: String,
     },
 
     #[error(
@@ -1200,12 +1201,12 @@ impl From<OperatorApiError> for CliError {
                 branch_id,
                 existing_mode,
                 requested_mode,
-                creator,
+                created_by,
             } => Self::BranchCopyModeMismatch {
                 branch_id,
                 existing_mode,
                 requested_mode,
-                creator,
+                created_by,
             },
             OperatorApiError::PreviewSecretMountCreation(msg) => {
                 Self::PreviewSecretMountFailed(msg)
