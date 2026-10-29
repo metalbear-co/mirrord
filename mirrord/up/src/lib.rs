@@ -19,9 +19,9 @@ use std::{
 
 pub use config::{
     COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, PreviewImageError,
-    PreviewImageSource, PreviewImages, SERVICE_LAYER_PATHS, SelectError, ServiceConfig,
-    ServiceError, ServiceMode, SubprocessCfg, SyncEntry, TargetValidationError, UpConfig,
-    WindowsSupportError, preview_image_env,
+    PreviewImageSource, PreviewImages, PreviewRun, SERVICE_LAYER_PATHS, SelectError, ServiceConfig,
+    ServiceError, ServiceMode, SkipReason, SubprocessCfg, SyncEntry, TargetValidationError,
+    UpConfig, WindowsSupportError, preview_image_env,
 };
 use config::{
     ResolvedTarget, SessionKind, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets,
@@ -230,8 +230,9 @@ pub enum UpError {
         namespace: String,
     },
 
-    /// A service previewed by `mirrord preview up` has no target (`target: none` or
-    /// `path: targetless`). A preview runs a copy of its target's pod, so there has to be one.
+    /// A service previewed by `mirrord preview up` or `mirrord preview sync` has no target
+    /// (`target: none` or `path: targetless`). A preview runs a copy of its target's pod, so there
+    /// has to be one.
     #[error("service `{service}` has no target, but a preview environment needs one")]
     PreviewTargetless {
         /// Name of the targetless service.
@@ -380,14 +381,15 @@ fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
     )
 }
 
-/// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up` and `mirrord
-/// preview down`, and resolve the local directories of each service's `sync` against the
-/// directory of the file.
+/// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up`, `mirrord
+/// preview sync` and `mirrord preview down`, and resolve the local directories of each service's
+/// `sync` against the directory of the file.
 ///
-/// Unlike [`load_up_config`], it doesn't check that the local paths exist. `mirrord preview up`
-/// never launches the services' local commands, so a `run.directory` that only exists on a
-/// developer's machine must not stop it (e.g. in CI). `mirrord preview down` never reads the
-/// `sync` directories, so it must work in a checkout without them.
+/// Unlike [`load_up_config`], it doesn't check that the local paths exist. The `preview`
+/// commands never launch the services' local commands, so a `run.directory` that only exists on
+/// a developer's machine must not stop them (e.g. in CI). `mirrord preview up` and `mirrord
+/// preview down` never read the `sync` directories, so they must work in a checkout without
+/// them. `mirrord preview sync` checks the `sync` directories of the services that it previews.
 pub fn load_preview_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
     let mut config = template(&std::fs::read_to_string(path)?, key)?;
     let config_directory = config_directory(path)?;
@@ -849,11 +851,11 @@ pub async fn resolve_services(
     Ok(service_configs)
 }
 
-/// Generate the [`mirrord_config::LayerConfig`] of every service's `mirrord preview up` session,
-/// resolving the targets left to the cluster like [`resolve_services`] does, but without ever
-/// prompting. The caller drops the services without an image with
-/// [`UpConfig::select_preview_images`] before calling this, and sets each config's
-/// `feature.preview.image` to the one it picked.
+/// Generate the [`mirrord_config::LayerConfig`] of every service's `mirrord preview up` or
+/// `mirrord preview sync` session, resolving the targets left to the cluster like
+/// [`resolve_services`] does, but without ever prompting. The caller drops the services that get
+/// no preview with [`UpConfig::select_preview_images`] before calling this, and sets each
+/// config's `feature.preview.image` to the one it picked.
 pub async fn resolve_preview_services(
     up_config: UpConfig,
     config_path: &Path,

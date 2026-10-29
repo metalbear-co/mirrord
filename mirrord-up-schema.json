@@ -578,7 +578,7 @@
           "$ref": "#/$defs/RunConfig"
         },
         "skip": {
-          "description": "Don't launch this service unless it is named on the `mirrord up` command line. Defaults to\n`false`.",
+          "description": "Don't launch this service unless it is named on the `mirrord up` command line, and don't\npreview it with `mirrord preview sync` unless `--image` or `MIRRORD_<SERVICE>_IMAGE` gives\nit an image. `mirrord preview up` ignores it: an image alone picks its services. Defaults\nto `false`.",
           "type": "boolean",
           "default": false
         },

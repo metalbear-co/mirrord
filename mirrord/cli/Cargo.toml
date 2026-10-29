@@ -130,6 +130,7 @@ http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
+tokio-tungstenite.workspace = true
 tower-test.workspace = true
 
 [features]

@@ -1,6 +1,8 @@
-//! `mirrord preview up`: starts a preview environment for every service of a `mirrord-up.yaml`
-//! that has an image, all under one key, and returns once each one is ready, idle or failed.
-//! `mirrord preview down` deletes them again.
+//! `mirrord preview up` and `mirrord preview sync`: start a preview environment for every
+//! service of a `mirrord-up.yaml` that the command picks (see [`PreviewRun`]), all under one key,
+//! and return once each one is ready, idle or failed. `mirrord preview sync` also pushes each
+//! service's `sync` directories into its preview (see [`super::sync`]), and with `--watch` keeps
+//! pushing them. `mirrord preview down` deletes the previews again.
 //!
 //! Every service's session is created the way `mirrord preview start` creates one, from the
 //! config `mirrord_up::resolve_preview_services` assembles for it. All sessions are prepared
@@ -9,7 +11,7 @@
 
 use std::{io::ErrorKind, ops::Not, path::Path, sync::Arc};
 
-use futures::future::join_all;
+use futures::future::{join_all, try_join_all};
 use itertools::Itertools;
 use mirrord_analytics::{AnalyticsReporter, ExecutionKind, ReportTarget, Reporter};
 use mirrord_config::{
@@ -30,12 +32,13 @@ use mirrord_operator::{
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_up::{
-    PreviewImageSource, SubprocessCfg, UpError, load_preview_up_config, preview_image_env,
+    PreviewImageSource, PreviewRun, SkipReason, SubprocessCfg, UpError, load_preview_up_config,
+    preview_image_env,
 };
 
 use super::{
     PreparedPreview, StopMode, create_preview_api, load_manifests, manifest_sources,
-    preview_namespace, preview_stop, report_local_feature_gate,
+    preview_namespace, preview_stop, report_local_feature_gate, sync,
 };
 use crate::{
     config::{
@@ -47,10 +50,14 @@ use crate::{
     up::db_branches::{DEFAULT_DB_BRANCHES_UNSUPPORTED, resolves_default_db_branches},
 };
 
-/// Handle `mirrord preview up`, reporting one `PreviewUp` event for the run.
+/// Handle `mirrord preview up` or `mirrord preview sync`, which `run` names, reporting one
+/// `PreviewUp` event for the run. With `watch_files`, the `--watch` of `mirrord preview sync`,
+/// the run keeps pushing the `sync` directories after the previews are up.
 pub(super) async fn preview_up(
     common: &PreviewCommonArgs,
     args: PreviewUpArgs,
+    run: PreviewRun,
+    watch_files: bool,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
@@ -63,7 +70,18 @@ pub(super) async fn preview_up(
         user_data.machine_id(),
     );
 
-    let result = run_preview_up(common, args, watch, user_data, &mut analytics).await;
+    analytics.get_mut().add("sync", run == PreviewRun::Sync);
+
+    let result = run_preview_up(
+        common,
+        args,
+        run,
+        watch_files,
+        watch,
+        user_data,
+        &mut analytics,
+    )
+    .await;
 
     analytics.get_mut().add("success", result.is_ok());
     if let Err(error) = &result {
@@ -75,7 +93,7 @@ pub(super) async fn preview_up(
     result
 }
 
-/// Coarse bucket of a failed `mirrord preview up` run, for telemetry.
+/// Coarse bucket of a failed `mirrord preview up` or `mirrord preview sync` run, for telemetry.
 #[derive(Clone, Copy, Debug)]
 #[repr(u32)]
 enum ErrorCategory {
@@ -101,11 +119,13 @@ impl From<&CliError> for ErrorCategory {
 async fn run_preview_up(
     common: &PreviewCommonArgs,
     args: PreviewUpArgs,
+    run: PreviewRun,
+    watch_files: bool,
     watch: drain::Watch,
     user_data: &UserData,
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<()> {
-    let mut progress = ProgressTracker::from_env("mirrord preview up");
+    let mut progress = ProgressTracker::from_env(run.into());
 
     let key = match findable_key_from_env(common.key.as_deref()) {
         Some(key) => EnvKey::Provided(key),
@@ -123,9 +143,10 @@ async fn run_preview_up(
     up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
     analytics.enabled = up_config.telemetry_enabled();
 
-    let mut images = up_config.select_preview_images(&args.image, &ConfigContext::default())?;
+    let mut images =
+        up_config.select_preview_images(&args.image, &ConfigContext::default(), run)?;
     let analytics_data = analytics.get_mut();
-    analytics_data.add("services_previewed", images.picked.len());
+    analytics_data.add("services_previewed", up_config.services.len());
     analytics_data.add("services_skipped", images.skipped.len());
     for (property, source) in [
         ("images_from_flag", PreviewImageSource::Flag),
@@ -138,11 +159,16 @@ async fn run_preview_up(
             .count();
         analytics_data.add(property, count);
     }
-    for service in &images.skipped {
-        progress.info(&format!(
-            "{service}: no image (`--image {service}=<image ref>` or `{}`), skipped",
-            preview_image_env(service)
-        ));
+    for (service, reason) in &images.skipped {
+        let reason = match reason {
+            SkipReason::NoImage => format!(
+                "no image (`--image {service}=<image ref>` or `{}`)",
+                preview_image_env(service)
+            ),
+            SkipReason::Skip => "`skip: true`".to_owned(),
+            SkipReason::NoSync => "no `sync`".to_owned(),
+        };
+        progress.info(&format!("{service}: {reason}, skipped"));
     }
 
     let mut services = mirrord_up::resolve_preview_services(
@@ -166,7 +192,7 @@ async fn run_preview_up(
         let progress = progress.subtask(&name).prefixed(&name);
         let watch = watch.clone();
         async move {
-            let result = prepare_service(service, args, &progress, watch, user_data).await;
+            let result = prepare_service(service, args, run, &progress, watch, user_data).await;
             (name, progress, result)
         }
     }))
@@ -240,9 +266,11 @@ async fn run_preview_up(
     }))
     .await;
 
+    let mut syncs = Vec::new();
     for (name, mut service_progress, result) in started {
         match result {
-            Ok(summary) => {
+            Ok((summary, preview_sync)) => {
+                syncs.extend(preview_sync.map(|preview_sync| (name.clone(), preview_sync)));
                 summary.report(&service_progress);
                 service_progress.success(Some(if summary.idle {
                     "preview environment is idle"
@@ -251,7 +279,7 @@ async fn run_preview_up(
                 }));
             }
             Err(error) => {
-                service_progress.failure(Some(&error.to_string()));
+                service_progress.failure(Some(&sync::with_causes(&error)));
                 failed.push(name.to_string());
             }
         }
@@ -263,8 +291,35 @@ async fn run_preview_up(
         return Err(CliError::PreviewUpFailed(failed));
     }
 
-    progress.success(Some("preview environments are up"));
-    Ok(())
+    if watch_files.not() || syncs.is_empty() {
+        progress.success(Some("preview environments are up"));
+        return Ok(());
+    }
+
+    progress.info("watching the `sync` directories for changes, press Ctrl-C to stop");
+    // A watch only ends when it fails, so the first one that ends stops the others and fails the
+    // run.
+    let watches = try_join_all(syncs.into_iter().map(|(name, preview_sync)| {
+        let mut sync_progress = progress.subtask(&name).prefixed(&name);
+        async move {
+            let result = preview_sync.watch(&sync_progress).await;
+            if let Err(error) = &result {
+                sync_progress.failure(Some(&sync::with_causes(&error)));
+            }
+            result
+        }
+    }));
+
+    tokio::select! {
+        result = watches => {
+            progress.failure(Some("stopped pushing changes"));
+            result.map(|_| ())
+        }
+        _ = tokio::signal::ctrl_c() => {
+            progress.success(Some("stopped watching"));
+            Ok(())
+        }
+    }
 }
 
 /// A service whose preview passed its checks, with the task its progress is reported on.
@@ -279,6 +334,7 @@ struct ServicePreview {
 async fn prepare_service(
     service: SubprocessCfg,
     args: &PreviewUpArgs,
+    run: PreviewRun,
     progress: &ProgressTracker,
     watch: drain::Watch,
     user_data: &UserData,
@@ -287,8 +343,14 @@ async fn prepare_service(
         mut config,
         default_db_branches,
         default_split_queues,
+        sync,
         ..
     } = service;
+    // `mirrord preview up` ignores `sync`, which only `mirrord preview sync` pushes.
+    let sync = match run {
+        PreviewRun::Up => Vec::new(),
+        PreviewRun::Sync => sync,
+    };
 
     // Set over the patched config, so they take precedence over the service's `config_patch`.
     if let Some(ttl) = args.ttl {
@@ -441,6 +503,7 @@ async fn prepare_service(
         &sources,
         supplied_objects,
         auto_queue_splitting,
+        sync,
         progress,
         analytics,
     )
@@ -462,11 +525,11 @@ fn up_file_path(config_file: Option<&Path>) -> &Path {
 /// way `mirrord preview up` finds it, in every kube context the services of the
 /// `mirrord-up.yaml` run in.
 ///
-/// `mirrord preview up` takes each service's context from the file, so `down` reads it too
-/// (`-f`, or `mirrord-up.yaml` when it exists) to reach them all. Without a file, it runs in the
-/// context of `--context`, the global config or the kubeconfig. Every preview under the key goes
-/// in those contexts, whichever services it was started for, and no mirrord config is read,
-/// neither from `-f` nor from `MIRRORD_*` variables in the environment.
+/// `mirrord preview up` and `mirrord preview sync` take each service's context from the file, so
+/// `down` reads it too (`-f`, or `mirrord-up.yaml` when it exists) to reach them all. Without a
+/// file, it runs in the context of `--context`, the global config or the kubeconfig. Every
+/// preview under the key goes in those contexts, whichever services it was started for, and no
+/// mirrord config is read, neither from `-f` nor from `MIRRORD_*` variables in the environment.
 pub(super) async fn preview_down(
     common: &PreviewCommonArgs,
     watch: drain::Watch,
