@@ -26,7 +26,6 @@ client = [
   "dep:http",
   "dep:hyper",
   "dep:hyper-util",
-  "dep:ignore",
   "dep:mirrord-analytics",
   "dep:mirrord-auth",
   "dep:mirrord-kube",
@@ -77,7 +76,7 @@ futures = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true }
 hyper-util = { workspace = true, optional = true }
-ignore = { workspace = true, optional = true }
+ignore.workspace = true
 k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, features = ["derive", "ws"], optional = true }
 rand = { workspace = true, optional = true }

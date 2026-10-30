@@ -11,6 +11,8 @@
 
 use bincode::{Decode, Encode};
 
+pub mod rules;
+
 #[cfg(test)]
 mod tests;
 
