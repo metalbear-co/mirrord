@@ -65,7 +65,7 @@ pub const VCS_DIRECTORIES: [&str; 2] = [".git", ".jj"];
 ///
 /// The patterns of each source are matched below a virtual root, `/` followed by the source's
 /// directory, so no path of the machine that evaluates the rules plays a part.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IgnoreRules {
     snapshot: IgnoreSnapshot,
 
@@ -92,6 +92,11 @@ impl IgnoreRules {
     }
 
     /// The snapshot that the rules evaluate, with the sources that were added to it.
+    pub fn snapshot(&self) -> &IgnoreSnapshot {
+        &self.snapshot
+    }
+
+    /// The snapshot that the rules evaluate, with the sources that were added to it.
     pub fn into_snapshot(self) -> IgnoreSnapshot {
         self.snapshot
     }
@@ -111,6 +116,21 @@ impl IgnoreRules {
     pub fn add_last(&mut self, directory: &Path, lines: Vec<String>) {
         self.insert(self.snapshot.sources.len(), directory, lines);
         self.last_sources += 1;
+    }
+
+    /// Whether a source of the rules is rooted at `directory`, a path relative to the entry's
+    /// directory, or below it, such as the `.gitignore` of `directory` or of one of its
+    /// subdirectories.
+    pub fn has_source_within(&self, directory: &Path) -> bool {
+        let root = join_relative(&self.snapshot.prefix, directory);
+        self.snapshot.sources.iter().any(|source| {
+            source
+                .root
+                .strip_prefix(root.as_slice())
+                .is_some_and(|rest| {
+                    rest.is_empty() || rest.first() == Some(&b'/') || root.is_empty()
+                })
+        })
     }
 
     fn insert(&mut self, index: usize, directory: &Path, lines: Vec<String>) {

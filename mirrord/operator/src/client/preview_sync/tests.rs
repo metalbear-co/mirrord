@@ -1,4 +1,10 @@
-use std::{collections::BTreeMap, fs, io::Read, path::Path, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    io::{self, Read},
+    path::{Path, PathBuf},
+    time::Duration,
+};
 #[cfg(unix)]
 use std::{
     ffi::OsStr,
@@ -16,10 +22,13 @@ use tokio_tungstenite::{
     tungstenite::{Message, protocol::Role},
 };
 
-use super::{PackedEntry, PreviewSyncConnection, PreviewSyncError, TreeListing};
+use super::{
+    PackedEntry, PreviewSyncConnection, PreviewSyncError, RuleSources, SyncEvent, TreeListing,
+    pack_changes,
+};
 use crate::sync::{
     EntryCounts, EntryPlan, MAX_DATA_CHUNK_BYTES, PushMode, RejectReason, SYNC_PROTOCOL_VERSION,
-    SidecarState, SyncFrame,
+    SidecarState, SyncFrame, UnpairReason,
     rules::{IgnoreRules, IgnoreSnapshot},
 };
 
@@ -39,13 +48,19 @@ enum Packed {
     Symlink(String),
 }
 
+/// Lists the tree under `local` with `ignore` as the entry's own gitignore lines, as the CLI
+/// lists it without a watcher.
+fn list(local: &Path, ignore: &[String]) -> io::Result<TreeListing> {
+    TreeListing::new_watching(&RuleSources::new(local)?, ignore, &mut |_| Ok(()))
+}
+
 /// The entry that a push of `local` carries, with `ignore` as the entry's own gitignore lines.
 fn pack(local: &Path, ignore: &[&str]) -> PackedEntry {
     let ignore = ignore
         .iter()
         .map(|line| (*line).to_owned())
         .collect::<Vec<_>>();
-    TreeListing::new(local, &ignore)
+    list(local, &ignore)
         .unwrap()
         .pack(0, local)
         .unwrap()
@@ -268,7 +283,7 @@ fn a_file_that_fails_to_pack_is_named() {
     let local = tempfile::tempdir().unwrap();
     fs::create_dir(local.path().join("src")).unwrap();
     fs::write(local.path().join("src/app.js"), "app").unwrap();
-    let listing = TreeListing::new(local.path(), &[]).unwrap();
+    let listing = list(local.path(), &[]).unwrap();
 
     fs::remove_file(local.path().join("src/app.js")).unwrap();
     let error = listing.pack(0, local.path()).unwrap_err();
@@ -353,50 +368,6 @@ fn push_skips_sockets() {
     );
 }
 
-/// `--watch` pushes the tree again only when its listing changes, so a build that writes into an
-/// ignored directory, even inside a pushed one, must not change it, and an edit of a pushed file
-/// must, even when the edit keeps the file's size and modification time.
-#[test]
-fn listing_changes_only_with_the_pushed_tree() {
-    let local = tempfile::tempdir().unwrap();
-    fs::write(local.path().join(".gitignore"), "dist/\n*.log\n").unwrap();
-    fs::create_dir(local.path().join("src")).unwrap();
-    fs::write(local.path().join("src/app.js"), "v1").unwrap();
-    let pushed = TreeListing::new(local.path(), &[]).unwrap();
-
-    fs::create_dir(local.path().join("dist")).unwrap();
-    fs::write(local.path().join("dist/bundle.js"), "bundle").unwrap();
-    fs::write(local.path().join("src/debug.log"), "log").unwrap();
-    assert_eq!(TreeListing::new(local.path(), &[]).unwrap(), pushed);
-
-    fs::write(local.path().join("src/app.js"), "v2, longer").unwrap();
-    assert_ne!(TreeListing::new(local.path(), &[]).unwrap(), pushed);
-}
-
-/// Tools such as `cp -p` write a file and then restore its modification time, and an edit that
-/// keeps the size then looks unchanged by size and time alone.
-#[cfg(unix)]
-#[test]
-fn listing_changes_with_an_edit_that_keeps_size_and_time() {
-    let local = tempfile::tempdir().unwrap();
-    let app = local.path().join("app.js");
-    fs::write(&app, "v1").unwrap();
-    let modified = fs::metadata(&app).unwrap().modified().unwrap();
-    let pushed = TreeListing::new(local.path(), &[]).unwrap();
-
-    // The status change time has a resolution of a clock tick, so the edit must come later.
-    std::thread::sleep(Duration::from_millis(20));
-    fs::write(&app, "v2").unwrap();
-    fs::File::options()
-        .write(true)
-        .open(&app)
-        .unwrap()
-        .set_modified(modified)
-        .unwrap();
-
-    assert_ne!(TreeListing::new(local.path(), &[]).unwrap(), pushed);
-}
-
 /// The operator's end of a [`PreviewSyncConnection`], which a test scripts.
 struct Operator(WebSocketStream<DuplexStream>);
 
@@ -445,6 +416,7 @@ impl Operator {
                         received.push(PackedEntry {
                             plan: plan.clone(),
                             archive: Vec::new(),
+                            deleted: Vec::new(),
                         });
                         open = Some(index);
                     }
@@ -490,6 +462,7 @@ async fn push_reaches_the_sidecar_whole_after_pairing() {
             rules: IgnoreSnapshot::default(),
         },
         archive,
+        deleted: Vec::new(),
     };
     let large: Vec<u8> = (0..2 * MAX_DATA_CHUNK_BYTES + 1)
         .map(|byte| byte as u8)
@@ -498,12 +471,17 @@ async fn push_reaches_the_sidecar_whole_after_pairing() {
 
     let cli = async {
         let mut states = Vec::new();
-        let paired = connection
-            .wait_until_paired(|state| states.push(state))
+        let paired = loop {
+            match connection.next_event().await.unwrap() {
+                SyncEvent::Paired { generation } => break generation,
+                event => states.push(event),
+            }
+        };
+
+        let generation = connection
+            .push(5, PushMode::Full, entries.clone(), |_| {})
             .await
             .unwrap();
-
-        let generation = connection.push(5, &entries).await.unwrap();
 
         (states, paired, generation)
     };
@@ -546,7 +524,10 @@ async fn push_reaches_the_sidecar_whole_after_pairing() {
 
     assert_eq!(
         states,
-        [SidecarState::Disconnected, SidecarState::AwaitingFirstPush]
+        [
+            SyncEvent::Sidecar(SidecarState::Disconnected),
+            SyncEvent::Sidecar(SidecarState::AwaitingFirstPush)
+        ]
     );
     assert_eq!(paired, None);
     assert_eq!(generation, 1);
@@ -569,8 +550,9 @@ async fn failed_push_reports_why() {
                 rules: IgnoreSnapshot::default(),
             },
             archive: b"archive".to_vec(),
+            deleted: Vec::new(),
         }];
-        let cli = connection.push(5, &entries);
+        let cli = connection.push(5, PushMode::Full, entries.to_vec(), |_| {});
 
         let sidecar = async {
             operator.recv_push().await;
@@ -642,4 +624,178 @@ fn a_jj_repository_without_git_applies_the_gitignore_files_above_local() {
 
     let paths = unpacked(&pack(&local, &[])).into_keys().collect::<Vec<_>>();
     assert_eq!(paths, ["app.js"]);
+}
+
+/// The incremental push of the paths in `changed` of the tree under `local`, with the rules of
+/// the tree's listing, or `None` when the push must be a full one.
+fn pack_changed(local: &Path, ignore: &[&str], changed: &[&str]) -> Option<PackedEntry> {
+    let ignore = ignore
+        .iter()
+        .map(|line| (*line).to_owned())
+        .collect::<Vec<_>>();
+    let listing = list(local, &ignore).unwrap();
+    let rules = IgnoreRules::new(listing.snapshot().clone());
+    let changed = changed.iter().map(PathBuf::from).collect();
+
+    pack_changes(0, local, &rules, &changed, &mut |_| Ok(())).unwrap()
+}
+
+/// Build tools write a `.gitignore` into their output directory, which the rules ignore, and git
+/// never reads a `.gitignore` in an ignored directory, so each build must not force a full push.
+#[test]
+fn a_gitignore_in_an_ignored_directory_changes_no_rule() {
+    let local = tempfile::tempdir().unwrap();
+    fs::write(local.path().join(".gitignore"), "dist/\n").unwrap();
+    fs::create_dir(local.path().join("dist")).unwrap();
+    fs::write(local.path().join("dist/.gitignore"), "*\n").unwrap();
+
+    let packed = pack_changed(local.path(), &[], &["dist/.gitignore"]);
+
+    assert!(packed.is_some_and(|packed| unpacked(&packed).is_empty()));
+}
+
+/// Git reads the `.gitignore` of a directory even when the rules ignore that file, so a new
+/// directory whose `.gitignore` the entry's `ignore` list ignores still changes the rules, and
+/// the next incremental push would otherwise apply rules without it.
+#[test]
+fn an_ignored_gitignore_in_a_new_directory_changes_the_rules() {
+    let local = tempfile::tempdir().unwrap();
+    fs::write(local.path().join("app.js"), "app").unwrap();
+    fs::create_dir(local.path().join("new")).unwrap();
+    fs::write(local.path().join("new/.gitignore"), "secret\n").unwrap();
+    fs::write(local.path().join("new/secret"), "secret").unwrap();
+
+    assert_eq!(pack_changed(local.path(), &[".gitignore"], &["new"]), None);
+}
+
+/// Deleting a `.gitignore`, or changing one that the entry's `ignore` list matches, changes the
+/// rules as much as a new one does. Git reads a `.gitignore` also when a rule matches the file
+/// itself, so an incremental push would otherwise keep a stale rule, and send a file that the
+/// changed rules leave out.
+#[test]
+fn a_deleted_or_ignored_gitignore_changes_the_rules() {
+    let local = tempfile::tempdir().unwrap();
+    fs::write(local.path().join("app.js"), "app").unwrap();
+
+    assert_eq!(pack_changed(local.path(), &[], &[".gitignore"]), None);
+
+    fs::write(local.path().join(".gitignore"), ".env\n").unwrap();
+    fs::write(local.path().join(".env"), "private").unwrap();
+    assert_eq!(
+        pack_changed(local.path(), &[".gitignore"], &[".gitignore", ".env"]),
+        None
+    );
+}
+
+/// Replacing a directory whole, as a branch switch or a build tool does, takes its `.gitignore`
+/// away without an event that names the file, so a change to a directory that held a source of
+/// the rules must change the rules too, or `src/app.js` would stay ignored.
+#[test]
+fn replacing_a_directory_that_holds_a_gitignore_changes_the_rules() {
+    let local = tempfile::tempdir().unwrap();
+    fs::create_dir(local.path().join("src")).unwrap();
+    fs::write(local.path().join("src/.gitignore"), "app.js\n").unwrap();
+    fs::write(local.path().join("src/app.js"), "app").unwrap();
+    let listing = list(local.path(), &[]).unwrap();
+    let rules = IgnoreRules::new(listing.snapshot().clone());
+
+    let elsewhere = tempfile::tempdir_in(local.path().parent().unwrap()).unwrap();
+    fs::rename(local.path().join("src"), elsewhere.path().join("old")).unwrap();
+    fs::create_dir(local.path().join("src")).unwrap();
+    fs::write(local.path().join("src/app.js"), "app").unwrap();
+
+    let changed = BTreeSet::from([PathBuf::from("src")]);
+    let packed = pack_changes(0, local.path(), &rules, &changed, &mut |_| Ok(())).unwrap();
+
+    assert_eq!(packed, None);
+}
+
+/// A rule that only ignores directories doesn't ignore a file of the same name, so a full push
+/// carries the file, and its deletion must reach the sidecar, which decides by the kind that the
+/// path has in the pod.
+#[test]
+fn a_directory_rule_doesnt_keep_a_deleted_file() {
+    let local = tempfile::tempdir().unwrap();
+
+    let packed = pack_changed(local.path(), &["cache/"], &["cache"]).unwrap();
+
+    assert_eq!(packed.deleted, vec![b"cache".to_vec()]);
+}
+
+/// The sidecar deletes a directory with everything in it, so the paths below a deleted directory
+/// need no deletion of their own.
+#[test]
+fn a_deleted_directory_carries_its_descendants() {
+    let local = tempfile::tempdir().unwrap();
+
+    let packed = pack_changed(local.path(), &[], &["gone", "gone/a", "gone/b/c", "kept"]).unwrap();
+
+    assert_eq!(packed.deleted, vec![b"gone".to_vec(), b"kept".to_vec()]);
+}
+
+/// A `.gitignore` that a developer creates above the pushed directory changes the rules too, so
+/// the listing must name it even before it exists, for the CLI to watch it.
+#[test]
+fn a_gitignore_above_the_tree_is_a_rule_file_before_it_exists() {
+    let repository = tempfile::tempdir().unwrap();
+    fs::create_dir(repository.path().join(".git")).unwrap();
+    fs::create_dir(repository.path().join("service")).unwrap();
+
+    let listing = list(&repository.path().join("service"), &[]).unwrap();
+
+    let root = repository.path().canonicalize().unwrap();
+    assert!(listing.rule_files().contains(&root.join(".gitignore")));
+}
+
+/// The CLI writes a large push before it reads, and another CLI that takes the sync over makes
+/// the operator send `Unpaired { Replaced }` and close the connection, which can fail one of the
+/// writes first. The push must still fail as replaced, or the CLI would connect again and take
+/// the sync back.
+#[tokio::test]
+async fn a_push_that_another_cli_replaced_fails_as_replaced() {
+    let (cli, operator) = tokio::io::duplex(MAX_DATA_CHUNK_BYTES);
+    let (cli, operator) = tokio::join!(
+        WebSocketStream::from_raw_socket(cli, Role::Client, None),
+        WebSocketStream::from_raw_socket(operator, Role::Server, None),
+    );
+    let mut connection = PreviewSyncConnection::new(cli);
+    let mut operator = Operator(operator);
+    let large = PackedEntry {
+        plan: EntryPlan {
+            index: 0,
+            files: 1,
+            directories: 0,
+            bytes: 0,
+            rules: IgnoreSnapshot::default(),
+        },
+        archive: vec![7; 16 * MAX_DATA_CHUNK_BYTES],
+        deleted: Vec::new(),
+    };
+
+    let operator = async move {
+        operator.recv().await;
+        operator
+            .send(SyncFrame::Unpaired {
+                reason: UnpairReason::Replaced,
+            })
+            .await;
+        operator.0.close(None).await.unwrap();
+    };
+    let (pushed, ()) = tokio::time::timeout(
+        TEST_TIMEOUT,
+        futures::future::join(
+            connection.push(1, PushMode::Full, vec![large], |_| {}),
+            operator,
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(
+            pushed,
+            Err(PreviewSyncError::Unpaired(UnpairReason::Replaced))
+        ),
+        "{pushed:?}"
+    );
 }
