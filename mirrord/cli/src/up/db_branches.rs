@@ -18,7 +18,7 @@ use mirrord_analytics::NullReporter;
 use mirrord_config::{
     LayerConfig,
     feature::{
-        database_branches::{BranchCopyMode, DatabaseBranchesConfig},
+        database_branches::{BranchCopyMode, DatabaseBranchEngine, DatabaseBranchesConfig},
         split_queues::QueueKind,
     },
 };
@@ -279,7 +279,8 @@ pub(super) async fn check_db_branches(
     // branch is named for its namespace and lives in its cluster, so each pair is one branch. The
     // cluster is the API server URL, since two kube contexts can name one cluster.
     let mut entry_namespaces: BTreeMap<String, BTreeMap<_, Vec<Arc<str>>>> = BTreeMap::new();
-    // Each branch (cluster, namespace, branch id) and the copy mode every service asks it for.
+    // Each branch (cluster, namespace, engine, branch id) and the copy mode every service asks it
+    // for. Branch names carry the engine, so entries of two engines under one id are two branches.
     let mut branch_modes: BTreeMap<_, Vec<(Arc<str>, BranchCopyMode)>> = BTreeMap::new();
     for ((service, _, key), lookup) in requesting.into_iter().zip(lookups) {
         let (response, resolved) = match lookup {
@@ -379,8 +380,14 @@ pub(super) async fn check_db_branches(
                 entry.base().and_then(|base| base.id.clone()),
                 entry.copy_mode(),
             ) {
+                let engine = <&str>::from(DatabaseBranchEngine::from(entry));
                 branch_modes
-                    .entry((api.cluster_url().to_owned(), namespace.clone(), branch))
+                    .entry((
+                        api.cluster_url().to_owned(),
+                        namespace.clone(),
+                        engine,
+                        branch,
+                    ))
                     .or_default()
                     .push((service.service_name.clone(), mode));
             }
@@ -398,7 +405,7 @@ pub(super) async fn check_db_branches(
     // The first service to start creates the branch with its mode, and the others fail when they
     // attach to it, after some have already started. Every request is known here, so the run
     // stops before any of them.
-    for ((_, _, branch), requests) in branch_modes {
+    for ((_, _, _, branch), requests) in branch_modes {
         let mut modes = requests.iter().map(|(_, mode)| mode);
         let first = modes.next();
         if modes.any(|mode| Some(mode) != first) {
