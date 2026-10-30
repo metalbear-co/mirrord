@@ -960,11 +960,7 @@ impl DatabaseBranchConfig {
                 MysqlBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
                 MysqlBranchCopyConfig::All { .. } => BranchCopyMode::All,
             },
-            DatabaseBranchConfig::Pg(cfg) => match cfg.copy {
-                PgBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
-                PgBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
-                PgBranchCopyConfig::All { .. } => BranchCopyMode::All,
-            },
+            DatabaseBranchConfig::Pg(cfg) => cfg.copy.mode(),
             DatabaseBranchConfig::Redis(cfg) => match &**cfg {
                 RedisBranchConfig::Local(_) => return None,
                 RedisBranchConfig::Remote(remote) => match remote.copy {

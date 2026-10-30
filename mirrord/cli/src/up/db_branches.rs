@@ -14,11 +14,12 @@ use std::{
 };
 
 use futures::future::join_all;
+use itertools::Itertools;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
     LayerConfig,
     feature::{
-        database_branches::{BranchCopyMode, DatabaseBranchEngine, DatabaseBranchesConfig},
+        database_branches::{DatabaseBranchConfig, DatabaseBranchEngine, DatabaseBranchesConfig},
         split_queues::QueueKind,
     },
 };
@@ -281,7 +282,7 @@ pub(super) async fn check_db_branches(
     let mut entry_namespaces: BTreeMap<String, BTreeMap<_, Vec<Arc<str>>>> = BTreeMap::new();
     // Each branch (cluster, namespace, engine, branch id) and the copy mode every service asks it
     // for. Branch names carry the engine, so entries of two engines under one id are two branches.
-    let mut branch_modes: BTreeMap<_, Vec<(Arc<str>, BranchCopyMode)>> = BTreeMap::new();
+    let mut branch_modes: BTreeMap<_, Vec<(Arc<str>, String)>> = BTreeMap::new();
     for ((service, _, key), lookup) in requesting.into_iter().zip(lookups) {
         let (response, resolved) = match lookup {
             Ok(lookup) => lookup,
@@ -378,7 +379,7 @@ pub(super) async fn check_db_branches(
         for entry in &resolved.entries {
             if let (Some(branch), Some(mode)) = (
                 entry.base().and_then(|base| base.id.clone()),
-                entry.copy_mode(),
+                copy_modes(entry),
             ) {
                 let engine = <&str>::from(DatabaseBranchEngine::from(entry));
                 branch_modes
@@ -413,7 +414,7 @@ pub(super) async fn check_db_branches(
                 branch,
                 requests: requests
                     .iter()
-                    .map(|(service, mode)| format!("`{service}` {}", <&str>::from(mode)))
+                    .map(|(service, modes)| format!("`{service}` {modes}"))
                     .collect::<Vec<_>>()
                     .join(", "),
             });
@@ -452,6 +453,25 @@ pub(super) async fn check_db_branches(
     }
 
     Ok(requested.into_iter().chain(inline).collect())
+}
+
+/// The copy modes a branch is created with, compared as a session attaching to it compares them:
+/// the entry's own and, for PostgreSQL, each additional database's (`schema, analytics: empty`).
+/// `None` for engines without copy modes.
+fn copy_modes(entry: &DatabaseBranchConfig) -> Option<String> {
+    let mut modes = <&str>::from(entry.copy_mode()?).to_owned();
+    for database in entry
+        .pg_additional_databases()
+        .iter()
+        .sorted_by(|a, b| a.name.cmp(&b.name))
+    {
+        modes.push_str(&format!(
+            ", {}: {}",
+            database.name,
+            <&str>::from(database.copy.mode())
+        ));
+    }
+    Some(modes)
 }
 
 /// The settings that decide which operator a session finds and whether it has to use it, so
