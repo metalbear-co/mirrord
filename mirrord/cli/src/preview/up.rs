@@ -30,6 +30,7 @@ use mirrord_operator::{
         split_config_branches::entries_from_response,
     },
     crd::NewOperatorFeature,
+    sync::UnpairReason,
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_up::{
@@ -40,6 +41,7 @@ use mirrord_up::{
 use super::{
     PreparedPreview, StopMode, create_preview_api, load_manifests, manifest_sources,
     preview_namespace, preview_stop, report_local_feature_gate, sync, sync::ServiceSync,
+    sync_task_error,
 };
 use crate::{
     config::{
@@ -273,7 +275,10 @@ async fn run_preview_up(
     }
 
     let started = join_all(ready_to_start.into_iter().map(|mut service| async move {
-        let result = service.preview.start(&mut service.progress).await;
+        let result = service
+            .preview
+            .start(watch_files, &mut service.progress)
+            .await;
         (service.name, service.progress, result)
     }))
     .await;
@@ -281,8 +286,8 @@ async fn run_preview_up(
     let mut syncs = Vec::new();
     for (name, mut service_progress, result) in started {
         match result {
-            Ok((summary, preview_sync)) => {
-                syncs.extend(preview_sync.map(|preview_sync| (name.clone(), preview_sync)));
+            Ok((summary, sync_task)) => {
+                syncs.extend(sync_task.map(|sync_task| (name.clone(), sync_task)));
                 summary.report(&service_progress);
                 service_progress.success(Some(if summary.idle {
                     "preview environment is idle"
@@ -309,24 +314,47 @@ async fn run_preview_up(
     }
 
     progress.info("watching the `sync` directories for changes, press Ctrl-C to stop");
-    // A watch only ends when it fails, so the first one that ends stops the others and fails the
-    // run.
-    let watches = try_join_all(syncs.into_iter().map(|(name, preview_sync)| {
-        let mut sync_progress = progress.subtask(&name).prefixed(&name);
+    // A sync only ends when it fails, when another CLI takes it over, or when its session is
+    // deleted, and the last two stop only that service's sync. The first failure stops the others
+    // and fails the run: dropping a sync's task stops it.
+    let watches = try_join_all(syncs.into_iter().map(|(name, sync_task)| {
+        let mut sync_progress = progress.subtask("watching for changes").prefixed(&name);
         async move {
-            let result = preview_sync.watch(&sync_progress).await;
-            if let Err(error) = &result {
-                sync_progress.failure(Some(&sync::with_causes(&error)));
+            match sync_task.await {
+                Ok(CliError::PreviewSyncReplaced) => {
+                    sync_progress.success(Some(&format!(
+                        "{}, so this one stopped and left the preview environment as it is",
+                        UnpairReason::Replaced
+                    )));
+                    Ok(())
+                }
+                Ok(CliError::PreviewSessionDeleted) => {
+                    sync_progress.success(Some(
+                        "the preview session was deleted, so `mirrord preview sync` stopped \
+                         pushing into it",
+                    ));
+                    Ok(())
+                }
+                result => {
+                    let error = sync_task_error(result);
+                    sync_progress.failure(Some(&sync::with_causes(&error)));
+                    Err(error)
+                }
             }
-            result
         }
     }));
 
     tokio::select! {
-        result = watches => {
-            progress.failure(Some("stopped pushing changes"));
-            result.map(|_| ())
-        }
+        result = watches => match result {
+            Ok(_) => {
+                progress.success(Some("stopped watching"));
+                Ok(())
+            }
+            Err(error) => {
+                progress.failure(Some("stopped pushing changes"));
+                Err(error)
+            }
+        },
         _ = tokio::signal::ctrl_c() => {
             progress.success(Some("stopped watching"));
             Ok(())

@@ -1,5 +1,6 @@
-use std::{fs, path::Path, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, fs, io::Read, ops::Not, path::Path, sync::Arc, time::Duration};
 
+use flate2::read::GzDecoder;
 use futures::{SinkExt, StreamExt};
 use mirrord_config::{
     LayerConfig,
@@ -11,153 +12,463 @@ use mirrord_operator::{
     crd::preview::{
         PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncInstall,
     },
-    sync::SyncFrame,
+    sync::{PushMode, RejectReason, SyncFrame, UnpairReason},
 };
 use mirrord_progress::ProgressTracker;
 use mirrord_up::{InstallConfig, RunConfig, RunType, ServiceMode, SubprocessCfg, SyncEntry};
-use tokio::io::DuplexStream;
+use tokio::{io::DuplexStream, sync::mpsc, task::JoinHandle};
 use tokio_tungstenite::{
     WebSocketStream,
     tungstenite::{Message, protocol::Role},
 };
 
-use super::{PreviewSync, ServiceSync, WATCH_DEBOUNCE};
+use super::{Connect, ServiceSync, SyncActivity, SyncDriver, WATCH_DEBOUNCE, WATCH_MAX_DELAY};
 use crate::error::CliError;
 
-/// The operator's end of the sync connection, which answers every push as the sidecar would.
+/// How long a test waits for a frame that must come: the debounce of `--watch`, packing and the
+/// push.
+const FRAME_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long a test waits to see that the CLI sends nothing: the longest debounce of `--watch`,
+/// and as long again for packing and sending.
+const QUIET_PERIOD: Duration = WATCH_MAX_DELAY.saturating_add(WATCH_DEBOUNCE.saturating_mul(4));
+
+/// What one entry of a push carried: each path with its content, `None` for a directory.
+type Pushed = BTreeMap<String, Option<String>>;
+
+/// A push that the operator received.
+#[derive(Debug)]
+struct Push {
+    push_id: u64,
+    mode: PushMode,
+
+    /// Each entry's paths and contents, by entry index.
+    entries: BTreeMap<u32, Pushed>,
+}
+
+/// The operator's end of one sync connection, which a test scripts.
 struct Operator {
     socket: WebSocketStream<DuplexStream>,
-    generation: u64,
 }
 
 impl Operator {
-    /// Waits up to `timeout` for the next push, applies it, and returns the entries it named.
-    /// Fails when a push starts but doesn't end within `timeout`.
-    async fn next_push(&mut self, timeout: Duration) -> Option<Vec<u32>> {
+    async fn send(&mut self, frame: SyncFrame) {
+        self.socket
+            .send(Message::Binary(frame.encode().into()))
+            .await
+            .unwrap();
+    }
+
+    /// The next frame from the CLI, or `None` if none comes within `timeout`.
+    async fn recv_within(&mut self, timeout: Duration) -> Option<SyncFrame> {
         let message = tokio::time::timeout(timeout, self.socket.next())
             .await
-            .ok()?;
-        let Message::Binary(bytes) = message.unwrap().unwrap() else {
-            panic!("the CLI sent a message that isn't a frame");
-        };
+            .ok()??
+            .unwrap();
+        match message {
+            Message::Binary(bytes) => Some(SyncFrame::decode(&bytes).unwrap()),
+            message => panic!("the CLI sent {message:?}"),
+        }
+    }
 
+    async fn recv(&mut self) -> SyncFrame {
+        self.recv_within(FRAME_TIMEOUT)
+            .await
+            .expect("the CLI sent nothing in time")
+    }
+
+    /// Receives a whole push, from `Begin` to `Commit`, and unpacks it.
+    async fn recv_push(&mut self) -> Push {
         let SyncFrame::Begin {
-            push_id, entries, ..
-        } = SyncFrame::decode(&bytes).unwrap()
+            push_id,
+            mode,
+            entries: plans,
+        } = self.recv().await
         else {
             panic!("a push starts with `Begin`");
         };
 
-        tokio::time::timeout(timeout, async {
-            loop {
-                let Message::Binary(bytes) = self.socket.next().await.unwrap().unwrap() else {
-                    panic!("the CLI sent a message that isn't a frame");
-                };
+        let mut archives = BTreeMap::<u32, Vec<u8>>::new();
 
-                match SyncFrame::decode(&bytes).unwrap() {
-                    SyncFrame::Data { .. } | SyncFrame::EntryDone { .. } => {}
-                    SyncFrame::Commit { .. } => break,
-                    frame => panic!("unexpected frame in a push: {frame:?}"),
+        loop {
+            match self.recv().await {
+                SyncFrame::Data { index, chunk } => {
+                    archives.entry(index).or_default().extend(chunk);
                 }
+                SyncFrame::EntryDone { .. } => {}
+                SyncFrame::Commit { push_id: committed } => {
+                    assert_eq!(committed, push_id);
+                    break;
+                }
+                frame => panic!("unexpected frame in a push: {frame:?}"),
             }
-        })
-        .await
-        .expect("the push started, but `Commit` didn't arrive");
+        }
 
-        self.generation += 1;
-        let applied = SyncFrame::Applied {
+        let entries = plans
+            .iter()
+            .map(|plan| {
+                let archive = archives.remove(&plan.index).unwrap_or_default();
+                (plan.index, unpack(&archive))
+            })
+            .collect();
+
+        Push {
             push_id,
-            generation: self.generation,
+            mode,
+            entries,
+        }
+    }
+
+    /// Answers push `push_id` as the sidecar would, with `generation`.
+    async fn apply(&mut self, push_id: u64, generation: u64) {
+        self.send(SyncFrame::Applied {
+            push_id,
+            generation,
             entries: Vec::new(),
-        };
+        })
+        .await;
+    }
 
-        self.socket
-            .send(Message::Binary(applied.encode().into()))
-            .await
-            .unwrap();
-
-        Some(entries.iter().map(|entry| entry.index).collect())
+    /// Pairs the CLI, and receives and applies the full push that follows, as `generation`.
+    async fn pair_and_apply(&mut self, generation: u64) -> Push {
+        self.send(SyncFrame::Paired {
+            generation: None,
+            protocol_version: mirrord_operator::sync::SYNC_PROTOCOL_VERSION,
+        })
+        .await;
+        let push = self.recv_push().await;
+        assert_eq!(push.mode, PushMode::Full);
+        self.apply(push.push_id, generation).await;
+        push
     }
 }
 
-/// How long `--watch` gets to push a change: the debounce, packing and the push.
-const PUSH_TIMEOUT: Duration = Duration::from_secs(5);
+/// The paths and contents of a gzip-compressed tar stream, `None` for a directory.
+fn unpack(archive: &[u8]) -> Pushed {
+    if archive.is_empty() {
+        return Pushed::new();
+    }
 
-/// How long the test waits to see that `--watch` pushes nothing: the debounce, and as long again
-/// for packing and sending the push.
-const QUIET_PERIOD: Duration = WATCH_DEBOUNCE.saturating_mul(2);
+    tar::Archive::new(GzDecoder::new(archive))
+        .entries()
+        .unwrap()
+        .map(|entry| {
+            let mut entry = entry.unwrap();
+            let path = entry.path().unwrap().to_string_lossy().into_owned();
+            let contents = entry.header().entry_type().is_file().then(|| {
+                let mut contents = String::new();
+                entry.read_to_string(&mut contents).unwrap();
+                contents
+            });
+            (path, contents)
+        })
+        .collect()
+}
 
-/// `--watch` pushes an entry once per change to the files that a push carries, including a change
-/// made after the first push but before it started watching, and never for what a push doesn't
-/// carry, such as a build's output in an ignored directory.
-#[tokio::test]
-async fn watch_pushes_each_change_to_the_pushed_files_once() {
-    let frontend = tempfile::tempdir().unwrap();
-    let backend = tempfile::tempdir().unwrap();
-    let write = |dir: &Path, path: &str, contents: &str| {
-        let path = dir.join(path);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, contents).unwrap();
-    };
+/// A sync driver of `entries`, started, whose every connection reaches the test as an
+/// [`Operator`] on the returned channel.
+fn start(
+    entries: Vec<SyncEntry>,
+    watch: bool,
+) -> (
+    JoinHandle<CliError>,
+    mpsc::UnboundedReceiver<Operator>,
+    tokio::sync::watch::Receiver<SyncActivity>,
+) {
+    let (operators, operators_rx) = mpsc::unbounded_channel();
+    let connect: Connect<DuplexStream> = Box::new(move || {
+        let operators = operators.clone();
+        Box::pin(async move {
+            let (cli, operator) = tokio::io::duplex(1 << 20);
+            let (cli, operator) = tokio::join!(
+                WebSocketStream::from_raw_socket(cli, Role::Client, None),
+                WebSocketStream::from_raw_socket(operator, Role::Server, None),
+            );
+            let _ = operators.send(Operator { socket: operator });
+            Ok(PreviewSyncConnection::new(cli))
+        })
+    });
 
-    write(frontend.path(), ".gitignore", "dist/\n");
-    write(frontend.path(), "app.js", "v1");
-    write(backend.path(), "server.js", "v1");
+    let (driver, activity) =
+        SyncDriver::with_connect(connect, entries.into(), watch, ProgressTracker::null()).unwrap();
+    (tokio::spawn(driver.run()), operators_rx, activity)
+}
 
-    let (cli, operator) = tokio::io::duplex(1 << 20);
-    let (cli, operator) = tokio::join!(
-        WebSocketStream::from_raw_socket(cli, Role::Client, None),
-        WebSocketStream::from_raw_socket(operator, Role::Server, None),
-    );
-    let mut operator = Operator {
-        socket: operator,
-        generation: 0,
-    };
-    let entry = |local: &Path| SyncEntry {
+/// The next connection that the driver opens.
+async fn next_connection(operators: &mut mpsc::UnboundedReceiver<Operator>) -> Operator {
+    tokio::time::timeout(FRAME_TIMEOUT, operators.recv())
+        .await
+        .expect("the CLI didn't connect in time")
+        .unwrap()
+}
+
+fn write(dir: &Path, path: &str, contents: &str) {
+    let path = dir.join(path);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, contents).unwrap();
+}
+
+fn entry(local: &Path) -> SyncEntry {
+    SyncEntry {
         local: local.to_owned(),
         remote: "/app".to_owned(),
         ignore: Vec::new(),
-    };
-    let entries = Arc::from([entry(frontend.path()), entry(backend.path())]);
-
-    let (first_push, entries) = tokio::join!(
-        PreviewSync::first_push(PreviewSyncConnection::new(cli), entries),
-        operator.next_push(PUSH_TIMEOUT),
-    );
-    let (preview_sync, generation) = first_push.unwrap();
-    assert_eq!((generation, entries), (1, Some(vec![0, 1])));
-
-    write(frontend.path(), "app.js", "v2, written before the watch");
-
-    let progress = ProgressTracker::null();
-    let edits = async {
-        assert_eq!(operator.next_push(PUSH_TIMEOUT).await, Some(vec![0]));
-
-        write(frontend.path(), "app.js", "v3, a longer edit");
-        assert_eq!(operator.next_push(PUSH_TIMEOUT).await, Some(vec![0]));
-        assert_eq!(
-            operator.next_push(QUIET_PERIOD).await,
-            None,
-            "a push followed although the tree didn't change"
-        );
-
-        write(frontend.path(), "dist/bundle.js", "bundle");
-        assert_eq!(
-            operator.next_push(QUIET_PERIOD).await,
-            None,
-            "a change to an ignored file started a push"
-        );
-
-        write(backend.path(), "server.js", "v2, a longer edit");
-        assert_eq!(operator.next_push(PUSH_TIMEOUT).await, Some(vec![1]));
-    };
-
-    // `watch` starts watching before it first waits, so polling it first makes it see the edits.
-    tokio::select! {
-        biased;
-        result = preview_sync.watch(&progress) => panic!("`--watch` ended: {result:?}"),
-        () = edits => {}
     }
+}
+
+fn file(contents: &str) -> Option<String> {
+    Some(contents.to_owned())
+}
+
+/// Under `--watch`, each change pushes the trees whole again, including a change made while the
+/// CLI listed the trees for the push before.
+#[tokio::test]
+async fn watch_pushes_the_trees_again_on_each_change() {
+    let local = tempfile::tempdir().unwrap();
+    let dir = local.path();
+    write(dir, "app.js", "v1");
+
+    let (sync, mut operators, _activity) = start(vec![entry(dir)], true);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+
+    write(dir, "app.js", "v2");
+    write(dir, "lib/util.js", "util");
+    let push = operator.recv_push().await;
+    assert_eq!(push.mode, PushMode::Full);
+    assert_eq!(
+        push.entries[&0],
+        Pushed::from([
+            ("app.js".to_owned(), file("v2")),
+            ("lib".to_owned(), None),
+            ("lib/util.js".to_owned(), file("util")),
+        ])
+    );
+
+    assert!(sync.is_finished().not());
+    sync.abort();
+}
+
+/// The operator and the sidecar may still hold a push of a CLI that a newer CLI replaced, and
+/// tell pushes apart by their ids, so the newer CLI's pushes must not reuse them.
+#[tokio::test]
+async fn two_clis_number_their_pushes_apart() {
+    let local = tempfile::tempdir().unwrap();
+    let dir = local.path();
+    write(dir, "app.js", "v1");
+
+    let mut push_ids = Vec::new();
+    for _ in 0..2 {
+        let (sync, mut operators, _activity) = start(vec![entry(dir)], true);
+        let mut operator = next_connection(&mut operators).await;
+        push_ids.push(operator.pair_and_apply(1).await.push_id);
+        sync.abort();
+    }
+
+    assert_ne!(push_ids[0], push_ids[1]);
+}
+
+/// The operator unpairs the CLI when the sidecar goes, and the volume may then hold anything, so
+/// the CLI pushes the tree whole once it is paired again, and not before.
+#[tokio::test]
+async fn a_full_push_follows_every_pairing() {
+    let local = tempfile::tempdir().unwrap();
+    let dir = local.path();
+    write(dir, "app.js", "v1");
+
+    let (sync, mut operators, _activity) = start(vec![entry(dir)], true);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+
+    operator
+        .send(SyncFrame::Unpaired {
+            reason: UnpairReason::SidecarGone,
+        })
+        .await;
+    write(dir, "app.js", "v2");
+    assert_eq!(
+        operator.recv_within(QUIET_PERIOD).await,
+        None,
+        "the CLI pushed while unpaired"
+    );
+    let push = operator.pair_and_apply(2).await;
+    assert_eq!(push.entries[&0]["app.js"], file("v2"));
+
+    sync.abort();
+}
+
+/// A change while the preview is idle wakes it once, and the CLI pushes the tree whole once the
+/// operator pairs it again.
+#[tokio::test]
+async fn a_change_wakes_an_idle_preview() {
+    let local = tempfile::tempdir().unwrap();
+    let dir = local.path();
+    write(dir, "app.js", "v1");
+
+    let (sync, mut operators, _activity) = start(vec![entry(dir)], true);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+
+    operator
+        .send(SyncFrame::Unpaired {
+            reason: UnpairReason::Idle,
+        })
+        .await;
+    write(dir, "app.js", "v2");
+    assert_eq!(operator.recv().await, SyncFrame::WakeRequest);
+
+    write(dir, "app.js", "v3");
+    assert_eq!(
+        operator.recv_within(QUIET_PERIOD).await,
+        None,
+        "the CLI woke the preview twice, or pushed while unpaired"
+    );
+
+    let push = operator.pair_and_apply(2).await;
+    assert_eq!(push.entries[&0]["app.js"], file("v3"));
+
+    sync.abort();
+}
+
+/// A push that fails with an I/O error of the sidecar is retried once on a new connection, and
+/// fails the sync when the retry fails too. A rejection that would repeat, such as a conflict,
+/// fails the sync without a retry.
+#[tokio::test]
+async fn a_failed_push_is_retried_once_unless_it_would_repeat() {
+    let local = tempfile::tempdir().unwrap();
+    write(local.path(), "app.js", "v1");
+    let io = || RejectReason::Io("disk error".to_owned());
+
+    let (sync, mut operators, _activity) = start(vec![entry(local.path())], false);
+    for attempt in 0..2 {
+        let mut operator = next_connection(&mut operators).await;
+        operator
+            .send(SyncFrame::Paired {
+                generation: None,
+                protocol_version: mirrord_operator::sync::SYNC_PROTOCOL_VERSION,
+            })
+            .await;
+        let push = operator.recv_push().await;
+        operator
+            .send(SyncFrame::Rejected {
+                push_id: push.push_id,
+                reason: io(),
+            })
+            .await;
+        if attempt == 1 {
+            let error = tokio::time::timeout(FRAME_TIMEOUT, sync)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                super::with_causes(&error).contains("disk error"),
+                "{error:?}"
+            );
+            break;
+        }
+    }
+
+    let (sync, mut operators, _activity) = start(vec![entry(local.path())], false);
+    let mut operator = next_connection(&mut operators).await;
+    operator
+        .send(SyncFrame::Paired {
+            generation: None,
+            protocol_version: mirrord_operator::sync::SYNC_PROTOCOL_VERSION,
+        })
+        .await;
+    let push = operator.recv_push().await;
+    operator
+        .send(SyncFrame::Rejected {
+            push_id: push.push_id,
+            reason: RejectReason::Conflict("node_modules".to_owned()),
+        })
+        .await;
+    let error = tokio::time::timeout(FRAME_TIMEOUT, sync)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        super::with_causes(&error).contains("node_modules"),
+        "{error:?}"
+    );
+    assert!(
+        operators.try_recv().is_err(),
+        "the CLI connected again after a rejection that would repeat"
+    );
+}
+
+/// When another CLI takes over the sync, this one stops and doesn't connect again.
+#[tokio::test]
+async fn a_replaced_sync_stops_without_reconnecting() {
+    let local = tempfile::tempdir().unwrap();
+    write(local.path(), "app.js", "v1");
+
+    let (sync, mut operators, _activity) = start(vec![entry(local.path())], true);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+    operator
+        .send(SyncFrame::Unpaired {
+            reason: UnpairReason::Replaced,
+        })
+        .await;
+
+    let result = tokio::time::timeout(FRAME_TIMEOUT, sync)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(result, CliError::PreviewSyncReplaced),
+        "{result:?}"
+    );
+    assert!(operators.try_recv().is_err());
+}
+
+/// The operator unpairs the CLI in the middle of a push when the pod's sidecar goes away or a
+/// `mirrord exec` session pauses the preview. The CLI must then wait for the next `Paired` and
+/// push the tree whole, rather than fail the sync.
+#[tokio::test]
+async fn an_unpair_during_a_push_waits_for_the_next_pairing() {
+    let local = tempfile::tempdir().unwrap();
+    let dir = local.path();
+    write(dir, "app.js", "v1");
+
+    let (sync, mut operators, _activity) = start(vec![entry(dir)], true);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+
+    write(dir, "app.js", "v2");
+    operator.recv_push().await;
+    operator
+        .send(SyncFrame::Unpaired {
+            reason: UnpairReason::SidecarGone,
+        })
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(sync.is_finished().not(), "{:?}", sync.await);
+
+    let push = operator.pair_and_apply(2).await;
+    assert_eq!(push.entries[&0]["app.js"], file("v2"));
+    sync.abort();
+}
+
+/// Under `--watch`, the run lasts as long as the developer works, and every operator restart
+/// breaks the connection between pushes. The CLI must connect again each time.
+#[tokio::test]
+async fn watch_reconnects_after_every_broken_connection() {
+    let local = tempfile::tempdir().unwrap();
+    write(local.path(), "app.js", "v1");
+
+    let (sync, mut operators, _activity) = start(vec![entry(local.path())], true);
+    for generation in 1..=3 {
+        let mut operator = next_connection(&mut operators).await;
+        operator.pair_and_apply(generation).await;
+        drop(operator);
+    }
+
+    next_connection(&mut operators).await;
+    assert!(sync.is_finished().not(), "{:?}", sync.await);
+    sync.abort();
 }
 
 /// A service of a `mirrord-up.yaml` in `/repo` with the given `sync` entries, as

@@ -883,6 +883,14 @@ pub(crate) enum CliError {
         error: io::Error,
     },
 
+    #[error("Another `mirrord preview sync` took over the code sync of the preview environment")]
+    #[diagnostic(help(
+        "Only one CLI pushes into a preview environment at a time, and a newer CLI takes over \
+        from an earlier one. This CLI stopped, and left the preview environment as it is.\
+        {GENERAL_HELP}"
+    ))]
+    PreviewSyncReplaced,
+
     #[error("The `sync` path `{}` is not a local directory", .0.display())]
     #[diagnostic(help(
         "`sync[].local` in `mirrord-up.yaml` is resolved against the directory that contains the \

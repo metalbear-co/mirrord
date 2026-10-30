@@ -11,6 +11,7 @@ use std::{
     ffi::OsStr,
     ops::Not,
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -23,7 +24,7 @@ use kube::{
     Api, Client, Resource, ResourceExt,
     api::{DeleteParams, ListParams, ObjectMeta, PostParams},
     runtime::{
-        wait::delete,
+        wait::{await_condition, delete},
         watcher::{self, Event, watcher},
     },
 };
@@ -66,6 +67,7 @@ use mirrord_operator::{
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_up::{PreviewRun, SyncEntry};
 use prettytable::{Table, row};
+use tokio_util::task::AbortOnDropHandle;
 use tracing::Level;
 
 use crate::{
@@ -180,7 +182,7 @@ async fn preview_start(
         analytics,
     )
     .await?
-    .start(&mut progress)
+    .start(false, &mut progress)
     .await?;
 
     progress.success(Some("preview environment created successfully"));
@@ -596,12 +598,14 @@ impl PreparedPreview {
     }
 
     /// Creates the session, replacing the preview under the same key and target, and waits for
-    /// it to be ready. Returns the sync connection of a session with `sync` beside the
-    /// summary, after the first push.
+    /// it to be ready. Once a session with `sync` is ready, its sync has pushed the local code.
+    /// With `watch_files`, returns the sync's task beside the summary, which keeps pushing the
+    /// changes; without, the sync stops once the session is ready.
     async fn start(
         self,
+        watch_files: bool,
         progress: &mut ProgressTracker,
-    ) -> CliResult<(PreviewSummary, Option<sync::PreviewSync>)> {
+    ) -> CliResult<(PreviewSummary, Option<SyncTask>)> {
         let Self {
             mut layer_config,
             operator_api,
@@ -675,6 +679,12 @@ impl PreparedPreview {
                 .or_else(|| session.spec.share_host.clone())
         });
 
+        // The namespace the session (and therefore the preview pod) lands in.
+        let session_namespace = preview_namespace(&operator_api, &layer_config);
+
+        spec.db_branching = PreviewDbBranchingConfig::from_db_names(branch_db_names);
+        spec.share_host = share_host;
+
         for session in replaced_sessions {
             let name = session.name_any();
 
@@ -730,12 +740,6 @@ impl PreparedPreview {
             }
             labels
         };
-
-        // The namespace the session (and therefore the preview pod) lands in.
-        let session_namespace = preview_namespace(&operator_api, &layer_config);
-
-        spec.db_branching = PreviewDbBranchingConfig::from_db_names(branch_db_names);
-        spec.share_host = share_host;
 
         let annotations = operator_api
             .operator()
@@ -795,16 +799,16 @@ impl PreparedPreview {
 
         subtask.success(Some("preview session resource created"));
 
-        // Watch the `PreviewSession` status until it reaches `Ready` or `Failed`. Emits
-        // periodic warnings if initialization is taking longer than expected, so the user knows
-        // the command hasn't hung. If the session does not become `Ready` within the timeout,
-        // the CLI deletes the session resource.
+        // Watch the `PreviewSession` status until it reaches `Ready` or `Failed`. Emits periodic
+        // warnings if initialization is taking longer than expected, so the user knows the
+        // command hasn't hung. If the session does not become `Ready` within the timeout, the
+        // CLI deletes the session resource.
 
         let mut subtask = progress.subtask("waiting for preview to be ready");
 
         let mut stream = std::pin::pin!(watcher(
             api.clone(),
-            watcher::Config::default().fields(&format!("metadata.name={}", session.name_any())),
+            watcher::Config::default().fields(&format!("metadata.name={session_name}")),
         ));
 
         let initialization_start = Instant::now();
@@ -817,54 +821,94 @@ impl PreparedPreview {
         )));
 
         let mut last_known_phase: &str = "unknown";
-        // Assigned exactly once, in the `Ready` or `Idle` arm below, the only paths that leave the
-        // loop.
-        let share_host;
-        let idle;
 
-        // The pod of a session with `sync` becomes ready only once its sidecar holds a
-        // push, so the push runs while the loop below waits for `Ready`.
-        let mut preview_sync = None;
-        let mut sync_pending = sync.is_some();
-        let sync_progress = sync.map(|sync| (sync, progress.subtask("pushing the local code")));
-        let mut sync_push = Box::pin(async {
-            match sync_progress {
-                Some((PreparedSync { entries, api }, sync_progress)) => sync::PreviewSync::start(
-                    &api,
-                    &session_namespace,
-                    &session_name,
+        // The pod of a session with `sync` becomes ready only once its sidecar holds a push, so
+        // the sync runs while the loop below waits for `Ready`.
+        let (mut sync_task, mut activity) = match sync {
+            None => (None, None),
+            Some(PreparedSync {
+                entries,
+                api: sync_api,
+            }) => {
+                let (driver, activity) = sync::SyncDriver::new(
+                    Arc::new(sync_api),
+                    session_namespace.clone(),
+                    session_name.clone(),
                     entries,
-                    sync_progress,
+                    watch_files,
+                    progress.subtask("pushing the local code"),
                 )
-                .await
-                .map(Some),
-                None => Ok(None),
+                .inspect_err(|_| subtask.failure(None))?;
+                let api = api.clone();
+                let client = operator_api.client().clone();
+                let (namespace, name) = (session_namespace.clone(), session_name.clone());
+                let task = async move {
+                    let error = driver.run().await;
+                    sync_end(&api, &client, &namespace, &name, error).await
+                };
+                (Some(SyncTask::new(tokio::spawn(task))), Some(activity))
             }
-        });
+        };
 
-        loop {
+        // Fails the start with `error`, and deletes the session, unless another CLI took over its
+        // sync, which keeps it.
+        let fail = async |error: CliError, subtask: &mut ProgressTracker| {
+            if matches!(error, CliError::PreviewSyncReplaced).not() {
+                abandon_session(&api, &session_name, subtask, error).await
+            } else {
+                subtask.failure(None);
+                error
+            }
+        };
+
+        // The session's `share_host` and whether it is idle, once it is `Ready` or `Idle`. The
+        // session can turn `Ready` before the CLI reads the sidecar's answer to the first push,
+        // so the loop also waits for that answer, which the creation timeout bounds too.
+        let mut started = None;
+        let (share_host, idle) = loop {
+            if let Some(outcome) = started.clone()
+                && activity
+                    .as_mut()
+                    .is_none_or(|activity| activity.borrow_and_update().first_push.is_some())
+            {
+                break outcome;
+            }
+
             tokio::select! {
-                result = &mut sync_push, if sync_pending => {
-                    sync_pending = false;
-                    match result {
-                        Ok(pushed) => preview_sync = pushed,
-                        Err(error) => {
-                            return Err(abandon_session(&api, &session_name, &mut subtask, error).await);
-                        }
+                result = async {
+                    match &mut sync_task {
+                        Some(task) => task.await,
+                        None => std::future::pending().await,
                     }
+                } => {
+                    return Err(match sync_task_error(result) {
+                        // The session is gone, or failed, so there is nothing to delete.
+                        error @ (CliError::PreviewSessionFailed { .. }
+                        | CliError::PreviewSessionDeleted) => {
+                            subtask.failure(None);
+                            error
+                        }
+                        error => fail(error, &mut subtask).await,
+                    });
                 }
+                // The top of the loop reads the first push.
+                Ok(()) = async {
+                    match &mut activity {
+                        Some(activity) => activity.changed().await,
+                        None => std::future::pending().await,
+                    }
+                } => {}
                 _ = &mut timeout => {
                     // Read the pods before deleting the session: the delete tears down the
                     // deployment, and their output goes with it.
                     let logs = fetch_preview_logs_best_effort(
                         operator_api.client(),
                         &session_namespace,
-                        &session.name_any(),
+                        &session_name,
                     )
                     .await;
 
-                    let error = CliError::PreviewTimeout { logs };
-                    return Err(abandon_session(&api, &session_name, &mut subtask, error).await);
+                    return Err(fail(CliError::PreviewTimeout { logs }, &mut subtask).await);
                 }
                 _ = long_initialization_timer.tick() => {
                     subtask.warning(&format!(
@@ -885,32 +929,25 @@ impl PreparedPreview {
                                         last_known_phase = "waiting for preview pod to be ready";
                                     }
                                     PreviewSessionPhase::Ready => {
-                                        share_host = status.share_host.clone();
-                                        idle = false;
-                                        break;
+                                        started = Some((status.share_host.clone(), false));
                                     }
                                     // Sessions started with `feature.preview.idle.start_idle` never
                                     // pass through `Ready` on creation — `Idle` is their terminal
                                     // success state (pods boot on first traffic).
                                     PreviewSessionPhase::Idle => {
-                                        share_host = status.share_host.clone();
-                                        idle = true;
-                                        break;
+                                        started = Some((status.share_host.clone(), true));
                                     }
                                     PreviewSessionPhase::Failed => {
-                                        let failure_message = status.failure_message.clone().expect("Failed session must have failure_message");
-                                        let logs = fetch_preview_logs_best_effort(
+                                        let error = session_failed(
                                             operator_api.client(),
                                             &session_namespace,
-                                            &session.name_any(),
+                                            &session_name,
+                                            status.failure_message.clone().unwrap_or_default(),
                                         )
                                         .await;
 
                                         subtask.failure(None);
-                                        return Err(CliError::PreviewSessionFailed {
-                                            message: failure_message,
-                                            logs,
-                                        });
+                                        return Err(error);
                                     }
                                     PreviewSessionPhase::Paused => {
                                         last_known_phase = "preview session is paused";
@@ -939,33 +976,11 @@ impl PreparedPreview {
                     }
                 }
             }
-        }
+        };
 
-        // The session can turn `Ready` before the CLI reads the sidecar's answer to the push, so
-        // the loop can end first. The creation timeout still bounds the wait for the answer.
-        if sync_pending {
-            tokio::select! {
-                result = &mut sync_push => match result {
-                    Ok(pushed) => preview_sync = pushed,
-                    Err(error) => {
-                        return Err(abandon_session(&api, &session_name, &mut subtask, error).await);
-                    }
-                },
-                _ = &mut timeout => {
-                    let logs = fetch_preview_logs_best_effort(
-                        operator_api.client(),
-                        &session_namespace,
-                        &session.name_any(),
-                    )
-                    .await;
-
-                    let error = CliError::PreviewTimeout { logs };
-                    return Err(abandon_session(&api, &session_name, &mut subtask, error).await);
-                }
-            }
-        }
-        // The push borrows the session's name, which the summary takes below.
-        drop(sync_push);
+        // Without `--watch`, nothing needs the sync once the session is ready, and dropping the
+        // task stops it.
+        let sync_task = sync_task.filter(|_| watch_files);
 
         subtask.success(Some(if idle {
             "preview session is idle (pods will boot on first traffic)"
@@ -996,15 +1011,16 @@ impl PreparedPreview {
             // The preview is gone: reporting a successful start would print a key and session
             // name for something the user cannot use.
             multicluster::ReplicaOutcome::Failed(message) => {
-                let logs = fetch_preview_logs_best_effort(
+                let error = session_failed(
                     operator_api.client(),
                     &session_namespace,
                     &session_name,
+                    message,
                 )
                 .await;
 
                 progress.failure(None);
-                return Err(CliError::PreviewSessionFailed { message, logs });
+                return Err(error);
             }
             multicluster::ReplicaOutcome::Deleted => {
                 progress.failure(None);
@@ -1020,8 +1036,74 @@ impl PreparedPreview {
             idle,
         };
 
-        Ok((summary, preview_sync))
+        Ok((summary, sync_task))
     }
+}
+
+/// The task of a session's code sync, which ends only with the error that ended the sync (see
+/// [`sync::SyncDriver::run`] and [`sync_end`]). Dropping it stops the sync, so a start that fails
+/// or a run that ends leaves no sync running.
+pub(crate) type SyncTask = AbortOnDropHandle<CliError>;
+
+/// The error that ended a code sync task. A panic of the task becomes
+/// [`CliError::PreviewSyncFailed`].
+fn sync_task_error(result: Result<CliError, tokio::task::JoinError>) -> CliError {
+    result.unwrap_or_else(|error| CliError::PreviewSyncFailed(Box::new(error)))
+}
+
+/// How long the CLI waits for the status of a session whose code sync ended, to tell whether the
+/// session failed or was deleted. The controller writes a failure into the status a few seconds
+/// after the operator ends the sync.
+const SYNC_END_STATUS_WAIT: Duration = Duration::from_secs(10);
+
+/// The error to report for the code sync of the session `name` in `namespace`, which `error`
+/// ended. The operator ends the sync of a session that failed or was deleted with an error that
+/// only says that the preview doesn't run, so the session's own failure, or its deletion, is
+/// reported instead, once the session shows it within [`SYNC_END_STATUS_WAIT`]. An error of the
+/// CLI's own, or another CLI's takeover, says all there is to say.
+async fn sync_end(
+    api: &Api<PreviewSession>,
+    client: &Client,
+    namespace: &str,
+    name: &str,
+    error: CliError,
+) -> CliError {
+    if matches!(
+        error,
+        CliError::PreviewSyncReplaced | CliError::PreviewSyncReadFailed { .. }
+    ) {
+        return error;
+    }
+
+    let ended = await_condition(api.clone(), name, |session: Option<&PreviewSession>| {
+        session.is_none_or(|session| {
+            session.metadata.deletion_timestamp.is_some()
+                || session
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| status.phase == PreviewSessionPhase::Failed)
+        })
+    });
+
+    match tokio::time::timeout(SYNC_END_STATUS_WAIT, ended).await {
+        Ok(Ok(Some(session))) if session.metadata.deletion_timestamp.is_none() => {
+            let message = session
+                .status
+                .and_then(|status| status.failure_message)
+                .unwrap_or_default();
+            session_failed(client, namespace, name, message).await
+        }
+        Ok(Ok(_)) => CliError::PreviewSessionDeleted,
+        // The watch failed, or the session showed no failure or deletion in time.
+        Ok(Err(_)) | Err(_) => error,
+    }
+}
+
+/// The error of the session `name` in `namespace`, which failed with `message`, with the logs of
+/// its pods.
+async fn session_failed(client: &Client, namespace: &str, name: &str, message: String) -> CliError {
+    let logs = fetch_preview_logs_best_effort(client, namespace, name).await;
+    CliError::PreviewSessionFailed { message, logs }
 }
 
 /// Deletes the session `session_name`, whose start failed with `error`, and fails `subtask`.
