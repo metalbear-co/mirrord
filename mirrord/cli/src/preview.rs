@@ -724,78 +724,18 @@ impl PreparedPreview {
             };
         }
 
-        let session_name = PreviewSession::make_resource_name(&config_target, key.to_owned());
-
-        // Operators running with a custom OPERATOR_ISOLATION_MARKER only reconcile preview
-        // sessions labeled with their marker (see the label selector in the preview-env
-        // controller). The runtime env var check here allows developers to label the session
-        // so it gets picked up by an isolated operator instead of the production one.
-        let session_labels = {
-            let mut labels = BTreeMap::from([(
-                PREVIEW_SESSION_KEY_LABEL.to_owned(),
-                EnvKey::to_hashed_label_value(layer_config.key.as_str()),
-            )]);
-            if let Ok(marker) = std::env::var("OPERATOR_ISOLATION_MARKER") {
-                labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
-            }
-            labels
-        };
-
-        let annotations = operator_api
-            .operator()
-            .spec
-            .operator_namespace
-            .is_some()
-            .then(|| {
-                let target_ns = layer_config
-                    .target
-                    .namespace
-                    .as_deref()
-                    .unwrap_or(operator_api.client().default_namespace());
-                BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_owned(), target_ns.to_owned())])
-            });
-
-        // Create the `PreviewSession` resource in the cluster. The CR name is derived from
-        // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).
-        // The operator watches for these resources and reconciles them into preview pods.
-        let session = PreviewSession {
-            metadata: ObjectMeta {
-                name: Some(session_name.clone()),
-                labels: Some(session_labels),
-                annotations,
-                ..Default::default()
-            },
+        let session = create_session(
+            &api,
+            &operator_api,
+            &layer_config,
+            &config_target,
             spec,
-            status: None,
-        };
-
-        let session = api
-            .create(&PostParams::default(), &session)
-            .await
-            .map_err(|e| {
-                subtask.failure(None);
-                CliError::PreviewSessionRejected(e.to_string())
-            })?;
-
-        // Now that the session exists we can hand its secret-mount contents to the operator, tagging
-        // the Secret with the session's owner reference so it is garbage-collected together with the
-        // session. Done after creation so a rejected session never leaves an orphaned Secret.
-        if !secret_values.is_empty() {
-            let owner_ref = session.owner_ref(&()).ok_or_else(|| {
-                subtask.failure(None);
-                CliError::PreviewSecretMountFailed("created session is missing a UID".to_owned())
-            })?;
-
-            if let Err(error) = operator_api
-                .create_preview_secret_mounts(&session_namespace, owner_ref, secret_values)
-                .await
-            {
-                // The session can never become ready without its Secret, so remove it.
-                let _ = api.delete(&session_name, &DeleteParams::default()).await;
-                subtask.failure(None);
-                return Err(CliError::PreviewSecretMountFailed(error.to_string()));
-            }
-        }
+            secret_values,
+            &session_namespace,
+        )
+        .await
+        .inspect_err(|_| subtask.failure(None))?;
+        let session_name = session.name_any();
 
         subtask.success(Some("preview session resource created"));
 
@@ -1051,6 +991,89 @@ impl PreparedPreview {
 
         Ok((summary, sync_task))
     }
+}
+
+/// Creates the session `spec` describes for `config_target`, and hands `secret_values` to the
+/// operator once it exists. The session's namespace is `session_namespace`.
+async fn create_session(
+    api: &Api<PreviewSession>,
+    operator_api: &OperatorApi<NoClientCert>,
+    layer_config: &LayerConfig,
+    config_target: &Target,
+    spec: PreviewSessionSpec,
+    secret_values: BTreeMap<String, ByteString>,
+    session_namespace: &str,
+) -> CliResult<PreviewSession> {
+    let session_name =
+        PreviewSession::make_resource_name(config_target, layer_config.key.as_str().to_owned());
+
+    // Operators running with a custom OPERATOR_ISOLATION_MARKER only reconcile preview
+    // sessions labeled with their marker (see the label selector in the preview-env
+    // controller). The runtime env var check here allows developers to label the session
+    // so it gets picked up by an isolated operator instead of the production one.
+    let session_labels = {
+        let mut labels = BTreeMap::from([(
+            PREVIEW_SESSION_KEY_LABEL.to_owned(),
+            EnvKey::to_hashed_label_value(layer_config.key.as_str()),
+        )]);
+        if let Ok(marker) = std::env::var("OPERATOR_ISOLATION_MARKER") {
+            labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
+        }
+        labels
+    };
+
+    let annotations = operator_api
+        .operator()
+        .spec
+        .operator_namespace
+        .is_some()
+        .then(|| {
+            let target_ns = layer_config
+                .target
+                .namespace
+                .as_deref()
+                .unwrap_or(operator_api.client().default_namespace());
+            BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_owned(), target_ns.to_owned())])
+        });
+
+    // Create the `PreviewSession` resource in the cluster. The CR name is derived from
+    // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).
+    // The operator watches for these resources and reconciles them into preview pods.
+    let session = PreviewSession {
+        metadata: ObjectMeta {
+            name: Some(session_name.clone()),
+            labels: Some(session_labels),
+            annotations,
+            ..Default::default()
+        },
+        spec,
+        status: None,
+    };
+
+    let session = api
+        .create(&PostParams::default(), &session)
+        .await
+        .map_err(|e| CliError::PreviewSessionRejected(e.to_string()))?;
+
+    // Now that the session exists we can hand its secret-mount contents to the operator, tagging
+    // the Secret with the session's owner reference so it is garbage-collected together with the
+    // session. Done after creation so a rejected session never leaves an orphaned Secret.
+    if !secret_values.is_empty() {
+        let owner_ref = session.owner_ref(&()).ok_or_else(|| {
+            CliError::PreviewSecretMountFailed("created session is missing a UID".to_owned())
+        })?;
+
+        if let Err(error) = operator_api
+            .create_preview_secret_mounts(session_namespace, owner_ref, secret_values)
+            .await
+        {
+            // The session can never become ready without its Secret, so remove it.
+            let _ = api.delete(&session_name, &DeleteParams::default()).await;
+            return Err(CliError::PreviewSecretMountFailed(error.to_string()));
+        }
+    }
+
+    Ok(session)
 }
 
 /// The task of a session's code sync, which ends only with the error that ended the sync (see
