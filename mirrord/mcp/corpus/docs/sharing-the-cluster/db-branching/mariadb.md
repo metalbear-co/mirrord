@@ -7,6 +7,8 @@ tags:
   - enterprise
 ---
 
+# MariaDB
+
 This page covers DB branching for MariaDB. For the general concepts, the full list of config fields, and how a session behaves, see the [DB Branching overview](../db-branching.md).
 
 {% hint style="info" %}

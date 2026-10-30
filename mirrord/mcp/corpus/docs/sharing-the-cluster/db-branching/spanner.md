@@ -7,6 +7,8 @@ tags:
   - enterprise
 ---
 
+# Google Spanner
+
 This page covers DB branching for Google Cloud Spanner. For the general concepts, the full list of config fields, and how a session behaves, see the [DB Branching overview](../db-branching.md).
 
 The branch runs the [Cloud Spanner emulator](https://cloud.google.com/spanner/docs/emulator) as a pod in your cluster. mirrord redirects your app to it by setting `SPANNER_EMULATOR_HOST`, which every official Spanner client library checks on its own. Your app keeps its own `project`, `instance`, and `database` values unchanged - they now resolve against the emulator instead of real Spanner, so no code change is needed.

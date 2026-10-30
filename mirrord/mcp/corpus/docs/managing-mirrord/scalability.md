@@ -16,6 +16,8 @@ tags:
 description: Default sizing, concurrent session guidance, and capacity validation for the mirrord Operator
 ---
 
+# Scalability
+
 {% hint style="info" %}
 This page is relevant for users on the Team and Enterprise pricing plans.
 {% endhint %}

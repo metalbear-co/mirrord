@@ -3,6 +3,8 @@ title: Global Configuration
 description: Set and remove user-wide mirrord CLI defaults
 ---
 
+# Global Configuration
+
 mirrord stores user-wide configuration in `~/.mirrord/mirrord.json`. Use it for a preference you want to keep across projects, rather than adding the same setting to every project's config file. The CLI creates the file as an empty JSON object when it is missing.
 
 {% hint style="warning" %}
