@@ -1,16 +1,15 @@
 //! Code sync for `mirrord preview sync`: pushes the local directories of a service's `sync` into
 //! its preview pod whole each time the operator pairs the CLI with the pod's sidecar, and under
-//! `--watch` again on each change in between.
+//! `--watch` pushes each change in between.
 
 use std::{
+    collections::{BTreeMap, BTreeSet},
     future::Future,
+    io,
     ops::Not,
     path::{Component, Path, PathBuf},
     pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -21,13 +20,13 @@ use mirrord_operator::{
         error::OperatorApiError,
         preview_sync::{
             PackedEntry, PreviewSyncConnection, PreviewSyncError, RuleSources, SyncEvent,
-            TreeListing, UpgradedConnection,
+            TreeListing, UpgradedConnection, pack_changes,
         },
     },
     crd::preview::{PreviewSyncConfig, PreviewSyncEntry, PreviewSyncInstall},
     sync::{
         AppReport, InstallReport, InstallState, PushMode, RejectReason, SidecarState,
-        SupervisorReport, UnpairReason,
+        SupervisorReport, UnpairReason, rules::IgnoreRules,
     },
 };
 use mirrord_progress::{Progress, ProgressTracker};
@@ -215,7 +214,7 @@ const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 
 /// The code sync of one service of `mirrord preview sync`: connects to the session's `sync`
 /// websocket, pushes the service's `sync` entries whenever the operator pairs the connection with
-/// the preview pod's sidecar, and with `--watch` pushes them again on every change in between.
+/// the preview pod's sidecar, and with `--watch` pushes every change in between.
 ///
 /// A push that fails with an I/O error is retried once, with a new connection and a full push,
 /// and a rejection that would repeat fails the sync right away. A broken connection to the
@@ -229,8 +228,8 @@ pub(super) struct SyncDriver<S> {
 
     connect: Connect<S>,
 
-    /// Watches the entries' trees under `--watch`, from before the first listing, so that it sees
-    /// every change that a push doesn't hold.
+    /// Watches the entries' trees under `--watch`. Each listing starts watching a directory
+    /// right before it reads it, so the watch sees every change that the listing doesn't hold.
     watcher: Option<TreeWatcher>,
 
     activity: watch::Sender<SyncActivity>,
@@ -247,8 +246,19 @@ pub(super) struct SyncDriver<S> {
 
     pairing: Pairing,
 
+    /// The generation that the volume holds after this CLI's last push, which an incremental
+    /// push builds on.
+    generation: Option<u64>,
+
     /// Where each entry's rules come from, found by the first listing.
     sources: Option<Arc<[RuleSources]>>,
+
+    /// The rules of each entry's last full push, which its incremental pushes apply too, and
+    /// which keep the watcher's ignored paths out of a push.
+    rules: Arc<[IgnoreRules]>,
+
+    /// The files outside the trees that the rules came from or could come from.
+    rule_files: BTreeSet<PathBuf>,
 
     sidecar: Option<SidecarState>,
     supervisor: SupervisorReport,
@@ -275,6 +285,10 @@ enum Pairing {
 enum Pushed {
     /// The sidecar applied the push, and the volume holds this generation.
     Applied(u64),
+
+    /// The sidecar rejected an incremental push because the volume holds another generation
+    /// than the one it built on, so only a full push makes it a mirror again.
+    StaleBase,
 
     /// The operator unpaired the connection before the sidecar answered, so the sidecar may or
     /// may not have applied the push, and the CLI pushes in full after the next `Paired`.
@@ -314,7 +328,7 @@ impl From<PreviewSyncError> for Stop {
 impl SyncDriver<UpgradedConnection> {
     /// The driver of the sync of the session `name` in `namespace`, which pushes `entries`, the
     /// service's `sync` entries in the order of the session's `spec.sync`. With `watch_files`, it
-    /// starts watching the entries' trees here.
+    /// creates the watcher here, and each listing then watches the directories that it reads.
     pub(super) fn new(
         operator_api: Arc<OperatorApi<MaybeClientCert>>,
         namespace: String,
@@ -362,9 +376,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
         watch_files: bool,
         progress: ProgressTracker,
     ) -> CliResult<(Self, watch::Receiver<SyncActivity>)> {
-        let watcher = watch_files
-            .then(|| TreeWatcher::new(&entries))
-            .transpose()?;
+        let watcher = watch_files.then(TreeWatcher::new).transpose()?;
         let (activity, activity_rx) = watch::channel(SyncActivity::default());
 
         let driver = Self {
@@ -376,7 +388,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
             next_push_id: rand::random(),
             applied_pushes: 0,
             pairing: Pairing::Waiting,
+            generation: None,
             sources: None,
+            rules: Arc::new([]),
+            rule_files: BTreeSet::new(),
             sidecar: None,
             supervisor: SupervisorReport::default(),
         };
@@ -431,8 +446,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
     }
 
     /// Serves one connection: pushes the trees whole whenever the operator pairs it, and with
-    /// `--watch` again on each change in between. Returns why it stopped.
+    /// `--watch` pushes the changes in between. Returns why it stopped.
     async fn serve(&mut self, mut connection: PreviewSyncConnection<S>) -> Stop {
+        let mut pending = Changes::default();
         self.pairing = Pairing::Waiting;
 
         loop {
@@ -447,7 +463,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                 event = connection.next_event() => match event {
                     Ok(SyncEvent::Paired { .. }) => {
                         self.pairing = Pairing::Paired;
-                        self.push_full(&mut connection, false).await
+                        pending = Changes::default();
+                        self.push_full(&mut connection, None).await
                     }
                     Ok(SyncEvent::Unpaired(UnpairReason::Replaced)) => {
                         return Stop::Fatal(Box::new(CliError::PreviewSyncReplaced));
@@ -462,16 +479,23 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                     }
                     Err(error) => Err(error.into()),
                 },
-                () = batch => match self.pairing {
-                    Pairing::Paired => self.push_full(&mut connection, true).await,
-                    Pairing::Idle => {
-                        self.pairing = Pairing::Waking;
-                        self.progress.info("waking the idle preview to push the change");
-                        connection.wake().await.map_err(Stop::from)
+                batch = batch => {
+                    pending.merge(batch, &self.entries, &self.rule_files, &self.rules);
+
+                    match self.pairing {
+                        Pairing::Paired if pending.is_empty().not() => {
+                            let changes = std::mem::take(&mut pending);
+                            self.push_changes(&mut connection, changes, &mut pending).await
+                        }
+                        Pairing::Idle if pending.is_empty().not() => {
+                            self.pairing = Pairing::Waking;
+                            self.progress.info("waking the idle preview to push the change");
+                            connection.wake().await.map_err(Stop::from)
+                        }
+                        // The next `Paired` brings a full push, which holds these changes.
+                        _ => Ok(()),
                     }
-                    // The next `Paired` brings a full push, which holds the change.
-                    Pairing::Waiting | Pairing::Waking => Ok(()),
-                },
+                }
             };
 
             if let Err(stop) = result {
@@ -483,28 +507,36 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
     /// Lists and pushes every entry whole, which makes each `remote` a mirror of its tree.
     ///
     /// When the trees can't be packed, such as a file that the CLI can't read, the sync stops,
-    /// unless a change started the push: a file that a tool removes while the CLI reads the tree
-    /// fails the pack, and its removal is a change, which starts the next push.
+    /// unless changes started the push: then `pending` turns into a full push, which the next
+    /// change starts, so that a file that a tool keeps unreadable for a while doesn't end
+    /// `--watch`.
     async fn push_full(
         &mut self,
         connection: &mut PreviewSyncConnection<S>,
-        after_change: bool,
+        pending: Option<&mut Changes>,
     ) -> Result<(), Stop> {
         let entries = self.entries.clone();
         let sources = self.sources.clone();
-        let full = tokio::task::spawn_blocking(move || list_and_pack(&entries, sources))
-            .await
-            .map_err(|error| Stop::Fatal(Box::new(CliError::PreviewSyncFailed(Box::new(error)))))?;
-
-        let full = match full {
+        let full = match self
+            .pack_blocking(move |watcher| list_and_pack(&entries, sources, watcher))
+            .await?
+        {
             Ok(full) => full,
-            Err(error) if after_change => {
-                self.progress.warning(&with_causes(&error));
-                return Ok(());
+            Err(error) => {
+                return match pending {
+                    Some(pending) => {
+                        self.progress.warning(&with_causes(&error));
+                        pending.full = true;
+                        Ok(())
+                    }
+                    None => Err(Stop::Transient(Box::new(error))),
+                };
             }
-            Err(error) => return Err(Stop::Transient(Box::new(error))),
         };
+
         self.sources = Some(full.sources);
+        self.rules = full.rules.into();
+        self.rule_files = full.rule_files;
 
         match self.push(connection, PushMode::Full, full.packed).await? {
             Pushed::Applied(generation) => {
@@ -518,7 +550,83 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                 self.unpaired(reason);
                 Ok(())
             }
+            // A full push builds on no generation.
+            Pushed::StaleBase => Err(PreviewSyncError::Rejected(RejectReason::StaleBase).into()),
         }
+    }
+
+    /// Pushes `changes`: incrementally when the rules still hold and the volume holds this
+    /// CLI's last push, and whole otherwise. When the changes can't be packed, such as a file
+    /// that a tool removes while the CLI reads it, they turn `pending` into a full push, which
+    /// the next change starts.
+    async fn push_changes(
+        &mut self,
+        connection: &mut PreviewSyncConnection<S>,
+        changes: Changes,
+        pending: &mut Changes,
+    ) -> Result<(), Stop> {
+        let Some(base_generation) = self.generation.filter(|_| changes.full.not()) else {
+            return self.push_full(connection, Some(pending)).await;
+        };
+
+        let entries = self.entries.clone();
+        let rules = self.rules.clone();
+        let packed = self
+            .pack_blocking(move |watcher| pack_all_changes(&entries, &rules, &changes, watcher))
+            .await?;
+
+        let packed = match packed {
+            Ok(Some(packed)) => packed,
+            // A change touched the rules.
+            Ok(None) => return self.push_full(connection, Some(pending)).await,
+            Err(error) => {
+                self.progress.warning(&with_causes(&error));
+                pending.full = true;
+                return Ok(());
+            }
+        };
+
+        if packed.is_empty() {
+            return Ok(());
+        }
+
+        match self
+            .push(
+                connection,
+                PushMode::Incremental { base_generation },
+                packed,
+            )
+            .await?
+        {
+            Pushed::Applied(_) => Ok(()),
+            Pushed::StaleBase => self.push_full(connection, Some(pending)).await,
+            Pushed::Unpaired(reason) => {
+                self.unpaired(reason);
+                Ok(())
+            }
+        }
+    }
+
+    /// Runs `pack` on a blocking thread with the watcher lent to it, so that it can start
+    /// watching each directory right before it reads it.
+    async fn pack_blocking<T: Send + 'static>(
+        &mut self,
+        pack: impl FnOnce(Option<&mut RecommendedWatcher>) -> T + Send + 'static,
+    ) -> Result<T, Stop> {
+        let mut watcher = self.watcher.as_mut().map(TreeWatcher::take);
+
+        let (watcher, result) = tokio::task::spawn_blocking(move || {
+            let result = pack(watcher.as_mut());
+            (watcher, result)
+        })
+        .await
+        .map_err(|error| Stop::Fatal(Box::new(CliError::PreviewSyncFailed(Box::new(error)))))?;
+
+        if let (Some(tree_watcher), Some(watcher)) = (&mut self.watcher, watcher) {
+            tree_watcher.put_back(watcher);
+        }
+
+        Ok(result)
     }
 
     /// Sends `packed` as one push in `mode`.
@@ -537,12 +645,16 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
 
         let generation = match result {
             Ok(generation) => generation,
+            Err(PreviewSyncError::Rejected(RejectReason::StaleBase)) => {
+                return Ok(Pushed::StaleBase);
+            }
             Err(PreviewSyncError::Unpaired(reason)) if reason != UnpairReason::Replaced => {
                 return Ok(Pushed::Unpaired(reason));
             }
             Err(error) => return Err(error.into()),
         };
 
+        self.generation = Some(generation);
         self.applied_pushes += 1;
         self.progress
             .info(&format!("pushed the local code (generation {generation})"));
@@ -598,62 +710,263 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
     }
 }
 
-/// The entries of a full push, with where their rules come from.
+/// The entries of a full push, with what incremental pushes after it need.
 struct FullPack {
     packed: Vec<PackedEntry>,
 
     /// Where each entry's rules come from.
     sources: Arc<[RuleSources]>,
+
+    /// The rules of each entry.
+    rules: Vec<IgnoreRules>,
+
+    /// The files outside the trees that the rules came from or could come from.
+    rule_files: BTreeSet<PathBuf>,
 }
 
 /// Lists and packs every entry whole. Finds where each entry's rules come from, unless
-/// `sources` holds them from an earlier listing.
+/// `sources` holds them from an earlier listing. Starts watching each directory before it reads
+/// it.
 fn list_and_pack(
     entries: &[SyncEntry],
     sources: Option<Arc<[RuleSources]>>,
+    mut watcher: Option<&mut RecommendedWatcher>,
 ) -> CliResult<FullPack> {
     let sources = match sources {
         Some(sources) => sources,
         None => entries
             .iter()
             .map(|entry| {
-                RuleSources::new(&entry.local).map_err(|error| CliError::PreviewSyncReadFailed {
-                    path: entry.local.clone(),
-                    error,
-                })
+                RuleSources::new(&entry.local).map_err(|error| read_failed(&entry.local, error))
             })
             .collect::<Result<Vec<_>, _>>()?
             .into(),
     };
+    let mut packed = Vec::with_capacity(entries.len());
+    let mut rules = Vec::with_capacity(entries.len());
+    let mut rule_files = BTreeSet::new();
 
-    let packed = entries
-        .iter()
-        .zip(sources.iter())
-        .enumerate()
-        .map(|(index, (entry, entry_sources))| {
-            let failed = |error| CliError::PreviewSyncReadFailed {
-                path: entry.local.clone(),
-                error,
-            };
-            TreeListing::new_watching(entry_sources, &entry.ignore, &mut |_| Ok(()))
-                .and_then(|listing| listing.pack(index as u32, &entry.local))
-                .map_err(failed)
+    for (index, (entry, entry_sources)) in entries.iter().zip(sources.iter()).enumerate() {
+        let failed = |error| read_failed(&entry.local, error);
+        let watch_failed = |error| CliError::PreviewSyncWatchFailed {
+            path: entry.local.clone(),
+            error,
+        };
+
+        // A watch follows its directory, so only a watch of the parent reports a directory that
+        // replaces the entry's own, such as one renamed into its place.
+        if let (Some(watcher), Some(parent)) = (watcher.as_deref_mut(), entry.local.parent()) {
+            watch_directory(watcher, parent).map_err(watch_failed)?;
+        }
+
+        let listing = TreeListing::new_watching(entry_sources, &entry.ignore, &mut |directory| {
+            watcher.as_deref_mut().map_or(Ok(()), |watcher| {
+                    watch_directory(watcher, directory).map_err(io::Error::other)
+            })
         })
-        .collect::<Result<_, _>>()?;
+        .map_err(failed)?;
 
-    Ok(FullPack { packed, sources })
+        if let Some(watcher) = watcher.as_deref_mut() {
+            // A change to a file that the rules come from, or could come from, changes the
+            // rules, so its directory is watched too. Only the file's own events count (see
+            // `Changes::merge`).
+            for file in listing.rule_files() {
+                if let Some(directory) = file.parent() {
+                    watch_directory(watcher, directory).map_err(watch_failed)?;
+                }
+            }
+        }
+
+        packed.push(listing.pack(index as u32, &entry.local).map_err(failed)?);
+        rules.push(listing.rules().clone());
+        rule_files.extend(listing.rule_files().iter().cloned());
+    }
+
+    Ok(FullPack {
+        packed,
+        sources,
+        rules,
+        rule_files,
+    })
 }
 
-/// Watches the trees of the pushed entries, each one recursively.
-struct TreeWatcher {
-    /// Kept for its watches, which end when it drops.
-    _watcher: RecommendedWatcher,
+/// Packs the changes of every entry in `changes` incrementally, with each entry's `rules`.
+/// Returns `None` when a change touched the rules, so the trees need a full push. Leaves out the
+/// entries without a change.
+fn pack_all_changes(
+    entries: &[SyncEntry],
+    rules: &[IgnoreRules],
+    changes: &Changes,
+    mut watcher: Option<&mut RecommendedWatcher>,
+) -> CliResult<Option<Vec<PackedEntry>>> {
+    let mut packed = Vec::new();
+
+    for (&index, changed) in &changes.per_entry {
+        let (Some(entry), Some(rules)) = (entries.get(index), rules.get(index)) else {
+            continue;
+        };
+
+        let packed_entry = pack_changes(
+            index as u32,
+            &entry.local,
+            rules,
+            changed,
+            &mut |directory| {
+                watcher.as_deref_mut().map_or(Ok(()), |watcher| {
+                        watch_directory(watcher, directory).map_err(io::Error::other)
+                })
+            },
+        )
+        .map_err(|error| read_failed(&entry.local, error))?;
+
+        let Some(packed_entry) = packed_entry else {
+            return Ok(None);
+        };
+
+        if packed_entry.plan.files + packed_entry.plan.directories > 0
+            || packed_entry.deleted.is_empty().not()
+        {
+            packed.push(packed_entry);
+        }
+    }
+
+    Ok(Some(packed))
+}
+
+/// Starts watching `directory` alone, without its subdirectories, which the listing watches when
+/// it reads them, so that an ignored tree such as `node_modules` takes no watch.
+fn watch_directory(watcher: &mut RecommendedWatcher, directory: &Path) -> notify::Result<()> {
+    match watcher.watch(directory, RecursiveMode::NonRecursive) {
+        // A directory that is gone by now has its removal on the way as an event, and the
+        // directory of a rule file that doesn't exist yet may not exist either.
+        Err(error) if matches!(error.kind, notify::ErrorKind::PathNotFound) => Ok(()),
+        result => result,
+    }
+}
+
+/// The error of an entry whose tree under `path` the CLI couldn't read, or couldn't watch: a
+/// listing that watches the directories it reads carries the watcher's error in an `io::Error`.
+fn read_failed(path: &Path, error: io::Error) -> CliError {
+    match error.downcast::<notify::Error>() {
+        Ok(error) => CliError::PreviewSyncWatchFailed {
+            path: path.to_owned(),
+            error,
+        },
+        Err(error) => CliError::PreviewSyncReadFailed {
+            path: path.to_owned(),
+            error,
+        },
+    }
+}
+
+/// What the watcher saw change, by entry, since the last push.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct Changes {
+    /// The changed paths of each entry, by its index, relative to its `local`.
+    per_entry: BTreeMap<usize, BTreeSet<PathBuf>>,
+
+    /// Whether only a full push can sync the trees: the watcher lost events, the rules changed,
+    /// or an earlier batch failed to pack.
+    full: bool,
+}
+
+impl Changes {
+    fn is_empty(&self) -> bool {
+        self.full.not() && self.per_entry.is_empty()
+    }
+
+    /// Adds the paths of `batch` to every entry whose `local` holds them, leaving out the paths
+    /// that the entry's `rules`, from its last full push, ignore whatever their kind. Local
+    /// directories may overlap, and a file under two of them goes into two remotes. A change to
+    /// a file in `rule_files`, outside the trees, or to a `.gitignore` that the rules read, in a
+    /// directory that they don't ignore, changes the rules.
+    fn merge(
+        &mut self,
+        batch: Batch,
+        entries: &[SyncEntry],
+        rule_files: &BTreeSet<PathBuf>,
+        rules: &[IgnoreRules],
+    ) {
+        self.full |= batch.lost;
+
+        for path in batch.paths {
+            if rule_files.contains(&path) {
+                self.full = true;
+                continue;
+            }
+
+            for (index, entry) in entries.iter().enumerate() {
+                let Ok(relative) = path.strip_prefix(&entry.local) else {
+                    continue;
+                };
+                let entry_rules = rules.get(index);
+
+                // A change to a child is the child's event, so an event of the entry's own
+                // directory means that the directory was removed or replaced. Only a full push
+                // lists the directory that is there now, and watches it.
+                if relative.as_os_str().is_empty() {
+                    self.full = true;
+                    continue;
+                }
+
+                // A `.gitignore` in a directory that the rules don't ignore is a source of them,
+                // which git reads also when a rule matches the file itself, so it changes the
+                // rules whether it was created, changed or deleted. So does a directory that holds
+                // a source, or lies above one, when it is replaced or deleted whole.
+                if (relative
+                    .file_name()
+                    .is_some_and(|name| name == ".gitignore")
+                    && relative.parent().is_none_or(|parent| {
+                        entry_rules.is_none_or(|rules| rules.is_ignored(parent, true).not())
+                    }))
+                    || entry_rules.is_some_and(|rules| rules.has_source_within(relative))
+                {
+                    self.full = true;
+                    continue;
+                }
+
+                if entry_rules.is_some_and(|rules| {
+                    rules.is_ignored(relative, false) && rules.is_ignored(relative, true)
+                }) {
+                    continue;
+                }
+
+                self.per_entry
+                    .entry(index)
+                    .or_default()
+                    .insert(relative.to_owned());
+            }
+        }
+    }
+}
+
+/// The changes that the watcher saw since the last batch.
+#[derive(Debug, Default)]
+pub(super) struct Batch {
+    /// The files, directories and symlinks that were created, changed, removed or renamed.
+    paths: BTreeSet<PathBuf>,
+
+    /// Whether the watcher lost events, so that only a new listing tells what changed.
+    lost: bool,
+}
+
+/// What the watcher saw since the last batch. The watcher's handler collects it as the events
+/// come, so that during a long push, while the CLI reads no events, the batch holds one entry per
+/// changed path.
+#[derive(Default)]
+struct Collected {
+    batch: Batch,
 
     /// Counts the events, so that a batch waits until they stop.
-    events: Arc<AtomicU64>,
+    events: u64,
+}
 
-    /// The count of events when the last batch ended.
-    batched: u64,
+/// Watches the directories of the pushed trees, one by one.
+struct TreeWatcher {
+    /// Lent to the listing while it runs on a blocking thread (see [`Self::take`]).
+    watcher: Option<RecommendedWatcher>,
+
+    collected: Arc<Mutex<Collected>>,
 
     /// Notified on each event.
     changed: Arc<Notify>,
@@ -663,66 +976,71 @@ struct TreeWatcher {
 }
 
 impl TreeWatcher {
-    /// Watches the `local` directory of each of `entries`.
-    fn new(entries: &[SyncEntry]) -> CliResult<Self> {
-        let events = Arc::new(AtomicU64::new(0));
+    fn new() -> CliResult<Self> {
+        let collected = Arc::new(Mutex::new(Collected::default()));
         let changed = Arc::new(Notify::new());
 
-        let mut watcher = notify::recommended_watcher({
-            let events = events.clone();
+        let watcher = notify::recommended_watcher({
+            let collected = collected.clone();
             let changed = changed.clone();
             move |event: notify::Result<notify::Event>| {
-                // An error may hide a change, which only a new listing finds.
-                if event.is_ok_and(|event| changes_the_tree(&event.kind).not()) {
+                // The CLI's own reads of the tree are most of the events, so they don't take the
+                // lock.
+                if let Ok(event) = &event
+                    && event.need_rescan().not()
+                    && changes_the_tree(&event.kind).not()
+                {
                     return;
                 }
-                events.fetch_add(1, Ordering::Relaxed);
+
+                let mut collected = collected.lock().expect("the lock holders don't panic");
+                match event {
+                    Ok(event) if event.need_rescan() => collected.batch.lost = true,
+                    Ok(event) => collected.batch.paths.extend(event.paths),
+                    Err(_) => collected.batch.lost = true,
+                }
+                collected.events += 1;
+                drop(collected);
                 changed.notify_one();
             }
         })
         .map_err(|error| CliError::PreviewSyncFailed(Box::new(error)))?;
 
-        for local in entries.iter().map(|entry| &entry.local) {
-            watcher
-                .watch(local, RecursiveMode::Recursive)
-                .map_err(|error| match error.kind {
-                    // On Linux, a recursive watch takes one inotify watch per directory,
-                    // including those of `node_modules`.
-                    notify::ErrorKind::MaxFilesWatch => CliError::PreviewSyncFailed(
-                        format!(
-                            "watching `{}` needs more file watches than the system allows; \
-                             raise `fs.inotify.max_user_watches`",
-                            local.display()
-                        )
-                        .into(),
-                    ),
-                    _ => CliError::PreviewSyncFailed(Box::new(error)),
-                })?;
-        }
-
         Ok(Self {
-            _watcher: watcher,
-            events,
-            batched: 0,
+            watcher: Some(watcher),
+            collected,
             changed,
             batch_ends_by: None,
         })
     }
 
+    fn take(&mut self) -> RecommendedWatcher {
+        self.watcher
+            .take()
+            .expect("the watcher is back before the next listing")
+    }
+
+    fn put_back(&mut self, watcher: RecommendedWatcher) {
+        self.watcher = Some(watcher);
+    }
+
     fn events(&self) -> u64 {
-        self.events.load(Ordering::Relaxed)
+        self.collected
+            .lock()
+            .expect("the lock holders don't panic")
+            .events
     }
 
     /// Waits for the next change, then until the files stay unchanged, so that one save of
-    /// several files makes one push.
+    /// several files makes one push, and returns what changed.
     ///
     /// Cancel-safe: a call that is dropped before it returns leaves what it waited for to the
     /// next call.
-    async fn next_batch(&mut self) {
+    async fn next_batch(&mut self) -> Batch {
         let ends_by = match self.batch_ends_by {
             Some(ends_by) => ends_by,
             None => {
-                while self.events() == self.batched {
+                while self.events() == 0 {
                     self.changed.notified().await;
                 }
                 let ends_by = tokio::time::Instant::now() + WATCH_MAX_DELAY;
@@ -737,12 +1055,14 @@ impl TreeWatcher {
             tokio::time::sleep_until(quiet_by).await;
 
             if self.events() == events || tokio::time::Instant::now() >= ends_by {
-                self.batched = events;
                 break;
             }
         }
 
         self.batch_ends_by = None;
+        let mut collected = self.collected.lock().expect("the lock holders don't panic");
+        collected.events = 0;
+        std::mem::take(&mut collected.batch)
     }
 }
 
@@ -766,7 +1086,7 @@ pub(super) fn with_causes(error: &dyn std::error::Error) -> String {
 /// Whether an event of `kind` can change the files under a watched directory. Listing and
 /// packing a tree read it, and the watcher reports those reads too, so counting them would make
 /// every push start the next one. `Other` includes the watcher's notice that the kernel dropped
-/// events, after which only a new listing tells what changed.
+/// events, which [`Event::need_rescan`](notify::Event::need_rescan) reports too.
 fn changes_the_tree(kind: &EventKind) -> bool {
     match kind {
         EventKind::Create(_) | EventKind::Remove(_) | EventKind::Other => true,

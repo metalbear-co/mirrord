@@ -883,6 +883,18 @@ pub(crate) enum CliError {
         error: io::Error,
     },
 
+    #[error("Failed to watch `{}` for changes", path.display())]
+    #[diagnostic(help(
+        "The CLI watches each directory under `sync` that it pushes. When the cause says that the \
+        system allows too few watches, raise `fs.inotify.max_user_watches`, or leave large \
+        directories out with `ignore` or `.gitignore`.{GENERAL_HELP}"
+    ))]
+    PreviewSyncWatchFailed {
+        path: PathBuf,
+        #[source]
+        error: notify::Error,
+    },
+
     #[error("Another `mirrord preview sync` took over the code sync of the preview environment")]
     #[diagnostic(help(
         "Only one CLI pushes into a preview environment at a time, and a newer CLI takes over \

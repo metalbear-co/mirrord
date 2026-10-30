@@ -361,7 +361,8 @@ impl RuleSources {
 /// [`Self::new_watching`].
 #[derive(Debug)]
 pub struct TreeListing {
-    snapshot: IgnoreSnapshot,
+    /// The rules that the listing applied, with every `.gitignore` of the tree added.
+    rules: IgnoreRules,
     paths: Vec<ListedPath>,
 
     /// The files outside the tree that the snapshot's sources came from or could come from,
@@ -404,7 +405,7 @@ impl TreeListing {
         )?;
 
         Ok(Self {
-            snapshot: rules.into_snapshot(),
+            rules,
             paths,
             rule_files,
         })
@@ -412,8 +413,13 @@ impl TreeListing {
 
     /// The rules that the listing applied, which an incremental push of the same tree applies
     /// too (see [`pack_changes`]).
+    pub fn rules(&self) -> &IgnoreRules {
+        &self.rules
+    }
+
+    /// The snapshot of [`Self::rules`], which a push carries.
     pub fn snapshot(&self) -> &IgnoreSnapshot {
-        &self.snapshot
+        self.rules.snapshot()
     }
 
     /// The files outside the tree that the rules came from or could come from. A change to one
@@ -429,7 +435,7 @@ impl TreeListing {
     /// Reads each file whole before it writes its header, so the declared size is the size of
     /// what the stream holds even when the file changes meanwhile.
     pub fn pack(&self, index: u32, local: &Path) -> io::Result<PackedEntry> {
-        pack_paths(index, local, &self.paths, &self.snapshot, Vec::new())
+        pack_paths(index, local, &self.paths, self.rules.snapshot(), Vec::new())
     }
 }
 

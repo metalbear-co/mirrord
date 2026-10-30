@@ -1070,7 +1070,9 @@ async fn sync_end(
 ) -> CliError {
     if matches!(
         error,
-        CliError::PreviewSyncReplaced | CliError::PreviewSyncReadFailed { .. }
+        CliError::PreviewSyncReplaced
+            | CliError::PreviewSyncReadFailed { .. }
+            | CliError::PreviewSyncWatchFailed { .. }
     ) {
         return error;
     }

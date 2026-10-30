@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{collections::BTreeMap, fs, io::Read, ops::Not, path::Path, sync::Arc, time::Duration};
 
 use flate2::read::GzDecoder;
@@ -44,6 +46,9 @@ struct Push {
 
     /// Each entry's paths and contents, by entry index.
     entries: BTreeMap<u32, Pushed>,
+
+    /// Each entry's deleted paths, by entry index, for the entries that listed any.
+    deleted: BTreeMap<u32, Vec<String>>,
 }
 
 /// The operator's end of one sync connection, which a test scripts.
@@ -89,13 +94,27 @@ impl Operator {
         };
 
         let mut archives = BTreeMap::<u32, Vec<u8>>::new();
+        let mut deleted = BTreeMap::new();
 
         loop {
             match self.recv().await {
                 SyncFrame::Data { index, chunk } => {
                     archives.entry(index).or_default().extend(chunk);
                 }
-                SyncFrame::EntryDone { .. } => {}
+                SyncFrame::EntryDone {
+                    index,
+                    deleted: paths,
+                } => {
+                    if paths.is_empty().not() {
+                        deleted.insert(
+                            index,
+                            paths
+                                .into_iter()
+                                .map(|path| String::from_utf8(path).unwrap())
+                                .collect(),
+                        );
+                    }
+                }
                 SyncFrame::Commit { push_id: committed } => {
                     assert_eq!(committed, push_id);
                     break;
@@ -116,6 +135,7 @@ impl Operator {
             push_id,
             mode,
             entries,
+            deleted,
         }
     }
 
@@ -220,30 +240,109 @@ fn file(contents: &str) -> Option<String> {
     Some(contents.to_owned())
 }
 
-/// Under `--watch`, each change pushes the trees whole again, including a change made while the
-/// CLI listed the trees for the push before.
+/// After the first full push, `--watch` pushes each change incrementally: a new, a changed, a
+/// deleted and a renamed file, and a new or renamed directory with everything in it, each in one
+/// push that carries only what changed and lists what is gone. A change that the rules ignore
+/// pushes nothing, and a change to the rules themselves pushes the tree whole, because the
+/// incremental pushes apply the rules of the last full push.
 #[tokio::test]
-async fn watch_pushes_the_trees_again_on_each_change() {
+async fn watch_pushes_each_change_incrementally() {
     let local = tempfile::tempdir().unwrap();
     let dir = local.path();
+    write(dir, ".gitignore", "dist/\n");
     write(dir, "app.js", "v1");
+    write(dir, "old.js", "old");
+    write(dir, "lib/util.js", "util");
 
     let (sync, mut operators, _activity) = start(vec![entry(dir)], true);
     let mut operator = next_connection(&mut operators).await;
-    operator.pair_and_apply(1).await;
-
-    write(dir, "app.js", "v2");
-    write(dir, "lib/util.js", "util");
-    let push = operator.recv_push().await;
-    assert_eq!(push.mode, PushMode::Full);
+    let first = operator.pair_and_apply(1).await;
     assert_eq!(
-        push.entries[&0],
+        first.entries[&0],
         Pushed::from([
-            ("app.js".to_owned(), file("v2")),
+            (".gitignore".to_owned(), file("dist/\n")),
+            ("app.js".to_owned(), file("v1")),
             ("lib".to_owned(), None),
             ("lib/util.js".to_owned(), file("util")),
+            ("old.js".to_owned(), file("old")),
         ])
     );
+
+    let mut generation = 1;
+    let mut expect = async |operator: &mut Operator, pushed: Pushed, deleted: Vec<&str>| {
+        let push = operator.recv_push().await;
+        assert_eq!(
+            push.mode,
+            PushMode::Incremental {
+                base_generation: generation
+            }
+        );
+        assert_eq!(push.entries.get(&0).cloned().unwrap_or_default(), pushed);
+        assert_eq!(
+            push.deleted.get(&0).cloned().unwrap_or_default(),
+            deleted
+                .iter()
+                .map(|path| path.to_string())
+                .collect::<Vec<_>>()
+        );
+        generation += 1;
+        operator.apply(push.push_id, generation).await;
+    };
+
+    write(dir, "app.js", "v2");
+    write(dir, "new.js", "new");
+    expect(
+        &mut operator,
+        Pushed::from([
+            ("app.js".to_owned(), file("v2")),
+            ("new.js".to_owned(), file("new")),
+        ]),
+        vec![],
+    )
+    .await;
+
+    fs::remove_file(dir.join("old.js")).unwrap();
+    expect(&mut operator, Pushed::new(), vec!["old.js"]).await;
+
+    fs::rename(dir.join("new.js"), dir.join("renamed.js")).unwrap();
+    expect(
+        &mut operator,
+        Pushed::from([("renamed.js".to_owned(), file("new"))]),
+        vec!["new.js"],
+    )
+    .await;
+
+    fs::rename(dir.join("lib"), dir.join("src")).unwrap();
+    expect(
+        &mut operator,
+        Pushed::from([
+            ("src".to_owned(), None),
+            ("src/util.js".to_owned(), file("util")),
+        ]),
+        vec!["lib"],
+    )
+    .await;
+
+    // A file in the renamed directory, which the CLI started watching when it pushed it.
+    write(dir, "src/more.js", "more");
+    expect(
+        &mut operator,
+        Pushed::from([("src/more.js".to_owned(), file("more"))]),
+        vec![],
+    )
+    .await;
+
+    write(dir, "dist/bundle.js", "bundle");
+    assert_eq!(
+        operator.recv_within(QUIET_PERIOD).await,
+        None,
+        "a change to an ignored path started a push"
+    );
+
+    write(dir, ".gitignore", "dist/\n*.log\n");
+    let push = operator.recv_push().await;
+    assert_eq!(push.mode, PushMode::Full);
+    assert!(push.entries[&0].contains_key("src/more.js"));
 
     assert!(sync.is_finished().not());
     sync.abort();
@@ -269,9 +368,10 @@ async fn two_clis_number_their_pushes_apart() {
 }
 
 /// The operator unpairs the CLI when the sidecar goes, and the volume may then hold anything, so
-/// the CLI pushes the tree whole once it is paired again, and not before.
+/// the CLI pushes the tree whole once it is paired again. A push the sidecar rejects because the
+/// volume holds another generation than the one it built on is pushed whole too.
 #[tokio::test]
-async fn a_full_push_follows_every_pairing() {
+async fn a_full_push_follows_every_pairing_and_a_stale_base() {
     let local = tempfile::tempdir().unwrap();
     let dir = local.path();
     write(dir, "app.js", "v1");
@@ -293,6 +393,19 @@ async fn a_full_push_follows_every_pairing() {
     );
     let push = operator.pair_and_apply(2).await;
     assert_eq!(push.entries[&0]["app.js"], file("v2"));
+
+    write(dir, "app.js", "v3");
+    let push = operator.recv_push().await;
+    assert_eq!(push.mode, PushMode::Incremental { base_generation: 2 });
+    operator
+        .send(SyncFrame::Rejected {
+            push_id: push.push_id,
+            reason: RejectReason::StaleBase,
+        })
+        .await;
+    let push = operator.recv_push().await;
+    assert_eq!(push.mode, PushMode::Full);
+    assert_eq!(push.entries[&0]["app.js"], file("v3"));
 
     sync.abort();
 }
@@ -437,7 +550,8 @@ async fn an_unpair_during_a_push_waits_for_the_next_pairing() {
     operator.pair_and_apply(1).await;
 
     write(dir, "app.js", "v2");
-    operator.recv_push().await;
+    let push = operator.recv_push().await;
+    assert_eq!(push.mode, PushMode::Incremental { base_generation: 1 });
     operator
         .send(SyncFrame::Unpaired {
             reason: UnpairReason::SidecarGone,
@@ -468,6 +582,139 @@ async fn watch_reconnects_after_every_broken_connection() {
 
     next_connection(&mut operators).await;
     assert!(sync.is_finished().not(), "{:?}", sync.await);
+    sync.abort();
+}
+
+/// A file that the CLI can't read fails the pack of its batch, and the other changes of the batch
+/// must still reach the pod, or the pod would run old code until each of them changes again.
+#[cfg(unix)]
+#[tokio::test]
+async fn changes_that_fail_to_pack_are_pushed_with_the_next_change() {
+    let local = tempfile::tempdir().unwrap();
+    let dir = local.path();
+    write(dir, "a.js", "v1");
+    write(dir, "b.js", "v1");
+
+    let (sync, mut operators, _activity) = start(vec![entry(dir)], true);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+
+    write(dir, "a.js", "v2");
+    write(dir, "b.js", "v2");
+    fs::set_permissions(dir.join("b.js"), fs::Permissions::from_mode(0o000)).unwrap();
+    // Root reads the file anyway, and the batch then packs.
+    let first = operator.recv_within(QUIET_PERIOD).await;
+    fs::set_permissions(dir.join("b.js"), fs::Permissions::from_mode(0o644)).unwrap();
+
+    let push = match first {
+        Some(SyncFrame::Begin { .. }) => {
+            sync.abort();
+            return;
+        }
+        Some(frame) => panic!("unexpected frame {frame:?}"),
+        None => operator.recv_push().await,
+    };
+    assert_eq!(push.entries[&0]["a.js"], file("v2"));
+    assert_eq!(push.entries[&0]["b.js"], file("v2"));
+    sync.abort();
+}
+
+/// A tool can replace the whole local directory, for example by renaming a fresh copy into its
+/// place, and the watches stay on the directory that it renamed away. `--watch` must still push
+/// the directory that is there now, or the preview keeps the old code for the rest of the run.
+#[tokio::test]
+async fn watch_pushes_a_directory_that_replaces_the_local_one() {
+    let parent = tempfile::tempdir().unwrap();
+    let local = parent.path().join("app");
+    write(&local, "main.js", "old code");
+    let replacement = parent.path().join("replacement");
+    write(&replacement, "main.js", "new code");
+
+    let (sync, mut operators, _activity) = start(vec![entry(&local)], true);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+
+    fs::rename(&local, parent.path().join("old-app")).unwrap();
+    fs::rename(&replacement, &local).unwrap();
+    let push = operator.recv_push().await;
+    assert_eq!(push.mode, PushMode::Full);
+    assert_eq!(push.entries[&0]["main.js"], file("new code"));
+    sync.abort();
+}
+
+/// A `.gitignore` that the developer creates in a directory above the pushed one changes the
+/// rules, so `--watch` must apply it to what it pushes next, even though the file didn't exist
+/// when the CLI started watching.
+#[tokio::test]
+async fn a_gitignore_created_above_the_tree_changes_what_watch_pushes() {
+    let repository = tempfile::tempdir().unwrap();
+    fs::create_dir(repository.path().join(".git")).unwrap();
+    let service = repository.path().join("service");
+    write(&service, "app.js", "v1");
+
+    let (sync, mut operators, _activity) = start(vec![entry(&service)], true);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+
+    write(repository.path(), ".gitignore", ".env\n");
+    let push = operator.recv_push().await;
+    assert_eq!(push.mode, PushMode::Full);
+    operator.apply(push.push_id, 2).await;
+
+    write(&service, ".env", "secret");
+    assert_eq!(operator.recv_within(QUIET_PERIOD).await, None);
+    sync.abort();
+}
+
+/// Git reads a `.gitignore` even when a rule, here the entry's `ignore` list, matches the file
+/// itself. A rule that the developer adds to it must keep the file it names out of the next
+/// pushes, or `--watch` would send a secret that the developer just ignored.
+#[tokio::test]
+async fn an_ignored_gitignore_still_keeps_what_it_names_out_of_watch() {
+    let local = tempfile::tempdir().unwrap();
+    let dir = local.path();
+    write(dir, "app.js", "v1");
+    write(dir, ".gitignore", "*.log\n");
+    let entry = SyncEntry {
+        ignore: vec![".gitignore".to_owned()],
+        ..entry(dir)
+    };
+
+    let (sync, mut operators, _activity) = start(vec![entry], true);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+
+    write(dir, ".gitignore", "*.log\n.env\n");
+    let push = operator.recv_push().await;
+    assert_eq!(push.mode, PushMode::Full);
+    operator.apply(push.push_id, 2).await;
+
+    write(dir, ".env", "secret");
+    assert_eq!(operator.recv_within(QUIET_PERIOD).await, None);
+    sync.abort();
+}
+
+/// Two `sync` entries may have local directories inside one another, and a file under both is in
+/// both remotes, so a change to it must reach both.
+#[tokio::test]
+async fn a_change_under_two_local_directories_reaches_both_remotes() {
+    let local = tempfile::tempdir().unwrap();
+    let dir = local.path();
+    write(dir, "nested/app.js", "v1");
+    let nested = SyncEntry {
+        local: dir.join("nested"),
+        remote: "/nested".to_owned(),
+        ignore: Vec::new(),
+    };
+
+    let (sync, mut operators, _activity) = start(vec![entry(dir), nested], true);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+
+    write(dir, "nested/app.js", "v2");
+    let push = operator.recv_push().await;
+    assert_eq!(push.entries[&0]["nested/app.js"], file("v2"));
+    assert_eq!(push.entries[&1]["app.js"], file("v2"));
     sync.abort();
 }
 
