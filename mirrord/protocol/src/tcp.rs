@@ -463,6 +463,11 @@ pub enum HttpFilter {
 
     /// Filter by header using JQ
     HeaderJq(JqQuery),
+
+    /// Matches every request the inner filter does not. A preview environment's own pods steal
+    /// with the preview filter negated, so traffic a platform load balancer sends them directly
+    /// goes back to the stable pods instead of being served by preview code.
+    Not(Box<HttpFilter>),
 }
 
 impl Display for HttpFilter {
@@ -501,6 +506,7 @@ impl Display for HttpFilter {
             },
             HttpFilter::Body(filter) => write!(f, "body={filter}"),
             HttpFilter::HeaderJq(filter) => write!(f, "header_jq={filter}"),
+            HttpFilter::Not(filter) => write!(f, "not ({filter})"),
         }
     }
 }
@@ -717,6 +723,10 @@ pub static HTTP_BODY_JSON_FILTER_VERSION: LazyLock<VersionReq> =
 /// ([`HttpFilter::Body`]) by JSON.
 pub static HTTP_HEADER_JQ_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.26.0".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows negating an HTTP filter ([`HttpFilter::Not`]).
+pub static HTTP_NOT_FILTER_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.31.0".parse().expect("Bad Identifier"));
 
 /// Minimal mirrord-protocol version that allows [`IncomingTrafficTransportType::TlsV2`].
 pub static TLS_CLIENT_IDENTITY_VERSION: LazyLock<VersionReq> =

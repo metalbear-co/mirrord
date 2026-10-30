@@ -38,6 +38,9 @@ pub enum HttpFilter {
 
     /// Header based on header using jq
     HeaderJq(JqQuery),
+
+    /// Matches whatever the inner filter does not.
+    Not(Box<HttpFilter>),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -80,6 +83,9 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
                 JqQuery::new(header)
                     .map(HttpFilter::HeaderJq)
                     .map_err(FilterCreationError::Jq)
+            }
+            mirrord_protocol::tcp::HttpFilter::Not(filter) => {
+                Ok(Self::Not(Box::new(HttpFilter::try_from(filter.as_ref())?)))
             }
         }
     }
@@ -140,6 +146,8 @@ impl HttpFilter {
             }),
 
             Self::Method(filter) => parts.method.as_str().eq_ignore_ascii_case(filter.as_ref()),
+
+            Self::Not(filter) => Box::pin(filter.matches(parts, body)).await.not(),
 
             Self::Composite { all: true, filters } => {
                 // Since we require `body` to be Clone + Copy, each
@@ -214,6 +222,7 @@ impl HttpFilter {
     pub fn needs_body(&self) -> bool {
         match self {
             HttpFilter::Composite { filters, .. } => filters.iter().any(HttpFilter::needs_body),
+            HttpFilter::Not(filter) => filter.needs_body(),
             HttpFilter::Body(_) => true,
             _ => false,
         }
@@ -331,6 +340,32 @@ mod test {
     use mirrord_protocol::tcp::{self, Filter, HttpMethodFilter};
 
     use super::HttpFilter;
+
+    /// A `Not` filter steals exactly the requests its inner filter leaves alone, so a preview
+    /// pod can send everything that is not preview traffic back to the stable pods.
+    #[tokio::test]
+    async fn not_filter_inverts_its_inner_filter() {
+        let tcp_filter = tcp::HttpFilter::Not(Box::new(tcp::HttpFilter::Header(
+            Filter::new("baggage: .*mirrord=preview-key".to_owned()).unwrap(),
+        )));
+        let filter = HttpFilter::try_from(&tcp_filter).unwrap();
+        assert!(!filter.needs_body());
+
+        let (mut preview, _) = Request::builder()
+            .uri("/orders")
+            .header("baggage", "mirrord=preview-key")
+            .body(())
+            .unwrap()
+            .into_parts();
+        assert!(!filter.matches::<&[u8]>(&mut preview, None).await);
+
+        let (mut live, _) = Request::builder()
+            .uri("/orders")
+            .body(())
+            .unwrap()
+            .into_parts();
+        assert!(filter.matches::<&[u8]>(&mut live, None).await);
+    }
 
     #[tokio::test]
     async fn matching_all_filter() {
