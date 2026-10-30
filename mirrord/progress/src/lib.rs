@@ -2,14 +2,68 @@
 
 #[cfg(feature = "implementations")]
 pub mod implementations;
+#[cfg_attr(
+    not(feature = "implementations"),
+    allow(
+        dead_code,
+        reason = "without the renderers, only a finished task is ever printed"
+    )
+)]
+mod json;
 pub mod messages;
 
 #[cfg(feature = "implementations")]
 pub use implementations::*;
 
+use crate::json::ProgressMessage;
+
 /// The environment variable name that is used
 /// to determine the mode of progress reporting
 pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_PROGRESS_MODE";
+
+/// A progress mode that prints one line per event, the modes machines read: `simple` for
+/// `mirrord up`, `json` for the IDEs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineMode {
+    /// `SimpleProgress`'s plain lines.
+    Simple,
+    /// `JsonProgress`'s JSON lines.
+    Json,
+}
+
+impl LineMode {
+    /// The mode's name, as [`MIRRORD_PROGRESS_ENV`] spells it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Simple => "simple",
+            Self::Json => "json",
+        }
+    }
+
+    /// The mode named `name`, as [`Self::as_str`] spells it; anything else is `None`.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "simple" => Some(Self::Simple),
+            "json" => Some(Self::Json),
+            _ => None,
+        }
+    }
+}
+
+/// The line that finishing `task` successfully with `message` prints in `mode`, newline included.
+///
+/// Byte for byte what `SimpleProgress` and `JsonProgress` print for `success(Some(message))`, for
+/// code that finishes a task without them: the layer finishes `mirrord exec`'s running task with
+/// `Ready!` from inside the program. `simple` prints the message alone, as `SimpleProgress` does.
+pub fn finished_task_line(mode: LineMode, task: &str, message: &str) -> String {
+    match mode {
+        LineMode::Simple => format!("{message}\n"),
+        LineMode::Json => format!(
+            "{}\n",
+            ProgressMessage::finished_task(task, true, Some(message)).to_line()
+        ),
+    }
+}
 
 /// The environment variable name used to communicate which IDE is running the CLI.
 ///
@@ -129,6 +183,16 @@ impl ProgressTracker {
         Some(progress)
     }
 
+    /// The one-line-per-event mode this tracker prints in, or `None` for a tracker meant for a
+    /// person (the spinner, a prefixed tracker) or one that prints nothing.
+    pub fn line_mode(&self) -> Option<LineMode> {
+        match self {
+            Self::SimpleProgress(_) => Some(LineMode::Simple),
+            Self::JsonProgress(_) => Some(LineMode::Json),
+            Self::SpinnerProgress(_) | Self::NullProgress(_) | Self::PrefixedProgress(_) => None,
+        }
+    }
+
     /// Returns a tracker with `NullProgress`.
     pub fn null() -> Self {
         Self::NullProgress(NullProgress)
@@ -138,5 +202,32 @@ impl ProgressTracker {
     /// them, starts with `"<prefix>: "` (see [`PrefixedProgress`]).
     pub fn prefixed(self, prefix: &str) -> Self {
         PrefixedProgress::new(prefix.to_owned(), self).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::messages::{EXEC_RUNNING_TASK, SESSION_READY_MESSAGE};
+
+    /// `mirrord up` matches the plain line `SimpleProgress` prints for `success(Some("Ready!"))`.
+    #[test]
+    fn a_simple_ready_is_the_message_alone() {
+        assert_eq!(
+            finished_task_line(LineMode::Simple, EXEC_RUNNING_TASK, SESSION_READY_MESSAGE),
+            "Ready!\n",
+            "mirrord up matches this exact line"
+        );
+    }
+
+    /// The IDEs match the running task's finish by this exact line, the one `JsonProgress` prints
+    /// for `success(Some("Ready!"))` on the `running process` task.
+    #[test]
+    fn a_json_ready_is_the_line_json_progress_prints() {
+        assert_eq!(
+            finished_task_line(LineMode::Json, EXEC_RUNNING_TASK, SESSION_READY_MESSAGE),
+            "{\"type\":\"FinishedTask\",\"name\":\"running process\",\"success\":true,\"message\":\"Ready!\"}\n",
+            "the IDEs parse this exact line"
+        );
     }
 }

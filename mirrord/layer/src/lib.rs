@@ -176,6 +176,8 @@ mod file;
 mod hooks;
 mod load;
 mod macros;
+mod program_stdout;
+mod ready;
 mod socket;
 #[cfg(target_os = "macos")]
 mod tls;
@@ -298,6 +300,9 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         LoadType::SIPOnly => sip_only_layer_start(config, patch_binaries, skip_patch_binaries),
         LoadType::Skip => load_only_layer_start(&config),
     }
+
+    // Every start above, early returns included, ends here.
+    ready::layer_ready()?;
 
     Ok(())
 }

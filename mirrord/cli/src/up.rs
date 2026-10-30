@@ -10,13 +10,14 @@ use mirrord_analytics::{
 use mirrord_config::config::EnvKey;
 use mirrord_operator::{client::UpSession, crd::session::UpSessionInfo};
 use mirrord_up::{
-    InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, UpError, load_up_config, run_wizard,
+    InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, UpConfig, UpError, UpListing,
+    load_up_config, run_wizard,
 };
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpSubcommand},
+    config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpListFormat, UpSubcommand},
     data::{GlobalConfig, UserData},
     error::CliError,
     ui::ui_command,
@@ -87,6 +88,9 @@ pub enum UpCliError {
         "The username is used for automatically generating a session key. Please provide a session key manually or ensure your OS user has a valid username."
     ))]
     UsernameFetch(whoami::Error),
+
+    #[error("failed to write the `mirrord up list` JSON output")]
+    ListOutput(#[source] serde_json::Error),
 }
 
 /// The `mirrord up` command handler.
@@ -98,6 +102,11 @@ pub(crate) async fn up_command(
 ) -> Result<(), UpCliError> {
     if let Some(UpSubcommand::Init { output }) = args.command {
         return Ok(run_wizard(output).await.map_err(Box::new)?);
+    }
+
+    // No analytics: IDE extensions list on every refresh, and no session starts.
+    if let Some(UpSubcommand::List { format }) = args.command {
+        return list_services(&args, format).await;
     }
 
     // We don't yet know whether the user has opted out of telemetry,
@@ -112,19 +121,52 @@ pub(crate) async fn up_command(
     result
 }
 
-async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
-    let key = match args.key {
+/// The session key: `-k`, else the OS username.
+fn session_key(key: Option<String>) -> Result<EnvKey, UpCliError> {
+    Ok(match key {
         Some(key) => EnvKey::Provided(key),
         None => EnvKey::Generated(whoami::username().map_err(UpCliError::UsernameFetch)?),
-    };
+    })
+}
 
-    let mut up_config = match load_up_config(&args.config_file, &key) {
-        Ok(cfg) => cfg,
+fn load_config(args: &UpArgs, key: &EnvKey) -> Result<UpConfig, UpCliError> {
+    match load_up_config(&args.config_file, key) {
+        Ok(cfg) => Ok(cfg),
         Err(UpError::Io(err)) if err.kind() == ErrorKind::NotFound => {
-            return Err(UpCliError::ConfigNotFound);
+            Err(UpCliError::ConfigNotFound)
         }
-        other_error => other_error?,
-    };
+        Err(other_error) => Err(other_error.into()),
+    }
+}
+
+/// `mirrord up list`: prints every service as `mirrord up` would run it, for people or, with
+/// `--format json`, for IDE extensions.
+///
+/// Stays offline: it reads the up file and the global config, and touches no cluster. The kube
+/// context falls back on the global config's, as a run's does, so each listed context is the one
+/// the run would use.
+async fn list_services(args: &UpArgs, format: UpListFormat) -> Result<(), UpCliError> {
+    let key = session_key(args.key.clone())?;
+    let mut up_config = load_config(args, &key)?;
+    up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
+    if let Some(mode) = &args.mode {
+        up_config.override_mode(mode).map_err(UpError::from)?;
+    }
+
+    let listing = UpListing::new(&up_config, &args.config_file, &key, args.context.clone())?;
+    match format {
+        UpListFormat::Pretty => print!("{}", listing.render()),
+        UpListFormat::Json => {
+            let json = serde_json::to_string(&listing).map_err(UpCliError::ListOutput)?;
+            println!("{json}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
+    let key = session_key(args.key.clone())?;
+    let mut up_config = load_config(&args, &key)?;
 
     up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
 
@@ -136,7 +178,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         .add("num_selected_services", args.services.len());
 
     up_config
-        .select_services(&args.services)
+        .select_services(&args.services, &args.debug)
         .map_err(UpError::from)?;
 
     analytics
@@ -192,7 +234,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         .map(|service| (service.service_name.clone(), service.mode.clone()))
         .collect::<Vec<_>>();
 
-    let result = mirrord_up::launch(services, correlation_id, ready.clone()).await;
+    let result = mirrord_up::launch(services, correlation_id, &args.debug, ready.clone()).await;
 
     analytics.get_mut().add(
         "services",
@@ -301,7 +343,8 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::NoWorkloads(_))
             | UpCliError::Up(UpError::YamlPatch(_))
             | UpCliError::Up(UpError::YamlQuery(_))
-            | UpCliError::Init(_) => Self::InternalError,
+            | UpCliError::Init(_)
+            | UpCliError::ListOutput(_) => Self::InternalError,
         }
     }
 }
