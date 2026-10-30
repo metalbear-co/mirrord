@@ -36,6 +36,11 @@ pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// The largest chunk of a tar stream that the CLI puts in one [`SyncFrame::Data`].
 pub const MAX_DATA_CHUNK_BYTES: usize = 256 * 1024;
 
+/// The most that the paths of one [`SyncFrame::Manifest`] or [`SyncFrame::Want`] may cost, as
+/// [`ManifestPath::frame_cost`] and [`wanted_path_frame_cost`] count it, so that each frame
+/// stays well below [`MAX_FRAME_BYTES`] both as bytes and in what decoding it allocates.
+pub const MAX_MANIFEST_CHUNK_BYTES: usize = 256 * 1024;
+
 /// One message of the sync protocol.
 ///
 /// `bincode` isn't self-describing, so once released, the enum may only grow: a new variant goes
@@ -43,7 +48,8 @@ pub const MAX_DATA_CHUNK_BYTES: usize = 256 * 1024;
 /// frame carries.
 #[derive(Encode, Decode, Debug, Clone, PartialEq, Eq, IntoStaticStr)]
 pub enum SyncFrame {
-    /// CLI to sidecar: starts a push of the entries that `entries` plans.
+    /// CLI to sidecar: declares the entries of a push, after the manifests of a full push and
+    /// before its data.
     Begin {
         push_id: u64,
         mode: PushMode,
@@ -56,7 +62,7 @@ pub enum SyncFrame {
     /// CLI to sidecar: every chunk of entry `index` is sent. In an incremental push, `deleted`
     /// lists the paths of the entry that the push deletes, relative to the entry, as the bytes of
     /// `/`-separated components, because a file name needn't be UTF-8. A full push lists none,
-    /// because it deletes every path that it doesn't carry and that isn't ignored.
+    /// because it deletes every path that its manifest lacks and that isn't ignored.
     EntryDone { index: u32, deleted: Vec<Vec<u8>> },
 
     /// CLI to sidecar: every entry of the push is done, so the sidecar applies it.
@@ -100,6 +106,103 @@ pub enum SyncFrame {
 
     /// CLI to operator: wakes the preview if it is idle, as traffic to it would.
     WakeRequest,
+
+    /// CLI to sidecar: part of the manifest of entry `index` for the full push `push_id`, sent
+    /// before the push's [`SyncFrame::Begin`]. The manifest lists every path of the entry's tree,
+    /// directories included, and the CLI splits it into frames with [`chunked`].
+    Manifest {
+        push_id: u64,
+        index: u32,
+        paths: Vec<ManifestPath>,
+    },
+
+    /// CLI to sidecar: the manifests of push `push_id` are complete, so the sidecar answers which
+    /// paths it needs.
+    ManifestDone { push_id: u64 },
+
+    /// Sidecar to CLI: part of the paths of entry `index` that the push `push_id` must carry,
+    /// because the volume lacks them or holds them with another kind, mode or content. The push
+    /// leaves the other paths of the manifest as the volume holds them.
+    Want {
+        push_id: u64,
+        index: u32,
+        paths: Vec<Vec<u8>>,
+    },
+
+    /// Sidecar to CLI: every path that the push `push_id` must carry is in a
+    /// [`SyncFrame::Want`] before this, so the CLI sends the push.
+    WantDone { push_id: u64 },
+}
+
+/// One path of a [`SyncFrame::Manifest`]: the path relative to the entry, as the bytes of
+/// `/`-separated components, and what the CLI's tree holds there.
+#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
+pub struct ManifestPath {
+    pub path: Vec<u8>,
+    pub kind: ManifestKind,
+}
+
+impl ManifestPath {
+    /// What the path costs in a [`SyncFrame::Manifest`]. The decoder claims the size of each
+    /// element of a list before it reads it, and then the bytes of the element's own lists, the
+    /// path and a symlink's target, all against [`MAX_FRAME_BYTES`]. This cost is also more than
+    /// the path's encoded bytes, so it bounds both.
+    pub fn frame_cost(&self) -> usize {
+        let target = match &self.kind {
+            ManifestKind::Symlink { target } => target.len(),
+            ManifestKind::Dir | ManifestKind::File { .. } => 0,
+        };
+
+        size_of::<Self>() + self.path.len() + target
+    }
+}
+
+/// What the path `path` of a [`SyncFrame::Want`] costs, as [`ManifestPath::frame_cost`] counts
+/// it.
+pub fn wanted_path_frame_cost(path: &[u8]) -> usize {
+    size_of::<Vec<u8>>() + path.len()
+}
+
+/// Splits `items` into the lists of paths of consecutive [`SyncFrame::Manifest`] or
+/// [`SyncFrame::Want`] frames, whose `cost`s add up to at most [`MAX_MANIFEST_CHUNK_BYTES`]
+/// each. Every list holds at least one item, and an empty `items` gives no list.
+pub fn chunked<T>(items: impl IntoIterator<Item = T>, cost: impl Fn(&T) -> usize) -> Vec<Vec<T>> {
+    let mut chunks: Vec<Vec<T>> = Vec::new();
+    let mut chunk_cost = 0;
+
+    for item in items {
+        let item_cost = cost(&item);
+        match chunks.last_mut() {
+            Some(chunk) if chunk_cost + item_cost <= MAX_MANIFEST_CHUNK_BYTES => {
+                chunk.push(item);
+                chunk_cost += item_cost;
+            }
+            _ => {
+                chunks.push(vec![item]);
+                chunk_cost = item_cost;
+            }
+        }
+    }
+
+    chunks
+}
+
+/// What a [`ManifestPath`] holds.
+#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
+pub enum ManifestKind {
+    /// A directory. A push keeps an existing directory's mode, so the manifest has none.
+    Dir,
+
+    /// A regular file of `size` bytes whose SHA-256 hash is `hash`, with the permission bits
+    /// `mode`.
+    File {
+        mode: u32,
+        size: u64,
+        hash: [u8; 32],
+    },
+
+    /// A symlink to `target`.
+    Symlink { target: Vec<u8> },
 }
 
 /// Why the operator unpaired a CLI. Once released, it may only grow, as [`SyncFrame`] says.
@@ -129,8 +232,9 @@ pub enum UnpairReason {
 /// [`SyncFrame`] says.
 #[derive(Encode, Decode, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PushMode {
-    /// Each entry of the push becomes a mirror of the CLI's tree: the sidecar deletes every path
-    /// that the push doesn't carry and that the entry's rules don't ignore.
+    /// Each entry of the push becomes a mirror of the CLI's tree. The push carries the paths
+    /// that the sidecar wanted after the manifest exchange, keeps the manifest's other paths,
+    /// and deletes every path that the manifest lacks and that the entry's rules don't ignore.
     Full,
 
     /// The push only writes the paths that it carries and deletes the paths that

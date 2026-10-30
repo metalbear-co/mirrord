@@ -1,7 +1,9 @@
 use super::{
-    AppReport, AppState, EntryCounts, EntryPlan, InstallReport, InstallState, PushMode,
-    RejectReason, SidecarState, SupervisorReport, SyncFrame, UnpairReason,
+    AppReport, AppState, EntryCounts, EntryPlan, InstallReport, InstallState, ManifestKind,
+    ManifestPath, PushMode, RejectReason, SidecarState, SupervisorReport, SyncFrame, UnpairReason,
+    chunked,
     rules::{IgnoreSnapshot, IgnoreSource},
+    wanted_path_frame_cost,
 };
 
 /// The CLI, the operator and the sidecar come from different releases, so each frame must keep
@@ -25,7 +27,7 @@ fn frames_keep_their_encoding() {
         },
     };
 
-    let frames: [(SyncFrame, &[u8]); 22] = [
+    let frames: [(SyncFrame, &[u8]); 28] = [
         (
             SyncFrame::Begin {
                 push_id: 7,
@@ -158,6 +160,58 @@ fn frames_keep_their_encoding() {
             &[11, 3],
         ),
         (SyncFrame::WakeRequest, &[12]),
+        (
+            SyncFrame::Manifest {
+                push_id: 7,
+                index: 1,
+                paths: vec![ManifestPath {
+                    path: b"d".to_vec(),
+                    kind: ManifestKind::Dir,
+                }],
+            },
+            &[13, 7, 1, 1, 1, b'd', 0],
+        ),
+        (
+            SyncFrame::Manifest {
+                push_id: 7,
+                index: 1,
+                paths: vec![ManifestPath {
+                    path: b"f".to_vec(),
+                    kind: ManifestKind::File {
+                        mode: 0o644,
+                        size: 2,
+                        hash: [9; 32],
+                    },
+                }],
+            },
+            &[
+                13, 7, 1, 1, 1, b'f', 1, 251, 0xA4, 0x01, 2, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+                9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+            ],
+        ),
+        (
+            SyncFrame::Manifest {
+                push_id: 7,
+                index: 1,
+                paths: vec![ManifestPath {
+                    path: b"l".to_vec(),
+                    kind: ManifestKind::Symlink {
+                        target: b"t".to_vec(),
+                    },
+                }],
+            },
+            &[13, 7, 1, 1, 1, b'l', 2, 1, b't'],
+        ),
+        (SyncFrame::ManifestDone { push_id: 7 }, &[14, 7]),
+        (
+            SyncFrame::Want {
+                push_id: 7,
+                index: 1,
+                paths: vec![b"f".to_vec()],
+            },
+            &[15, 7, 1, 1, 1, b'f'],
+        ),
+        (SyncFrame::WantDone { push_id: 7 }, &[16, 7]),
     ];
 
     for (frame, bytes) in frames {
@@ -176,4 +230,39 @@ fn frames_that_claim_huge_lengths_fail_to_decode() {
     frame.extend_from_slice(&(1u64 << 42).to_le_bytes());
 
     assert!(SyncFrame::decode(&frame).is_err());
+}
+
+/// A tree of many short paths fits in fewer bytes than [`MAX_FRAME_BYTES`] per frame, but the
+/// decoder also claims the size of every path in memory against that limit, so a frame of such a
+/// manifest, or of the sidecar's answer, must still decode.
+#[test]
+fn chunked_manifests_and_wants_decode() {
+    let manifest = (0..20_000)
+        .map(|index| ManifestPath {
+            path: format!("d{index:05}").into_bytes(),
+            kind: ManifestKind::Dir,
+        })
+        .collect::<Vec<_>>();
+    let wanted = (0..50_000)
+        .map(|index| format!("{index:05}").into_bytes())
+        .collect::<Vec<_>>();
+
+    let manifest_frames = chunked(manifest, ManifestPath::frame_cost)
+        .into_iter()
+        .map(|paths| SyncFrame::Manifest {
+            push_id: 1,
+            index: 0,
+            paths,
+        });
+    let want_frames = chunked(wanted, |path| wanted_path_frame_cost(path))
+        .into_iter()
+        .map(|paths| SyncFrame::Want {
+            push_id: 1,
+            index: 0,
+            paths,
+        });
+
+    for frame in manifest_frames.chain(want_frames) {
+        assert_eq!(SyncFrame::decode(&frame.encode()).unwrap(), frame);
+    }
 }
