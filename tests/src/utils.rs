@@ -39,11 +39,65 @@ pub const PRESERVE_FAILED_ENV_NAME: &str = "MIRRORD_E2E_PRESERVE_FAILED";
 /// All Kubernetes resources created for testing purposes share this label.
 pub const TEST_RESOURCE_LABEL: (&str, &str) = ("mirrord-e2e-test-resource", "true");
 
+/// Environment variable a CI job sets to its run id; see [`RUN_ID_LABEL`].
+pub const RUN_ID_ENV: &str = "MIRRORD_E2E_RUN_ID";
+
+/// Label carrying [`RUN_ID_ENV`], present exactly when the suite runs in CI.
+pub const RUN_ID_LABEL: &str = "mirrord-e2e-run";
+
+/// Environment variable naming who runs the suite, for a run started on purpose against a shared
+/// cluster (an xtask, a developer's own invocation). A CI run needs none: [`RUN_ID_ENV`] marks
+/// it as `ci`. A plain local run against a throwaway cluster sets neither and gets no labels.
+pub const OWNER_ENV: &str = "MIRRORD_E2E_OWNER";
+
+/// Label naming who created a resource: `ci` for a CI run, otherwise the [`OWNER_ENV`] value.
+/// On a shared cluster it tells CI leftovers from a colleague's, and lets anyone clean up their
+/// own with one selector.
+pub const OWNER_LABEL: &str = "mirrord-e2e-owner";
+
+/// The labels every resource a test creates carries: [`OWNER_LABEL`] and, in CI, [`RUN_ID_LABEL`].
+/// Empty when neither [`RUN_ID_ENV`] nor [`OWNER_ENV`] is set, so a run nobody asked to be
+/// identifiable leaves no trace of who ran it.
+///
+/// A CI job sweeps its own leftovers (tests killed on a timeout, a cancelled job) by run id,
+/// including objects that live outside the test's namespace. A developer sweeps theirs by owner.
+#[must_use]
+pub fn origin_labels() -> BTreeMap<String, String> {
+    let env = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+    let mut labels = BTreeMap::new();
+    if let Some(run_id) = env(RUN_ID_ENV) {
+        labels.insert(OWNER_LABEL.to_owned(), "ci".to_owned());
+        labels.insert(RUN_ID_LABEL.to_owned(), run_id);
+    } else if let Some(owner) = env(OWNER_ENV) {
+        labels.insert(OWNER_LABEL.to_owned(), label_value(&owner));
+    }
+    labels
+}
+
+/// Shapes free text into a valid label value: lowercase alphanumerics, `-`, `_` and `.`, at
+/// most 63 characters.
+fn label_value(text: &str) -> String {
+    let value: String = text
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | '0'..='9' | '-' | '_' | '.' => c,
+            'A'..='Z' => c.to_ascii_lowercase(),
+            _ => '-',
+        })
+        .take(63)
+        .collect();
+    value
+        .trim_matches(|c| c == '-' || c == '_' || c == '.')
+        .to_owned()
+}
+
 pub fn get_test_resource_label_map() -> BTreeMap<String, String> {
-    BTreeMap::from_iter([(
+    let mut labels = BTreeMap::from_iter([(
         TEST_RESOURCE_LABEL.0.to_owned(),
         TEST_RESOURCE_LABEL.1.to_owned(),
-    )])
+    )]);
+    labels.extend(origin_labels());
+    labels
 }
 
 /// Creates a random string of 7 alphanumeric lowercase characters.

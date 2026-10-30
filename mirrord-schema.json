@@ -512,6 +512,16 @@
             "null"
           ]
         },
+        "http2_max_header_list_size": {
+          "title": "agent.http2_max_header_list_size {#agent-http2_max_header_list_size}",
+          "description": "Maximum size, in bytes, of the header list the agent accepts on HTTP/2 connections it\nintercepts. Applies to request headers sent by clients of the target, and to response\nheaders sent back by the target when requests are passed through to it.\n\nThe agent advertises this value as `SETTINGS_MAX_HEADER_LIST_SIZE`. Clients that respect\nit refuse to send larger headers, so set this to at least the header size limit your\nservices allow.\n\nDefaults to 16 Kb.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
         "http_detection_timeout": {
           "title": "agent.http_detection_timeout {#agent-http_detection_timeout}",
           "description": "How long, in seconds, to wait for data on a redirected connection during HTTP protocol\ndetection before giving up and treating it as raw TCP. The timer resets on every read,\nso total detection time may exceed this value for connections that send data in many\nsmall chunks.",

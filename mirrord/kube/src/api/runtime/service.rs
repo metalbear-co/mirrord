@@ -1,6 +1,7 @@
-use std::{borrow::Cow, collections::BTreeMap};
+use std::borrow::Cow;
 
 use k8s_openapi::api::core::v1::Service;
+use kube::core::Selector;
 use mirrord_config::target::service::ServiceTarget;
 
 use super::RuntimeDataFromLabels;
@@ -17,11 +18,12 @@ impl RuntimeDataFromLabels for ServiceTarget {
         self.container.as_deref()
     }
 
-    fn get_selector_match_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
+    fn get_selector(resource: &Self::Resource) -> Result<Selector> {
         resource
             .spec
             .as_ref()
             .and_then(|spec| spec.selector.clone())
+            .map(|selector| selector.into_iter().collect())
             .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector"))
     }
 }

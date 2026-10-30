@@ -23,6 +23,8 @@ use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
 use thiserror::Error;
 
+#[cfg(not(target_os = "windows"))]
+use crate::no_layer::NoLayer;
 use crate::{
     ci::error::CiError,
     container::{CommandDisplay, IntproxySidecarError},
@@ -688,6 +690,24 @@ pub(crate) enum CliError {
         Please use `feature.env.load_from_process`."
     ))]
     ExecveE2Big,
+
+    #[cfg(not(target_os = "windows"))]
+    #[error(
+        "`{binary}` never loads the mirrord layer ({reason}), so mirrord can't hold it for a debugger"
+    )]
+    #[diagnostic(help(
+        "On Linux and macOS the mirrord layer holds the program for the debugger, from inside the program. Debug a build of the program that loads it: dynamically linked, not setuid or setgid, and on macOS not excluded by `skip_sip`.{GENERAL_HELP}"
+    ))]
+    DebugHoldWithoutLayer { binary: String, reason: NoLayer },
+
+    #[cfg(not(target_os = "windows"))]
+    #[error(
+        "`mirrord ci start` runs `{0}` as a child here (in the background, or with its output in files), so mirrord can't hold it for a debugger"
+    )]
+    #[diagnostic(help(
+        "On Linux and macOS the hold is bound to the process `mirrord exec` turns into, and this run starts a separate one. Unset `ci.output_dir` in the mirrord config (or `MIRRORD_CI_API_KEY`) to debug it.{GENERAL_HELP}"
+    ))]
+    DebugHoldSpawnedByCi(String),
 
     #[error("mirrord dump session failed: {0}")]
     DumpError(#[from] DumpSessionError),
