@@ -1806,6 +1806,27 @@ where
         Ok((client_config, kube_context))
     }
 
+    /// Refuses a `split_queues` entry with no filter of its own when the operator cannot take the
+    /// filter from the queue's `MirrordSplitConfig` entry. Such an operator rejects the entry with
+    /// a generic error, so this names the missing feature instead. Multi-cluster sessions run it
+    /// against the primary, which reads the request before any workload cluster sees it.
+    fn check_split_config_filters_support(
+        &self,
+        layer_config: &LayerConfig,
+    ) -> OperatorApiResult<()> {
+        if layer_config
+            .feature
+            .split_queues
+            .uses_split_config_filters()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::SplitConfigQueueFilters)?;
+        }
+
+        Ok(())
+    }
+
     /// Check the operator supports all the operator features required by the user's configuration.
     pub fn check_feature_support(
         &self,
@@ -1848,11 +1869,16 @@ where
                 .require_feature(NewOperatorFeature::KafkaBranching)?;
         }
 
+        // Checked before the auto-splitting early return: the splits `mirrord up` generates
+        // always carry a jq filter, so a filterless entry can only come from the user's
+        // `config_patch`, and an old operator must not be asked to run it.
+        self.check_split_config_filters_support(layer_config)?;
+
+        let split_queues = &layer_config.feature.split_queues;
+
         if auto_queue_splitting {
             return Ok(());
         }
-
-        let split_queues = &layer_config.feature.split_queues;
 
         // Brokers added after the first ones were born with jq, so only the early ones gate jq
         // separately.
@@ -2496,6 +2522,7 @@ impl OperatorApi<PreparedClientCert> {
             layer_config.feature.split_queues = filtered;
             progress.warning(RMQ_AUTO_SPLITS_DISABLED_WARNING);
         }
+        self.check_split_config_filters_support(layer_config)?;
         // Owned: branch preparation below edits the config while the namespace is still needed.
         let namespace = layer_config.target.namespace.clone();
 
