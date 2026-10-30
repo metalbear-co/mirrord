@@ -391,7 +391,6 @@ jobs:
     uses: ./.github/workflows/build-cli-image.yaml
     with:
       runner: ${{ needs.plan.outputs.runner_8 }}
-      runner_arm: ${{ needs.plan.outputs.runner_8_arm }}
 
   # ── tests ───────────────────────────────────────────────────────────
 
