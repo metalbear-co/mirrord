@@ -40,8 +40,9 @@ pub struct IgnoreSnapshot {
     pub prefix: Vec<u8>,
 
     /// The sources of rules, in git's order of precedence, lowest first: the global excludes
-    /// file, `.git/info/exclude`, and every `.gitignore` from the repository's root down. A later
-    /// source decides over an earlier one, so a `!` pattern in it can re-include a path.
+    /// file, `.git/info/exclude`, every `.gitignore` from the repository's root down, and last
+    /// the `ignore` list of the entry in `mirrord-up.yaml`. A later source decides over an
+    /// earlier one, so a `!` pattern in it can re-include a path.
     pub sources: Vec<IgnoreSource>,
 }
 
@@ -74,6 +75,10 @@ pub struct IgnoreRules {
     /// Each source's directory under the virtual root, with its patterns, in the order of
     /// [`IgnoreSnapshot::sources`].
     sources: Vec<(PathBuf, Gitignore)>,
+
+    /// How many of the sources at the end come from [`Self::add_last`], and stay after the ones
+    /// that [`Self::add_gitignore`] adds.
+    last_sources: usize,
 }
 
 impl IgnoreRules {
@@ -82,24 +87,39 @@ impl IgnoreRules {
             entry: virtual_path(&snapshot.prefix),
             sources: snapshot.sources.iter().map(build).collect(),
             snapshot,
+            last_sources: 0,
         }
     }
 
-    /// The snapshot that the rules evaluate, with the sources that [`Self::add_gitignore`] added.
+    /// The snapshot that the rules evaluate, with the sources that were added to it.
     pub fn into_snapshot(self) -> IgnoreSnapshot {
         self.snapshot
     }
 
     /// Adds `lines`, the `.gitignore` of `directory`, a directory relative to the entry's
-    /// directory, after the sources that the rules hold. The CLI adds each `.gitignore` that it
-    /// finds while it walks the tree, before it decides on the paths below it, as git does.
+    /// directory, after the sources that the rules hold, but before the ones from
+    /// [`Self::add_last`]. The CLI adds each `.gitignore` that it finds while it walks the tree,
+    /// before it decides on the paths below it, as git does.
     pub fn add_gitignore(&mut self, directory: &Path, lines: Vec<String>) {
+        let index = self.snapshot.sources.len() - self.last_sources;
+        self.insert(index, directory, lines);
+    }
+
+    /// Adds `lines`, rooted at `directory`, a directory relative to the entry's directory, as the
+    /// last source, which keeps the last word over every source that
+    /// [`Self::add_gitignore`] adds later. The CLI adds the entry's own `ignore` list this way.
+    pub fn add_last(&mut self, directory: &Path, lines: Vec<String>) {
+        self.insert(self.snapshot.sources.len(), directory, lines);
+        self.last_sources += 1;
+    }
+
+    fn insert(&mut self, index: usize, directory: &Path, lines: Vec<String>) {
         let source = IgnoreSource {
             root: join_relative(&self.snapshot.prefix, directory),
             lines,
         };
-        self.sources.push(build(&source));
-        self.snapshot.sources.push(source);
+        self.sources.insert(index, build(&source));
+        self.snapshot.sources.insert(index, source);
     }
 
     /// Whether git would ignore `path`, a path relative to the entry's directory, which is a

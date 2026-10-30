@@ -602,14 +602,23 @@ pub struct InstallConfig {
 #[serde(deny_unknown_fields)]
 pub struct SyncEntry {
     /// The local directory to push. A relative path is resolved against the directory that
-    /// contains `mirrord-up.yaml`. The push leaves out `.git`, `.jj` and the files that git
-    /// ignores. Those paths keep what the image has at them in the pod, and every other path in
-    /// `remote` holds the local tree.
+    /// contains `mirrord-up.yaml`. The push leaves out `.git`, `.jj`, the paths that git ignores
+    /// and the paths that `ignore` leaves out. Those paths keep what the pod has at them, such as
+    /// the image's files or what the install wrote, and every other path in `remote` holds the
+    /// local tree.
     pub local: PathBuf,
 
-    /// The absolute path in the preview's container that holds the pushed directory, on top of
-    /// what the image has at that path (see `local`).
+    /// The absolute path in the preview's container that holds the pushed directory. A push makes
+    /// it a mirror of `local`, so it deletes what the image has there, except at the paths that
+    /// the push leaves out (see `local`).
     pub remote: String,
+
+    /// More paths that the push leaves out, written as the lines of a `.gitignore` in `local`,
+    /// e.g. `coverage/`. They take precedence over git's rules, so a `!` line pushes a file that
+    /// a `.gitignore` excludes, e.g. `!.env.preview`. A `!` line can't bring back a file in an
+    /// ignored directory, as in git.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore: Vec<String>,
 }
 
 /// Top-level `mirrord-up.yaml` configuration.

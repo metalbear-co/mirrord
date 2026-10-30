@@ -38,9 +38,16 @@ enum Packed {
     Symlink(String),
 }
 
-/// The entry that a push of `local` carries.
-fn pack(local: &Path) -> PackedEntry {
-    TreeListing::new(local).unwrap().pack(0, local).unwrap()
+/// The entry that a push of `local` carries, with `ignore` as the entry's own gitignore lines.
+fn pack(local: &Path, ignore: &[&str]) -> PackedEntry {
+    let ignore = ignore
+        .iter()
+        .map(|line| (*line).to_owned())
+        .collect::<Vec<_>>();
+    TreeListing::new(local, &ignore)
+        .unwrap()
+        .pack(0, local)
+        .unwrap()
 }
 
 /// What the archive of `entry` holds, by path.
@@ -104,7 +111,7 @@ fn push_leaves_out_what_git_ignores() {
 
     let file = |contents: &str, executable| Packed::File(contents.to_owned(), executable);
     assert_eq!(
-        unpacked(&pack(local.path())),
+        unpacked(&pack(local.path(), &[])),
         BTreeMap::from([
             (".gitignore".to_owned(), file("dist/\n*.log\n", false)),
             ("app.js".to_owned(), file("app", false)),
@@ -139,7 +146,7 @@ fn push_of_a_subdirectory_leaves_out_what_its_repository_ignores() {
     write("repo/frontend/notes.txt", "notes");
     write("repo/frontend/node_modules/left-pad/index.js", "dependency");
 
-    let entry = pack(&home.path().join("repo/frontend"));
+    let entry = pack(&home.path().join("repo/frontend"), &[]);
     assert_eq!(
         unpacked(&entry),
         BTreeMap::from([("app.js".to_owned(), Packed::File("app".to_owned(), false))])
@@ -193,7 +200,9 @@ fn push_leaves_out_what_the_repository_configuration_excludes() {
         git(&["check-ignore", "--no-index", "--quiet", "private-key.pem"]),
         Some(0)
     );
-    let paths = unpacked(&pack(repo.path())).into_keys().collect::<Vec<_>>();
+    let paths = unpacked(&pack(repo.path(), &[]))
+        .into_keys()
+        .collect::<Vec<_>>();
     assert_eq!(paths, ["app.js", "private-excludes"]);
 
     // A later `[core]` section wins, with an inline comment, with a quoted path followed by a
@@ -223,7 +232,9 @@ fn push_leaves_out_what_the_repository_configuration_excludes() {
             Some(0),
             "{section}"
         );
-        let paths = unpacked(&pack(repo.path())).into_keys().collect::<Vec<_>>();
+        let paths = unpacked(&pack(repo.path(), &[]))
+            .into_keys()
+            .collect::<Vec<_>>();
         assert_eq!(paths, ["app.js", "private-excludes"], "{section}");
     }
 }
@@ -240,7 +251,7 @@ fn push_leaves_out_what_a_gitignore_in_a_directory_with_a_non_utf8_name_excludes
     fs::write(directory.join("app.js"), "app").unwrap();
     fs::write(directory.join("private-key.pem"), "secret").unwrap();
 
-    let paths = unpacked(&pack(local.path()))
+    let paths = unpacked(&pack(local.path(), &[]))
         .into_keys()
         .collect::<Vec<_>>();
     assert_eq!(paths.len(), 3, "{paths:?}");
@@ -256,7 +267,7 @@ fn a_file_that_fails_to_pack_is_named() {
     let local = tempfile::tempdir().unwrap();
     fs::create_dir(local.path().join("src")).unwrap();
     fs::write(local.path().join("src/app.js"), "app").unwrap();
-    let listing = TreeListing::new(local.path()).unwrap();
+    let listing = TreeListing::new(local.path(), &[]).unwrap();
 
     fs::remove_file(local.path().join("src/app.js")).unwrap();
     let error = listing.pack(0, local.path()).unwrap_err();
@@ -266,6 +277,34 @@ fn a_file_that_fails_to_pack_is_named() {
             .contains(&format!("`{}`", local.path().join("src/app.js").display())),
         "{error}"
     );
+}
+
+/// The entry's own `ignore` lines leave out more, and re-include what a `.gitignore` excludes,
+/// but never a file below an ignored directory. A `.gitignore` in the tree counts outside a
+/// repository too.
+#[test]
+fn push_leaves_out_what_the_entry_ignores() {
+    let local = tempfile::tempdir().unwrap();
+    let write = |path: &str| {
+        let path = local.path().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "").unwrap();
+    };
+
+    fs::write(local.path().join(".gitignore"), ".env*\ndist/\n").unwrap();
+    write("app.js");
+    write(".env");
+    write(".env.preview");
+    write("coverage/index.html");
+    write("dist/.env.preview");
+
+    let paths = unpacked(&pack(
+        local.path(),
+        &["coverage/", "!.env.preview", "!dist/.env.preview"],
+    ))
+    .into_keys()
+    .collect::<Vec<_>>();
+    assert_eq!(paths, [".env.preview", ".gitignore", "app.js"]);
 }
 
 /// The sidecar refuses a stream that holds more than `Begin` declared, so the declared counts
@@ -279,7 +318,7 @@ fn push_declares_what_its_stream_holds() {
     fs::write(local.path().join("app.js"), "app, longer").unwrap();
     symlink("app.js", local.path().join("link")).unwrap();
 
-    let entry = pack(local.path());
+    let entry = pack(local.path(), &[]);
     let mut archive = tar::Archive::new(GzDecoder::new(entry.archive.as_slice()));
     let (mut files, mut directories, mut bytes) = (0, 0, 0);
     for archived in archive.entries().unwrap() {
@@ -308,7 +347,7 @@ fn push_skips_sockets() {
     let _listener = std::os::unix::net::UnixListener::bind(local.path().join("dev.sock")).unwrap();
 
     assert_eq!(
-        unpacked(&pack(local.path())),
+        unpacked(&pack(local.path(), &[])),
         BTreeMap::from([("app.js".to_owned(), Packed::File("app".to_owned(), false))])
     );
 }
@@ -322,15 +361,15 @@ fn listing_changes_only_with_the_pushed_tree() {
     fs::write(local.path().join(".gitignore"), "dist/\n*.log\n").unwrap();
     fs::create_dir(local.path().join("src")).unwrap();
     fs::write(local.path().join("src/app.js"), "v1").unwrap();
-    let pushed = TreeListing::new(local.path()).unwrap();
+    let pushed = TreeListing::new(local.path(), &[]).unwrap();
 
     fs::create_dir(local.path().join("dist")).unwrap();
     fs::write(local.path().join("dist/bundle.js"), "bundle").unwrap();
     fs::write(local.path().join("src/debug.log"), "log").unwrap();
-    assert_eq!(TreeListing::new(local.path()).unwrap(), pushed);
+    assert_eq!(TreeListing::new(local.path(), &[]).unwrap(), pushed);
 
     fs::write(local.path().join("src/app.js"), "v2, longer").unwrap();
-    assert_ne!(TreeListing::new(local.path()).unwrap(), pushed);
+    assert_ne!(TreeListing::new(local.path(), &[]).unwrap(), pushed);
 }
 
 /// Tools such as `cp -p` write a file and then restore its modification time, and an edit that
@@ -342,7 +381,7 @@ fn listing_changes_with_an_edit_that_keeps_size_and_time() {
     let app = local.path().join("app.js");
     fs::write(&app, "v1").unwrap();
     let modified = fs::metadata(&app).unwrap().modified().unwrap();
-    let pushed = TreeListing::new(local.path()).unwrap();
+    let pushed = TreeListing::new(local.path(), &[]).unwrap();
 
     // The status change time has a resolution of a clock tick, so the edit must come later.
     std::thread::sleep(Duration::from_millis(20));
@@ -354,7 +393,7 @@ fn listing_changes_with_an_edit_that_keeps_size_and_time() {
         .set_modified(modified)
         .unwrap();
 
-    assert_ne!(TreeListing::new(local.path()).unwrap(), pushed);
+    assert_ne!(TreeListing::new(local.path(), &[]).unwrap(), pushed);
 }
 
 /// The operator's end of a [`PreviewSyncConnection`], which a test scripts.
@@ -595,6 +634,6 @@ fn a_jj_repository_without_git_applies_the_gitignore_files_above_local() {
     fs::write(local.join("app.js"), "app").unwrap();
     fs::write(local.join("debug.log"), "log").unwrap();
 
-    let paths = unpacked(&pack(&local)).into_keys().collect::<Vec<_>>();
+    let paths = unpacked(&pack(&local, &[])).into_keys().collect::<Vec<_>>();
     assert_eq!(paths, ["app.js"]);
 }

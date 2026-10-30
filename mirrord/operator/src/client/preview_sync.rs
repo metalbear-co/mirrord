@@ -199,7 +199,8 @@ pub struct TreeListing {
 }
 
 impl TreeListing {
-    /// Lists the tree under `local`, leaving out what git ignores.
+    /// Lists the tree under `local`, leaving out what git ignores and what `ignore`, the entry's
+    /// own gitignore lines, matches.
     ///
     /// The rules come from the sources that git reads, rooted where git roots them: the excludes
     /// file that git's configuration names (`core.excludesFile` of the repository's worktree
@@ -207,12 +208,14 @@ impl TreeListing {
     /// `~/.config/git/ignore`) and the repository's `.git/info/exclude` at the repository's
     /// root, the `.gitignore` of every directory from the repository's root down to `local`, and
     /// the `.gitignore` of every directory in the tree that isn't ignored, as git reads them.
-    /// `local` is often a service's directory inside a larger repository whose root
-    /// `.gitignore` excludes `node_modules` or `.env`, so the sources above `local` count too.
-    /// The `.gitignore` files above the repository's root don't, as in git, and outside a
-    /// repository only the `.gitignore` files in the tree apply.
-    pub fn new(local: &Path) -> io::Result<Self> {
+    /// `ignore` comes last, rooted at `local`. `local` is often a service's directory inside a
+    /// larger repository whose root `.gitignore` excludes `node_modules` or `.env`, so the
+    /// sources above `local` count too. The `.gitignore` files above the repository's root
+    /// don't, as in git, and outside a repository only the `.gitignore` files in the tree and
+    /// `ignore` apply.
+    pub fn new(local: &Path, ignore: &[String]) -> io::Result<Self> {
         let mut rules = IgnoreRules::new(repository_rules(local)?);
+        rules.add_last(Path::new(""), ignore.to_vec());
         let mut paths = Vec::new();
         visit(local, Path::new(""), &mut rules, &mut paths)?;
 

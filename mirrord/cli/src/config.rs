@@ -1860,8 +1860,8 @@ pub(super) struct PreviewSyncArgs {
     pub up: PreviewUpArgs,
 
     /// Keep running after the previews are up, and push the `sync` directories of each service
-    /// again whenever a file that they push changes. A change to `.git` or to a file that git
-    /// ignores pushes nothing.
+    /// again whenever a file that they push changes. A change to `.git`, or to a file that git or
+    /// the entry's `ignore` leaves out, pushes nothing.
     #[arg(long)]
     pub watch: bool,
 }

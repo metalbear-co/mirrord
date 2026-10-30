@@ -64,7 +64,7 @@ use mirrord_operator::{
     types::OPERATOR_OWNERSHIP_LABEL,
 };
 use mirrord_progress::{Progress, ProgressTracker};
-use mirrord_up::PreviewRun;
+use mirrord_up::{PreviewRun, SyncEntry};
 use prettytable::{Table, row};
 use tracing::Level;
 
@@ -244,9 +244,9 @@ struct PreparedPreview {
     /// The session's spec, but for what [`PreparedPreview::start`] fills in: `db_branching`,
     /// from the branches it prepares, and `share_host`, from the session it replaces.
     spec: PreviewSessionSpec,
-    /// The local directory of each entry of `spec.sync`, which [`PreparedPreview::start`] pushes
-    /// into the preview pod.
-    sync_locals: Vec<PathBuf>,
+    /// The service's `sync` entries, in the order of `spec.sync`, which
+    /// [`PreparedPreview::start`] pushes into the preview pod.
+    sync_entries: Vec<SyncEntry>,
 }
 
 impl PreparedPreview {
@@ -534,7 +534,7 @@ impl PreparedPreview {
             subtask.warning(&temporal_mirror_warning(&id));
         }
 
-        let (sync_locals, sync_config) = sync.map(|sync| (sync.locals, sync.config)).unzip();
+        let (sync_entries, sync_config) = sync.map(|sync| (sync.entries, sync.config)).unzip();
         let spec = PreviewSessionSpec {
             image,
             key: layer_config.key.as_str().to_owned(),
@@ -568,7 +568,7 @@ impl PreparedPreview {
             config_target,
             secret_values,
             spec,
-            sync_locals: sync_locals.unwrap_or_default(),
+            sync_entries: sync_entries.unwrap_or_default(),
         })
     }
 
@@ -588,7 +588,7 @@ impl PreparedPreview {
             config_target,
             secret_values,
             mut spec,
-            sync_locals,
+            sync_entries,
         } = self;
 
         // Label targets with branches were rejected in `prepare`, so an empty config is the only
@@ -802,7 +802,7 @@ impl PreparedPreview {
         // The pod of a session with `sync` becomes ready only once its sidecar holds a
         // push, so the push runs while the loop below waits for `Ready`.
         let mut preview_sync = None;
-        let mut sync_pending = sync_locals.is_empty().not();
+        let mut sync_pending = sync_entries.is_empty().not();
         let sync_progress = sync_pending.then(|| progress.subtask("pushing the local code"));
         let mut sync_push = Box::pin(async {
             match sync_progress {
@@ -810,7 +810,7 @@ impl PreparedPreview {
                     &operator_api,
                     &session_namespace,
                     &session_name,
-                    sync_locals,
+                    sync_entries,
                     sync_progress,
                 )
                 .await
@@ -1782,8 +1782,8 @@ fn check_sync(sync: &sync::ServiceSync, spec: &MirrordOperatorSpec) -> CliResult
         return Err(CliError::PreviewSyncMultiCluster);
     }
 
-    if let Some(local) = sync.locals.iter().find(|local| local.is_dir().not()) {
-        return Err(CliError::PreviewSyncLocalNotADirectory(local.clone()));
+    if let Some(entry) = sync.entries.iter().find(|entry| entry.local.is_dir().not()) {
+        return Err(CliError::PreviewSyncLocalNotADirectory(entry.local.clone()));
     }
 
     Ok(())
@@ -2385,7 +2385,11 @@ mod tests {
     fn sync_is_refused_where_it_cannot_work() {
         let local = tempfile::tempdir().unwrap();
         let sync = |local: PathBuf| sync::ServiceSync {
-            locals: vec![local],
+            entries: vec![SyncEntry {
+                local,
+                remote: "/app".to_owned(),
+                ignore: Vec::new(),
+            }],
             config: PreviewSyncConfig {
                 entries: vec![PreviewSyncEntry {
                     remote: "/app".to_owned(),

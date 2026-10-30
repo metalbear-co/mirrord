@@ -113,10 +113,15 @@ async fn watch_pushes_each_change_to_the_pushed_files_once() {
         socket: operator,
         generation: 0,
     };
-    let locals = Arc::from([frontend.path().to_owned(), backend.path().to_owned()]);
+    let entry = |local: &Path| SyncEntry {
+        local: local.to_owned(),
+        remote: "/app".to_owned(),
+        ignore: Vec::new(),
+    };
+    let entries = Arc::from([entry(frontend.path()), entry(backend.path())]);
 
     let (first_push, entries) = tokio::join!(
-        PreviewSync::first_push(PreviewSyncConnection::new(cli), locals),
+        PreviewSync::first_push(PreviewSyncConnection::new(cli), entries),
         operator.next_push(PUSH_TIMEOUT),
     );
     let (preview_sync, generation) = first_push.unwrap();
@@ -173,6 +178,7 @@ fn service(entries: &[(&str, &str)], install: Option<InstallConfig>) -> Subproce
             .map(|(local, remote)| SyncEntry {
                 local: Path::new("/repo").join(local),
                 remote: (*remote).to_owned(),
+                ignore: Vec::new(),
             })
             .collect(),
         install,
@@ -204,13 +210,7 @@ fn on_change_globs_match_the_pushed_files_in_the_container() {
 
     let sync = ServiceSync::of_service(&frontend).unwrap().unwrap();
 
-    assert_eq!(
-        sync.locals,
-        [
-            Path::new("/repo/frontend"),
-            Path::new("/repo/frontend/packages/ui")
-        ]
-    );
+    assert_eq!(sync.entries, frontend.sync);
     assert_eq!(
         sync.config,
         PreviewSyncConfig {

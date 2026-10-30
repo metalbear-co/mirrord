@@ -40,11 +40,11 @@ const WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
 /// that a process that keeps writing, such as a dev server's log, can't hold back every push.
 const WATCH_MAX_DELAY: Duration = Duration::from_secs(2);
 
-/// The code sync of a `mirrord preview sync` service: the local directories that the CLI pushes,
-/// and the sync settings of the session.
+/// The code sync of a `mirrord preview sync` service: the `sync` entries that the CLI pushes, and
+/// the sync settings of the session.
 pub(super) struct ServiceSync {
-    /// The local directory of each entry, by its index in `config.entries`.
-    pub(super) locals: Vec<PathBuf>,
+    /// The `sync` entries of the service, by their index in `config.entries`.
+    pub(super) entries: Vec<SyncEntry>,
 
     pub(super) config: PreviewSyncConfig,
 }
@@ -131,11 +131,7 @@ impl ServiceSync {
         config.check()?;
 
         Ok(Some(Self {
-            locals: service
-                .sync
-                .iter()
-                .map(|entry| entry.local.clone())
-                .collect(),
+            entries: service.sync.clone(),
             config,
         }))
     }
@@ -188,8 +184,8 @@ fn lexically_normal(path: &Path) -> PathBuf {
 pub(super) struct PreviewSync<S = UpgradedConnection> {
     connection: PreviewSyncConnection<S>,
 
-    /// The local directory of each entry, by its index in the session's `sync`.
-    locals: Arc<[PathBuf]>,
+    /// The `sync` entries of the service, by their index in the session's `sync`.
+    entries: Arc<[SyncEntry]>,
 
     /// The listing of each entry's tree when the sidecar last received it.
     pushed: Vec<TreeListing>,
@@ -199,16 +195,17 @@ pub(super) struct PreviewSync<S = UpgradedConnection> {
 
 impl PreviewSync {
     /// Opens the sync connection of the session `name` in `namespace`, waits until the operator
-    /// pairs it with the preview pod, and pushes `locals`, the local directory of each entry of
-    /// the session's `spec.sync`. Reports on `progress`, and finishes it.
+    /// pairs it with the preview pod, and pushes `entries`, the service's `sync` entries in the
+    /// order of the session's `spec.sync`. Reports on `progress`, and finishes it.
     pub(super) async fn start(
         operator_api: &OperatorApi<NoClientCert>,
         namespace: &str,
         name: &str,
-        locals: Vec<PathBuf>,
+        entries: Vec<SyncEntry>,
         mut progress: ProgressTracker,
     ) -> CliResult<Self> {
-        let result = Self::connect_and_push(operator_api, namespace, name, locals, &progress).await;
+        let result =
+            Self::connect_and_push(operator_api, namespace, name, entries, &progress).await;
 
         match &result {
             Ok(_) => progress.success(Some("pushed the local code")),
@@ -222,7 +219,7 @@ impl PreviewSync {
         operator_api: &OperatorApi<NoClientCert>,
         namespace: &str,
         name: &str,
-        locals: Vec<PathBuf>,
+        entries: Vec<SyncEntry>,
         progress: &ProgressTracker,
     ) -> CliResult<Self> {
         let mut connection = operator_api.connect_preview_sync(namespace, name).await?;
@@ -237,7 +234,8 @@ impl PreviewSync {
             })
             .await?;
 
-        let (preview_sync, generation) = PreviewSync::first_push(connection, locals.into()).await?;
+        let (preview_sync, generation) =
+            PreviewSync::first_push(connection, entries.into()).await?;
         progress.info(&format!("pushed the local code (generation {generation})"));
 
         Ok(preview_sync)
@@ -245,16 +243,16 @@ impl PreviewSync {
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSync<S> {
-    /// Pushes the directory of each entry in `locals` on the paired `connection`, and returns
+    /// Pushes the directory of each entry in `entries` on the paired `connection`, and returns
     /// the generation that the volume holds afterwards.
     async fn first_push(
         connection: PreviewSyncConnection<S>,
-        locals: Arc<[PathBuf]>,
+        entries: Arc<[SyncEntry]>,
     ) -> CliResult<(Self, u64)> {
-        let (pushed, packed) = pack(locals.clone(), Vec::new()).await?;
+        let (pushed, packed) = pack(entries.clone(), Vec::new()).await?;
         let mut preview_sync = Self {
             connection,
-            locals,
+            entries,
             pushed,
             next_push_id: 1,
         };
@@ -285,7 +283,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSync<S> {
         })
         .map_err(|error| CliError::PreviewSyncFailed(Box::new(error)))?;
 
-        for local in self.locals.iter() {
+        for local in self.entries.iter().map(|entry| &entry.local) {
             watcher
                 .watch(local, RecursiveMode::Recursive)
                 .map_err(|error| match error.kind {
@@ -323,7 +321,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSync<S> {
             // A change under `.git` or under an ignored path, such as a build's output, leaves
             // the listings as they were, so it pushes nothing.
             let pushed = std::mem::take(&mut self.pushed);
-            let (listings, packed) = match pack(self.locals.clone(), pushed).await {
+            let (listings, packed) = match pack(self.entries.clone(), pushed).await {
                 Ok(packed) => packed,
                 // A file that an editor or a tool removes while the CLI reads the tree fails the
                 // pack, and its removal is a change, so the next pass packs the trees again.
@@ -345,30 +343,30 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSync<S> {
     }
 }
 
-/// Lists the tree of every entry in `locals`, and packs the entries whose listing differs from
+/// Lists the tree of every entry in `entries`, and packs the entries whose listing differs from
 /// their listing in `pushed`, the listings of the last push. Returns all the listings, and the
 /// packed entries. Before the first push `pushed` is empty, so every entry is packed.
 ///
 /// Lists each tree before it packs it, so that a change made while it packs makes the next
 /// listing differ and leads to another push.
 async fn pack(
-    locals: Arc<[PathBuf]>,
+    entries: Arc<[SyncEntry]>,
     pushed: Vec<TreeListing>,
 ) -> CliResult<(Vec<TreeListing>, Vec<PackedEntry>)> {
     tokio::task::spawn_blocking(move || {
-        let mut listings = Vec::with_capacity(locals.len());
+        let mut listings = Vec::with_capacity(entries.len());
         let mut packed = Vec::new();
 
-        for (index, local) in locals.iter().enumerate() {
+        for (index, entry) in entries.iter().enumerate() {
             let failed = |error| CliError::PreviewSyncReadFailed {
-                path: local.clone(),
+                path: entry.local.clone(),
                 error,
             };
 
-            let listing = TreeListing::new(local).map_err(failed)?;
+            let listing = TreeListing::new(&entry.local, &entry.ignore).map_err(failed)?;
 
             if pushed.get(index) != Some(&listing) {
-                packed.push(listing.pack(index as u32, local).map_err(failed)?);
+                packed.push(listing.pack(index as u32, &entry.local).map_err(failed)?);
             }
 
             listings.push(listing);
