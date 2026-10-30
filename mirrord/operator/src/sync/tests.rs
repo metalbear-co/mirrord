@@ -1,5 +1,6 @@
 use super::{
-    EntryCounts, EntryPlan, PushMode, RejectReason, SidecarState, SyncFrame,
+    AppReport, AppState, EntryCounts, EntryPlan, InstallReport, InstallState, PushMode,
+    RejectReason, SidecarState, SupervisorReport, SyncFrame,
     rules::{IgnoreSnapshot, IgnoreSource},
 };
 
@@ -24,7 +25,7 @@ fn frames_keep_their_encoding() {
         },
     };
 
-    let frames: [(SyncFrame, &[u8]); 19] = [
+    let frames: [(SyncFrame, &[u8]); 20] = [
         (
             SyncFrame::Begin {
                 push_id: 7,
@@ -126,6 +127,22 @@ fn frames_keep_their_encoding() {
                 message: "gone".to_owned(),
             },
             &[9, 4, b'g', b'o', b'n', b'e'],
+        ),
+        (
+            // Signed integers are zigzag varints, so the exit code 1 is `2`.
+            SyncFrame::Supervisor(SupervisorReport {
+                install: InstallReport {
+                    state: InstallState::Failed,
+                    error: Some("x".to_owned()),
+                },
+                app: AppReport {
+                    state: AppState::Restarting,
+                    restarts: 2,
+                    last_exit_code: Some(1),
+                },
+                handled: Some(4),
+            }),
+            &[10, 3, 1, 1, b'x', 2, 2, 1, 2, 1, 4],
         ),
     ];
 

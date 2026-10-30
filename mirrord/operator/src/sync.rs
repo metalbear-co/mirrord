@@ -12,6 +12,7 @@
 use std::fmt;
 
 use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 use strum_macros::Display;
 
 use self::rules::IgnoreSnapshot;
@@ -83,6 +84,10 @@ pub enum SyncFrame {
 
     /// Operator to CLI: the sync can't go on, and the operator closes the connection.
     Error { message: String },
+
+    /// Sidecar to operator, and operator to CLI: what the supervisor of the app container
+    /// reported about the install and the app, sent on connect and whenever it changes.
+    Supervisor(SupervisorReport),
 }
 
 /// What a push replaces in each of its entries. Once released, it may only grow, as
@@ -206,6 +211,87 @@ pub enum SidecarState {
     /// write to.
     #[strum(to_string = "failed: {message}")]
     Failed { message: String },
+}
+
+/// What the supervisor, the first process of the app container, reports about the install
+/// command and the app. The supervisor sends it to the sidecar on their Unix socket, as JSON, and
+/// the sidecar sends it on as [`SyncFrame::Supervisor`]. Once released, it may only grow, as
+/// [`SyncFrame`] says.
+#[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct SupervisorReport {
+    pub install: InstallReport,
+    pub app: AppReport,
+
+    /// The generation of the last push that the supervisor acted on: it ran the install that the
+    /// push needed, and the app that it started or restarted for the push, as the session's
+    /// settings say, has started. `None` before it acted on a push. Once this reaches the
+    /// generation of a CLI's push, the supervisor is done with that push, and `install` says
+    /// whether its install failed.
+    pub handled: Option<u64>,
+}
+
+/// The last run of `install.command`.
+#[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct InstallReport {
+    pub state: InstallState,
+
+    /// Why the last install failed, with the end of its output.
+    pub error: Option<String>,
+}
+
+/// Where the install stands. Once released, it may only grow, as [`SyncFrame`] says.
+#[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum InstallState {
+    /// No install ran in this container yet: the supervisor waits for the sidecar's first
+    /// answer, or the volume's install is up to date, or the session has no `install`.
+    #[default]
+    NotRun,
+    Running,
+    Succeeded,
+
+    /// The last install failed. The app keeps running on the earlier install, or doesn't start
+    /// when no install ever succeeded, and the next push runs the install again.
+    Failed,
+
+    /// A state that a newer supervisor or operator reports, which this version doesn't know.
+    #[serde(other)]
+    Unknown,
+}
+
+/// The app, the process of `run.command`.
+#[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct AppReport {
+    pub state: AppState,
+
+    /// How many times the app exited on its own, or couldn't start, and the supervisor started
+    /// it again.
+    pub restarts: u32,
+
+    /// The exit code of the app's last run, or 128 plus the number of the signal that ended it,
+    /// as a shell reports it. A program that couldn't start counts as 127, as a shell reports a
+    /// command that isn't found.
+    pub last_exit_code: Option<i32>,
+}
+
+/// Where the app stands. Once released, it may only grow, as [`SyncFrame`] says.
+#[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AppState {
+    /// The app hasn't started yet: the supervisor waits for the sidecar's first answer, or the
+    /// first install is running or failed.
+    #[default]
+    NotStarted,
+    Running,
+
+    /// The app starts again: it stops to start on a new push or install, or it exited on its own
+    /// and the supervisor starts it again after a backoff.
+    Restarting,
+
+    /// The container stops, and the app is gone.
+    Exited,
+
+    /// A state that a newer supervisor or operator reports, which this version doesn't know.
+    #[serde(other)]
+    Unknown,
 }
 
 impl SidecarState {

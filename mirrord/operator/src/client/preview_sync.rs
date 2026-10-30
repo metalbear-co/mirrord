@@ -104,6 +104,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSyncConnection<S> {
             match self.recv().await? {
                 SyncFrame::Paired { generation } => return Ok(generation),
                 SyncFrame::Status(state) => on_status(state),
+                // TODO: show the install and the app while the CLI waits for the sidecar.
+                SyncFrame::Supervisor(_) => {}
                 frame => return Err(PreviewSyncError::Unexpected(frame)),
             }
         }
@@ -156,8 +158,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSyncConnection<S> {
                     push_id: rejected,
                     reason,
                 } if rejected == push_id => return Err(PreviewSyncError::Rejected(reason)),
-                // The sidecar's state can change while it applies the push.
-                SyncFrame::Status(_) => continue,
+                // The sidecar's state, and what the supervisor reports, can change while the
+                // sidecar applies the push.
+                SyncFrame::Status(_) | SyncFrame::Supervisor(_) => continue,
                 frame => return Err(PreviewSyncError::Unexpected(frame)),
             }
         }
