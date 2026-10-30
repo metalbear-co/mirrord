@@ -6,11 +6,7 @@ use futures::{
     stream::{self, BoxStream, SelectAll},
 };
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter};
-use mirrord_config::{
-    config::ConfigContext,
-    target::{Target, TargetConfig},
-};
-use mirrord_kube::resolved::ResolvedTarget;
+use mirrord_config::{config::ConfigContext, target::Target};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
     LogLevel, LogMessage,
@@ -26,8 +22,10 @@ use tracing::info;
 
 use super::config::DumpArgs;
 use crate::{
-    CliError, connection::create_and_connect, data::UserData, error::CliResult,
-    kube::kube_client_from_layer_config,
+    CliError,
+    connection::{ConnectData, create_and_connect},
+    data::UserData,
+    error::CliResult,
 };
 
 /// Implements the `mirrord dump` command.
@@ -57,16 +55,12 @@ pub async fn dump_command(
     );
 
     // Ensure a target was specified
-    let TargetConfig { path, namespace } = config.target.clone();
-    let path: Target = match path {
-        Some(Target::Targetless) | None => {
-            return Err(CliError::MissingArg {
-                command: "mirrord dump".to_owned(),
-                arg: "--target".to_owned(),
-            });
-        }
-        valid_target => valid_target.unwrap(),
-    };
+    if matches!(config.target.path, Some(Target::Targetless) | None) {
+        return Err(CliError::MissingArg {
+            command: "mirrord dump".to_owned(),
+            arg: "--target".to_owned(),
+        });
+    }
 
     if args.params.disable_version_check.not() {
         super::prompt_outdated_version(&progress).await;
@@ -75,48 +69,28 @@ pub async fn dump_command(
     (&config).collect_analytics(analytics.get_mut());
 
     // Create connection to the agent
-    let client = create_and_connect(&mut config, &mut progress, &mut analytics, None, None, None)
-        .await?
-        .connector
-        .into_client()
-        .await?;
+    let ConnectData {
+        connector,
+        target_container_ports,
+        ..
+    } = create_and_connect(&mut config, &mut progress, &mut analytics, None, None, None).await?;
+
+    let client = connector.into_client().await?;
 
     // If the user didn't specify ports, detect them on the target
     let ports = if args.ports.is_empty() {
-        let kube_client = kube_client_from_layer_config(&config).await?;
-
-        let resolved = ResolvedTarget::new(&kube_client, &path, namespace.as_deref())
-            .await
-            .map_err(|error| {
-                DumpSessionError::PortDetectionFailed(format!("failed to resolve target: {error}"))
-            })?;
-        let pod_spec = resolved
-            .resolve_pod_spec(&kube_client)
-            .await
-            .map_err(|error| {
-                DumpSessionError::PortDetectionFailed(format!(
-                    "failed to resolve target pod spec: {error}"
-                ))
-            })?;
-        let ports: Vec<_> = pod_spec
-            .map(|spec| {
-                spec.containers
-                    .iter()
-                    .flat_map(|container| container.ports.clone().unwrap_or_default())
-                    .map(|port| port.container_port.unsigned_abs() as u16)
-                    .collect()
-            })
-            .unwrap_or_default();
-        if ports.is_empty() {
-            Err(DumpSessionError::PortDetectionFailed(format!(
-                "no ports found in the resource spec for target {path}"
-            )))?;
+        if target_container_ports.is_empty() {
+            Err(DumpSessionError::PortDetectionFailed)?;
         }
 
         progress.info(
-            format!("No ports were specified, attaching to all detected ports: {ports:?}").as_str(),
+            format!(
+                "No ports were specified, attaching to all detected ports: \
+                 {target_container_ports:?}"
+            )
+            .as_str(),
         );
-        ports
+        target_container_ports
     } else {
         args.ports.clone()
     };
@@ -140,8 +114,11 @@ pub enum DumpSessionError {
     #[error("subscription failed: {0}")]
     SubscriptionFailed(#[from] ClientError),
 
-    #[error("couldn't detect ports on target, try using the `--ports` flag: {0}")]
-    PortDetectionFailed(String),
+    /// The target's ports are unknown, which is not the same as the target having none: containers
+    /// don't have to declare their ports, and they are not resolved for every kind of session
+    /// (e.g. copy target or multi-cluster).
+    #[error("couldn't detect ports on target, try using the `--ports` flag")]
+    PortDetectionFailed,
 }
 
 /// Subscribes to mirror traffic on the given ports and prints it to stdout,
