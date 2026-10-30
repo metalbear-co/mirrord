@@ -4,6 +4,9 @@
 
 mirrord is a tool that lets developers run local processes in the context of their Kubernetes cloud environment.
 
+`CONTRIBUTING.md` has the procedures: preparing a cluster for the end-to-end tests, debugging with `mirrord-console`,
+building the agent on macOS, adding a hook or a target type, and releasing.
+
 ### Core Crates
 
 - `mirrord-layer`: gets loaded into the user's process via `LD_PRELOAD`/`DYLD_INSERT_LIBRARIES`. Intercepts libc
@@ -14,17 +17,10 @@ responses, handles reconnects, and routes messages to the right feature proxy.
 actual I/O work requested by the layers.
 - `mirrord-protocol`: defines the shared messages (`ClientMessage`, `DaemonMessage`) sent between layer/intproxy/agent.
 - `mirrord-config`: config types and validation. Used by the CLI and layer to decide what features are enabled and what
-target to use. Every option records the plan it needs (`oss`, `team` or `enterprise`, per its docs page) as
-`x-mirrord-plan` in the schema, as a `mirrord_config::plan::Plan`: `#[config(plan = Team)]` on `MirrordConfig`
-fields, `#[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Team))]` elsewhere. Nested options inherit it, except that every option under
-`feature` and every target kind needs its own; tests in `mirrord-mcp` fail on an option without one.
+target to use.
 - `mirrord`: the CLI that resolves configuration, creates or connects to the agent, starts the intproxy, and launches
 the user's local process with the mirrord layer loaded.
-- `mirrord-mcp`: the MCP server behind `mirrord mcp`, which exposes mirrord to AI agents over stdio. Tools are
-registered in its `tools` module and must be answered offline, from what is compiled into the binary. Usage is
-reported through `mirrord-analytics`, and every new tool needs a variant in its `McpTool` telemetry enum. The docs and
-skills it answers from are vendored into `mirrord/mcp/corpus` from pinned upstream commits: never edit them by hand,
-bump them with `cargo xtask corpus sync --bump` (the release PR does).
+- `mirrord-mcp`: the MCP server behind `mirrord mcp`, which exposes mirrord to AI agents over stdio.
 
 ## Command Reference
 
@@ -33,11 +29,15 @@ bump them with `cargo xtask corpus sync --bump` (the release PR does).
 ```bash
 # check the entire workspace at once
 # always use when a change spans multiple crates instead of checking each crate individually
-CARGO_BUILD_WARNINGS=deny cargo clippy --all-targets --all-features --keep-going
+# CI appends `-- -Wclippy::indexing_slicing` to every clippy run, so add it to any clippy command here
+CARGO_BUILD_WARNINGS=deny cargo clippy --all-targets --all-features --keep-going -- -Wclippy::indexing_slicing
 
 # check a specific crate
 # the agent is linux only
-CARGO_BUILD_WARNINGS=deny cargo clippy -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going
+CARGO_BUILD_WARNINGS=deny cargo clippy -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going -- -Wclippy::indexing_slicing
+
+# rustdoc of private items, as `check-rust-docs` builds it
+RUSTDOCFLAGS=-Dwarnings cargo xtask test-doc
 
 # layer and cli bundled with the new layer
 # use only when a fresh mirrord + layer binary is needed for testing
@@ -50,20 +50,31 @@ Use `--keep-going` to surface all errors at once. Use `clippy` instead of `check
 
 ```bash
 # integration tests
-# requires building the cli first with `xtask build-cli`
+# builds the cli and layer, unless given `--binary`/`--layer` or `MIRRORD_TESTS_USE_BINARY`/`MIRRORD_LAYER_FILE`
 cargo xtask test-integration
 
 # filtered integration tests
 cargo xtask test-integration -- outgoing_udp --nocapture
 
-# unit tests
+# e2e tests, against the cluster kubectl points at; same artifact options
+cargo xtask test-e2e
+
+# unit tests of the cli, with placeholder layer files
+# other crates: cargo nextest run -p <package>
 cargo xtask test-ut
 
 # filtered unit tests
 cargo xtask test-ut -- resolve_url_happy_path -- --nocapture
+
+# any of these inside the CI runner image, which has every toolchain the suites need
+cargo xtask in-runner -- cargo xtask test-e2e
 ```
 
 Never write unit tests unless explicitly asked. Run the existing tests to verify a change.
+
+Prefer an integration test (`mirrord-layer-tests`, which stands in for the agent) to an end-to-end test, which needs a
+cluster. Don't add the `#[timeout]` of `rstest`: `.config/nextest.toml` already times out every test and reports it as
+a timeout, where `rstest` panics like any other failure.
 
 #### A test can merge and never run
 
@@ -82,6 +93,67 @@ Grepping the workflows for `-p <package>` is not enough either, since some runs 
 # Formatting
 cargo fmt
 ```
+
+## CI
+
+`.github/workflows/ci.yaml` runs on pull requests into `main` that aren't drafts, and in the merge queue. A pull
+request into a branch its `pull_request` trigger doesn't list gets it only as part of a GitHub stack, from the first
+push after it joins. Its `plan` job picks the other jobs from the changed paths, and a change under
+`.github/workflows/` runs nearly every one.
+
+- `ci` (the `ci-success` job) is the only required check. It and `lint-success` only collect the jobs they need, so
+  when either fails, read the job under it that failed.
+- `main` merges through the merge queue, with merge commits, after one approval and with every review thread resolved.
+- nextest retries a failing test twice, so `FLAKY` marks a pass on a retry and `TRY 3 FAIL` a test that never passed.
+- Clippy runs for macOS, Windows, and Linux targets, so code behind a `cfg` can fail on one of them only.
+- `typos` checks the tracked Markdown outside `mirrord/mcp/corpus`, and Vale the Markdown at the root and every fragment
+  in `changelog.d`. `CONTRIBUTING.md` says how to clear a false positive from either.
+- The CI runner image (`tests/e2e.Dockerfile`) bakes in the compiled test apps (`scripts/prepare_e2e.sh --apps-only`).
+  A pull request rebuilds it when a path in `plan`'s `changed-runner-image` filter changes, and `main` republishes it
+  when one in `publish-ci-runner.yaml`'s paths does. A new kind of compiled app goes in the script and both lists.
+- While the `windows-e2e` label is on a pull request, adding any label runs the Windows end-to-end tests; pushes
+  don't. `no-greptile` skips Greptile's review, and `no-qodo` skips Qodo's only if it's on before the pull request
+  leaves draft (`.pr_agent.toml`).
+
+## Changelog Fragments
+
+Every pull request adds a fragment to `changelog.d/`, or `towncrier check` fails it. Name it `<issue>.<type>.md` after
+an issue in this repository, or `+<name>.<type>.md` when there's none; never use the ID of a private tracker. The
+types are the `[[tool.towncrier.type]]` directories in `towncrier.toml`: `internal` is for what users never see,
+such as tests and CI, and any type besides `fixed`, `security`, and `internal` makes the next release a minor one.
+
+The fragment becomes the release notes, so write it for users: what changed for them, not in the code. Never edit
+`CHANGELOG.md`; the release pull request builds it.
+
+## Compatibility
+
+The CLI ships the layer and the intproxy inside its own binary, but not the agent or the operator. An agent can be
+another version (a custom `agent.image`, or one the operator spawns), and users upgrade the operator on their own
+schedule. What's only on `main` hasn't shipped and needs no compatibility; what's in the latest release tag does.
+
+- New messages to the agent are gated on the negotiated protocol version (`mirrord/protocol/AGENTS.md`).
+- A capability the CLI newly asks of the operator is gated on `require_feature(NewOperatorFeature::...)`, so an older
+  operator fails with a clear error. Without the gate it may ignore the request, reject it, or leave the CLI waiting
+  on a resource nothing reconciles.
+- An exception: a feature the operator started advertising after the capability shipped can't be gated, since an
+  operator that supports the capability may not advertise it. The CLI relies on the operator's own failure instead
+  (`required_branching_feature`).
+- An older CLI must keep working against a newer operator, so new behavior is opt-in and no client has to change. The
+  rules this puts on the shared CRD types are in `mirrord/operator/AGENTS.md`.
+
+## Related Repositories
+
+- `metalbear-co/docs` documents user-visible behavior, so a change users notice usually needs a pull request there
+  too. The configuration reference is the exception: it's generated here (`mirrord/config/AGENTS.md`).
+- `metalbear-co/mirrord-vscode` and `metalbear-co/mirrord-intellij` drive the CLI; `ci.yaml` runs their end-to-end
+  tests on release branches.
+- `metalbear-co/test-images` builds the app images the end-to-end tests deploy.
+
+## Generated Files
+
+`mirrord-schema.json` and `mirrord-up-schema.json` are generated, as `mirrord/config/AGENTS.md` and
+`mirrord/up/AGENTS.md` say. A change to either runs `corpus_check`, which validates the config examples in the skills
+`mirrord-mcp` vendors against them, so renaming or removing an option they use fails it.
 
 ## Simplicity and Reuse
 
@@ -127,3 +199,4 @@ before awaiting it, so one `match` with a large future per arm pays for all of t
 - Prefer `to_owned` for `&str` → `String`.
 - Always use `foo.rs` instead of `foo/mod.rs` for module roots.
 - Run styling commands after every edit.
+- `STYLE.md` has more Rust conventions; follow it too.
