@@ -60,6 +60,11 @@ pub enum SplitConfigCopyMode {
     Empty,
     Schema,
     All,
+
+    /// A mode a newer client asks for, so an operator that doesn't know it can still read the
+    /// request and refuse the mode instead of the whole request. Never sent.
+    #[serde(other, skip_serializing)]
+    Unknown,
 }
 
 /// Response of `POST /splitconfigdbbranches`.
