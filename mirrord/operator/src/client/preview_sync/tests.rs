@@ -18,7 +18,8 @@ use tokio_tungstenite::{
 
 use super::{PackedEntry, PreviewSyncConnection, PreviewSyncError, TreeListing};
 use crate::sync::{
-    EntryCounts, EntryPlan, MAX_DATA_CHUNK_BYTES, PushMode, RejectReason, SidecarState, SyncFrame,
+    EntryCounts, EntryPlan, MAX_DATA_CHUNK_BYTES, PushMode, RejectReason, SYNC_PROTOCOL_VERSION,
+    SidecarState, SyncFrame,
     rules::{IgnoreRules, IgnoreSnapshot},
 };
 
@@ -514,7 +515,12 @@ async fn push_reaches_the_sidecar_whole_after_pairing() {
         operator
             .send(SyncFrame::Status(SidecarState::AwaitingFirstPush))
             .await;
-        operator.send(SyncFrame::Paired { generation: None }).await;
+        operator
+            .send(SyncFrame::Paired {
+                generation: None,
+                protocol_version: SYNC_PROTOCOL_VERSION,
+            })
+            .await;
 
         let pushed = operator.recv_push().await;
 

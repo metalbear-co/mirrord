@@ -22,7 +22,7 @@ use tokio_tungstenite::{
 };
 
 use crate::sync::{
-    EntryPlan, MAX_DATA_CHUNK_BYTES, PushMode, RejectReason, SidecarState, SyncFrame,
+    EntryPlan, MAX_DATA_CHUNK_BYTES, PushMode, RejectReason, SidecarState, SyncFrame, UnpairReason,
     rules::{IgnoreRules, IgnoreSnapshot, IgnoreSource, join_relative},
 };
 
@@ -46,6 +46,9 @@ pub enum PreviewSyncError {
 
     #[error("the preview pod rejected the push: {0}")]
     Rejected(RejectReason),
+
+    #[error("the operator stopped the sync: {0}")]
+    Unpaired(UnpairReason),
 
     #[error("the operator answered a push with an unexpected frame: {0:?}")]
     Unexpected(SyncFrame),
@@ -75,7 +78,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSyncConnection<S> {
     }
 
     /// The next frame from the operator. An [`SyncFrame::Error`] becomes
-    /// [`PreviewSyncError::Operator`].
+    /// [`PreviewSyncError::Operator`], and an [`SyncFrame::Unpaired`] becomes
+    /// [`PreviewSyncError::Unpaired`], because this connection doesn't wait for the operator to
+    /// pair it again.
     async fn recv(&mut self) -> Result<SyncFrame, PreviewSyncError> {
         loop {
             let message = self.socket.next().await.ok_or(PreviewSyncError::Closed)??;
@@ -87,6 +92,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSyncConnection<S> {
 
             return match frame {
                 SyncFrame::Error { message } => Err(PreviewSyncError::Operator(message)),
+                SyncFrame::Unpaired { reason } => Err(PreviewSyncError::Unpaired(reason)),
                 frame => Ok(frame),
             };
         }
@@ -102,7 +108,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSyncConnection<S> {
     ) -> Result<Option<u64>, PreviewSyncError> {
         loop {
             match self.recv().await? {
-                SyncFrame::Paired { generation } => return Ok(generation),
+                SyncFrame::Paired { generation, .. } => return Ok(generation),
                 SyncFrame::Status(state) => on_status(state),
                 // TODO: show the install and the app while the CLI waits for the sidecar.
                 SyncFrame::Supervisor(_) => {}

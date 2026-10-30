@@ -1,6 +1,6 @@
 use super::{
     AppReport, AppState, EntryCounts, EntryPlan, InstallReport, InstallState, PushMode,
-    RejectReason, SidecarState, SupervisorReport, SyncFrame,
+    RejectReason, SidecarState, SupervisorReport, SyncFrame, UnpairReason,
     rules::{IgnoreSnapshot, IgnoreSource},
 };
 
@@ -25,7 +25,7 @@ fn frames_keep_their_encoding() {
         },
     };
 
-    let frames: [(SyncFrame, &[u8]); 20] = [
+    let frames: [(SyncFrame, &[u8]); 22] = [
         (
             SyncFrame::Begin {
                 push_id: 7,
@@ -115,12 +115,19 @@ fn frames_keep_their_encoding() {
             SyncFrame::Status(SidecarState::Synced { generation: 3 }),
             &[7, 4, 3],
         ),
-        (SyncFrame::Paired { generation: None }, &[8, 0]),
+        (
+            SyncFrame::Paired {
+                generation: None,
+                protocol_version: 1,
+            },
+            &[8, 0, 1],
+        ),
         (
             SyncFrame::Paired {
                 generation: Some(3),
+                protocol_version: 1,
             },
-            &[8, 1, 3],
+            &[8, 1, 3, 1],
         ),
         (
             SyncFrame::Error {
@@ -144,6 +151,13 @@ fn frames_keep_their_encoding() {
             }),
             &[10, 3, 1, 1, b'x', 2, 2, 1, 2, 1, 4],
         ),
+        (
+            SyncFrame::Unpaired {
+                reason: UnpairReason::Replaced,
+            },
+            &[11, 3],
+        ),
+        (SyncFrame::WakeRequest, &[12]),
     ];
 
     for (frame, bytes) in frames {

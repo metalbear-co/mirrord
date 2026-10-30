@@ -12,7 +12,7 @@
 use bincode::{Decode, Encode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use strum_macros::Display;
+use strum_macros::{Display, IntoStaticStr};
 
 use self::rules::IgnoreSnapshot;
 
@@ -41,7 +41,7 @@ pub const MAX_DATA_CHUNK_BYTES: usize = 256 * 1024;
 /// `bincode` isn't self-describing, so once released, the enum may only grow: a new variant goes
 /// at the end, and a changed message becomes a new variant. The same holds for every type that a
 /// frame carries.
-#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
+#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq, IntoStaticStr)]
 pub enum SyncFrame {
     /// CLI to sidecar: starts a push of the entries that `entries` plans.
     Begin {
@@ -78,8 +78,13 @@ pub enum SyncFrame {
     /// Operator to CLI: the sidecar's state while the CLI waits for [`SyncFrame::Paired`].
     Status(SidecarState),
 
-    /// Operator to CLI: the sidecar is ready, so the CLI can push.
-    Paired { generation: Option<u64> },
+    /// Operator to CLI: the sidecar is ready, so the CLI can push. `generation` is what the
+    /// volume holds, and `protocol_version` is the sidecar's version of the protocol, which can
+    /// be older than the CLI's until the preview pod restarts after an operator upgrade.
+    Paired {
+        generation: Option<u64>,
+        protocol_version: u8,
+    },
 
     /// Operator to CLI: the sync can't go on, and the operator closes the connection.
     Error { message: String },
@@ -87,6 +92,37 @@ pub enum SyncFrame {
     /// Sidecar to operator, and operator to CLI: what the supervisor of the app container
     /// reported about the install and the app, sent on connect and whenever it changes.
     Supervisor(SupervisorReport),
+
+    /// Operator to CLI: the CLI can't push for now, for the reason in `reason`. The connection
+    /// stays open, except after [`UnpairReason::Replaced`], and the operator sends
+    /// [`SyncFrame::Paired`] once the CLI can push again.
+    Unpaired { reason: UnpairReason },
+
+    /// CLI to operator: wakes the preview if it is idle, as traffic to it would.
+    WakeRequest,
+}
+
+/// Why the operator unpaired a CLI. Once released, it may only grow, as [`SyncFrame`] says.
+#[derive(Encode, Decode, Debug, Clone, Copy, PartialEq, Eq, Display)]
+pub enum UnpairReason {
+    /// The preview scaled to zero after its idle timeout, and its pod is gone until a wake.
+    #[strum(to_string = "the preview is idle")]
+    Idle,
+
+    /// A `mirrord exec` session replaces the preview for now.
+    #[strum(to_string = "a `mirrord exec` session replaces the preview for now")]
+    Paused,
+
+    /// The preview pod's sync sidecar disconnected, for example because its pod was replaced.
+    #[strum(to_string = "the preview pod's sync sidecar disconnected")]
+    SidecarGone,
+
+    /// Another CLI took over the sync of the preview, and the operator closes this connection.
+    #[strum(
+        to_string = "another `mirrord preview sync` took over the code sync of the preview \
+                     environment"
+    )]
+    Replaced,
 }
 
 /// What a push replaces in each of its entries. Once released, it may only grow, as
@@ -344,6 +380,12 @@ impl SidecarState {
 }
 
 impl SyncFrame {
+    /// The name of the frame's variant, for a message about the frame. A `Data` frame's `Debug`
+    /// would hold its whole chunk.
+    pub fn name(&self) -> &'static str {
+        self.into()
+    }
+
     /// Encodes the frame with the `bincode` configuration that both sides use.
     pub fn encode(&self) -> Vec<u8> {
         bincode::encode_to_vec(self, bincode::config::standard())
