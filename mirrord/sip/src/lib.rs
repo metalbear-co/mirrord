@@ -131,7 +131,8 @@ mod main {
 
     /// Path to `~/.mirrord/binaries` where pre-built SIP utility binaries are stored.
     pub static MIRRORD_BINARIES_DIR_PATH_BUF: Lazy<PathBuf> = Lazy::new(|| {
-        PathBuf::from(env::var("HOME").unwrap_or_default())
+        env::home_dir()
+            .unwrap_or_default()
             .join(".mirrord")
             .join("binaries")
     });
@@ -144,7 +145,8 @@ mod main {
     /// extracted into [`MIRRORD_BINARIES_DIR_PATH_BUF`]. Used to decide whether the bundled
     /// binaries need to be re-extracted after a CLI upgrade.
     pub static MIRRORD_BINARIES_VERSION_PATH_BUF: Lazy<PathBuf> = Lazy::new(|| {
-        PathBuf::from(env::var("HOME").unwrap_or_default())
+        env::home_dir()
+            .unwrap_or_default()
             .join(".mirrord")
             .join("binaries_version")
     });
