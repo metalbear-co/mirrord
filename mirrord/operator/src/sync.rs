@@ -9,9 +9,8 @@
 //! This module needs no feature of the crate, so the static sidecar can use it without pulling in
 //! `kube`.
 
-use std::fmt;
-
 use bincode::{Decode, Encode};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum_macros::Display;
 
@@ -230,21 +229,44 @@ pub struct SupervisorReport {
     pub handled: Option<u64>,
 }
 
-/// The last run of `install.command`.
-#[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+/// The last run of `install.command`. The error sits beside the state rather than in
+/// [`InstallState::Failed`], so that the state stays one word in the session's status, as
+/// `kubectl` shows it.
+#[derive(
+    Encode, Decode, Serialize, Deserialize, JsonSchema, Debug, Clone, Default, PartialEq, Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct InstallReport {
     pub state: InstallState,
 
-    /// Why the last install failed, with the end of its output.
+    /// Why the last install failed, with the end of its output. `None` unless `state` is
+    /// [`InstallState::Failed`].
     pub error: Option<String>,
 }
 
-/// Where the install stands. Once released, it may only grow, as [`SyncFrame`] says.
-#[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// Where the install stands. Once released, it may only grow, as [`SyncFrame`] says. Its
+/// `Display` is the wording of `mirrord preview sync` and `mirrord preview status`.
+#[derive(
+    Encode,
+    Decode,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Display,
+)]
+#[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "lowercase")]
 pub enum InstallState {
     /// No install ran in this container yet: the supervisor waits for the sidecar's first
     /// answer, or the volume's install is up to date, or the session has no `install`.
     #[default]
+    #[strum(to_string = "not run")]
     NotRun,
     Running,
     Succeeded,
@@ -259,7 +281,10 @@ pub enum InstallState {
 }
 
 /// The app, the process of `run.command`.
-#[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[derive(
+    Encode, Decode, Serialize, Deserialize, JsonSchema, Debug, Clone, Default, PartialEq, Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct AppReport {
     pub state: AppState,
 
@@ -273,12 +298,29 @@ pub struct AppReport {
     pub last_exit_code: Option<i32>,
 }
 
-/// Where the app stands. Once released, it may only grow, as [`SyncFrame`] says.
-#[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// Where the app stands. Once released, it may only grow, as [`SyncFrame`] says. Its `Display`
+/// is the wording of `mirrord preview sync` and `mirrord preview status`.
+#[derive(
+    Encode,
+    Decode,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Display,
+)]
+#[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "lowercase")]
 pub enum AppState {
     /// The app hasn't started yet: the supervisor waits for the sidecar's first answer, or the
     /// first install is running or failed.
     #[default]
+    #[strum(to_string = "not started")]
     NotStarted,
     Running,
 

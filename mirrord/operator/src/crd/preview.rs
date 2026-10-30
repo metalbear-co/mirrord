@@ -42,6 +42,7 @@ use uuid::Uuid;
 use super::{db_branching::core::ConnectionSource, session::SessionTarget};
 #[cfg(feature = "client")]
 use crate::client::connect_params::BranchDbNames;
+use crate::sync::{AppReport, InstallReport, SidecarState};
 
 /// This resource represents a preview environment created by the `mirrord preview start` command.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -495,6 +496,86 @@ pub struct PreviewSyncStatus {
     /// includes a session without `spec.idle`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_disabled: Option<String>,
+
+    /// What the sync sidecar in the preview pod is doing, or `disconnected` while no sidecar is
+    /// connected to the operator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidecar: Option<PreviewSyncSidecarState>,
+
+    /// Why the sync sidecar failed, while `sidecar` is `failed`.
+    ///
+    /// This and the supervisor's fields are written as `null` when they are `None`, because the
+    /// status is written with a merge patch, which keeps a field that the patch leaves out, and
+    /// they must go once the sidecar that reported them is gone.
+    #[serde(default)]
+    pub sidecar_error: Option<String>,
+
+    /// Whether a `mirrord preview sync` is connected to the operator to push code to the
+    /// preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_attached: Option<bool>,
+
+    /// The generation of the last push that the code volume holds. Each push that the sidecar
+    /// applies adds one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u64>,
+
+    /// When the sidecar last applied a push.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<MicroTime>,
+
+    /// The last run of `install.command` in the preview pod, while a sidecar that relays the
+    /// supervisor's report is connected.
+    #[serde(default)]
+    pub install: Option<InstallReport>,
+
+    /// The app, the process of `run.command` in the preview pod, while a sidecar that relays the
+    /// supervisor's report is connected.
+    #[serde(default)]
+    pub app: Option<AppReport>,
+}
+
+/// What the sync sidecar of a preview session is doing, as [`PreviewSyncStatus::sidecar`]
+/// reports it.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviewSyncSidecarState {
+    /// No sidecar of the preview is connected to the operator, for example while the pod starts
+    /// or while the session is idle.
+    Disconnected,
+
+    /// The sidecar waits for the sidecar and the supervisor of an earlier pod to release the
+    /// code volume.
+    WaitingForVolume,
+
+    /// The sidecar copies the image's files to the code volume.
+    Seeding,
+
+    /// The code volume holds no push yet.
+    AwaitingFirstPush,
+
+    /// The code volume holds the push of [`PreviewSyncStatus::generation`].
+    Synced,
+
+    /// The sidecar can't go on, for the reason in [`PreviewSyncStatus::sidecar_error`].
+    Failed,
+
+    /// For future compatibility.
+    #[serde(other)]
+    Unknown,
+}
+
+impl From<&SidecarState> for PreviewSyncSidecarState {
+    fn from(state: &SidecarState) -> Self {
+        match state {
+            SidecarState::Disconnected => Self::Disconnected,
+            SidecarState::WaitingForVolume => Self::WaitingForVolume,
+            SidecarState::Seeding => Self::Seeding,
+            SidecarState::AwaitingFirstPush => Self::AwaitingFirstPush,
+            SidecarState::Synced { .. } => Self::Synced,
+            SidecarState::Failed { .. } => Self::Failed,
+        }
+    }
 }
 
 /// The kind of volume that holds the synced code of a preview session. A session keeps the kind
@@ -790,6 +871,16 @@ mod tests {
     use super::*;
     use crate::crd::session::KubeResourceTarget;
 
+    /// The operator writes the status with a merge patch, which keeps a field that the patch
+    /// leaves out, so a sync status without the supervisor's report writes `install` and `app` as
+    /// `null`, which clears the ones that the status holds.
+    #[test]
+    fn a_sync_status_without_a_report_clears_the_stored_one() {
+        let status = serde_json::to_value(PreviewSyncStatus::default()).unwrap();
+
+        assert_eq!(status.get("install"), Some(&serde_json::Value::Null));
+        assert_eq!(status.get("app"), Some(&serde_json::Value::Null));
+    }
 
     /// Legacy entries keep riding the per-broker maps older operators read; composed entries go
     /// to the `queues` list only, so no entry is sent twice and an older operator never sees half
