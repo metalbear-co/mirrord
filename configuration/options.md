@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-10-28T00:00:00.000Z
+lastmod: 2026-10-30T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -4935,6 +4935,32 @@ To select a namespaced profile
   "profile": "my-namespace/my-profile-name"
 }
 ```
+
+## sessions_manager {#root-sessions_manager}
+
+Selects the sessions-manager that pairs a serverless target with the agent running beside it.
+
+Without it, mirrord connects through the MetalBear Cloud sessions-manager, unless
+[`operator`](#root-operator) is `true`, in which case the sessions-manager hosted by the
+mirrord operator is used and this section is ignored.
+
+```json
+{
+  "sessions_manager": {
+    "url": "https://sessions-manager.example.com/sm"
+  }
+}
+```
+
+### sessions_manager.url {#sessions_manager-url}
+
+Base URL of a standalone sessions-manager, including any path prefix it is served under,
+e.g. `https://example.com/sm`.
+
+The `MIRRORD_SESSIONS_MANAGER_URL` environment variable overrides it.
+
+Defaults to the MetalBear Cloud sessions-manager,
+`https://sm-aws-use1.app.metalbear.com/sm`.
 
 ## sip_binaries {#root-sip_binaries}
 
