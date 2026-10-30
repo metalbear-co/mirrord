@@ -16,6 +16,8 @@ tags:
   - enterprise
 ---
 
+# Licensing
+
 ## License Types
 
 mirrord for Teams is available in two license variants:

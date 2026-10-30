@@ -70,6 +70,10 @@ The default cluster is chosen in the settings of the operator on the primary clu
 
 If the Primary cluster only orchestrates and doesn't run application workloads, set it to management-only mode (`managementOnly: true`). In this case, you must designate a different cluster as the Default, since stateful operations can't run on a cluster with no application pods.
 
+In management-only mode, the Primary resolves multi-cluster targets against the Default cluster, doesn't run [preview environment](../use-cases/preview-environments.md) controllers, and doesn't get the RBAC it needs to tunnel to branch databases locally.
+
+Leave `managementOnly` set to `false` if the Primary runs application workloads, even when most sessions run on other clusters. Sessions started with `multi_cluster: false` always run on the Primary as regular single-cluster sessions, using its local queue splitting and database branching controllers.
+
 ***
 
 ## How Operations Are Routed
@@ -122,7 +126,7 @@ If the Primary cluster is also the Default cluster, no synchronization is requir
 
 ## Queue Splitting in Multi-Cluster
 
-[Queue splitting](../sharing-the-cluster/queue-splitting.md) works in multi-cluster mode for **every supported queue service** — Amazon SQS, Kafka, RabbitMQ, Google Cloud Pub/Sub, Azure Service Bus, Redis Pub/Sub, Temporal, and BullMQ. A single session can even split several queue services at once, across all clusters. See the [Feature Support Matrix](../reference/feature-matrix.md) for maturity levels.
+[Queue splitting](../sharing-the-cluster/queue-splitting.md) works in multi-cluster mode for **every supported queue service** — Amazon SQS, Kafka, RabbitMQ, Google Cloud Pub/Sub, Azure Service Bus, NATS (JetStream and core pub/sub), Redis Pub/Sub, Temporal, and BullMQ. A single session can even split several queue services at once, across all clusters. See the [Feature Support Matrix](../reference/feature-matrix.md) for maturity levels.
 
 The flow is the same as single-cluster, applied in every cluster:
 

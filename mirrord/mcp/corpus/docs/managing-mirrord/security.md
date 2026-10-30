@@ -103,8 +103,9 @@ These fields are always sent on every plan. The only exception is an Enterprise 
 6. subscription_id (generated uuid)
 7. organization_id (generated uuid)
 8. cluster_id (the UID of the cluster's `default` namespace, used as a stable, anonymous per-cluster identifier)
-9. cluster_name (optional; only sent if you set the `operator.clusterName` Helm value to give the cluster a recognizable label)
-10. kubernetes_version (the version of the Kubernetes cluster the Operator is running in)
+9. kubernetes_version (the version of the Kubernetes cluster the Operator is running in)
+
+Operators older than 3.227.0 also send cluster_name (optional; set via the `operator.clusterName` Helm value) in this list. From 3.227.0 it is sent only with identity sharing enabled, see below.
 
 None of these fields identify an individual developer or a workload in your cluster.
 
@@ -115,6 +116,7 @@ Identity sharing is an organization-level setting. An organization admin chooses
 1. Kubernetes username of the client, as authenticated by your Kubernetes API server
 2. Display name of the local account and hostname of the client machine
 3. Namespace, kind, name, and container of the session's target
+4. cluster_name, from Operator 3.227.0 (optional; only present if you set the `operator.clusterName` Helm value to give the cluster a recognizable label). It is shown in the Clusters view at app.metalbear.com. Without identity sharing, clusters are listed by `cluster_id` only. A self-hosted [License Server](license-server.md) receives it regardless, since that data never leaves your infrastructure.
 
 These are what the usage dashboard at app.metalbear.com uses to show usernames and service names instead of hashes. Anonymized metrics go to `analytics.metalbear.com`; events that carry identity go to `app.metalbear.com`.
 

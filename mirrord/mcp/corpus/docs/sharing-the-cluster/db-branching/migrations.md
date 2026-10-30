@@ -7,6 +7,8 @@ tags:
   - enterprise
 ---
 
+# Schema Migrations
+
 A DB branch includes the source database's schema as of when it was cloned - or starts with no schema at all, depending on `copy.mode`. Either way, it won't include migrations that exist only in your working tree and haven't been applied to the source database yet.
 
 The `migrations` field closes that gap: mirrord runs your schema migrations against the branch automatically when it's created, so the branch comes up with the schema your code expects.
