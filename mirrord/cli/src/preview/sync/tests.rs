@@ -541,7 +541,8 @@ async fn a_replaced_sync_stops_without_reconnecting() {
 
 /// `mirrord preview sync` runs no creation timeout while the preview pod is busy with work whose
 /// length the CLI can't predict, such as copying the image's files or an install, so the
-/// activity says when the pod is busy, and counts every report of progress.
+/// activity says when the pod is busy, and counts every report of progress. The run succeeds only
+/// once the supervisor is done with the first push, so the activity says which push it handled.
 #[tokio::test]
 async fn the_activity_reports_busy_work_and_counts_progress() {
     let local = tempfile::tempdir().unwrap();
@@ -603,8 +604,11 @@ async fn the_activity_reports_busy_work_and_counts_progress() {
         },
         handled: Some(1),
     };
-    operator.send(SyncFrame::Supervisor(running)).await;
-    assert!(next(&mut activity).await.busy.not());
+    operator.send(SyncFrame::Supervisor(running.clone())).await;
+    let installed = next(&mut activity).await;
+    assert!(installed.busy.not());
+    assert_eq!(installed.handled, Some(1));
+    assert!(installed.install_failed.not());
 
     sync.abort();
 }
@@ -636,6 +640,42 @@ async fn an_unpair_during_a_push_waits_for_the_next_pairing() {
 
     let push = operator.pair_and_apply(2).await;
     assert_eq!(push.entries[&0]["app.js"], file("v2"));
+    sync.abort();
+}
+
+/// `mirrord preview sync` waits until the supervisor is done with the first push. A pod whose
+/// `emptyDir` volume is replaced starts its generations again, so after a new pairing the CLI
+/// must wait for the first push of that pairing, not for a generation that the new volume may
+/// never reach.
+#[tokio::test]
+async fn each_pairing_has_its_own_first_push() {
+    let local = tempfile::tempdir().unwrap();
+    write(local.path(), "app.js", "v1");
+
+    let (sync, mut operators, mut activity) = start(vec![entry(local.path())], false);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(3).await;
+    tokio::time::timeout(
+        FRAME_TIMEOUT,
+        activity.wait_for(|activity| activity.first_push == Some(3)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    operator
+        .send(SyncFrame::Unpaired {
+            reason: UnpairReason::SidecarGone,
+        })
+        .await;
+    operator.pair_and_apply(1).await;
+    tokio::time::timeout(
+        FRAME_TIMEOUT,
+        activity.wait_for(|activity| activity.first_push == Some(1)),
+    )
+    .await
+    .expect("the first push of the new pairing is the one to wait for")
+    .unwrap();
     sync.abort();
 }
 

@@ -895,7 +895,14 @@ pub(crate) enum CliError {
         error: notify::Error,
     },
 
-    #[error("Another `mirrord preview sync` took over the code sync of the preview environment")]
+    #[error("The install command failed in the preview pod")]
+    #[diagnostic(help(
+        "The end of its output is above. Fix the install command, or the files that it installs \
+        from, and run `mirrord preview sync` again.{GENERAL_HELP}"
+    ))]
+    PreviewSyncInstallFailed,
+
+    #[error("{}", mirrord_operator::sync::UnpairReason::Replaced)]
     #[diagnostic(help(
         "Only one CLI pushes into a preview environment at a time, and a newer CLI takes over \
         from an earlier one. This CLI stopped, and left the preview environment as it is.\
@@ -1025,6 +1032,21 @@ pub(crate) enum CliError {
         logs: Vec<PreviewPodLogs>,
     },
 
+    #[error(
+        "Preview environment creation timed out while a `mirrord exec` session paused the \
+        preview{}",
+        format_preview_logs(logs)
+    )]
+    #[diagnostic(help(
+        "The operator pauses a preview while a `mirrord exec` session targets it, and the preview \
+        pod applies no push until that session ends. Run `mirrord preview sync` again once it has \
+        ended."
+    ))]
+    PreviewSyncPaused {
+        /// Output of the preview's pods as of the moment the CLI gave up.
+        logs: Vec<PreviewPodLogs>,
+    },
+
     #[error("Failed to list preview sessions: {0}")]
     #[diagnostic(help(
         "Please check that you have permissions to list PreviewSession resources \
@@ -1106,6 +1128,14 @@ pub(crate) enum CliError {
         "Run the command again with the same key. It replaces the session of every service."
     ))]
     PreviewUpFailed(Vec<String>),
+
+    #[error("preview environments failed to start for: {}", .0.join(", "))]
+    #[diagnostic(help(
+        "Run the command again with the same key. It reuses the session of a service when that \
+         session is live, has the same settings and runs no image of its own, and replaces the \
+         other sessions."
+    ))]
+    PreviewSyncStartFailed(Vec<String>),
 
     #[error("Session key is required for this command")]
     #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]

@@ -1638,10 +1638,13 @@ pub(super) enum PreviewCommand {
     ///
     /// Each preview runs the service's image (`--image <service>=<image ref>`, then
     /// `MIRRORD_<SERVICE>_IMAGE`) or, without one, the target's image, with the local directories
-    /// in it. An image also previews a service with `skip`. The command pushes once and returns
-    /// when every preview is ready; with `--watch`, it then keeps pushing changes. `mirrord
-    /// preview up` for the same service and key replaces the preview with one without code sync,
-    /// and the other way round. The key is found as `mirrord preview up` finds it.
+    /// in it. An image also previews a service with `skip`. The command pushes the local code and
+    /// returns when every preview is ready; with `--watch`, it then keeps pushing changes. A later
+    /// run for a service without an image reuses a live session with the same settings and takes
+    /// over its sync from an earlier `mirrord preview sync`, and a service with an image always
+    /// gets a new session, which pulls the image again. `mirrord preview up` for the same service
+    /// and key replaces the preview with one without code sync, and the other way round. The key is
+    /// found as `mirrord preview up` finds it.
     Sync(PreviewSyncArgs),
     /// Show the status of preview environments.
     Status(PreviewStatusArgs),
@@ -1840,7 +1843,8 @@ pub(super) struct PreviewUpArgs {
 
     /// TTL in minutes for every preview session.
     ///
-    /// The operator will terminate each session after this time elapses.
+    /// The operator will terminate each session after this time elapses. A session that `mirrord
+    /// preview sync` reuses keeps the time it had left.
     ///
     /// Set to `"infinite"` to disable TTL.
     #[arg(long)]

@@ -19,7 +19,10 @@ use base64::prelude::*;
 use futures::{StreamExt, future::join_all};
 use glob::Pattern;
 use itertools::Itertools;
-use k8s_openapi::{ByteString, jiff::Timestamp};
+use k8s_openapi::{
+    ByteString,
+    jiff::{SignedDuration, Timestamp},
+};
 use kube::{
     Api, Client, Resource, ResourceExt,
     api::{DeleteParams, ListParams, ObjectMeta, PostParams},
@@ -598,9 +601,11 @@ impl PreparedPreview {
     }
 
     /// Creates the session, replacing the preview under the same key and target, and waits for
-    /// it to be ready. Once a session with `sync` is ready, its sync has pushed the local code.
-    /// With `watch_files`, returns the sync's task beside the summary, which keeps pushing the
-    /// changes; without, the sync stops once the session is ready.
+    /// it to be ready. A session with `sync` and no image of its own reuses the live session under
+    /// the same key and target when its spec is the same (see [`reusable_session`]). Once a
+    /// session with `sync` is ready, its sync has pushed the local code, and the preview pod's
+    /// supervisor is done with that push. With `watch_files`, also returns the sync's task, which
+    /// keeps pushing the changes; without it, the sync stops once the session is ready.
     async fn start(
         self,
         watch_files: bool,
@@ -683,263 +688,121 @@ impl PreparedPreview {
         let session_namespace = preview_namespace(&operator_api, &layer_config);
 
         spec.db_branching = PreviewDbBranchingConfig::from_db_names(branch_db_names);
-        spec.share_host = share_host;
 
-        for session in replaced_sessions {
-            let name = session.name_any();
-
-            subtask.warning(&format!("replacing existing session '{name}'"));
-            // Two sync sessions without an image of their own both run the target's image, which
-            // is no image to name.
-            if session.spec.image == spec.image && spec.image.is_empty().not() {
-                subtask.warning(&format!(
-                    "the existing session runs the same image ('{}'), so the new session runs the \
-                     same code unless the image's tag now points to a new image",
-                    spec.image
-                ));
-            }
-
-            // Delete and wait for the existing session to be fully removed.
-            match tokio::time::timeout(
-                Duration::from_secs(60),
-                delete::delete_and_finalize(api.clone(), &name, &DeleteParams::default()),
+        // Only a sync session without an image of its own is reused. A session with an image is
+        // replaced, so that a rerun with the same tag pulls the image again, and a session
+        // without `sync` is always replaced.
+        let now = Timestamp::now();
+        let reused = if sync.is_some() && spec.image.is_empty() {
+            reusable_session(
+                &replaced_sessions,
+                &spec,
+                secret_values.is_empty().not(),
+                now,
             )
-            .await
-            {
-                Err(_) => {
-                    subtask.failure(None);
-                    return Err(CliError::PreviewDeleteFailed {
-                        name: name.clone(),
-                        reason: "timed out waiting for previous session to be deleted".to_owned(),
-                    });
-                }
-                Ok(Err(e)) => {
-                    subtask.failure(None);
-                    return Err(CliError::PreviewDeleteFailed {
-                        name,
-                        reason: e.to_string(),
-                    });
-                }
-                _ => continue,
-            };
-        }
+            .cloned()
+        } else {
+            None
+        };
 
-        let session = create_session(
-            &api,
-            &operator_api,
-            &layer_config,
-            &config_target,
-            spec,
-            secret_values,
-            &session_namespace,
-        )
-        .await
-        .inspect_err(|_| subtask.failure(None))?;
+        let created = reused.is_none();
+        let session = match reused {
+            Some(session) => {
+                let remaining = session
+                    .status
+                    .as_ref()
+                    .and_then(|status| status.expires_at.as_ref())
+                    .and_then(|expires_at| {
+                        Duration::try_from(expires_at.0.duration_since(now)).ok()
+                    })
+                    .map(|left| humantime::format_duration(Duration::from_secs(left.as_secs())));
+                let ttl = match remaining {
+                    _ if session.spec.has_infinite_ttl() => "no TTL".to_owned(),
+                    Some(remaining) => format!("{remaining} of its TTL left"),
+                    None => "its TTL not started yet".to_owned(),
+                };
+                subtask.success(Some(&format!(
+                    "reusing session '{}', which has the same settings ({ttl})",
+                    session.name_any()
+                )));
+                session
+            }
+            None => {
+                for session in replaced_sessions {
+                    let name = session.name_any();
+
+                    subtask.warning(&format!("replacing existing session '{name}'"));
+                    // Two sync sessions without an image of their own both run the target's
+                    // image, which is no image to name.
+                    if session.spec.image == spec.image && spec.image.is_empty().not() {
+                        subtask.warning(&format!(
+                            "the existing session runs the same image ('{}'), so the new session \
+                             runs the same code unless the image's tag now points to a new image",
+                            spec.image
+                        ));
+                    }
+
+                    // Delete and wait for the existing session to be fully removed.
+                    match tokio::time::timeout(
+                        Duration::from_secs(60),
+                        delete::delete_and_finalize(api.clone(), &name, &DeleteParams::default()),
+                    )
+                    .await
+                    {
+                        Err(_) => {
+                            subtask.failure(None);
+                            return Err(CliError::PreviewDeleteFailed {
+                                name: name.clone(),
+                                reason: "timed out waiting for previous session to be deleted"
+                                    .to_owned(),
+                            });
+                        }
+                        Ok(Err(e)) => {
+                            subtask.failure(None);
+                            return Err(CliError::PreviewDeleteFailed {
+                                name,
+                                reason: e.to_string(),
+                            });
+                        }
+                        _ => continue,
+                    };
+                }
+
+                spec.share_host = share_host;
+                let session = create_session(
+                    &api,
+                    &operator_api,
+                    &layer_config,
+                    &config_target,
+                    spec,
+                    secret_values,
+                    &session_namespace,
+                )
+                .await
+                .inspect_err(|_| subtask.failure(None))?;
+
+                subtask.success(Some("preview session resource created"));
+                session
+            }
+        };
         let session_name = session.name_any();
 
-        subtask.success(Some("preview session resource created"));
-
-        // Watch the `PreviewSession` status until it reaches `Ready` or `Failed`. Emits periodic
-        // warnings if initialization is taking longer than expected, so the user knows the
-        // command hasn't hung. A session that isn't ready within the creation timeout, which for
-        // a session with `sync` counts only time without progress, fails, and the CLI deletes it.
-
-        let mut subtask = progress.subtask("waiting for preview to be ready");
-
-        let mut stream = std::pin::pin!(watcher(
-            api.clone(),
-            watcher::Config::default().fields(&format!("metadata.name={session_name}")),
-        ));
-
-        let initialization_start = Instant::now();
-        let mut long_initialization_timer = tokio::time::interval(Duration::from_secs(60));
-        // First tick is instant
-        long_initialization_timer.tick().await;
-
-        let mut deadline = ProgressDeadline::new(Duration::from_secs(
-            layer_config.feature.preview.creation_timeout_secs,
-        ));
-
-        let mut last_known_phase: &str = "unknown";
-        let mut previous_phase = None;
-
-        // The pod of a session with `sync` becomes ready only once its sidecar holds a push, so
-        // the sync runs while the loop below waits for `Ready`.
-        let (mut sync_task, mut activity) = match sync {
-            None => (None, None),
-            Some(PreparedSync {
-                entries,
-                api: sync_api,
-            }) => {
-                let (driver, activity) = sync::SyncDriver::new(
-                    Arc::new(sync_api),
-                    session_namespace.clone(),
-                    session_name.clone(),
-                    entries,
-                    watch_files,
-                    progress.subtask("pushing the local code"),
-                )
-                .inspect_err(|_| subtask.failure(None))?;
-                let api = api.clone();
-                let client = operator_api.client().clone();
-                let (namespace, name) = (session_namespace.clone(), session_name.clone());
-                let task = async move {
-                    let error = driver.run().await;
-                    sync_end(&api, &client, &namespace, &name, error).await
-                };
-                (Some(SyncTask::new(tokio::spawn(task))), Some(activity))
-            }
-        };
-
-        // Fails the start with `error`, and deletes the session, unless another CLI took over its
-        // sync, which keeps it.
-        let fail = async |error: CliError, subtask: &mut ProgressTracker| {
-            if matches!(error, CliError::PreviewSyncReplaced).not() {
-                abandon_session(&api, &session_name, subtask, error).await
-            } else {
-                subtask.failure(None);
-                error
-            }
-        };
-
-        // The session's `share_host` and whether it is idle, once it is `Ready` or `Idle`. The
-        // session can turn `Ready` before the CLI reads the sidecar's answer to the first push,
-        // so the loop also waits for that answer, which the creation timeout bounds too.
-        let mut started = None;
-        let (share_host, idle) = loop {
-            if let Some(outcome) = started.clone()
-                && activity
-                    .as_mut()
-                    .is_none_or(|activity| activity.borrow_and_update().first_push.is_some())
-            {
-                break outcome;
-            }
-
-            tokio::select! {
-                result = async {
-                    match &mut sync_task {
-                        Some(task) => task.await,
-                        None => std::future::pending().await,
-                    }
-                } => {
-                    return Err(match sync_task_error(result) {
-                        // The session is gone, or failed, so there is nothing to delete.
-                        error @ (CliError::PreviewSessionFailed { .. }
-                        | CliError::PreviewSessionDeleted) => {
-                            subtask.failure(None);
-                            error
-                        }
-                        error => fail(error, &mut subtask).await,
-                    });
-                }
-                Ok(()) = async {
-                    match &mut activity {
-                        Some(activity) => activity.changed().await,
-                        None => std::future::pending().await,
-                    }
-                } => {
-                    if let Some(activity) = &mut activity {
-                        deadline.on_activity(&activity.borrow_and_update());
-                    }
-                }
-                _ = deadline.expired() => {
-                    // Read the pods before deleting the session: the delete tears down the
-                    // deployment, and their output goes with it.
-                    let logs = fetch_preview_logs_best_effort(
-                        operator_api.client(),
-                        &session_namespace,
-                        &session_name,
-                    )
-                    .await;
-
-                    return Err(fail(CliError::PreviewTimeout { logs }, &mut subtask).await);
-                }
-                _ = long_initialization_timer.tick() => {
-                    subtask.warning(&format!(
-                        "preview initialization is taking over {}s, phase: {}",
-                        initialization_start.elapsed().as_secs(),
-                        last_known_phase
-                    ));
-                }
-                event = stream.next() => {
-                    match event {
-                        Some(Ok(Event::Apply(current) | Event::InitApply(current))) => {
-                            if let Some(status) = &current.status {
-                                // A new phase is progress too, for a session with `sync`, whose
-                                // timeout counts time without progress. The timeout of any other
-                                // session counts from its start.
-                                if activity.is_some()
-                                    && previous_phase.replace(status.phase) != Some(status.phase)
-                                {
-                                    deadline.on_progress();
-                                }
-
-                                match &status.phase {
-                                    PreviewSessionPhase::Initializing => {
-                                        last_known_phase = "initializing preview env";
-                                    }
-                                    PreviewSessionPhase::Waiting => {
-                                        last_known_phase = "waiting for preview pod to be ready";
-                                    }
-                                    PreviewSessionPhase::Ready => {
-                                        started = Some((status.share_host.clone(), false));
-                                    }
-                                    // Sessions started with `feature.preview.idle.start_idle` never
-                                    // pass through `Ready` on creation — `Idle` is their terminal
-                                    // success state (pods boot on first traffic).
-                                    PreviewSessionPhase::Idle => {
-                                        started = Some((status.share_host.clone(), true));
-                                    }
-                                    PreviewSessionPhase::Failed => {
-                                        let error = session_failed(
-                                            operator_api.client(),
-                                            &session_namespace,
-                                            &session_name,
-                                            status.failure_message.clone().unwrap_or_default(),
-                                        )
-                                        .await;
-
-                                        subtask.failure(None);
-                                        return Err(error);
-                                    }
-                                    PreviewSessionPhase::Paused => {
-                                        last_known_phase = "preview session is paused";
-                                    }
-                                    PreviewSessionPhase::Unknown => last_known_phase = "unknown",
-                                }
-                            }
-                        }
-
-                        Some(Ok(Event::Delete(_))) => {
-                            subtask.failure(None);
-                            return Err(CliError::PreviewSessionDeleted);
-                        }
-
-                        Some(Ok(Event::Init | Event::InitDone)) => continue,
-
-                        Some(Err(error)) => {
-                            subtask.failure(None);
-                            return Err(CliError::PreviewWatchFailed(error.to_string()));
-                        }
-
-                        None => {
-                            subtask.failure(None);
-                            return Err(CliError::PreviewWatchFailed("stream closed".to_owned()));
-                        }
-                    }
-                }
-            }
-        };
-
-        // Without `--watch`, nothing needs the sync once the session is ready, and dropping the
-        // task stops it.
-        let sync_task = sync_task.filter(|_| watch_files);
-
-        subtask.success(Some(if idle {
-            "preview session is idle (pods will boot on first traffic)"
-        } else {
-            "preview session is ready"
-        }));
+        let Started {
+            share_host,
+            idle,
+            sync_task,
+        } = wait_until_started(
+            &api,
+            operator_api.client(),
+            &session_namespace,
+            &session_name,
+            sync,
+            created,
+            watch_files,
+            Duration::from_secs(layer_config.feature.preview.creation_timeout_secs),
+            progress,
+        )
+        .await?;
 
         // Display summary of the created preview environment.
 
@@ -991,6 +854,259 @@ impl PreparedPreview {
 
         Ok((summary, sync_task))
     }
+}
+
+/// A session that [`wait_until_started`] saw start.
+struct Started {
+    /// The host that the session is shared on.
+    share_host: Option<String>,
+
+    /// Whether the session started idle, see `feature.preview.idle.start_idle`.
+    idle: bool,
+
+    /// With `watch_files`, the task of the session's sync, which keeps pushing the changes.
+    sync_task: Option<SyncTask>,
+}
+
+/// Waits for the session `session_name` in `session_namespace` to reach `Ready` or `Idle`, and,
+/// with `sync`, runs its sync meanwhile, which pushes the local code. A session with `sync` only
+/// counts as started once the preview pod's supervisor is done with the first push.
+///
+/// Emits periodic warnings while the start takes long, so that the user knows that the command
+/// hasn't hung. A session that doesn't start within `creation_timeout`, which for a session with
+/// `sync` counts only time without progress, fails, and when `created`, the CLI deletes it.
+#[allow(clippy::too_many_arguments)]
+async fn wait_until_started(
+    api: &Api<PreviewSession>,
+    client: &Client,
+    session_namespace: &str,
+    session_name: &str,
+    sync: Option<PreparedSync>,
+    created: bool,
+    watch_files: bool,
+    creation_timeout: Duration,
+    progress: &mut ProgressTracker,
+) -> CliResult<Started> {
+    let mut subtask = progress.subtask("waiting for preview to be ready");
+
+    let mut stream = std::pin::pin!(watcher(
+        api.clone(),
+        watcher::Config::default().fields(&format!("metadata.name={session_name}")),
+    ));
+
+    let initialization_start = Instant::now();
+    let mut long_initialization_timer = tokio::time::interval(Duration::from_secs(60));
+    // First tick is instant
+    long_initialization_timer.tick().await;
+
+    let mut deadline = ProgressDeadline::new(creation_timeout);
+
+    let mut last_known_phase: &str = "unknown";
+    let mut previous_phase = None;
+
+    // The pod of a session with `sync` becomes ready only once its sidecar holds a push, so
+    // the sync runs while the loop below waits for `Ready`.
+    let (mut sync_task, mut activity) = match sync {
+        None => (None, None),
+        Some(PreparedSync {
+            entries,
+            api: sync_api,
+        }) => {
+            let (driver, activity) = sync::SyncDriver::new(
+                Arc::new(sync_api),
+                session_namespace.to_owned(),
+                session_name.to_owned(),
+                entries,
+                watch_files,
+                progress.subtask("pushing the local code"),
+            )
+            .inspect_err(|_| subtask.failure(None))?;
+            let api = api.clone();
+            let client = client.clone();
+            let (namespace, name) = (session_namespace.to_owned(), session_name.to_owned());
+            let task = async move {
+                let error = driver.run().await;
+                sync_end(&api, &client, &namespace, &name, error).await
+            };
+            (Some(SyncTask::new(tokio::spawn(task))), Some(activity))
+        }
+    };
+
+    // Fails the start with `error`. Deletes the session only if this run created it, and the
+    // session still exists and is of use: another CLI that took over its sync uses it now, and a
+    // session that failed or was deleted has nothing to delete.
+    let fail = async |error: CliError, subtask: &mut ProgressTracker| {
+        let gone = matches!(
+            error,
+            CliError::PreviewSyncReplaced
+                | CliError::PreviewSessionFailed { .. }
+                | CliError::PreviewSessionDeleted
+        );
+        if created && gone.not() {
+            abandon_session(api, session_name, subtask, error).await
+        } else {
+            subtask.failure(None);
+            error
+        }
+    };
+
+    // The session's `share_host` and whether it is idle, once it is `Ready` or `Idle`. The
+    // session can turn `Ready` before the supervisor in the preview pod is done with the first
+    // push, so the loop also waits for that, which the creation timeout bounds too.
+    let mut started = None;
+    let (share_host, idle) = loop {
+        // The `Ready` of a reused session predates the push, and the volume holds the push
+        // before the supervisor ran its install and restarted the app, so the first push only
+        // counts once the supervisor is done with it. The `changed` arm below only wakes the
+        // loop, so the loop hands each activity that it reads to the deadline here, and the
+        // deadline sees every change of the sync's work.
+        let first_push_handled = match &mut activity {
+            None => true,
+            Some(activity) => {
+                let activity = *activity.borrow_and_update();
+                deadline.on_activity(&activity);
+                match activity.first_push {
+                    Some(first_push) if activity.handled >= Some(first_push) => {
+                        if activity.install_failed {
+                            return Err(
+                                fail(CliError::PreviewSyncInstallFailed, &mut subtask).await
+                            );
+                        }
+                        true
+                    }
+                    _ => false,
+                }
+            }
+        };
+        if first_push_handled && let Some(outcome) = started.take() {
+            break outcome;
+        }
+
+        tokio::select! {
+            result = async {
+                match &mut sync_task {
+                    Some(task) => task.await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                return Err(fail(sync_task_error(result), &mut subtask).await);
+            }
+            Ok(()) = async {
+                match &mut activity {
+                    Some(activity) => activity.changed().await,
+                    None => std::future::pending().await,
+                }
+            } => {}
+            _ = deadline.expired() => {
+                // Read the pods before deleting the session: the delete tears down the
+                // deployment, and their output goes with it.
+                let logs = fetch_preview_logs_best_effort(client, session_namespace, session_name)
+                    .await;
+
+                let paused = activity
+                    .as_ref()
+                    .is_some_and(|activity| activity.borrow().paused);
+                let error = if paused {
+                    CliError::PreviewSyncPaused { logs }
+                } else {
+                    CliError::PreviewTimeout { logs }
+                };
+                return Err(fail(error, &mut subtask).await);
+            }
+            _ = long_initialization_timer.tick() => {
+                subtask.warning(&format!(
+                    "preview initialization is taking over {}s, phase: {}",
+                    initialization_start.elapsed().as_secs(),
+                    last_known_phase
+                ));
+            }
+            event = stream.next() => {
+                match event {
+                    Some(Ok(Event::Apply(current) | Event::InitApply(current))) => {
+                        if let Some(status) = &current.status {
+                            // A new phase is progress too, for a session with `sync`, whose
+                            // timeout counts time without progress. The timeout of any other
+                            // session counts from its start.
+                            if activity.is_some()
+                                && previous_phase.replace(status.phase) != Some(status.phase)
+                            {
+                                deadline.on_progress();
+                            }
+
+                            match &status.phase {
+                                // A session that leaves `Ready` or `Idle`, such as a reused
+                                // one that the sync woke, isn't started any more.
+                                PreviewSessionPhase::Initializing => {
+                                    last_known_phase = "initializing preview env";
+                                    started = None;
+                                }
+                                PreviewSessionPhase::Waiting => {
+                                    last_known_phase = "waiting for preview pod to be ready";
+                                    started = None;
+                                }
+                                PreviewSessionPhase::Ready => {
+                                    started = Some((status.share_host.clone(), false));
+                                }
+                                // Sessions started with `feature.preview.idle.start_idle` never
+                                // pass through `Ready` on creation — `Idle` is their terminal
+                                // success state (pods boot on first traffic).
+                                PreviewSessionPhase::Idle => {
+                                    started = Some((status.share_host.clone(), true));
+                                }
+                                PreviewSessionPhase::Failed => {
+                                    let error = session_failed(
+                                        client,
+                                        session_namespace,
+                                        session_name,
+                                        status.failure_message.clone().unwrap_or_default(),
+                                    )
+                                    .await;
+                                    return Err(fail(error, &mut subtask).await);
+                                }
+                                PreviewSessionPhase::Paused => {
+                                    last_known_phase = "preview session is paused";
+                                    started = None;
+                                }
+                                PreviewSessionPhase::Unknown => last_known_phase = "unknown",
+                            }
+                        }
+                    }
+
+                    Some(Ok(Event::Delete(_))) => {
+                        return Err(fail(CliError::PreviewSessionDeleted, &mut subtask).await);
+                    }
+
+                    Some(Ok(Event::Init | Event::InitDone)) => continue,
+
+                    Some(Err(error)) => {
+                        subtask.failure(None);
+                        return Err(CliError::PreviewWatchFailed(error.to_string()));
+                    }
+
+                    None => {
+                        subtask.failure(None);
+                        return Err(CliError::PreviewWatchFailed("stream closed".to_owned()));
+                    }
+                }
+            }
+        }
+    };
+
+    // Without `--watch`, nothing needs the sync once the session is ready, and dropping the
+    // task stops it.
+    let sync_task = sync_task.filter(|_| watch_files);
+
+    subtask.success(Some(if idle {
+        "preview session is idle (pods will boot on first traffic)"
+    } else {
+        "preview session is ready"
+    }));
+
+    Ok(Started {
+        share_host,
+        idle,
+        sync_task,
+    })
 }
 
 /// Creates the session `spec` describes for `config_target`, and hands `secret_values` to the
@@ -1142,6 +1258,50 @@ async fn sync_end(
 async fn session_failed(client: &Client, namespace: &str, name: &str, message: String) -> CliError {
     let logs = fetch_preview_logs_best_effort(client, namespace, name).await;
     CliError::PreviewSessionFailed { message, logs }
+}
+
+/// The least TTL a session must have left to be reused, enough for a push and a start. A session
+/// with less is replaced, so that the operator doesn't delete it soon after the start.
+const MIN_REUSED_TTL: SignedDuration = SignedDuration::from_mins(5);
+
+/// The session that a sync session with `spec` can keep using rather than replace: the one live
+/// session in `sessions` with the same spec and at least [`MIN_REUSED_TTL`] left at `now`.
+/// `sessions` holds the sessions under the same key and target. A failed session or one that is
+/// being deleted isn't live, but a session without a status, which the operator hasn't seen yet,
+/// is live. `share_host` doesn't count: a session that replaced another one asks for its host,
+/// and one that didn't has its host only in its status, so the field differs between two runs
+/// with the same settings.
+///
+/// With `secret_mounts`, there is none: the operator can't tell whether the session's Secret
+/// holds the current contents of the files, so the session is replaced, which writes them again.
+fn reusable_session<'a>(
+    sessions: &'a [PreviewSession],
+    spec: &PreviewSessionSpec,
+    secret_mounts: bool,
+    now: Timestamp,
+) -> Option<&'a PreviewSession> {
+    let [session] = sessions else {
+        return None;
+    };
+
+    let live = session.metadata.deletion_timestamp.is_none()
+        && session
+            .status
+            .as_ref()
+            .is_none_or(|status| status.phase != PreviewSessionPhase::Failed);
+
+    let lasts = session
+        .status
+        .as_ref()
+        .and_then(|status| status.expires_at.as_ref())
+        .is_none_or(|expires_at| expires_at.0.duration_since(now) >= MIN_REUSED_TTL);
+
+    let same_spec = PreviewSessionSpec {
+        share_host: session.spec.share_host.clone(),
+        ..spec.clone()
+    } == session.spec;
+
+    (secret_mounts.not() && live && lasts && same_spec).then_some(session)
 }
 
 /// The creation timeout of a preview session. For a session with `sync`, it measures time without
@@ -2442,6 +2602,121 @@ mod tests {
 
     use super::*;
 
+    /// A sync session of the key `pr-123` with `spec`'s settings, in `phase`, whose TTL runs out
+    /// at `expires_at`.
+    fn session(
+        spec: &PreviewSessionSpec,
+        phase: PreviewSessionPhase,
+        expires_at: &str,
+    ) -> PreviewSession {
+        let mut session = PreviewSession::new("deployment-app-pr-123-a1b2c3d4", spec.clone());
+        session.status = Some(
+            serde_json::from_value(serde_json::json!({
+                "phase": phase,
+                "startedAt": "2026-10-30T00:00:00Z",
+                "expiresAt": expires_at,
+            }))
+            .unwrap(),
+        );
+        session
+    }
+
+    fn sync_spec() -> PreviewSessionSpec {
+        serde_json::from_value(serde_json::json!({
+            "image": "",
+            "key": "pr-123",
+            "target": {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "name": "app",
+                "container": "app",
+            },
+            "ttlSecs": 3600,
+            "sync": {
+                "entries": [{ "remote": "/app" }],
+                "runCommand": ["npm", "run", "dev"],
+            },
+        }))
+        .unwrap()
+    }
+
+    /// A sync session is reused only when it is the one live session under the key and target,
+    /// has the same settings and has enough of its TTL left, so that a run with changed settings,
+    /// or a session that is gone, failed, ambiguous or about to expire, gets a fresh session. A
+    /// session that the operator hasn't given a status yet is live. The host that a session is
+    /// shared on isn't a setting of the run, so it doesn't keep a rerun from reusing the session.
+    /// With secret mounts, the operator can't tell whether the session's Secret holds the current
+    /// files, so the session is replaced.
+    #[test]
+    fn only_a_live_session_with_the_same_settings_is_reused() {
+        let spec = sync_spec();
+        let now: Timestamp = "2026-10-30T00:30:00Z".parse().unwrap();
+        let in_an_hour = "2026-10-30T01:30:00Z";
+        let ready = session(&spec, PreviewSessionPhase::Ready, in_an_hour);
+        let reusable = |sessions: &[PreviewSession], secret_mounts| {
+            reusable_session(sessions, &spec, secret_mounts, now).is_some()
+        };
+
+        assert!(reusable(std::slice::from_ref(&ready), false));
+        assert!(reusable(
+            &[session(&spec, PreviewSessionPhase::Idle, in_an_hour)],
+            false
+        ));
+        assert!(reusable(
+            &[PreviewSession::new(
+                "deployment-app-pr-123-a1b2c3d4",
+                spec.clone()
+            )],
+            false
+        ));
+        assert!(reusable(std::slice::from_ref(&ready), true).not());
+        assert!(
+            reusable(
+                &[session(&spec, PreviewSessionPhase::Failed, in_an_hour)],
+                false
+            )
+            .not()
+        );
+        assert!(reusable(&[ready.clone(), ready.clone()], false).not());
+        assert!(reusable(&[], false).not());
+
+        let mut deleting = ready.clone();
+        deleting.metadata.deletion_timestamp =
+            Some(k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(now));
+        assert!(reusable(&[deleting], false).not());
+
+        // The operator writes the host that it shares a session on into the status, and a
+        // session that replaced another one carries the replaced session's host in its spec,
+        // while the spec of a rerun asks for none.
+        let mut shared = ready.clone();
+        if let Some(status) = shared.status.as_mut() {
+            status.share_host = Some("pr-123-abc.preview.example.com".to_owned());
+        }
+        assert!(reusable(std::slice::from_ref(&shared), false));
+        shared.spec.share_host = Some("pr-123-abc.preview.example.com".to_owned());
+        assert!(reusable(&[shared], false));
+
+        let mut changed = sync_spec();
+        changed.ttl_secs = 7200;
+        assert!(
+            reusable(
+                &[session(&changed, PreviewSessionPhase::Ready, in_an_hour)],
+                false
+            )
+            .not()
+        );
+
+        for expires_at in ["2026-10-30T00:00:00Z", "2026-10-30T00:32:00Z"] {
+            assert!(
+                reusable(
+                    &[session(&spec, PreviewSessionPhase::Ready, expires_at)],
+                    false
+                )
+                .not()
+            );
+        }
+    }
+
     /// The creation timeout of a session with `sync` measures time without progress: it doesn't
     /// run while the preview pod is busy, such as during an install, and each report of progress
     /// starts it again.
@@ -2457,9 +2732,9 @@ mod tests {
 
         tokio::time::advance(Duration::from_secs(50)).await;
         deadline.on_activity(&sync::SyncActivity {
-            first_push: None,
             busy: true,
             progress: 1,
+            ..Default::default()
         });
         // A long install: no timeout at all while it runs.
         tokio::time::advance(Duration::from_secs(600)).await;
@@ -2470,9 +2745,9 @@ mod tests {
         );
 
         deadline.on_activity(&sync::SyncActivity {
-            first_push: None,
             busy: false,
             progress: 2,
+            ..Default::default()
         });
         assert!(
             expires_within(&deadline, Duration::from_secs(59))

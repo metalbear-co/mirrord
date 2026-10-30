@@ -195,7 +195,9 @@ fn lexically_normal(path: &Path) -> PathBuf {
 /// session, to tell progress from a stall.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct SyncActivity {
-    /// The generation that the first push made, once the volume holds it.
+    /// The generation that the first push since the operator paired the CLI with the preview
+    /// pod made, once the volume holds it. A new pairing can reach a new volume, such as an
+    /// `emptyDir` of a replaced pod, whose generations start again, so each pairing has its own.
     pub(super) first_push: Option<u64>,
 
     /// Whether the sync does work whose length the CLI can't predict, during which no creation
@@ -208,6 +210,17 @@ pub(super) struct SyncActivity {
     /// a new handled push, and every applied push. A failed restart of the app isn't progress,
     /// because the supervisor retries it for as long as the app fails to start.
     pub(super) progress: u64,
+
+    /// The generation of the last push that the preview pod's supervisor acted on, from its last
+    /// report. Once it reaches `first_push`, the supervisor is done with the first push.
+    pub(super) handled: Option<u64>,
+
+    /// Whether the supervisor's last report says that the last install failed.
+    pub(super) install_failed: bool,
+
+    /// Whether the operator unpaired the CLI because a `mirrord exec` session paused the
+    /// preview, so the preview pod applies no push until that session ends.
+    pub(super) paused: bool,
 }
 
 /// Opens a sync connection of the session, as many times as the sync needs one. A failure says
@@ -283,8 +296,12 @@ pub(super) struct SyncDriver<S> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Pairing {
     /// Waiting for `Paired`: the first one, or the next one after the operator unpaired the
-    /// connection because the sidecar went or a `mirrord exec` session paused the preview.
+    /// connection because the sidecar went.
     Waiting,
+
+    /// Waiting for `Paired` after a `mirrord exec` session paused the preview, which ends when
+    /// that session ends.
+    Paused,
 
     /// Waiting for `Paired` while the preview is idle. The first change asks for a wake.
     Idle,
@@ -473,6 +490,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
     async fn serve(&mut self, mut connection: PreviewSyncConnection<S>) -> Stop {
         let mut pending = Changes::default();
         self.pairing = Pairing::Waiting;
+        self.activity
+            .send_if_modified(|activity| activity.first_push.take().is_some());
 
         loop {
             let batch = async {
@@ -719,13 +738,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
     }
 
     /// Waits for the next `Paired` after the operator unpaired the connection for `reason`.
-    /// The supervisor's last report described a pod that may be gone, so it no longer counts.
+    /// The supervisor's last report described a pod that may be gone, so it no longer counts,
+    /// and neither does the first push of the pairing that ended.
     fn unpaired(&mut self, reason: UnpairReason) {
         self.pairing = match reason {
             UnpairReason::Idle => Pairing::Idle,
+            UnpairReason::Paused => Pairing::Paused,
             _ => Pairing::Waiting,
         };
         self.supervisor = SupervisorReport::default();
+        self.activity
+            .send_modify(|activity| activity.first_push = None);
         self.publish(false);
         self.progress
             .info(&format!("waiting to push again: {reason}"));
@@ -787,6 +810,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
 
         self.activity.send_modify(|activity| {
             activity.busy = busy;
+            activity.handled = self.supervisor.handled;
+            activity.install_failed = self.supervisor.install.state == InstallState::Failed;
+            activity.paused = self.pairing == Pairing::Paused;
             if progressed {
                 activity.progress += 1;
             }

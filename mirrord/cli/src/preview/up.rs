@@ -113,7 +113,7 @@ impl From<&CliError> for ErrorCategory {
     fn from(error: &CliError) -> Self {
         match error {
             CliError::PreviewUpInvalid(_) => Self::Checks,
-            CliError::PreviewUpFailed(_) => Self::Start,
+            CliError::PreviewUpFailed(_) | CliError::PreviewSyncStartFailed(_) => Self::Start,
             _ => Self::Setup,
         }
     }
@@ -305,7 +305,10 @@ async fn run_preview_up(
     analytics.get_mut().add("services_failed", failed.len());
     if failed.is_empty().not() {
         progress.failure(Some("some preview environments failed to start"));
-        return Err(CliError::PreviewUpFailed(failed));
+        return Err(match run {
+            PreviewRun::Up => CliError::PreviewUpFailed(failed),
+            PreviewRun::Sync => CliError::PreviewSyncStartFailed(failed),
+        });
     }
 
     if watch_files.not() || syncs.is_empty() {
