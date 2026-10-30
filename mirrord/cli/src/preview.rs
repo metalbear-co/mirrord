@@ -59,7 +59,7 @@ use mirrord_operator::{
             PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvVarsConfig,
             PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs,
             PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
-            PreviewSessionPhase, PreviewSessionSpec, PreviewTlsClientAuth,
+            PreviewSessionPhase, PreviewSessionSpec, PreviewSyncStatus, PreviewTlsClientAuth,
             PreviewTlsClientAuthFromTarget, PreviewTlsDelivery,
             view::{PreviewEnv, PreviewMessageKind},
         },
@@ -1488,7 +1488,8 @@ async fn preview_status(
         "Namespace",
         "Status",
         "Clusters",
-        "Message"
+        "Message",
+        "Sync"
     ]);
 
     for (key, sessions) in sessions_by_key {
@@ -1565,6 +1566,13 @@ async fn preview_status(
                 })
                 .unwrap_or_default();
 
+            let sync = session
+                .status
+                .as_ref()
+                .and_then(|status| status.sync.as_ref())
+                .map(describe_sync_status)
+                .unwrap_or_default();
+
             table.add_row(row![
                 key,
                 session_name,
@@ -1572,7 +1580,8 @@ async fn preview_status(
                 session.metadata.namespace.as_deref().unwrap_or_default(),
                 status,
                 clusters,
-                message
+                message,
+                sync
             ]);
 
             if let Some(license_fingerprint) =
@@ -1596,6 +1605,53 @@ async fn preview_status(
     table.printstd();
 
     Ok(())
+}
+
+/// The code sync of a session in `mirrord preview status`, one line per fact: whether a CLI is
+/// attached, when the last push was applied and its generation, the install with the last line of its
+/// error, the app, and why idle mode is off.
+fn describe_sync_status(sync: &PreviewSyncStatus) -> String {
+    let mut lines = Vec::new();
+
+    lines.push(match sync.cli_attached {
+        Some(true) => "CLI attached".to_owned(),
+        _ => "no CLI attached".to_owned(),
+    });
+
+    match (&sync.last_synced_at, sync.generation) {
+        (Some(synced_at), generation) => {
+            let ago = Duration::try_from(Timestamp::now().duration_since(synced_at.0))
+                .map(|ago| humantime::format_duration(Duration::from_secs(ago.as_secs())))
+                .map(|ago| format!("{ago} ago"))
+                .unwrap_or_else(|_| "just now".to_owned());
+            lines.push(match generation {
+                Some(generation) => format!("last push {ago} (generation {generation})"),
+                None => format!("last push {ago}"),
+            });
+        }
+        (None, Some(generation)) => lines.push(format!("holds generation {generation}")),
+        (None, None) => lines.push("no push yet".to_owned()),
+    }
+
+    if let Some(install) = &sync.install {
+        let last_error_line = install.error.as_deref().and_then(|error| {
+            error
+                .lines()
+                .rev()
+                .find(|line| line.trim().is_empty().not())
+        });
+        lines.extend(sync::describe_install(install, last_error_line));
+    }
+
+    if let Some(app) = &sync.app {
+        lines.push(format!("app: {}", sync::describe_app(app)));
+    }
+
+    if let Some(reason) = &sync.idle_disabled {
+        lines.push(format!("idle off: {reason}"));
+    }
+
+    lines.join("\n")
 }
 
 /// Handle `mirrord preview logs` command.

@@ -776,7 +776,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                     return;
                 }
                 if report.install != self.supervisor.install
-                    && let Some(message) = describe_install(&report.install)
+                    && let Some(message) =
+                        describe_install(&report.install, report.install.error.as_deref())
                 {
                     self.progress.info(&message);
                 }
@@ -1206,16 +1207,17 @@ fn changes_the_tree(kind: &EventKind) -> bool {
     }
 }
 
-/// What a change of the install's report means to the developer, or `None` when it says
-/// nothing new.
-fn describe_install(install: &InstallReport) -> Option<String> {
-    match install.state {
-        InstallState::NotRun => None,
-        InstallState::Failed => Some(match &install.error {
-            Some(error) => format!("install: failed:\n{error}"),
-            None => "install: failed".to_owned(),
-        }),
-        state => Some(format!("install: {state}")),
+/// The install's state in the words of `mirrord preview sync` and `mirrord preview status`, or
+/// `None` when the install didn't run. `error` is the part of the install's error to show, which
+/// starts on a line of its own when it has more than one line.
+pub(super) fn describe_install(install: &InstallReport, error: Option<&str>) -> Option<String> {
+    match (install.state, error) {
+        (InstallState::NotRun, _) => None,
+        (InstallState::Failed, Some(error)) if error.contains('\n') => {
+            Some(format!("install: failed:\n{error}"))
+        }
+        (InstallState::Failed, Some(error)) => Some(format!("install: failed: {error}")),
+        (state, _) => Some(format!("install: {state}")),
     }
 }
 
