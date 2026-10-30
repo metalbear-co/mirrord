@@ -1,6 +1,5 @@
 use std::{
     borrow::Cow,
-    collections::BTreeMap,
     fmt::{self, Display, Formatter},
     future::Future,
     net::IpAddr,
@@ -11,9 +10,9 @@ use std::{
 use k8s_openapi::{
     NamespaceResourceScope,
     api::core::v1::{Container, ContainerPort, Node, Pod, PodStatus, Probe},
-    apimachinery::pkg::util::intstr::IntOrString,
+    apimachinery::pkg::{apis::meta::v1::LabelSelector, util::intstr::IntOrString},
 };
-use kube::{Api, Client, Resource, api::ListParams};
+use kube::{Api, Client, Resource, api::ListParams, core::Selector};
 use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::target::Target;
 use serde::de::DeserializeOwned;
@@ -481,19 +480,30 @@ pub trait RuntimeDataProvider {
     ) -> impl Future<Output = Result<RuntimeData>>;
 }
 
+/// Accepts label maps or nonempty expressions, including expression-only workloads.
+/// Explicitly empty `matchLabels` maps preserve unrestricted workload selectors;
+/// rejecting them would make those targets fail with missing-selector errors.
+pub(crate) fn has_match_labels_or_expressions(selector: &LabelSelector) -> bool {
+    selector.match_labels.is_some()
+        || selector
+            .match_expressions
+            .as_ref()
+            .is_some_and(|expressions| expressions.is_empty().not())
+}
+
 /// Trait for resources that abstract a set of pods
-/// defined by a label selector.
+/// defined by a label selector, including both label equalities and expressions.
 ///
 /// Implementors are provided with an implementation of [`RuntimeDataProvider`].
 /// When resolving [`RuntimeData`], the set of pods is fetched and [`RuntimeData`] is extracted from
-/// the first pod on the list. If the set is empty, resolution fails.
+/// the first pod ready to be targeted. If the set is empty or no pod is ready, resolution fails.
 pub trait RuntimeDataFromLabels {
     type Resource: Resource<DynamicType = (), Scope = NamespaceResourceScope>
         + Clone
         + DeserializeOwned
         + fmt::Debug;
 
-    fn get_selector_match_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>>;
+    fn get_selector(resource: &Self::Resource) -> Result<Selector>;
 
     /// Returns a list of pods matching the selector of the given `resource`.
     fn get_pods(
@@ -510,17 +520,8 @@ pub trait RuntimeDataFromLabels {
                 .ok_or_else(|| KubeApiError::missing_field(resource, ".metadata.name"))?;
             let resource = api.get(name).await?;
 
-            let labels = Self::get_selector_match_labels(&resource)?;
-
-            let formatted_labels = labels
-                .iter()
-                .map(|(key, value)| format!("{key}={value}"))
-                .collect::<Vec<String>>()
-                .join(",");
-            let list_params = ListParams {
-                label_selector: Some(formatted_labels),
-                ..Default::default()
-            };
+            let selector = Self::get_selector(&resource)?;
+            let list_params = ListParams::default().labels_from(&selector);
 
             let pod_api: Api<Pod> =
                 get_k8s_resource_api(client, resource.meta().namespace.as_deref());
@@ -600,15 +601,174 @@ impl RuntimeDataProvider for ResolvedTarget<true> {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::{
+        net::{Ipv4Addr, Ipv6Addr},
+        time::Duration,
+    };
 
-    use k8s_openapi::api::core::v1::HostIP;
+    use http::{Method, Request, Response};
+    use k8s_openapi::api::{apps::v1::Deployment, core::v1::HostIP};
+    use kube::client::Body;
     use mirrord_config::target::{
-        deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, service::ServiceTarget,
+        deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget,
+        service::ServiceTarget,
     };
     use rstest::rstest;
 
     use super::*;
+    use crate::{api::kubernetes::rollout::Rollout, resolved::ResolvedResource};
+
+    fn assert_pod_list_selector(request: &Request<Body>, expected_selector: &str) {
+        assert_eq!(request.method(), Method::GET);
+        assert_eq!(request.uri().path(), "/api/v1/namespaces/workloads/pods");
+        let selectors: Vec<_> = request
+            .uri()
+            .query()
+            .unwrap_or_default()
+            .split('&')
+            .filter_map(|parameter| parameter.strip_prefix("labelSelector="))
+            .collect();
+        assert_eq!(selectors.len(), 1);
+        let mut parts = selectors.first().unwrap().split('%');
+        let mut decoded_selector = parts.next().unwrap().replace('+', " ");
+        for part in parts {
+            let (byte, rest) = part.split_at(2);
+            decoded_selector.push(char::from(u8::from_str_radix(byte, 16).unwrap()));
+            decoded_selector.push_str(&rest.replace('+', " "));
+        }
+        assert_eq!(decoded_selector, expected_selector);
+    }
+
+    fn pod_list_response() -> Response<Body> {
+        Response::new(Body::from(
+            serde_json::to_vec(&serde_json::json!({
+                "apiVersion": "v1", "kind": "PodList", "metadata": {}, "items": [],
+            }))
+            .unwrap(),
+        ))
+    }
+
+    #[rstest]
+    #[case::mixed(serde_json::json!({"matchLabels": {"app": "api"}, "matchExpressions": [{"key": "tier", "operator": "In", "values": ["backend", "worker"]}]}), Some("app=api,tier in (backend,worker)"))]
+    #[case::expressions_only(serde_json::json!({"matchExpressions": [{"key": "tier", "operator": "In", "values": ["backend", "worker"]}]}), Some("tier in (backend,worker)"))]
+    #[case::empty_object(serde_json::json!({}), None)]
+    #[case::empty_expressions(serde_json::json!({"matchExpressions": []}), None)]
+    #[case::empty_labels(serde_json::json!({"matchLabels": {}}), Some(""))]
+    #[tokio::test]
+    async fn deployment_pod_list_selector(
+        #[case] selector: serde_json::Value,
+        #[case] expected_selector: Option<&str>,
+        #[values(false, true)] resolved: bool,
+    ) {
+        let deployment: Deployment = serde_json::from_value(serde_json::json!({
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {"name": "api", "namespace": "workloads"},
+            "spec": {"selector": selector, "template": {}},
+        }))
+        .unwrap();
+        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let client = Client::new(service, "default");
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (result, ()) = tokio::join!(
+                async {
+                    if resolved {
+                        ResolvedResource::<Deployment>::get_pods(&deployment, &client).await
+                    } else {
+                        DeploymentTarget::get_pods(&deployment, &client).await
+                    }
+                },
+                async {
+                    let (request, send) = handle.next_request().await.unwrap();
+                    assert_eq!(request.method(), Method::GET);
+                    assert_eq!(
+                        request.uri().path(),
+                        "/apis/apps/v1/namespaces/workloads/deployments/api"
+                    );
+                    send.send_response(Response::new(Body::from(
+                        serde_json::to_vec(&deployment).unwrap(),
+                    )));
+
+                    if let Some(expected_selector) = expected_selector {
+                        let (request, send) = handle.next_request().await.unwrap();
+                        assert_pod_list_selector(&request, expected_selector);
+                        send.send_response(pod_list_response());
+                    }
+                },
+            );
+            if expected_selector.is_some() {
+                result.unwrap();
+            } else {
+                assert!(
+                    matches!(result, Err(KubeApiError::MalformedResource(ref message))
+                    if message.contains(".spec.selector.matchLabels"))
+                );
+            }
+        })
+        .await
+        .expect("deployment pod-list request timed out");
+    }
+
+    #[rstest]
+    #[case::mixed(Some(serde_json::json!({"app": "api"})), "app=api,tier in (backend,worker)")]
+    #[case::expressions_only(None, "tier in (backend,worker)")]
+    #[tokio::test]
+    async fn rollout_pod_list_preserves_selector_expressions(
+        #[case] match_labels: Option<serde_json::Value>,
+        #[case] expected_selector: &str,
+        #[values(false, true)] referenced: bool,
+    ) {
+        let mut selector = serde_json::json!({
+            "matchExpressions": [{"key": "tier", "operator": "In", "values": ["backend", "worker"]}],
+        });
+        if let Some(match_labels) = match_labels {
+            selector
+                .as_object_mut()
+                .unwrap()
+                .insert("matchLabels".to_owned(), match_labels);
+        }
+        let rollout: Rollout = serde_json::from_value(serde_json::json!({
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Rollout",
+            "metadata": {"name": "api", "namespace": "workloads"},
+            "spec": if referenced {
+                serde_json::json!({"workloadRef": {"apiVersion": "apps/v1", "kind": "Deployment", "name": "api"}})
+            } else {
+                serde_json::json!({"selector": selector})
+            },
+        })).unwrap();
+        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let client = Client::new(service, "default");
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (_pods, ()) = tokio::try_join!(RolloutTarget::get_pods(&rollout, &client), async {
+                if referenced {
+                    let (request, send) = handle.next_request().await.unwrap();
+                    assert_eq!(request.method(), Method::GET);
+                    assert_eq!(
+                        request.uri().path(),
+                        "/apis/apps/v1/namespaces/workloads/deployments/api"
+                    );
+                    send.send_response(Response::new(Body::from(
+                        serde_json::to_vec(&serde_json::json!({
+                            "apiVersion": "apps/v1", "kind": "Deployment",
+                            "metadata": {"name": "api", "namespace": "workloads"},
+                            "spec": {"selector": selector, "template": {}},
+                        }))
+                        .unwrap(),
+                    )));
+                }
+                let (request, send) = handle.next_request().await.unwrap();
+                assert_pod_list_selector(&request, expected_selector);
+                send.send_response(pod_list_response());
+                Ok(())
+            })
+            .unwrap();
+        })
+        .await
+        .expect("rollout pod-list request timed out");
+    }
 
     #[test]
     fn host_ips_preserve_kubernetes_order_and_remove_duplicates() {

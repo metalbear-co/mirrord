@@ -18,14 +18,14 @@ mod shared_secret;
 
 use std::sync::Arc;
 
-pub use cloud_token::{CloudTokenCredentials, cloud_url_from_env};
+pub use cloud_token::{CloudTokenCredentials, SESSIONS_MANAGER_URL_DEFAULT, cloud_url_from_env};
 use futures::future::{BoxFuture, FutureExt};
 pub use login_token::{LoginToken, LoginTokenCredentials, LoginTokenSource};
 use reqwest::header::HeaderMap;
 pub use shared_secret::SharedSecretCredentials;
 use url::Url;
 
-use crate::error::SessionsManagerClientError;
+use crate::{error::SessionsManagerClientError, transport::EndpointSource};
 
 /// Supplies the headers that authenticate a client's sessions-manager requests.
 ///
@@ -133,8 +133,9 @@ impl CredentialProvider for EnvCredentials {
 
 /// The credentials an agent uses unless the caller supplies its own: the environment's shared
 /// secret and API key.
-pub(crate) fn credentials_from_env()
--> Result<Arc<dyn CredentialProvider>, SessionsManagerClientError> {
+pub(crate) fn credentials_from_env(
+    source: EndpointSource,
+) -> Result<Arc<dyn CredentialProvider>, SessionsManagerClientError> {
     let cloud = CloudTokenCredentials::from_env()?;
     if let Some(cloud) = &cloud {
         tracing::debug!(
@@ -143,12 +144,16 @@ pub(crate) fn credentials_from_env()
         );
     }
 
-    with_shared_secret_from_env(cloud.map(|cloud| Box::new(cloud) as Box<dyn CredentialProvider>))
+    with_shared_secret_from_env(
+        source,
+        cloud.map(|cloud| Box::new(cloud) as Box<dyn CredentialProvider>),
+    )
 }
 
 /// The credentials an intproxy uses: the environment's shared secret and the developer's login
 /// token from `login_tokens`. Never the API key, which sessions-manager refuses from an intproxy.
 pub(crate) fn intproxy_credentials_from_env(
+    source: EndpointSource,
     login_tokens: Option<Arc<dyn LoginTokenSource>>,
     base_url: &Url,
 ) -> Result<Arc<dyn CredentialProvider>, SessionsManagerClientError> {
@@ -159,14 +164,31 @@ pub(crate) fn intproxy_credentials_from_env(
         Box::new(LoginTokenCredentials::new(source, base_url)) as Box<dyn CredentialProvider>
     });
 
-    with_shared_secret_from_env(login)
+    with_shared_secret_from_env(source, login)
 }
 
 fn with_shared_secret_from_env(
+    source: EndpointSource,
     identity: Option<Box<dyn CredentialProvider>>,
 ) -> Result<Arc<dyn CredentialProvider>, SessionsManagerClientError> {
-    let shared_secret = SharedSecretCredentials::from_env()?;
+    with_shared_secret(source, SharedSecretCredentials::from_env()?, identity)
+}
+
+/// Combines `shared_secret` and `identity` into the credentials sent to the sessions-manager
+/// chosen by `source`.
+///
+/// The shared secret belongs to a proxy in front of a sessions-manager the user deployed, so it
+/// requires an explicit URL: sent to the MetalBear Cloud default instead, it would hand that
+/// proxy's secret to a third party, and the session would fail there anyway.
+fn with_shared_secret(
+    source: EndpointSource,
+    shared_secret: Option<SharedSecretCredentials>,
+    identity: Option<Box<dyn CredentialProvider>>,
+) -> Result<Arc<dyn CredentialProvider>, SessionsManagerClientError> {
     if shared_secret.is_some() {
+        if source == EndpointSource::Default {
+            return Err(SessionsManagerClientError::SharedSecretWithoutUrl);
+        }
         tracing::debug!("authenticating sessions-manager connections with a shared secret");
     }
 
@@ -261,12 +283,31 @@ mod tests {
 
         assert!(CloudTokenCredentials::from_env().unwrap().is_none());
         assert!(
-            credentials_from_env()
+            credentials_from_env(EndpointSource::Default)
                 .unwrap()
                 .control_plane_headers()
                 .await
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    /// The shared secret goes only to a sessions-manager the user pointed at, never to the
+    /// MetalBear Cloud default.
+    #[tokio::test]
+    async fn shared_secret_requires_an_explicit_url() {
+        let shared_secret = || Some(SharedSecretCredentials::new("shhh").unwrap());
+
+        assert!(matches!(
+            with_shared_secret(EndpointSource::Default, shared_secret(), None),
+            Err(SessionsManagerClientError::SharedSecretWithoutUrl)
+        ));
+
+        let headers = with_shared_secret(EndpointSource::Explicit, shared_secret(), None)
+            .unwrap()
+            .control_plane_headers()
+            .await
+            .unwrap();
+        assert_eq!(headers.get(AUTH_HEADER_NAME).unwrap(), "shhh");
     }
 }

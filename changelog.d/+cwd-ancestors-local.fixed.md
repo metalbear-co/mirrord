@@ -1,0 +1,1 @@
+Calls that describe a folder above the working directory, such as `stat` and `access`, now stay local by default on Linux and macOS, so resolving a local path no longer fails when the target doesn't have those folders.

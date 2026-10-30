@@ -79,9 +79,17 @@ pub const REMOTE_SERVICE_REPLICA: CheckedEnv<String> =
 /// This is distinct from `MIRRORD_TARGET_NAMESPACE`, which configures a local mirrord process.
 pub const REMOTE_ENVIRONMENT: CheckedEnv<String> = CheckedEnv::new("MIRRORD_REMOTE_ENVIRONMENT");
 
+/// Base URL of the standalone sessions-manager the workload companion registers with, including
+/// any path prefix it is served under, e.g. `https://example.com/sm`.
+///
+/// When neither this nor [`OPERATOR_API_URL`] is set, the companion registers with the MetalBear
+/// Cloud sessions-manager. Setting both is an error.
+pub const SESSIONS_MANAGER_URL: CheckedEnv<String> =
+    CheckedEnv::new("MIRRORD_SESSIONS_MANAGER_URL");
+
 /// Makes the workload companion register with the sessions-manager hosted by the mirrord
 /// operator, through this Kubernetes API server, instead of a standalone sessions-manager at
-/// `MIRRORD_SESSIONS_MANAGER_URL`. Setting both is an error.
+/// [`SESSIONS_MANAGER_URL`]. Setting both is an error.
 ///
 /// The value is the EKS cluster's API server endpoint, e.g.
 /// `https://ABC123.gr7.us-east-1.eks.amazonaws.com`. The companion authenticates as its AWS
@@ -153,6 +161,10 @@ pub const OVERRIDE_CACHE_CONTROL: CheckedEnv<bool> =
 /// detection before treating it as raw TCP.
 pub const HTTP_DETECTION_TIMEOUT: CheckedEnv<u64> =
     CheckedEnv::new("MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT");
+
+/// Sets the max size (in bytes) of the HTTP/2 header list accepted by the agent.
+pub const HTTP2_MAX_HEADER_LIST_SIZE: CheckedEnv<u32> =
+    CheckedEnv::new("MIRRORD_AGENT_HTTP2_MAX_HEADER_LIST_SIZE");
 
 /// Sets how long (in seconds) to keep an unused incoming port redirection before removing it.
 pub const UNUSED_PORT_LINGER: CheckedEnv<u64> =
