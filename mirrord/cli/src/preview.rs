@@ -46,8 +46,8 @@ use mirrord_config::{
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
     client::{
-        NoClientCert, OperatorApi, connect_params::BranchDbNames, error::OperatorApiError,
-        temporal_mirror_warning,
+        MaybeClientCert, NoClientCert, OperatorApi, connect_params::BranchDbNames,
+        error::OperatorApiError, temporal_mirror_warning,
     },
     crd::{
         MirrordOperatorSpec, NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
@@ -244,9 +244,17 @@ struct PreparedPreview {
     /// The session's spec, but for what [`PreparedPreview::start`] fills in: `db_branching`,
     /// from the branches it prepares, and `share_host`, from the session it replaces.
     spec: PreviewSessionSpec,
-    /// The service's `sync` entries, in the order of `spec.sync`, which
-    /// [`PreparedPreview::start`] pushes into the preview pod.
-    sync_entries: Vec<SyncEntry>,
+    /// The code sync of a session with `sync`.
+    sync: Option<PreparedSync>,
+}
+
+/// The code sync of a session with `sync`, which [`PreparedPreview::start`] runs while it waits
+/// for the session to be ready.
+struct PreparedSync {
+    /// The service's `sync` entries, in the order of `spec.sync`.
+    entries: Vec<SyncEntry>,
+    /// The client of the sync websocket, with the user's certificate if the user has one.
+    api: OperatorApi<MaybeClientCert>,
 }
 
 impl PreparedPreview {
@@ -559,6 +567,21 @@ impl PreparedPreview {
             sync: sync_config,
         };
 
+        // The sync websocket claims a developer seat, as a target connection does, so the
+        // operator needs the user's certificate on it. A user without a certificate gets a
+        // client without one, and the operator's sync route then refuses the sync. A session
+        // without `sync` opens no websocket, so it doesn't get the certificate.
+        let sync = match sync_entries {
+            None => None,
+            Some(entries) => Some(PreparedSync {
+                entries,
+                api: operator_api
+                    .clone()
+                    .with_client_certificate(&mut analytics, progress, &layer_config)
+                    .await,
+            }),
+        };
+
         Ok(Self {
             layer_config,
             operator_api,
@@ -568,7 +591,7 @@ impl PreparedPreview {
             config_target,
             secret_values,
             spec,
-            sync_entries: sync_entries.unwrap_or_default(),
+            sync,
         })
     }
 
@@ -588,7 +611,7 @@ impl PreparedPreview {
             config_target,
             secret_values,
             mut spec,
-            sync_entries,
+            sync,
         } = self;
 
         // Label targets with branches were rejected in `prepare`, so an empty config is the only
@@ -802,15 +825,15 @@ impl PreparedPreview {
         // The pod of a session with `sync` becomes ready only once its sidecar holds a
         // push, so the push runs while the loop below waits for `Ready`.
         let mut preview_sync = None;
-        let mut sync_pending = sync_entries.is_empty().not();
-        let sync_progress = sync_pending.then(|| progress.subtask("pushing the local code"));
+        let mut sync_pending = sync.is_some();
+        let sync_progress = sync.map(|sync| (sync, progress.subtask("pushing the local code")));
         let mut sync_push = Box::pin(async {
             match sync_progress {
-                Some(sync_progress) => sync::PreviewSync::start(
-                    &operator_api,
+                Some((PreparedSync { entries, api }, sync_progress)) => sync::PreviewSync::start(
+                    &api,
                     &session_namespace,
                     &session_name,
-                    sync_entries,
+                    entries,
                     sync_progress,
                 )
                 .await

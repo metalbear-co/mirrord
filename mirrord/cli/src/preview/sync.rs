@@ -11,7 +11,7 @@ use std::{
 use mirrord_config::target::Target;
 use mirrord_operator::{
     client::{
-        NoClientCert, OperatorApi,
+        MaybeClientCert, OperatorApi,
         preview_sync::{PackedEntry, PreviewSyncConnection, TreeListing, UpgradedConnection},
     },
     crd::preview::{PreviewSyncConfig, PreviewSyncEntry, PreviewSyncInstall},
@@ -198,7 +198,7 @@ impl PreviewSync {
     /// pairs it with the preview pod, and pushes `entries`, the service's `sync` entries in the
     /// order of the session's `spec.sync`. Reports on `progress`, and finishes it.
     pub(super) async fn start(
-        operator_api: &OperatorApi<NoClientCert>,
+        operator_api: &OperatorApi<MaybeClientCert>,
         namespace: &str,
         name: &str,
         entries: Vec<SyncEntry>,
@@ -216,7 +216,7 @@ impl PreviewSync {
     }
 
     async fn connect_and_push(
-        operator_api: &OperatorApi<NoClientCert>,
+        operator_api: &OperatorApi<MaybeClientCert>,
         namespace: &str,
         name: &str,
         entries: Vec<SyncEntry>,

@@ -131,7 +131,7 @@ pub fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> Operato
 pub trait ClientCertificateState: fmt::Debug {}
 
 /// Represents a [`ClientCertificateState`] where we don't have the certificate.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NoClientCert {
     /// [`Config::headers`] here contain some extra entries:
     /// 1. [`CLIENT_HOSTNAME_HEADER`] (if available)
@@ -294,6 +294,7 @@ pub struct PreparedSession {
 }
 
 /// Wrapper over mirrord operator API.
+#[derive(Clone)]
 pub struct OperatorApi<C> {
     /// For making requests to kubernetes API server.
     client: Client,
