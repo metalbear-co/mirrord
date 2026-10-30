@@ -192,11 +192,22 @@ fn lexically_normal(path: &Path) -> PathBuf {
 }
 
 /// What the sync of a session did so far, which `mirrord preview sync` reads while it waits for the
-/// session.
+/// session, to tell progress from a stall.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct SyncActivity {
     /// The generation that the first push made, once the volume holds it.
     pub(super) first_push: Option<u64>,
+
+    /// Whether the sync does work whose length the CLI can't predict, during which no creation
+    /// timeout runs: the sidecar waits for the code volume or copies the image's files to it,
+    /// the CLI lists, hashes or packs the trees of a push, the push is being sent or applied, or
+    /// the install runs.
+    pub(super) busy: bool,
+
+    /// Counts the reports of progress: a new state of the sidecar, of the install or of the app,
+    /// a new handled push, and every applied push. A failed restart of the app isn't progress,
+    /// because the supervisor retries it for as long as the app fails to start.
+    pub(super) progress: u64,
 }
 
 /// Opens a sync connection of the session, as many times as the sync needs one. A failure says
@@ -262,6 +273,9 @@ pub(super) struct SyncDriver<S> {
 
     sidecar: Option<SidecarState>,
     supervisor: SupervisorReport,
+
+    /// Whether the CLI is busy with a push, from the listing of its trees to the sidecar's answer.
+    pushing: bool,
 }
 
 /// Whether the operator pairs the connection with the preview pod's sidecar, so that the CLI can
@@ -394,6 +408,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
             rule_files: BTreeSet::new(),
             sidecar: None,
             supervisor: SupervisorReport::default(),
+            pushing: false,
         };
 
         Ok((driver, activity_rx))
@@ -413,6 +428,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                 Ok(connection) => self.serve(connection).await,
                 Err(stop) => stop,
             };
+
+            // What the connection reported about the preview pod may no longer hold, such as an
+            // install that ran, which would keep the creation timeout stopped while the CLI
+            // can't hear of its end.
+            self.sidecar = None;
+            self.supervisor = SupervisorReport::default();
+            self.pushing = false;
+            self.publish(false);
 
             if self.applied_pushes > applied_before {
                 may_retry = true;
@@ -515,6 +538,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
         connection: &mut PreviewSyncConnection<S>,
         pending: Option<&mut Changes>,
     ) -> Result<(), Stop> {
+        self.set_pushing(true);
+        let result = self.full_push(connection, pending).await;
+        self.set_pushing(false);
+        result
+    }
+
+    /// The steps of [`Self::push_full`], which the CLI is busy with as a whole: the listing and
+    /// the hashing of a large tree take as long as sending it.
+    async fn full_push(
+        &mut self,
+        connection: &mut PreviewSyncConnection<S>,
+        pending: Option<&mut Changes>,
+    ) -> Result<(), Stop> {
         let entries = self.entries.clone();
         let sources = self.sources.clone();
         let full = match self
@@ -565,8 +601,21 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
         changes: Changes,
         pending: &mut Changes,
     ) -> Result<(), Stop> {
+        self.set_pushing(true);
+        let result = self.changes_push(connection, changes, pending).await;
+        self.set_pushing(false);
+        result
+    }
+
+    /// The steps of [`Self::push_changes`], which the CLI is busy with as a whole.
+    async fn changes_push(
+        &mut self,
+        connection: &mut PreviewSyncConnection<S>,
+        changes: Changes,
+        pending: &mut Changes,
+    ) -> Result<(), Stop> {
         let Some(base_generation) = self.generation.filter(|_| changes.full.not()) else {
-            return self.push_full(connection, Some(pending)).await;
+            return self.full_push(connection, Some(pending)).await;
         };
 
         let entries = self.entries.clone();
@@ -578,7 +627,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
         let packed = match packed {
             Ok(Some(packed)) => packed,
             // A change touched the rules.
-            Ok(None) => return self.push_full(connection, Some(pending)).await,
+            Ok(None) => return self.full_push(connection, Some(pending)).await,
             Err(error) => {
                 self.progress.warning(&with_causes(&error));
                 pending.full = true;
@@ -599,7 +648,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
             .await?
         {
             Pushed::Applied(_) => Ok(()),
-            Pushed::StaleBase => self.push_full(connection, Some(pending)).await,
+            Pushed::StaleBase => self.full_push(connection, Some(pending)).await,
             Pushed::Unpaired(reason) => {
                 self.unpaired(reason);
                 Ok(())
@@ -629,6 +678,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
         Ok(result)
     }
 
+    /// Whether the CLI is busy with a push, which keeps the creation timeout from running.
+    fn set_pushing(&mut self, pushing: bool) {
+        self.pushing = pushing;
+        self.publish(false);
+    }
+
     /// Sends `packed` as one push in `mode`.
     async fn push(
         &mut self,
@@ -642,6 +697,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
         let result = connection
             .push(push_id, mode, packed, |event| self.observe(&event))
             .await;
+        self.publish(result.is_ok());
 
         let generation = match result {
             Ok(generation) => generation,
@@ -670,13 +726,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
             _ => Pairing::Waiting,
         };
         self.supervisor = SupervisorReport::default();
+        self.publish(false);
         self.progress
             .info(&format!("waiting to push again: {reason}"));
     }
 
-    /// Reports `event`, and records what it says about the preview pod.
+    /// Reports `event`, and records what it says about the preview pod's work.
     fn observe(&mut self, event: &SyncEvent) {
-        match event {
+        let progressed = match event {
             SyncEvent::Sidecar(state) => {
                 if self.sidecar.as_ref() == Some(state) {
                     return;
@@ -689,6 +746,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                 if *state == SidecarState::Disconnected {
                     self.supervisor = SupervisorReport::default();
                 }
+                true
             }
             SyncEvent::Supervisor(report) => {
                 if *report == self.supervisor {
@@ -703,10 +761,36 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                     self.progress
                         .info(&format!("app: {}", describe_app(&report.app)));
                 }
+
+                // A failed restart only counts up the app's restarts.
+                let progressed = report.install.state != self.supervisor.install.state
+                    || report.app.state != self.supervisor.app.state
+                    || report.handled != self.supervisor.handled;
                 self.supervisor = report.clone();
+                progressed
             }
-            SyncEvent::Paired { .. } | SyncEvent::Unpaired(_) => {}
-        }
+            SyncEvent::Paired { .. } | SyncEvent::Unpaired(_) => return,
+        };
+
+        self.publish(progressed);
+    }
+
+    /// Publishes whether the preview pod is busy, and with `progressed` counts one more report
+    /// of progress.
+    fn publish(&self, progressed: bool) {
+        let busy = self.pushing
+            || self.supervisor.install.state == InstallState::Running
+            || matches!(
+                self.sidecar,
+                Some(SidecarState::WaitingForVolume | SidecarState::Seeding)
+            );
+
+        self.activity.send_modify(|activity| {
+            activity.busy = busy;
+            if progressed {
+                activity.progress += 1;
+            }
+        });
     }
 }
 

@@ -801,8 +801,8 @@ impl PreparedPreview {
 
         // Watch the `PreviewSession` status until it reaches `Ready` or `Failed`. Emits periodic
         // warnings if initialization is taking longer than expected, so the user knows the
-        // command hasn't hung. If the session does not become `Ready` within the timeout, the
-        // CLI deletes the session resource.
+        // command hasn't hung. A session that isn't ready within the creation timeout, which for
+        // a session with `sync` counts only time without progress, fails, and the CLI deletes it.
 
         let mut subtask = progress.subtask("waiting for preview to be ready");
 
@@ -816,11 +816,12 @@ impl PreparedPreview {
         // First tick is instant
         long_initialization_timer.tick().await;
 
-        let mut timeout = std::pin::pin!(tokio::time::sleep(Duration::from_secs(
+        let mut deadline = ProgressDeadline::new(Duration::from_secs(
             layer_config.feature.preview.creation_timeout_secs,
-        )));
+        ));
 
         let mut last_known_phase: &str = "unknown";
+        let mut previous_phase = None;
 
         // The pod of a session with `sync` becomes ready only once its sidecar holds a push, so
         // the sync runs while the loop below waits for `Ready`.
@@ -891,14 +892,17 @@ impl PreparedPreview {
                         error => fail(error, &mut subtask).await,
                     });
                 }
-                // The top of the loop reads the first push.
                 Ok(()) = async {
                     match &mut activity {
                         Some(activity) => activity.changed().await,
                         None => std::future::pending().await,
                     }
-                } => {}
-                _ = &mut timeout => {
+                } => {
+                    if let Some(activity) = &mut activity {
+                        deadline.on_activity(&activity.borrow_and_update());
+                    }
+                }
+                _ = deadline.expired() => {
                     // Read the pods before deleting the session: the delete tears down the
                     // deployment, and their output goes with it.
                     let logs = fetch_preview_logs_best_effort(
@@ -921,6 +925,15 @@ impl PreparedPreview {
                     match event {
                         Some(Ok(Event::Apply(current) | Event::InitApply(current))) => {
                             if let Some(status) = &current.status {
+                                // A new phase is progress too, for a session with `sync`, whose
+                                // timeout counts time without progress. The timeout of any other
+                                // session counts from its start.
+                                if activity.is_some()
+                                    && previous_phase.replace(status.phase) != Some(status.phase)
+                                {
+                                    deadline.on_progress();
+                                }
+
                                 match &status.phase {
                                     PreviewSessionPhase::Initializing => {
                                         last_known_phase = "initializing preview env";
@@ -1106,6 +1119,58 @@ async fn sync_end(
 async fn session_failed(client: &Client, namespace: &str, name: &str, message: String) -> CliError {
     let logs = fetch_preview_logs_best_effort(client, namespace, name).await;
     CliError::PreviewSessionFailed { message, logs }
+}
+
+/// The creation timeout of a preview session. For a session with `sync`, it measures time without
+/// progress: each report of progress starts the timeout again, and while the preview pod does
+/// work whose length the CLI can't predict, such as an install, the timeout doesn't run at all.
+/// For any other session, nothing reports progress, so it measures the time since its start.
+struct ProgressDeadline {
+    timeout: Duration,
+
+    /// When the timeout runs out, or `None` while it doesn't run.
+    at: Option<tokio::time::Instant>,
+
+    /// The count of progress reports in the last [`sync::SyncActivity`] seen.
+    progress: u64,
+}
+
+impl ProgressDeadline {
+    fn new(timeout: Duration) -> Self {
+        Self {
+            timeout,
+            at: Some(tokio::time::Instant::now() + timeout),
+            progress: 0,
+        }
+    }
+
+    /// Starts the timeout again, unless it doesn't run.
+    fn on_progress(&mut self) {
+        if self.at.is_some() {
+            self.at = Some(tokio::time::Instant::now() + self.timeout);
+        }
+    }
+
+    /// Takes in the code sync's `activity`: stops the timeout while the pod is busy, and starts
+    /// it again after progress, or when the pod stops being busy.
+    fn on_activity(&mut self, activity: &sync::SyncActivity) {
+        let progressed = activity.progress != self.progress;
+        self.progress = activity.progress;
+
+        if activity.busy {
+            self.at = None;
+        } else if progressed || self.at.is_none() {
+            self.at = Some(tokio::time::Instant::now() + self.timeout);
+        }
+    }
+
+    /// Waits until the timeout runs out, and forever while it doesn't run.
+    async fn expired(&self) {
+        match self.at {
+            Some(at) => tokio::time::sleep_until(at).await,
+            None => std::future::pending().await,
+        }
+    }
 }
 
 /// Deletes the session `session_name`, whose start failed with `error`, and fails `subtask`.
@@ -2353,6 +2418,52 @@ mod tests {
     use mirrord_operator::crd::preview::{PreviewSyncConfig, PreviewSyncEntry};
 
     use super::*;
+
+    /// The creation timeout of a session with `sync` measures time without progress: it doesn't
+    /// run while the preview pod is busy, such as during an install, and each report of progress
+    /// starts it again.
+    #[tokio::test(start_paused = true)]
+    async fn the_creation_timeout_counts_time_without_progress() {
+        let timeout = Duration::from_secs(60);
+        let mut deadline = ProgressDeadline::new(timeout);
+        let expires_within = async |deadline: &ProgressDeadline, within: Duration| {
+            tokio::time::timeout(within, deadline.expired())
+                .await
+                .is_ok()
+        };
+
+        tokio::time::advance(Duration::from_secs(50)).await;
+        deadline.on_activity(&sync::SyncActivity {
+            first_push: None,
+            busy: true,
+            progress: 1,
+        });
+        // A long install: no timeout at all while it runs.
+        tokio::time::advance(Duration::from_secs(600)).await;
+        assert!(
+            expires_within(&deadline, Duration::from_secs(600))
+                .await
+                .not()
+        );
+
+        deadline.on_activity(&sync::SyncActivity {
+            first_push: None,
+            busy: false,
+            progress: 2,
+        });
+        assert!(
+            expires_within(&deadline, Duration::from_secs(59))
+                .await
+                .not()
+        );
+        deadline.on_progress();
+        assert!(
+            expires_within(&deadline, Duration::from_secs(59))
+                .await
+                .not()
+        );
+        assert!(expires_within(&deadline, Duration::from_secs(61)).await);
+    }
 
     /// The operator rebuilds the config target from the session target. A label target with no
     /// container must come back with no container, so each matching pod picks its own instead

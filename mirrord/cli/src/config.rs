@@ -1848,7 +1848,12 @@ pub(super) struct PreviewUpArgs {
 
     /// How long (in seconds) to wait for each preview to become ready.
     ///
-    /// If a session hasn't reached `Ready` within this time, the CLI deletes it.
+    /// If a session hasn't reached `Ready` within this time, the CLI deletes it, unless `mirrord
+    /// preview sync` reused the session from an earlier run. For `mirrord preview sync`, it is the
+    /// longest time without progress: each new state of the session or of the preview pod, and
+    /// each applied push, starts it again, and it doesn't run while the pod copies the image's
+    /// files to the code volume, while the CLI lists, packs or sends a push, while the pod applies
+    /// it or while an install runs.
     #[arg(long)]
     pub timeout: Option<u64>,
 }

@@ -14,7 +14,10 @@ use mirrord_operator::{
     crd::preview::{
         PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncInstall,
     },
-    sync::{PushMode, RejectReason, SyncFrame, UnpairReason},
+    sync::{
+        AppReport, AppState, InstallReport, InstallState, PushMode, RejectReason, SidecarState,
+        SupervisorReport, SyncFrame, UnpairReason,
+    },
 };
 use mirrord_progress::ProgressTracker;
 use mirrord_up::{InstallConfig, RunConfig, RunType, ServiceMode, SubprocessCfg, SyncEntry};
@@ -536,6 +539,76 @@ async fn a_replaced_sync_stops_without_reconnecting() {
     assert!(operators.try_recv().is_err());
 }
 
+/// `mirrord preview sync` runs no creation timeout while the preview pod is busy with work whose
+/// length the CLI can't predict, such as copying the image's files or an install, so the
+/// activity says when the pod is busy, and counts every report of progress.
+#[tokio::test]
+async fn the_activity_reports_busy_work_and_counts_progress() {
+    let local = tempfile::tempdir().unwrap();
+    write(local.path(), "app.js", "v1");
+
+    let (sync, mut operators, mut activity) = start(vec![entry(local.path())], false);
+    let mut operator = next_connection(&mut operators).await;
+    let next = async |activity: &mut tokio::sync::watch::Receiver<SyncActivity>| {
+        tokio::time::timeout(FRAME_TIMEOUT, activity.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        *activity.borrow_and_update()
+    };
+
+    operator
+        .send(SyncFrame::Status(SidecarState::Seeding))
+        .await;
+    let seeding = next(&mut activity).await;
+    assert!(seeding.busy);
+
+    operator
+        .send(SyncFrame::Status(SidecarState::AwaitingFirstPush))
+        .await;
+    let awaiting = next(&mut activity).await;
+    assert!(awaiting.busy.not());
+    assert!(awaiting.progress > seeding.progress);
+
+    operator.pair_and_apply(1).await;
+    let pushed = loop {
+        let current = next(&mut activity).await;
+        if current.first_push.is_some() {
+            break current;
+        }
+    };
+    assert_eq!(pushed.first_push, Some(1));
+    assert!(pushed.busy.not());
+
+    let installing = SupervisorReport {
+        install: InstallReport {
+            state: InstallState::Running,
+            error: None,
+        },
+        app: AppReport::default(),
+        handled: None,
+    };
+    operator.send(SyncFrame::Supervisor(installing)).await;
+    assert!(next(&mut activity).await.busy);
+
+    let running = SupervisorReport {
+        install: InstallReport {
+            state: InstallState::Succeeded,
+            error: None,
+        },
+        app: AppReport {
+            state: AppState::Running,
+            restarts: 0,
+            last_exit_code: None,
+        },
+        handled: Some(1),
+    };
+    operator.send(SyncFrame::Supervisor(running)).await;
+    assert!(next(&mut activity).await.busy.not());
+
+    sync.abort();
+}
+
 /// The operator unpairs the CLI in the middle of a push when the pod's sidecar goes away or a
 /// `mirrord exec` session pauses the preview. The CLI must then wait for the next `Paired` and
 /// push the tree whole, rather than fail the sync.
@@ -582,6 +655,86 @@ async fn watch_reconnects_after_every_broken_connection() {
 
     next_connection(&mut operators).await;
     assert!(sync.is_finished().not(), "{:?}", sync.await);
+    sync.abort();
+}
+
+/// The creation timeout doesn't run while the install runs. Once the operator unpairs the CLI
+/// because the sidecar is gone, the pod that ran the install may be gone too, so the CLI must
+/// stop reporting the pod as busy, or the timeout would never run again if no pod comes back.
+#[tokio::test]
+async fn an_unpair_ends_the_busy_install() {
+    let local = tempfile::tempdir().unwrap();
+    write(local.path(), "app.js", "v1");
+
+    let (sync, mut operators, mut activity) = start(vec![entry(local.path())], false);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+
+    operator
+        .send(SyncFrame::Supervisor(SupervisorReport {
+            install: InstallReport {
+                state: InstallState::Running,
+                error: None,
+            },
+            app: AppReport::default(),
+            handled: None,
+        }))
+        .await;
+    tokio::time::timeout(FRAME_TIMEOUT, activity.wait_for(|activity| activity.busy))
+        .await
+        .unwrap()
+        .unwrap();
+
+    operator
+        .send(SyncFrame::Unpaired {
+            reason: UnpairReason::SidecarGone,
+        })
+        .await;
+    tokio::time::timeout(
+        FRAME_TIMEOUT,
+        activity.wait_for(|activity| activity.busy.not()),
+    )
+    .await
+    .expect("the CLI reports the pod busy after the sidecar is gone")
+    .unwrap();
+    sync.abort();
+}
+
+/// A broken connection delivers no `Unpaired`, and the CLI may not reach the operator again for
+/// a while, so the install that the connection reported running must stop keeping the creation
+/// timeout stopped too.
+#[tokio::test]
+async fn a_broken_connection_ends_the_busy_install() {
+    let local = tempfile::tempdir().unwrap();
+    write(local.path(), "app.js", "v1");
+
+    let (sync, mut operators, mut activity) = start(vec![entry(local.path())], true);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+
+    operator
+        .send(SyncFrame::Supervisor(SupervisorReport {
+            install: InstallReport {
+                state: InstallState::Running,
+                error: None,
+            },
+            app: AppReport::default(),
+            handled: None,
+        }))
+        .await;
+    tokio::time::timeout(FRAME_TIMEOUT, activity.wait_for(|activity| activity.busy))
+        .await
+        .unwrap()
+        .unwrap();
+
+    drop(operator);
+    tokio::time::timeout(
+        FRAME_TIMEOUT,
+        activity.wait_for(|activity| activity.busy.not()),
+    )
+    .await
+    .expect("the CLI reports the pod busy after the connection broke")
+    .unwrap();
     sync.abort();
 }
 
