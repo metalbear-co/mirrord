@@ -1,0 +1,12 @@
+services:
+  api:
+    run:
+      command: ["dotnet", "Api.dll"]
+  db:
+    run:
+      type: container
+      command: ["docker", "run", "postgres"]
+  queue:
+    run:
+      type: container
+      command: ["docker", "run", "rabbitmq"]

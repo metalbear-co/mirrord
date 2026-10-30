@@ -100,6 +100,11 @@ jobs:
         with:
           command: |
             cargo nextest run -p mirrord-config
+      - name: mirrord progress UT
+        uses: ./.github/actions/run-in-ci-runner
+        with:
+          command: |
+            cargo nextest run -p mirrord-progress
       - name: mirrord kube UT
         uses: ./.github/actions/run-in-ci-runner
         with:

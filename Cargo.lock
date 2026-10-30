@@ -4670,9 +4670,9 @@ dependencies = [
 
 [[package]]
 name = "libz-sys"
-version = "1.1.29"
+version = "1.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85bc9657773828b90eeb625adff10eeac83cc21bbfd8e23a03eaa8a33c9e28d9"
+checksum = "ff20308ecabd635a2dc1dd5834a86c462cca20efba1d5d3ddab1f8aea3455cb2"
 dependencies = [
  "cc",
  "libc",
@@ -5553,6 +5553,7 @@ dependencies = [
  "mirrord-layer-lib",
  "mirrord-layer-macro",
  "mirrord-layer-tests",
+ "mirrord-progress",
  "mirrord-protocol",
  "mirrord-sip",
  "mirrord-test-utils",
@@ -5630,6 +5631,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "utils-win",
+ "uuid",
  "winapi",
  "windows-strings 0.4.2",
 ]

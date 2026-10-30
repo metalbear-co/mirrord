@@ -32,11 +32,14 @@ pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
 use itertools::Itertools;
 use k8s_openapi::api::core::v1::Namespace;
+pub use list::{LISTING_VERSION, UpListing};
 use miette::Diagnostic;
 use mirrord_analytics::{MIRRORD_UP_CORRELATION_ID_ENV, UpSessionDbBranch};
 use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
+    MIRRORD_DEBUG_HOLD,
     config::{ConfigContext, ConfigError, EnvKey},
+    debug_hold,
     target::{Target, TargetType},
     util::GIT_BRANCH,
 };
@@ -58,6 +61,7 @@ use crate::kube_context::UpKubeContext;
 mod config;
 mod init;
 mod kube_context;
+mod list;
 mod process;
 
 /// Shared slot that [`launch`] fills with what the child sessions report while starting: the
@@ -923,13 +927,30 @@ pub async fn resolve_preview_services(
 /// `ready` is filled with the time-to-ready once every session has signalled
 /// readiness, and with the branch databases the sessions report (see [`ReadyTracker`]).
 ///
+/// `debug` names the services whose programs are held for a debugger (see [`MIRRORD_DEBUG_HOLD`]).
+/// [`UpConfig::select_services`] has checked that each is one of the services launched.
+///
 /// Returns when the user stops the session or one of the child sessions exits.
 pub async fn launch(
     service_configs: Vec<SubprocessCfg>,
     correlation_id: Uuid,
+    debug: &[String],
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
-    let commands: Vec<_> = service_configs
+    let commands = service_commands(service_configs, correlation_id, debug)?;
+    process::run(commands, ready).await
+}
+
+/// The `mirrord exec`/`mirrord container` command, and `run.pre_command`, of every service.
+///
+/// Only the services named in `debug` get [`MIRRORD_DEBUG_HOLD`]. The others never inherit it from
+/// `mirrord up`'s own environment, so they run as usual whatever it holds.
+fn service_commands(
+    service_configs: Vec<SubprocessCfg>,
+    correlation_id: Uuid,
+    debug: &[String],
+) -> Result<Vec<process::ServiceCommands>, UpError> {
+    service_configs
         .into_iter()
         .map(|config| {
             let SubprocessCfg {
@@ -951,6 +972,12 @@ pub async fn launch(
             let encoded_cfg = config.encode()?;
 
             let mut cmd = resolve_tokio_command(std::env::current_exe()?);
+            let debugged = debug.iter().any(|name| **name == *service_name);
+            if debugged {
+                cmd.env(MIRRORD_DEBUG_HOLD, debug_hold::REQUESTED);
+            } else {
+                cmd.env_remove(MIRRORD_DEBUG_HOLD);
+            }
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
@@ -980,13 +1007,12 @@ pub async fn launch(
 
             Ok(process::ServiceCommands {
                 name: service_name,
+                debugged,
                 pre,
                 session: cmd,
             })
         })
-        .collect::<Result<_, UpError>>()?;
-
-    process::run(commands, ready).await
+        .collect()
 }
 
 #[cfg(test)]
@@ -1175,6 +1201,57 @@ services:
             run_directory.to_str().unwrap().starts_with(r"\\?\").not(),
             "{} is a verbatim path",
             run_directory.display()
+        );
+    }
+
+    /// `--debug` holds exactly the programs it names: each named service's `mirrord exec` gets
+    /// the hold, and the one in between, not named, has it removed, so it runs as usual even if
+    /// `mirrord up`'s own environment holds.
+    #[test]
+    fn only_the_debugged_services_are_held() {
+        let key = EnvKey::Provided("key".to_owned());
+        let config = template(include_str!("testdata/debugged-services.yaml"), &key)
+            .expect("parse the config");
+        let service_configs = config
+            .service_configs(
+                &key,
+                &mut HashMap::new(),
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
+            .expect("assemble the services");
+
+        let debug = ["worker".to_owned(), "api".to_owned()];
+        let commands =
+            service_commands(service_configs, Uuid::nil(), &debug).expect("build the commands");
+
+        let holds: HashMap<_, _> = commands
+            .iter()
+            .map(|commands| {
+                let hold = commands
+                    .session
+                    .as_std()
+                    .get_envs()
+                    .find(|(name, _)| *name == MIRRORD_DEBUG_HOLD)
+                    // `None` inside: the variable is removed.
+                    .map(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()));
+                (commands.name.to_string(), hold)
+            })
+            .collect();
+        assert_eq!(
+            holds,
+            HashMap::from([
+                (
+                    "api".to_owned(),
+                    Some(Some(debug_hold::REQUESTED.to_owned()))
+                ),
+                ("web".to_owned(), Some(None)),
+                (
+                    "worker".to_owned(),
+                    Some(Some(debug_hold::REQUESTED.to_owned()))
+                ),
+            ]),
+            "only the services `--debug` names may wait for an IDE to release them"
         );
     }
 

@@ -1,10 +1,10 @@
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, ops::Not};
 
 use k8s_openapi::api::core::v1::Pod;
-use kube::{Api, Client, Resource, api::ListParams};
+use kube::{Api, Client, Resource, api::ListParams, core::Selector};
 use mirrord_config::target::rollout::RolloutTarget;
 
-use super::RuntimeDataFromLabels;
+use super::{RuntimeDataFromLabels, has_match_labels_or_expressions};
 use crate::{
     api::{kubernetes::rollout::Rollout, runtime::get_k8s_resource_api},
     error::{KubeApiError, Result},
@@ -21,37 +21,37 @@ impl RuntimeDataFromLabels for RolloutTarget {
         self.container.as_deref()
     }
 
-    /// Digs into `resource` to return its `.spec.selector.matchLabels`.
-    fn get_selector_match_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
-        resource
+    /// Uses the inline selector; workload references require the async pod-resolution path.
+    fn get_selector(resource: &Self::Resource) -> Result<Selector> {
+        let selector = resource
             .spec
-            .clone()
+            .as_ref()
             .ok_or_else(|| KubeApiError::missing_field(resource, ".spec"))?
             .selector
-            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector"))?
-            .match_labels
-            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))
+            .as_ref()
+            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector"))?;
+        if has_match_labels_or_expressions(selector).not() {
+            return Err(KubeApiError::missing_field(
+                resource,
+                ".spec.selector.matchLabels",
+            ));
+        }
+
+        Ok(Selector::try_from(selector.clone())?)
     }
 
-    // Override auto implementaion because `LabelSelector` needs to be async fetched for Rollout
+    // Workload references require an async fetch to resolve the complete selector.
     async fn get_pods(resource: &Self::Resource, client: &Client) -> Result<Vec<Pod>> {
-        let formatted_labels = resource
-            .get_match_labels(client)
-            .await?
-            .match_labels
-            .as_ref()
-            .ok_or_else(|| {
-                KubeApiError::missing_field(resource, ".selector or .selector.match_labels")
-            })?
-            .iter()
-            .map(|(key, value)| format!("{key}={value}"))
-            .collect::<Vec<String>>()
-            .join(",");
+        let selector = resource.get_match_labels(client).await?;
+        if has_match_labels_or_expressions(&selector).not() {
+            return Err(KubeApiError::missing_field(
+                resource,
+                ".selector or .selector.match_labels",
+            ));
+        }
+        let selector = Selector::try_from(selector.into_owned())?;
 
-        let list_params = ListParams {
-            label_selector: Some(formatted_labels),
-            ..Default::default()
-        };
+        let list_params = ListParams::default().labels_from(&selector);
 
         let pod_api: Api<Pod> = get_k8s_resource_api(client, resource.meta().namespace.as_deref());
         let pods = pod_api.list(&list_params).await?;
