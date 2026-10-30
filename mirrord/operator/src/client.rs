@@ -34,7 +34,8 @@ use mirrord_config::{
     config::EnvKey,
     feature::{
         database_branches::{
-            DatabaseBranchConfig, SplitConfigDbBranches, default_creation_timeout_secs,
+            DatabaseBranchConfig, MysqlBranchCopyConfig, SplitConfigDbBranches,
+            default_creation_timeout_secs,
         },
         split_queues::{QueueKind, QueueSplit, SplitQueuesConfig},
     },
@@ -1100,6 +1101,29 @@ where
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::DbBranchProfiles)?;
+        }
+
+        // Same fail-fast for MySQL `exclude_tables`: an older operator's CRD schema prunes
+        // `excludeTables`, and the copy would then fail on the very tables the user excluded
+        // when another service drops them mid-dump.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| match branch_config {
+                DatabaseBranchConfig::Mysql(mysql) => match &mysql.copy {
+                    MysqlBranchCopyConfig::Empty { exclude_tables, .. }
+                    | MysqlBranchCopyConfig::Schema { exclude_tables, .. }
+                    | MysqlBranchCopyConfig::All { exclude_tables, .. } => exclude_tables
+                        .as_ref()
+                        .is_some_and(|tables| !tables.is_empty()),
+                },
+                _ => false,
+            })
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::MysqlBranchExcludeTables)?;
         }
 
         // Same fail-fast for `namespace`: an older operator's CRD schema prunes

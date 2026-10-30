@@ -948,6 +948,11 @@ pub enum NewOperatorFeature {
     /// creation timeout.
     DbBranchSsmParameter,
 
+    /// This operator leaves the tables named in `feature.db_branches[].copy.exclude_tables` out
+    /// of a MySQL branch copy. Gated so the CLI fails fast: an older operator's CRD schema prunes
+    /// `excludeTables`, and the copy would then fail on the very tables the user excluded when
+    /// they disappear mid-dump.
+    MysqlBranchExcludeTables,
     /// This operator runs a Redis branch as a one node Redis Cluster when
     /// `feature.db_branches[].cluster` is set. Gated so the CLI fails fast: an older operator's
     /// CRD schema prunes `redisOptions.cluster` and brings up a standalone server, which a
@@ -1020,6 +1025,7 @@ impl NewOperatorFeature {
             | Self::DbBranchSecretManagerExtract
             | Self::DbBranchSsmParameter
             | Self::DbBranchDedicatedNamespace
+            | Self::MysqlBranchExcludeTables
             | Self::RedisClusterBranching => Some("feature.db_branches"),
             Self::PreviewEnv
             | Self::PreviewTlsDelivery
@@ -1151,6 +1157,7 @@ impl Display for NewOperatorFeature {
                 "DB branches in a dedicated namespace per key"
             }
             NewOperatorFeature::RedisClusterBranching => "Redis Cluster branching",
+            NewOperatorFeature::MysqlBranchExcludeTables => "MySQL branch table exclusions",
             NewOperatorFeature::DbBranchSsmParameter => {
                 "DB branching connection values from AWS SSM Parameter Store"
             }
@@ -1263,6 +1270,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::DbBranchesFromSplitConfig
             | NewOperatorFeature::DbBranchSecretManagerExtract
             | NewOperatorFeature::DbBranchSsmParameter
+            | NewOperatorFeature::MysqlBranchExcludeTables
             | NewOperatorFeature::Unknown => &[],
         }
     }
