@@ -602,12 +602,13 @@ pub struct InstallConfig {
 #[serde(deny_unknown_fields)]
 pub struct SyncEntry {
     /// The local directory to push. A relative path is resolved against the directory that
-    /// contains `mirrord-up.yaml`. The push leaves out `.git` and the files that git ignores, so
-    /// `remote` has none of them in the pod, even where the image had them.
+    /// contains `mirrord-up.yaml`. The push leaves out `.git`, `.jj` and the files that git
+    /// ignores. Those paths keep what the image has at them in the pod, and every other path in
+    /// `remote` holds the local tree.
     pub local: PathBuf,
 
-    /// The absolute path in the preview's container that holds the pushed directory. It replaces
-    /// what the image has at that path.
+    /// The absolute path in the preview's container that holds the pushed directory, on top of
+    /// what the image has at that path (see `local`).
     pub remote: String,
 }
 

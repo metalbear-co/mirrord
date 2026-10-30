@@ -9,7 +9,12 @@
 //! This module needs no feature of the crate, so the static sidecar can use it without pulling in
 //! `kube`.
 
+use std::fmt;
+
 use bincode::{Decode, Encode};
+use strum_macros::Display;
+
+use self::rules::IgnoreSnapshot;
 
 pub mod rules;
 
@@ -33,24 +38,39 @@ pub const MAX_DATA_CHUNK_BYTES: usize = 256 * 1024;
 
 /// One message of the sync protocol.
 ///
-/// `bincode` isn't self-describing, so the enum may only grow: a new variant goes at the end, and
-/// a changed message becomes a new variant.
+/// `bincode` isn't self-describing, so once released, the enum may only grow: a new variant goes
+/// at the end, and a changed message becomes a new variant. The same holds for every type that a
+/// frame carries.
 #[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
 pub enum SyncFrame {
-    /// CLI to sidecar: starts a push, which replaces the content of every entry in `entries`.
-    Begin { push_id: u64, entries: Vec<u32> },
+    /// CLI to sidecar: starts a push of the entries that `entries` plans.
+    Begin {
+        push_id: u64,
+        mode: PushMode,
+        entries: Vec<EntryPlan>,
+    },
 
     /// CLI to sidecar: the next chunk of the gzip-compressed tar stream of entry `index`.
     Data { index: u32, chunk: Vec<u8> },
 
-    /// CLI to sidecar: every chunk of the push is sent, so the sidecar applies it.
+    /// CLI to sidecar: every chunk of entry `index` is sent. In an incremental push, `deleted`
+    /// lists the paths of the entry that the push deletes, relative to the entry, as the bytes of
+    /// `/`-separated components, because a file name needn't be UTF-8. A full push lists none,
+    /// because it deletes every path that it doesn't carry and that isn't ignored.
+    EntryDone { index: u32, deleted: Vec<Vec<u8>> },
+
+    /// CLI to sidecar: every entry of the push is done, so the sidecar applies it.
     Commit { push_id: u64 },
 
     /// Sidecar to CLI: the push is on the volume, as generation `generation`.
-    Applied { push_id: u64, generation: u64 },
+    Applied {
+        push_id: u64,
+        generation: u64,
+        entries: Vec<EntryCounts>,
+    },
 
     /// Sidecar to CLI: the push failed, and the volume holds what it held before.
-    Rejected { push_id: u64, reason: String },
+    Rejected { push_id: u64, reason: RejectReason },
 
     /// Sidecar to operator: the sidecar's state, sent on connect and whenever it changes.
     SidecarState(SidecarState),
@@ -65,22 +85,132 @@ pub enum SyncFrame {
     Error { message: String },
 }
 
-/// What the sync sidecar is doing.
+/// What a push replaces in each of its entries. Once released, it may only grow, as
+/// [`SyncFrame`] says.
 #[derive(Encode, Decode, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushMode {
+    /// Each entry of the push becomes a mirror of the CLI's tree: the sidecar deletes every path
+    /// that the push doesn't carry and that the entry's rules don't ignore.
+    Full,
+
+    /// The push only writes the paths that it carries and deletes the paths that
+    /// [`SyncFrame::EntryDone`] lists. It applies only on top of generation `base_generation`,
+    /// and the sidecar rejects it with [`RejectReason::StaleBase`] otherwise.
+    Incremental { base_generation: u64 },
+}
+
+/// What a push carries for one entry, declared in [`SyncFrame::Begin`] before the data, so that
+/// the sidecar can refuse a push that is too large before it writes anything.
+#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
+pub struct EntryPlan {
+    /// The index of the entry in the session's `spec.sync`.
+    pub index: u32,
+
+    /// The number of files and symlinks in the entry's tar stream.
+    pub files: u64,
+
+    /// The number of directories in the entry's tar stream. Each costs a tar header, which the
+    /// sidecar counts against the stream's size.
+    pub directories: u64,
+
+    /// The total size of the files in the entry's tar stream, unpacked.
+    pub bytes: u64,
+
+    /// The rules that decide which paths of the entry the push leaves out, and which ones a full
+    /// push keeps on the volume.
+    pub rules: IgnoreSnapshot,
+}
+
+/// What a push changed in one entry.
+#[derive(Encode, Decode, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntryCounts {
+    /// The index of the entry in the session's `spec.sync`.
+    pub index: u32,
+
+    /// The files and symlinks that the push wrote, because they were new or changed.
+    pub written: u64,
+
+    /// The files and symlinks of the push that the entry already held as they were.
+    pub unchanged: u64,
+
+    /// The paths that the push deleted.
+    pub deleted: u64,
+}
+
+/// Why the sidecar rejected a push. Once released, it may only grow, as [`SyncFrame`] says.
+#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq, Display)]
+pub enum RejectReason {
+    /// An incremental push named a base generation that the volume no longer holds. The CLI
+    /// should send a full push instead.
+    #[strum(to_string = "the push was based on a generation that the volume no longer holds")]
+    StaleBase,
+
+    /// The sidecar isn't ready for a push yet: it waits for the code volume, or copies the
+    /// image's files to it.
+    #[strum(to_string = "the preview pod's sync sidecar isn't ready for a push yet")]
+    NotReady,
+
+    /// The push breaks the protocol, for example with a path that leaves its entry.
+    #[strum(to_string = "the push is invalid: {0}")]
+    Invalid(String),
+
+    /// Applying the push at this path would destroy paths that the rules ignore, such as a file
+    /// that replaces an ignored directory, or a directory with ignored paths in it.
+    #[strum(
+        to_string = "`{0}` would replace a directory that the push's rules ignore, or that holds \
+                     ignored paths, which a push never deletes; ignore `{0}`, or remove that \
+                     directory in the preview pod"
+    )]
+    Conflict(String),
+
+    /// The code volume ran out of space.
+    #[strum(to_string = "the code volume is full; raise `operator.preview.codeSync.storage.size`")]
+    Space,
+
+    /// The push is larger than the sidecar accepts.
+    #[strum(to_string = "the push is too large: {0}")]
+    Limit(String),
+
+    /// The sidecar failed to read or write the volume.
+    #[strum(to_string = "the sync sidecar failed to read or write the code volume: {0}")]
+    Io(String),
+}
+
+/// What the sync sidecar is doing. Once released, it may only grow, as [`SyncFrame`] says. Its
+/// `Display` is the wording of `mirrord preview sync`.
+#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq, Display)]
 pub enum SidecarState {
     /// No sidecar of the preview is connected to the operator.
+    #[strum(to_string = "waiting for the preview pod")]
     Disconnected,
 
+    /// The sidecar waits for the sidecar and the supervisor of an earlier pod to release the
+    /// code volume.
+    #[strum(to_string = "waiting for the previous pod to release the code volume")]
+    WaitingForVolume,
+
+    /// The sidecar copies the image's files at each `remote` and `install.persist` path to the
+    /// code volume.
+    #[strum(to_string = "copying the image's files to the code volume")]
+    Seeding,
+
     /// The volume has no push yet.
+    #[strum(to_string = "waiting for the first push")]
     AwaitingFirstPush,
 
     /// The volume holds the push of generation `generation`.
+    #[strum(to_string = "holds generation {generation}")]
     Synced { generation: u64 },
+
+    /// The sidecar can't go on, for the reason in `message`, such as a volume that its user can't
+    /// write to.
+    #[strum(to_string = "failed: {message}")]
+    Failed { message: String },
 }
 
 impl SidecarState {
     /// Whether the sidecar accepts a push in this state.
-    pub fn is_ready(self) -> bool {
+    pub fn is_ready(&self) -> bool {
         matches!(self, Self::AwaitingFirstPush | Self::Synced { .. })
     }
 }

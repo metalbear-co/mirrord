@@ -12,7 +12,7 @@ use mirrord_config::target::Target;
 use mirrord_operator::{
     client::{
         NoClientCert, OperatorApi,
-        preview_sync::{PreviewSyncConnection, TreeListing, UpgradedConnection, pack_directory},
+        preview_sync::{PackedEntry, PreviewSyncConnection, TreeListing, UpgradedConnection},
     },
     crd::preview::{PreviewSyncConfig, PreviewSyncEntry, PreviewSyncInstall},
     sync::SidecarState,
@@ -230,8 +230,9 @@ impl PreviewSync {
         let mut last_state = None;
         connection
             .wait_until_paired(|state| {
-                if last_state.replace(state) != Some(state) {
-                    progress.info(&format!("sync sidecar: {}", describe(state)));
+                if last_state.as_ref() != Some(&state) {
+                    progress.info(&format!("sync sidecar: {}", describe(&state)));
+                    last_state = Some(state);
                 }
             })
             .await?;
@@ -250,7 +251,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSync<S> {
         connection: PreviewSyncConnection<S>,
         locals: Arc<[PathBuf]>,
     ) -> CliResult<(Self, u64)> {
-        let (pushed, archives) = pack(locals.clone(), Vec::new()).await?;
+        let (pushed, packed) = pack(locals.clone(), Vec::new()).await?;
         let mut preview_sync = Self {
             connection,
             locals,
@@ -258,16 +259,16 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSync<S> {
             next_push_id: 1,
         };
 
-        let generation = preview_sync.push(&archives).await?;
+        let generation = preview_sync.push(&packed).await?;
 
         Ok((preview_sync, generation))
     }
 
-    /// Pushes `archives`, and returns the generation that the volume holds afterwards.
-    async fn push(&mut self, archives: &[(u32, Vec<u8>)]) -> CliResult<u64> {
+    /// Pushes `packed`, and returns the generation that the volume holds afterwards.
+    async fn push(&mut self, packed: &[PackedEntry]) -> CliResult<u64> {
         let push_id = self.next_push_id;
         self.next_push_id += 1;
-        Ok(self.connection.push(push_id, archives).await?)
+        Ok(self.connection.push(push_id, packed).await?)
     }
 
     /// Pushes the entries whose trees changed whenever a file under them changes, until the push
@@ -322,7 +323,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSync<S> {
             // A change under `.git` or under an ignored path, such as a build's output, leaves
             // the listings as they were, so it pushes nothing.
             let pushed = std::mem::take(&mut self.pushed);
-            let (listings, archives) = match pack(self.locals.clone(), pushed).await {
+            let (listings, packed) = match pack(self.locals.clone(), pushed).await {
                 Ok(packed) => packed,
                 // A file that an editor or a tool removes while the CLI reads the tree fails the
                 // pack, and its removal is a change, so the next pass packs the trees again.
@@ -334,11 +335,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSync<S> {
             };
             self.pushed = listings;
 
-            if archives.is_empty() {
+            if packed.is_empty() {
                 continue;
             }
 
-            let generation = self.push(&archives).await?;
+            let generation = self.push(&packed).await?;
             progress.info(&format!("pushed the local code (generation {generation})"));
         }
     }
@@ -346,17 +347,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSync<S> {
 
 /// Lists the tree of every entry in `locals`, and packs the entries whose listing differs from
 /// their listing in `pushed`, the listings of the last push. Returns all the listings, and the
-/// archives by entry index. Before the first push `pushed` is empty, so every entry is packed.
+/// packed entries. Before the first push `pushed` is empty, so every entry is packed.
 ///
 /// Lists each tree before it packs it, so that a change made while it packs makes the next
 /// listing differ and leads to another push.
 async fn pack(
     locals: Arc<[PathBuf]>,
     pushed: Vec<TreeListing>,
-) -> CliResult<(Vec<TreeListing>, Vec<(u32, Vec<u8>)>)> {
+) -> CliResult<(Vec<TreeListing>, Vec<PackedEntry>)> {
     tokio::task::spawn_blocking(move || {
         let mut listings = Vec::with_capacity(locals.len());
-        let mut archives = Vec::new();
+        let mut packed = Vec::new();
 
         for (index, local) in locals.iter().enumerate() {
             let failed = |error| CliError::PreviewSyncReadFailed {
@@ -367,13 +368,13 @@ async fn pack(
             let listing = TreeListing::new(local).map_err(failed)?;
 
             if pushed.get(index) != Some(&listing) {
-                archives.push((index as u32, pack_directory(local).map_err(failed)?));
+                packed.push(listing.pack(index as u32, local).map_err(failed)?);
             }
 
             listings.push(listing);
         }
 
-        Ok((listings, archives))
+        Ok((listings, packed))
     })
     .await
     .map_err(|error| CliError::PreviewSyncFailed(Box::new(error)))?
@@ -409,10 +410,15 @@ fn changes_the_tree(kind: &EventKind) -> bool {
     }
 }
 
-fn describe(state: SidecarState) -> String {
+fn describe(state: &SidecarState) -> String {
     match state {
         SidecarState::Disconnected => "waiting for the preview pod".to_owned(),
+        SidecarState::WaitingForVolume => {
+            "waiting for the previous pod to release the code volume".to_owned()
+        }
+        SidecarState::Seeding => "copying the image's files to the code volume".to_owned(),
         SidecarState::AwaitingFirstPush => "waiting for the first push".to_owned(),
         SidecarState::Synced { generation } => format!("holds generation {generation}"),
+        SidecarState::Failed { message } => format!("failed: {message}"),
     }
 }

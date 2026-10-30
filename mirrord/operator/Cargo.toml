@@ -28,6 +28,7 @@ client = [
   "dep:hyper-util",
   "dep:mirrord-analytics",
   "dep:mirrord-auth",
+  "dep:mirrord-command",
   "dep:mirrord-kube",
   "dep:mirrord-macros",
   "dep:mirrord-progress",
@@ -53,7 +54,6 @@ crd = [
   "dep:serde_json",
   "dep:sha2",
   "dep:strum",
-  "dep:strum_macros",
   "dep:thiserror",
   "dep:uuid",
 ]
@@ -62,6 +62,7 @@ crd = [
 mirrord-macros = { path = "../macros", optional = true }
 mirrord-analytics = { path = "../analytics", optional = true }
 mirrord-auth = { path = "../auth", features = ["client"], optional = true }
+mirrord-command = { path = "../command", optional = true }
 mirrord-config = { path = "../config", optional = true }
 mirrord-kube = { path = "../kube", optional = true }
 mirrord-operator-websocket = { path = "../operator-websocket", optional = true }
@@ -87,7 +88,7 @@ serde_json = { workspace = true, optional = true }
 serde_urlencoded = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 strum = { workspace = true, optional = true }
-strum_macros = { workspace = true, optional = true }
+strum_macros.workspace = true
 tar = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }

@@ -5755,6 +5755,7 @@ dependencies = [
  "kube",
  "mirrord-analytics",
  "mirrord-auth",
+ "mirrord-command",
  "mirrord-config",
  "mirrord-kube",
  "mirrord-macros",

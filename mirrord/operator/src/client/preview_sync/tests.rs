@@ -1,6 +1,12 @@
-#[cfg(unix)]
-use std::os::unix::fs::{PermissionsExt, symlink};
 use std::{collections::BTreeMap, fs, io::Read, path::Path, time::Duration};
+#[cfg(unix)]
+use std::{
+    ffi::OsStr,
+    os::unix::{
+        ffi::OsStrExt,
+        fs::{PermissionsExt, symlink},
+    },
+};
 
 use flate2::read::GzDecoder;
 use futures::{SinkExt, StreamExt};
@@ -10,8 +16,11 @@ use tokio_tungstenite::{
     tungstenite::{Message, protocol::Role},
 };
 
-use super::{PreviewSyncConnection, PreviewSyncError, TreeListing, pack_directory};
-use crate::sync::{MAX_DATA_CHUNK_BYTES, SidecarState, SyncFrame};
+use super::{PackedEntry, PreviewSyncConnection, PreviewSyncError, TreeListing};
+use crate::sync::{
+    EntryCounts, EntryPlan, MAX_DATA_CHUNK_BYTES, PushMode, RejectReason, SidecarState, SyncFrame,
+    rules::{IgnoreRules, IgnoreSnapshot},
+};
 
 /// How long a test waits for a push before it fails, so that a push that stalls fails the test
 /// rather than hang it.
@@ -29,10 +38,14 @@ enum Packed {
     Symlink(String),
 }
 
-/// What the archive that `pack_directory` makes of `local` holds, by path.
-fn packed(local: &Path) -> BTreeMap<String, Packed> {
-    let archive = pack_directory(local).unwrap();
-    let mut archive = tar::Archive::new(GzDecoder::new(archive.as_slice()));
+/// The entry that a push of `local` carries.
+fn pack(local: &Path) -> PackedEntry {
+    TreeListing::new(local).unwrap().pack(0, local).unwrap()
+}
+
+/// What the archive of `entry` holds, by path.
+fn unpacked(entry: &PackedEntry) -> BTreeMap<String, Packed> {
+    let mut archive = tar::Archive::new(GzDecoder::new(entry.archive.as_slice()));
     let mut packed = BTreeMap::new();
 
     for entry in archive.entries().unwrap() {
@@ -83,8 +96,7 @@ fn push_leaves_out_what_git_ignores() {
     write("lib/generated.js", "generated");
     write("dist/bundle.js", "bundle");
     write("debug.log", "log");
-    // Git's ignore rules only apply inside a repository, and the push leaves out the
-    // repository's own directories.
+    // The push leaves out the directories of version control systems.
     write(".git/HEAD", "ref: refs/heads/main");
     write(".jj/.gitignore", "/*\n");
     write(".jj/repo/store", "store");
@@ -92,7 +104,7 @@ fn push_leaves_out_what_git_ignores() {
 
     let file = |contents: &str, executable| Packed::File(contents.to_owned(), executable);
     assert_eq!(
-        packed(local.path()),
+        unpacked(&pack(local.path())),
         BTreeMap::from([
             (".gitignore".to_owned(), file("dist/\n*.log\n", false)),
             ("app.js".to_owned(), file("app", false)),
@@ -127,10 +139,164 @@ fn push_of_a_subdirectory_leaves_out_what_its_repository_ignores() {
     write("repo/frontend/notes.txt", "notes");
     write("repo/frontend/node_modules/left-pad/index.js", "dependency");
 
+    let entry = pack(&home.path().join("repo/frontend"));
     assert_eq!(
-        packed(&home.path().join("repo/frontend")),
+        unpacked(&entry),
         BTreeMap::from([("app.js".to_owned(), Packed::File("app".to_owned(), false))])
     );
+
+    // The sidecar keeps on the volume what the rules of the push ignore, so they must ignore
+    // what the push left out, with the patterns of the repository's root.
+    let rules = IgnoreRules::new(entry.plan.rules.clone());
+    for (left_out, is_dir) in [
+        (".env", false),
+        ("notes.txt", false),
+        ("node_modules", true),
+    ] {
+        assert!(rules.is_ignored(Path::new(left_out), is_dir), "{left_out}");
+    }
+    assert!(!rules.is_ignored(Path::new("app.js"), false));
+}
+
+/// A repository can name its own excludes file in its configuration, which takes precedence over
+/// the developer's global one, and a push must leave out what that file excludes, which may be a
+/// secret, however git's syntax writes the setting.
+#[cfg(unix)]
+#[test]
+// Git is an `.exe` on Windows, which `Command::new` finds.
+#[allow(clippy::disallowed_methods)]
+fn push_leaves_out_what_the_repository_configuration_excludes() {
+    let repo = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(repo.path())
+            // Keeps the developer's own configuration out of the comparison.
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        output.status.code()
+    };
+
+    assert_eq!(git(&["init", "--quiet"]), Some(0));
+    let excludes = repo.path().join("private-excludes");
+    fs::write(&excludes, "private-key.pem\n").unwrap();
+    assert_eq!(
+        git(&["config", "core.excludesFile", excludes.to_str().unwrap()]),
+        Some(0)
+    );
+    fs::write(repo.path().join("app.js"), "app").unwrap();
+    fs::write(repo.path().join("private-key.pem"), "secret").unwrap();
+
+    assert_eq!(
+        git(&["check-ignore", "--no-index", "--quiet", "private-key.pem"]),
+        Some(0)
+    );
+    let paths = unpacked(&pack(repo.path())).into_keys().collect::<Vec<_>>();
+    assert_eq!(paths, ["app.js", "private-excludes"]);
+
+    // A later `[core]` section wins, with an inline comment, with a quoted path followed by a
+    // comment, with a path relative to the working tree, and in a file that the configuration
+    // includes.
+    let config = repo.path().join(".git/config");
+    let base = fs::read_to_string(&config).unwrap();
+    let included = repo.path().join(".git/included");
+    fs::write(
+        &included,
+        format!("[core]\n\texcludesFile = {}\n", excludes.display()),
+    )
+    .unwrap();
+    for section in [
+        format!("[core]\n\texcludesFile = {} # the keys", excludes.display()),
+        format!(
+            "[core]\n\texcludesFile = \"{}\" ; the keys",
+            excludes.display()
+        ),
+        "[core]\n\texcludesFile = private-excludes".to_owned(),
+        format!("[include]\n\tpath = {}", included.display()),
+    ] {
+        fs::write(&config, format!("{base}{section}\n")).unwrap();
+
+        assert_eq!(
+            git(&["check-ignore", "--no-index", "--quiet", "private-key.pem"]),
+            Some(0),
+            "{section}"
+        );
+        let paths = unpacked(&pack(repo.path())).into_keys().collect::<Vec<_>>();
+        assert_eq!(paths, ["app.js", "private-excludes"], "{section}");
+    }
+}
+
+/// A `.gitignore` in a directory whose name isn't UTF-8 applies to that directory's files, as in
+/// git.
+#[cfg(unix)]
+#[test]
+fn push_leaves_out_what_a_gitignore_in_a_directory_with_a_non_utf8_name_excludes() {
+    let local = tempfile::tempdir().unwrap();
+    let directory = local.path().join(OsStr::from_bytes(b"caf\xe9"));
+    fs::create_dir(&directory).unwrap();
+    fs::write(directory.join(".gitignore"), "private-key.pem\n").unwrap();
+    fs::write(directory.join("app.js"), "app").unwrap();
+    fs::write(directory.join("private-key.pem"), "secret").unwrap();
+
+    let paths = unpacked(&pack(local.path()))
+        .into_keys()
+        .collect::<Vec<_>>();
+    assert_eq!(paths.len(), 3, "{paths:?}");
+    assert!(
+        !paths.iter().any(|path| path.ends_with("private-key.pem")),
+        "{paths:?}"
+    );
+}
+
+/// A file that fails to pack in a large tree must be named, so that the developer can find it.
+#[test]
+fn a_file_that_fails_to_pack_is_named() {
+    let local = tempfile::tempdir().unwrap();
+    fs::create_dir(local.path().join("src")).unwrap();
+    fs::write(local.path().join("src/app.js"), "app").unwrap();
+    let listing = TreeListing::new(local.path()).unwrap();
+
+    fs::remove_file(local.path().join("src/app.js")).unwrap();
+    let error = listing.pack(0, local.path()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains(&format!("`{}`", local.path().join("src/app.js").display())),
+        "{error}"
+    );
+}
+
+/// The sidecar refuses a stream that holds more than `Begin` declared, so the declared counts
+/// must be those of the stream.
+#[cfg(unix)]
+#[test]
+fn push_declares_what_its_stream_holds() {
+    let local = tempfile::tempdir().unwrap();
+    fs::create_dir(local.path().join("lib")).unwrap();
+    fs::write(local.path().join("lib/util.js"), "util").unwrap();
+    fs::write(local.path().join("app.js"), "app, longer").unwrap();
+    symlink("app.js", local.path().join("link")).unwrap();
+
+    let entry = pack(local.path());
+    let mut archive = tar::Archive::new(GzDecoder::new(entry.archive.as_slice()));
+    let (mut files, mut directories, mut bytes) = (0, 0, 0);
+    for archived in archive.entries().unwrap() {
+        let header = archived.unwrap().header().clone();
+        if header.entry_type().is_dir() {
+            directories += 1;
+        } else {
+            files += 1;
+            bytes += header.size().unwrap();
+        }
+    }
+
+    assert_eq!(
+        (entry.plan.files, entry.plan.directories, entry.plan.bytes),
+        (files, directories, bytes)
+    );
+    assert_eq!((files, directories, bytes), (3, 1, 15));
 }
 
 /// A dev server's socket in the tree must not stop the push of the files around it.
@@ -142,7 +308,7 @@ fn push_skips_sockets() {
     let _listener = std::os::unix::net::UnixListener::bind(local.path().join("dev.sock")).unwrap();
 
     assert_eq!(
-        packed(local.path()),
+        unpacked(&pack(local.path())),
         BTreeMap::from([("app.js".to_owned(), Packed::File("app".to_owned(), false))])
     );
 }
@@ -153,8 +319,6 @@ fn push_skips_sockets() {
 #[test]
 fn listing_changes_only_with_the_pushed_tree() {
     let local = tempfile::tempdir().unwrap();
-    // Git's ignore rules only apply inside a repository.
-    fs::create_dir(local.path().join(".git")).unwrap();
     fs::write(local.path().join(".gitignore"), "dist/\n*.log\n").unwrap();
     fs::create_dir(local.path().join("src")).unwrap();
     fs::write(local.path().join("src/app.js"), "v1").unwrap();
@@ -211,28 +375,48 @@ impl Operator {
         }
     }
 
-    /// Receives a push of the entries and returns its id, and what each entry's `Data` frames
-    /// carried, in the order they came.
-    async fn recv_push(&mut self) -> (u64, Vec<(u32, Vec<u8>)>) {
-        let SyncFrame::Begin { push_id, entries } = self.recv().await else {
-            panic!("a push starts with `Begin`");
+    /// Receives a full push and returns its id and its entries, each with the plan that `Begin`
+    /// declared and what its `Data` frames carried, in the order they came. Checks that each
+    /// entry's data ends with `EntryDone`.
+    async fn recv_push(&mut self) -> (u64, Vec<PackedEntry>) {
+        let SyncFrame::Begin {
+            push_id,
+            mode: PushMode::Full,
+            entries: plans,
+        } = self.recv().await
+        else {
+            panic!("a push starts with `Begin` of a full push");
         };
 
-        let mut received: Vec<(u32, Vec<u8>)> = Vec::new();
+        let mut received = Vec::<PackedEntry>::new();
+        let mut open = None;
 
         loop {
             match self.recv().await {
                 SyncFrame::Data { index, chunk } => {
-                    assert!(entries.contains(&index), "entry {index} isn't in the push");
                     assert!(chunk.len() <= MAX_DATA_CHUNK_BYTES);
 
-                    match received.last_mut() {
-                        Some((last, archive)) if *last == index => archive.extend(chunk),
-                        _ => received.push((index, chunk)),
+                    if open != Some(index) {
+                        assert_eq!(open, None, "entry {index} began before the last one ended");
+                        let plan = plans
+                            .iter()
+                            .find(|plan| plan.index == index)
+                            .unwrap_or_else(|| panic!("entry {index} isn't in the push"));
+                        received.push(PackedEntry {
+                            plan: plan.clone(),
+                            archive: Vec::new(),
+                        });
+                        open = Some(index);
                     }
+
+                    received.last_mut().unwrap().archive.extend(chunk);
+                }
+                SyncFrame::EntryDone { index, deleted } => {
+                    assert_eq!(open.take(), Some(index));
+                    assert!(deleted.is_empty(), "a full push lists no deleted paths");
                 }
                 SyncFrame::Commit { push_id: committed } => {
-                    assert_eq!(committed, push_id);
+                    assert_eq!((committed, open), (push_id, None));
                     return (push_id, received);
                 }
                 frame => panic!("unexpected frame in a push: {frame:?}"),
@@ -257,10 +441,20 @@ async fn connection() -> (PreviewSyncConnection<DuplexStream>, Operator) {
 #[tokio::test]
 async fn push_reaches_the_sidecar_whole_after_pairing() {
     let (mut connection, mut operator) = connection().await;
+    let entry = |index, archive| PackedEntry {
+        plan: EntryPlan {
+            index,
+            files: 1,
+            directories: 0,
+            bytes: 10,
+            rules: IgnoreSnapshot::default(),
+        },
+        archive,
+    };
     let large: Vec<u8> = (0..2 * MAX_DATA_CHUNK_BYTES + 1)
         .map(|byte| byte as u8)
         .collect();
-    let archives = vec![(0, large), (2, b"small".to_vec())];
+    let entries = vec![entry(0, large), entry(2, b"small".to_vec())];
 
     let cli = async {
         let mut states = Vec::new();
@@ -269,7 +463,7 @@ async fn push_reaches_the_sidecar_whole_after_pairing() {
             .await
             .unwrap();
 
-        let generation = connection.push(5, &archives).await.unwrap();
+        let generation = connection.push(5, &entries).await.unwrap();
 
         (states, paired, generation)
     };
@@ -293,6 +487,7 @@ async fn push_reaches_the_sidecar_whole_after_pairing() {
             .send(SyncFrame::Applied {
                 push_id: pushed.0,
                 generation: 1,
+                entries: Vec::new(),
             })
             .await;
 
@@ -310,7 +505,7 @@ async fn push_reaches_the_sidecar_whole_after_pairing() {
     );
     assert_eq!(paired, None);
     assert_eq!(generation, 1);
-    assert_eq!(pushed, (5, archives));
+    assert_eq!(pushed, (5, entries));
 }
 
 /// A push that doesn't land must fail with the reason, so that `mirrord preview sync` can tell the
@@ -320,8 +515,17 @@ async fn push_reaches_the_sidecar_whole_after_pairing() {
 async fn failed_push_reports_why() {
     async fn push_answered_with(answer: Option<SyncFrame>) -> PreviewSyncError {
         let (mut connection, mut operator) = connection().await;
-        let archives = [(0, b"archive".to_vec())];
-        let cli = connection.push(5, &archives);
+        let entries = [PackedEntry {
+            plan: EntryPlan {
+                index: 0,
+                files: 1,
+                directories: 0,
+                bytes: 7,
+                rules: IgnoreSnapshot::default(),
+            },
+            archive: b"archive".to_vec(),
+        }];
+        let cli = connection.push(5, &entries);
 
         let sidecar = async {
             operator.recv_push().await;
@@ -343,11 +547,11 @@ async fn failed_push_reports_why() {
 
     let rejected = push_answered_with(Some(SyncFrame::Rejected {
         push_id: 5,
-        reason: "`escape/evil.js` leaves the entry".to_owned(),
+        reason: RejectReason::Invalid("`../evil.js` leaves the entry".to_owned()),
     }))
     .await;
     assert!(
-        matches!(&rejected, PreviewSyncError::Rejected(reason) if reason.contains("leaves the entry")),
+        matches!(&rejected, PreviewSyncError::Rejected(RejectReason::Invalid(reason)) if reason.contains("leaves the entry")),
         "{rejected}"
     );
 
@@ -367,7 +571,30 @@ async fn failed_push_reports_why() {
     let other = push_answered_with(Some(SyncFrame::Applied {
         push_id: 4,
         generation: 9,
+        entries: vec![EntryCounts {
+            index: 0,
+            written: 1,
+            unchanged: 0,
+            deleted: 0,
+        }],
     }))
     .await;
     assert!(matches!(other, PreviewSyncError::Unexpected(_)), "{other}");
+}
+
+/// jj honours the `.gitignore` files of its repository also when it keeps its git data outside
+/// the working tree, so a `local` in such a repository gets the `.gitignore` of the directories
+/// above it, as in a git repository.
+#[test]
+fn a_jj_repository_without_git_applies_the_gitignore_files_above_local() {
+    let repo = tempfile::tempdir().unwrap();
+    fs::create_dir(repo.path().join(".jj")).unwrap();
+    fs::write(repo.path().join(".gitignore"), "*.log\n").unwrap();
+    let local = repo.path().join("service");
+    fs::create_dir(&local).unwrap();
+    fs::write(local.join("app.js"), "app").unwrap();
+    fs::write(local.join("debug.log"), "log").unwrap();
+
+    let paths = unpacked(&pack(&local)).into_keys().collect::<Vec<_>>();
+    assert_eq!(paths, ["app.js"]);
 }

@@ -41,7 +41,10 @@ impl Operator {
             panic!("the CLI sent a message that isn't a frame");
         };
 
-        let SyncFrame::Begin { push_id, entries } = SyncFrame::decode(&bytes).unwrap() else {
+        let SyncFrame::Begin {
+            push_id, entries, ..
+        } = SyncFrame::decode(&bytes).unwrap()
+        else {
             panic!("a push starts with `Begin`");
         };
 
@@ -52,7 +55,7 @@ impl Operator {
                 };
 
                 match SyncFrame::decode(&bytes).unwrap() {
-                    SyncFrame::Data { .. } => {}
+                    SyncFrame::Data { .. } | SyncFrame::EntryDone { .. } => {}
                     SyncFrame::Commit { .. } => break,
                     frame => panic!("unexpected frame in a push: {frame:?}"),
                 }
@@ -65,6 +68,7 @@ impl Operator {
         let applied = SyncFrame::Applied {
             push_id,
             generation: self.generation,
+            entries: Vec::new(),
         };
 
         self.socket
@@ -72,7 +76,7 @@ impl Operator {
             .await
             .unwrap();
 
-        Some(entries)
+        Some(entries.iter().map(|entry| entry.index).collect())
     }
 }
 
@@ -96,8 +100,6 @@ async fn watch_pushes_each_change_to_the_pushed_files_once() {
         fs::write(path, contents).unwrap();
     };
 
-    // Git's ignore rules only apply inside a repository.
-    fs::create_dir(frontend.path().join(".git")).unwrap();
     write(frontend.path(), ".gitignore", "dist/\n");
     write(frontend.path(), "app.js", "v1");
     write(backend.path(), "server.js", "v1");

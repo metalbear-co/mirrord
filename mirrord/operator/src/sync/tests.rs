@@ -1,4 +1,7 @@
-use super::{SidecarState, SyncFrame};
+use super::{
+    EntryCounts, EntryPlan, PushMode, RejectReason, SidecarState, SyncFrame,
+    rules::{IgnoreSnapshot, IgnoreSource},
+};
 
 /// The CLI, the operator and the sidecar come from different releases, so each frame must keep
 /// its bytes: a variant inserted before another one, or a field added to a variant, would make
@@ -7,13 +10,36 @@ use super::{SidecarState, SyncFrame};
 /// two little-endian bytes above) and vectors and strings prefixed with their length.
 #[test]
 fn frames_keep_their_encoding() {
-    let frames: [(SyncFrame, &[u8]); 12] = [
+    let plan = EntryPlan {
+        index: 2,
+        files: 3,
+        directories: 4,
+        bytes: 300,
+        rules: IgnoreSnapshot {
+            prefix: b"a".to_vec(),
+            sources: vec![IgnoreSource {
+                root: Vec::new(),
+                lines: vec!["x".to_owned()],
+            }],
+        },
+    };
+
+    let frames: [(SyncFrame, &[u8]); 19] = [
         (
             SyncFrame::Begin {
                 push_id: 7,
-                entries: vec![0, 2],
+                mode: PushMode::Full,
+                entries: vec![plan],
             },
-            &[0, 7, 2, 0, 2],
+            &[0, 7, 0, 1, 2, 3, 4, 251, 44, 1, 1, b'a', 1, 0, 1, 1, b'x'],
+        ),
+        (
+            SyncFrame::Begin {
+                push_id: 7,
+                mode: PushMode::Incremental { base_generation: 5 },
+                entries: Vec::new(),
+            },
+            &[0, 7, 1, 5, 0],
         ),
         (
             SyncFrame::Data {
@@ -22,46 +48,84 @@ fn frames_keep_their_encoding() {
             },
             &[1, 1, 2, 0xAB, 0xCD],
         ),
-        (SyncFrame::Commit { push_id: 7 }, &[2, 7]),
+        (
+            SyncFrame::EntryDone {
+                index: 1,
+                deleted: vec![b"a/b".to_vec(), vec![0xFF]],
+            },
+            &[2, 1, 2, 3, b'a', b'/', b'b', 1, 0xFF],
+        ),
+        (SyncFrame::Commit { push_id: 7 }, &[3, 7]),
         (
             SyncFrame::Applied {
                 push_id: 7,
                 generation: 300,
+                entries: vec![EntryCounts {
+                    index: 0,
+                    written: 1,
+                    unchanged: 2,
+                    deleted: 3,
+                }],
             },
-            &[3, 7, 251, 44, 1],
+            &[4, 7, 251, 44, 1, 1, 0, 1, 2, 3],
         ),
         (
             SyncFrame::Rejected {
                 push_id: 7,
-                reason: "bad".to_owned(),
+                reason: RejectReason::StaleBase,
             },
-            &[4, 7, 3, b'b', b'a', b'd'],
+            &[5, 7, 0],
         ),
-        (SyncFrame::SidecarState(SidecarState::Disconnected), &[5, 0]),
+        (
+            SyncFrame::Rejected {
+                push_id: 7,
+                reason: RejectReason::Conflict("d".to_owned()),
+            },
+            &[5, 7, 3, 1, b'd'],
+        ),
+        (
+            SyncFrame::Rejected {
+                push_id: 7,
+                reason: RejectReason::Io("e".to_owned()),
+            },
+            &[5, 7, 6, 1, b'e'],
+        ),
+        (SyncFrame::SidecarState(SidecarState::Disconnected), &[6, 0]),
+        (
+            SyncFrame::SidecarState(SidecarState::WaitingForVolume),
+            &[6, 1],
+        ),
+        (SyncFrame::SidecarState(SidecarState::Seeding), &[6, 2]),
         (
             SyncFrame::SidecarState(SidecarState::AwaitingFirstPush),
-            &[5, 1],
+            &[6, 3],
         ),
         (
             SyncFrame::SidecarState(SidecarState::Synced { generation: 3 }),
-            &[5, 2, 3],
+            &[6, 4, 3],
+        ),
+        (
+            SyncFrame::SidecarState(SidecarState::Failed {
+                message: "no".to_owned(),
+            }),
+            &[6, 5, 2, b'n', b'o'],
         ),
         (
             SyncFrame::Status(SidecarState::Synced { generation: 3 }),
-            &[6, 2, 3],
+            &[7, 4, 3],
         ),
-        (SyncFrame::Paired { generation: None }, &[7, 0]),
+        (SyncFrame::Paired { generation: None }, &[8, 0]),
         (
             SyncFrame::Paired {
                 generation: Some(3),
             },
-            &[7, 1, 3],
+            &[8, 1, 3],
         ),
         (
             SyncFrame::Error {
                 message: "gone".to_owned(),
             },
-            &[8, 4, b'g', b'o', b'n', b'e'],
+            &[9, 4, b'g', b'o', b'n', b'e'],
         ),
     ];
 
