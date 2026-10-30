@@ -6,6 +6,8 @@ toc: true
 tags: ["team", "enterprise"]
 ---
 
+# Agent-Started Trials
+
 Some things an agent needs on a shared cluster only work with mirrord for Teams: branching a database so its writes don't reach everyone else's data, splitting a queue so it doesn't eat messages other people need, or stealing traffic from a target another session already holds.
 
 On a cluster with no license, an agent that follows [metalbear.com/agents.md](https://metalbear.com/agents.md) can start a trial itself rather than stopping and waiting for you to sign up. It ends up with a working cluster and you end up with a link to claim. If you already have an organization, the agent installs with it instead (see [If you already have an organization](#if-you-already-have-an-organization)), so no second organization gets created.

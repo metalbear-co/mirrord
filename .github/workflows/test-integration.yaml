@@ -100,6 +100,7 @@ jobs:
               -p mirrord-layer \
               -p mirrord-protocol \
               -p mirrord-config \
+              -p mirrord-progress \
               -p mirrord-kube \
               -p mirrord-intproxy \
               -p mirrord-auth \

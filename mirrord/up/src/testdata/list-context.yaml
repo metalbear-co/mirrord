@@ -1,0 +1,7 @@
+common:
+  context: common
+services:
+  api:
+    target: none
+    run:
+      command: [x]

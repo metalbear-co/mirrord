@@ -16,6 +16,8 @@ tags:
   - enterprise
 ---
 
+# Local UI
+
 `mirrord ui` launches a small local web dashboard that watches every active mirrord session on your machine and, when you're connected to a mirrord operator, every operator session your kubeconfig can see across the cluster. It runs entirely on your laptop. Nothing in your cluster has to change to use it.
 
 ## What it shows

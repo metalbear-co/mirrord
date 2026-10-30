@@ -7,6 +7,8 @@ tags:
   - enterprise
 ---
 
+# DynamoDB
+
 This page covers DB branching for DynamoDB. For the general concepts, the full list of config fields, and how a session behaves, see the [DB Branching overview](../db-branching.md).
 
 The branch runs as a [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) pod (`amazon/dynamodb-local`) in your cluster, so your application talks to an isolated endpoint instead of the source AWS account.

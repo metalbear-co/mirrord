@@ -44,3 +44,29 @@ pub(crate) fn set(env: &mut ProcessEnv, name: &str, value: String) {
         env.insert(name.to_owned(), value);
     }
 }
+
+/// The value of `name`, under any spelling the platform treats as the same name.
+#[cfg(test)]
+pub(crate) fn get<'env>(env: &'env ProcessEnv, name: &str) -> Option<&'env str> {
+    #[cfg(windows)]
+    {
+        env.get(name)
+    }
+
+    #[cfg(not(windows))]
+    {
+        env.get(name).map(String::as_str)
+    }
+}
+
+/// An environment holding exactly `entries`.
+#[cfg(test)]
+pub(crate) fn from_entries<'name>(
+    entries: impl IntoIterator<Item = (&'name str, String)>,
+) -> ProcessEnv {
+    let mut env = ProcessEnv::default();
+    for (name, value) in entries {
+        set(&mut env, name, value);
+    }
+    env
+}

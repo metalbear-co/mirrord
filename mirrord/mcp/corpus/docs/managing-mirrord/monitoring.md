@@ -139,7 +139,7 @@ Queue and message bus records use the following fields when the broker provides 
 
 | field | description |
 | --- | --- |
-| `queue_type` | Broker type: `sqs`, `azure_service_bus`, `bullmq`, `rmq`, `gcp_pubsub`, `kafka`, or `redis_pubsub` |
+| `queue_type` | Broker type: `sqs`, `azure_service_bus`, `bullmq`, `rmq`, `gcp_pubsub`, `kafka`, `redis_pubsub`, `nats`, or `nats_pubsub` |
 | `queue_name` | Queue, topic, subscription, or Redis channel name |
 | `message_id` | Broker-provided message or job identifier |
 | `correlation_id` | Broker-provided correlation ID or a recognized correlation ID property/header |
