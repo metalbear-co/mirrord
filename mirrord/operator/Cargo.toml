@@ -98,6 +98,13 @@ tracing = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 walkdir = { workspace = true, optional = true }
 
+# On aarch64, `sha2` only uses the CPU's SHA instructions with its `asm` feature (on x86-64 it
+# detects them by itself). The CLI, which mostly runs on Apple Silicon, hashes every synced file on
+# each full push. Windows is left out, because the feature's `sha2-asm` builds GNU assembler files,
+# which the MSVC toolchain can't assemble.
+[target.'cfg(all(target_arch = "aarch64", not(target_os = "windows")))'.dependencies]
+sha2 = { workspace = true, optional = true, features = ["asm"] }
+
 [dev-dependencies]
 rstest.workspace = true
 serde-saphyr.workspace = true

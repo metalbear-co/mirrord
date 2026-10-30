@@ -24,11 +24,11 @@ use tokio_tungstenite::{
 
 use super::{
     PackedEntry, PreviewSyncConnection, PreviewSyncError, RuleSources, SyncEvent, TreeListing,
-    pack_changes,
+    pack_changes, pack_paths,
 };
 use crate::sync::{
-    EntryCounts, EntryPlan, MAX_DATA_CHUNK_BYTES, PushMode, RejectReason, SYNC_PROTOCOL_VERSION,
-    SidecarState, SyncFrame, UnpairReason,
+    EntryCounts, EntryPlan, MAX_DATA_CHUNK_BYTES, ManifestKind, ManifestPath, PushMode,
+    RejectReason, SYNC_PROTOCOL_VERSION, SidecarState, SyncFrame, UnpairReason,
     rules::{IgnoreRules, IgnoreSnapshot},
 };
 
@@ -54,16 +54,24 @@ fn list(local: &Path, ignore: &[String]) -> io::Result<TreeListing> {
     TreeListing::new_watching(&RuleSources::new(local)?, ignore, &mut |_| Ok(()))
 }
 
+/// The whole listed tree under `local` as entry `index` of a push.
+fn pack_listing(listing: &TreeListing, index: u32, local: &Path) -> io::Result<PackedEntry> {
+    pack_paths(
+        index,
+        local,
+        &listing.paths,
+        listing.rules.snapshot(),
+        Vec::new(),
+    )
+}
+
 /// The entry that a push of `local` carries, with `ignore` as the entry's own gitignore lines.
 fn pack(local: &Path, ignore: &[&str]) -> PackedEntry {
     let ignore = ignore
         .iter()
         .map(|line| (*line).to_owned())
         .collect::<Vec<_>>();
-    list(local, &ignore)
-        .unwrap()
-        .pack(0, local)
-        .unwrap()
+    pack_listing(&list(local, &ignore).unwrap(), 0, local).unwrap()
 }
 
 /// What the archive of `entry` holds, by path.
@@ -286,7 +294,7 @@ fn a_file_that_fails_to_pack_is_named() {
     let listing = list(local.path(), &[]).unwrap();
 
     fs::remove_file(local.path().join("src/app.js")).unwrap();
-    let error = listing.pack(0, local.path()).unwrap_err();
+    let error = pack_listing(&listing, 0, local.path()).unwrap_err();
     assert!(
         error
             .to_string()
@@ -634,7 +642,7 @@ fn pack_changed(local: &Path, ignore: &[&str], changed: &[&str]) -> Option<Packe
         .map(|line| (*line).to_owned())
         .collect::<Vec<_>>();
     let listing = list(local, &ignore).unwrap();
-    let rules = IgnoreRules::new(listing.snapshot().clone());
+    let rules = listing.rules().clone();
     let changed = changed.iter().map(PathBuf::from).collect();
 
     pack_changes(0, local, &rules, &changed, &mut |_| Ok(())).unwrap()
@@ -697,7 +705,7 @@ fn replacing_a_directory_that_holds_a_gitignore_changes_the_rules() {
     fs::write(local.path().join("src/.gitignore"), "app.js\n").unwrap();
     fs::write(local.path().join("src/app.js"), "app").unwrap();
     let listing = list(local.path(), &[]).unwrap();
-    let rules = IgnoreRules::new(listing.snapshot().clone());
+    let rules = listing.rules().clone();
 
     let elsewhere = tempfile::tempdir_in(local.path().parent().unwrap()).unwrap();
     fs::rename(local.path().join("src"), elsewhere.path().join("old")).unwrap();
@@ -797,5 +805,52 @@ async fn a_push_that_another_cli_replaced_fails_as_replaced() {
             Err(PreviewSyncError::Unpaired(UnpairReason::Replaced))
         ),
         "{pushed:?}"
+    );
+}
+
+/// The manifest of a large tree is many frames, which the CLI writes before it reads, so the
+/// operator's `Unpaired { Replaced }` can arrive while the CLI still sends it, as during a push.
+/// The exchange must then fail as replaced too.
+#[tokio::test]
+async fn a_manifest_that_another_cli_replaced_fails_as_replaced() {
+    let (cli, operator) = tokio::io::duplex(MAX_DATA_CHUNK_BYTES);
+    let (cli, operator) = tokio::join!(
+        WebSocketStream::from_raw_socket(cli, Role::Client, None),
+        WebSocketStream::from_raw_socket(operator, Role::Server, None),
+    );
+    let mut connection = PreviewSyncConnection::new(cli);
+    let mut operator = Operator(operator);
+    let manifest = (0..30_000)
+        .map(|index| ManifestPath {
+            path: format!("directory-{index:05}").into_bytes(),
+            kind: ManifestKind::Dir,
+        })
+        .collect::<Vec<_>>();
+
+    let operator = async move {
+        operator.recv().await;
+        operator
+            .send(SyncFrame::Unpaired {
+                reason: UnpairReason::Replaced,
+            })
+            .await;
+        operator.0.close(None).await.unwrap();
+    };
+    let (exchanged, ()) = tokio::time::timeout(
+        TEST_TIMEOUT,
+        futures::future::join(
+            connection.exchange_manifest(1, vec![(0, manifest)], |_| {}),
+            operator,
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(
+            exchanged,
+            Err(PreviewSyncError::Unpaired(UnpairReason::Replaced))
+        ),
+        "{exchanged:?}"
     );
 }

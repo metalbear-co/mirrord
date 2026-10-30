@@ -1,6 +1,8 @@
-//! Code sync for `mirrord preview sync`: pushes the local directories of a service's `sync` into
-//! its preview pod whole each time the operator pairs the CLI with the pod's sidecar, and under
-//! `--watch` pushes each change in between.
+//! Code sync for `mirrord preview sync`: makes a full push of the local directories of a
+//! service's `sync` into its preview pod each time the operator pairs the CLI with the pod's
+//! sidecar, and under `--watch` pushes each change in between. A full push sends the manifest of
+//! each tree, then only the files that the volume lacks, and makes each `remote` a mirror of its
+//! tree.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -25,7 +27,7 @@ use mirrord_operator::{
     },
     crd::preview::{PreviewSyncConfig, PreviewSyncEntry, PreviewSyncInstall},
     sync::{
-        AppReport, InstallReport, InstallState, PushMode, RejectReason, SidecarState,
+        AppReport, InstallReport, InstallState, ManifestPath, PushMode, RejectReason, SidecarState,
         SupervisorReport, UnpairReason, rules::IgnoreRules,
     },
 };
@@ -485,7 +487,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
         }
     }
 
-    /// Serves one connection: pushes the trees whole whenever the operator pairs it, and with
+    /// Serves one connection: makes a full push whenever the operator pairs it, and with
     /// `--watch` pushes the changes in between. Returns why it stopped.
     async fn serve(&mut self, mut connection: PreviewSyncConnection<S>) -> Stop {
         let mut pending = Changes::default();
@@ -546,12 +548,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
         }
     }
 
-    /// Lists and pushes every entry whole, which makes each `remote` a mirror of its tree.
+    /// Makes a full push of every entry, which makes each `remote` a mirror of its tree.
     ///
-    /// When the trees can't be packed, such as a file that the CLI can't read, the sync stops,
-    /// unless changes started the push: then `pending` turns into a full push, which the next
-    /// change starts, so that a file that a tool keeps unreadable for a while doesn't end
-    /// `--watch`.
+    /// When the trees can't be listed or packed, such as a file that the CLI can't read, the
+    /// sync stops, unless changes started the push: then `pending` turns into a full push,
+    /// which the next change starts, so that a file that a tool keeps unreadable for a while
+    /// doesn't end `--watch`.
     async fn push_full(
         &mut self,
         connection: &mut PreviewSyncConnection<S>,
@@ -572,28 +574,63 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
     ) -> Result<(), Stop> {
         let entries = self.entries.clone();
         let sources = self.sources.clone();
-        let full = match self
-            .pack_blocking(move |watcher| list_and_pack(&entries, sources, watcher))
+        let listed = match self
+            .pack_blocking(move |watcher| list_entries(&entries, sources, watcher))
             .await?
         {
-            Ok(full) => full,
-            Err(error) => {
-                return match pending {
-                    Some(pending) => {
-                        self.progress.warning(&with_causes(&error));
-                        pending.full = true;
-                        Ok(())
-                    }
-                    None => Err(Stop::Transient(Box::new(error))),
-                };
-            }
+            Ok(listed) => listed,
+            Err(error) => return self.failed_to_read_trees(error, pending),
         };
 
-        self.sources = Some(full.sources);
-        self.rules = full.rules.into();
-        self.rule_files = full.rule_files;
+        self.sources = Some(listed.sources);
+        self.rules = listed.rules.into();
+        self.rule_files = listed.rule_files;
 
-        match self.push(connection, PushMode::Full, full.packed).await? {
+        // The push only carries the paths that the sidecar wants after it compared the
+        // manifests with the volume, so a push after a pairing or a rule change sends little
+        // when the volume already holds most of the tree.
+        let push_id = self.take_push_id();
+        let wanted = connection
+            .exchange_manifest(push_id, listed.manifests, |event| self.observe(&event))
+            .await;
+        let mut wanted = match wanted {
+            Ok(wanted) => wanted,
+            Err(PreviewSyncError::Unpaired(reason)) if reason != UnpairReason::Replaced => {
+                self.unpaired(reason);
+                return Ok(());
+            }
+            Err(error) => return Err(error.into()),
+        };
+
+        let entries = self.entries.clone();
+        let listings = listed.listings;
+        let packed = self
+            .pack_blocking(move |_| {
+                listings
+                    .iter()
+                    .zip(entries.iter())
+                    .enumerate()
+                    .map(|(index, (listing, entry))| {
+                        let wanted = wanted.remove(&(index as u32)).unwrap_or_default();
+                        listing
+                            .pack_wanted(index as u32, &entry.local, &wanted)
+                            .map_err(|error| CliError::PreviewSyncReadFailed {
+                                path: entry.local.clone(),
+                                error,
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .await?;
+        let packed = match packed {
+            Ok(packed) => packed,
+            Err(error) => return self.failed_to_read_trees(error, pending),
+        };
+
+        match self
+            .send_push(connection, push_id, PushMode::Full, packed)
+            .await?
+        {
             Pushed::Applied(generation) => {
                 if self.activity.borrow().first_push.is_none() {
                     self.activity
@@ -610,10 +647,27 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
         }
     }
 
+    /// What a full push does when it can't list or pack the trees, as [`Self::push_full`] says:
+    /// stops the sync, or turns `pending` into a full push that the next change starts.
+    fn failed_to_read_trees(
+        &mut self,
+        error: CliError,
+        pending: Option<&mut Changes>,
+    ) -> Result<(), Stop> {
+        match pending {
+            Some(pending) => {
+                self.progress.warning(&with_causes(&error));
+                pending.full = true;
+                Ok(())
+            }
+            None => Err(Stop::Transient(Box::new(error))),
+        }
+    }
+
     /// Pushes `changes`: incrementally when the rules still hold and the volume holds this
-    /// CLI's last push, and whole otherwise. When the changes can't be packed, such as a file
-    /// that a tool removes while the CLI reads it, they turn `pending` into a full push, which
-    /// the next change starts.
+    /// CLI's last push, and with a full push otherwise. When the changes can't be packed, such as
+    /// a file that a tool removes while the CLI reads it, they turn `pending` into a full push,
+    /// which the next change starts.
     async fn push_changes(
         &mut self,
         connection: &mut PreviewSyncConnection<S>,
@@ -658,14 +712,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
             return Ok(());
         }
 
-        match self
-            .push(
-                connection,
-                PushMode::Incremental { base_generation },
-                packed,
-            )
-            .await?
-        {
+        let push_id = self.take_push_id();
+        let mode = PushMode::Incremental { base_generation };
+        match self.send_push(connection, push_id, mode, packed).await? {
             Pushed::Applied(_) => Ok(()),
             Pushed::StaleBase => self.full_push(connection, Some(pending)).await,
             Pushed::Unpaired(reason) => {
@@ -697,22 +746,27 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
         Ok(result)
     }
 
+    /// Takes the id of the next push.
+    fn take_push_id(&mut self) -> u64 {
+        let push_id = self.next_push_id;
+        self.next_push_id = self.next_push_id.wrapping_add(1);
+        push_id
+    }
+
     /// Whether the CLI is busy with a push, which keeps the creation timeout from running.
     fn set_pushing(&mut self, pushing: bool) {
         self.pushing = pushing;
         self.publish(false);
     }
 
-    /// Sends `packed` as one push in `mode`.
-    async fn push(
+    /// Sends `packed` as the push `push_id` in `mode`.
+    async fn send_push(
         &mut self,
         connection: &mut PreviewSyncConnection<S>,
+        push_id: u64,
         mode: PushMode,
         packed: Vec<PackedEntry>,
     ) -> Result<Pushed, Stop> {
-        let push_id = self.next_push_id;
-        self.next_push_id = self.next_push_id.wrapping_add(1);
-
         let result = connection
             .push(push_id, mode, packed, |event| self.observe(&event))
             .await;
@@ -761,8 +815,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                 if self.sidecar.as_ref() == Some(state) {
                     return;
                 }
-                self.progress
-                    .info(&format!("sync sidecar: {state}"));
+                self.progress.info(&format!("sync sidecar: {state}"));
                 self.sidecar = Some(state.clone());
 
                 // The supervisor's last report described a pod that may be gone.
@@ -821,9 +874,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
     }
 }
 
-/// The entries of a full push, with what incremental pushes after it need.
-struct FullPack {
-    packed: Vec<PackedEntry>,
+/// The listed entries of a full push, with what the push and the incremental pushes after it
+/// need.
+struct FullListing {
+    /// The listing of each entry.
+    listings: Vec<TreeListing>,
+
+    /// The manifest of each entry's tree, with the entry's index.
+    manifests: Vec<(u32, Vec<ManifestPath>)>,
 
     /// Where each entry's rules come from.
     sources: Arc<[RuleSources]>,
@@ -835,14 +893,14 @@ struct FullPack {
     rule_files: BTreeSet<PathBuf>,
 }
 
-/// Lists and packs every entry whole. Finds where each entry's rules come from, unless
+/// Lists every entry and makes its manifest. Finds where each entry's rules come from, unless
 /// `sources` holds them from an earlier listing. Starts watching each directory before it reads
 /// it.
-fn list_and_pack(
+fn list_entries(
     entries: &[SyncEntry],
     sources: Option<Arc<[RuleSources]>>,
     mut watcher: Option<&mut RecommendedWatcher>,
-) -> CliResult<FullPack> {
+) -> CliResult<FullListing> {
     let sources = match sources {
         Some(sources) => sources,
         None => entries
@@ -853,7 +911,8 @@ fn list_and_pack(
             .collect::<Result<Vec<_>, _>>()?
             .into(),
     };
-    let mut packed = Vec::with_capacity(entries.len());
+    let mut listings = Vec::with_capacity(entries.len());
+    let mut manifests = Vec::with_capacity(entries.len());
     let mut rules = Vec::with_capacity(entries.len());
     let mut rule_files = BTreeSet::new();
 
@@ -872,7 +931,7 @@ fn list_and_pack(
 
         let listing = TreeListing::new_watching(entry_sources, &entry.ignore, &mut |directory| {
             watcher.as_deref_mut().map_or(Ok(()), |watcher| {
-                    watch_directory(watcher, directory).map_err(io::Error::other)
+                watch_directory(watcher, directory).map_err(io::Error::other)
             })
         })
         .map_err(failed)?;
@@ -888,13 +947,18 @@ fn list_and_pack(
             }
         }
 
-        packed.push(listing.pack(index as u32, &entry.local).map_err(failed)?);
+        manifests.push((
+            index as u32,
+            listing.manifest(&entry.local).map_err(failed)?,
+        ));
         rules.push(listing.rules().clone());
         rule_files.extend(listing.rule_files().iter().cloned());
+        listings.push(listing);
     }
 
-    Ok(FullPack {
-        packed,
+    Ok(FullListing {
+        listings,
+        manifests,
         sources,
         rules,
         rule_files,
@@ -924,7 +988,7 @@ fn pack_all_changes(
             changed,
             &mut |directory| {
                 watcher.as_deref_mut().map_or(Ok(()), |watcher| {
-                        watch_directory(watcher, directory).map_err(io::Error::other)
+                    watch_directory(watcher, directory).map_err(io::Error::other)
                 })
             },
         )

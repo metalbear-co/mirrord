@@ -96,11 +96,6 @@ impl IgnoreRules {
         &self.snapshot
     }
 
-    /// The snapshot that the rules evaluate, with the sources that were added to it.
-    pub fn into_snapshot(self) -> IgnoreSnapshot {
-        self.snapshot
-    }
-
     /// Adds `lines`, the `.gitignore` of `directory`, a directory relative to the entry's
     /// directory, after the sources that the rules hold, but before the ones from
     /// [`Self::add_last`]. The CLI adds each `.gitignore` that it finds while it walks the tree,

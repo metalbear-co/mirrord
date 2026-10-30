@@ -4,8 +4,8 @@
 #[cfg(unix)]
 use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};
 use std::{
-    collections::BTreeSet,
-    fs::{self, FileType, Permissions},
+    collections::{BTreeMap, BTreeSet},
+    fs::{self, File, FileType, Permissions},
     io,
     ops::Not,
     path::{Path, PathBuf},
@@ -15,6 +15,7 @@ use std::{
 use flate2::{Compression, write::GzEncoder};
 use futures::{SinkExt, StreamExt};
 use hyper_util::rt::TokioIo;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_tungstenite::{
@@ -23,8 +24,8 @@ use tokio_tungstenite::{
 };
 
 use crate::sync::{
-    EntryPlan, MAX_DATA_CHUNK_BYTES, PushMode, RejectReason, SidecarState, SupervisorReport,
-    SyncFrame, UnpairReason,
+    EntryPlan, MAX_DATA_CHUNK_BYTES, ManifestKind, ManifestPath, PushMode, RejectReason,
+    SidecarState, SupervisorReport, SyncFrame, UnpairReason, chunked,
     rules::{IgnoreRules, IgnoreSnapshot, IgnoreSource, join_relative},
 };
 
@@ -72,11 +73,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSyncConnection<S> {
         Self { socket }
     }
 
+    /// Sends `frame`. When the send fails, the error says why the operator closed the
+    /// connection if it did (see [`Self::why_sending_failed`]).
     async fn send(&mut self, frame: &SyncFrame) -> Result<(), PreviewSyncError> {
-        self.socket
+        match self
+            .socket
             .send(Message::Binary(frame.encode().into()))
-            .await?;
-        Ok(())
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(error) => Err(self.why_sending_failed(error.into()).await),
+        }
     }
 
     /// The next frame from the operator. An [`SyncFrame::Error`] becomes
@@ -111,6 +118,61 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSyncConnection<S> {
         self.send(&SyncFrame::WakeRequest).await
     }
 
+    /// Sends the `manifests` of the full push `push_id`, each an entry's index and the manifest of
+    /// its tree (see [`TreeListing::manifest`]), and returns the paths of each entry that the
+    /// push must carry, as the sidecar answers. Calls `on_event` with the events that arrive
+    /// meanwhile.
+    ///
+    /// The push itself follows with [`Self::push`], in [`PushMode::Full`] and with the same
+    /// `push_id`, and carries only the returned paths (see [`TreeListing::pack_wanted`]). The
+    /// sidecar keeps the manifest's other paths as the volume holds them, and deletes what the
+    /// manifest lacks and the rules don't ignore.
+    pub async fn exchange_manifest(
+        &mut self,
+        push_id: u64,
+        manifests: Vec<(u32, Vec<ManifestPath>)>,
+        mut on_event: impl FnMut(SyncEvent),
+    ) -> Result<BTreeMap<u32, BTreeSet<Vec<u8>>>, PreviewSyncError> {
+        for (index, manifest) in manifests {
+            let mut chunks = chunked(manifest, ManifestPath::frame_cost);
+            // An empty tree still sends its manifest, so that the sidecar knows the entry.
+            if chunks.is_empty() {
+                chunks.push(Vec::new());
+            }
+
+            for paths in chunks {
+                self.send(&SyncFrame::Manifest {
+                    push_id,
+                    index,
+                    paths,
+                })
+                .await?;
+            }
+        }
+
+        self.send(&SyncFrame::ManifestDone { push_id }).await?;
+
+        let mut wanted = BTreeMap::<u32, BTreeSet<Vec<u8>>>::new();
+        loop {
+            match self.recv().await? {
+                SyncFrame::Want {
+                    push_id: want,
+                    index,
+                    paths,
+                } if want == push_id => wanted.entry(index).or_default().extend(paths),
+                SyncFrame::WantDone { push_id: done } if done == push_id => return Ok(wanted),
+                SyncFrame::Rejected {
+                    push_id: rejected,
+                    reason,
+                } if rejected == push_id => return Err(PreviewSyncError::Rejected(reason)),
+                SyncFrame::Unpaired { reason } => return Err(PreviewSyncError::Unpaired(reason)),
+                SyncFrame::Status(state) => on_event(SyncEvent::Sidecar(state)),
+                SyncFrame::Supervisor(report) => on_event(SyncEvent::Supervisor(report)),
+                frame => return Err(PreviewSyncError::Unexpected(frame)),
+            }
+        }
+    }
+
     /// Pushes `entries` in `mode`, and returns the generation that the volume holds afterwards.
     /// Calls `on_event` with the events that arrive while the sidecar applies the push.
     ///
@@ -124,9 +186,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSyncConnection<S> {
         entries: Vec<PackedEntry>,
         mut on_event: impl FnMut(SyncEvent),
     ) -> Result<u64, PreviewSyncError> {
-        if let Err(error) = self.send_push(push_id, mode, entries).await {
-            return Err(self.why_sending_failed(error).await);
-        }
+        self.send_push(push_id, mode, entries).await?;
 
         loop {
             match self.recv().await? {
@@ -186,9 +246,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSyncConnection<S> {
         self.send(&SyncFrame::Commit { push_id }).await
     }
 
-    /// Why sending a push failed with `error`. The operator closes the connection after an
-    /// `Unpaired` or an `Error`, so a large push can fail to send after the operator said why
-    /// it stopped the sync, such as another CLI taking it over, which must not look like a
+    /// Why sending a frame failed with `error`. The operator closes the connection after an
+    /// `Unpaired` or an `Error`, so a large push or manifest can fail to send after the operator
+    /// said why it stopped the sync, such as another CLI taking it over, which must not look like a
     /// broken connection. The frames that arrived before the connection closed say so.
     async fn why_sending_failed(&mut self, error: PreviewSyncError) -> PreviewSyncError {
         const DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
@@ -417,11 +477,6 @@ impl TreeListing {
         &self.rules
     }
 
-    /// The snapshot of [`Self::rules`], which a push carries.
-    pub fn snapshot(&self) -> &IgnoreSnapshot {
-        self.rules.snapshot()
-    }
-
     /// The files outside the tree that the rules came from or could come from. A change to one
     /// of them, or to a `.gitignore` in the tree, changes the rules, so the tree needs a full
     /// push.
@@ -429,13 +484,56 @@ impl TreeListing {
         &self.rule_files
     }
 
-    /// Packs the listed tree under `local` into a gzip-compressed tar stream, as entry `index`
-    /// of a push. Symlinks are packed as symlinks.
-    ///
-    /// Reads each file whole before it writes its header, so the declared size is the size of
-    /// what the stream holds even when the file changes meanwhile.
-    pub fn pack(&self, index: u32, local: &Path) -> io::Result<PackedEntry> {
-        pack_paths(index, local, &self.paths, self.rules.snapshot(), Vec::new())
+    /// The manifest of the listed tree under `local`, for
+    /// [`PreviewSyncConnection::exchange_manifest`]: every listed path with its kind, the mode,
+    /// size and SHA-256 hash of each file, which it reads whole, and the target of each symlink.
+    pub fn manifest(&self, local: &Path) -> io::Result<Vec<ManifestPath>> {
+        self.paths
+            .iter()
+            .map(|listed| {
+                let source = local.join(&listed.path);
+                let kind = if listed.file_type.is_dir() {
+                    ManifestKind::Dir
+                } else if listed.file_type.is_symlink() {
+                    let target = fs::read_link(&source).map_err(at(&source))?;
+                    ManifestKind::Symlink {
+                        target: target_bytes(&target),
+                    }
+                } else {
+                    let mut file = File::open(&source).map_err(at(&source))?;
+                    let mut hasher = Sha256::new();
+                    let size = io::copy(&mut file, &mut hasher).map_err(at(&source))?;
+
+                    ManifestKind::File {
+                        mode: tar_mode(&listed.permissions, false) & 0o777,
+                        size,
+                        hash: hasher.finalize().into(),
+                    }
+                };
+
+                Ok(ManifestPath {
+                    path: join_relative(b"", &listed.path),
+                    kind,
+                })
+            })
+            .collect()
+    }
+
+    /// Packs the paths of the listed tree under `local` that `wanted` names, as
+    /// [`SyncFrame::Want`] names them, into entry `index` of a full push after a manifest
+    /// exchange. The sidecar keeps the other listed paths as the volume holds them.
+    pub fn pack_wanted(
+        &self,
+        index: u32,
+        local: &Path,
+        wanted: &BTreeSet<Vec<u8>>,
+    ) -> io::Result<PackedEntry> {
+        let paths = self
+            .paths
+            .iter()
+            .filter(|listed| wanted.contains(&join_relative(b"", &listed.path)));
+
+        pack_paths(index, local, paths, self.rules.snapshot(), Vec::new())
     }
 }
 
@@ -532,10 +630,10 @@ pub fn pack_changes(
 ///
 /// Reads each file whole before it writes its header, so the declared size is the size of what
 /// the stream holds even when the file changes meanwhile.
-fn pack_paths(
+fn pack_paths<'a>(
     index: u32,
     local: &Path,
-    paths: &[ListedPath],
+    paths: impl IntoIterator<Item = &'a ListedPath>,
     snapshot: &IgnoreSnapshot,
     deleted: Vec<Vec<u8>>,
 ) -> io::Result<PackedEntry> {
@@ -580,6 +678,18 @@ fn pack_paths(
         archive: builder.into_inner()?.finish()?,
         deleted,
     })
+}
+
+/// The bytes of a symlink's `target` as it is written, which, unlike the paths of a tree, may be
+/// absolute or leave the tree.
+fn target_bytes(target: &Path) -> Vec<u8> {
+    #[cfg(unix)]
+    {
+        target.as_os_str().as_bytes().to_vec()
+    }
+
+    #[cfg(not(unix))]
+    target.to_string_lossy().replace('\\', "/").into_bytes()
 }
 
 /// Lists the directory `relative` of the tree under `local` into `paths`, after it adds the

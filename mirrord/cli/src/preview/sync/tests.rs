@@ -15,8 +15,8 @@ use mirrord_operator::{
         PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncInstall,
     },
     sync::{
-        AppReport, AppState, InstallReport, InstallState, PushMode, RejectReason, SidecarState,
-        SupervisorReport, SyncFrame, UnpairReason,
+        AppReport, AppState, InstallReport, InstallState, ManifestPath, PushMode, RejectReason,
+        SidecarState, SupervisorReport, SyncFrame, UnpairReason,
     },
 };
 use mirrord_progress::ProgressTracker;
@@ -52,11 +52,19 @@ struct Push {
 
     /// Each entry's deleted paths, by entry index, for the entries that listed any.
     deleted: BTreeMap<u32, Vec<String>>,
+
+    /// The manifest of each entry, by entry index, for a full push.
+    manifests: BTreeMap<u32, Vec<ManifestPath>>,
 }
 
 /// The operator's end of one sync connection, which a test scripts.
 struct Operator {
     socket: WebSocketStream<DuplexStream>,
+
+    /// What the volume holds after the last full push that [`Self::pair_and_apply`] applied, by
+    /// entry index, as the manifest described it. The operator answers a manifest as the sidecar
+    /// would: it wants every path that differs from these.
+    held: BTreeMap<u32, Vec<ManifestPath>>,
 }
 
 impl Operator {
@@ -85,16 +93,44 @@ impl Operator {
             .expect("the CLI sent nothing in time")
     }
 
-    /// Receives a whole push, from `Begin` to `Commit`, and unpacks it.
+    /// Receives a push from its first frame (the manifest of a full push, or the `Begin` of an
+    /// incremental one) to its `Commit`, and unpacks it. Answers the manifest with the paths that
+    /// differ from [`Self::held`].
     async fn recv_push(&mut self) -> Push {
-        let SyncFrame::Begin {
-            push_id,
-            mode,
-            entries: plans,
-        } = self.recv().await
-        else {
-            panic!("a push starts with `Begin`");
+        let mut manifests = BTreeMap::<u32, Vec<ManifestPath>>::new();
+        let (push_id, mode, plans) = loop {
+            match self.recv().await {
+                SyncFrame::Manifest { index, paths, .. } => {
+                    manifests.entry(index).or_default().extend(paths);
+                }
+                SyncFrame::ManifestDone { push_id } => {
+                    for (index, paths) in &manifests {
+                        let held = self.held.get(index).cloned().unwrap_or_default();
+                        let paths = paths
+                            .iter()
+                            .filter(|path| held.contains(path).not())
+                            .map(|path| path.path.clone())
+                            .collect();
+                        self.send(SyncFrame::Want {
+                            push_id,
+                            index: *index,
+                            paths,
+                        })
+                        .await;
+                    }
+                    self.send(SyncFrame::WantDone { push_id }).await;
+                }
+                SyncFrame::Begin {
+                    push_id,
+                    mode,
+                    entries,
+                } => break (push_id, mode, entries),
+                frame => panic!("a push starts with `Manifest` or `Begin`, not {frame:?}"),
+            }
         };
+        if mode == PushMode::Full {
+            assert!(manifests.is_empty().not(), "a full push sends a manifest");
+        }
 
         let mut archives = BTreeMap::<u32, Vec<u8>>::new();
         let mut deleted = BTreeMap::new();
@@ -139,6 +175,7 @@ impl Operator {
             mode,
             entries,
             deleted,
+            manifests,
         }
     }
 
@@ -162,6 +199,7 @@ impl Operator {
         let push = self.recv_push().await;
         assert_eq!(push.mode, PushMode::Full);
         self.apply(push.push_id, generation).await;
+        self.held = push.manifests.clone();
         push
     }
 }
@@ -207,7 +245,10 @@ fn start(
                 WebSocketStream::from_raw_socket(cli, Role::Client, None),
                 WebSocketStream::from_raw_socket(operator, Role::Server, None),
             );
-            let _ = operators.send(Operator { socket: operator });
+            let _ = operators.send(Operator {
+                socket: operator,
+                held: BTreeMap::new(),
+            });
             Ok(PreviewSyncConnection::new(cli))
         })
     });
@@ -246,7 +287,7 @@ fn file(contents: &str) -> Option<String> {
 /// After the first full push, `--watch` pushes each change incrementally: a new, a changed, a
 /// deleted and a renamed file, and a new or renamed directory with everything in it, each in one
 /// push that carries only what changed and lists what is gone. A change that the rules ignore
-/// pushes nothing, and a change to the rules themselves pushes the tree whole, because the
+/// pushes nothing, and a change to the rules themselves makes a full push, because the
 /// incremental pushes apply the rules of the last full push.
 #[tokio::test]
 async fn watch_pushes_each_change_incrementally() {
@@ -371,8 +412,8 @@ async fn two_clis_number_their_pushes_apart() {
 }
 
 /// The operator unpairs the CLI when the sidecar goes, and the volume may then hold anything, so
-/// the CLI pushes the tree whole once it is paired again. A push the sidecar rejects because the
-/// volume holds another generation than the one it built on is pushed whole too.
+/// the CLI makes a full push once it is paired again. A push the sidecar rejects because the
+/// volume holds another generation than the one it built on is followed by a full push too.
 #[tokio::test]
 async fn a_full_push_follows_every_pairing_and_a_stale_base() {
     let local = tempfile::tempdir().unwrap();
@@ -413,7 +454,92 @@ async fn a_full_push_follows_every_pairing_and_a_stale_base() {
     sync.abort();
 }
 
-/// A change while the preview is idle wakes it once, and the CLI pushes the tree whole once the
+/// A full push sends the manifest of the whole tree and carries only the paths that the sidecar
+/// wants, so a push after a pairing sends what changed and keeps the rest, which the manifest
+/// still lists.
+#[tokio::test]
+async fn a_full_push_carries_only_what_the_sidecar_wants() {
+    let local = tempfile::tempdir().unwrap();
+    let dir = local.path();
+    write(dir, "app.js", "v1");
+    write(dir, "lib/util.js", "util");
+
+    let (sync, mut operators, _activity) = start(vec![entry(dir)], false);
+    let mut operator = next_connection(&mut operators).await;
+    let push = operator.pair_and_apply(1).await;
+    assert_eq!(
+        push.entries[&0],
+        Pushed::from([
+            ("app.js".to_owned(), file("v1")),
+            ("lib".to_owned(), None),
+            ("lib/util.js".to_owned(), file("util")),
+        ])
+    );
+
+    write(dir, "app.js", "v2");
+    let push = operator.pair_and_apply(2).await;
+    assert_eq!(
+        push.entries[&0],
+        Pushed::from([("app.js".to_owned(), file("v2"))])
+    );
+    let listed = push.manifests[&0]
+        .iter()
+        .map(|path| String::from_utf8(path.path.clone()).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(listed, ["app.js", "lib", "lib/util.js"]);
+
+    sync.abort();
+}
+
+/// A full push that started from changes lists the trees, exchanges their manifests, and only then
+/// reads the files that the sidecar wants. A tool can remove a file in between, and under
+/// `--watch` that must not end the sync: the next change, such as the removal, starts another
+/// full push on the same connection.
+#[tokio::test]
+async fn a_file_deleted_before_its_full_push_packs_it_doesnt_end_watch() {
+    let local = tempfile::tempdir().unwrap();
+    let dir = local.path();
+    write(dir, "app.js", "v1");
+
+    let (sync, mut operators, _activity) = start(vec![entry(dir)], true);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+
+    // A rule change starts a full push, and `app.js` goes after the CLI hashed it.
+    write(dir, ".gitignore", "*.log\n");
+    loop {
+        match operator.recv().await {
+            SyncFrame::Manifest { .. } => {}
+            SyncFrame::ManifestDone { push_id } => {
+                fs::remove_file(dir.join("app.js")).unwrap();
+                operator
+                    .send(SyncFrame::Want {
+                        push_id,
+                        index: 0,
+                        paths: vec![b"app.js".to_vec()],
+                    })
+                    .await;
+                operator.send(SyncFrame::WantDone { push_id }).await;
+                break;
+            }
+            frame => panic!("expected the manifest of a full push, got {frame:?}"),
+        }
+    }
+    // The removal is itself a change, which starts the next full push on the same connection,
+    // where a push without the wanted file would have been rejected.
+    let push = operator.recv_push().await;
+    assert_eq!(push.mode, PushMode::Full);
+    assert!(
+        push.manifests[&0]
+            .iter()
+            .all(|path| path.path != b"app.js".to_vec())
+    );
+
+    assert!(sync.is_finished().not());
+    sync.abort();
+}
+
+/// A change while the preview is idle wakes it once, and the CLI makes a full push once the
 /// operator pairs it again.
 #[tokio::test]
 async fn a_change_wakes_an_idle_preview() {
@@ -613,9 +739,66 @@ async fn the_activity_reports_busy_work_and_counts_progress() {
     sync.abort();
 }
 
+/// The supervisor retries an app that fails to start for as long as it fails, and each retry
+/// counts up the app's restarts in its report. Those retries aren't progress, or an app that never
+/// starts would keep `mirrord preview sync` from ever timing out.
+#[tokio::test]
+async fn an_app_that_keeps_failing_to_start_is_no_progress() {
+    let local = tempfile::tempdir().unwrap();
+    write(local.path(), "app.js", "v1");
+
+    let (sync, mut operators, mut activity) = start(vec![entry(local.path())], false);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+    let pushed = tokio::time::timeout(
+        FRAME_TIMEOUT,
+        activity.wait_for(|activity| activity.first_push.is_some()),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .progress;
+
+    let report = |state, restarts, handled| SupervisorReport {
+        install: InstallReport::default(),
+        app: AppReport {
+            state,
+            restarts,
+            last_exit_code: Some(127),
+        },
+        handled,
+    };
+    for restarts in 1..=3 {
+        operator
+            .send(SyncFrame::Supervisor(report(
+                AppState::Restarting,
+                restarts,
+                None,
+            )))
+            .await;
+    }
+    // The driver reads the frames in order, so once it saw this one, it saw the retries too.
+    operator
+        .send(SyncFrame::Supervisor(report(AppState::Running, 3, Some(1))))
+        .await;
+
+    let handled = tokio::time::timeout(
+        FRAME_TIMEOUT,
+        activity.wait_for(|activity| activity.handled == Some(1)),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .progress;
+
+    // The app's first `Restarting` and its `Running` are progress, the two retries aren't.
+    assert_eq!(handled - pushed, 2);
+    sync.abort();
+}
+
 /// The operator unpairs the CLI in the middle of a push when the pod's sidecar goes away or a
 /// `mirrord exec` session pauses the preview. The CLI must then wait for the next `Paired` and
-/// push the tree whole, rather than fail the sync.
+/// make a full push, rather than fail the sync.
 #[tokio::test]
 async fn an_unpair_during_a_push_waits_for_the_next_pairing() {
     let local = tempfile::tempdir().unwrap();
@@ -1063,4 +1246,58 @@ fn settings_that_a_sync_preview_cannot_run_are_refused() {
         Err(CliError::PreviewSyncConfigInvalid(PreviewSyncConfigError::Reserved { path, .. }))
             if path == "/mirrord/app"
     ));
+}
+
+/// A full push that can't pack the files that the sidecar wants ends without a push, so the
+/// preview pod isn't busy with it any more, and the creation timeout must run again until the next
+/// change starts the next push.
+#[tokio::test]
+async fn a_full_push_that_fails_to_pack_after_the_exchange_frees_the_pod() {
+    let local = tempfile::tempdir().unwrap();
+    let dir = local.path();
+    write(dir, "app.js", "v1");
+
+    let (sync, mut operators, mut activity) = start(vec![entry(dir)], true);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+    tokio::time::timeout(
+        FRAME_TIMEOUT,
+        activity.wait_for(|activity| activity.busy.not()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    // A rule change starts a full push, and `app.js` goes after the CLI hashed it.
+    write(dir, ".gitignore", "*.log\n");
+    loop {
+        match operator.recv().await {
+            SyncFrame::Manifest { .. } => {}
+            SyncFrame::ManifestDone { push_id } => {
+                fs::remove_file(dir.join("app.js")).unwrap();
+                operator
+                    .send(SyncFrame::Want {
+                        push_id,
+                        index: 0,
+                        paths: vec![b"app.js".to_vec()],
+                    })
+                    .await;
+                operator.send(SyncFrame::WantDone { push_id }).await;
+                break;
+            }
+            frame => panic!("expected the manifest of a full push, got {frame:?}"),
+        }
+    }
+
+    // The next push starts only once the removal's batch is quiet for `WATCH_DEBOUNCE`.
+    let free = tokio::time::timeout(
+        Duration::from_millis(150),
+        activity.wait_for(|activity| activity.busy.not()),
+    )
+    .await;
+    sync.abort();
+    assert!(
+        free.is_ok(),
+        "the CLI reports the pod busy after the push that it couldn't pack ended"
+    );
 }
