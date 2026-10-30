@@ -484,6 +484,14 @@ pub(crate) enum CliError {
     ))]
     SessionsManagerCloudUrl(#[source] mirrord_sessions_manager_client::SessionsManagerClientError),
 
+    #[error("the sessions-manager URL is invalid")]
+    #[diagnostic(help(
+        "Check `sessions_manager.url` in the mirrord config and `MIRRORD_SESSIONS_MANAGER_URL`, \
+        which overrides it, or unset both to use the MetalBear Cloud sessions-manager.\
+        {GENERAL_HELP}"
+    ))]
+    SessionsManagerUrl(#[source] mirrord_sessions_manager_client::SessionsManagerClientError),
+
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorBranchCreationFailed(OperatorOperation, String),

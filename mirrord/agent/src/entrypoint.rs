@@ -27,8 +27,8 @@ use mirrord_cluster_auth::{AuthMethod, ClusterClientFactory, ClusterCredentials,
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use mirrord_protocol_io::{Agent, Connection};
 use mirrord_sessions_manager_client::{
-    AgentClient, DirectTransport, OperatorTransport, ReplicaId, SESSIONS_MANAGER_URL_ENV,
-    ServiceScope, SessionsManagerClientError,
+    AgentClient, DirectTransport, EndpointSource, OperatorTransport, ReplicaId, ServiceScope,
+    SessionsManagerClientError, SessionsManagerEndpoint,
 };
 use socket2::SockRef;
 use tokio::{
@@ -41,7 +41,7 @@ use tokio::{
     time::{Duration, timeout},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{Level, debug, error, trace, warn};
+use tracing::{Level, debug, error, info, trace, warn};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -1193,9 +1193,37 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
-/// Registers the workload companion with the operator-hosted sessions-manager when
-/// [`envs::OPERATOR_API_URL`] is set, and with a standalone one at [`SESSIONS_MANAGER_URL_ENV`]
-/// otherwise.
+/// The sessions-manager a workload companion registers with.
+#[derive(Debug, PartialEq, Eq)]
+enum SessionsManagerSelection {
+    /// Hosted by the mirrord operator and reached through the Kubernetes API server at `api_url`.
+    Operator {
+        api_url: String,
+    },
+    Standalone(SessionsManagerEndpoint),
+}
+
+/// Picks the operator-hosted sessions-manager when `operator_api_url` is set, the standalone one
+/// at `sessions_manager_url` when that is set, and the MetalBear Cloud one otherwise.
+///
+/// Only the two explicit settings conflict: the MetalBear Cloud default never stands in the way
+/// of the operator.
+fn select_sessions_manager(
+    operator_api_url: Option<String>,
+    sessions_manager_url: Option<String>,
+) -> AgentResult<SessionsManagerSelection> {
+    match (operator_api_url, sessions_manager_url) {
+        (Some(_), Some(_)) => Err(AgentError::ConflictingSessionsManagerEndpoints),
+        (Some(api_url), None) => Ok(SessionsManagerSelection::Operator { api_url }),
+        (None, sessions_manager_url) => Ok(SessionsManagerSelection::Standalone(
+            SessionsManagerEndpoint::resolve(sessions_manager_url.as_deref())?,
+        )),
+    }
+}
+
+/// Registers the workload companion with the sessions-manager [`select_sessions_manager`] picks
+/// from [`envs::OPERATOR_API_URL`] and [`envs::SESSIONS_MANAGER_URL`], and logs which one and
+/// why, so the workload's output shows where it connects.
 ///
 /// The operator is reached through the EKS API server, authenticated as the companion's AWS
 /// identity. The caller must poll the token-refresh future alongside the companion loop so a
@@ -1208,30 +1236,49 @@ async fn start_control_plane(
     AgentClient,
     Option<BoxFuture<'static, mirrord_cluster_auth::Result<()>>>,
 )> {
-    let required = |env: &CheckedEnv<String>| {
+    let optional = |env: &CheckedEnv<String>| {
         env.try_from_env()
             .expect("String environment variables are infallible")
-            .ok_or(AgentError::MissingOperatorConfig(env.name))
     };
+    let required =
+        |env: &CheckedEnv<String>| optional(env).ok_or(AgentError::MissingOperatorConfig(env.name));
 
-    let Some(api_url) = envs::OPERATOR_API_URL
-        .try_from_env()
-        .expect("String environment variables are infallible")
-    else {
-        return Ok((
-            AgentClient::start(
-                scope,
-                replica_id,
-                DirectTransport::from_env()?,
-                cancellation_token,
-            )?,
-            None,
-        ));
+    let api_url = match select_sessions_manager(
+        optional(&envs::OPERATOR_API_URL),
+        optional(&envs::SESSIONS_MANAGER_URL),
+    )? {
+        SessionsManagerSelection::Operator { api_url } => {
+            info!(
+                %api_url,
+                "Registering with the sessions-manager hosted by the mirrord operator, selected by \
+                 MIRRORD_OPERATOR_API_URL"
+            );
+            api_url
+        }
+        SessionsManagerSelection::Standalone(endpoint) => {
+            match endpoint.source {
+                EndpointSource::Explicit => info!(
+                    url = %endpoint,
+                    "Registering with the sessions-manager set by MIRRORD_SESSIONS_MANAGER_URL"
+                ),
+                EndpointSource::Default => info!(
+                    url = %endpoint,
+                    "Registering with the MetalBear Cloud sessions-manager, since neither \
+                     MIRRORD_OPERATOR_API_URL nor MIRRORD_SESSIONS_MANAGER_URL is set"
+                ),
+            }
+
+            return Ok((
+                AgentClient::start(
+                    scope,
+                    replica_id,
+                    DirectTransport::from_env(endpoint)?,
+                    cancellation_token,
+                )?,
+                None,
+            ));
+        }
     };
-
-    if std::env::var_os(SESSIONS_MANAGER_URL_ENV).is_some() {
-        return Err(AgentError::ConflictingSessionsManagerEndpoints);
-    }
 
     let cluster_name = required(&envs::OPERATOR_EKS_CLUSTER_NAME)?;
     let region = eks_region(&api_url).ok_or(AgentError::MissingOperatorRegion)?;
@@ -1591,5 +1638,60 @@ pub async fn main() -> AgentResult<()> {
         start_agent_workload_companion(args).await
     } else {
         start_iptable_guard(args).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mirrord_sessions_manager_client::SESSIONS_MANAGER_URL_DEFAULT;
+
+    use super::*;
+
+    const OPERATOR_API_URL: &str = "https://ABC123.gr7.us-east-1.eks.amazonaws.com";
+    const SESSIONS_MANAGER_URL: &str = "https://sm.example.com/sm";
+
+    #[test]
+    fn operator_api_url_selects_the_operator() {
+        assert_eq!(
+            select_sessions_manager(Some(OPERATOR_API_URL.to_owned()), None).unwrap(),
+            SessionsManagerSelection::Operator {
+                api_url: OPERATOR_API_URL.to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn explicit_sessions_manager_url_is_used() {
+        let Ok(SessionsManagerSelection::Standalone(endpoint)) =
+            select_sessions_manager(None, Some(SESSIONS_MANAGER_URL.to_owned()))
+        else {
+            panic!("expected a standalone sessions-manager");
+        };
+
+        assert_eq!(endpoint.url.as_str(), SESSIONS_MANAGER_URL);
+        assert_eq!(endpoint.source, EndpointSource::Explicit);
+    }
+
+    #[test]
+    fn metalbear_cloud_is_the_default() {
+        let Ok(SessionsManagerSelection::Standalone(endpoint)) =
+            select_sessions_manager(None, None)
+        else {
+            panic!("expected a standalone sessions-manager");
+        };
+
+        assert_eq!(endpoint.url.as_str(), SESSIONS_MANAGER_URL_DEFAULT);
+        assert_eq!(endpoint.source, EndpointSource::Default);
+    }
+
+    #[test]
+    fn operator_and_explicit_url_conflict() {
+        assert!(matches!(
+            select_sessions_manager(
+                Some(OPERATOR_API_URL.to_owned()),
+                Some(SESSIONS_MANAGER_URL.to_owned())
+            ),
+            Err(AgentError::ConflictingSessionsManagerEndpoints)
+        ));
     }
 }

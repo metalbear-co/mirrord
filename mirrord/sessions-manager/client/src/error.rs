@@ -39,8 +39,6 @@ pub enum SessionsManagerClientError {
     InvalidBaseUrl,
     #[error("sessions-manager base URL must be of schema http/s")]
     InvalidBaseUrlScheme(Url),
-    #[error("MIRRORD_SESSIONS_MANAGER_URL is required for sessions-manager connections")]
-    MissingSessionsManagerUrl,
     #[error("Missing serverless environment")]
     MissingConfigEnvironment,
     #[error("Missing serverless service")]
@@ -60,6 +58,12 @@ pub enum SessionsManagerClientError {
     InvalidOperatorDataPlaneEndpoint,
     #[error("sessions-manager shared secret is not a valid header value")]
     InvalidSharedSecret,
+    #[error(
+        "MIRRORD_SESSIONS_MANAGER_AUTH_TOKEN is set without a sessions-manager URL; set \
+         MIRRORD_SESSIONS_MANAGER_URL (or `sessions_manager.url`) to the sessions-manager behind \
+         the proxy it authenticates to, since the MetalBear Cloud sessions-manager doesn't take it"
+    )]
+    SharedSecretWithoutUrl,
     #[error("the mirrord login token is not a valid header value")]
     InvalidLoginToken,
     #[error(
