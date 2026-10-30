@@ -18,9 +18,8 @@ use itertools::Itertools;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
     LayerConfig,
-    feature::{
-        database_branches::{DatabaseBranchConfig, DatabaseBranchEngine, DatabaseBranchesConfig},
-        split_queues::QueueKind,
+    feature::database_branches::{
+        DatabaseBranchConfig, DatabaseBranchEngine, DatabaseBranchesConfig,
     },
 };
 use mirrord_operator::{
@@ -32,7 +31,6 @@ use mirrord_operator::{
 };
 use mirrord_progress::NullProgress;
 use mirrord_up::{RequestOrigin, SubprocessCfg};
-use strum::IntoEnumIterator;
 
 use super::UpCliError;
 use crate::{
@@ -96,11 +94,12 @@ pub(super) async fn usable_operators(services: &[SubprocessCfg]) -> Result<Opera
 }
 
 /// Stops the run when a mode's `queues` line can't be served: the service has no usable operator,
-/// or one that splits no queues at all. Without the line, the run goes on, saying so when the
-/// operator splits no queues. With no operator at all it says nothing, as a session wouldn't.
+/// or one that splits none of its queue kinds. Without the line, the run goes on, saying so when
+/// the operator splits none of them. With no operator at all it says nothing, as a session
+/// wouldn't.
 ///
-/// The queues are split from a wildcard over every broker, so an operator that splits some
-/// brokers serves it; only one that splits none can't.
+/// The queues are split from a wildcard over every broker, less those a Kafka branch takes over,
+/// so an operator that splits one of the remaining brokers serves it.
 pub(super) fn check_queue_splits(
     services: &[SubprocessCfg],
     operators: &Operators,
@@ -111,7 +110,12 @@ pub(super) fn check_queue_splits(
         };
         let splits_queues = operator.as_ref().is_ok_and(|api| {
             let supported = api.operator().spec.supported_features();
-            QueueKind::iter()
+            service
+                .config
+                .feature
+                .split_queues
+                .kinds()
+                .into_iter()
                 .filter_map(NewOperatorFeature::queue_splitting)
                 .any(|feature| supported.contains(&feature))
         });
