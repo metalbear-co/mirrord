@@ -753,7 +753,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
     /// watching each directory right before it reads it.
     async fn pack_blocking<T: Send + 'static>(
         &mut self,
-        pack: impl FnOnce(Option<&mut RecommendedWatcher>) -> T + Send + 'static,
+        pack: impl FnOnce(Option<&mut DirectoryWatcher>) -> T + Send + 'static,
     ) -> Result<T, Stop> {
         let mut watcher = self.watcher.as_mut().map(TreeWatcher::take);
 
@@ -924,7 +924,7 @@ struct FullListing {
 fn list_entries(
     entries: &[SyncEntry],
     sources: Option<Arc<[RuleSources]>>,
-    mut watcher: Option<&mut RecommendedWatcher>,
+    mut watcher: Option<&mut DirectoryWatcher>,
 ) -> CliResult<FullListing> {
     let sources = match sources {
         Some(sources) => sources,
@@ -950,13 +950,16 @@ fn list_entries(
 
         // A watch follows its directory, so only a watch of the parent reports a directory that
         // replaces the entry's own, such as one renamed into its place.
-        if let (Some(watcher), Some(parent)) = (watcher.as_deref_mut(), entry.local.parent()) {
-            watch_directory(watcher, parent).map_err(watch_failed)?;
+        if let Some(watcher) = watcher.as_deref_mut() {
+            if let Some(parent) = entry.local.parent() {
+                watcher.watch_directory(parent).map_err(watch_failed)?;
+            }
+            watcher.watch_tree(&entry.local).map_err(watch_failed)?;
         }
 
         let listing = TreeListing::new_watching(entry_sources, &entry.ignore, &mut |directory| {
             watcher.as_deref_mut().map_or(Ok(()), |watcher| {
-                watch_directory(watcher, directory).map_err(io::Error::other)
+                watcher.watch_directory(directory).map_err(io::Error::other)
             })
         })
         .map_err(failed)?;
@@ -967,7 +970,7 @@ fn list_entries(
             // `Changes::merge`).
             for file in listing.rule_files() {
                 if let Some(directory) = file.parent() {
-                    watch_directory(watcher, directory).map_err(watch_failed)?;
+                    watcher.watch_directory(directory).map_err(watch_failed)?;
                 }
             }
         }
@@ -997,7 +1000,7 @@ fn pack_all_changes(
     entries: &[SyncEntry],
     rules: &[IgnoreRules],
     changes: &Changes,
-    mut watcher: Option<&mut RecommendedWatcher>,
+    mut watcher: Option<&mut DirectoryWatcher>,
 ) -> CliResult<Option<Vec<PackedEntry>>> {
     let mut packed = Vec::new();
 
@@ -1013,7 +1016,7 @@ fn pack_all_changes(
             changed,
             &mut |directory| {
                 watcher.as_deref_mut().map_or(Ok(()), |watcher| {
-                    watch_directory(watcher, directory).map_err(io::Error::other)
+                    watcher.watch_directory(directory).map_err(io::Error::other)
                 })
             },
         )
@@ -1033,14 +1036,65 @@ fn pack_all_changes(
     Ok(Some(packed))
 }
 
-/// Starts watching `directory` alone, without its subdirectories, which the listing watches when
-/// it reads them, so that an ignored tree such as `node_modules` takes no watch.
-fn watch_directory(watcher: &mut RecommendedWatcher, directory: &Path) -> notify::Result<()> {
-    match watcher.watch(directory, RecursiveMode::NonRecursive) {
-        // A directory that is gone by now has its removal on the way as an event, and the
-        // directory of a rule file that doesn't exist yet may not exist either.
-        Err(error) if matches!(error.kind, notify::ErrorKind::PathNotFound) => Ok(()),
-        result => result,
+/// Whether [`DirectoryWatcher`] watches each entry's tree whole, once.
+const WATCH_WHOLE_TREES: bool = cfg!(target_os = "macos");
+
+/// Watches the directories of the pushed trees, which each listing starts watching right before
+/// it reads them.
+///
+/// inotify on Linux watches each directory on its own, so a directory is watched alone, without
+/// its subdirectories, and an ignored tree such as `node_modules` takes no watch. A directory that
+/// is made again at the same path is a new one, which needs a new watch.
+///
+/// The FSEvents backend of notify on macOS watches by path. On each new watch, it stops its
+/// stream, adds the path and starts a new stream over every path so far, so a change made
+/// between two watches is lost, and the paths pile up. So there each entry's directory is watched
+/// once, with its subdirectories, before its first listing, and a directory below it, or one that
+/// is watched already, takes no new watch.
+struct DirectoryWatcher {
+    watcher: RecommendedWatcher,
+
+    /// The directories watched so far, with how, when [`WATCH_WHOLE_TREES`] holds.
+    watched: Vec<(PathBuf, RecursiveMode)>,
+}
+
+impl DirectoryWatcher {
+    /// Starts watching the tree under `local` whole, on macOS. Elsewhere, the listing watches each
+    /// directory of the tree when it reads it.
+    fn watch_tree(&mut self, local: &Path) -> notify::Result<()> {
+        if WATCH_WHOLE_TREES {
+            self.watch(local, RecursiveMode::Recursive)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Starts watching `directory`, without its subdirectories, unless a watch covers it already.
+    fn watch_directory(&mut self, directory: &Path) -> notify::Result<()> {
+        self.watch(directory, RecursiveMode::NonRecursive)
+    }
+
+    fn watch(&mut self, directory: &Path, mode: RecursiveMode) -> notify::Result<()> {
+        let covered = self.watched.iter().any(|(watched, watched_mode)| {
+            *watched_mode == RecursiveMode::Recursive && directory.starts_with(watched)
+                || watched == directory && mode == RecursiveMode::NonRecursive
+        });
+        if covered {
+            return Ok(());
+        }
+
+        match self.watcher.watch(directory, mode) {
+            Ok(()) => {
+                if WATCH_WHOLE_TREES {
+                    self.watched.push((directory.to_owned(), mode));
+                }
+                Ok(())
+            }
+            // A directory that is gone by now has its removal on the way as an event, and the
+            // directory of a rule file that doesn't exist yet may not exist either.
+            Err(error) if matches!(error.kind, notify::ErrorKind::PathNotFound) => Ok(()),
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -1161,10 +1215,11 @@ struct Collected {
     events: u64,
 }
 
-/// Watches the directories of the pushed trees, one by one.
+/// Watches the pushed trees through a [`DirectoryWatcher`], and collects their changes into
+/// batches.
 struct TreeWatcher {
     /// Lent to the listing while it runs on a blocking thread (see [`Self::take`]).
-    watcher: Option<RecommendedWatcher>,
+    watcher: Option<DirectoryWatcher>,
 
     collected: Arc<Mutex<Collected>>,
 
@@ -1207,20 +1262,23 @@ impl TreeWatcher {
         .map_err(|error| CliError::PreviewSyncFailed(Box::new(error)))?;
 
         Ok(Self {
-            watcher: Some(watcher),
+            watcher: Some(DirectoryWatcher {
+                watcher,
+                watched: Vec::new(),
+            }),
             collected,
             changed,
             batch_ends_by: None,
         })
     }
 
-    fn take(&mut self) -> RecommendedWatcher {
+    fn take(&mut self) -> DirectoryWatcher {
         self.watcher
             .take()
             .expect("the watcher is back before the next listing")
     }
 
-    fn put_back(&mut self, watcher: RecommendedWatcher) {
+    fn put_back(&mut self, watcher: DirectoryWatcher) {
         self.watcher = Some(watcher);
     }
 
