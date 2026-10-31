@@ -359,6 +359,31 @@ impl From<PreviewSyncError> for Stop {
     }
 }
 
+impl From<OperatorApiError> for Stop {
+    /// Why connecting to the operator failed with `error`. A 4xx answer refuses what no new
+    /// connection changes: a session that is gone (404) or that doesn't run (409), a user without
+    /// a certificate, a license or a seat that the operator refuses, or a role without
+    /// `previews/sync`. Retrying those would only hide the reason, and during the start it would
+    /// count as no progress, so the start would fail with a timeout. A request timeout (408) and a
+    /// rate limit (429) may pass, as may every other failure, such as an operator that restarts.
+    fn from(error: OperatorApiError) -> Self {
+        let refused = matches!(
+            &error,
+            OperatorApiError::KubeError {
+                error: kube::Error::Api(status),
+                ..
+            } if (400..500).contains(&status.code) && !matches!(status.code, 408 | 429)
+        );
+
+        let error = Box::new(error.into());
+        if refused {
+            Stop::Fatal(error)
+        } else {
+            Stop::Disconnected(error)
+        }
+    }
+}
+
 impl SyncDriver<UpgradedConnection> {
     /// The driver of the sync of the session `name` in `namespace`, which pushes `entries`, the
     /// service's `sync` entries in the order of the session's `spec.sync`. With `watch_files`, it
@@ -379,23 +404,7 @@ impl SyncDriver<UpgradedConnection> {
                 operator_api
                     .connect_preview_sync(&namespace, &name)
                     .await
-                    .map_err(|error| {
-                        // The operator refuses the connection of a session that is gone (404) or
-                        // that doesn't run (409), which no new connection changes.
-                        let gone = matches!(
-                            &error,
-                            OperatorApiError::KubeError {
-                                error: kube::Error::Api(status),
-                                ..
-                            } if matches!(status.code, 404 | 409)
-                        );
-                        let error = Box::new(error.into());
-                        if gone {
-                            Stop::Fatal(error)
-                        } else {
-                            Stop::Disconnected(error)
-                        }
-                    })
+                    .map_err(Stop::from)
             })
         });
 

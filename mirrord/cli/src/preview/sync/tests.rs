@@ -9,7 +9,10 @@ use mirrord_config::{
     target::{Target, cron_job::CronJobTarget},
 };
 use mirrord_operator::{
-    client::preview_sync::PreviewSyncConnection,
+    client::{
+        error::{OperatorApiError, OperatorOperation},
+        preview_sync::PreviewSyncConnection,
+    },
     crd::preview::{
         PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncInstall,
     },
@@ -26,7 +29,9 @@ use tokio_tungstenite::{
     tungstenite::{Message, protocol::Role},
 };
 
-use super::{Connect, ServiceSync, SyncActivity, SyncDriver, WATCH_DEBOUNCE, WATCH_MAX_DELAY};
+use super::{
+    Connect, ServiceSync, Stop, SyncActivity, SyncDriver, WATCH_DEBOUNCE, WATCH_MAX_DELAY,
+};
 use crate::error::CliError;
 
 /// How long a test waits for a frame that must come: the debounce of `--watch`, packing and the
@@ -1298,4 +1303,27 @@ async fn a_full_push_that_fails_to_pack_after_the_exchange_frees_the_pod() {
         free.is_ok(),
         "the CLI reports the pod busy after the push that it couldn't pack ended"
     );
+}
+
+/// A connection that the operator or the API server refuses with a 4xx, such as for a missing
+/// certificate, a refused license or a role without `previews/sync`, fails the sync with the
+/// reason at once. Retrying it would only print warnings, and during the start it would end in a
+/// timeout that hides the reason. A request timeout, a rate limit and a server error may pass.
+#[test]
+fn a_refused_connection_isnt_retried() {
+    let stop = |code| {
+        let mut status = kube::core::Status::failure("refused", "Refused");
+        status.code = code;
+        Stop::from(OperatorApiError::KubeError {
+            error: kube::Error::Api(Box::new(status)),
+            operation: OperatorOperation::WebsocketConnection,
+        })
+    };
+
+    for code in [400, 401, 403, 404, 409] {
+        assert!(matches!(stop(code), Stop::Fatal(_)), "{code}");
+    }
+    for code in [408, 429, 500, 503] {
+        assert!(matches!(stop(code), Stop::Disconnected(_)), "{code}");
+    }
 }
