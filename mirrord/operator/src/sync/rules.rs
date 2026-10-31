@@ -46,6 +46,24 @@ pub struct IgnoreSnapshot {
     pub sources: Vec<IgnoreSource>,
 }
 
+impl IgnoreSnapshot {
+    /// What the snapshot costs in a [`SyncFrame::Begin`](super::SyncFrame::Begin), as
+    /// [`ManifestPath::frame_cost`](super::ManifestPath::frame_cost) counts a path: the decoder
+    /// claims the size of each source and of each line before it reads them, and then their
+    /// bytes.
+    pub fn frame_cost(&self) -> usize {
+        let sources = self.sources.iter().map(|source| {
+            let lines = source
+                .lines
+                .iter()
+                .map(|line| size_of::<String>() + line.len());
+            size_of::<IgnoreSource>() + source.root.len() + lines.sum::<usize>()
+        });
+
+        self.prefix.len() + sources.sum::<usize>()
+    }
+}
+
 /// One source of gitignore rules, such as a `.gitignore` file.
 #[derive(Encode, Decode, Debug, Clone, Default, PartialEq, Eq)]
 pub struct IgnoreSource {

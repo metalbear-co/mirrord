@@ -24,9 +24,11 @@ use tokio_tungstenite::{
 };
 
 use crate::sync::{
-    EntryPlan, MAX_DATA_CHUNK_BYTES, ManifestKind, ManifestPath, PushMode, RejectReason,
-    SidecarState, SupervisorReport, SyncFrame, UnpairReason, chunked,
+    EntryPlan, MAX_DATA_CHUNK_BYTES, MAX_MANIFEST_CHUNK_BYTES, MAX_RULES_BYTES, ManifestKind,
+    ManifestPath, PushMode, RejectReason, SidecarState, SupervisorReport, SyncFrame, UnpairReason,
+    chunked,
     rules::{IgnoreRules, IgnoreSnapshot, IgnoreSource, join_relative},
+    wanted_path_frame_cost,
 };
 
 #[cfg(test)]
@@ -55,6 +57,13 @@ pub enum PreviewSyncError {
 
     #[error("the operator answered a push with an unexpected frame: {0:?}")]
     Unexpected(SyncFrame),
+
+    #[error(
+        "the ignore rules of the push take {0} bytes, more than the {MAX_RULES_BYTES} bytes that \
+         one push can carry; the `.gitignore` files, the excludes files and the `ignore` lists of \
+         the synced directories hold too many lines"
+    )]
+    RulesTooLarge(usize),
 }
 
 /// The HTTP connection to the operator after the upgrade to a websocket.
@@ -223,6 +232,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreviewSyncConnection<S> {
                 (entry.plan, (index, entry.archive, entry.deleted))
             })
             .unzip();
+
+        // The rules go in `Begin` whole, and a frame that the operator can't decode would only
+        // close the connection, and fail each push again.
+        let rules_cost = plans.iter().map(|plan| plan.rules.frame_cost()).sum();
+        if rules_cost > MAX_RULES_BYTES {
+            return Err(PreviewSyncError::RulesTooLarge(rules_cost));
+        }
 
         self.send(&SyncFrame::Begin {
             push_id,
@@ -549,7 +565,9 @@ impl TreeListing {
 /// each directory that it reads, as [`TreeListing::new_watching`] does.
 ///
 /// Returns `None` when a change touches the rules, such as a `.gitignore` that changed or that a
-/// new directory holds, because the rules no longer hold then, so the tree needs a full push.
+/// new directory holds, because the rules no longer hold then, so the tree needs a full push. So
+/// does a change that deletes more paths than one [`SyncFrame::EntryDone`] can list, such as a
+/// branch switch, because a full push deletes by its manifest, which it sends in chunks.
 pub fn pack_changes(
     index: u32,
     local: &Path,
@@ -620,6 +638,14 @@ pub fn pack_changes(
             }
             packed_directories.push(path);
         }
+    }
+
+    let deleted_cost = deleted
+        .iter()
+        .map(|path| wanted_path_frame_cost(path))
+        .sum::<usize>();
+    if deleted_cost > MAX_MANIFEST_CHUNK_BYTES {
+        return Ok(None);
     }
 
     pack_paths(index, local, &paths, rules.snapshot(), deleted).map(Some)

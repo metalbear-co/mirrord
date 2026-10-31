@@ -29,7 +29,7 @@ use super::{
 use crate::sync::{
     EntryCounts, EntryPlan, MAX_DATA_CHUNK_BYTES, ManifestKind, ManifestPath, PushMode,
     RejectReason, SYNC_PROTOCOL_VERSION, SidecarState, SyncFrame, UnpairReason,
-    rules::{IgnoreRules, IgnoreSnapshot},
+    rules::{IgnoreRules, IgnoreSnapshot, IgnoreSource},
 };
 
 /// How long a test waits for a push before it fails, so that a push that stalls fails the test
@@ -741,6 +741,21 @@ fn a_deleted_directory_carries_its_descendants() {
     assert_eq!(packed.deleted, vec![b"gone".to_vec(), b"kept".to_vec()]);
 }
 
+/// A branch switch can delete thousands of files and keep their directories, and the deleted
+/// paths of an incremental push go in one `EntryDone` frame, which the operator can't decode
+/// past its limit. A full push deletes by its manifest instead, which it sends in chunks.
+#[test]
+fn a_change_that_deletes_too_many_paths_needs_a_full_push() {
+    let local = tempfile::tempdir().unwrap();
+    let deleted = (0..5000)
+        .map(|file| format!("packages/package/src/component_file_{file:05}.tsx"))
+        .collect::<Vec<_>>();
+    let deleted = deleted.iter().map(String::as_str).collect::<Vec<_>>();
+
+    assert_eq!(pack_changed(local.path(), &[], &deleted), None);
+    assert!(pack_changed(local.path(), &[], deleted.get(..100).unwrap()).is_some());
+}
+
 /// A `.gitignore` that a developer creates above the pushed directory changes the rules too, so
 /// the listing must name it even before it exists, for the CLI to watch it.
 #[test]
@@ -753,6 +768,47 @@ fn a_gitignore_above_the_tree_is_a_rule_file_before_it_exists() {
 
     let root = repository.path().canonicalize().unwrap();
     assert!(listing.rule_files().contains(&root.join(".gitignore")));
+}
+
+/// The rules of every entry go in the push's `Begin` frame, which the operator can't decode
+/// past its limit, so it would close the connection, and each push would fail the same way. The
+/// push must fail with what is too large before it sends anything.
+#[tokio::test]
+async fn a_push_whose_rules_dont_fit_in_a_frame_fails() {
+    let (mut connection, _operator) = connection().await;
+    let rules = IgnoreSnapshot {
+        prefix: Vec::new(),
+        sources: vec![IgnoreSource {
+            root: Vec::new(),
+            lines: (0..30_000)
+                .map(|line| format!("generated/output/file_{line:05}.js"))
+                .collect(),
+        }],
+    };
+    let entry = PackedEntry {
+        plan: EntryPlan {
+            index: 0,
+            files: 0,
+            directories: 0,
+            bytes: 0,
+            rules,
+        },
+        archive: Vec::new(),
+        deleted: Vec::new(),
+    };
+
+    let error = tokio::time::timeout(
+        TEST_TIMEOUT,
+        connection.push(1, PushMode::Full, vec![entry], |_| {}),
+    )
+    .await
+    .expect("the push waited for the operator")
+    .unwrap_err();
+
+    assert!(
+        matches!(error, PreviewSyncError::RulesTooLarge(_)),
+        "{error}"
+    );
 }
 
 /// The CLI writes a large push before it reads, and another CLI that takes the sync over makes

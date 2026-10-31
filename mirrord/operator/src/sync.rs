@@ -41,6 +41,11 @@ pub const MAX_DATA_CHUNK_BYTES: usize = 256 * 1024;
 /// stays well below [`MAX_FRAME_BYTES`] both as bytes and in what decoding it allocates.
 pub const MAX_MANIFEST_CHUNK_BYTES: usize = 256 * 1024;
 
+/// The most that the rules of all the entries of one [`SyncFrame::Begin`] may cost, as
+/// [`IgnoreSnapshot::frame_cost`] counts it, which leaves the rest of [`MAX_FRAME_BYTES`] to the
+/// frame's other fields.
+pub const MAX_RULES_BYTES: usize = MAX_FRAME_BYTES / 2;
+
 /// One message of the sync protocol.
 ///
 /// `bincode` isn't self-describing, so once released, the enum may only grow: a new variant goes
