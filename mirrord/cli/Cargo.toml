@@ -99,6 +99,7 @@ axum = { workspace = true, features = ["ws"] }
 axum-extra = { workspace = true }
 rust-embed.workspace = true
 notify.workspace = true
+dunce.workspace = true
 mime_guess.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 mirrord-session-monitor-client.workspace = true

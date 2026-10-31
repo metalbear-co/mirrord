@@ -419,6 +419,21 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
         watch_files: bool,
         progress: ProgressTracker,
     ) -> CliResult<(Self, watch::Receiver<SyncActivity>)> {
+        // `mirrord-up.yaml` can name an entry's directory through `..` or a symlink, but the
+        // FSEvents watcher of macOS reports each path as it is on disk, and `Changes::merge`
+        // must find the entry that holds it.
+        let entries = entries
+            .iter()
+            .map(|entry| {
+                let local = dunce::canonicalize(&entry.local)
+                    .map_err(|error| read_failed(&entry.local, error))?;
+                Ok(SyncEntry {
+                    local,
+                    ..entry.clone()
+                })
+            })
+            .collect::<CliResult<Vec<_>>>()?
+            .into();
         let watcher = watch_files.then(TreeWatcher::new).transpose()?;
         let (activity, activity_rx) = watch::channel(SyncActivity::default());
 
