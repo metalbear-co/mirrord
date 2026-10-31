@@ -542,7 +542,8 @@ impl TreeListing {
 /// the rules of the tree's last listing, which the push applies.
 ///
 /// A changed path that exists goes into the stream, with everything below it if it is a
-/// directory. A changed path that doesn't exist goes into the paths that the push deletes,
+/// directory, which the sidecar then mirrors, so it loses the paths that the directory no
+/// longer holds. A changed path that doesn't exist goes into the paths that the push deletes,
 /// unless the rules ignore it whatever its kind was: the sidecar decides by the kind that the
 /// path has on the volume. Ignored paths are left out of the stream. Calls `before_read` with
 /// each directory that it reads, as [`TreeListing::new_watching`] does.

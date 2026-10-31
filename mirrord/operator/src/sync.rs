@@ -238,8 +238,10 @@ pub enum PushMode {
     Full,
 
     /// The push only writes the paths that it carries and deletes the paths that
-    /// [`SyncFrame::EntryDone`] lists. It applies only on top of generation `base_generation`,
-    /// and the sidecar rejects it with [`RejectReason::StaleBase`] otherwise.
+    /// [`SyncFrame::EntryDone`] lists. A directory that the stream carries, rather than one that
+    /// a path below it implies, becomes a mirror of the CLI's directory, as each entry does in a
+    /// full push, so the CLI must carry every path below it. It applies only on top of generation
+    /// `base_generation`, and the sidecar rejects it with [`RejectReason::StaleBase`] otherwise.
     Incremental { base_generation: u64 },
 }
 
