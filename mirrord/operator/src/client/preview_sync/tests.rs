@@ -756,6 +756,51 @@ fn a_change_that_deletes_too_many_paths_needs_a_full_push() {
     assert!(pack_changed(local.path(), &[], deleted.get(..100).unwrap()).is_some());
 }
 
+/// A watcher reports a directory that a symlink or a file replaced together with the paths that
+/// the directory held. Below a symlink, those paths resolve through it, so packing them would
+/// send the files behind the symlink, which can lie outside the tree, and the sidecar refuses a
+/// path below a symlink of the push. Below a file, they fail to read. The push must hold only the
+/// symlink or the file, which replaces the old directory whole in the pod.
+#[cfg(unix)]
+#[test]
+fn a_directory_replaced_by_a_symlink_or_a_file_is_pushed_without_its_old_paths() {
+    let local = tempfile::tempdir().unwrap();
+    let shared = tempfile::tempdir().unwrap();
+    fs::create_dir(local.path().join("lib")).unwrap();
+    fs::write(local.path().join("lib/a.js"), "old a").unwrap();
+    fs::write(shared.path().join("a.js"), "outside the tree").unwrap();
+    let rules = list(local.path(), &[]).unwrap().rules().clone();
+    let changed = BTreeSet::from([PathBuf::from("lib"), PathBuf::from("lib/a.js")]);
+
+    fs::remove_dir_all(local.path().join("lib")).unwrap();
+    symlink(shared.path(), local.path().join("lib")).unwrap();
+    let packed = pack_changes(0, local.path(), &rules, &changed, &mut |_| Ok(()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(unpacked(&packed).into_keys().collect::<Vec<_>>(), ["lib"]);
+    assert!(packed.deleted.is_empty(), "{:?}", packed.deleted);
+
+    fs::remove_file(local.path().join("lib")).unwrap();
+    fs::write(local.path().join("lib"), "a file").unwrap();
+    let packed = pack_changes(0, local.path(), &rules, &changed, &mut |_| Ok(()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(unpacked(&packed).into_keys().collect::<Vec<_>>(), ["lib"]);
+}
+
+/// A file that replaced a directory without an event of its own leaves the paths that the
+/// directory held unreadable, so they are gone, and the push deletes them.
+#[cfg(unix)]
+#[test]
+fn a_path_below_a_file_is_deleted() {
+    let local = tempfile::tempdir().unwrap();
+    fs::write(local.path().join("lib"), "a file").unwrap();
+
+    let packed = pack_changed(local.path(), &[], &["lib/a.js"]).unwrap();
+
+    assert_eq!(packed.deleted, vec![b"lib/a.js".to_vec()]);
+}
+
 /// A `.gitignore` that a developer creates above the pushed directory changes the rules too, so
 /// the listing must name it even before it exists, for the CLI to watch it.
 #[test]

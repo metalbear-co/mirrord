@@ -561,8 +561,11 @@ impl TreeListing {
 /// directory, which the sidecar then mirrors, so it loses the paths that the directory no
 /// longer holds. A changed path that doesn't exist goes into the paths that the push deletes,
 /// unless the rules ignore it whatever its kind was: the sidecar decides by the kind that the
-/// path has on the volume. Ignored paths are left out of the stream. Calls `before_read` with
-/// each directory that it reads, as [`TreeListing::new_watching`] does.
+/// path has on the volume. The changed paths below one that the stream holds or that the push
+/// deletes are left out, because the stream holds them already, or because nothing can lie
+/// below a file or a symlink that replaced a directory. Ignored paths are left out of the
+/// stream. Calls `before_read` with each directory that it reads, as
+/// [`TreeListing::new_watching`] does.
 ///
 /// Returns `None` when a change touches the rules, such as a `.gitignore` that changed or that a
 /// new directory holds, because the rules no longer hold then, so the tree needs a full push. So
@@ -578,17 +581,14 @@ pub fn pack_changes(
     let mut walk_rules = rules.clone();
     let mut paths = Vec::new();
     let mut deleted = Vec::new();
-    // The directories that the stream holds whole, whose changed descendants it holds already.
-    let mut packed_directories: Vec<&Path> = Vec::new();
-    // The deleted paths, whose descendants are gone too, and which the sidecar deletes whole.
-    let mut deleted_paths: Vec<&Path> = Vec::new();
+    // The last changed path that the stream holds or that the push deletes, which covers the
+    // paths below it: the stream holds a directory whole, nothing lies below a file or a symlink,
+    // and the sidecar deletes a path whole. `changed` is sorted, so the paths below a path follow
+    // it.
+    let mut covered: Option<&Path> = None;
 
     for path in changed {
-        if packed_directories
-            .iter()
-            .chain(&deleted_paths)
-            .any(|directory| path.starts_with(directory))
-        {
+        if covered.is_some_and(|covered| path.starts_with(covered)) {
             continue;
         }
 
@@ -608,10 +608,16 @@ pub fn pack_changes(
 
         let metadata = match fs::symlink_metadata(local.join(path)) {
             Ok(metadata) => metadata,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            // A path below a directory that a file replaced is gone too.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                ) =>
+            {
                 if (rules.is_ignored(path, false) && rules.is_ignored(path, true)).not() {
                     deleted.push(join_relative(b"", path));
-                    deleted_paths.push(path);
+                    covered = Some(path);
                 }
                 continue;
             }
@@ -627,6 +633,7 @@ pub fn pack_changes(
         }
 
         paths.push(listed(path.clone(), &metadata));
+        covered = Some(path);
 
         if is_dir {
             // The walk adds the `.gitignore` of every directory below `path` to the rules, also
@@ -636,7 +643,6 @@ pub fn pack_changes(
             if walk_rules.snapshot().sources.len() != sources {
                 return Ok(None);
             }
-            packed_directories.push(path);
         }
     }
 
