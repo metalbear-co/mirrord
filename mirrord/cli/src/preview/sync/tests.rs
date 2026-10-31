@@ -599,7 +599,7 @@ async fn a_failed_push_is_retried_once_unless_it_would_repeat() {
         if attempt == 1 {
             let error = tokio::time::timeout(FRAME_TIMEOUT, sync)
                 .await
-                .unwrap()
+                .expect("the sync didn't end after the failed retry")
                 .unwrap();
             assert!(
                 super::with_causes(&error).contains("disk error"),
@@ -626,7 +626,7 @@ async fn a_failed_push_is_retried_once_unless_it_would_repeat() {
         .await;
     let error = tokio::time::timeout(FRAME_TIMEOUT, sync)
         .await
-        .unwrap()
+        .expect("the sync didn't end after the push failed")
         .unwrap();
     assert!(
         super::with_causes(&error).contains("node_modules"),
@@ -655,7 +655,7 @@ async fn a_replaced_sync_stops_without_reconnecting() {
 
     let result = tokio::time::timeout(FRAME_TIMEOUT, sync)
         .await
-        .unwrap()
+        .expect("the sync didn't end after another CLI took over")
         .unwrap();
     assert!(
         matches!(result, CliError::PreviewSyncReplaced),
@@ -678,7 +678,7 @@ async fn the_activity_reports_busy_work_and_counts_progress() {
     let next = async |activity: &mut tokio::sync::watch::Receiver<SyncActivity>| {
         tokio::time::timeout(FRAME_TIMEOUT, activity.changed())
             .await
-            .unwrap()
+            .expect("the activity didn't change")
             .unwrap();
         *activity.borrow_and_update()
     };
@@ -754,7 +754,7 @@ async fn an_app_that_keeps_failing_to_start_is_no_progress() {
         activity.wait_for(|activity| activity.first_push.is_some()),
     )
     .await
-    .unwrap()
+    .expect("the first push didn't land")
     .unwrap()
     .progress;
 
@@ -786,7 +786,7 @@ async fn an_app_that_keeps_failing_to_start_is_no_progress() {
         activity.wait_for(|activity| activity.handled == Some(1)),
     )
     .await
-    .unwrap()
+    .expect("the supervisor didn't handle the first push")
     .unwrap()
     .progress;
 
@@ -842,7 +842,7 @@ async fn each_pairing_has_its_own_first_push() {
         activity.wait_for(|activity| activity.first_push == Some(3)),
     )
     .await
-    .unwrap()
+    .expect("the first push of the new pairing didn't land")
     .unwrap();
 
     operator
@@ -904,7 +904,7 @@ async fn an_unpair_ends_the_busy_install() {
         .await;
     tokio::time::timeout(FRAME_TIMEOUT, activity.wait_for(|activity| activity.busy))
         .await
-        .unwrap()
+        .expect("the CLI didn't report the pod busy")
         .unwrap();
 
     operator
@@ -946,7 +946,7 @@ async fn a_broken_connection_ends_the_busy_install() {
         .await;
     tokio::time::timeout(FRAME_TIMEOUT, activity.wait_for(|activity| activity.busy))
         .await
-        .unwrap()
+        .expect("the CLI didn't report the pod busy")
         .unwrap();
 
     drop(operator);
@@ -1263,7 +1263,7 @@ async fn a_full_push_that_fails_to_pack_after_the_exchange_frees_the_pod() {
         activity.wait_for(|activity| activity.busy.not()),
     )
     .await
-    .unwrap()
+    .expect("the CLI didn't report the pod free")
     .unwrap();
 
     // A rule change starts a full push, and `app.js` goes after the CLI hashed it.
