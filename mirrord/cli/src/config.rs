@@ -32,7 +32,6 @@ use mirrord_config::{
 use mirrord_layer_lib::process::windows::injection::{
     InjectionMethod, MIRRORD_INJECTION_METHOD_ENV,
 };
-use mirrord_up::ServiceMode;
 use strum_macros::Display;
 use thiserror::Error;
 use url::Url;
@@ -2070,12 +2069,24 @@ pub(super) struct UpArgs {
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml", global = true)]
     pub config_file: PathBuf,
 
-    /// Network mode to use for all defined services.
+    /// Mode to use for all defined services: `split`, `replace`, `mirror`, or one defined under
+    /// `modes` in the config file.
+    ///
+    /// - `split`: incoming traffic is split between the local and original services using HTTP
+    ///   filtering. If no filter is provided, a header filter matching the regex `baggage:
+    ///   .*mirrord-session={session key}.*` is used.
+    ///
+    /// - `replace`: the local service replaces the original one: the target workload is copied and
+    ///   scaled down to zero, so all incoming traffic reaches your local process. Any configured
+    ///   HTTP filter is ignored. Requires a target that supports copy target with scale down.
+    ///
+    /// - `mirror`: incoming traffic is mirrored to the local service using HTTP filtering, with
+    ///   the same default filter as `split`.
     ///
     /// Overrides the `default_mode` of every service being launched. When
     /// omitted, each service uses the mode from the config file.
-    #[arg(short = 'm', long, value_enum, global = true)]
-    pub mode: Option<ServiceMode>,
+    #[arg(short = 'm', long, global = true)]
+    pub mode: Option<String>,
 
     /// Session key, used as the `{{ key }}` template variable.
     ///
@@ -2673,7 +2684,7 @@ mod tests {
         let args = up_args(args);
         assert_eq!(args.config_file, PathBuf::from("x.yaml"));
         assert_eq!(args.key.as_deref(), Some("demo"));
-        assert!(matches!(args.mode, Some(ServiceMode::Mirror)));
+        assert_eq!(args.mode.as_deref(), Some("mirror"));
         assert_eq!(args.context.as_deref(), Some("staging"));
         assert!(args.services.is_empty());
         assert!(matches!(

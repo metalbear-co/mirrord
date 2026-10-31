@@ -121,12 +121,17 @@ fn up_option_mapped_onto_mirrord_json() {
     );
 }
 
+/// `default_mode` takes a mode name, not the values of the `incoming.mode` it maps onto.
 #[test]
 fn up_mode() {
     let output = explain_path(ConfigFormat::MirrordUpYaml, "services.api.default_mode");
-    assert_eq!(
-        output.allowed_values,
-        Some(vec![json!("split"), json!("replace"), json!("mirror")])
+    assert_eq!(output.allowed_values, None);
+    assert!(
+        output
+            .description
+            .unwrap()
+            .contains("defined under `modes`"),
+        "default_mode should point at custom modes"
     );
     assert_eq!(
         output.mirrord_json_path.as_deref(),
@@ -171,7 +176,7 @@ fn target() {
 /// A `mirrord.json` option asked in a `mirrord-up.yaml` suggests the up setting that maps onto
 /// it, then setting it through `config_patch`. A map key is only filled in from the asked path
 /// where the paths agree up to it, so `feature.network.…` is not under a service called
-/// `network`.
+/// `network` or a mode called `network`.
 #[test]
 fn mirrord_json_path_in_up() {
     let output = explain_path(ConfigFormat::MirrordUpYaml, "feature.network.incoming.mode");
@@ -190,7 +195,7 @@ fn mirrord_json_path_in_up() {
     assert!(
         suggestions
             .iter()
-            .all(|path| path.starts_with("services.<name>.")),
+            .all(|path| path.starts_with("services.<name>.") || path.starts_with("modes.<name>.")),
         "{suggestions:?}"
     );
 }
