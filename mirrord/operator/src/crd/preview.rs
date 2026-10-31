@@ -497,6 +497,13 @@ pub struct PreviewSyncStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_disabled: Option<String>,
 
+    /// The image that the preview pod runs the app in: the session's own image, or, for a
+    /// session without one, the target's image when the operator built the pod. `mirrord preview
+    /// sync` reuses a session without an image only while the target still names this one. Set
+    /// with `storage`, and optional only so that a later status update can leave it unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+
     /// What the sync sidecar in the preview pod is doing, or `disconnected` while no sidecar is
     /// connected to the operator.
     #[serde(default, skip_serializing_if = "Option::is_none")]

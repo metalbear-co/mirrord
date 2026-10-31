@@ -244,6 +244,9 @@ struct PreparedPreview {
     /// session resource is created.
     subtask: ProgressTracker,
     config_target: Target,
+    /// The image of the target's container, when the operator reports it, which decides whether
+    /// a sync session without an image of its own is reused.
+    target_image: Option<String>,
     /// Sent to the operator once the session exists, see [`resolve_secret_mounts`].
     secret_values: BTreeMap<String, ByteString>,
     /// The session's spec, but for what [`PreparedPreview::start`] fills in: `db_branching`,
@@ -454,7 +457,7 @@ impl PreparedPreview {
             (incoming, None)
         };
 
-        let session_target = resolve_config_target(
+        let (session_target, target_image) = resolve_config_target(
             &config_target,
             operator_api.client(),
             layer_config.target.namespace.as_deref(),
@@ -594,6 +597,7 @@ impl PreparedPreview {
             analytics,
             subtask,
             config_target,
+            target_image,
             secret_values,
             spec,
             sync,
@@ -618,6 +622,7 @@ impl PreparedPreview {
             mut analytics,
             mut subtask,
             config_target,
+            target_image,
             secret_values,
             mut spec,
             sync,
@@ -697,6 +702,7 @@ impl PreparedPreview {
             reusable_session(
                 &replaced_sessions,
                 &spec,
+                target_image.as_deref(),
                 secret_values.is_empty().not(),
                 now,
             )
@@ -1271,16 +1277,21 @@ const MIN_REUSED_TTL: SignedDuration = SignedDuration::from_mins(5);
 /// The session that a sync session with `spec` can keep using rather than replace: the one live
 /// session in `sessions` with the same spec and at least [`MIN_REUSED_TTL`] left at `now`.
 /// `sessions` holds the sessions under the same key and target. A failed session or one that is
-/// being deleted isn't live, but a session without a status, which the operator hasn't seen yet,
-/// is live. `share_host` doesn't count: a session that replaced another one asks for its host,
+/// being deleted isn't live. `share_host` doesn't count: a session that replaced another one asks for its host,
 /// and one that didn't has its host only in its status, so the field differs between two runs
 /// with the same settings.
+///
+/// A session without an image of its own runs the image that the target named when the operator
+/// built its pod, so it must still be `target_image`, the image that the target names now. A
+/// session whose status doesn't name its image yet, and a target whose image is unknown, give a
+/// new session, which runs the current image whatever it is.
 ///
 /// With `secret_mounts`, there is none: the operator can't tell whether the session's Secret
 /// holds the current contents of the files, so the session is replaced, which writes them again.
 fn reusable_session<'a>(
     sessions: &'a [PreviewSession],
     spec: &PreviewSessionSpec,
+    target_image: Option<&str>,
     secret_mounts: bool,
     now: Timestamp,
 ) -> Option<&'a PreviewSession> {
@@ -1305,7 +1316,15 @@ fn reusable_session<'a>(
         ..spec.clone()
     } == session.spec;
 
-    (secret_mounts.not() && live && lasts && same_spec).then_some(session)
+    let session_image = session
+        .status
+        .as_ref()
+        .and_then(|status| status.sync.as_ref())
+        .and_then(|sync| sync.image.as_deref());
+    let same_image =
+        spec.image.is_empty().not() || (target_image.is_some() && session_image == target_image);
+
+    (secret_mounts.not() && live && lasts && same_spec && same_image).then_some(session)
 }
 
 /// The creation timeout of a preview session. For a session with `sync`, it measures time without
@@ -1710,7 +1729,8 @@ async fn preview_logs(
                 layer_config.target.namespace.as_deref(),
             )
             .await
-            .inspect_err(|_| subtask.failure(None))?,
+            .inspect_err(|_| subtask.failure(None))?
+            .0,
         ),
         None => None,
     };
@@ -1852,7 +1872,8 @@ async fn preview_stop(
                 layer_config.target.namespace.as_deref(),
             )
             .await
-            .inspect_err(|_| subtask.failure(None))?,
+            .inspect_err(|_| subtask.failure(None))?
+            .0,
         ),
         None => None,
     };
@@ -2002,7 +2023,7 @@ async fn preview_diff(
         CliError::PreviewTargetRequired
     })?;
 
-    let session_target = resolve_config_target(
+    let (session_target, _) = resolve_config_target(
         config_target,
         operator_api.client(),
         layer_config.target.namespace.as_deref(),
@@ -2246,13 +2267,15 @@ fn target_namespace<'a>(
 /// A label target is sent as written: it has no single workload for the operator to fetch,
 /// and the pods it matches can each name their container differently. The operator reports
 /// a selector that matches no ready pod as a failed session.
+///
+/// Also returns the image of the target's container, when the operator reports one.
 async fn resolve_config_target(
     config_target: &Target,
     client: &kube::Client,
     namespace: Option<&str>,
-) -> CliResult<SessionTarget> {
+) -> CliResult<(SessionTarget, Option<String>)> {
     if let Target::Label(label_target) = config_target {
-        return Ok(label_session_target(label_target));
+        return Ok((label_session_target(label_target), None));
     }
 
     let ns = namespace.unwrap_or(client.default_namespace());
@@ -2278,9 +2301,11 @@ async fn resolve_config_target(
         target.set_container(runtime_data.container_name);
     }
 
-    SessionTarget::from_config(target).ok_or_else(|| {
+    let session_target = SessionTarget::from_config(target).ok_or_else(|| {
         CliError::PreviewTargetResolutionFailed("no valid container found".to_owned())
-    })
+    })?;
+
+    Ok((session_target, target_crd.spec.image))
 }
 
 /// Builds the session target for a label target. An empty container tells the operator to
@@ -2675,6 +2700,7 @@ mod tests {
                 "phase": phase,
                 "startedAt": "2026-10-30T00:00:00Z",
                 "expiresAt": expires_at,
+                "sync": { "image": "app:v1" },
             }))
             .unwrap(),
         );
@@ -2703,10 +2729,11 @@ mod tests {
     /// A sync session is reused only when it is the one live session under the key and target,
     /// has the same settings and has enough of its TTL left, so that a run with changed settings,
     /// or a session that is gone, failed, ambiguous or about to expire, gets a fresh session. A
-    /// session that the operator hasn't given a status yet is live. The host that a session is
-    /// shared on isn't a setting of the run, so it doesn't keep a rerun from reusing the session.
-    /// With secret mounts, the operator can't tell whether the session's Secret holds the current
-    /// files, so the session is replaced.
+    /// session without an image of its own must also run the image that the target names now, or
+    /// a rerun after the target moved to a new image would keep the old one. The host that a
+    /// session is shared on isn't a setting of the run, so it doesn't keep a rerun from reusing
+    /// the session. With secret mounts, the operator can't tell whether the session's Secret
+    /// holds the current files, so the session is replaced.
     #[test]
     fn only_a_live_session_with_the_same_settings_is_reused() {
         let spec = sync_spec();
@@ -2714,7 +2741,7 @@ mod tests {
         let in_an_hour = "2026-10-30T01:30:00Z";
         let ready = session(&spec, PreviewSessionPhase::Ready, in_an_hour);
         let reusable = |sessions: &[PreviewSession], secret_mounts| {
-            reusable_session(sessions, &spec, secret_mounts, now).is_some()
+            reusable_session(sessions, &spec, Some("app:v1"), secret_mounts, now).is_some()
         };
 
         assert!(reusable(std::slice::from_ref(&ready), false));
@@ -2722,14 +2749,32 @@ mod tests {
             &[session(&spec, PreviewSessionPhase::Idle, in_an_hour)],
             false
         ));
-        assert!(reusable(
-            &[PreviewSession::new(
-                "deployment-app-pr-123-a1b2c3d4",
-                spec.clone()
-            )],
-            false
-        ));
         assert!(reusable(std::slice::from_ref(&ready), true).not());
+
+        // The target moved to another image, or its image is unknown, or the operator hasn't
+        // written which image the session runs yet.
+        for target_image in [Some("app:v2"), None] {
+            assert!(
+                reusable_session(
+                    std::slice::from_ref(&ready),
+                    &spec,
+                    target_image,
+                    false,
+                    now
+                )
+                .is_none()
+            );
+        }
+        assert!(
+            reusable(
+                &[PreviewSession::new(
+                    "deployment-app-pr-123-a1b2c3d4",
+                    spec.clone()
+                )],
+                false
+            )
+            .not()
+        );
         assert!(
             reusable(
                 &[session(&spec, PreviewSessionPhase::Failed, in_an_hour)],

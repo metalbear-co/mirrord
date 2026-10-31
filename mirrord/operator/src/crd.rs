@@ -104,6 +104,13 @@ pub const TARGET_NAMESPACE_ANNOTATION: &str = "mirrord.metalbear.co/target-names
 pub struct TargetSpec {
     /// The kubernetes resource to target.
     pub target: KubeTarget,
+
+    /// The image of the target's container, as the target's pod template names it. `mirrord
+    /// preview sync` reuses a preview that runs the target's image only while the target still
+    /// names that image. `None` for a target without a single container, such as a label target,
+    /// and from an operator that doesn't report it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
 }
 
 impl TargetCrd {
