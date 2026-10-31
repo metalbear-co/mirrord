@@ -8,7 +8,10 @@ use mirrord_analytics::{
     UpSessionDbBranch,
 };
 use mirrord_config::config::EnvKey;
-use mirrord_operator::{client::UpSession, crd::session::UpSessionInfo};
+use mirrord_operator::{
+    client::UpSession,
+    crd::{NewOperatorFeature, session::UpSessionInfo},
+};
 use mirrord_up::{
     InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, UpConfig, UpError, UpListing,
     load_up_config, run_wizard,
@@ -24,6 +27,8 @@ use crate::{
 };
 
 pub(crate) mod db_branches;
+
+use db_branches::NoOperator;
 
 /// Context for sessions started by `mirrord up`.
 #[derive(Clone, Debug)]
@@ -73,14 +78,108 @@ pub enum UpCliError {
     ))]
     ConfigNotFound,
 
-    /// The operator couldn't tell what a service's DB branching request resolves to, or
-    /// rejected it. Shown as the session would show it (including its help, e.g. to upgrade the
+    /// A service's operator couldn't be used though its config requires one, or couldn't tell
+    /// what its DB branching request resolves to, or rejected it. Shown as the session would show it (including its help, e.g. to upgrade the
     /// operator), prefixed with the service.
     #[error("{service}: {error}")]
     #[diagnostic(forward(error))]
     DbBranches {
         service: Arc<str>,
         error: Box<CliError>,
+    },
+
+    /// A mode's `db_branching` line asks for DB branches, but the service's cluster has no
+    /// usable mirrord operator to create them.
+    #[error(
+        "{service}: mode `{mode}` sets `db_branching`, but there is no usable mirrord operator: \
+         {reason}"
+    )]
+    #[diagnostic(help(
+        "DB branching needs the mirrord operator. To run against the source databases, set \
+         `db_branching: off` for mode `{mode}` in mirrord-up.yaml."
+    ))]
+    ModeDbBranchesNoOperator {
+        service: Arc<str>,
+        mode: Arc<str>,
+        reason: NoOperator,
+    },
+
+    /// A mode's `db_branching` line asks for DB branches, but the service's workload has none
+    /// defined.
+    #[error(
+        "{service} has no DB branch definitions: mode `{mode}` sets `db_branching`, but no \
+         MirrordSplitConfig defines `dbBranches` for its workload"
+    )]
+    #[diagnostic(help(
+        "To run against the source databases, set `db_branching: off` for mode `{mode}` in \
+         mirrord-up.yaml. Or ask the MirrordSplitConfig owner to add `dbBranches` for the \
+         workload."
+    ))]
+    ModeDbBranchesNoDefinitions { service: Arc<str>, mode: Arc<str> },
+
+    /// A mode's `queues` line asks for queue splitting, but the service's cluster has no usable
+    /// mirrord operator to split them.
+    #[error(
+        "{service}: mode `{mode}` sets `queues`, but there is no usable mirrord operator: {reason}"
+    )]
+    #[diagnostic(help(
+        "Queue splitting needs the mirrord operator. Remove `queues` from mode `{mode}` in \
+         mirrord-up.yaml to run without requiring it."
+    ))]
+    ModeQueuesNoOperator {
+        service: Arc<str>,
+        mode: Arc<str>,
+        reason: NoOperator,
+    },
+
+    /// A mode's `queues` line asks for queue splitting, but the service's operator splits no
+    /// queues: its queue splitting is off, or its license doesn't include it.
+    #[error(
+        "{service}: mode `{mode}` sets `queues`, but the mirrord operator doesn't split queues"
+    )]
+    #[diagnostic(help(
+        "Enable queue splitting in the mirrord operator, or remove `queues` from mode `{mode}` in \
+         mirrord-up.yaml to run without requiring it."
+    ))]
+    ModeQueuesUnsupported { service: Arc<str>, mode: Arc<str> },
+
+    /// A mode's `db_branching` line asks for DB branches of an engine the service's operator has
+    /// turned off.
+    #[error(
+        "{service}: mode `{mode}` sets `db_branching`, but the mirrord operator doesn't support \
+         {feature}"
+    )]
+    #[diagnostic(help(
+        "Enable it in the mirrord operator, or set `db_branching: off` for mode `{mode}` in \
+         mirrord-up.yaml to run against the source databases."
+    ))]
+    ModeDbBranchesFeatureDisabled {
+        service: Arc<str>,
+        mode: Arc<str>,
+        feature: NewOperatorFeature,
+    },
+
+    /// Services that share a DB branch ask for it with different copy modes. The branch is
+    /// created once, so all but one would fail when they attach to it.
+    #[error("DB branch `{branch}` is requested with different copy modes: {requests}")]
+    #[diagnostic(help(
+        "Services started under one key share the branch, so give them the same copy mode (e.g. \
+         the same `db_branching`), or start them under different keys."
+    ))]
+    BranchCopyModeConflict { branch: String, requests: String },
+
+    /// The copy mode of a mode's `db_branching` line is missing from an entry's
+    /// `copy.allowedModes`. The message comes from the operator and names the entry.
+    #[error("{service}: {message}")]
+    #[diagnostic(help(
+        "Change `db_branching` for mode `{mode}` in mirrord-up.yaml (`inherit` uses each entry's \
+         own copy mode), or ask the MirrordSplitConfig owner to add the mode to the entry's \
+         `copy.allowedModes`."
+    ))]
+    ModeCopyModeNotAllowed {
+        service: Arc<str>,
+        mode: Arc<str>,
+        message: String,
     },
 
     #[error("failed to acquire OS username for key")]
@@ -228,7 +327,9 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
 
     let mut services =
         mirrord_up::resolve_services(up_config, &args.config_file, args.context, &key).await?;
-    let requesting = db_branches::check_db_branches(&mut services).await?;
+    let mut operators = db_branches::usable_operators(&services).await?;
+    db_branches::check_queue_splits(&services, &operators)?;
+    let requesting = db_branches::check_db_branches(&mut services, &mut operators).await?;
     let modes = services
         .iter()
         .map(|service| (service.service_name.clone(), service.mode.clone()))
@@ -332,7 +433,15 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::ServiceFailedToStart { .. }) => Self::ServiceStartFailed,
-            UpCliError::DbBranches { .. } => Self::DbBranching,
+            UpCliError::DbBranches { .. }
+            | UpCliError::ModeDbBranchesNoOperator { .. }
+            | UpCliError::ModeDbBranchesNoDefinitions { .. }
+            | UpCliError::ModeDbBranchesFeatureDisabled { .. }
+            | UpCliError::BranchCopyModeConflict { .. }
+            | UpCliError::ModeCopyModeNotAllowed { .. } => Self::DbBranching,
+            UpCliError::ModeQueuesNoOperator { .. } | UpCliError::ModeQueuesUnsupported { .. } => {
+                Self::ConfigValidation
+            }
             UpCliError::Up(UpError::PreCommandFailed { .. })
             | UpCliError::Up(UpError::PreCommandSpawn { .. }) => Self::PreCommandFailed,
             UpCliError::Up(UpError::Io(_))

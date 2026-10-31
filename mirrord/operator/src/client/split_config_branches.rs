@@ -158,11 +158,19 @@ pub fn check_attach_copy_mode(
     if existing_mode == requested_mode {
         return Ok(());
     }
+    let created_by = match existing.annotations().get(UP_SERVICE_ANNOTATION) {
+        Some(service) => format!("the `mirrord up` service `{service}`"),
+        None => format!(
+            "a session targeting `{}/{}`",
+            existing.spec.target.kind.to_lowercase(),
+            existing.spec.target.name
+        ),
+    };
     Err(OperatorApiError::BranchCopyModeMismatch {
         branch_id: existing.spec.id.clone(),
         existing_mode,
         requested_mode,
-        creator: existing.spec.target.name.clone(),
+        created_by,
     })
 }
 
@@ -372,7 +380,7 @@ mod tests {
     }
 
     /// Attaching with the creator's copy mode is fine; a different mode is refused, naming the
-    /// branch, both modes, and the workload that created it.
+    /// branch, both modes, and, without a `mirrord up` service to name, the creator's target.
     #[test]
     fn attach_copy_mode_must_match_the_creator() {
         let existing = pg_branch(
@@ -390,7 +398,7 @@ mod tests {
             branch_id,
             existing_mode,
             requested_mode,
-            creator,
+            created_by,
         } = error
         else {
             panic!("unexpected error {error:?}");
@@ -398,7 +406,7 @@ mod tests {
         assert_eq!(branch_id, "orders-pg-a1b2c3");
         assert_eq!(existing_mode, "schema");
         assert_eq!(requested_mode, "empty");
-        assert_eq!(creator, "cake-maker");
+        assert_eq!(created_by, "a session targeting `deployment/cake-maker`");
     }
 
     /// A PostgreSQL entry's additional databases are copied too, so their modes are part of

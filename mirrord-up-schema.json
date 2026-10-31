@@ -16,7 +16,7 @@
       "x-mirrord-plan": "oss"
     },
     "modes": {
-      "description": "Custom modes keyed by name, selected with a service's `default_mode` or\n`mirrord up --mode`. The built-in names (`split`, `replace`, `mirror`) are reserved.",
+      "description": "Custom modes keyed by name, selected with a service's `default_mode` or\n`mirrord up --mode`. An entry named after a built-in mode (`split`, `replace`, `mirror`)\nmay set only `db_branching`.",
       "type": "object",
       "additionalProperties": {
         "anyOf": [
@@ -125,6 +125,36 @@
         "cron_job"
       ],
       "x-mirrord-plan": "team"
+    },
+    "DbBranching": {
+      "description": "Which DB branches a mode requests.",
+      "oneOf": [
+        {
+          "description": "Branches of every database defined on the workload's `MirrordSplitConfig`, created empty.",
+          "type": "string",
+          "const": "empty"
+        },
+        {
+          "description": "Like `empty`, with the source database's schema copied.",
+          "type": "string",
+          "const": "schema"
+        },
+        {
+          "description": "Like `empty`, with the source database's schema and data copied.",
+          "type": "string",
+          "const": "all"
+        },
+        {
+          "description": "Branches of every database defined on the workload's `MirrordSplitConfig`, each copied\nwith its own `copy.mode`.",
+          "type": "string",
+          "const": "inherit"
+        },
+        {
+          "description": "No branches: the service runs against the source databases.",
+          "type": "string",
+          "const": "off"
+        }
+      ]
     },
     "DeploymentTarget": {
       "description": "<!--${internal}-->\nMirror the deployment specified by [`DeploymentTarget::deployment`].",
@@ -254,16 +284,33 @@
       "x-mirrord-plan": "team"
     },
     "ModeConfig": {
-      "description": "A custom mode, defined under `modes` and selected by name with `default_mode` or\n`mirrord up --mode`.",
+      "description": "A custom mode, defined under `modes` and selected by name with `default_mode` or\n`mirrord up --mode`.\n\nAn entry named after a built-in mode (`split`, `replace`, `mirror`) may set only\n`db_branching`, which then applies to that built-in mode for every service.",
       "type": "object",
       "properties": {
+        "db_branching": {
+          "description": "Which DB branches the service requests, from the `dbBranches` defined on the workload's\n`MirrordSplitConfig`: `empty`, `schema` or `all` to copy every one with that copy mode,\n`inherit` to copy each with its own, `off` for none. Applies whatever `incoming` is.\n\nWhen not set, a mode whose `incoming` is `split` or `mirror` requests the same branches as\n`inherit` when the target is a single workload, but runs against the source databases\ninstead of failing when the operator can't branch or there is nothing to branch. With\n`incoming: replace` it requests none. A service that sets `db_branches` itself keeps\nthem.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DbBranching"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "incoming": {
           "description": "How incoming traffic is handled, as in the built-in mode of the same name. Defaults to\n`split`.",
-          "$ref": "#/$defs/ServiceMode",
-          "default": "split"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServiceMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "queues": {
-          "description": "How the service's queues are split. When not set, every queue defined in the cluster is\nsplit with `queue_mode: steal`.\n\nIgnored with `incoming: replace`, which doesn't split queues.",
+          "description": "How the service's queues are split. When not set, every queue defined in the cluster is\nsplit like `incoming`: mirrored with `incoming: mirror`, stolen (`queue_mode: steal`)\notherwise.\n\nIgnored with `incoming: replace`, which doesn't split queues.",
           "anyOf": [
             {
               "$ref": "#/$defs/QueueSplitMode"
@@ -658,7 +705,7 @@
       "description": "A built-in mode. Also the `incoming` of a custom mode: how the service handles incoming traffic.",
       "oneOf": [
         {
-          "description": "Incoming traffic is split between the local and the original service using HTTP filtering.\n\nUses the service's `http_filter` if set. Otherwise, requests with a header matching the\nregex `baggage: .*mirrord-session={key}.*` go to the local service, where `{key}` is the\nsession key.\n\nWith a workload target and no `db_branches` of its own, the service requests DB branching\n(`db_branches: \"*\"`): it runs against branches of the databases defined on the workload's\n`MirrordSplitConfig`, shared with the other services of the run that use the same ones.",
+          "description": "Incoming traffic is split between the local and the original service using HTTP filtering.\n\nUses the service's `http_filter` if set. Otherwise, requests with a header matching the\nregex `baggage: .*mirrord-session={key}.*` go to the local service, where `{key}` is the\nsession key.",
           "type": "string",
           "const": "split"
         },
@@ -669,7 +716,7 @@
           "x-mirrord-plan": "team"
         },
         {
-          "description": "Incoming traffic is mirrored to the local service, leaving traffic to the original service\nunaltered.\n\nUses the service's `http_filter` if set. Otherwise, requests with a header matching the\nregex `baggage: .*mirrord-session={key}.*` are mirrored, where `{key}` is the session key.\n\nWith a workload target and no `db_branches` of its own, the service requests DB branching\n(`db_branches: \"*\"`): it runs against branches of the databases defined on the workload's\n`MirrordSplitConfig`, shared with the other services of the run that use the same ones.",
+          "description": "Incoming traffic is mirrored to the local service, leaving traffic to the original service\nunaltered.\n\nUses the service's `http_filter` if set. Otherwise, requests with a header matching the\nregex `baggage: .*mirrord-session={key}.*` are mirrored, where `{key}` is the session key.",
           "type": "string",
           "const": "mirror"
         }

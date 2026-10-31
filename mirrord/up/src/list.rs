@@ -116,7 +116,7 @@ impl UpListing {
                 Ok::<_, UpError>(ListedService {
                     name: name.clone(),
                     skip: service.skip,
-                    mode: ModeConfig::named(&config.modes, &service.default_mode)?.incoming,
+                    mode: ModeConfig::named(&config.modes, &service.default_mode)?.incoming(),
                     target: ListedTarget::of(&service.target, service.config_patch.as_ref()),
                     context: patched_context(service.config_patch.as_ref())
                         .unwrap_or_else(|| up_context.get_context(service.context.clone())),

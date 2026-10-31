@@ -152,6 +152,11 @@ pub enum OperatorApiError {
     #[error("failed to resolve db_branches from the target's MirrordSplitConfig: {0}")]
     SplitConfigDbBranches(String),
 
+    /// The requested copy mode is missing from the `copy.allowedModes` of a resolved entry. The
+    /// message comes from the operator and names the entry, the mode and the allowed ones.
+    #[error("{0}")]
+    SplitConfigCopyModeNotAllowed(String),
+
     /// A resolved `dbBranches` entry does not parse with this CLI's config version.
     #[error(
         "dbBranches entry `{id}` on MirrordSplitConfig `{split_configs}` uses a setting this \
@@ -174,15 +179,15 @@ pub enum OperatorApiError {
     /// Attaching to a branch another session created under the same key, from an entry whose
     /// copy mode differs from the one the branch was created with.
     #[error(
-        "branch `{branch_id}` exists with copy mode \"{existing_mode}\", this service asked for \
-         \"{requested_mode}\""
+        "branch `{branch_id}` was created with copy mode \"{existing_mode}\", this session asks \
+         for \"{requested_mode}\""
     )]
     BranchCopyModeMismatch {
         branch_id: String,
         existing_mode: String,
         requested_mode: String,
-        /// The workload whose session created the branch.
-        creator: String,
+        /// Who created the branch: the `mirrord up` service, or else the session's target.
+        created_by: String,
     },
 
     #[error("failed to create preview secret mounts: {0}")]

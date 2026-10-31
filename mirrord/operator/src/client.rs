@@ -34,7 +34,8 @@ use mirrord_config::{
     config::EnvKey,
     feature::{
         database_branches::{
-            DatabaseBranchConfig, SplitConfigDbBranches, default_creation_timeout_secs,
+            BranchCopyMode, DatabaseBranchConfig, SplitConfigDbBranches, SplitConfigRequest,
+            default_creation_timeout_secs,
         },
         split_queues::{QueueKind, QueueSplit, SplitQueuesConfig},
     },
@@ -87,8 +88,9 @@ use crate::{
             mysql::MysqlBranchDatabase,
             pg::PgBranchDatabase,
             split_config::{
-                AllEntries, ResolveSplitConfigDbBranchesRequest,
-                ResolveSplitConfigDbBranchesResponse, SplitConfigDbBranchesRequest,
+                AllEntries, COPY_MODE_NOT_ALLOWED_REASON, ResolveSplitConfigDbBranchesRequest,
+                ResolveSplitConfigDbBranchesResponse, SplitConfigCopyMode,
+                SplitConfigDbBranchesRequest,
             },
         },
         session::{KubeResourceTarget, SessionCiInfo, SessionTarget, UpSessionInfo},
@@ -842,12 +844,22 @@ where
     pub async fn lookup_split_config_db_branches(
         &self,
         layer_config: &LayerConfig,
-        request: &SplitConfigDbBranches,
+        request: &SplitConfigRequest,
     ) -> OperatorApiResult<ResolveSplitConfigDbBranchesResponse> {
         self.operator
             .spec
             .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
-        let request = match request {
+        let copy_mode = request.copy_mode().map(|mode| match mode {
+            BranchCopyMode::Empty => SplitConfigCopyMode::Empty,
+            BranchCopyMode::Schema => SplitConfigCopyMode::Schema,
+            BranchCopyMode::All => SplitConfigCopyMode::All,
+        });
+        if copy_mode.is_some() {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchesSplitConfigCopyMode)?;
+        }
+        let request = match request.entries() {
             SplitConfigDbBranches::All(_) => SplitConfigDbBranchesRequest::All(AllEntries::All),
             SplitConfigDbBranches::Ids(ids) => SplitConfigDbBranchesRequest::Ids(ids.clone()),
         };
@@ -867,6 +879,7 @@ where
             namespace: namespace.clone(),
             target,
             request: Some(request),
+            copy_mode,
         };
         self.post_in_namespace(&namespace, "splitconfigdbbranches", &body)
             .await
@@ -874,6 +887,9 @@ where
                 // The operator's answer says what is wrong with the request (an unknown id, a
                 // config conflict) in its own words; it is shown as it is, not inside kube's
                 // wrapping of the response.
+                kube::Error::Api(response) if response.reason == COPY_MODE_NOT_ALLOWED_REASON => {
+                    OperatorApiError::SplitConfigCopyModeNotAllowed(response.message)
+                }
                 kube::Error::Api(response) => {
                     if let Some(gate) = PaidFeatureGate::from_status(&response) {
                         OperatorApiError::FeatureNotLicensed { gate }
@@ -906,6 +922,7 @@ where
             namespace: namespace.clone(),
             target,
             request: None,
+            copy_mode: None,
         };
         match self
             .post_in_namespace::<ResolveSplitConfigDbBranchesResponse>(
