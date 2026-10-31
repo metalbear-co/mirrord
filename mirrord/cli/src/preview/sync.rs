@@ -44,7 +44,8 @@ use tokio::{
 
 use crate::error::{CliError, CliResult};
 
-#[cfg(test)]
+// `mirrord preview sync` refuses to run on Windows, so its tests only run elsewhere.
+#[cfg(all(test, unix))]
 #[allow(clippy::indexing_slicing)]
 // Tests read pushes with `entries[&index][path]`; a panic just fails the test.
 mod tests;

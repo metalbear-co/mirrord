@@ -1,4 +1,3 @@
-#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{collections::BTreeMap, fs, io::Read, ops::Not, path::Path, sync::Arc, time::Duration};
 
@@ -963,7 +962,6 @@ async fn a_broken_connection_ends_the_busy_install() {
 
 /// A file that the CLI can't read fails the pack of its batch, and the other changes of the batch
 /// must still reach the pod, or the pod would run old code until each of them changes again.
-#[cfg(unix)]
 #[tokio::test]
 async fn changes_that_fail_to_pack_are_pushed_with_the_next_change() {
     let local = tempfile::tempdir().unwrap();
