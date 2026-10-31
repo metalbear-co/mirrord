@@ -45,7 +45,7 @@ pub(crate) static TCP_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static UDP_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) static SEQPACKET_CONNECTION: AtomicUsize = AtomicUsize::new(0);
+pub(crate) static SEQPACKET_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
 
 /// Metrics for tracking bypassed requests (a request that did not match an http filter or wasn't
 /// stolen by the stealer task).
@@ -95,6 +95,7 @@ struct Metrics {
     redirected_requests: IntGauge,
     tcp_outgoing_connection: IntGauge,
     udp_outgoing_connection: IntGauge,
+    seqpacket_outgoing_connection: IntGauge,
 }
 
 impl Metrics {
@@ -192,6 +193,14 @@ impl Metrics {
             IntGauge::with_opts(opts).expect("Valid at initialization!")
         };
 
+        let seqpacket_outgoing_connection = {
+            let opts = Opts::new(
+                "mirrord_agent_seqpacket_outgoing_connection_count",
+                "amount of seqpacket outgoing connections in mirrord-agent",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
+
         registry
             .register(Box::new(client_count.clone()))
             .expect("Register must be valid at initialization!");
@@ -225,6 +234,9 @@ impl Metrics {
         registry
             .register(Box::new(udp_outgoing_connection.clone()))
             .expect("Register must be valid at initialization!");
+        registry
+            .register(Box::new(seqpacket_outgoing_connection.clone()))
+            .expect("Register must be valid at initialization!");
 
         Self {
             registry,
@@ -239,6 +251,7 @@ impl Metrics {
             redirected_requests,
             tcp_outgoing_connection,
             udp_outgoing_connection,
+            seqpacket_outgoing_connection,
         }
     }
 
@@ -261,6 +274,7 @@ impl Metrics {
             redirected_requests,
             tcp_outgoing_connection,
             udp_outgoing_connection,
+            seqpacket_outgoing_connection,
         } = self;
 
         client_count.set(CLIENT_COUNT.load_as_i64());
@@ -274,6 +288,7 @@ impl Metrics {
         redirected_requests.set(REDIRECTED_REQUESTS.load_as_i64());
         tcp_outgoing_connection.set(TCP_OUTGOING_CONNECTION.load_as_i64());
         udp_outgoing_connection.set(UDP_OUTGOING_CONNECTION.load_as_i64());
+        seqpacket_outgoing_connection.set(SEQPACKET_OUTGOING_CONNECTION.load_as_i64());
 
         registry.gather()
     }
