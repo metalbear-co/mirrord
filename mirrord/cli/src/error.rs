@@ -912,8 +912,8 @@ pub(crate) enum CliError {
 
     #[error("The `sync` path `{}` is not a local directory", .0.display())]
     #[diagnostic(help(
-        "`sync[].local` in `mirrord-up.yaml` is resolved against the directory that contains the \
-        file.{GENERAL_HELP}"
+        "`sync.files[].local` in `mirrord-up.yaml` is resolved against the directory that contains \
+        the file.{GENERAL_HELP}"
     ))]
     PreviewSyncLocalNotADirectory(PathBuf),
 
@@ -953,29 +953,32 @@ pub(crate) enum CliError {
     ))]
     PreviewSyncOnWindows,
 
-    #[error("A preview environment with `sync` doesn't support `run.type: container`")]
+    #[error("A preview environment with `sync` can't run a `run.command` of `run.type: container`")]
     #[diagnostic(help(
-        "Remove `run.type`. `run.type: container` runs `run.command` locally with `mirrord \
-        container`, but a preview with `sync` runs it in the target's container in the preview \
-        pod.{GENERAL_HELP}"
+        "`run.type: container` runs `run.command` locally with `mirrord container`, but a preview \
+        with `sync` runs its command in the target's container in the preview pod. Set \
+        `sync.run.command` to the command that runs the app in that container.{GENERAL_HELP}"
     ))]
     PreviewSyncContainerRun,
 
-    #[error("A preview environment with `sync` doesn't support `run.pre_command`")]
+    #[error("A preview environment with `sync` doesn't run `run.pre_command`")]
     #[diagnostic(help(
-        "Remove `run.pre_command`. It runs on your machine before the local process starts, and \
-        a preview with `sync` starts no local process.{GENERAL_HELP}"
+        "`run.pre_command` runs on your machine before the local process starts, and a preview \
+        with `sync` starts no local process. Set `sync.run.command`, which the preview runs \
+        instead of `run.command` and without `run.pre_command`, or remove \
+        `run.pre_command`.{GENERAL_HELP}"
     ))]
     PreviewSyncPreCommand,
 
     #[error(
-        "The `install.on_change` glob `{}` doesn't lie under the `local` of a `sync` entry",
+        "The `sync.install.on_change` glob `{}` doesn't lie under the `local` of a `sync.files` \
+         entry",
         .0.display()
     )]
     #[diagnostic(help(
         "The preview pod only has the files that the CLI pushes, so a glob can only match those. \
         The globs are resolved against the directory that contains `mirrord-up.yaml`, as \
-        `sync[].local` is, and each must start with the `local` of an entry spelled out, with \
+        `sync.files[].local` is, and each must start with the `local` of an entry spelled out, with \
         wildcards only below it.{GENERAL_HELP}"
     ))]
     PreviewSyncOnChangeOutsideLocal(PathBuf),

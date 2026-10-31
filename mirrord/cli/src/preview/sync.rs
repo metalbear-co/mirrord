@@ -69,13 +69,13 @@ pub(super) struct ServiceSync {
 impl ServiceSync {
     /// The code sync of `service`, or `None` when it has no `sync`.
     ///
-    /// Translates each `install.on_change` glob into the container, under the `remote` of the
-    /// entry whose `local` holds it, and refuses the settings that a sync preview can't run,
+    /// Translates each `sync.install.on_change` glob into the container, under the `remote` of
+    /// the entry whose `local` holds it, and refuses the settings that a sync preview can't run,
     /// before anything changes in the cluster.
     pub(super) fn of_service(service: &SubprocessCfg) -> CliResult<Option<Self>> {
-        if service.sync.is_empty() {
+        let Some(sync) = &service.sync else {
             return Ok(None);
-        }
+        };
 
         // A Windows tree has no Unix permissions, so a push would drop the executable bit of
         // every script, and the translated `on_change` globs would hold `\`, which the pod
@@ -84,12 +84,16 @@ impl ServiceSync {
             return Err(CliError::PreviewSyncOnWindows);
         }
 
-        if service.run.r#type == RunType::Container {
-            return Err(CliError::PreviewSyncContainerRun);
-        }
+        // Without a command of its own, the preview runs `run.command`, which `mirrord up` runs
+        // with `mirrord container`, or after `run.pre_command`, on the developer's machine.
+        if sync.run.command.is_none() {
+            if service.run.r#type == RunType::Container {
+                return Err(CliError::PreviewSyncContainerRun);
+            }
 
-        if service.run.pre_command.is_empty().not() {
-            return Err(CliError::PreviewSyncPreCommand);
+            if service.run.pre_command.is_empty().not() {
+                return Err(CliError::PreviewSyncPreCommand);
+            }
         }
 
         // A session that starts idle has no pod to push into, and the pod that the first request
@@ -109,17 +113,18 @@ impl ServiceSync {
             return Err(CliError::PreviewSyncCronJobTarget);
         }
 
-        let install = match &service.install {
+        let install = match &sync.install {
             None => None,
             Some(InstallConfig {
                 command,
+                directory,
                 on_change,
                 persist,
             }) => {
                 let on_change = on_change
                     .iter()
                     .map(|glob| {
-                        container_glob(glob, &service.sync)
+                        container_glob(glob, &sync.files)
                             .ok_or_else(|| CliError::PreviewSyncOnChangeOutsideLocal(glob.clone()))
                     })
                     .collect::<CliResult<_>>()?;
@@ -128,27 +133,32 @@ impl ServiceSync {
                     command: command.clone(),
                     on_change,
                     persist: persist.clone(),
+                    working_dir: directory.clone(),
                 })
             }
         };
 
         let config = PreviewSyncConfig {
-            entries: service
-                .sync
+            entries: sync
+                .files
                 .iter()
                 .map(|entry| PreviewSyncEntry {
                     remote: entry.remote.clone(),
                 })
                 .collect(),
-            run_command: service.run.command.clone(),
-            working_dir: service.run.remote_directory.clone(),
+            run_command: sync
+                .run
+                .command
+                .clone()
+                .unwrap_or_else(|| service.run.command.clone()),
+            working_dir: sync.run.directory.clone(),
             install,
-            restart_on_change: service.restart_on_change,
+            restart_on_change: sync.restart_on_change,
         };
         config.check()?;
 
         Ok(Some(Self {
-            entries: service.sync.clone(),
+            entries: sync.files.clone(),
             config,
         }))
     }

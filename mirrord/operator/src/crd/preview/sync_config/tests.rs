@@ -18,6 +18,7 @@ fn config(remotes: &[&str], persist: &[&str]) -> PreviewSyncConfig {
                 "/app/**/requirements*.txt".to_owned(),
             ],
             persist: persist.iter().map(|path| (*path).to_owned()).collect(),
+            working_dir: Some("/app".to_owned()),
         }),
         restart_on_change: true,
     }
@@ -57,38 +58,38 @@ fn check_refuses_paths_that_the_pod_cannot_mount() {
     let refused = [
         (
             config(&["app"], &[]),
-            not_normalized("sync[].remote", "app"),
+            not_normalized("sync.files[].remote", "app"),
         ),
         (
             config(&["/app/"], &[]),
-            not_normalized("sync[].remote", "/app/"),
+            not_normalized("sync.files[].remote", "/app/"),
         ),
         (
             config(&["//app"], &[]),
-            not_normalized("sync[].remote", "//app"),
+            not_normalized("sync.files[].remote", "//app"),
         ),
         (
             config(&["/app/../etc"], &[]),
-            not_normalized("sync[].remote", "/app/../etc"),
+            not_normalized("sync.files[].remote", "/app/../etc"),
         ),
         (
             config(&["/app", "/srv/./lib"], &[]),
-            not_normalized("sync[].remote", "/srv/./lib"),
+            not_normalized("sync.files[].remote", "/srv/./lib"),
         ),
         (
             config(&["/app"], &["lib"]),
-            not_normalized("install.persist", "lib"),
+            not_normalized("sync.install.persist", "lib"),
         ),
         (
             config(&["/"], &[]),
             PreviewSyncConfigError::Root {
-                option: "sync[].remote",
+                option: "sync.files[].remote",
             },
         ),
         (
             config(&["/mirrord/bin"], &[]),
             PreviewSyncConfigError::Reserved {
-                option: "sync[].remote",
+                option: "sync.files[].remote",
                 path: "/mirrord/bin".to_owned(),
                 reserved: "/mirrord",
             },
@@ -96,25 +97,30 @@ fn check_refuses_paths_that_the_pod_cannot_mount() {
         (
             config(&["/app"], &["/mirrord-code"]),
             PreviewSyncConfigError::Reserved {
-                option: "install.persist",
+                option: "sync.install.persist",
                 path: "/mirrord-code".to_owned(),
                 reserved: "/mirrord-code",
             },
         ),
         (
             config(&["/app", "/app"], &[]),
-            overlap("sync[].remote", "/app", "sync[].remote", "/app"),
+            overlap("sync.files[].remote", "/app", "sync.files[].remote", "/app"),
         ),
         (
             config(&["/app/src", "/app"], &[]),
-            overlap("sync[].remote", "/app/src", "sync[].remote", "/app"),
+            overlap(
+                "sync.files[].remote",
+                "/app/src",
+                "sync.files[].remote",
+                "/app",
+            ),
         ),
         (
             config(&["/app"], &["/app/node_modules"]),
             overlap(
-                "sync[].remote",
+                "sync.files[].remote",
                 "/app",
-                "install.persist",
+                "sync.install.persist",
                 "/app/node_modules",
             ),
         ),
@@ -126,7 +132,7 @@ fn check_refuses_paths_that_the_pod_cannot_mount() {
 }
 
 /// The pod can't start the app or the install without a command, and resolves the working
-/// directory and the `on_change` globs in the container, so they must be absolute.
+/// directories and the `on_change` globs in the container, so they must be absolute.
 #[test]
 fn check_refuses_commands_and_container_paths_the_pod_cannot_use() {
     let no_entries = config(&[], &[]);
@@ -151,8 +157,18 @@ fn check_refuses_commands_and_container_paths_the_pod_cannot_use() {
     assert_eq!(
         relative_working_dir.check(),
         Err(PreviewSyncConfigError::NotNormalized {
-            option: "run.remote_directory",
+            option: "sync.run.directory",
             path: "app".to_owned(),
+        })
+    );
+
+    let mut relative_install_dir = config(&["/app"], &[]);
+    relative_install_dir.install.as_mut().unwrap().working_dir = Some("./app".to_owned());
+    assert_eq!(
+        relative_install_dir.check(),
+        Err(PreviewSyncConfigError::NotNormalized {
+            option: "sync.install.directory",
+            path: "./app".to_owned(),
         })
     );
 
@@ -161,7 +177,7 @@ fn check_refuses_commands_and_container_paths_the_pod_cannot_use() {
     assert_eq!(
         relative_glob.check(),
         Err(PreviewSyncConfigError::NotNormalized {
-            option: "install.on_change",
+            option: "sync.install.on_change",
             path: "package-lock.json".to_owned(),
         })
     );

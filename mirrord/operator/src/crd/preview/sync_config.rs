@@ -33,8 +33,8 @@ pub struct PreviewSyncConfig {
     /// arguments. It replaces the container's command and arguments.
     pub run_command: Vec<String>,
 
-    /// The absolute working directory of `run_command` and of the install command in the target
-    /// container. `None` keeps the container's working directory.
+    /// The absolute working directory of `run_command` in the target container, and of the
+    /// install command without one of its own. `None` keeps the container's working directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
 
@@ -77,19 +77,24 @@ pub struct PreviewSyncInstall {
     /// restart of the pod.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub persist: Vec<String>,
+
+    /// The absolute working directory of `command` in the target container. `None` runs it in
+    /// the working directory of `run_command`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
 }
 
 /// A problem with [`PreviewSyncConfig`] that keeps the preview from syncing code. The messages
 /// name the options of `mirrord-up.yaml`, which the settings come from.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum PreviewSyncConfigError {
-    #[error("`sync` has no entries")]
+    #[error("`sync.files` has no entries")]
     NoEntries,
 
-    #[error("`run.command` is empty")]
+    #[error("`sync.run.command`, or `run.command` without it, is empty")]
     EmptyRunCommand,
 
-    #[error("`install.command` is empty")]
+    #[error("`sync.install.command` is empty")]
     EmptyInstallCommand,
 
     #[error(
@@ -125,7 +130,7 @@ pub enum PreviewSyncConfigError {
 
 impl PreviewSyncConfig {
     /// Checks that the operator can build a preview pod from these settings: there is at least
-    /// one entry, the commands aren't empty, `working_dir`, the `on_change` globs and the mount
+    /// one entry, the commands aren't empty, the working directories, the `on_change` globs and the mount
     /// paths are absolute and normalized, and each `remote` and `install.persist` path is a
     /// separate mount that isn't `/`, doesn't lie under a [`RESERVED_SYNC_PATHS`] path, and
     /// doesn't equal, contain or lie inside another one.
@@ -139,7 +144,15 @@ impl PreviewSyncConfig {
         }
 
         if let Some(working_dir) = &self.working_dir {
-            components("run.remote_directory", working_dir)?;
+            components("sync.run.directory", working_dir)?;
+        }
+
+        if let Some(working_dir) = self
+            .install
+            .as_ref()
+            .and_then(|install| install.working_dir.as_ref())
+        {
+            components("sync.install.directory", working_dir)?;
         }
 
         if let Some(install) = &self.install
@@ -151,12 +164,12 @@ impl PreviewSyncConfig {
         let mounts = self
             .entries
             .iter()
-            .map(|entry| ("sync[].remote", entry.remote.as_str()))
+            .map(|entry| ("sync.files[].remote", entry.remote.as_str()))
             .chain(
                 self.install
                     .iter()
                     .flat_map(|install| &install.persist)
-                    .map(|path| ("install.persist", path.as_str())),
+                    .map(|path| ("sync.install.persist", path.as_str())),
             );
 
         let mut checked: Vec<(&'static str, &str, Vec<&str>)> = Vec::new();
@@ -199,7 +212,7 @@ impl PreviewSyncConfig {
         // The mounts come first, so that a `remote` that isn't normalized is reported as such,
         // rather than as the glob that the CLI built under it.
         for glob in self.install.iter().flat_map(|install| &install.on_change) {
-            components("install.on_change", glob)?;
+            components("sync.install.on_change", glob)?;
         }
 
         Ok(())
