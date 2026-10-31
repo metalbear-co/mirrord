@@ -904,34 +904,6 @@ async fn wait_until_started(
     let mut last_known_phase: &str = "unknown";
     let mut previous_phase = None;
 
-    // The pod of a session with `sync` becomes ready only once its sidecar holds a push, so
-    // the sync runs while the loop below waits for `Ready`.
-    let (mut sync_task, mut activity) = match sync {
-        None => (None, None),
-        Some(PreparedSync {
-            entries,
-            api: sync_api,
-        }) => {
-            let (driver, activity) = sync::SyncDriver::new(
-                Arc::new(sync_api),
-                session_namespace.to_owned(),
-                session_name.to_owned(),
-                entries,
-                watch_files,
-                progress.subtask("pushing the local code"),
-            )
-            .inspect_err(|_| subtask.failure(None))?;
-            let api = api.clone();
-            let client = client.clone();
-            let (namespace, name) = (session_namespace.to_owned(), session_name.to_owned());
-            let task = async move {
-                let error = driver.run().await;
-                sync_end(&api, &client, &namespace, &name, error).await
-            };
-            (Some(SyncTask::new(tokio::spawn(task))), Some(activity))
-        }
-    };
-
     // Fails the start with `error`. Deletes the session only if this run created it, and the
     // session still exists and is of use: another CLI that took over its sync uses it now, and a
     // session that failed or was deleted has nothing to delete.
@@ -947,6 +919,38 @@ async fn wait_until_started(
         } else {
             subtask.failure(None);
             error
+        }
+    };
+
+    // The pod of a session with `sync` becomes ready only once its sidecar holds a push, so
+    // the sync runs while the loop below waits for `Ready`.
+    let (mut sync_task, mut activity) = match sync {
+        None => (None, None),
+        Some(PreparedSync {
+            entries,
+            api: sync_api,
+        }) => {
+            // The driver creates the watcher of `--watch`, which can fail after this run created
+            // the session, such as when the user has no inotify instances left.
+            let (driver, activity) = match sync::SyncDriver::new(
+                Arc::new(sync_api),
+                session_namespace.to_owned(),
+                session_name.to_owned(),
+                entries,
+                watch_files,
+                progress.subtask("pushing the local code"),
+            ) {
+                Ok(driver) => driver,
+                Err(error) => return Err(fail(error, &mut subtask).await),
+            };
+            let api = api.clone();
+            let client = client.clone();
+            let (namespace, name) = (session_namespace.to_owned(), session_name.to_owned());
+            let task = async move {
+                let error = driver.run().await;
+                sync_end(&api, &client, &namespace, &name, error).await
+            };
+            (Some(SyncTask::new(tokio::spawn(task))), Some(activity))
         }
     };
 
