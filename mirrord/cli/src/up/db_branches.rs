@@ -36,8 +36,8 @@ use crate::{
 pub(crate) const DEFAULT_DB_BRANCHES_UNSUPPORTED: &str =
     "the mirrord operator doesn't support DB branching, running against the source DB";
 
-/// Whether `operator` can resolve the `"*"` `mirrord up` and `mirrord preview up` add to a
-/// service's DB branches by default.
+/// Whether `operator` can resolve the `"*"` that `mirrord up`, `mirrord preview up` and `mirrord
+/// preview sync` add to a service's DB branches by default.
 ///
 /// The operator leaves the feature out when its branching is off, its license tier doesn't
 /// include it, or it predates it. A `"*"` the user didn't ask for must not stop the service on

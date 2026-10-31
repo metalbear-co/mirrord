@@ -195,6 +195,37 @@
         }
       ]
     },
+    "InstallConfig": {
+      "description": "The command that installs a service's dependencies in its preview pod.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "description": "The command to run, as a list of the program and its arguments, e.g. `[\"npm\", \"ci\"]`. It\nruns in the preview's container before `run.command` starts, and again after a push that\nchanges a file that `on_change` matches.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "on_change": {
+          "description": "The files whose changes run `command` again, as globs relative to the directory that\ncontains `mirrord-up.yaml`, e.g. `frontend/package-lock.json`. Each must lie under the\n`local` of a `sync` entry. The preview pod reads every file that a glob matches after\neach push, including the files that `command` wrote, so a glob with `**` over a\ndirectory such as `node_modules` hashes every match on every push. Name the files, such\nas `frontend/package-lock.json` or `packages/*/package.json`, to keep that cheap.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "persist": {
+          "description": "The absolute paths in the container that `command` writes to outside every `sync`\n`remote`, e.g. `/usr/local/lib/python3.12/site-packages`. The preview keeps them on the\nvolume that holds the pushed code, so the installed files survive a restart of the pod. A\npath under a `remote` is on that volume already and needs no entry.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ]
+    },
     "JobTarget": {
       "type": "object",
       "properties": {
@@ -323,6 +354,14 @@
           "items": {
             "type": "string"
           }
+        },
+        "remote_directory": {
+          "description": "The absolute working directory of `command` and `install.command` in the preview pod of a\nservice with `sync`, e.g. `/app`. When not set, they run in the working directory of the\npreview's container, which is `/` for an image without a `WORKDIR`.\n\n`mirrord up` and `mirrord preview up` ignore this.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-mirrord-plan": "enterprise"
         },
         "type": {
           "description": "Whether to run `command` with `mirrord exec` or `mirrord container`.\n\nDefaults to `exec`.",
@@ -573,14 +612,40 @@
           },
           "uniqueItems": true
         },
+        "install": {
+          "description": "The command that installs the dependencies of a service with `sync` in its preview pod.\nFor example:\n\n```yaml\ninstall:\n  command: [\"npm\", \"ci\"]\n  on_change: [\"frontend/package-lock.json\"]\n```\n\n`mirrord up` and `mirrord preview up` ignore this.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InstallConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-mirrord-plan": "enterprise"
+        },
+        "restart_on_change": {
+          "description": "Whether the preview pod of a service with `sync` restarts `run.command` after each push.\nSet it to `false` for a dev server that reloads changed files on its own. Defaults to\n`true`.\n\n`mirrord up` and `mirrord preview up` ignore this.",
+          "type": "boolean",
+          "default": true,
+          "x-mirrord-plan": "enterprise"
+        },
         "run": {
           "description": "How to launch the service's local process.",
           "$ref": "#/$defs/RunConfig"
         },
         "skip": {
-          "description": "Don't launch this service unless it is named on the `mirrord up` command line. Defaults to\n`false`.",
+          "description": "Don't launch this service unless it is named on the `mirrord up` command line, and don't\npreview it with `mirrord preview sync` unless `--image` or `MIRRORD_<SERVICE>_IMAGE` gives\nit an image. `mirrord preview up` ignores it: an image alone picks its services. Defaults\nto `false`.",
           "type": "boolean",
           "default": false
+        },
+        "sync": {
+          "description": "Local directories that `mirrord preview sync` pushes into the service's preview pod. The\npreview runs the image from `--image` or `MIRRORD_<SERVICE>_IMAGE`, or the target's image\nwithout one, with these directories in it. For example:\n\n```yaml\nsync:\n  - local: frontend\n    remote: /app\n```\n\n`mirrord up` and `mirrord preview up` ignore this.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SyncEntry"
+          },
+          "x-mirrord-plan": "enterprise"
         },
         "target": {
           "description": "The remote workload this service runs against.\n\n- `none`: run targetless.\n- A mapping with `path` and/or `namespace`: run against that workload.\n- Not set: `mirrord up` looks for a deployment, statefulset, rollout or pod (in that order)\n  named after the service.",
@@ -679,6 +744,32 @@
         "stateful_set"
       ],
       "x-mirrord-plan": "team"
+    },
+    "SyncEntry": {
+      "description": "One local directory that `mirrord preview sync` pushes into a preview pod.",
+      "type": "object",
+      "properties": {
+        "ignore": {
+          "description": "More paths that the push leaves out, written as the lines of a `.gitignore` in `local`,\ne.g. `coverage/`. They take precedence over git's rules, so a `!` line pushes a file that\na `.gitignore` excludes, e.g. `!.env.preview`. A `!` line can't bring back a file in an\nignored directory, as in git.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "local": {
+          "description": "The local directory to push. A relative path is resolved against the directory that\ncontains `mirrord-up.yaml`. The push leaves out `.git`, `.jj`, the paths that git ignores\nand the paths that `ignore` leaves out. Those paths keep what the pod has at them, such as\nthe image's files or what the install wrote, and every other path in `remote` holds the\nlocal tree.",
+          "type": "string"
+        },
+        "remote": {
+          "description": "The absolute path in the preview's container that holds the pushed directory. A push makes\nit a mirror of `local`, so it deletes what the image has there, except at the paths that\nthe push leaves out (see `local`).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "local",
+        "remote"
+      ]
     },
     "Target": {
       "oneOf": [

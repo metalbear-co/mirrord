@@ -5078,6 +5078,7 @@ dependencies = [
  "const-random",
  "dotenvy",
  "drain",
+ "flate2",
  "fs4",
  "futures",
  "glob",
@@ -5143,12 +5144,14 @@ dependencies = [
  "stork",
  "strum 0.27.2",
  "strum_macros 0.27.2",
+ "tar",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tokio-retry",
  "tokio-rustls",
  "tokio-stream",
+ "tokio-tungstenite",
  "tokio-util",
  "tower",
  "tower-http",
@@ -5741,15 +5744,20 @@ name = "mirrord-operator"
 version = "3.282.0"
 dependencies = [
  "base64 0.22.1",
+ "bincode",
  "chrono",
  "dotenvy",
  "flate2",
  "futures",
  "http 1.5.0",
+ "hyper",
+ "hyper-util",
+ "ignore",
  "k8s-openapi",
  "kube",
  "mirrord-analytics",
  "mirrord-auth",
+ "mirrord-command",
  "mirrord-config",
  "mirrord-kube",
  "mirrord-macros",
@@ -5770,6 +5778,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-tungstenite",
  "tower",
  "tower-test",
  "tracing",
@@ -8931,6 +8940,7 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "digest 0.10.7",
+ "sha2-asm",
 ]
 
 [[package]]
@@ -8942,6 +8952,15 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
  "digest 0.11.3",
+]
+
+[[package]]
+name = "sha2-asm"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b845214d6175804686b2bd482bcffe96651bb2d1200742b712003504a2dac1ab"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

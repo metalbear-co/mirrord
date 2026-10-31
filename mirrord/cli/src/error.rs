@@ -12,8 +12,14 @@ use mirrord_intproxy::{
 use mirrord_kube::{api::kubernetes::KubeEnvironment, error::KubeApiError};
 use mirrord_mcp::McpError;
 use mirrord_operator::{
-    client::error::{HttpError, OperatorApiError, OperatorOperation},
-    crd::{NewOperatorFeature, preview::PreviewPodLogs},
+    client::{
+        error::{HttpError, OperatorApiError, OperatorOperation},
+        preview_sync::PreviewSyncError,
+    },
+    crd::{
+        NewOperatorFeature,
+        preview::{PreviewPodLogs, PreviewSyncConfigError},
+    },
     types::PaidFeatureGate,
 };
 use mirrord_progress::messages::AGENT_OPERATOR_HINT;
@@ -43,7 +49,7 @@ use crate::{
 
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
 
-const GENERAL_HELP: &str = r#"
+pub(crate) const GENERAL_HELP: &str = r#"
 
 - If you're still stuck:
 
@@ -857,6 +863,127 @@ pub(crate) enum CliError {
     ))]
     PreviewSecretMountFailed(String),
 
+    #[error("Failed to push the local code into the preview environment")]
+    #[diagnostic(help(
+        "The operator relays the push to a sidecar in the preview pod. Check that the operator \
+        is running and healthy, and see its logs and the logs of the pod's `mirrord-sync` \
+        container for details.{GENERAL_HELP}"
+    ))]
+    PreviewSyncFailed(#[source] Box<dyn std::error::Error + Send + Sync>),
+
+    #[error("Failed to read `{}` to push it into the preview environment", path.display())]
+    #[diagnostic(help(
+        "Check that you can read the files under the `sync` directory. A file that a tool removes \
+        while the CLI reads it fails the read too, and running the command again pushes the \
+        files.{GENERAL_HELP}"
+    ))]
+    PreviewSyncReadFailed {
+        path: PathBuf,
+        #[source]
+        error: io::Error,
+    },
+
+    #[error("Failed to watch `{}` for changes", path.display())]
+    #[diagnostic(help(
+        "The CLI watches each directory under `sync` that it pushes. When the cause says that the \
+        system allows too few watches, raise `fs.inotify.max_user_watches`, or leave large \
+        directories out with `ignore` or `.gitignore`.{GENERAL_HELP}"
+    ))]
+    PreviewSyncWatchFailed {
+        path: PathBuf,
+        #[source]
+        error: notify::Error,
+    },
+
+    #[error("The install command failed in the preview pod")]
+    #[diagnostic(help(
+        "The end of its output is above. Fix the install command, or the files that it installs \
+        from, and run `mirrord preview sync` again.{GENERAL_HELP}"
+    ))]
+    PreviewSyncInstallFailed,
+
+    #[error("{}", mirrord_operator::sync::UnpairReason::Replaced)]
+    #[diagnostic(help(
+        "Only one CLI pushes into a preview environment at a time, and a newer CLI takes over \
+        from an earlier one. This CLI stopped, and left the preview environment as it is.\
+        {GENERAL_HELP}"
+    ))]
+    PreviewSyncReplaced,
+
+    #[error("The `sync` path `{}` is not a local directory", .0.display())]
+    #[diagnostic(help(
+        "`sync[].local` in `mirrord-up.yaml` is resolved against the directory that contains the \
+        file.{GENERAL_HELP}"
+    ))]
+    PreviewSyncLocalNotADirectory(PathBuf),
+
+    #[error("A preview environment with `sync` can't start idle")]
+    #[diagnostic(help(
+        "The preview pod waits for the CLI to push the local code, and an idle preview has no \
+        pod to push into. Remove `feature.preview.idle.start_idle`.{GENERAL_HELP}"
+    ))]
+    PreviewSyncStartIdle,
+
+    #[error("A preview environment with `sync` needs one replica, not {0}")]
+    #[diagnostic(help(
+        "Only one pod at a time can write the code volume. Set `feature.preview.replicas` to \
+        1.{GENERAL_HELP}"
+    ))]
+    PreviewSyncReplicas(i32),
+
+    #[error("A preview environment with `sync` can't target a CronJob")]
+    #[diagnostic(help(
+        "A CronJob creates its pods on a schedule, after the CLI has pushed. Preview the CronJob \
+        with `mirrord preview up` instead.{GENERAL_HELP}"
+    ))]
+    PreviewSyncCronJobTarget,
+
+    #[error("A preview environment with `sync` can't run on a multicluster operator")]
+    #[diagnostic(help(
+        "A multicluster operator runs the preview's pods in its workload clusters, and only one \
+        pod can hold the pushed code. Preview the service with \
+        `mirrord preview up` instead.{GENERAL_HELP}"
+    ))]
+    PreviewSyncMultiCluster,
+
+    #[error("A preview environment with `sync` doesn't support a Windows client")]
+    #[diagnostic(help(
+        "Run `mirrord preview sync` on Linux or macOS, or preview the service with `mirrord \
+        preview up` instead.{GENERAL_HELP}"
+    ))]
+    PreviewSyncOnWindows,
+
+    #[error("A preview environment with `sync` doesn't support `run.type: container`")]
+    #[diagnostic(help(
+        "Remove `run.type`. `run.type: container` runs `run.command` locally with `mirrord \
+        container`, but a preview with `sync` runs it in the target's container in the preview \
+        pod.{GENERAL_HELP}"
+    ))]
+    PreviewSyncContainerRun,
+
+    #[error("A preview environment with `sync` doesn't support `run.pre_command`")]
+    #[diagnostic(help(
+        "Remove `run.pre_command`. It runs on your machine before the local process starts, and \
+        a preview with `sync` starts no local process.{GENERAL_HELP}"
+    ))]
+    PreviewSyncPreCommand,
+
+    #[error(
+        "The `install.on_change` glob `{}` doesn't lie under the `local` of a `sync` entry",
+        .0.display()
+    )]
+    #[diagnostic(help(
+        "The preview pod only has the files that the CLI pushes, so a glob can only match those. \
+        The globs are resolved against the directory that contains `mirrord-up.yaml`, as \
+        `sync[].local` is, and each must start with the `local` of an entry spelled out, with \
+        wildcards only below it.{GENERAL_HELP}"
+    ))]
+    PreviewSyncOnChangeOutsideLocal(PathBuf),
+
+    #[error("The settings of the service's preview with `sync` are invalid: {0}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    PreviewSyncConfigInvalid(#[from] PreviewSyncConfigError),
+
     #[error(
         "Failed to read the TLS client certificate file `{path}` for preview delivery: {error}"
     )]
@@ -901,6 +1028,21 @@ pub(crate) enum CliError {
         Check the operator logs for more details.{GENERAL_HELP}"
     ))]
     PreviewTimeout {
+        /// Output of the preview's pods as of the moment the CLI gave up.
+        logs: Vec<PreviewPodLogs>,
+    },
+
+    #[error(
+        "Preview environment creation timed out while a `mirrord exec` session paused the \
+        preview{}",
+        format_preview_logs(logs)
+    )]
+    #[diagnostic(help(
+        "The operator pauses a preview while a `mirrord exec` session targets it, and the preview \
+        pod applies no push until that session ends. Run `mirrord preview sync` again once it has \
+        ended."
+    ))]
+    PreviewSyncPaused {
         /// Output of the preview's pods as of the moment the CLI gave up.
         logs: Vec<PreviewPodLogs>,
     },
@@ -956,8 +1098,8 @@ pub(crate) enum CliError {
 
     #[error("{} not found", .0.display())]
     #[diagnostic(help(
-        "`mirrord preview up` and `mirrord preview down` read the services from a \
-         mirrord-up.yaml. Pass another path with `-f <path>`, or create one with `mirrord up \
+        "`mirrord preview up`, `mirrord preview sync` and `mirrord preview down` read the \
+         services from a mirrord-up.yaml. Pass another path with `-f <path>`, or create one with `mirrord up \
          init`."
     ))]
     PreviewUpFileNotFound(PathBuf),
@@ -976,17 +1118,24 @@ pub(crate) enum CliError {
     #[error("no key to stop preview environments under")]
     #[diagnostic(help(
         "Without `--key` or `MIRRORD_KEY`, the key is the git branch, but on `main`, `master` or \
-         without a branch `mirrord preview up` uses a random key. Pass the key it printed with \
-         `--key <key>`."
+         without a branch `mirrord preview up` and `mirrord preview sync` use a random key. Pass \
+         the key they printed with `--key <key>`."
     ))]
     PreviewDownKeyRequired,
 
     #[error("preview environments failed to start for: {}", .0.join(", "))]
     #[diagnostic(help(
-        "Run `mirrord preview up` with the same key again, it replaces the session of every \
-         service."
+        "Run the command again with the same key. It replaces the session of every service."
     ))]
     PreviewUpFailed(Vec<String>),
+
+    #[error("preview environments failed to start for: {}", .0.join(", "))]
+    #[diagnostic(help(
+        "Run the command again with the same key. It reuses the session of a service when that \
+         session is live, has the same settings and runs no image of its own, and replaces the \
+         other sessions."
+    ))]
+    PreviewSyncStartFailed(Vec<String>),
 
     #[error("Session key is required for this command")]
     #[diagnostic(help("Specify the key using --key <key> or set it in your mirrord config file."))]
@@ -1090,6 +1239,12 @@ impl From<crate::preview::resources::ResourcesError> for CliError {
 impl From<mirrord_up::UpError> for CliError {
     fn from(error: mirrord_up::UpError) -> Self {
         Self::PreviewUpConfig(Box::new(error))
+    }
+}
+
+impl From<PreviewSyncError> for CliError {
+    fn from(error: PreviewSyncError) -> Self {
+        Self::PreviewSyncFailed(Box::new(error))
     }
 }
 

@@ -364,7 +364,7 @@ pub enum ReportTarget {
     OperatorUninstall,
     /// An ARM mac had to use Rosetta for some binaries.
     MissingX86Binaries,
-    /// One run of `mirrord preview up`.
+    /// One run of `mirrord preview up`, or of `mirrord preview sync`, which reports `sync`.
     PreviewUp,
 }
 

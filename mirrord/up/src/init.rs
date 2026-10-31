@@ -211,6 +211,9 @@ async fn prompt_service(
             run,
             context: None,
             config_patch: None,
+            sync: Vec::new(),
+            install: None,
+            restart_on_change: true,
         },
     ))
 }
@@ -503,6 +506,7 @@ fn prompt_run() -> Result<RunConfig, inquire::InquireError> {
         directory,
         command,
         pre_command: Vec::new(),
+        remote_directory: None,
     })
 }
 
@@ -658,9 +662,13 @@ mod tests {
                 directory: Some("services/api".into()),
                 command: vec!["go".to_owned(), "run".to_owned(), "./cmd/api".to_owned()],
                 pre_command: Vec::new(),
+                remote_directory: None,
             },
             context: Some("popper-deskpop".into()),
             config_patch: None,
+            sync: Vec::new(),
+            install: None,
+            restart_on_change: true,
         }
     }
 
@@ -724,9 +732,13 @@ mod tests {
                 directory: None,
                 command: vec!["echo".to_owned()],
                 pre_command: Vec::new(),
+                remote_directory: None,
             },
             context: None,
             config_patch: None,
+            sync: Vec::new(),
+            install: None,
+            restart_on_change: true,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -774,9 +786,13 @@ mod tests {
                 directory: None,
                 command: vec!["go".to_owned(), "run".to_owned(), "--opt=a,b".to_owned()],
                 pre_command: Vec::new(),
+                remote_directory: None,
             },
             context: None,
             config_patch: None,
+            sync: Vec::new(),
+            install: None,
+            restart_on_change: true,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -822,9 +838,13 @@ mod tests {
                 directory: None,
                 command: vec!["echo".to_owned()],
                 pre_command: Vec::new(),
+                remote_directory: None,
             },
             context: None,
             config_patch: None,
+            sync: Vec::new(),
+            install: None,
+            restart_on_change: true,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),

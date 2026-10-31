@@ -144,7 +144,8 @@ mod tests {
         assert!(matches!(
             new,
             TargetSpec {
-                target: KubeTarget::Unknown(_)
+                target: KubeTarget::Unknown(_),
+                ..
             }
         ))
     }
@@ -153,6 +154,7 @@ mod tests {
     fn kube_target_to_legacy() {
         let new = serde_json::to_string_pretty(&TargetSpec {
             target: KubeTarget::Known(Target::Targetless),
+            image: None,
         })
         .unwrap();
 

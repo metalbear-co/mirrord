@@ -32,12 +32,17 @@ use serde_json::json;
 
 use crate::crd::queue_filter::{MessageFilter, QueueType, message_filter_crd_schema};
 
+pub mod sync_config;
 pub mod view;
+pub use sync_config::{
+    PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncInstall,
+};
 use uuid::Uuid;
 
 use super::{db_branching::core::ConnectionSource, session::SessionTarget};
 #[cfg(feature = "client")]
 use crate::client::connect_params::BranchDbNames;
+use crate::sync::{AppReport, InstallReport, SidecarState};
 
 /// This resource represents a preview environment created by the `mirrord preview start` command.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -61,7 +66,8 @@ use crate::client::connect_params::BranchDbNames;
 )]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewSessionSpec {
-    /// User's container image to run in the preview pod.
+    /// User's container image to run in the preview pod. An empty image keeps the target's
+    /// image. The CLI sends an empty image only for a session with `sync`.
     pub image: String,
 
     /// Environment key used to group related preview pods and for traffic filtering.
@@ -158,13 +164,20 @@ pub struct PreviewSessionSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub share_host: Option<String>,
 
-    /// The `queue_splitting` are the splits `mirrord preview up` adds by default (`"*"` for every
-    /// broker), not ones the user asked for. The operator drops those it can't serve, like a
-    /// broker whose splitting is off, instead of failing the session, as it does for `mirrord up`
-    /// sessions. Sent only to operators advertising `PreviewAutoQueueSplitting`; `false`, left
-    /// out of the resource as older CLIs do, means every split was asked for.
+    /// The `queue_splitting` are the splits `mirrord preview up` and `mirrord preview sync` add
+    /// by default (`"*"` for every broker), not ones the user asked for. The operator drops those
+    /// it can't serve, like a broker whose splitting is off, instead of failing the session, as
+    /// it does for `mirrord up` sessions. Sent only to operators advertising
+    /// `PreviewAutoQueueSplitting`; `false`, left out of the resource as older CLIs do, means every
+    /// split was asked for.
     #[serde(default, skip_serializing_if = "Not::not")]
     pub auto_queue_splitting: bool,
+
+    /// Code sync settings. When set, the CLI pushes its local tree into the preview pod. `image`
+    /// may then be empty, and the preview runs the target's image with the pushed code. Sent
+    /// only to operators advertising `PreviewCodeSync`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync: Option<PreviewSyncConfig>,
 }
 
 /// The user's versions of the target and the ConfigMaps and Secrets its pod uses.
@@ -457,6 +470,138 @@ pub struct PreviewSessionStatus {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(extend("x-kubernetes-list-type" = "map", "x-kubernetes-list-map-keys" = ["type"]))]
     pub conditions: Vec<Condition>,
+
+    /// The state of code sync, for a session with `spec.sync`.
+    ///
+    /// `None` for a session without `spec.sync`, or when running against an older operator that
+    /// does not set this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync: Option<PreviewSyncStatus>,
+}
+
+/// The state of code sync in a preview session.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSyncStatus {
+    /// The kind of volume that holds the session's synced code. The operator picks it on the
+    /// session's first run and keeps it for the session's life, because the session's Deployment
+    /// keeps the code volume of its first pod template. Set on every status that the operator
+    /// writes, and optional only so that a later status update can leave it unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage: Option<PreviewCodeStorageKind>,
+
+    /// Why the session never scales to zero, although `spec.idle` asks for it. Code on an
+    /// `emptyDir` is deleted with the pod, so a session that scaled to zero would start again
+    /// without its code. `None` when nothing keeps the session from following `spec.idle`, which
+    /// includes a session without `spec.idle`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_disabled: Option<String>,
+
+    /// The image that the preview pod runs the app in: the session's own image, or, for a
+    /// session without one, the target's image when the operator built the pod. `mirrord preview
+    /// sync` reuses a session without an image only while the target still names this one. Set
+    /// with `storage`, and optional only so that a later status update can leave it unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+
+    /// What the sync sidecar in the preview pod is doing, or `disconnected` while no sidecar is
+    /// connected to the operator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidecar: Option<PreviewSyncSidecarState>,
+
+    /// Why the sync sidecar failed, while `sidecar` is `failed`.
+    ///
+    /// This and the supervisor's fields are written as `null` when they are `None`, because the
+    /// status is written with a merge patch, which keeps a field that the patch leaves out, and
+    /// they must go once the sidecar that reported them is gone.
+    #[serde(default)]
+    pub sidecar_error: Option<String>,
+
+    /// Whether a `mirrord preview sync` is connected to the operator to push code to the
+    /// preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_attached: Option<bool>,
+
+    /// The generation of the last push that the code volume holds. Each push that the sidecar
+    /// applies adds one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u64>,
+
+    /// When the sidecar last applied a push.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<MicroTime>,
+
+    /// The last run of `install.command` in the preview pod, while a sidecar that relays the
+    /// supervisor's report is connected.
+    #[serde(default)]
+    pub install: Option<InstallReport>,
+
+    /// The app, the process of `run.command` in the preview pod, while a sidecar that relays the
+    /// supervisor's report is connected.
+    #[serde(default)]
+    pub app: Option<AppReport>,
+}
+
+/// What the sync sidecar of a preview session is doing, as [`PreviewSyncStatus::sidecar`]
+/// reports it.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviewSyncSidecarState {
+    /// No sidecar of the preview is connected to the operator, for example while the pod starts
+    /// or while the session is idle.
+    Disconnected,
+
+    /// The sidecar waits for the sidecar and the supervisor of an earlier pod to release the
+    /// code volume.
+    WaitingForVolume,
+
+    /// The sidecar copies the image's files to the code volume.
+    Seeding,
+
+    /// The code volume holds no push yet.
+    AwaitingFirstPush,
+
+    /// The code volume holds the push of [`PreviewSyncStatus::generation`].
+    Synced,
+
+    /// The sidecar can't go on, for the reason in [`PreviewSyncStatus::sidecar_error`].
+    Failed,
+
+    /// For future compatibility.
+    #[serde(other)]
+    Unknown,
+}
+
+impl From<&SidecarState> for PreviewSyncSidecarState {
+    fn from(state: &SidecarState) -> Self {
+        match state {
+            SidecarState::Disconnected => Self::Disconnected,
+            SidecarState::WaitingForVolume => Self::WaitingForVolume,
+            SidecarState::Seeding => Self::Seeding,
+            SidecarState::AwaitingFirstPush => Self::AwaitingFirstPush,
+            SidecarState::Synced { .. } => Self::Synced,
+            SidecarState::Failed { .. } => Self::Failed,
+        }
+    }
+}
+
+/// The kind of volume that holds the synced code of a preview session. A session keeps the kind
+/// of its first run. `pvc` keeps the code while the session is scaled to zero, and with `emptyDir`
+/// the code is deleted with the pod, so the session never scales to zero.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PreviewCodeStorageKind {
+    /// A PersistentVolumeClaim per session, which keeps the code while the session is scaled to
+    /// zero and when its pod is replaced.
+    Pvc,
+
+    /// An `emptyDir` in the pod. The code is deleted with the pod, so the session never scales to
+    /// zero, and a replaced pod waits for another push.
+    EmptyDir,
+
+    /// For future compatibility.
+    #[serde(other)]
+    Unknown,
 }
 
 /// The tail of one preview container's output.
@@ -541,6 +686,9 @@ pub struct PreviewStatusUpdate {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conditions: Option<Vec<Condition>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sync: Option<PreviewSyncStatus>,
 }
 
 impl PreviewStatusUpdate {
@@ -729,6 +877,17 @@ mod tests {
 
     use super::*;
     use crate::crd::session::KubeResourceTarget;
+
+    /// The operator writes the status with a merge patch, which keeps a field that the patch
+    /// leaves out, so a sync status without the supervisor's report writes `install` and `app` as
+    /// `null`, which clears the ones that the status holds.
+    #[test]
+    fn a_sync_status_without_a_report_clears_the_stored_one() {
+        let status = serde_json::to_value(PreviewSyncStatus::default()).unwrap();
+
+        assert_eq!(status.get("install"), Some(&serde_json::Value::Null));
+        assert_eq!(status.get("app"), Some(&serde_json::Value::Null));
+    }
 
     /// Legacy entries keep riding the per-broker maps older operators read; composed entries go
     /// to the `queues` list only, so no entry is sent twice and an older operator never sees half

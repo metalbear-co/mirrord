@@ -18,9 +18,10 @@ use std::{
 };
 
 pub use config::{
-    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, PreviewImageError,
-    PreviewImageSource, PreviewImages, SERVICE_LAYER_PATHS, SelectError, ServiceConfig,
-    ServiceError, ServiceMode, SubprocessCfg, TargetValidationError, UpConfig, WindowsSupportError,
+    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, InstallConfig,
+    PreviewImageError, PreviewImageSource, PreviewImages, PreviewRun, RunConfig, RunType,
+    SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SkipReason,
+    SubprocessCfg, SyncEntry, TargetValidationError, UpConfig, WindowsSupportError,
     preview_image_env,
 };
 use config::{
@@ -230,8 +231,9 @@ pub enum UpError {
         namespace: String,
     },
 
-    /// A service previewed by `mirrord preview up` has no target (`target: none` or
-    /// `path: targetless`). A preview runs a copy of its target's pod, so there has to be one.
+    /// A service previewed by `mirrord preview up` or `mirrord preview sync` has no target
+    /// (`target: none` or `path: targetless`). A preview runs a copy of its target's pod, so there
+    /// has to be one.
     #[error("service `{service}` has no target, but a preview environment needs one")]
     PreviewTargetless {
         /// Name of the targetless service.
@@ -380,13 +382,34 @@ fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
     )
 }
 
-/// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up`.
+/// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up`, `mirrord
+/// preview sync` and `mirrord preview down`, and resolve the local directories of each service's
+/// `sync` and the globs of its `install.on_change` against the directory of the file.
 ///
-/// Unlike [`load_up_config`], it doesn't check the services' `run`: `mirrord preview up` never
-/// launches their local commands, so a `run.directory` that only exists on a developer's machine
-/// must not stop it (e.g. in CI).
+/// Unlike [`load_up_config`], it doesn't check that the local paths exist. The `preview`
+/// commands never launch the services' local commands, so a `run.directory` that only exists on
+/// a developer's machine must not stop them (e.g. in CI). `mirrord preview up` and `mirrord
+/// preview down` never read the `sync` directories, so they must work in a checkout without
+/// them. `mirrord preview sync` checks the `sync` directories of the services that it previews.
 pub fn load_preview_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
-    template(&std::fs::read_to_string(path)?, key)
+    let mut config = template(&std::fs::read_to_string(path)?, key)?;
+    let config_directory = config_directory(path)?;
+
+    for service in config.services.values_mut() {
+        for entry in &mut service.sync {
+            entry.local = config_directory.join(&entry.local);
+        }
+
+        for glob in service
+            .install
+            .iter_mut()
+            .flat_map(|install| &mut install.on_change)
+        {
+            *glob = config_directory.join(&*glob);
+        }
+    }
+
+    Ok(config)
 }
 
 /// Load, parse, and resolve local paths in a `mirrord-up.yaml` configuration file.
@@ -835,11 +858,11 @@ pub async fn resolve_services(
     Ok(service_configs)
 }
 
-/// Generate the [`mirrord_config::LayerConfig`] of every service's `mirrord preview up` session,
-/// resolving the targets left to the cluster like [`resolve_services`] does, but without ever
-/// prompting. The caller drops the services without an image with
-/// [`UpConfig::select_preview_images`] before calling this, and sets each config's
-/// `feature.preview.image` to the one it picked.
+/// Generate the [`mirrord_config::LayerConfig`] of every service's `mirrord preview up` or
+/// `mirrord preview sync` session, resolving the targets left to the cluster like
+/// [`resolve_services`] does, but without ever prompting. The caller drops the services that get
+/// no preview with [`UpConfig::select_preview_images`] before calling this, and sets each
+/// config's `feature.preview.image` to the one it picked.
 pub async fn resolve_preview_services(
     up_config: UpConfig,
     config_path: &Path,
@@ -916,6 +939,9 @@ fn service_commands(
                 config,
                 service_name,
                 run,
+                sync: _,
+                install: _,
+                restart_on_change: _,
                 mode: _,
                 default_db_branches: _,
                 default_split_queues: _,
@@ -925,6 +951,8 @@ fn service_commands(
                 directory,
                 command,
                 pre_command,
+                // Only the preview pod of a service with `sync` uses it.
+                remote_directory: _,
             } = run;
 
             let encoded_cfg = config.encode()?;
@@ -1171,6 +1199,32 @@ services:
                 ),
             ]),
             "only the services `--debug` names may wait for an IDE to release them"
+        );
+    }
+
+    /// `mirrord preview down` loads the same config as `mirrord preview up`, and must still
+    /// delete the previews in a checkout that lacks a `sync` directory.
+    #[test]
+    fn preview_config_resolves_sync_paths_without_reading_them() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let config_path = directory.path().join("mirrord-up.yaml");
+        std::fs::write(
+            &config_path,
+            "services:\n  web:\n    run:\n      command: [x]\n    sync:\n      - local: missing\n        remote: /app\n    install:\n      command: [npm, ci]\n      on_change: [missing/package-lock.json]\n",
+        )
+        .unwrap();
+
+        let config =
+            load_preview_up_config(&config_path, &EnvKey::Provided("key".to_owned())).unwrap();
+
+        // `mirrord preview sync` translates each glob into the container by its place under a
+        // `local`, so both must be resolved against the same directory.
+        let config_directory = config_directory(&config_path).unwrap();
+        let web = &config.services["web"];
+        assert_eq!(web.sync[0].local, config_directory.join("missing"));
+        assert_eq!(
+            web.install.as_ref().unwrap().on_change,
+            [config_directory.join("missing/package-lock.json")]
         );
     }
 
