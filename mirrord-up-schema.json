@@ -214,7 +214,7 @@
           ]
         },
         "on_change": {
-          "description": "The files whose changes run `command` again, as globs relative to the directory that\ncontains `mirrord-up.yaml`, e.g. `frontend/package-lock.json`. Each must lie under the\n`local` of a `sync` entry. The preview pod reads every file that a glob matches after\neach push, including the files that `command` wrote, so a glob with `**` over a\ndirectory such as `node_modules` hashes every match on every push. Name the files, such\nas `frontend/package-lock.json` or `packages/*/package.json`, to keep that cheap.",
+          "description": "The files whose changes run `command` again, as globs relative to the directory that\ncontains `mirrord-up.yaml`, e.g. `frontend/package-lock.json`. Each must lie under the\n`local` of a `sync.files` entry. The preview pod reads every file that a glob matches after\neach push, including the files that `command` wrote, so a glob with `**` over a\ndirectory such as `node_modules` hashes every match on every push. Name the files, such\nas `frontend/package-lock.json` or `packages/*/package.json`, to keep that cheap.",
           "type": "array",
           "items": {
             "type": "string"
