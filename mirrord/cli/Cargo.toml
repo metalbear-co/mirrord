@@ -68,7 +68,7 @@ thiserror.workspace = true
 humantime.workspace = true
 inquire.workspace = true
 shlex.workspace = true
-tokio-util.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
 socket2.workspace = true
 drain.workspace = true
 prettytable-rs.workspace = true
@@ -99,6 +99,7 @@ axum = { workspace = true, features = ["ws"] }
 axum-extra = { workspace = true }
 rust-embed.workspace = true
 notify.workspace = true
+dunce.workspace = true
 mime_guess.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 mirrord-session-monitor-client.workspace = true
@@ -131,6 +132,12 @@ kube.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
 tower-test.workspace = true
+
+# Only the tests of `preview sync`, which runs on Unix alone, use these.
+[target.'cfg(unix)'.dev-dependencies]
+flate2.workspace = true
+tar.workspace = true
+tokio-tungstenite.workspace = true
 
 [features]
 windows_build = []
