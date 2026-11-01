@@ -6,7 +6,10 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::{Progress, ProgressTracker};
+use crate::{
+    Progress, ProgressTracker,
+    json::{NewTaskMessage, ProgressMessage, WarningMessage},
+};
 
 #[derive(Debug)]
 pub struct JsonProgress {
@@ -37,12 +40,7 @@ impl JsonProgress {
     }
 
     fn print_finished_task(&self, success: bool, msg: Option<&str>) {
-        let message = ProgressMessage::FinishedTask(FinishedTaskMessage {
-            name: self.name.clone(),
-            message: msg.map(|s| s.to_owned()),
-            success,
-        });
-        message.print();
+        ProgressMessage::finished_task(&self.name, success, msg).print();
     }
 }
 
@@ -356,32 +354,6 @@ impl Progress for PrefixedProgress {
     }
 }
 
-#[derive(Serialize, Debug, Clone, Default)]
-struct NewTaskMessage {
-    /// Task name (identifier)
-    name: String,
-    /// Parent task name, if subtask.
-    parent: Option<String>,
-}
-
-/// Message sent when a task is finished.
-#[derive(Serialize, Debug, Clone, Default)]
-struct FinishedTaskMessage {
-    /// Finished task name
-    name: String,
-    /// Was the task successful?
-    success: bool,
-    /// Finish message
-    message: Option<String>,
-}
-
-/// Message sent when a task is finished.
-#[derive(Serialize, Debug, Clone, Default)]
-struct WarningMessage {
-    /// Warning message
-    message: String,
-}
-
 /// Indicates what type of notification should appear in the IDEs.
 #[derive(Serialize, Debug, Clone, Default)]
 pub enum NotificationLevel {
@@ -421,29 +393,8 @@ pub struct IdeMessage {
     pub actions: HashSet<IdeAction>,
 }
 
-/// The message types that we report on [`Progress`].
-///
-/// These are used by the extensions (vscode and intellij) to show nice notifications.
-#[derive(Serialize, Debug, Clone)]
-#[serde(tag = "type")]
-enum ProgressMessage {
-    NewTask(NewTaskMessage),
-    Warning(WarningMessage),
-    FinishedTask(FinishedTaskMessage),
-    Info {
-        message: String,
-    },
-    /// Messages that are passed to the IDE and shown to the user in notification boxes.
-    IdeMessage {
-        /// It's a generic json [`Value`].
-        ///
-        /// Should be an [`IdeMessage`] converted to [`Value`].
-        message: Value,
-    },
-}
-
 impl ProgressMessage {
     pub(crate) fn print(&self) {
-        println!("{}", serde_json::to_string(self).unwrap());
+        println!("{}", self.to_line());
     }
 }

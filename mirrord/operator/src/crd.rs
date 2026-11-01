@@ -104,6 +104,13 @@ pub const TARGET_NAMESPACE_ANNOTATION: &str = "mirrord.metalbear.co/target-names
 pub struct TargetSpec {
     /// The kubernetes resource to target.
     pub target: KubeTarget,
+
+    /// The image of the target's container, as the target's pod template names it. `mirrord
+    /// preview sync` reuses a preview that runs the target's image only while the target still
+    /// names that image. `None` for a target without a single container, such as a label target,
+    /// and from an operator that doesn't report it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
 }
 
 impl TargetCrd {
@@ -970,6 +977,12 @@ pub enum NewOperatorFeature {
     /// reconciles the branch, which surfaces only as a creation timeout.
     TargetlessDbBranches,
 
+    /// This operator honors `sync` on a `PreviewSession`: it adds the code sync sidecar to the
+    /// preview pod and relays pushes to it. The CLI requires this feature before it sends `sync`,
+    /// because an older operator's CRD schema prunes `sync`, and the preview would then try to
+    /// run an empty image.
+    PreviewCodeSync,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -1035,6 +1048,7 @@ impl NewOperatorFeature {
             | Self::PreviewLabelTarget
             | Self::PreviewTlsClientAuthFromTarget
             | Self::PreviewAutoQueueSplitting
+            | Self::PreviewCodeSync
             | Self::PreviewSpecResources => Some("feature.preview"),
             Self::LabelTargeting | Self::ServerlessSessionsManager => Some("target.path"),
             Self::MultiClusterPrimary | Self::MultiClusterRemote | Self::MultiClusterSubscribe => {
@@ -1126,6 +1140,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::AzureServiceBusQueueSplitting => {
                 "Azure Service Bus queue splitting"
             }
+            NewOperatorFeature::PreviewCodeSync => "code sync in preview environments",
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
@@ -1204,7 +1219,8 @@ impl NewOperatorFeature {
             | NewOperatorFeature::PreviewCronJobTarget
             | NewOperatorFeature::PreviewLabelTarget
             | NewOperatorFeature::PreviewSpecResources
-            | NewOperatorFeature::PreviewAutoQueueSplitting => &["operator.previewEnv"],
+            | NewOperatorFeature::PreviewAutoQueueSplitting
+            | NewOperatorFeature::PreviewCodeSync => &["operator.previewEnv"],
             NewOperatorFeature::SqsQueueSplitting
             | NewOperatorFeature::SqsQueueSplittingDirect
             | NewOperatorFeature::SqsQueueSplittingWithJqFilter => &["operator.sqsSplitting"],

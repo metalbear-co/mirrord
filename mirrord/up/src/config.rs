@@ -496,8 +496,10 @@ pub struct ServiceConfig {
     #[serde(default)]
     pub(crate) ignore_ports: BTreeSet<u16>,
 
-    /// Don't launch this service unless it is named on the `mirrord up` command line. Defaults to
-    /// `false`.
+    /// Don't launch this service unless it is named on the `mirrord up` command line, and don't
+    /// preview it with `mirrord preview sync` unless `--image` or `MIRRORD_<SERVICE>_IMAGE` gives
+    /// it an image. `mirrord preview up` ignores it: an image alone picks its services. Defaults
+    /// to `false`.
     #[serde(default)]
     pub(crate) skip: bool,
 
@@ -516,6 +518,126 @@ pub struct ServiceConfig {
 
     /// How to launch the service's local process.
     pub(crate) run: RunConfig,
+
+    /// How `mirrord preview sync` previews the service with local code: the local directories
+    /// that it pushes into the service's preview pod, and how the pod runs them. The preview runs
+    /// the image from `--image` or `MIRRORD_<SERVICE>_IMAGE`, or the target's image without one.
+    /// For example:
+    ///
+    /// ```yaml
+    /// sync:
+    ///   files:
+    ///     - local: frontend
+    ///       remote: /app
+    ///   run:
+    ///     command: ["npm", "run", "dev"]
+    ///     directory: /app
+    ///   install:
+    ///     command: ["npm", "ci"]
+    ///     on_change: ["frontend/package-lock.json"]
+    ///   restart_on_change: false
+    /// ```
+    ///
+    /// `mirrord up` and `mirrord preview up` ignore this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
+    pub(crate) sync: Option<SyncConfig>,
+}
+
+/// How `mirrord preview sync` previews a service with local code.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncConfig {
+    /// The local directories to push into the preview pod.
+    pub files: Vec<SyncEntry>,
+
+    /// How the preview pod runs the app on the pushed code.
+    #[serde(default)]
+    pub run: SyncRunConfig,
+
+    /// The command that installs the app's dependencies in the preview pod.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install: Option<InstallConfig>,
+
+    /// Whether the preview pod restarts the app after each push. Set it to `false` for a dev
+    /// server that reloads changed files on its own. Defaults to `true`.
+    #[serde(default = "default_restart_on_change")]
+    pub restart_on_change: bool,
+}
+
+fn default_restart_on_change() -> bool {
+    true
+}
+
+/// How the preview pod of a service with `sync` runs the app.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SyncRunConfig {
+    /// The command that runs the app in the preview's container, as a list of the program and
+    /// its arguments, e.g. `["npm", "run", "dev"]`. Defaults to `run.command`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+
+    /// The absolute working directory of `command` in the preview's container, e.g. `/app`.
+    /// When not set, `command` runs in the working directory of the container, which is `/` for
+    /// an image without a `WORKDIR`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
+}
+
+/// The command that installs a service's dependencies in its preview pod.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InstallConfig {
+    /// The command to run, as a list of the program and its arguments, e.g. `["npm", "ci"]`. It
+    /// runs in the preview's container before the app starts, and again after a push that
+    /// changes a file that `on_change` matches.
+    pub command: Vec<String>,
+
+    /// The absolute working directory of `command` in the preview's container, e.g. `/app`.
+    /// Defaults to `sync.run.directory`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
+
+    /// The files whose changes run `command` again, as globs relative to the directory that
+    /// contains `mirrord-up.yaml`, e.g. `frontend/package-lock.json`. Each must lie under the
+    /// `local` of a `sync.files` entry. The preview pod reads every file that a glob matches after
+    /// each push, including the files that `command` wrote, so a glob with `**` over a
+    /// directory such as `node_modules` hashes every match on every push. Name the files, such
+    /// as `frontend/package-lock.json` or `packages/*/package.json`, to keep that cheap.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub on_change: Vec<PathBuf>,
+
+    /// The absolute paths in the container that `command` writes to outside every `sync`
+    /// `remote`, e.g. `/usr/local/lib/python3.12/site-packages`. The preview keeps them on the
+    /// volume that holds the pushed code, so the installed files survive a restart of the pod. A
+    /// path under a `remote` is on that volume already and needs no entry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub persist: Vec<String>,
+}
+
+/// One local directory that `mirrord preview sync` pushes into a preview pod.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncEntry {
+    /// The local directory to push. A relative path is resolved against the directory that
+    /// contains `mirrord-up.yaml`. The push leaves out `.git`, `.jj`, the paths that git ignores
+    /// and the paths that `ignore` leaves out. Those paths keep what the pod has at them, such as
+    /// the image's files or what the install wrote, and every other path in `remote` holds the
+    /// local tree.
+    pub local: PathBuf,
+
+    /// The absolute path in the preview's container that holds the pushed directory. A push makes
+    /// it a mirror of `local`, so it deletes what the image has there, except at the paths that
+    /// the push leaves out (see `local`).
+    pub remote: String,
+
+    /// More paths that the push leaves out, written as the lines of a `.gitignore` in `local`,
+    /// e.g. `coverage/`. They take precedence over git's rules, so a `!` line pushes a file that
+    /// a `.gitignore` excludes, e.g. `!.env.preview`. A `!` line can't bring back a file in an
+    /// ignored directory, as in git.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore: Vec<String>,
 }
 
 /// Top-level `mirrord-up.yaml` configuration.
@@ -575,9 +697,9 @@ impl ServiceConfig {
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `base` from
     /// [`CommonConfig::base_config`].
     ///
-    /// For [`SessionKind::Preview`], the config is for the service's `mirrord preview up` session
-    /// instead: it is assembled as in `split` mode whatever the service's `default_mode`, and
-    /// without `env`.
+    /// For [`SessionKind::Preview`], the config is for the service's `mirrord preview up` or
+    /// `mirrord preview sync` session instead: it is assembled as in `split` mode whatever the
+    /// service's `default_mode`, and without `env`.
     fn assemble(
         mut self,
         service_name: &Arc<str>,
@@ -689,6 +811,7 @@ impl ServiceConfig {
             config: cfg,
             service_name: service_name.clone(),
             run: self.run,
+            sync: self.sync,
             mode: self.default_mode,
             default_db_branches,
             default_split_queues,
@@ -801,8 +924,8 @@ enum ConfigPatchErrorKind {
     Validation(#[from] mirrord_config::config::ConfigError),
 
     #[error(
-        "it sets `feature.preview.image`, which `mirrord preview up` takes from `--image` or \
-         `MIRRORD_<SERVICE>_IMAGE` instead"
+        "it sets `feature.preview.image`, which `mirrord preview up` and `mirrord preview sync` \
+         take from `--image` or `MIRRORD_<SERVICE>_IMAGE` instead"
     )]
     PreviewImage,
 }
@@ -868,7 +991,7 @@ fn patchable(config: LayerConfig, key: &EnvKey) -> Result<serde_json::Value, ser
 pub(crate) enum SessionKind {
     /// A `mirrord up` session, running the service's local process.
     Up,
-    /// A `mirrord preview up` session, running the service's image in the cluster.
+    /// A `mirrord preview up` or `mirrord preview sync` session, running in the cluster.
     Preview,
 }
 
@@ -881,6 +1004,8 @@ pub struct SubprocessCfg {
     pub service_name: Arc<str>,
     /// How to run this service (exec vs container, and the command).
     pub run: RunConfig,
+    /// How `mirrord preview sync` previews the service with local code, if it can.
+    pub sync: Option<SyncConfig>,
     /// Mode this service was assembled for. Its effects are already in `config`; it names the
     /// mode in [`validate_targets`] errors and in what `mirrord up` reports about the service.
     pub mode: ServiceMode,
@@ -1169,8 +1294,22 @@ impl UpConfig {
     /// a service overrides its `skip` flag. When `selected` is empty,
     /// keeps every service except those marked `skip: true`.
     ///
-    /// Errors if no service remains to be launched.
-    pub fn select_services(&mut self, selected: &[String]) -> Result<(), SelectError> {
+    /// Errors if no service remains to be launched, or if any of `debug`, the services `--debug`
+    /// holds for a debugger, is unknown, not among those kept, or runs in a container. Each error
+    /// lists every offending name.
+    pub fn select_services(
+        &mut self,
+        selected: &[String],
+        debug: &[String],
+    ) -> Result<(), SelectError> {
+        let unknown = self.missing_services(debug);
+        if unknown.is_empty().not() {
+            return Err(SelectError::UnknownServices {
+                unknown,
+                available: self.service_names(),
+            });
+        }
+
         if selected.is_empty() {
             self.services.retain(|_, svc| svc.skip.not());
 
@@ -1178,36 +1317,78 @@ impl UpConfig {
                 return Err(SelectError::AllSkipped);
             }
         } else {
-            let unknown: Vec<String> = selected
-                .iter()
-                .filter(|name| self.services.contains_key(name.as_str()).not())
-                .cloned()
-                .collect();
+            let unknown = self.missing_services(selected);
             if unknown.is_empty().not() {
-                let mut available: Vec<String> =
-                    self.services.keys().map(|name| name.to_string()).collect();
-                available.sort();
-                return Err(SelectError::UnknownServices { unknown, available });
+                return Err(SelectError::UnknownServices {
+                    unknown,
+                    available: self.service_names(),
+                });
             }
 
             self.services
                 .retain(|name, _| selected.iter().any(|s| s.as_str() == name.as_ref()));
         }
 
+        let not_launched = self.missing_services(debug);
+        if not_launched.is_empty().not() {
+            return Err(SelectError::DebugNotSelected {
+                services: not_launched,
+            });
+        }
+
+        let in_containers: Vec<String> = debug
+            .iter()
+            .filter(|name| {
+                self.services
+                    .get(name.as_str())
+                    .is_some_and(|service| service.run.r#type == RunType::Container)
+            })
+            .cloned()
+            .collect();
+        if in_containers.is_empty().not() {
+            return Err(SelectError::DebugNotExec {
+                services: in_containers,
+            });
+        }
+
         Ok(())
     }
 
-    /// Picks the image of every service for `mirrord preview up`, and drops the services that have
-    /// none: those get no preview.
+    /// Those of `names` that aren't among [`Self::services`], in the order given.
+    fn missing_services(&self, names: &[String]) -> Vec<String> {
+        names
+            .iter()
+            .filter(|name| self.services.contains_key(name.as_str()).not())
+            .cloned()
+            .collect()
+    }
+
+    /// Every service name in the config, sorted.
+    fn service_names(&self) -> Vec<String> {
+        self.services
+            .keys()
+            .map(|name| name.to_string())
+            .sorted()
+            .collect()
+    }
+
+    /// Picks the image of every service for a `run` of `mirrord preview up` or `mirrord preview
+    /// sync`, and drops the services that get no preview.
+    ///
+    /// [`PreviewRun::Up`] previews every service with an image. [`PreviewRun::Sync`] previews only
+    /// the services with `sync`, except those with `skip` and no image, and a service without an
+    /// image runs the target's image.
     ///
     /// `flags` are the `--image <service>=<ref>` values. A service's image comes from its flag,
     /// then its `MIRRORD_<SERVICE>_IMAGE` environment variable (see [`preview_image_env`]; empty
-    /// counts as unset). `skip` doesn't apply: the images pick the services.
-    /// The variables are read through `context`.
+    /// counts as unset). For [`PreviewRun::Sync`], an image overrides `skip`, because passing one
+    /// selects the service, as naming it does in `mirrord up <service>`. The variables are read
+    /// through `context`.
     pub fn select_preview_images(
         &mut self,
         flags: &[String],
         context: &ConfigContext,
+        run: PreviewRun,
     ) -> Result<PreviewImages, PreviewImageError> {
         let mut from_flags: HashMap<&str, &str> = HashMap::new();
         for flag in flags {
@@ -1267,7 +1448,7 @@ impl UpConfig {
         }
 
         let mut images = PreviewImages::default();
-        self.services.retain(|name, _| {
+        self.services.retain(|name, service| {
             let picked = match from_flags.get(name.as_ref()) {
                 Some(image) => Some(((*image).to_owned(), PreviewImageSource::Flag)),
                 None => from_env
@@ -1275,21 +1456,28 @@ impl UpConfig {
                     .map(|image| (image, PreviewImageSource::Env)),
             };
 
-            match picked {
-                Some(picked) => {
+            let skipped = match run {
+                PreviewRun::Up if picked.is_none() => Some(SkipReason::NoImage),
+                PreviewRun::Sync if service.sync.is_none() => Some(SkipReason::NoSync),
+                PreviewRun::Sync if service.skip && picked.is_none() => Some(SkipReason::Skip),
+                PreviewRun::Up | PreviewRun::Sync => None,
+            };
+            match (skipped, picked) {
+                (Some(reason), _) => images.skipped.push((name.clone(), reason)),
+                (None, Some(picked)) => {
                     images.picked.insert(name.clone(), picked);
-                    true
                 }
-                None => {
-                    images.skipped.push(name.clone());
-                    false
-                }
+                (None, None) => {}
             }
+            skipped.is_none()
         });
         images.skipped.sort();
 
         if self.services.is_empty() {
-            return Err(PreviewImageError::NoImages);
+            return Err(match run {
+                PreviewRun::Up => PreviewImageError::NoImages,
+                PreviewRun::Sync => PreviewImageError::NothingToSync,
+            });
         }
 
         Ok(images)
@@ -1403,11 +1591,33 @@ pub enum SelectError {
     #[error("no services to launch: every service is marked `skip: true`")]
     #[diagnostic(help("Name a service explicitly to run it, or remove a `skip: true` flag."))]
     AllSkipped,
+
+    /// Services named by `--debug` are in the config, but not among those launched.
+    #[error("cannot debug service(s) that are not launched: {}", services.join(", "))]
+    #[diagnostic(help(
+        "Name them among the services to launch, or remove their `skip: true` flags."
+    ))]
+    DebugNotSelected {
+        /// The services named by `--debug` that aren't launched.
+        services: Vec<String>,
+    },
+
+    /// Services named by `--debug` run with `type: container`. Their local process is the
+    /// container runtime's client, not the app, so holding it gives a debugger nothing to debug.
+    #[error("cannot debug service(s) that run in a container: {}", services.join(", "))]
+    #[diagnostic(help(
+        "`--debug` only holds services that run with `type: exec`. Drop these from `--debug`."
+    ))]
+    DebugNotExec {
+        /// The services named by `--debug` that run with `type: container`.
+        services: Vec<String>,
+    },
 }
 
-/// The environment variable that sets the image of `service` for `mirrord preview up`:
-/// `MIRRORD_<SERVICE>_IMAGE`, with the service name in upper case and every character that isn't
-/// an ASCII letter or digit turned into `_` (`cake-maker` reads `MIRRORD_CAKE_MAKER_IMAGE`).
+/// The environment variable that sets the image of `service` for `mirrord preview up` and
+/// `mirrord preview sync`: `MIRRORD_<SERVICE>_IMAGE`, with the service name in upper case and
+/// every character that isn't an ASCII letter or digit turned into `_` (`cake-maker` reads
+/// `MIRRORD_CAKE_MAKER_IMAGE`).
 pub fn preview_image_env(service: &str) -> String {
     let service = service
         .chars()
@@ -1422,7 +1632,30 @@ pub fn preview_image_env(service: &str) -> String {
     format!("MIRRORD_{service}_IMAGE")
 }
 
-/// Where `mirrord preview up` took a service's image from.
+/// Which command picks the services to preview, see [`UpConfig::select_preview_images`]. Its
+/// static string is the command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, IntoStaticStr)]
+pub enum PreviewRun {
+    /// `mirrord preview up`: the services with an image, without code sync.
+    #[strum(serialize = "mirrord preview up")]
+    Up,
+    /// `mirrord preview sync`: the services with `sync`, with code sync.
+    #[strum(serialize = "mirrord preview sync")]
+    Sync,
+}
+
+/// Why [`UpConfig::select_preview_images`] gives a service no preview.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SkipReason {
+    /// [`PreviewRun::Up`]: the service has no image.
+    NoImage,
+    /// [`PreviewRun::Sync`]: the service has `skip: true` and no image.
+    Skip,
+    /// [`PreviewRun::Sync`]: the service has no `sync`.
+    NoSync,
+}
+
+/// Where `mirrord preview up` or `mirrord preview sync` took a service's image from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PreviewImageSource {
     /// `--image <service>=<ref>`.
@@ -1436,8 +1669,8 @@ pub enum PreviewImageSource {
 pub struct PreviewImages {
     /// The image of every service left in the config, and where it came from.
     pub picked: HashMap<Arc<str>, (String, PreviewImageSource)>,
-    /// The services dropped for having no image, sorted by name.
-    pub skipped: Vec<Arc<str>>,
+    /// The services that get no preview, and why, sorted by name.
+    pub skipped: Vec<(Arc<str>, SkipReason)>,
 }
 
 /// Error produced by [`UpConfig::select_preview_images`].
@@ -1471,10 +1704,26 @@ pub enum PreviewImageError {
         services: Vec<String>,
     },
 
-    /// No service got an image, so there is nothing to preview.
+    /// No service got an image, so `mirrord preview up` has nothing to preview.
     #[error("no service has an image to preview")]
-    #[diagnostic(help("Pass `--image <service>=<image ref>` or set `MIRRORD_<SERVICE>_IMAGE`."))]
+    #[diagnostic(help(
+        "Pass `--image <service>=<image ref>` or set `MIRRORD_<SERVICE>_IMAGE`. To preview the \
+         services with `sync` without building an image, run `mirrord preview sync`."
+    ))]
     NoImages,
+
+    /// Every service lacks `sync`, or has `sync` and `skip` but no image, so `mirrord preview
+    /// sync` has nothing to push.
+    #[error(
+        "no service to sync: no service has `sync`, or every service with `sync` is marked \
+         `skip: true` and has no image"
+    )]
+    #[diagnostic(help(
+        "Add `sync` to a service, remove `skip: true` from one, or pass `--image \
+         <service>=<image ref>` for it. `mirrord preview up` previews the services that have an \
+         image."
+    ))]
+    NothingToSync,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
@@ -1542,6 +1791,8 @@ impl CollectAnalytics for &UpConfig {
                 run,
                 context,
                 config_patch,
+                // `mirrord up` ignores it.
+                sync: _,
             } = svc;
 
             if *target != TargetConfig::UNSPECIFIED {
@@ -1820,7 +2071,7 @@ mod tests {
     #[test]
     fn windows_validation_accepts_exec_without_ci() {
         let mut config = windows_validation_fixture();
-        config.select_services(&["exec".to_owned()]).unwrap();
+        config.select_services(&["exec".to_owned()], &[]).unwrap();
 
         config.validate_windows(false).unwrap();
     }
@@ -1840,7 +2091,7 @@ mod tests {
                   command: ["docker"]
             "#,
         );
-        config.select_services(&[]).unwrap();
+        config.select_services(&[], &[]).unwrap();
 
         config.validate_windows(false).unwrap();
     }
@@ -1849,7 +2100,7 @@ mod tests {
     fn windows_validation_rejects_selected_container_services() {
         let mut config = windows_validation_fixture();
         config
-            .select_services(&["exec".to_owned(), "zeta-container".to_owned()])
+            .select_services(&["exec".to_owned(), "zeta-container".to_owned()], &[])
             .unwrap();
 
         assert!(matches!(
@@ -1861,7 +2112,7 @@ mod tests {
     #[test]
     fn windows_validation_rejects_ci_for_exec_services() {
         let mut config = windows_validation_fixture();
-        config.select_services(&["exec".to_owned()]).unwrap();
+        config.select_services(&["exec".to_owned()], &[]).unwrap();
 
         assert!(matches!(
             config.validate_windows(true),
@@ -2719,21 +2970,7 @@ mod tests {
     // -- Service selection --
 
     fn selection_fixture() -> UpConfig {
-        parse(
-            r#"
-            services:
-              a:
-                run:
-                  command: ["echo", "a"]
-              b:
-                skip: true
-                run:
-                  command: ["echo", "b"]
-              c:
-                run:
-                  command: ["echo", "c"]
-            "#,
-        )
+        parse(include_str!("testdata/selection.yaml"))
     }
 
     fn service_names(config: &UpConfig) -> HashSet<String> {
@@ -2743,7 +2980,7 @@ mod tests {
     #[test]
     fn no_selection_drops_skipped_services() {
         let mut config = selection_fixture();
-        config.select_services(&[]).unwrap();
+        config.select_services(&[], &[]).unwrap();
         assert_eq!(
             service_names(&config),
             HashSet::from(["a".to_owned(), "c".to_owned()]),
@@ -2753,14 +2990,14 @@ mod tests {
     #[test]
     fn selection_keeps_only_named_services() {
         let mut config = selection_fixture();
-        config.select_services(&["a".to_owned()]).unwrap();
+        config.select_services(&["a".to_owned()], &[]).unwrap();
         assert_eq!(service_names(&config), HashSet::from(["a".to_owned()]));
     }
 
     #[test]
     fn explicit_selection_overrides_skip() {
         let mut config = selection_fixture();
-        config.select_services(&["b".to_owned()]).unwrap();
+        config.select_services(&["b".to_owned()], &[]).unwrap();
         assert_eq!(service_names(&config), HashSet::from(["b".to_owned()]));
     }
 
@@ -2768,7 +3005,7 @@ mod tests {
     fn unknown_service_errors_and_lists_available() {
         let mut config = selection_fixture();
         let err = config
-            .select_services(&["nope".to_owned(), "a".to_owned()])
+            .select_services(&["nope".to_owned(), "a".to_owned()], &[])
             .unwrap_err();
         match err {
             SelectError::UnknownServices { unknown, available } => {
@@ -2777,6 +3014,93 @@ mod tests {
             }
             other => panic!("expected UnknownServices, got {other:?}"),
         }
+    }
+
+    fn owned(names: &[&str]) -> Vec<String> {
+        names.iter().map(|&name| name.to_owned()).collect()
+    }
+
+    /// `--debug` takes services that run: ones named explicitly, or ones not skipped when none
+    /// are named.
+    #[rstest::rstest]
+    #[case::named(&["b"], &["b"])]
+    #[case::not_skipped(&[], &["a"])]
+    #[case::several_not_skipped(&[], &["c", "a"])]
+    #[case::several_named(&["a", "b"], &["b", "a"])]
+    fn debugging_launched_services_is_accepted(#[case] selected: &[&str], #[case] debug: &[&str]) {
+        let mut config = selection_fixture();
+        config
+            .select_services(&owned(selected), &owned(debug))
+            .expect("every debugged service is launched");
+    }
+
+    /// Every unknown `--debug` name is reported at once, and the known one among them is not.
+    #[test]
+    fn debugging_unknown_services_errors_and_lists_them_all() {
+        let mut config = selection_fixture();
+        match config
+            .select_services(&[], &owned(&["nope", "a", "gone"]))
+            .unwrap_err()
+        {
+            SelectError::UnknownServices { unknown, available } => {
+                assert_eq!(
+                    unknown,
+                    ["nope", "gone"],
+                    "only the unknown names, all of them"
+                );
+                assert_eq!(available, ["a", "b", "c"]);
+            }
+            other => panic!("expected UnknownServices, got {other:?}"),
+        }
+    }
+
+    /// A known service that does not run can't be held: the IDE would wait for a hold line
+    /// that never comes. Every such service is reported, and none that is launched.
+    #[rstest::rstest]
+    #[case::another_one_named(&["a"], &["c"], &["c"])]
+    #[case::skipped(&[], &["b"], &["b"])]
+    #[case::some_of_several(&["a"], &["b", "a", "c"], &["b", "c"])]
+    fn debugging_services_that_are_not_launched_errors(
+        #[case] selected: &[&str],
+        #[case] debug: &[&str],
+        #[case] expected: &[&str],
+    ) {
+        let mut config = selection_fixture();
+        match config
+            .select_services(&owned(selected), &owned(debug))
+            .unwrap_err()
+        {
+            SelectError::DebugNotSelected { services } => assert_eq!(services, expected),
+            other => panic!("expected DebugNotSelected, got {other:?}"),
+        }
+    }
+
+    /// A container service's local process is the container runtime's client, not the app, so
+    /// it can't be held. Every such service is reported at once, in the order given, and the exec
+    /// one among them is not.
+    #[test]
+    fn debugging_container_services_errors_and_lists_them_all() {
+        let mut config = parse(include_str!("testdata/debug-run-types.yaml"));
+        match config
+            .select_services(&[], &owned(&["queue", "api", "db"]))
+            .unwrap_err()
+        {
+            SelectError::DebugNotExec { services } => assert_eq!(
+                services,
+                ["queue", "db"],
+                "only the container services, all of them"
+            ),
+            other => panic!("expected DebugNotExec, got {other:?}"),
+        }
+    }
+
+    /// An exec service can be held while container services run next to it.
+    #[test]
+    fn debugging_an_exec_service_beside_containers_is_accepted() {
+        let mut config = parse(include_str!("testdata/debug-run-types.yaml"));
+        config
+            .select_services(&[], &owned(&["api"]))
+            .expect("`api` runs with `type: exec`, so it can be held");
     }
 
     #[test]
@@ -2791,8 +3115,129 @@ mod tests {
             "#,
         );
         assert!(matches!(
-            config.select_services(&[]).unwrap_err(),
+            config.select_services(&[], &[]).unwrap_err(),
             SelectError::AllSkipped
+        ));
+    }
+
+    // -- Preview image selection --
+
+    fn preview_fixture() -> UpConfig {
+        parse(
+            r#"
+            services:
+              built:
+                run:
+                  command: ["echo"]
+              synced:
+                run:
+                  command: ["echo"]
+                sync:
+                  files:
+                    - local: app
+                      remote: /app
+              skipped-sync:
+                skip: true
+                run:
+                  command: ["echo"]
+                sync:
+                  files:
+                    - local: app
+                      remote: /app
+              plain:
+                run:
+                  command: ["echo"]
+            "#,
+        )
+    }
+
+    /// `mirrord preview up` previews only the services with an image.
+    #[test]
+    fn preview_up_takes_only_the_services_with_an_image() {
+        let mut config = preview_fixture();
+        let context = ConfigContext::default()
+            .override_env(preview_image_env("synced"), "registry.example/synced:v1");
+
+        let images = config
+            .select_preview_images(&[], &context, PreviewRun::Up)
+            .unwrap();
+
+        assert_eq!(service_names(&config), HashSet::from(["synced".to_owned()]));
+        assert_eq!(
+            images.skipped,
+            vec![
+                (Arc::from("built"), SkipReason::NoImage),
+                (Arc::from("plain"), SkipReason::NoImage),
+                (Arc::from("skipped-sync"), SkipReason::NoImage),
+            ]
+        );
+    }
+
+    /// `mirrord preview sync` previews only the services with `sync`, each of its image or else of
+    /// the target's image, and keeps their `sync` also with an image. An image names its service,
+    /// so it previews a service with `skip` too.
+    #[test]
+    fn preview_sync_takes_only_the_services_with_sync() {
+        let mut config = preview_fixture();
+        let context = ConfigContext::default()
+            .override_env(preview_image_env("synced"), "registry.example/synced:v1");
+
+        let images = config
+            .select_preview_images(&[], &context, PreviewRun::Sync)
+            .unwrap();
+
+        assert_eq!(service_names(&config), HashSet::from(["synced".to_owned()]));
+        assert_eq!(
+            images.picked["synced"],
+            (
+                "registry.example/synced:v1".to_owned(),
+                PreviewImageSource::Env
+            )
+        );
+        assert_eq!(
+            images.skipped,
+            vec![
+                (Arc::from("built"), SkipReason::NoSync),
+                (Arc::from("plain"), SkipReason::NoSync),
+                (Arc::from("skipped-sync"), SkipReason::Skip),
+            ]
+        );
+
+        let mut config = preview_fixture();
+        let flags = ["skipped-sync=registry.example/skipped:v1".to_owned()];
+        let images = config
+            .select_preview_images(&flags, &ConfigContext::default(), PreviewRun::Sync)
+            .unwrap();
+        assert_eq!(
+            service_names(&config),
+            HashSet::from(["synced".to_owned(), "skipped-sync".to_owned()])
+        );
+        assert_eq!(
+            images.skipped,
+            vec![
+                (Arc::from("built"), SkipReason::NoSync),
+                (Arc::from("plain"), SkipReason::NoSync),
+            ]
+        );
+    }
+
+    /// A run with nothing to preview fails: `preview up` when no service has an image, and
+    /// `preview sync` when no service has `sync` without `skip`.
+    #[test]
+    fn a_run_with_nothing_to_preview_fails() {
+        let mut config = preview_fixture();
+        assert!(matches!(
+            config.select_preview_images(&[], &ConfigContext::default(), PreviewRun::Up),
+            Err(PreviewImageError::NoImages)
+        ));
+
+        let mut config = preview_fixture();
+        config
+            .services
+            .retain(|name, _| ["plain", "skipped-sync"].contains(&name.as_ref()));
+        assert!(matches!(
+            config.select_preview_images(&[], &ConfigContext::default(), PreviewRun::Sync),
+            Err(PreviewImageError::NothingToSync)
         ));
     }
 

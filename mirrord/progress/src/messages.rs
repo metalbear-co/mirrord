@@ -31,10 +31,18 @@ pub const EXEC_CONTAINER_BINARY: &str = "`mirrord exec <docker|podman|nerdctl> .
     `mirrord container [options] -- <docker|podman|nerdctl> ...` instead.";
 
 /// Final success message printed once a `mirrord exec` / `mirrord port-forward`
-/// session is fully initialized (for `exec`, immediately before the user's
-/// binary is `execve`d).
+/// session is fully initialized (for `exec`, once the layer has started in the
+/// user's program; on Linux and macOS the layer prints it itself in `simple` and
+/// `json` modes, and `exec` prints it before `execve` in a terminal).
 ///
 /// `mirrord up` parses child stdout for this exact line (in `simple` progress
 /// mode) to detect when a session is ready. Keep the emitters and that parser
 /// in sync via this constant.
 pub const SESSION_READY_MESSAGE: &str = "Ready!";
+
+/// The task `mirrord exec` runs the user's program under, which finishes with
+/// [`SESSION_READY_MESSAGE`].
+///
+/// On Linux and macOS in `json` mode the layer finishes it from inside the
+/// program, and the IDE matches the finish to the task by this name.
+pub const EXEC_RUNNING_TASK: &str = "running process";

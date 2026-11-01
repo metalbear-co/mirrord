@@ -115,6 +115,12 @@ pub fn debugger_wait_targets(setting: &str, image_stem: &str) -> bool {
     }
 }
 
+/// Whether a `MIRRORD_LAYER_WAIT_FOR_DEBUGGER` value names one program, so whether it applies to a
+/// process depends on that process's name ([`debugger_wait_targets`]'s filter case).
+pub fn debugger_wait_names_a_program(setting: &str) -> bool {
+    !matches!(setting, "" | "1")
+}
+
 /// The current process's executable name, without extension.
 pub use utils_win::process::get_current_process_name;
 

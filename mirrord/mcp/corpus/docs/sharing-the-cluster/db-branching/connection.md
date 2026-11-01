@@ -6,6 +6,8 @@ tags:
   - enterprise
 ---
 
+# Connection Modes
+
 This page covers the `connection` field of a DB branch config - how mirrord locates the source database connection details. It applies to all database engines. For general concepts and the full list of config fields, see the [DB Branching overview](../db-branching.md).
 
 mirrord supports two ways of specifying how to connect to the source database: a full **connection URL** or **individual connection parameters**. Either way, each value can come from the target pod's environment or from one of several other sources.
