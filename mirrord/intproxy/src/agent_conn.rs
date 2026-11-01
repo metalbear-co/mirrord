@@ -21,7 +21,7 @@ use mirrord_protocol_io::ConnectionOutput;
 use mirrord_protocol_io::{Client, Connection, ProtocolError};
 use mirrord_sessions_manager_client::{
     IntproxyClient, LoginTokenSource, OperatorTransport, SessionsManagerClientError,
-    SessionsManagerConnectInfo,
+    SessionsManagerConnectInfo, SessionsManagerEndpoint,
 };
 #[cfg(not(test))]
 use serde::Deserialize;
@@ -271,7 +271,15 @@ impl AgentConnection {
             }
 
             AgentConnectInfo::SessionsManager(connect_info) => {
-                let proxy_client = IntproxyClient::new(connect_info.clone(), login_tokens.clone())?;
+                let endpoint =
+                    SessionsManagerEndpoint::resolve(config.sessions_manager.url.as_deref())?;
+                tracing::info!(
+                    url = %endpoint,
+                    source = ?endpoint.source,
+                    "Connecting through a standalone sessions-manager"
+                );
+                let proxy_client =
+                    IntproxyClient::new(connect_info.clone(), endpoint, login_tokens.clone())?;
                 let conn = Box::pin(proxy_client.connect(Duration::from_secs(60)))
                     .await
                     .map(Connection::from_channel)?;

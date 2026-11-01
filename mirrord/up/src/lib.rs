@@ -18,20 +18,27 @@ use std::{
 };
 
 pub use config::{
-    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, ModeError,
-    SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SubprocessCfg,
-    UpConfig, WindowsSupportError,
+    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, InstallConfig,
+    PreviewImageError, PreviewImageSource, PreviewImages, PreviewRun, RunConfig, RunType,
+    SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SkipReason,
+    SubprocessCfg, SyncConfig, SyncEntry, SyncRunConfig, TargetValidationError, UpConfig,
+    WindowsSupportError, preview_image_env,
 };
-use config::{ResolvedTarget, SpecifiedTarget, UnresolvedTarget, validate_targets};
+use config::{
+    ResolvedTarget, SessionKind, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets,
+};
 use futures::TryStreamExt;
 pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
 use k8s_openapi::api::core::v1::Namespace;
+pub use list::{LISTING_VERSION, UpListing};
 use miette::Diagnostic;
 use mirrord_analytics::{MIRRORD_UP_CORRELATION_ID_ENV, UpSessionDbBranch};
 use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
+    MIRRORD_DEBUG_HOLD,
     config::{ConfigContext, ConfigError, EnvKey},
+    debug_hold,
     target::{Target, TargetType},
     util::GIT_BRANCH,
 };
@@ -53,6 +60,7 @@ use crate::kube_context::UpKubeContext;
 mod config;
 mod init;
 mod kube_context;
+mod list;
 mod process;
 
 /// Shared slot that [`launch`] fills with what the child sessions report while starting: the
@@ -147,10 +155,9 @@ pub enum UpError {
     #[diagnostic(transparent)]
     Select(#[from] SelectError),
 
-    /// A service's mode can't be used with the target it resolved to.
-    #[error(transparent)]
-    #[diagnostic(transparent)]
-    Mode(#[from] ModeError),
+    /// One or more services cannot use their resolved targets.
+    #[error("target validation failed")]
+    Mode(#[related] Vec<TargetValidationError>),
 
     /// The selected services would delegate to commands unsupported on Windows.
     #[error(transparent)]
@@ -210,6 +217,28 @@ pub enum UpError {
     /// The user chose to exit from the target-resolution wizard.
     #[error("exited")]
     Exited,
+
+    /// A service without a `target.path` has no workload named after it, and the command can't
+    /// prompt for one.
+    #[error("no workload named `{service}` found in namespace `{namespace}`")]
+    #[diagnostic(help(
+        "Set `target.path` (and `target.namespace` if needed) for the service in mirrord-up.yaml."
+    ))]
+    NoInferredTarget {
+        /// Name of the service whose target couldn't be inferred.
+        service: Arc<str>,
+        /// Namespace the workload was looked up in.
+        namespace: String,
+    },
+
+    /// A service previewed by `mirrord preview up` or `mirrord preview sync` has no target
+    /// (`target: none` or `path: targetless`). A preview runs a copy of its target's pod, so there
+    /// has to be one.
+    #[error("service `{service}` has no target, but a preview environment needs one")]
+    PreviewTargetless {
+        /// Name of the targetless service.
+        service: Arc<str>,
+    },
 
     /// The only namespace that the user can pick has no workload that the user can list.
     #[error("found no workloads that you can list in namespace \"{0}\"")]
@@ -353,6 +382,41 @@ fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
     )
 }
 
+/// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up`, `mirrord
+/// preview sync` and `mirrord preview down`, and resolve the local directories of each service's
+/// `sync.files` and the globs of its `sync.install.on_change` against the directory of the
+/// file.
+///
+/// Unlike [`load_up_config`], it doesn't check that the local paths exist. The `preview`
+/// commands never launch the services' local commands, so a `run.directory` that only exists on
+/// a developer's machine must not stop them (e.g. in CI). `mirrord preview up` and `mirrord
+/// preview down` never read the `sync` directories, so they must work in a checkout without
+/// them. `mirrord preview sync` checks the `sync` directories of the services that it previews.
+pub fn load_preview_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
+    let mut config = template(&std::fs::read_to_string(path)?, key)?;
+    let config_directory = config_directory(path)?;
+
+    for sync in config
+        .services
+        .values_mut()
+        .filter_map(|service| service.sync.as_mut())
+    {
+        for entry in &mut sync.files {
+            entry.local = config_directory.join(&entry.local);
+        }
+
+        for glob in sync
+            .install
+            .iter_mut()
+            .flat_map(|install| &mut install.on_change)
+        {
+            *glob = config_directory.join(&*glob);
+        }
+    }
+
+    Ok(config)
+}
+
 /// Load, parse, and resolve local paths in a `mirrord-up.yaml` configuration file.
 pub fn load_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
     let content = std::fs::read_to_string(path)?;
@@ -395,8 +459,8 @@ const INFERRED_TARGET_TYPES: [TargetType; 4] = [
 
 /// Resolve every service whose `target.path` is absent by looking the service
 /// key up in the cluster (see [`INFERRED_TARGET_TYPES`] for the search order).
-/// When no workload matches, an interactive wizard lets the user pick a
-/// different namespace and workload, or exit.
+/// When no workload matches and `interactive` is set, a wizard lets the user
+/// pick a different namespace and workload, or exit. Otherwise that fails.
 ///
 /// If the user has specified a kube context via `--context`, `config.services.*.context` or
 /// `config.common.context`, use this to resolve targets.
@@ -404,6 +468,7 @@ async fn resolve_unresolved_workloads(
     up_config: &UpConfig,
     config_path: &Path,
     up_context: UpKubeContext,
+    interactive: bool,
 ) -> Result<HashMap<UnresolvedTarget, ResolvedTarget>, UpError> {
     let unresolved = up_config.unresolved_targets(up_context.clone());
 
@@ -445,13 +510,22 @@ async fn resolve_unresolved_workloads(
         let workloads = list_workloads(client, namespace, &INFERRED_TARGET_TYPES).await?;
         let resolved = match find_by_name(&workloads, name) {
             Some(path) => {
-                println!("{name}: using {path}");
+                // Without prompts, the caller reports the targets the way its output is set up.
+                if interactive {
+                    println!("{name}: using {path}");
+                }
                 ResolvedTarget {
                     resolved: SpecifiedTarget {
                         path: Some(Target::from_str(path)?),
                         namespace: unresolved_target.namespace.clone(),
                     },
                 }
+            }
+            None if interactive.not() => {
+                return Err(UpError::NoInferredTarget {
+                    service: name.clone(),
+                    namespace: namespace.to_owned(),
+                });
             }
             None => {
                 println!(
@@ -775,7 +849,7 @@ pub async fn resolve_services(
     };
 
     let mut resolved_targets =
-        resolve_unresolved_workloads(&up_config, config_path, up_context.clone()).await?;
+        resolve_unresolved_workloads(&up_config, config_path, up_context.clone(), true).await?;
 
     let service_configs = up_config.service_configs(
         key,
@@ -784,9 +858,53 @@ pub async fn resolve_services(
         &mut ConfigContext::default(),
     )?;
 
-    validate_targets(&service_configs)?;
+    validate_targets(&service_configs).map_err(UpError::Mode)?;
 
     Ok(service_configs)
+}
+
+/// Generate the [`mirrord_config::LayerConfig`] of every service's `mirrord preview up` or
+/// `mirrord preview sync` session, resolving the targets left to the cluster like
+/// [`resolve_services`] does, but without ever prompting. The caller drops the services that get
+/// no preview with [`UpConfig::select_preview_images`] before calling this, and sets each
+/// config's `feature.preview.image` to the one it picked.
+pub async fn resolve_preview_services(
+    up_config: UpConfig,
+    config_path: &Path,
+    kube_context_arg: Option<Arc<str>>,
+    key: &EnvKey,
+) -> Result<Vec<SubprocessCfg>, UpError> {
+    let targetless = up_config.services.iter().find(|(_, service)| {
+        matches!(
+            &service.target,
+            TargetConfig::Targetless
+                | TargetConfig::Specified(SpecifiedTarget {
+                    path: Some(Target::Targetless),
+                    ..
+                })
+        )
+    });
+    if let Some((service, _)) = targetless {
+        return Err(UpError::PreviewTargetless {
+            service: service.clone(),
+        });
+    }
+
+    let up_context = UpKubeContext {
+        command_arg: kube_context_arg,
+        common_context: up_config.common.context.clone(),
+    };
+
+    let mut resolved_targets =
+        resolve_unresolved_workloads(&up_config, config_path, up_context.clone(), false).await?;
+
+    up_config.assemble_services(
+        key,
+        &mut resolved_targets,
+        up_context,
+        &mut ConfigContext::default(),
+        SessionKind::Preview,
+    )
 }
 
 /// Spawn a child mirrord process for each of `service_configs`. Stdout/stderr from
@@ -796,21 +914,40 @@ pub async fn resolve_services(
 /// `ready` is filled with the time-to-ready once every session has signalled
 /// readiness, and with the branch databases the sessions report (see [`ReadyTracker`]).
 ///
+/// `debug` names the services whose programs are held for a debugger (see [`MIRRORD_DEBUG_HOLD`]).
+/// [`UpConfig::select_services`] has checked that each is one of the services launched.
+///
 /// Returns when the user stops the session or one of the child sessions exits.
 pub async fn launch(
     service_configs: Vec<SubprocessCfg>,
     correlation_id: Uuid,
+    debug: &[String],
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
-    let commands: Vec<_> = service_configs
+    let commands = service_commands(service_configs, correlation_id, debug)?;
+    process::run(commands, ready).await
+}
+
+/// The `mirrord exec`/`mirrord container` command, and `run.pre_command`, of every service.
+///
+/// Only the services named in `debug` get [`MIRRORD_DEBUG_HOLD`]. The others never inherit it from
+/// `mirrord up`'s own environment, so they run as usual whatever it holds.
+fn service_commands(
+    service_configs: Vec<SubprocessCfg>,
+    correlation_id: Uuid,
+    debug: &[String],
+) -> Result<Vec<process::ServiceCommands>, UpError> {
+    service_configs
         .into_iter()
         .map(|config| {
             let SubprocessCfg {
                 config,
                 service_name,
                 run,
+                sync: _,
                 mode: _,
                 default_db_branches: _,
+                default_split_queues: _,
             } = config;
             let config::RunConfig {
                 r#type,
@@ -822,6 +959,12 @@ pub async fn launch(
             let encoded_cfg = config.encode()?;
 
             let mut cmd = resolve_tokio_command(std::env::current_exe()?);
+            let debugged = debug.iter().any(|name| **name == *service_name);
+            if debugged {
+                cmd.env(MIRRORD_DEBUG_HOLD, debug_hold::REQUESTED);
+            } else {
+                cmd.env_remove(MIRRORD_DEBUG_HOLD);
+            }
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, "simple")
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
@@ -851,13 +994,12 @@ pub async fn launch(
 
             Ok(process::ServiceCommands {
                 name: service_name,
+                debugged,
                 pre,
                 session: cmd,
             })
         })
-        .collect::<Result<_, UpError>>()?;
-
-    process::run(commands, ready).await
+        .collect()
 }
 
 #[cfg(test)]
@@ -1007,6 +1149,83 @@ services:
             run_directory.to_str().unwrap().starts_with(r"\\?\").not(),
             "{} is a verbatim path",
             run_directory.display()
+        );
+    }
+
+    /// `--debug` holds exactly the programs it names: each named service's `mirrord exec` gets
+    /// the hold, and the one in between, not named, has it removed, so it runs as usual even if
+    /// `mirrord up`'s own environment holds.
+    #[test]
+    fn only_the_debugged_services_are_held() {
+        let key = EnvKey::Provided("key".to_owned());
+        let config = template(include_str!("testdata/debugged-services.yaml"), &key)
+            .expect("parse the config");
+        let service_configs = config
+            .service_configs(
+                &key,
+                &mut HashMap::new(),
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
+            .expect("assemble the services");
+
+        let debug = ["worker".to_owned(), "api".to_owned()];
+        let commands =
+            service_commands(service_configs, Uuid::nil(), &debug).expect("build the commands");
+
+        let holds: HashMap<_, _> = commands
+            .iter()
+            .map(|commands| {
+                let hold = commands
+                    .session
+                    .as_std()
+                    .get_envs()
+                    .find(|(name, _)| *name == MIRRORD_DEBUG_HOLD)
+                    // `None` inside: the variable is removed.
+                    .map(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()));
+                (commands.name.to_string(), hold)
+            })
+            .collect();
+        assert_eq!(
+            holds,
+            HashMap::from([
+                (
+                    "api".to_owned(),
+                    Some(Some(debug_hold::REQUESTED.to_owned()))
+                ),
+                ("web".to_owned(), Some(None)),
+                (
+                    "worker".to_owned(),
+                    Some(Some(debug_hold::REQUESTED.to_owned()))
+                ),
+            ]),
+            "only the services `--debug` names may wait for an IDE to release them"
+        );
+    }
+
+    /// `mirrord preview down` loads the same config as `mirrord preview up`, and must still
+    /// delete the previews in a checkout that lacks a `sync` directory.
+    #[test]
+    fn preview_config_resolves_sync_paths_without_reading_them() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let config_path = directory.path().join("mirrord-up.yaml");
+        std::fs::write(
+            &config_path,
+            "services:\n  web:\n    run:\n      command: [x]\n    sync:\n      files:\n        - local: missing\n          remote: /app\n      install:\n        command: [npm, ci]\n        on_change: [missing/package-lock.json]\n",
+        )
+        .unwrap();
+
+        let config =
+            load_preview_up_config(&config_path, &EnvKey::Provided("key".to_owned())).unwrap();
+
+        // `mirrord preview sync` translates each glob into the container by its place under a
+        // `local`, so both must be resolved against the same directory.
+        let config_directory = config_directory(&config_path).unwrap();
+        let sync = config.services["web"].sync.as_ref().unwrap();
+        assert_eq!(sync.files[0].local, config_directory.join("missing"));
+        assert_eq!(
+            sync.install.as_ref().unwrap().on_change,
+            [config_directory.join("missing/package-lock.json")]
         );
     }
 

@@ -54,12 +54,15 @@ impl KubernetesAPI {
     /// replaces [`AgentConfig::namespace`] with the target namespace.
     #[mirrord_macros::boxed_future]
     pub async fn create<P: Progress>(config: &LayerConfig, progress: &P) -> Result<Self> {
-        let client_config = create_kube_config(
+        let mut client_config = create_kube_config(
             config.accept_invalid_certificates,
             config.kubeconfig.clone(),
             config.kube_context.clone(),
         )
         .await?;
+        // `startup_retry` below is the only retry: kube's own, nested under it, turns a 503 into
+        // minutes of silent waiting.
+        client_config.default_retry = false;
 
         let client = progress
             .suspend(|| ClientBuilder::try_from(client_config.clone()))?

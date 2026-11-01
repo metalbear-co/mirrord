@@ -18,6 +18,7 @@ use serde_json::Value;
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "profiles.mirrord.metalbear.co",
+    group_resolver = "crate::types::keyed_group",
     version = "v1alpha",
     kind = "MirrordClusterProfile",
     category = "mirrord",
@@ -56,6 +57,7 @@ pub struct MirrordClusterProfileSpec {
 #[kube(
     // The operator group is handled by the operator, we want profiles to be handled by k8s.
     group = "profiles.mirrord.metalbear.co",
+    group_resolver = "crate::types::keyed_group",
     version = "v1alpha",
     kind = "MirrordProfile",
     category = "mirrord",

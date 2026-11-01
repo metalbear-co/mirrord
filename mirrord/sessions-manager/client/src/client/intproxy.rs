@@ -14,7 +14,7 @@ use crate::{
     credentials::LoginTokenSource,
     error::SessionsManagerClientError,
     retry::{RetryBudget, with_deadline},
-    transport::{DirectTransport, SessionsManagerTransport},
+    transport::{DirectTransport, SessionsManagerEndpoint, SessionsManagerTransport},
 };
 
 /// Describes the sessions-manager control-plane subscription an intproxy opens.
@@ -42,13 +42,14 @@ pub struct IntproxyClient<T = DirectTransport> {
 }
 
 impl IntproxyClient<DirectTransport> {
-    /// Reaches the standalone sessions-manager the environment configures, authenticating with
-    /// the developer's login token from `login_tokens`.
+    /// Connects through the standalone sessions-manager at `endpoint`, authenticating with the
+    /// developer's login token from `login_tokens`.
     pub fn new(
         connect_info: SessionsManagerConnectInfo,
+        endpoint: SessionsManagerEndpoint,
         login_tokens: Option<Arc<dyn LoginTokenSource>>,
     ) -> Result<Self, SessionsManagerClientError> {
-        let transport = DirectTransport::intproxy_from_env(login_tokens)?;
+        let transport = DirectTransport::intproxy_from_env(endpoint, login_tokens)?;
         Self::with_transport(connect_info, transport)
     }
 }

@@ -1,6 +1,10 @@
 //! General process helpers.
 
-use std::{env, path::Path};
+use std::{
+    env,
+    os::windows::io::{AsRawHandle, BorrowedHandle},
+    path::Path,
+};
 
 use str_win::{string_to_u16_buffer, u16_buffer_to_string};
 use winapi::{
@@ -115,23 +119,51 @@ pub fn process_status(pid: u32) -> ProcessStatus {
             status.alive = true;
         }
 
-        // Image name, stripped of its directory via the path API. Sized past `MAX_PATH` (260) so a
-        // long path is not truncated, matching the buffer `modules.rs` uses.
-        let mut buf = [0u16; 1024];
-        let mut size = buf.len() as u32;
-        if QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut size) != 0 {
-            let written = buf.get(..size as usize).unwrap_or(&buf);
-            let full = u16_buffer_to_string(written);
-            status.name = Path::new(&full)
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or(full);
+        if let Some(name) = process_image_name(BorrowedHandle::borrow_raw(handle.cast())) {
+            status.name = name;
         }
 
         CloseHandle(handle);
     }
 
     status
+}
+
+/// The image file name of the process `handle` refers to, without its directory, e.g.
+/// `python.exe`. `None` when it can't be read.
+///
+/// For a process this one created, the handle `CreateProcess` returned reads it even when opening
+/// the process again by pid would be refused.
+///
+/// # Arguments
+///
+/// * `handle` - a process handle with at least `PROCESS_QUERY_LIMITED_INFORMATION` access.
+pub fn process_image_name(handle: BorrowedHandle<'_>) -> Option<String> {
+    // Sized past `MAX_PATH` (260) so a long path is not truncated, matching the buffer
+    // `modules.rs` uses.
+    let mut buf = [0u16; 1024];
+    let mut size = buf.len() as u32;
+    // SAFETY: `handle` is open for the borrow, and `buf` holds `size` u16s, the most the call
+    // writes.
+    let read = unsafe {
+        QueryFullProcessImageNameW(
+            handle.as_raw_handle().cast(),
+            0,
+            buf.as_mut_ptr(),
+            &mut size,
+        )
+    };
+    if read == 0 {
+        return None;
+    }
+    let written = buf.get(..size as usize).unwrap_or(&buf);
+    let full = u16_buffer_to_string(written);
+    Some(
+        Path::new(&full)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or(full),
+    )
 }
 
 /// A snapshot of the current process's identity.

@@ -72,8 +72,24 @@ impl PathExt for Path {
     }
 }
 
+/// What an operation does with the path it's given. Only
+/// [`FileFilter::default_local_entries`] looks at it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathUse {
+    /// Describes the entry itself without opening it: `stat`, `access`, `readlink`, `realpath`
+    /// or `statfs`.
+    Describe,
+    /// Anything else: opens it, or creates, removes or renames it.
+    Other,
+}
+
 /// Checks whether the given [`Path`] should be accessed remotely.
-pub fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Detour<()> {
+pub fn ensure_remote(
+    file_filter: &FileFilter,
+    path: &Path,
+    write: bool,
+    path_use: PathUse,
+) -> Detour<()> {
     // TODO(gabriela): rewrite this using `FileFilter::check`!
 
     let text = path.to_str().unwrap_or_default();
@@ -101,6 +117,9 @@ pub fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Deto
         _ if file_filter.default_local.is_match(text) => {
             Err(DetourError::Bypass(Bypass::ignored_file(text)))
         }
+        _ if path_use == PathUse::Describe && file_filter.default_local_entries.is_match(text) => {
+            Err(DetourError::Bypass(Bypass::ignored_file(text)))
+        }
         FsModeConfig::LocalWithOverrides => Err(DetourError::Bypass(Bypass::ignored_file(text))),
         FsModeConfig::Write => Ok(()),
         FsModeConfig::Read if write => Err(DetourError::Bypass(Bypass::ReadOnly(text.into()))),
@@ -116,11 +135,11 @@ pub fn ensure_remote(file_filter: &FileFilter, path: &Path, write: bool) -> Deto
 /// 3. Bypass if the new path should be accessed locally.
 ///
 /// Returns the remapped path.
-fn common_path_check(path: PathBuf, write: bool) -> Detour<PathBuf> {
+fn common_path_check(path: PathBuf, write: bool, path_use: PathUse) -> Detour<PathBuf> {
     path.ensure_not_relative_or_not_found()?;
 
     let path = crate::setup().file_remapper().change_path(path);
-    ensure_remote(crate::setup().file_filter(), &path, write)?;
+    ensure_remote(crate::setup().file_filter(), &path, write, path_use)?;
     Ok(path)
 }
 
@@ -149,8 +168,8 @@ fn ensure_not_prefetched(path: &Path) -> Detour<()> {
 /// or answer for the local filesystem rather than the target's (`statfs`). So do the ones that
 /// change the remote namespace (`unlink`, `rename`, `mkdir`), which still take effect in the
 /// target.
-fn prefetchable_path_check(path: PathBuf, write: bool) -> Detour<PathBuf> {
-    let path = common_path_check(path, write)?;
+fn prefetchable_path_check(path: PathBuf, write: bool, path_use: PathUse) -> Detour<PathBuf> {
+    let path = common_path_check(path, write, path_use)?;
     ensure_not_prefetched(&path)?;
 
     Ok(path)
@@ -246,7 +265,14 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
     let file_path = env::temp_dir().join(file_name);
     let file_c_string = CString::new(file_path.to_string_lossy().to_string())?;
     let file_path_ptr = file_c_string.as_ptr();
-    let local_file_fd: RawFd = unsafe { FN_OPEN(file_path_ptr, O_RDONLY | O_CREAT) };
+    // `open` reads a `mode` argument when `O_CREAT` is set, so it must be passed explicitly.
+    let local_file_fd: RawFd = unsafe {
+        FN_OPEN(
+            file_path_ptr,
+            O_RDONLY | O_CREAT | libc::O_EXCL,
+            0o600 as c_int,
+        )
+    };
     if local_file_fd == -1 {
         let error = Errno::last_raw();
         // Close the remote file if creating a tmp local file failed and we have an invalid local fd
@@ -298,7 +324,7 @@ fn close_remote_file_on_failure(fd: u64) -> Result<()> {
 /// [`OPEN_FILES`].
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
-    let path = prefetchable_path_check(path?, open_options.is_write())?;
+    let path = prefetchable_path_check(path?, open_options.is_write(), PathUse::Other)?;
 
     let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)
         .on_error(|fail| match fail {
@@ -442,7 +468,7 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
 /// Resolves the symbolic link `path`.
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
-    let path = common_path_check(path?, false)?;
+    let path = common_path_check(path?, false, PathUse::Describe)?;
 
     let requesting_path = ReadLinkFileRequest { path };
 
@@ -456,7 +482,7 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn mkdir(path: Detour<PathBuf>, mode: u32) -> Detour<()> {
-    let path = common_path_check(path?, true)?;
+    let path = common_path_check(path?, true, PathUse::Other)?;
 
     let mkdir = MakeDirRequest {
         pathname: path,
@@ -499,7 +525,7 @@ pub(crate) fn mkdirat(dirfd: RawFd, path: Detour<PathBuf>, mode: u32) -> Detour<
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn rmdir(path: Detour<PathBuf>) -> Detour<()> {
-    let path = common_path_check(path?, true)?;
+    let path = common_path_check(path?, true, PathUse::Other)?;
 
     let rmdir = RemoveDirRequest { pathname: path };
 
@@ -513,7 +539,7 @@ pub(crate) fn rmdir(path: Detour<PathBuf>) -> Detour<()> {
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn unlink(path: Detour<PathBuf>) -> Detour<()> {
-    let path = common_path_check(path?, true)?;
+    let path = common_path_check(path?, true, PathUse::Other)?;
 
     let unlink = UnlinkRequest { pathname: path };
 
@@ -535,7 +561,7 @@ pub(crate) fn unlinkat(dirfd: RawFd, path: Detour<PathBuf>, flags: u32) -> Detou
 
     if path.is_absolute() {
         path = crate::setup().file_remapper().change_path(path);
-        ensure_remote(crate::setup().file_filter(), &path, true)?;
+        ensure_remote(crate::setup().file_filter(), &path, true, PathUse::Other)?;
     }
 
     let unlink = if path.is_absolute() || dirfd == AT_FDCWD {
@@ -625,7 +651,7 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: c_int) -> Detour<c_int> {
     // into account when deciding whether to ignore, because when a caller is asking whether they
     // have write access to a file and then write to it, we want the test and the actual write to
     // happen with the same file.
-    let path = prefetchable_path_check(path?, (mode & libc::W_OK) != 0)?;
+    let path = prefetchable_path_check(path?, (mode & libc::W_OK) != 0, PathUse::Describe)?;
 
     let access = AccessFileRequest {
         pathname: path,
@@ -666,11 +692,11 @@ pub(crate) fn xstat(
 
             let fd = {
                 if fd == AT_FDCWD {
-                    path = prefetchable_path_check(path, false)?;
+                    path = prefetchable_path_check(path, false, PathUse::Describe)?;
                     None
                 } else if path.is_absolute() {
                     path = crate::setup().file_remapper().change_path(path);
-                    ensure_remote(crate::setup().file_filter(), &path, true)?;
+                    ensure_remote(crate::setup().file_filter(), &path, true, PathUse::Describe)?;
                     None
                 } else {
                     Some(get_remote_fd(fd)?)
@@ -682,7 +708,7 @@ pub(crate) fn xstat(
 
         // lstat/stat
         (Some(path), None) => {
-            let path = prefetchable_path_check(path?, false)?;
+            let path = prefetchable_path_check(path?, false, PathUse::Describe)?;
             (Some(path), None)
         }
 
@@ -762,7 +788,7 @@ pub(crate) fn statx_logic(
             (Some(fd), Some(path))
         }
         (_, Some(path)) => {
-            let path = prefetchable_path_check(path, false)?;
+            let path = prefetchable_path_check(path, false, PathUse::Describe)?;
             (None, Some(path))
         }
     };
@@ -855,7 +881,7 @@ pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponseV2> {
 /// Gets all the data for statfs64, but can be used also for statfs.
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponseV2> {
-    let path = common_path_check(path?, false)?;
+    let path = common_path_check(path?, false, PathUse::Describe)?;
 
     // intproxy downgrades to old version if new one is not supported by agent, and converts
     // old version responses to V2 responses.
@@ -903,7 +929,7 @@ fn absolute_path(path: PathBuf) -> PathBuf {
 
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
-    let path = common_path_check(path?, false)?;
+    let path = common_path_check(path?, false, PathUse::Describe)?;
 
     let realpath = absolute_path(path);
 
@@ -920,8 +946,8 @@ pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
 ///   paths remapped.
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn rename(old_path: Detour<PathBuf>, new_path: Detour<PathBuf>) -> Detour<()> {
-    let old_path = common_path_check(old_path?, false);
-    let new_path = common_path_check(new_path?, false);
+    let old_path = common_path_check(old_path?, false, PathUse::Other);
+    let new_path = common_path_check(new_path?, false, PathUse::Other);
 
     // We need to remap both `old_path` and `new_path` on bypass.
     let (old_path, new_path) = match (old_path, new_path) {
@@ -1247,7 +1273,7 @@ mod test {
 
         let file_filter = FileFilter::try_new(fs_config).unwrap();
 
-        let res = ensure_remote(&file_filter, Path::new(path), write);
+        let res = ensure_remote(&file_filter, Path::new(path), write, PathUse::Other);
         println!("filter result: {res:?}");
         assert_eq!(DetourKind::from(&res), expected);
     }
@@ -1285,7 +1311,7 @@ mod test {
 
         let file_filter = FileFilter::try_new(fs_config).unwrap();
 
-        let res = ensure_remote(&file_filter, Path::new(path), write);
+        let res = ensure_remote(&file_filter, Path::new(path), write, PathUse::Other);
         println!("filter result: {res:?}");
 
         assert_eq!(DetourKind::from(&res), expected);
@@ -1309,9 +1335,39 @@ mod test {
     #[case("/nowhere/.nuget/packages/microsoft.azure.amqp", DetourKind::Success)]
     fn not_found_set(#[case] path: &str, #[case] expected: DetourKind) {
         let filter = FileFilter::try_new(Default::default()).unwrap();
-        let res = ensure_remote(&filter, Path::new(path), false);
+        let res = ensure_remote(&filter, Path::new(path), false, PathUse::Other);
         println!("filter result: {res:?}");
 
         assert_eq!(DetourKind::from(&res), expected);
+    }
+
+    /// A working directory ancestor is local only to calls that describe it. Opening it goes to
+    /// the remote, so `openat` through its fd reaches the target's entries. A user list still
+    /// wins over the default.
+    #[rstest]
+    #[case::described(None, PathUse::Describe, DetourKind::Bypass)]
+    #[case::opened(None, PathUse::Other, DetourKind::Success)]
+    #[case::described_but_read_only(Some("^/workspace"), PathUse::Describe, DetourKind::Success)]
+    fn an_ancestor_is_local_only_to_describe(
+        #[case] read_only: Option<&str>,
+        #[case] path_use: PathUse,
+        #[case] expected: DetourKind,
+    ) {
+        let filter = FileFilter {
+            default_local_entries: FileFilter::make_regex_set(Some(VecOrSingle::Single(
+                r"^/workspace/?$".to_owned(),
+            )))
+            .expect("the test pattern is a valid regex"),
+            ..FileFilter::try_new(FsConfig {
+                mode: FsModeConfig::Read,
+                read_only: read_only.map(|pattern| VecOrSingle::Single(pattern.to_owned())),
+                ..Default::default()
+            })
+            .expect("the test patterns are valid regexes")
+        };
+
+        let res = ensure_remote(&filter, Path::new("/workspace"), false, path_use);
+
+        assert_eq!(DetourKind::from(&res), expected, "filter result: {res:?}");
     }
 }

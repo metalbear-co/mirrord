@@ -6,7 +6,7 @@ use hyper::{
 };
 use hyper_util::rt::TokioExecutor;
 
-use super::HttpVersion;
+use super::{HTTP2_MAX_HEADER_LIST_SIZE, HttpVersion};
 
 /// [`hyper`] uses different types for HTTP/1 and HTTP/2 request senders.
 ///
@@ -34,7 +34,11 @@ where
                 Ok(Self::V1(sender))
             }
             HttpVersion::V2 => {
-                let (sender, conn) = http2::handshake(TokioExecutor::default(), io).await?;
+                let mut builder = http2::Builder::new(TokioExecutor::default());
+                if let Some(size) = *HTTP2_MAX_HEADER_LIST_SIZE {
+                    builder.max_header_list_size(size);
+                }
+                let (sender, conn) = builder.handshake(io).await?;
                 tokio::spawn(conn);
                 Ok(Self::V2(sender))
             }

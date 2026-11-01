@@ -127,7 +127,7 @@ jobs:
           chmod +x /tmp/vale/vale
           mv /tmp/vale/vale /usr/local/bin
       - name: check root markdown files
-        run: vale $(find . -maxdepth 1 -name '*.md' -not -name CLAUDE.md -not -name CHANGELOG.md) --output=report.tmpl
+        run: vale $(find . -maxdepth 1 -name '*.md' -not -name CHANGELOG.md) --output=report.tmpl
       - name: check changelog.d files
         run: vale $(git ls-files 'changelog.d/*.md') --output=report.tmpl
   cargo-lint:

@@ -7,6 +7,9 @@ tags:
 
 description: "Use mirrord subscribe to stream the events of a mirrord session as JSON, for example in CI."
 ---
+
+# Subscribing to Events
+
 `mirrord subscribe` lets you stream live events from an active mirrord session — HTTP requests, queue messages, and operator notifications as JSON to stdout. It's useful in CI/tests: assert that a request actually got stolen to your local process instead of silently hitting the real service, so a broken interception fails the build instead of
 going green.
 
@@ -34,11 +37,11 @@ HTTP events come from redirected requests/responses. Queue events require [queue
 Need support for more events? [Open a GitHub issue](https://github.com/metalbear-co/mirrord/issues) or reach out in the [mirrord Slack community](https://metalbearcommunity.slack.com/ssb/redirect)
 {% endhint %}
 
-### Prerequisites
+## Prerequisites
 
 * A running session started with a known key: `mirrord exec --key <KEY> ...`. If you don't pass `--key`, a random key is generated for the session (`mirrord up` is the exception, it defaults to your OS username). With CLI `3.272.0` and operator `3.210.0` or newer you can also subscribe without a key and get every session's events.
 
-### Usage
+## Usage
 
 In one terminal, run the session you want to observe:
 
@@ -68,7 +71,7 @@ mirrord subscribe --key my-key | jq 'select(.data.http_request)'
 
 You may also pass `--pretty` to pretty-print each event.
 
-### Options
+## Options
 
 All flags are off by default.
 
@@ -79,7 +82,7 @@ All flags are off by default.
 
 These flags need operator `3.210.0` or newer to take effect.
 
-### Unmatched messages
+## Unmatched messages
 
 By default you receive a queue message only when your filter claimed it. With `--unmatched` you also receive the ones nobody claimed.
 
@@ -91,9 +94,13 @@ mirrord subscribe --key my-key --unmatched | jq 'select(.data.queue_message.mode
 This covers queue messages only. An HTTP request that matches no filter never reaches the operator.
 {% endhint %}
 
-### Events
+## Events
 
 Every event has the same envelope — `service_name` (the intercepted workload), `timestamp`, and a `data` payload. On a [multi-cluster](multi-cluster.md) Primary the envelope also has `cluster`, see [Multi-cluster](#multi-cluster) below:
+
+{% hint style="info" %}
+The Operator's header and property redaction, and `operator.hideHeadersAndProperties`, apply only to the [Operator's logs](../managing-mirrord/monitoring.md). The `subscribe` stream carries header and property values as they are, so restrict who can subscribe accordingly.
+{% endhint %}
 
 ```json
 {
@@ -291,7 +298,7 @@ For a pattern subscription (`PSUBSCRIBE`), `channel` is the concrete channel the
 
 Lagging takes place whenever the consumer is not able to keep up with the messages and receive them in a timely fashion (e.g. due to a slow network connection). By default, the operator buffers up to 2048 messages (configurable in `values.yaml` through `subscribeEventBufferSize`), and lagging will take place if more than this many messages accumulate in the internal buffer without the consumer receiving them. Note that lagging only affects slow consumers — functioning consumers will continue to receive all events even in the presence of slow peers.
 
-### Multi-cluster
+## Multi-cluster
 
 In a [multi-cluster](multi-cluster.md) setup, one `mirrord subscribe` against the Primary cluster streams the events of every cluster, with or without a key. This is useful when a session spans several Workload clusters: you no longer need a subscription per cluster to see which one intercepted a request.
 
@@ -337,7 +344,7 @@ If the Primary cannot reach a Workload cluster's operator, the stream keeps goin
 
 This needs operator `3.219.0` or newer on the Primary. Each Workload cluster's operator must let the Primary watch `events`: the chart grants this through the `mirrord-operator-envoy-remote` role as of the same version, so a Workload cluster on an older chart shows up as `cluster_unavailable` with a message naming the missing permission until its chart is upgraded. Subscribing directly to a Workload cluster still works and streams that cluster alone, without a `cluster` field.
 
-### Direct Kube API access (no mirrord CLI required)
+## Direct Kube API access (no mirrord CLI required)
 
 `mirrord subscribe` is a thin wrapper over an operator endpoint that emits [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) (`text/event-stream`). You can access it directly through the Kubernetes API, without requiring the mirrord CLI:
 

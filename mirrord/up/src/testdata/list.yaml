@@ -1,0 +1,22 @@
+services:
+  worker:
+    target: none
+    skip: true
+    default_mode: mirror
+    run:
+      command: ["python", "worker.py"]
+  api:
+    target:
+      path: deployment/api
+      namespace: "ns-{{ key }}"
+    context: staging
+    run:
+      type: exec
+      directory: api
+      command: ["dotnet", "Api.dll", "--session", "{{ key }}"]
+      pre_command: ["dotnet", "build"]
+  web:
+    target:
+      namespace: frontend
+    run:
+      command: ["npm", "start"]

@@ -29,6 +29,7 @@ use crate::crd::session::KubeResourceTarget;
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "dbs.mirrord.metalbear.co",
+    group_resolver = "crate::types::keyed_group",
     version = "v1alpha1",
     kind = "BranchDatabase",
     category = "mirrord",
@@ -478,6 +479,11 @@ pub struct MongodbOptions {
 pub struct RedisOptions {
     #[serde(default)]
     pub copy: RedisCopySpec,
+
+    /// Run the branch as a one node Redis Cluster that owns every hash slot, so Redis Cluster
+    /// clients can discover and use it. Only database 0 exists on such a node.
+    #[serde(default)]
+    pub cluster: bool,
 }
 
 /// DynamoDB-specific branch options.

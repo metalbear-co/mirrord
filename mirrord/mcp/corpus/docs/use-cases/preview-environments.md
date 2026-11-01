@@ -173,6 +173,100 @@ jobs:
 
 Each PR gets an isolated preview keyed by its number. The `{{ key }}` template in the filter is replaced by mirrord with the session key at runtime, routing only matching traffic to the preview pod. When the PR is closed, the session is stopped and the preview pod is cleaned up. For the full list of inputs and configuration options, see the [action documentation](https://github.com/metalbear-co/mirrord-preview).
 
+## Previewing Several Services
+
+`mirrord preview up` starts a preview for every service in a [`mirrord-up.yaml`](../using-mirrord/multiple-concurrent-sessions.md) that has an image, all under one key. It reads the same file as `mirrord up`, so services already defined there need no separate `mirrord.json`. `mirrord preview down` stops them again.
+
+{% hint style="info" %}
+`mirrord preview up` and `mirrord preview down` require mirrord `3.279.0` or later.
+{% endhint %}
+
+```yaml
+services:
+  user-auth-service:
+    run:
+      command: ["python", "-m", "http.server"]
+  stage-user-dashboard-app:
+    run:
+      command: ["node", "app.js"]
+```
+
+```bash
+mirrord preview up \
+  --image user-auth-service=ghcr.io/org/user-auth-service:preview-pr-123-abc1234 \
+  --image stage-user-dashboard-app=ghcr.io/org/stage-user-dashboard-app:preview-pr-123-abc1234 \
+  -k pr-123
+```
+
+This starts two previews under the key `pr-123`, one per `--image`. The previews start in parallel, and the command returns once every preview is ready, idle or failed. Each preview reports its key, namespace, session and preview URL as `mirrord preview start` does, with every line prefixed by the service name.
+
+Use `-f` to read a file other than `mirrord-up.yaml`. The file is [rendered](../using-mirrord/multiple-concurrent-sessions.md#templating) as it is for `mirrord up`, with the preview's key as `{{ key }}`.
+
+### Images
+
+A service's image comes from the first of these two that is set:
+
+1. `--image <service>=<image ref>`, repeated once per service. Everything after the first `=` is the image ref.
+2. The `MIRRORD_<SERVICE>_IMAGE` environment variable. `<SERVICE>` is the service name in upper case, with every character that isn't a letter or digit turned into `_`, so `user-auth-service` reads `MIRRORD_USER_AUTH_SERVICE_IMAGE`.
+
+If a service has no image, `mirrord preview up` skips it.
+
+### Key
+
+Without `--key` (`-k`) or `MIRRORD_KEY`, `mirrord preview up` uses the branch name as the key: `GITHUB_HEAD_REF` in a GitHub pull request, otherwise the current git branch. On `main` or `master`, or with no branch checked out, it generates a random key. The output prints the key.
+
+### How Each Preview Is Set Up
+
+Each preview is created as `mirrord preview start` would create it for the service's target, in `split` mode.
+
+| Service field | In `mirrord preview up` |
+|---|---|
+| `target`, `context`, `ignore_ports`, `config_patch` | Used as in `mirrord up` |
+| `http_filter` | Replaces the default `baggage: mirrord-session=<key>` filter, as in [`split` mode](../using-mirrord/multiple-concurrent-sessions.md#service-modes) |
+| `default_mode`, `env`, `run`, `skip` | Ignored |
+
+* `config_patch` can set any `mirrord.json` option except `feature.preview.image`, which is rejected.
+* Queues are [split by the key](../using-mirrord/multiple-concurrent-sessions.md#queue-splitting), as in `mirrord up`'s `split` mode. This only applies to deployment, rollout and statefulset targets.
+* When the target is a single workload, not a label selector, the preview uses the [database branches defined on its `MirrordSplitConfig`](../sharing-the-cluster/db-branching.md#branches-defined-on-the-workload).
+* To change either default, set `feature.split_queues` or `feature.db_branches` in `config_patch`. Set it to `[]` to turn it off.
+* If the operator can't split a queue or branch a database, the preview starts without it and prints a warning. Default queue splitting requires mirrord operator `3.225.0` or later.
+* `--ttl <minutes>` (or `infinite`) and `--timeout <seconds>` set every preview's TTL and how long to wait for it to become ready, overriding a `config_patch`. `--context` applies to every service, following the [`mirrord up` context precedence](../using-mirrord/multiple-concurrent-sessions.md#context-precedence).
+
+A request reaches a second previewed service only when the first one forwards the `baggage` header on its outgoing calls. See [Header Propagation](preview-environments-in-ci.md#header-propagation-for-backend-testing).
+
+### Checks Before Anything Starts
+
+Every service is checked first. If any check fails, the command exits non-zero and changes nothing in the cluster. Among the checks, the command fails when:
+
+* `--image` names a service that isn't in the file, names one service twice, or isn't in the `<service>=<image ref>` form
+* no service has an image
+* a `MIRRORD_<SERVICE>_IMAGE` variable maps to two services, for example `user-auth-service` and `user_auth_service`
+* a previewed service has `target: none`, or a target that can't be found. `mirrord preview up` never prompts for one.
+* two previewed services have the same target in the same namespace
+* a `config_patch` is invalid, or requests a feature the operator doesn't support
+
+### Results
+
+The command exits with `0` when every preview is ready or idle. If a preview fails to start, the command exits non-zero and names the failed services. Previews that did start keep running.
+
+Running `mirrord preview up` again with the same key replaces each previewed service's session and keeps its preview URL. The old session goes before the new one is ready, so a service whose new preview fails is left with no preview. Services that get no image on a rerun keep their earlier preview until its TTL runs out or you stop it.
+
+### Sharing Previews via a Link
+
+As with `mirrord preview start`, each service gets its own preview URL when [sharing via a link](#sharing-a-preview-via-a-link) is set up.
+
+The one limitation is [stable share hosts](#stable-share-hosts): leave `operator.shareIngress.stableSlugs` off, the default. A stable slug comes from the key alone, so all services under one key get the same slug, and every service's preview except the first one fails.
+
+### Stopping
+
+```bash
+mirrord preview down -k pr-123
+```
+
+`mirrord preview down` stops every preview under the key in all namespaces, like `mirrord preview stop -k <key> -A`. It finds the key the way `mirrord preview up` does. On `main` or `master`, or with no branch checked out, pass the key with `--key` or `MIRRORD_KEY`, since the random key `mirrord preview up` generated there can't be found again.
+
+When `mirrord-up.yaml` (or the file passed with `-f`) exists, `mirrord preview down` stops the previews in every kube context its services use. It exits with `0` when there is nothing to stop.
+
 ## Sharing a Preview via a Link
 
 By default, opening a Preview Environment as a recipient requires the mirrord browser extension, which injects the `baggage: mirrord-session=<key>` header the operator routes on. That works for developers, but it's a non-starter for sharing a preview with a non-technical stakeholder.
@@ -302,6 +396,9 @@ Enable it in the mirrord configuration:
 * `sleep_after_secs` - scale the preview pods to zero after this many seconds without traffic
   (minimum 30). When unset, the environment never idles automatically.
 * `wake_timeout_secs` - How long an incoming request is held while the preview pods start before the request fails (default: 90 seconds).
+  It also gives the image pull of a waking pod that long to succeed: a failed pull is retried
+  instead of ending the environment, and only a pull still failing after `wake_timeout_secs`
+  does. Raise it when your registry is slow or the image is large.
 
 ### Idle Behavior
 

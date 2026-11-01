@@ -274,7 +274,6 @@ pub(super) enum Commands {
     Subscribe(Box<SubscribeArgs>),
 
     /// Run mirrord sessions for services defined in `mirrord-up.yaml`.
-    #[cfg_attr(target_os = "windows", command(hide = true))]
     Up(Box<UpArgs>),
 
     /// Fix issues related to mirrord.
@@ -409,8 +408,12 @@ impl Commands {
             Self::Preview(args) => match &args.command {
                 PreviewCommand::Status(args) => args.all_namespaces,
                 PreviewCommand::Stop(args) => args.all_namespaces,
+                PreviewCommand::Down => true,
                 PreviewCommand::Logs(args) => args.all_namespaces,
-                PreviewCommand::Start(_) | PreviewCommand::Diff(_) => false,
+                PreviewCommand::Start(_)
+                | PreviewCommand::Up(_)
+                | PreviewCommand::Sync(_)
+                | PreviewCommand::Diff(_) => false,
             },
             Self::Session(args) => args.common.all_namespaces,
             Self::Kill(args) => args.common.all_namespaces,
@@ -1621,10 +1624,43 @@ impl SubscribeArgs {
 pub(super) enum PreviewCommand {
     /// Start a new preview environment or update an existing one.
     Start(PreviewStartArgs),
+    /// Start a preview environment for every service of a mirrord-up.yaml that has an image.
+    ///
+    /// Each service's image comes from `--image <service>=<image ref>`, then
+    /// `MIRRORD_<SERVICE>_IMAGE`. Services without one are skipped. `sync` is ignored: `mirrord
+    /// preview sync` previews the services with `sync` and pushes their local directories, and
+    /// running both commands for one service under one key replaces one preview with the other.
+    /// All sessions run under one key: `--key`, then `MIRRORD_KEY`, then the git branch
+    /// (`GITHUB_HEAD_REF` when set), or a random key on `main`, `master` or without a branch.
+    Up(PreviewUpArgs),
+    /// Start a preview environment for every service of a mirrord-up.yaml with `sync` and without
+    /// `skip`, and push its `sync` directories into the preview pod.
+    ///
+    /// Each preview runs the service's image (`--image <service>=<image ref>`, then
+    /// `MIRRORD_<SERVICE>_IMAGE`) or, without one, the target's image, with the local directories
+    /// in it. An image also previews a service with `skip`. The command pushes the local code and
+    /// returns when every preview is ready; with `--watch`, it then keeps pushing changes. A later
+    /// run for a service without an image reuses a live session with the same settings and takes
+    /// over its sync from an earlier `mirrord preview sync`, and a service with an image always
+    /// gets a new session, which pulls the image again. `mirrord preview up` for the same service
+    /// and key replaces the preview with one without code sync, and the other way round. The key is
+    /// found as `mirrord preview up` finds it.
+    Sync(PreviewSyncArgs),
     /// Show the status of preview environments.
     Status(PreviewStatusArgs),
     /// Delete preview environments.
     Stop(PreviewStopArgs),
+    /// Delete every preview environment under a key, in all namespaces, like
+    /// `mirrord preview stop -k <key> -A`.
+    ///
+    /// Finds the key the way `mirrord preview up` does: `--key`, then `MIRRORD_KEY`, then the git
+    /// branch (`GITHUB_HEAD_REF` when set). On `main`, `master` or without a branch, `--key` is
+    /// required. Succeeds when there is nothing to delete.
+    ///
+    /// Deletes them in every kube context the services of the mirrord-up.yaml run in (`-f`, or
+    /// `mirrord-up.yaml` when it exists), as `mirrord preview up` picks them. Without a file, in
+    /// the context of `--context`, the global config or the kubeconfig.
+    Down,
     /// Print the output of preview environments' pods.
     Logs(PreviewLogsArgs),
     /// Show how the manifests passed with `--resource` differ from the live cluster.
@@ -1641,20 +1677,27 @@ pub(super) struct PreviewCommonArgs {
     /// Environment key for the preview environment.
     ///
     /// Can also be set with the `MIRRORD_KEY` environment variable or via the `key` field in the
-    /// mirrord config file.
+    /// mirrord config file. `mirrord preview up`, `mirrord preview sync` and `mirrord preview
+    /// down` read no mirrord config: without either, their key is the git branch
+    /// (`GITHUB_HEAD_REF` when set).
     #[arg(short = 'k', long, global = true)]
     pub key: Option<String>,
 
     /// Load config from config file.
     ///
-    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
-    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1, global = true)]
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json". For
+    /// `mirrord preview up`, `mirrord preview sync` and `mirrord preview down`, the
+    /// mirrord-up.yaml to read instead, `mirrord-up.yaml` by default.
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = DEFAULT_PREVIEW_CONFIG_FILE, num_args = 0..=1, global = true)]
     pub config_file: Option<PathBuf>,
 
     /// Kube context to use from Kubeconfig.
     #[arg(long, global = true)]
     pub context: Option<String>,
 }
+
+/// What a bare `-f` stands for in the `mirrord preview` subcommands.
+pub(crate) const DEFAULT_PREVIEW_CONFIG_FILE: &str = "./.mirrord/mirrord.json";
 
 impl PreviewCommonArgs {
     /// Convert the common CLI arguments to environment variable overrides.
@@ -1786,6 +1829,50 @@ impl PreviewStartArgs {
 
         envs
     }
+}
+
+/// Arguments for `mirrord preview up` command, which `mirrord preview sync` takes too.
+#[derive(Args, Debug)]
+pub(super) struct PreviewUpArgs {
+    /// Container image for one service, as `<service>=<image ref>`, e.g.
+    /// `--image api=ghcr.io/acme/api:3f9a2c1`. Repeat it once per service.
+    ///
+    /// Takes precedence over `MIRRORD_<SERVICE>_IMAGE`.
+    #[arg(long, value_name = "SERVICE=IMAGE")]
+    pub image: Vec<String>,
+
+    /// TTL in minutes for every preview session.
+    ///
+    /// The operator will terminate each session after this time elapses. A session that `mirrord
+    /// preview sync` reuses keeps the time it had left.
+    ///
+    /// Set to `"infinite"` to disable TTL.
+    #[arg(long)]
+    pub ttl: Option<PreviewTtl>,
+
+    /// How long (in seconds) to wait for each preview to become ready.
+    ///
+    /// If a session hasn't reached `Ready` within this time, the CLI deletes it, unless `mirrord
+    /// preview sync` reused the session from an earlier run. For `mirrord preview sync`, it is the
+    /// longest time without progress: each new state of the session or of the preview pod, and
+    /// each applied push, starts it again, and it doesn't run while the pod copies the image's
+    /// files to the code volume, while the CLI lists, packs or sends a push, while the pod applies
+    /// it or while an install runs.
+    #[arg(long)]
+    pub timeout: Option<u64>,
+}
+
+/// Arguments for `mirrord preview sync` command.
+#[derive(Args, Debug)]
+pub(super) struct PreviewSyncArgs {
+    #[command(flatten)]
+    pub up: PreviewUpArgs,
+
+    /// Keep running after the previews are up, and push each change under the `sync` directories
+    /// into the preview pods. A change to `.git`, or to a path that git or the entry's `ignore`
+    /// leaves out, pushes nothing.
+    #[arg(long)]
+    pub watch: bool,
 }
 
 /// Arguments for `mirrord preview diff` command.
@@ -2019,14 +2106,14 @@ pub(super) struct UpArgs {
     /// Path to the mirrord-up config file.
     ///
     /// When using this argument without a value, defaults to `mirrord-up.yaml`
-    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml", global = true)]
     pub config_file: PathBuf,
 
     /// Network mode to use for all defined services.
     ///
     /// Overrides the `default_mode` of every service being launched. When
     /// omitted, each service uses the mode from the config file.
-    #[arg(short = 'm', long, value_enum)]
+    #[arg(short = 'm', long, value_enum, global = true)]
     pub mode: Option<ServiceMode>,
 
     /// Session key, used as the `{{ key }}` template variable.
@@ -2034,7 +2121,7 @@ pub(super) struct UpArgs {
     /// Can also be set with the `MIRRORD_KEY` environment variable.
     /// If not provided here or through `MIRRORD_KEY`, a key is generated automatically from the
     /// system username.
-    #[arg(short = 'k', long)]
+    #[arg(short = 'k', long, global = true)]
     pub key: Option<String>,
 
     /// Start `mirrord ui` in the background.
@@ -2050,17 +2137,42 @@ pub(super) struct UpArgs {
     /// Names of the services to launch. When omitted, every service in the
     /// config is launched, except those marked `skip: true`. Naming a
     /// service explicitly overrides its `skip` flag.
+    ///
+    /// A service named like a subcommand (`init`, `list`) goes after `--`, e.g.
+    /// `mirrord up -- list`.
     #[arg(value_name = "SERVICE")]
     pub services: Vec<String>,
 
     /// Kube context to use from Kubeconfig
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub context: Option<Arc<str>>,
 
+    /// Experimental: hold this service's program at its entry point until an IDE releases it, so
+    /// a debugger attaches before its first line runs.
+    ///
+    /// Repeat it to hold several services, e.g. `--debug api --debug web`. Each one must be
+    /// among the services launched, and run with `type: exec`.
+    ///
+    /// Experimental, so it's hidden from help and may still change.
+    #[arg(long, hide = true, value_name = "SERVICE")]
+    pub debug: Vec<String>,
+
     /// Subcommand. When absent, `mirrord up` runs the sessions defined in
-    /// the config file. With a subcommand, the flags above are ignored.
+    /// the config file. `init` ignores the flags above, and `list` reads only `-f`, `-k`, `-m`
+    /// and `--context`.
     #[command(subcommand)]
     pub command: Option<UpSubcommand>,
+}
+
+/// Output formats of `mirrord up list`.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum, Display)]
+#[strum(serialize_all = "lowercase")]
+pub(super) enum UpListFormat {
+    /// One block per service, for people to read.
+    #[default]
+    Pretty,
+    /// One JSON document for IDE extensions, in the shape `mirrord_up::UpListing` defines.
+    Json,
 }
 
 #[derive(Subcommand, Debug)]
@@ -2070,6 +2182,16 @@ pub(super) enum UpSubcommand {
         /// Default path for the generated config (overrideable in the wizard).
         #[arg(short = 'o', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
         output: PathBuf,
+    },
+
+    /// Print every service in the config file as `mirrord up` would run it, without starting
+    /// anything.
+    ///
+    /// Touches no cluster and asks nothing. Skipped services are listed too.
+    List {
+        /// Format output for terminal display or IDE extensions.
+        #[arg(long, default_value_t)]
+        format: UpListFormat,
     },
 }
 /// `mirrord attach` args.
@@ -2552,6 +2674,61 @@ mod tests {
         };
         assert!(args.services.is_empty());
         assert!(matches!(args.command, Some(UpSubcommand::Init { .. })));
+    }
+
+    fn up_args(args: &[&str]) -> UpArgs {
+        let cli = Cli::try_parse_from(args).expect("the `up` arguments parse");
+        let Commands::Up(args) = cli.commands else {
+            panic!("expected `up` command");
+        };
+        *args
+    }
+
+    #[test]
+    fn up_list_defaults_to_pretty_output() {
+        let args = up_args(&["mirrord", "up", "list"]);
+        assert!(args.services.is_empty(), "`list` is the subcommand");
+        assert!(matches!(
+            args.command,
+            Some(UpSubcommand::List {
+                format: UpListFormat::Pretty
+            })
+        ));
+    }
+
+    /// After `--`, `list` is a service to launch, which is how a service named `list` runs.
+    #[test]
+    fn up_list_after_double_dash_is_a_service() {
+        let args = up_args(&["mirrord", "up", "--", "list"]);
+        assert_eq!(args.services, ["list"]);
+        assert!(args.command.is_none(), "{:?}", args.command);
+    }
+
+    /// `-f`, `-k`, `-m` and `--context` reach `up list` whether they come before or after it.
+    #[rstest]
+    #[case::before(&["mirrord", "up", "-f", "x.yaml", "-k", "demo", "-m", "mirror", "--context", "staging", "list", "--format", "json"])]
+    #[case::after(&["mirrord", "up", "list", "-f", "x.yaml", "-k", "demo", "-m", "mirror", "--context", "staging", "--format", "json"])]
+    fn up_list_reads_the_up_flags_on_either_side(#[case] args: &[&str]) {
+        let args = up_args(args);
+        assert_eq!(args.config_file, PathBuf::from("x.yaml"));
+        assert_eq!(args.key.as_deref(), Some("demo"));
+        assert!(matches!(args.mode, Some(ServiceMode::Mirror)));
+        assert_eq!(args.context.as_deref(), Some("staging"));
+        assert!(args.services.is_empty());
+        assert!(matches!(
+            args.command,
+            Some(UpSubcommand::List {
+                format: UpListFormat::Json
+            })
+        ));
+    }
+
+    #[test]
+    fn up_debug_names_a_launched_service() {
+        let args = up_args(&["mirrord", "up", "api", "--debug", "api"]);
+        assert_eq!(args.services, ["api"]);
+        assert_eq!(args.debug, ["api"]);
+        assert!(args.command.is_none());
     }
 
     #[rstest]

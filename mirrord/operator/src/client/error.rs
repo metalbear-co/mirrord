@@ -7,7 +7,10 @@ use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
 use tower::retry::backoff::InvalidBackoff;
 
-use crate::crd::{NewOperatorFeature, kube_target::UnknownTargetType};
+use crate::{
+    crd::{NewOperatorFeature, kube_target::UnknownTargetType},
+    types::PaidFeatureGate,
+};
 
 /// Operations performed on the operator via [`kube`] API.
 #[derive(Debug)]
@@ -17,6 +20,7 @@ pub enum OperatorOperation {
     WebsocketConnection,
     CopyingTarget,
     GettingStatus,
+    ReportingFeatureGate,
     SessionManagement,
     ListingTargets,
     DbBranching,
@@ -34,6 +38,7 @@ impl fmt::Display for OperatorOperation {
             Self::WebsocketConnection => "creating a websocket connection",
             Self::CopyingTarget => "copying target",
             Self::GettingStatus => "getting status",
+            Self::ReportingFeatureGate => "reporting feature gate hit",
             Self::SessionManagement => "session management",
             Self::ListingTargets => "listing targets",
             Self::DbBranching => "database branching",
@@ -71,12 +76,22 @@ pub enum OperatorApiError {
     },
 
     /// The operator's version knows about the feature but the current deployment doesn't advertise
-    /// it, meaning it's disabled in the operator's configuration. Unlike
+    /// it because it is disabled in the operator's configuration. Unlike
     /// [`Self::UnsupportedFeature`] this is not fixed by upgrading; the cluster admin has to
     /// enable it.
     #[error("feature {feature} is not enabled on this mirrord operator")]
     FeatureDisabled { feature: NewOperatorFeature },
 
+    /// Discovery can stop preparation before the gated operation reaches the operator. The
+    /// terminal async owner reports this refusal without counting server refusals again.
+    #[error("{gate}")]
+    LocalFeatureNotLicensed {
+        feature: NewOperatorFeature,
+        gate: PaidFeatureGate,
+    },
+
+    #[error("{gate}")]
+    FeatureNotLicensed { gate: PaidFeatureGate },
     #[error("mirrord operator does not serve the operator-hosted sessions-manager")]
     ServerlessSessionsManagerNotServed,
 

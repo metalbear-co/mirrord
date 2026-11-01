@@ -1,0 +1,42 @@
+name: Changelog Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Source ref to publish. Empty selects the latest published release tag.'
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Source ref to publish. Empty selects the latest published release tag.'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      CHANGELOG_PAT:
+        required: true
+
+jobs:
+  build-and-publish:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    steps:
+      - name: Prepare changelog to be published at /docs/changelog
+        uses: metalbear-co/release-changelog-docs@747e23c4fbb265ddd583a37e709549e1dbfc4e60
+        with:
+          ref: ${{ inputs.ref }}
+          source_token: ${{ github.token }}
+          local_file_path: ./CHANGELOG.md
+          public_source_url: https://github.com/metalbear-co/mirrord
+          destination_repo: metalbear-co/docs-changelog
+          destination_file_path: ./changelog/mirrord.md
+          git_user: Eyal Bukchin
+          git_email: eyal@metalbear.co
+          git_access_token: ${{ secrets.CHANGELOG_PAT }}
+          title: mirrord Changelog
+          description: The release changelog for the mirrord CLI.
+          tags: oss,team,enterprise

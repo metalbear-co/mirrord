@@ -155,6 +155,24 @@ pub struct RemoteRedisBranchConfig {
     /// How a Redis branch is seeded from its source.
     #[serde(default)]
     pub copy: RedisBranchCopyConfig,
+
+    /// #### feature.db_branches[].cluster (type: redis) {#feature-db_branches-redis-cluster}
+    ///
+    /// Run the branch as a one node Redis Cluster instead of a standalone server.
+    ///
+    /// Set this when the application connects with a Redis Cluster client (one that runs
+    /// `CLUSTER SLOTS` / `CLUSTER SHARDS` on connect): such clients refuse a standalone server.
+    /// The branch node owns all 16384 hash slots, so every key the application uses lands on
+    /// it, and the cluster limits apply like on any Redis Cluster: only database `0` exists,
+    /// so `name` must be unset or `0`, and multi key commands must keep all keys in one hash
+    /// slot.
+    ///
+    /// With `copy.mode: all` the source may be a standalone server or a Redis Cluster; from a
+    /// cluster, keys are copied from every master node.
+    ///
+    /// Defaults to `false`.
+    #[serde(default)]
+    pub cluster: bool,
 }
 
 impl RemoteRedisBranchConfig {
@@ -165,12 +183,24 @@ impl RemoteRedisBranchConfig {
         // A Redis branch selects a numbered database on the branch server, so unlike the SQL
         // engines its `name` has to be a database number.
         if let Some(name) = self.database.name.as_deref() {
-            name.parse::<u32>()
-                .map_err(|error| ConfigError::InvalidValue {
-                    name: "feature.db_branches[].name".into(),
-                    provided: name.to_owned(),
-                    error: Box::new(error),
-                })?;
+            let database_index =
+                name.parse::<u32>()
+                    .map_err(|error| ConfigError::InvalidValue {
+                        name: "feature.db_branches[].name".into(),
+                        provided: name.to_owned(),
+                        error: Box::new(error),
+                    })?;
+
+            // A Redis Cluster node only has database 0; `SELECT` to anything else fails on it.
+            if self.cluster && database_index != 0 {
+                return Err(ConfigError::ConflictAt {
+                    setting: "feature.db_branches[].name".into(),
+                    message: format!(
+                        "`name` is `{name}` but a Redis Cluster branch (`cluster: true`) only \
+                         has database `0` - unset `name` or set it to `0`"
+                    ),
+                });
+            }
         }
 
         Ok(())

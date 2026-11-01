@@ -37,6 +37,9 @@ pub enum KubeApiError {
     #[error(transparent)]
     KubeError(#[from] kube::Error),
 
+    #[error("Invalid workload label selector: {0}")]
+    InvalidLabelSelector(#[from] kube::core::ParseExpressionError),
+
     #[error("Connection to agent failed: {0}")]
     KubeConnectionError(#[from] std::io::Error),
 

@@ -7,6 +7,8 @@ tags:
   - enterprise
 ---
 
+# turbopuffer
+
 This page covers DB branching for [turbopuffer](https://turbopuffer.com) namespaces. For the general concepts, the full list of config fields, and how a session behaves, see the [DB Branching overview](../db-branching.md).
 
 Unlike the engines mirrord runs as pods in your cluster, a turbopuffer branch is a namespace in your own turbopuffer account: the operator asks turbopuffer to [branch](https://turbopuffer.com/docs/write#param-branch_from_namespace) your source namespace into a copy-on-write clone, and points your application at the clone. Nothing runs in the cluster, so there is no `image`, `version`, `profile` or migrations.

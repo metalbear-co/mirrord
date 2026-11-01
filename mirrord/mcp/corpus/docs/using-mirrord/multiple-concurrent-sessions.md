@@ -15,6 +15,9 @@ menu:
 weight: 140
 toc: true
 ---
+
+# Multiple concurrent sessions (mirrord up)
+
 ## Introduction
 
 `mirrord up` allows creating and running multiple mirrord sessions based on configuration defined in a single file — think `docker compose` but for mirrord. This can be useful for cases when you need to debug multiple related microservices and would like to manage their lifecycle together.
@@ -126,9 +129,9 @@ mirrord up --key checkout-debug
 
 Messages intended for this session must contain `mirrord-session=checkout-debug`.
 The marker is matched in broker-specific message metadata: Kafka headers, RabbitMQ headers, SQS message attributes, Google Cloud Pub/Sub attributes,
-Azure Service Bus application properties, or Temporal headers. For Redis Pub/Sub and BullMQ, it is matched in the message payload.
+Azure Service Bus application properties, NATS JetStream headers, or Temporal headers. For Redis Pub/Sub and BullMQ, it is matched in the message payload.
 
-Queue splitting is available in `mirrord up` for Kafka, Amazon SQS, RabbitMQ, Google Cloud Pub/Sub, Azure Service Bus, Redis Pub/Sub, Temporal, and BullMQ.
+Queue splitting is available in `mirrord up` for Kafka, Amazon SQS, RabbitMQ, Google Cloud Pub/Sub, Azure Service Bus, NATS JetStream, Redis Pub/Sub, Temporal, and BullMQ. Core NATS pub/sub is split only when a service's `config_patch` sets it in `feature.split_queues`, which then replaces the automatic splits.
 
 {% hint style="info" %}
 RabbitMQ splitting in `mirrord up` requires an operator that supports it. Against an older operator the session still runs, with RabbitMQ splitting disabled and a warning printed for the affected service.

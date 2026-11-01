@@ -41,7 +41,7 @@ This section only applies to Enterprise plan users. If you're using the open-sou
 {% endhint %}
 
 When the mirrord Operator is installed in the cluster, `mirrord ci` commands require a CI API key. Generating the key requires an Enterprise plan.
-Without the key, every CI runner would register as a new user and take up a seat. Sessions started with a CI API key don't count towards your seats, so CI runs won't consume them.
+Without the key, every CI runner would register as a new user and take up a seat. Sessions started with a CI API key don't take up seats. They are machine sessions, and they count towards the concurrent machine sessions of your [plan](https://metalbear.com/mirrord/pricing/).
 
 You can get the key by running the command:
 
