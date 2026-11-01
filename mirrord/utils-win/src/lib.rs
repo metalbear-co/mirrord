@@ -13,6 +13,8 @@ pub mod diagnostics;
 #[cfg(windows)]
 pub mod error;
 #[cfg(windows)]
+pub mod event;
+#[cfg(windows)]
 pub mod fixed_buf;
 pub mod internal_thread;
 #[cfg(windows)]

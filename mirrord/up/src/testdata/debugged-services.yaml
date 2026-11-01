@@ -1,0 +1,13 @@
+services:
+  api:
+    target: none
+    run:
+      command: [api]
+  web:
+    target: none
+    run:
+      command: [web]
+  worker:
+    target: none
+    run:
+      command: [worker]

@@ -1,6 +1,6 @@
 //! A standalone sessions-manager reached at its own base URL.
 
-use std::{env::VarError, sync::Arc, time::Duration};
+use std::{fmt, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
@@ -35,8 +35,8 @@ use crate::{
         verify_event_stream,
     },
     credentials::{
-        CredentialProvider, LoginTokenSource, NoCredentials, credentials_from_env,
-        intproxy_credentials_from_env,
+        CredentialProvider, LoginTokenSource, NoCredentials, SESSIONS_MANAGER_URL_DEFAULT,
+        credentials_from_env, intproxy_credentials_from_env,
     },
     error::SessionsManagerClientError,
     retry::with_deadline,
@@ -47,6 +47,57 @@ use crate::{
 /// For example, both `https://example.com/sm` and `https://sm.example.com` are valid; API version
 /// and resource segments are appended to the configured path.
 pub const SESSIONS_MANAGER_URL_ENV: &str = "MIRRORD_SESSIONS_MANAGER_URL";
+
+/// Why a standalone sessions-manager was chosen, so agents and the CLI can tell the user where a
+/// session connects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndpointSource {
+    /// Set by the user, through [`SESSIONS_MANAGER_URL_ENV`] or the CLI's
+    /// `sessions_manager.url`.
+    Explicit,
+    /// Nothing selected a sessions-manager, so it is the MetalBear Cloud one at
+    /// [`SESSIONS_MANAGER_URL_DEFAULT`].
+    Default,
+}
+
+/// Base URL of the standalone sessions-manager to reach, and why it was chosen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionsManagerEndpoint {
+    pub url: Url,
+    pub source: EndpointSource,
+}
+
+impl SessionsManagerEndpoint {
+    /// The sessions-manager at `explicit` when it is set, and the MetalBear Cloud one otherwise.
+    ///
+    /// Choosing the operator-hosted sessions-manager instead comes first and is up to the caller,
+    /// since agents and the CLI each select it in their own way.
+    pub fn resolve(explicit: Option<&str>) -> Result<Self, SessionsManagerClientError> {
+        let (url, source) = match explicit {
+            Some(url) => (url, EndpointSource::Explicit),
+            None => (SESSIONS_MANAGER_URL_DEFAULT, EndpointSource::Default),
+        };
+
+        Ok(Self {
+            url: Url::parse(url)?,
+            source,
+        })
+    }
+}
+
+/// Shows the URL without its username, password, query or fragment, since the endpoint is printed
+/// to CLI output and logs, and an explicit URL may carry credentials in any of them.
+impl fmt::Display for SessionsManagerEndpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut url = self.url.clone();
+        // These fail only for URLs that cannot carry credentials in the first place.
+        let _ = url.set_username("");
+        let _ = url.set_password(None);
+        url.set_query(None);
+        url.set_fragment(None);
+        url.fmt(f)
+    }
+}
 
 /// Bound on establishing the TCP (and TLS) connection for control-plane HTTP requests.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -83,22 +134,23 @@ impl DirectTransport {
         })
     }
 
-    /// Reaches the sessions-manager at [`SESSIONS_MANAGER_URL_ENV`] as an agent, with the shared
-    /// secret and the API key the environment configures, if any.
-    pub fn from_env() -> Result<Self, SessionsManagerClientError> {
-        Ok(Self::new(base_url_from_env()?)?.with_credentials(credentials_from_env()?))
+    /// Reaches the sessions-manager at `endpoint` as an agent, with the shared secret and the API
+    /// key the environment configures, if any.
+    pub fn from_env(endpoint: SessionsManagerEndpoint) -> Result<Self, SessionsManagerClientError> {
+        let credentials = credentials_from_env(endpoint.source)?;
+        Ok(Self::new(endpoint.url)?.with_credentials(credentials))
     }
 
-    /// Reaches the sessions-manager at [`SESSIONS_MANAGER_URL_ENV`] as an intproxy, with the
-    /// shared secret the environment configures, if any, and the developer's login token from
-    /// `login_tokens`.
+    /// Reaches the sessions-manager at `endpoint` as an intproxy, with the shared secret the
+    /// environment configures, if any, and the developer's login token from `login_tokens`.
     pub fn intproxy_from_env(
+        endpoint: SessionsManagerEndpoint,
         login_tokens: Option<Arc<dyn LoginTokenSource>>,
     ) -> Result<Self, SessionsManagerClientError> {
-        let base_url = base_url_from_env()?;
-        let credentials = intproxy_credentials_from_env(login_tokens, &base_url)?;
+        let credentials =
+            intproxy_credentials_from_env(endpoint.source, login_tokens, &endpoint.url)?;
 
-        Ok(Self::new(base_url)?.with_credentials(credentials))
+        Ok(Self::new(endpoint.url)?.with_credentials(credentials))
     }
 
     pub fn with_credentials(mut self, credentials: Arc<dyn CredentialProvider>) -> Self {
@@ -236,15 +288,6 @@ fn data_plane_authorization_headers(
     Ok(headers)
 }
 
-/// Reads the sessions-manager base URL from [`SESSIONS_MANAGER_URL_ENV`].
-pub fn base_url_from_env() -> Result<Url, SessionsManagerClientError> {
-    match std::env::var(SESSIONS_MANAGER_URL_ENV) {
-        Ok(raw) => Ok(Url::parse(&raw)?),
-        Err(VarError::NotPresent) => Err(SessionsManagerClientError::MissingSessionsManagerUrl),
-        Err(error) => Err(error.into()),
-    }
-}
-
 /// Accepts only hierarchical HTTP(S) URLs without query or fragment, and normalizes the path to
 /// end in `/` so endpoint segments are appended rather than replacing the last one.
 fn validate_base_url(mut base_url: Url) -> Result<Url, SessionsManagerClientError> {
@@ -323,5 +366,45 @@ mod tests {
             ),
             "got {error:?}"
         );
+    }
+
+    #[test]
+    fn explicit_url_is_used_as_set() {
+        let endpoint = SessionsManagerEndpoint::resolve(Some("https://sm.example.com/sm")).unwrap();
+
+        assert_eq!(endpoint.url.as_str(), "https://sm.example.com/sm");
+        assert_eq!(endpoint.source, EndpointSource::Explicit);
+    }
+
+    #[test]
+    fn metalbear_cloud_is_the_default() {
+        let endpoint = SessionsManagerEndpoint::resolve(None).unwrap();
+
+        assert_eq!(
+            endpoint.url.as_str(),
+            "https://sm-aws-use1.app.metalbear.com/sm"
+        );
+        assert_eq!(endpoint.source, EndpointSource::Default);
+        DirectTransport::new(endpoint.url).expect("the default must be a valid base URL");
+    }
+
+    #[test]
+    fn display_hides_credentials() {
+        let endpoint = SessionsManagerEndpoint::resolve(Some(
+            "https://user:password@sm.example.com/sm?token=secret#fragment",
+        ))
+        .unwrap();
+
+        assert_eq!(endpoint.to_string(), "https://sm.example.com/sm");
+    }
+
+    /// An explicit URL that doesn't parse is an error, not a reason to fall back to MetalBear
+    /// Cloud.
+    #[test]
+    fn invalid_explicit_url_is_an_error() {
+        assert!(matches!(
+            SessionsManagerEndpoint::resolve(Some("not a url")),
+            Err(SessionsManagerClientError::Url(_))
+        ));
     }
 }

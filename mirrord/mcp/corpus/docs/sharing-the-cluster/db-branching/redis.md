@@ -7,6 +7,8 @@ tags:
   - enterprise
 ---
 
+# Redis
+
 This page covers DB branching for Redis. For the general concepts, the full list of config fields, and how a session behaves, see the [DB Branching overview](../db-branching.md).
 
 Redis is the only engine that supports both branch locations:
@@ -71,6 +73,46 @@ In this example, only keys prefixed with `user:` or `session:` are copied; every
 
 {% hint style="info" %}
 Redis has no schema, so there is no `"schema"` copy mode - only `"empty"` and `"all"` are available. Filtering is done by key pattern rather than by SQL query.
+{% endhint %}
+
+## Redis Cluster Clients
+
+A remote branch is a standalone `redis-server` by default. An application that connects with a Redis Cluster client (one that runs `CLUSTER SLOTS` or `CLUSTER SHARDS` on connect, as cluster clients in go-redis, ioredis, Lettuce, redis-py and others do) refuses such a server. Set `"cluster": true` to run the branch as a one node Redis Cluster instead:
+
+```json
+{
+  "feature": {
+    "db_branches": [
+      {
+        "id": "cache-redis",
+        "type": "redis",
+        "cluster": true,
+        "connection": {
+          "url": "REDIS_URL"
+        },
+        "copy": {
+          "mode": "all"
+        }
+      }
+    ]
+  }
+}
+```
+
+The branch node owns all 16384 hash slots, so every key your application uses lands on it, and the Redis Cluster rules apply like on any cluster:
+
+* Only database `0` exists. Leave `name` out or set it to `"0"`; any other index is rejected.
+* Multi key commands (`MGET`, `MSET`, transactions, Lua scripts) must keep all their keys in one hash slot, which is what the application already does against the real cluster.
+* The node announces its own pod IP, which is what a cluster client dials after `CLUSTER SLOTS`. Through mirrord that address is reachable from your machine like any pod in the cluster.
+
+With `"mode": "all"` the source may be a standalone Redis or a Redis Cluster. From a cluster, keys are copied from every master node, following the addresses the cluster announces, with the same credentials and TLS settings as the source connection. `patterns` apply the same way.
+
+A standalone source needs nothing beyond what the copy reads, so a source user limited to `+@read` works. A cluster source user also needs `cluster|slots` and `cluster|nodes`, which the copy uses to find the masters and to check that no slot moved between them while it ran. If the cluster is resharding during the copy, the branch fails to start instead of coming up with missing keys; start the session again once the resharding is over.
+
+`"cluster": true` only applies to remote branches; a local branch always runs a standalone instance.
+
+{% hint style="info" %}
+Redis Cluster branches require mirrord `3.279.0` or later, and mirrord operator `3.225.0` or later. Against an older operator the CLI refuses to start the session and names the missing feature, rather than bringing up a standalone branch the cluster client cannot use.
 {% endhint %}
 
 ## TLS-Enabled Custom Images

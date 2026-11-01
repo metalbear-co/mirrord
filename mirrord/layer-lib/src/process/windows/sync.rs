@@ -7,32 +7,25 @@
 //! The launcher holds both through [`ParentInitEvents`]. The layer claims the readiness one as a
 //! [`ChildInitEvent`] while `DllMain` runs and sets it from its startup worker. A layer that fails
 //! inside `DllMain` sets the failure one through [`signal_init_failure_to_parent`].
-use std::os::windows::io::{AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle};
+//!
+//! The events themselves are [`NamedEvent`]s. This module owns only the protocol: the names, which
+//! event wins when several things happen at once, and what each outcome means.
+use std::{
+    os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle},
+    time::Duration,
+};
 
-use str_win::string_to_u16_buffer;
-use utils_win::process::process_status;
+use utils_win::{
+    error::WindowsError,
+    event::{EventAccess, EventError, NamedEvent, Wake, wait_any},
+    process::process_status,
+};
 use winapi::{
-    shared::{
-        minwindef::{DWORD, FALSE, TRUE},
-        winerror::{ERROR_ALREADY_EXISTS, WAIT_TIMEOUT},
-    },
+    shared::minwindef::FALSE,
     um::{
-        errhandlingapi::GetLastError,
         handleapi::{CloseHandle, DuplicateHandle},
-        minwinbase::SECURITY_ATTRIBUTES,
         processthreadsapi::{GetCurrentProcess, GetProcessId, OpenProcess},
-        securitybaseapi::{
-            AddMandatoryAce, InitializeAcl, InitializeSecurityDescriptor, SetSecurityDescriptorSacl,
-        },
-        synchapi::{CreateEventW, OpenEventW, SetEvent, WaitForMultipleObjects},
-        winbase::{INFINITE, WAIT_OBJECT_0},
-        winnt::{
-            ACL, ACL_REVISION, DUPLICATE_CLOSE_SOURCE, DUPLICATE_SAME_ACCESS, EVENT_MODIFY_STATE,
-            HANDLE, PROCESS_DUP_HANDLE, SECURITY_DESCRIPTOR, SECURITY_DESCRIPTOR_REVISION,
-            SECURITY_MANDATORY_LABEL_AUTHORITY, SECURITY_MANDATORY_LOW_RID, SID,
-            SID_IDENTIFIER_AUTHORITY, SID_REVISION, SYNCHRONIZE,
-            SYSTEM_MANDATORY_LABEL_NO_WRITE_UP,
-        },
+        winnt::{DUPLICATE_CLOSE_SOURCE, DUPLICATE_SAME_ACCESS, HANDLE, PROCESS_DUP_HANDLE},
     },
 };
 
@@ -67,14 +60,14 @@ enum EventKind {
 /// The launcher's side of a child's readiness handshake: both events, created before the layer
 /// is injected and held until the launcher stops waiting.
 pub struct ParentInitEvents {
-    ready: OwnedHandle,
-    failed: OwnedHandle,
+    ready: NamedEvent,
+    failed: NamedEvent,
     pid: u32,
 }
 
 /// The layer's side of the handshake: the readiness event, claimed inside `DllMain` and moved to
 /// the startup worker that sets it.
-pub struct ChildInitEvent(OwnedHandle);
+pub struct ChildInitEvent(NamedEvent);
 
 /// Keeps both readiness events alive in the target after the process that created them stops
 /// waiting: an APC attach that returns to the debugger, or a launch whose caller keeps the child
@@ -127,31 +120,17 @@ impl ParentInitEvents {
     /// Call this after creating the child suspended and before injecting the layer, then
     /// [`wait`](Self::wait) for the child to finish initializing.
     ///
-    /// Both events carry a low mandatory label, so a child running at a lower integrity level than
-    /// this process can still set them. See [`LowIntegrityLabel`].
+    /// Both events carry a low mandatory label ([`EventAccess::LowIntegrity`]), so a child running
+    /// at a lower integrity level than this process can still set them.
     ///
     /// An event that already exists is an error, not something to reuse. Its signaled state
     /// belongs to someone else: another session waiting on the same process, or a layer that is
     /// already loaded there and will not run `DllMain` again to signal a second time.
     pub fn create(child_pid: u32) -> LayerResult<Self> {
-        let mut label = LowIntegrityLabel::new();
-        let mut attributes = label.as_mut().map(|label| label.attributes());
-        let attributes_ptr = attributes
-            .as_mut()
-            .map_or(std::ptr::null_mut(), |attributes| {
-                attributes as *mut SECURITY_ATTRIBUTES
-            });
-        if attributes_ptr.is_null() {
-            tracing::warn!(
-                "could not build a low integrity label for the layer events, so a child at a lower integrity level cannot signal them"
-            );
-        }
-
         // Both events exist before injection, because a layer that fails inside `DllMain` has
         // only the failure one to report with, and no chance to wait for the parent to catch up.
-        // SAFETY: `attributes_ptr` is null or points into `attributes`, alive for both calls.
-        let ready = unsafe { create_fresh_event(attributes_ptr, EventKind::Ready, child_pid) }?;
-        let failed = unsafe { create_fresh_event(attributes_ptr, EventKind::Failed, child_pid) }?;
+        let ready = create_fresh_event(EventKind::Ready, child_pid)?;
+        let failed = create_fresh_event(EventKind::Failed, child_pid)?;
 
         tracing::debug!(child_pid, "created layer initialization events");
 
@@ -199,28 +178,18 @@ impl ParentInitEvents {
             process: unsafe { OwnedHandle::from_raw_handle(raw.cast()) },
             handles: [std::ptr::null_mut(); 2],
         };
-        let target_process: HANDLE = remote.process.as_raw_handle().cast();
-        for (source, target) in [&self.ready, &self.failed]
+        for (event, target) in [&self.ready, &self.failed]
             .into_iter()
             .zip(remote.handles.iter_mut())
         {
-            if unsafe {
-                DuplicateHandle(
-                    GetCurrentProcess(),
-                    source.as_raw_handle().cast(),
-                    target_process,
-                    target,
-                    0,
-                    FALSE,
-                    DUPLICATE_SAME_ACCESS,
-                )
-            } == 0
-            {
-                return Err(LayerError::ProcessSynchronization(format!(
-                    "duplicate readiness event into target: {}",
-                    std::io::Error::last_os_error()
-                )));
-            }
+            *target = event
+                .duplicate_into(remote.process.as_handle())
+                .map_err(|error| {
+                    LayerError::ProcessSynchronization(format!(
+                        "duplicate readiness event into target: {}",
+                        os_error(&error)
+                    ))
+                })?;
         }
         Ok(remote)
     }
@@ -243,37 +212,26 @@ impl ParentInitEvents {
         process: BorrowedHandle<'_>,
         timeout_ms: Option<u32>,
     ) -> LayerResult<InitWaitOutcome> {
-        const WAIT_OBJECT_1: u32 = WAIT_OBJECT_0 + 1;
-        const WAIT_OBJECT_2: u32 = WAIT_OBJECT_0 + 2;
+        // The order is the priority order: a layer that both failed and died is a failure.
+        let wake = wait_any(
+            &[&self.ready, &self.failed],
+            process,
+            timeout_ms.map(|ms| Duration::from_millis(u64::from(ms))),
+        )
+        .map_err(|error| {
+            LayerError::ProcessSynchronization(format!(
+                "wait for the layer of process {}: {}",
+                self.pid,
+                os_error(&error)
+            ))
+        })?;
 
-        // The order is the priority order: a layer that both failed and died is a failure, and
-        // `WaitForMultipleObjects` answers with the lowest signaled index.
-        let handles: [HANDLE; 3] = [
-            self.ready.as_raw_handle().cast(),
-            self.failed.as_raw_handle().cast(),
-            process.as_raw_handle().cast(),
-        ];
-        let wait_result = unsafe {
-            WaitForMultipleObjects(
-                handles.len() as u32,
-                handles.as_ptr(),
-                FALSE,
-                timeout_ms.unwrap_or(INFINITE),
-            )
-        };
-
-        let outcome = match wait_result {
-            WAIT_OBJECT_0 => InitWaitOutcome::Signaled,
-            WAIT_OBJECT_1 => InitWaitOutcome::Failed,
-            WAIT_OBJECT_2 => InitWaitOutcome::ProcessExited,
-            WAIT_TIMEOUT => InitWaitOutcome::TimedOut,
-            _ => {
-                return Err(LayerError::ProcessSynchronization(format!(
-                    "wait for the layer of process {}: result {wait_result:#x}, {}",
-                    self.pid,
-                    std::io::Error::last_os_error()
-                )));
-            }
+        let outcome = match wake {
+            Wake::Event(0) => InitWaitOutcome::Signaled,
+            // The failure event is the only other one waited on.
+            Wake::Event(_) => InitWaitOutcome::Failed,
+            Wake::ProcessExited => InitWaitOutcome::ProcessExited,
+            Wake::TimedOut => InitWaitOutcome::TimedOut,
         };
         tracing::debug!(
             child_pid = self.pid,
@@ -317,12 +275,12 @@ impl ChildInitEvent {
     ///
     /// When the event cannot be set.
     pub fn signal_complete(&self) -> LayerResult<()> {
-        if unsafe { SetEvent(self.0.as_raw_handle().cast()) } == 0 {
-            return Err(LayerError::ProcessSynchronization(format!(
+        self.0.set().map_err(|error| {
+            LayerError::ProcessSynchronization(format!(
                 "signal the layer readiness event: {}",
-                std::io::Error::last_os_error()
-            )));
-        }
+                os_error(&error)
+            ))
+        })?;
         tracing::debug!("signaled layer initialization complete");
         Ok(())
     }
@@ -337,130 +295,47 @@ fn event_name(kind: EventKind, child_pid: u32) -> String {
 }
 
 /// Creates a manual-reset event that must not exist yet. See [`ParentInitEvents::create`].
-///
-/// # Safety
-///
-/// `attributes` must be null or point to security attributes that stay valid for this call.
-unsafe fn create_fresh_event(
-    attributes: *mut SECURITY_ATTRIBUTES,
-    kind: EventKind,
-    child_pid: u32,
-) -> LayerResult<OwnedHandle> {
-    let name = event_name(kind, child_pid);
-    let wide = string_to_u16_buffer(&name);
-    let handle = unsafe { CreateEventW(attributes, TRUE, FALSE, wide.as_ptr()) };
-    if handle.is_null() {
-        return Err(LayerError::ProcessSynchronization(format!(
-            "create layer event {name}: {}",
-            std::io::Error::last_os_error()
-        )));
-    }
-    let already_existed = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
-    // SAFETY: a fresh handle this function owns.
-    let handle = unsafe { OwnedHandle::from_raw_handle(handle.cast()) };
-    if already_existed {
-        return Err(LayerError::ProcessSynchronization(format!(
-            "a mirrord layer event for process {child_pid} already exists: another mirrord \
-             session is waiting on this process, or the layer is already loaded in it"
-        )));
-    }
-    Ok(handle)
+fn create_fresh_event(kind: EventKind, child_pid: u32) -> LayerResult<NamedEvent> {
+    NamedEvent::create_fresh(event_name(kind, child_pid), EventAccess::LowIntegrity).map_err(
+        |error| match error {
+            EventError::Exists { .. } => LayerError::ProcessSynchronization(format!(
+                "a mirrord layer event for process {child_pid} already exists: another mirrord \
+                 session is waiting on this process, or the layer is already loaded in it"
+            )),
+            error => LayerError::ProcessSynchronization(format!(
+                "create layer event {}: {}",
+                event_name(kind, child_pid),
+                os_error(&error)
+            )),
+        },
+    )
 }
 
-/// Opens one of `pid`'s layer events with only the rights a child needs: setting it, and waiting
-/// on it.
-///
-/// Asking for no more than that is what lets a child at a lower integrity level open an event the
-/// parent created, together with the label [`LowIntegrityLabel`] puts on it.
+/// Opens one of `pid`'s layer events with only the rights a child needs. See [`NamedEvent::open`].
 ///
 /// # Returns
 ///
-/// The handle, or `None` when no such event exists or it cannot be opened.
-fn open_event(kind: EventKind, pid: u32) -> Option<OwnedHandle> {
-    let name = string_to_u16_buffer(event_name(kind, pid));
-    let handle = unsafe { OpenEventW(EVENT_MODIFY_STATE | SYNCHRONIZE, FALSE, name.as_ptr()) };
-    // SAFETY: a fresh handle this function owns.
-    (!handle.is_null()).then(|| unsafe { OwnedHandle::from_raw_handle(handle.cast()) })
+/// The event, or `None` when no such event exists or it cannot be opened.
+fn open_event(kind: EventKind, pid: u32) -> Option<NamedEvent> {
+    NamedEvent::open(&event_name(kind, pid)).ok().flatten()
 }
 
-/// A security descriptor that gives an object a low mandatory integrity label.
-///
-/// A named event takes its integrity label from its creator's token. Mandatory integrity control
-/// then refuses write access, such as setting the event, to any process at a lower level. A child
-/// created with a restricted or low-integrity token would open the readiness event, fail to set
-/// it, and leave the parent waiting out its timeout.
-///
-/// Only the label is set. The descriptor has no DACL, so the event gets the creator's default
-/// DACL, which already grants access to the same user: a lower integrity level is what stands in
-/// the way, not a different identity.
-///
-/// Boxed, because the descriptor points into the ACL it holds. `AddMandatoryAce` copies the SID
-/// into the ACE, so the SID is kept only to build it.
-struct LowIntegrityLabel {
-    sid: SID,
-    /// Room for an `ACL` header and one mandatory-label ACE, `DWORD`-aligned as `InitializeAcl`
-    /// requires.
-    acl: [u32; 16],
-    descriptor: SECURITY_DESCRIPTOR,
-}
-
-impl LowIntegrityLabel {
-    /// Builds the descriptor.
-    ///
-    /// # Returns
-    ///
-    /// `None` when Windows refuses one of the steps. The events then fall back to the default
-    /// label, which still serves every child at the parent's own level.
-    fn new() -> Option<Box<Self>> {
-        let mut label = Box::new(Self {
-            sid: SID {
-                Revision: SID_REVISION,
-                SubAuthorityCount: 1,
-                IdentifierAuthority: SID_IDENTIFIER_AUTHORITY {
-                    Value: SECURITY_MANDATORY_LABEL_AUTHORITY,
-                },
-                SubAuthority: [SECURITY_MANDATORY_LOW_RID],
-            },
-            acl: [0; 16],
-            descriptor: unsafe { std::mem::zeroed() },
-        });
-
-        let label_ref = &mut *label;
-        let acl = label_ref.acl.as_mut_ptr() as *mut ACL;
-        let acl_size = std::mem::size_of_val(&label_ref.acl) as DWORD;
-        let sid = &mut label_ref.sid as *mut SID as *mut _;
-
-        let built = unsafe {
-            InitializeAcl(acl, acl_size, ACL_REVISION as DWORD) != 0
-                && AddMandatoryAce(
-                    acl,
-                    ACL_REVISION as DWORD,
-                    0,
-                    SYSTEM_MANDATORY_LABEL_NO_WRITE_UP,
-                    sid,
-                ) != 0
-                && InitializeSecurityDescriptor(
-                    &mut label_ref.descriptor as *mut SECURITY_DESCRIPTOR as *mut _,
-                    SECURITY_DESCRIPTOR_REVISION,
-                ) != 0
-                && SetSecurityDescriptorSacl(
-                    &mut label_ref.descriptor as *mut SECURITY_DESCRIPTOR as *mut _,
-                    TRUE,
-                    acl,
-                    FALSE,
-                ) != 0
-        };
-
-        built.then_some(label)
-    }
-
-    /// Security attributes that apply this label, valid for as long as `self` is.
-    fn attributes(&mut self) -> SECURITY_ATTRIBUTES {
-        SECURITY_ATTRIBUTES {
-            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as DWORD,
-            lpSecurityDescriptor: &mut self.descriptor as *mut SECURITY_DESCRIPTOR as *mut _,
-            bInheritHandle: FALSE,
+/// The OS error behind an event failure, printed the way `std::io::Error` prints it, so the
+/// handshake's messages keep their error code.
+fn os_error(error: &EventError) -> std::io::Error {
+    let source = match error {
+        EventError::Create { source, .. }
+        | EventError::Open { source, .. }
+        | EventError::Set { source, .. }
+        | EventError::Duplicate { source, .. }
+        | EventError::Wait(source) => source,
+        EventError::Exists { name } => {
+            return std::io::Error::new(std::io::ErrorKind::AlreadyExists, name.clone());
         }
+    };
+    match source {
+        WindowsError::Windows(code) => std::io::Error::from_raw_os_error(*code as i32),
+        WindowsError::WinSock(code) => std::io::Error::from_raw_os_error(*code),
     }
 }
 
@@ -478,7 +353,7 @@ impl LowIntegrityLabel {
 pub fn signal_init_failure_to_parent() {
     let name = event_name(EventKind::Failed, std::process::id());
 
-    let Some(handle) = open_event(EventKind::Failed, std::process::id()) else {
+    let Some(event) = open_event(EventKind::Failed, std::process::id()) else {
         tracing::debug!(
             event_name = %name,
             "no parent is waiting for this layer, so its failure is not reported"
@@ -486,7 +361,7 @@ pub fn signal_init_failure_to_parent() {
         return;
     };
 
-    if unsafe { SetEvent(handle.as_raw_handle().cast()) } != 0 {
+    if event.set().is_ok() {
         tracing::info!(event_name = %name, "told the parent that layer initialization failed");
     } else {
         tracing::warn!(event_name = %name, "failed to signal the layer failure event");
@@ -534,7 +409,17 @@ fn parent_liveness(role: &SessionRole) -> String {
 mod tests {
     use std::sync::Mutex;
 
-    use winapi::um::synchapi::WaitForSingleObject;
+    use str_win::string_to_u16_buffer;
+    use winapi::{
+        shared::minwindef::{DWORD, TRUE},
+        um::{
+            synchapi::{CreateEventW, OpenEventW, WaitForSingleObject},
+            winbase::WAIT_OBJECT_0,
+            winnt::{EVENT_MODIFY_STATE, SID, SYNCHRONIZE},
+        },
+    };
+
+    use utils_win::security::LowIntegrityLabel;
 
     use super::*;
 
@@ -744,7 +629,7 @@ mod tests {
                 CloseHandle(token);
                 assert_ne!(duplicated, 0, "duplicate the process token");
 
-                let mut sid = LowIntegrityLabel::new().expect("label").sid;
+                let mut sid = LowIntegrityLabel::new().expect("label").sid();
                 let mut label = TOKEN_MANDATORY_LABEL {
                     Label: SID_AND_ATTRIBUTES {
                         Sid: &mut sid as *mut SID as *mut _,

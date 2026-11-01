@@ -8,6 +8,35 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.282.0](https://github.com/metalbear-co/mirrord/tree/3.282.0) - 2026-10-30
+
+
+### Added
+
+- Experimental: `mirrord up --debug <service>` holds that service's program
+  before its own code runs, until an IDE attaches its debugger and releases it.
+  It's hidden from help on every platform, and may still change.
+- New `mirrord up list` prints every service in an up file as `mirrord up`
+  would run it: its target, mode, command and folder, without touching the
+  cluster. `--format json` prints the same for scripts and IDE extensions.
+
+
+### Changed
+
+- `mirrord up` shows in `mirrord --help` and shell completions on Windows.
+
+
+### Fixed
+
+- Calls that describe a folder above the working directory, such as `stat` and
+  `access`, now stay local by default on Linux and macOS, so resolving a local
+  path no longer fails when the target doesn't have those folders.
+- Honor workload selector expressions when selecting target pods, including
+  workloads with expression-only selectors.
+- mirrord no longer waits for many minutes, printing nothing, when the cluster
+  answers 503 for the mirrord operator. `startup_retry` alone now decides how
+  often those requests are retried.
+
 ## [3.281.0](https://github.com/metalbear-co/mirrord/tree/3.281.0) - 2026-10-28
 
 

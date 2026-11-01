@@ -16,6 +16,8 @@ tags:
 description: What happens to active mirrord sessions when Karpenter, Cluster Autoscaler, a node pool upgrade or kubectl drain removes a node
 ---
 
+# Node Upgrades and Scale-Down
+
 {% hint style="info" %}
 This page is relevant for users on the Team and Enterprise pricing plans.
 {% endhint %}
