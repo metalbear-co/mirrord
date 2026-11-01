@@ -6,6 +6,8 @@ toc: true
 tags: ["oss", "team", "enterprise"]
 ---
 
+# Test Claude Code Changes Against Staging
+
 Claude Code can write a change to a microservice in seconds or minutes. To check that the change works, it needs the things that the service talks to: the other services, the queues, the database, and the configuration of the real environment. On a laptop, those are missing or mocked, so Claude Code can only check that the code compiles and that the unit tests pass.
 
 mirrord closes that gap. Claude Code runs the service on your machine, and mirrord connects the process to a pod in your staging cluster. The process gets the pod's environment variables, DNS, network access, and incoming traffic. Claude Code can then run the service and its tests against the real services in staging, read the real responses, and fix what breaks before you review the change. Nothing is built or deployed. Claude Code can also start the service with mirrord and leave it running, so that you can test the change yourself through staging, for example from the staging frontend with your header. With mirrord for Teams, it can also create a [preview environment](../use-cases/preview-environments.md) for a pull request that you and your colleagues can open.

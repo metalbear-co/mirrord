@@ -42,6 +42,16 @@ pub fn generate_local_set() -> RegexSet {
         .expect("Building local path regex set failed")
 }
 
+/// Paths whose entry mirrord describes locally by default, while opening them follows the usual
+/// rules. See [`read_local_by_default::entry_regex_set_builder`] for why the two differ.
+#[cfg(unix)]
+pub fn generate_local_entry_set() -> RegexSet {
+    read_local_by_default::entry_regex_set_builder()
+        .case_insensitive(true)
+        .build()
+        .expect("Building local entry regex set failed")
+}
+
 /// List of files that mirrord should use remotely read only
 pub fn generate_remote_ro_set() -> RegexSet {
     let patterns = read_remote_by_default::PATHS;
@@ -91,6 +101,10 @@ pub struct FileFilter {
     pub local: RegexSet,
     pub not_found: RegexSet,
     pub default_local: RegexSet,
+    /// Like `default_local`, but only for calls that describe a path without opening it. Built
+    /// by [`generate_local_entry_set`].
+    #[cfg(unix)]
+    pub default_local_entries: RegexSet,
     pub default_remote_ro: RegexSet,
     pub default_not_found: RegexSet,
     pub mode: FsModeConfig,
@@ -133,6 +147,8 @@ impl FileFilter {
         let not_found = make("not_found", not_found)?;
 
         let default_local = generate_local_set();
+        #[cfg(unix)]
+        let default_local_entries = generate_local_entry_set();
         let default_remote_ro = generate_remote_ro_set();
         let default_not_found = generate_not_found_set();
 
@@ -142,6 +158,8 @@ impl FileFilter {
             local,
             not_found,
             default_local,
+            #[cfg(unix)]
+            default_local_entries,
             default_remote_ro,
             default_not_found,
             mode,
@@ -362,5 +380,110 @@ mod tests {
         });
 
         assert_eq!(mode, Some(FileMode::ReadOnly(false)));
+    }
+
+    /// The working directory used by the tests below.
+    #[cfg(unix)]
+    const CWD: &str = "/workspace/demo/svc";
+
+    /// `patterns` built the way [`super::generate_local_set`] builds its own.
+    #[cfg(unix)]
+    fn set(patterns: impl IntoIterator<Item = String>) -> regex::RegexSet {
+        regex::RegexSetBuilder::new(patterns)
+            .case_insensitive(true)
+            .build()
+            .expect("the working directory patterns are valid regexes")
+    }
+
+    /// What [`CWD`] adds to [`super::generate_local_set`].
+    #[cfg(unix)]
+    fn cwd_set() -> regex::RegexSet {
+        set(super::read_local_by_default::cwd_pattern(
+            std::path::Path::new(CWD),
+        ))
+    }
+
+    /// What [`CWD`] adds to [`super::generate_local_entry_set`].
+    #[cfg(unix)]
+    fn ancestor_set() -> regex::RegexSet {
+        set(super::read_local_by_default::cwd_ancestor_patterns(
+            std::path::Path::new(CWD),
+        ))
+    }
+
+    /// The working directory and everything under it is local, whatever the call does with it.
+    #[cfg(unix)]
+    #[rstest]
+    #[case::cwd("/workspace/demo/svc")]
+    #[case::under_cwd("/workspace/demo/svc/app.mjs")]
+    fn the_working_directory_is_local(#[case] path: &str) {
+        assert!(
+            cwd_set().is_match(path),
+            "{path} is in the working directory, so it must be local"
+        );
+    }
+
+    /// Resolving a path under the working directory describes each ancestor (Node's
+    /// `realpathSync` `lstat`s each one), so they're described locally even when the target
+    /// doesn't have them.
+    #[cfg(unix)]
+    #[rstest]
+    #[case::parent("/workspace/demo")]
+    #[case::grandparent("/workspace")]
+    #[case::trailing_slash("/workspace/")]
+    fn the_ancestors_are_described_locally(#[case] path: &str) {
+        assert!(
+            ancestor_set().is_match(path),
+            "{path} is on the way to the working directory, so describing it must stay local"
+        );
+    }
+
+    /// Opening an ancestor follows the usual rules, so `openat` through its fd can still reach
+    /// the target's entries.
+    #[cfg(unix)]
+    #[rstest]
+    #[case::parent("/workspace/demo")]
+    #[case::grandparent("/workspace")]
+    fn the_ancestors_are_not_opened_locally(#[case] path: &str) {
+        assert!(
+            !cwd_set().is_match(path),
+            "a local fd for {path} would send `openat` on it to the local disk, past the target"
+        );
+    }
+
+    /// Only the ancestors themselves are local: their other entries still follow the usual rules.
+    #[cfg(unix)]
+    #[rstest]
+    #[case::beside_an_ancestor("/workspace/local-only.txt")]
+    #[case::sibling_dir("/workspace/demo/other/config.json")]
+    #[case::shared_prefix("/workspace/demo-old")]
+    fn entries_beside_the_ancestors_are_not_made_local(#[case] path: &str) {
+        assert!(
+            !cwd_set().is_match(path) && !ancestor_set().is_match(path),
+            "{path} is not on the way to the working directory, so these patterns must not match it"
+        );
+    }
+
+    /// Root is an ancestor of every working directory, but it never gets an ancestor pattern.
+    #[cfg(unix)]
+    #[test]
+    fn root_is_not_among_the_ancestors() {
+        assert!(
+            !ancestor_set().is_match("/"),
+            "root is the one ancestor without a parent, so it must not get an ancestor pattern"
+        );
+    }
+
+    /// Root as the working directory adds no patterns, or every path would be local.
+    #[cfg(unix)]
+    #[test]
+    fn root_as_the_working_directory_adds_no_patterns() {
+        let root = std::path::Path::new("/");
+
+        assert!(
+            super::read_local_by_default::cwd_pattern(root).is_none()
+                && super::read_local_by_default::cwd_ancestor_patterns(root).is_empty(),
+            "a root working directory must not make every path local"
+        );
     }
 }

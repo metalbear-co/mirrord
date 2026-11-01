@@ -6,7 +6,7 @@ name: Operator E2E Test
 #    repository.
 #
 # Release PRs are expected to come from branches named
-# `release/<major>.<minor>.<patch>` in this repository. Automatic runs happen
+# `releases/<major>.<minor>.<patch>` in this repository. Automatic runs happen
 # when commits are pushed to those branches in `metalbear-co/mirrord`, so fork
 # PRs do not trigger this workflow.
 #
@@ -16,7 +16,7 @@ name: Operator E2E Test
 #   - `metalbear-co/operator`: `Actions: read` and `Actions: write`
 #
 # Automatic runs only proceed when the pushed branch matches
-# `release/<major>.<minor>.<patch>`.
+# `releases/<major>.<minor>.<patch>`.
 #
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ on:
         default: "main"
   push:
     branches:
-      - "release/[0-9]+.[0-9]+.[0-9]+"
+      - "releases/[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
   contents: read
