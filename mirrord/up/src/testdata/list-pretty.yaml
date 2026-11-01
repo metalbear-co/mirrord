@@ -1,0 +1,27 @@
+services:
+  worker:
+    target: none
+    skip: true
+    default_mode: mirror
+    run:
+      command: ["python", "worker.py"]
+  api:
+    target:
+      path: deployment/api
+      namespace: "ns-{{ key }}"
+    context: staging
+    run:
+      directory: api
+      command: ["dotnet", "Api.dll", "--session", "{{ key }}"]
+      pre_command: ["dotnet", "build"]
+  db:
+    target:
+      path: statefulset/postgres
+    run:
+      type: container
+      command: ["docker", "run", "-e", "GREETING=hello world", "postgres"]
+  web:
+    target:
+      namespace: frontend
+    run:
+      command: ["npm", "start"]

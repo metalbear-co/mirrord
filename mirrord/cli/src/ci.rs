@@ -638,6 +638,12 @@ impl MirrordCi {
     pub(super) fn is_foreground(&self) -> bool {
         self.ci_common_args.foreground
     }
+
+    /// Whether `mirrord ci start` runs the program as a child instead of replacing itself with it
+    /// (`execve`): it runs in the background, or the program's output goes to files.
+    pub(super) fn spawns_the_program(&self, config: &CiConfig) -> bool {
+        self.is_foreground().not() || config.output_dir.is_some()
+    }
 }
 
 #[cfg(all(test, not(target_os = "windows")))]

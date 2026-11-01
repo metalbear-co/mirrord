@@ -6,6 +6,8 @@ toc: true
 tags: ["oss", "team", "enterprise"]
 ---
 
+# Configure AI Agents to Use mirrord
+
 Agents can even do this autonomously. By instructing them to use mirrord as part of their workflow, they can run code against a real environment, catch issues early, and iterate until the feature actually works end-to-end. They can even use mirrord to explore the staging environment before writing code, giving them better visibility into how things are configured and service dependencies so they write more accurate code to begin with.
 
 The workflow: the agent writes code, runs it with mirrord against the cluster, checks the result, and iterates. Feedback cycles drop from minutes to seconds.

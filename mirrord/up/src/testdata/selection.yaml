@@ -1,0 +1,11 @@
+services:
+  a:
+    run:
+      command: ["echo", "a"]
+  b:
+    skip: true
+    run:
+      command: ["echo", "b"]
+  c:
+    run:
+      command: ["echo", "c"]
