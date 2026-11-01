@@ -147,7 +147,16 @@ impl HttpFilter {
 
             Self::Method(filter) => parts.method.as_str().eq_ignore_ascii_case(filter.as_ref()),
 
-            Self::Not(filter) => Box::pin(filter.matches(parts, body)).await.not(),
+            Self::Not(filter) => {
+                // Without the body, an inner body filter says "no match" because it cannot look,
+                // not because the body differs. Negating that would mirror or steal the request
+                // before its body is read, so the answer is "no match" until the body is there.
+                if body.is_none() && filter.needs_body() {
+                    return false;
+                }
+
+                Box::pin(filter.matches(parts, body)).await.not()
+            }
 
             Self::Composite { all: true, filters } => {
                 // Since we require `body` to be Clone + Copy, each
@@ -337,7 +346,7 @@ mod test {
     use std::{ops::Not, str::FromStr};
 
     use hyper::Request;
-    use mirrord_protocol::tcp::{self, Filter, HttpMethodFilter};
+    use mirrord_protocol::tcp::{self, Filter, HttpMethodFilter, JsonPathQuery};
 
     use super::HttpFilter;
 
@@ -365,6 +374,37 @@ mod test {
             .unwrap()
             .into_parts();
         assert!(filter.matches::<&[u8]>(&mut live, None).await);
+    }
+
+    /// Mirroring matches once before the body is buffered. A `Not` over a body filter must not
+    /// read "no body yet" as "body does not match", or the request is mirrored before its body
+    /// is seen, and a body that does match slips through.
+    #[tokio::test]
+    async fn not_over_body_filter_waits_for_the_body() {
+        let tcp_filter =
+            tcp::HttpFilter::Not(Box::new(tcp::HttpFilter::Body(tcp::HttpBodyFilter::Json {
+                query: JsonPathQuery::new("$.tenant".to_owned()).unwrap(),
+                matches: Filter::new("preview".to_owned()).unwrap(),
+            })));
+        let filter = HttpFilter::try_from(&tcp_filter).unwrap();
+        assert!(filter.needs_body());
+
+        let (mut parts, _) = Request::builder()
+            .uri("/orders")
+            .body(())
+            .unwrap()
+            .into_parts();
+        assert!(!filter.matches::<&[u8]>(&mut parts, None).await);
+        assert!(
+            !filter
+                .matches(&mut parts, Some(br#"{"tenant":"preview"}"#.as_slice()))
+                .await
+        );
+        assert!(
+            filter
+                .matches(&mut parts, Some(br#"{"tenant":"live"}"#.as_slice()))
+                .await
+        );
     }
 
     #[tokio::test]
