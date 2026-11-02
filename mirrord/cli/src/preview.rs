@@ -50,8 +50,8 @@ use mirrord_config::{
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
     client::{
-        MaybeClientCert, NoClientCert, OperatorApi, connect_params::BranchDbNames,
-        error::OperatorApiError, temporal_mirror_warning,
+        MaybeClientCert, NoClientCert, OperatorApi, check_targetless_db_branches,
+        connect_params::BranchDbNames, error::OperatorApiError, temporal_mirror_warning,
     },
     crd::{
         MirrordOperatorSpec, NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
@@ -395,6 +395,17 @@ impl PreparedPreview {
                     .spec
                     .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
             }
+            // Same reason: a branch that needs the target pod, or an operator without targetless
+            // branching, must fail before `start` replaces anything. `mirrord up` prepares every
+            // service and then starts them all, so a refusal in `start` would come after a targeted
+            // service already replaced its preview.
+            if targetless {
+                check_targetless_db_branches(
+                    &operator_api.operator().spec,
+                    &layer_config.feature.db_branches,
+                )?;
+            }
+
             Ok::<(), CliError>(())
         };
         if let Err(error) = feature_support.await {

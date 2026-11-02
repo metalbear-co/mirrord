@@ -34,7 +34,7 @@ use mirrord_config::{
     config::EnvKey,
     feature::{
         database_branches::{
-            DatabaseBranchConfig, SplitConfigDbBranches, TargetPodNeed,
+            DatabaseBranchConfig, DatabaseBranchesConfig, SplitConfigDbBranches, TargetPodNeed,
             default_creation_timeout_secs,
         },
         split_queues::{QueueKind, QueueSplit, SplitQueuesConfig},
@@ -80,8 +80,8 @@ use crate::{
         },
     },
     crd::{
-        MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
-        OPERATOR_STATUS_NAME, TargetCrd,
+        MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordOperatorSpec,
+        NewOperatorFeature, OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
             branch_database::{BranchDatabase, BranchDatabaseSpec, DatabaseDialect},
@@ -1067,37 +1067,9 @@ where
             .as_deref()
             .unwrap_or(self.client.default_namespace());
 
-        // Without a target there is no pod to read connection values from, and no service
-        // account for secret managers or IAM auth to borrow, so every source must stand on its
-        // own. Checked before the operator gate so a config that cannot work anywhere is
-        // reported as such, not as a missing operator feature.
+        // Checked here too, so a targetless `mirrord exec` is refused as early as a preview is.
         if matches!(target, Target::Targetless) {
-            if let Some((position, need)) = layer_config
-                .feature
-                .db_branches
-                .iter()
-                .enumerate()
-                .find_map(|(position, branch)| Some((position, branch.target_pod_need()?)))
-            {
-                let message = match need {
-                    TargetPodNeed::ConnectionValues => format!(
-                        "`feature.db_branches[{position}]` needs the target pod (its env, a \
-                         ConfigMap volume, or its cloud identity for a secret manager source or \
-                         IAM auth), but this session has no target; give each connection value \
-                         as a literal, a Kubernetes Secret, or a ConfigMap named directly, or \
-                         set a `target`"
-                    ),
-                    TargetPodNeed::Engine => format!(
-                        "`feature.db_branches[{position}]` is a Spanner branch, which always \
-                         reads the app's emulator-host var and Google credentials off the \
-                         target pod, but this session has no target; set a `target`"
-                    ),
-                };
-                return Err(OperatorApiError::UnsupportedTargetConfig(message));
-            }
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::TargetlessDbBranches)?;
+            check_targetless_db_branches(&self.operator.spec, &layer_config.feature.db_branches)?;
         }
 
         // Management-only operators set operator_namespace so the sync controller can
@@ -3526,6 +3498,45 @@ impl OperatorApi<PreparedClientCert> {
     }
 }
 
+/// Refuses `db_branches` that cannot be provisioned for a session without a target, against
+/// the operator at `spec`. Without a target there is no pod to read connection values from, and
+/// no service account for secret managers or IAM auth to borrow, so every source must stand on
+/// its own; a Spanner branch reads the pod itself and can never run targetless. The branches are
+/// checked before the operator's `TargetlessDbBranches` gate so a config that cannot work
+/// anywhere is reported as such, not as a missing operator feature.
+///
+/// Pure, so `mirrord preview start` and `up` run it in `prepare`, before any running preview
+/// under the same key is replaced: `up` prepares every service and only then starts them all,
+/// so a refusal that waited for `start` would land after a targeted service already replaced
+/// its preview. [`OperatorApi::prepare_branch_dbs`] runs it again for the branches a `"*"` / ids
+/// request resolved to, and for `mirrord exec`.
+pub fn check_targetless_db_branches(
+    spec: &MirrordOperatorSpec,
+    db_branches: &DatabaseBranchesConfig,
+) -> OperatorApiResult<()> {
+    if let Some((position, need)) = db_branches
+        .iter()
+        .enumerate()
+        .find_map(|(position, branch)| Some((position, branch.target_pod_need()?)))
+    {
+        let message = match need {
+            TargetPodNeed::ConnectionValues => format!(
+                "`feature.db_branches[{position}]` needs the target pod (its env, a ConfigMap \
+                 volume, or its cloud identity for a secret manager source or IAM auth), but \
+                 this session has no target; give each connection value as a literal, a \
+                 Kubernetes Secret, or a ConfigMap named directly, or set a `target`"
+            ),
+            TargetPodNeed::Engine => format!(
+                "`feature.db_branches[{position}]` is a Spanner branch, which always reads the \
+                 app's emulator-host var and Google credentials off the target pod, but this \
+                 session has no target; set a `target`"
+            ),
+        };
+        return Err(OperatorApiError::UnsupportedTargetConfig(message));
+    }
+    spec.require_feature(NewOperatorFeature::TargetlessDbBranches)
+}
+
 #[cfg(test)]
 mod test {
     use std::{
@@ -3562,7 +3573,7 @@ mod test {
 
     use super::{
         BAGGAGE_HEADER, NewOperatorFeature, NoClientCert, OperatorApi, add_baggage_header,
-        disable_unsupported_auto_splits,
+        check_targetless_db_branches, disable_unsupported_auto_splits,
     };
     use crate::{
         client::{
@@ -3571,6 +3582,68 @@ mod test {
         },
         crd::{MirrordOperatorCrd, session::SessionCiInfo},
     };
+
+    /// `mirrord preview up` prepares every service and only then starts them all, so a check
+    /// that only ran while starting would land after a targeted service already replaced its
+    /// running preview. The targetless refusals are therefore a pure check of the config against
+    /// the operator spec, which `prepare` runs before anything is replaced: a Spanner branch
+    /// (reads the pod itself), a branch reading `DATABASE_URL` off the pod, and an operator
+    /// without `TargetlessDbBranches` are each refused, while a Secret-backed branch on an
+    /// operator that has the feature passes.
+    #[test]
+    fn targetless_db_branches_are_refused_from_the_config_and_spec_alone() {
+        use mirrord_config::feature::database_branches::DatabaseBranchesConfig;
+
+        let spec = |features: &[&str]| -> crate::crd::MirrordOperatorSpec {
+            serde_json::from_value(serde_json::json!({
+                "operator_version": "3.283.0",
+                "default_namespace": "default",
+                "supported_features": features,
+                "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
+            }))
+            .unwrap()
+        };
+        let branches = |value: serde_json::Value| -> DatabaseBranchesConfig {
+            serde_json::from_value(value).unwrap()
+        };
+        let secret_pg = serde_json::json!({
+            "type": "pg",
+            "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } },
+        });
+
+        let spanner = branches(serde_json::json!([{
+            "type": "spanner",
+            "connection": { "url": { "type": "secret", "name": "spanner", "key": "url" } },
+        }]));
+        let error = check_targetless_db_branches(&spec(&["TargetlessDbBranches"]), &spanner)
+            .expect_err("a Spanner branch always reads the target pod");
+        assert!(
+            matches!(&error, OperatorApiError::UnsupportedTargetConfig(message) if message.contains("Spanner")),
+            "{error}"
+        );
+
+        let pod_url = branches(serde_json::json!([secret_pg, {
+            "type": "pg",
+            "connection": { "url": "DATABASE_URL" },
+        }]));
+        let error = check_targetless_db_branches(&spec(&["TargetlessDbBranches"]), &pod_url)
+            .expect_err("a bare env var name is read off the target pod");
+        assert!(
+            matches!(&error, OperatorApiError::UnsupportedTargetConfig(message) if message.contains("db_branches[1]")),
+            "{error}"
+        );
+
+        let secret_only = branches(serde_json::json!([secret_pg]));
+        assert!(matches!(
+            check_targetless_db_branches(&spec(&[]), &secret_only),
+            Err(OperatorApiError::UnsupportedFeature {
+                feature: NewOperatorFeature::TargetlessDbBranches,
+                ..
+            })
+        ));
+        check_targetless_db_branches(&spec(&["TargetlessDbBranches"]), &secret_only)
+            .expect("Secret-backed values need no pod");
+    }
 
     #[tokio::test]
     async fn sessions_manager_requires_advertised_support() {
