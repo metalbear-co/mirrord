@@ -100,4 +100,25 @@ impl Default for MysqlBranchCopyConfig {
     }
 }
 
+impl MysqlBranchCopyConfig {
+    /// The table names and `*`/`?` patterns the copy leaves out. Every mode takes them, since
+    /// a table another service drops mid-dump breaks the schema pass as much as the data pass.
+    pub fn exclude_tables(&self) -> &[String] {
+        match self {
+            Self::Empty { exclude_tables, .. }
+            | Self::Schema { exclude_tables, .. }
+            | Self::All { exclude_tables, .. } => exclude_tables.as_deref().unwrap_or_default(),
+        }
+    }
+
+    /// The per-table copy filters. Only the modes that copy no data by default take them;
+    /// `all` already copies every table.
+    pub fn tables(&self) -> Option<&BTreeMap<String, MysqlBranchTableCopyConfig>> {
+        match self {
+            Self::Empty { tables, .. } | Self::Schema { tables, .. } => tables.as_ref(),
+            Self::All { .. } => None,
+        }
+    }
+}
+
 pub type MysqlBranchTableCopyConfig = super::BranchItemCopyConfig;
