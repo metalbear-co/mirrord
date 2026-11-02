@@ -966,6 +966,8 @@ impl ServiceConfig {
             // included, so whatever it holds afterwards was asked for by the user.
             if patch.pointer("/feature/db_branches").is_some() {
                 db_branches_origin = RequestOrigin::Config;
+                // The merge would otherwise go into an object form key by key.
+                cfg.feature.db_branches = DatabaseBranchesConfig::default();
             }
             cfg = apply_config_patch(cfg, patch, &key)?;
         }
