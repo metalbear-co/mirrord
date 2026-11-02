@@ -5,6 +5,8 @@ tags:
   - enterprise
 ---
 
+# Migrating to MirrordSplitConfig
+
 All queue services now share a single configuration resource, `MirrordSplitConfig`. Earlier versions of mirrord used a different, broker-specific resource for each service. Those legacy resources are deprecated but still fully supported - the operator reads them on the fly and drives the split through the same unified flow, so existing setups keep working with no change.
 
 This page shows how to move each legacy resource to `MirrordSplitConfig`. We recommend migrating so all your queue splitting configuration lives in one place. New setups should start with `MirrordSplitConfig` directly (see each broker's own page).
@@ -15,7 +17,7 @@ This page shows how to move each legacy resource to `MirrordSplitConfig`. We rec
 You do not have to migrate everything at once. The operator accepts a mix of legacy resources and `MirrordSplitConfig` objects, so you can migrate one workload at a time.
 {% endhint %}
 
-### Amazon SQS
+## Amazon SQS
 
 Earlier versions of mirrord (`<3.170.0`) used the `MirrordWorkloadQueueRegistry` resource with `queueType: SQS`.
 
@@ -117,7 +119,7 @@ spec:
 2. Start a session and verify messages are split as expected.
 3. Delete the old `MirrordWorkloadQueueRegistry`.
 
-### Kafka
+## Kafka
 
 Earlier versions of mirrord (`<3.170.0`) used two resources to configure Kafka splitting: `MirrordKafkaTopicsConsumer` (which queues to split and how to find their names) and `MirrordKafkaClientConfig` (the Kafka client connection). The new `clientConfig` field transparently falls back to a `MirrordKafkaClientConfig` of the same name in the operator's namespace, so you can migrate the topics consumer first and the client config later.
 
@@ -219,7 +221,7 @@ To migrate:
 3. Start a session and verify messages are split as expected.
 4. Once you are confident, delete the old `MirrordKafkaTopicsConsumer` (and `MirrordKafkaClientConfig`, if you moved its properties into a `MirrordPropertyList`).
 
-### RabbitMQ
+## RabbitMQ
 
 Earlier versions of mirrord (`<3.170.0`) used the `MirrordWorkloadQueueRegistry` resource with `queueType: RMQ`.
 

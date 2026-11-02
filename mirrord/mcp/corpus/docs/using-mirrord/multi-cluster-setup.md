@@ -646,7 +646,13 @@ Each connected cluster should show `license_fingerprint` and `operator_version`.
 A: No. The developer experience is identical to single-cluster. Developers run `mirrord exec` as usual and the operator handles everything. Note that multi-cluster sessions only work when the developer connects to the Primary cluster — connecting directly to a downstream cluster will start a regular single-cluster session on that cluster.
 
 **Q: Can the Primary cluster also run workloads?**
-A: Yes. By default, the Primary cluster participates as a workload cluster. Set `managementOnly: true` only if the Primary has no application pods.
+A: Yes. Set `managementOnly: false` (the Helm chart default is `true`) so the Primary participates as a workload cluster, and set `managementOnly: true` only if the Primary has no application pods. See [Management-Only Mode](multi-cluster.md#management-only-mode) for what the setting changes.
+
+**Q: Can I run some sessions on the Primary only?**
+A: Yes. A session started with `multi_cluster: false` stays on the Primary and runs as a regular single-cluster session, with the Primary's local queue splitting and database branching.
+
+**Q: Which resources can I exclude from syncing to the member clusters?**
+A: Label a `MirrordSplitConfig` or `MirrordPropertyList` with `operator.metalbear.co/skip-mc-sync: "true"` to keep the operator from syncing it. This is useful when your GitOps tool already applies the resource on every cluster. The operator skips it silently.
 
 **Q: What happens if a downstream cluster is unreachable?**
 A: The session creation will fail. The operator reports connection errors in the `MirrordOperator` status (see Verify the Connection above).

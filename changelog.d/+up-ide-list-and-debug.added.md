@@ -1,1 +1,0 @@
-Experimental: `mirrord up --debug <service>` holds that service's program before its own code runs, until an IDE attaches its debugger and releases it. It's hidden from help on every platform, and may still change.
