@@ -704,6 +704,18 @@ pub enum BranchCopyMode {
     All,
 }
 
+/// Why a branch needs the target pod, see [`DatabaseBranchConfig::target_pod_need`]. The two
+/// cases get different advice: a pod-bound value can be sourced from somewhere else, an engine
+/// that reads the pod itself cannot run without a target at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetPodNeed {
+    /// A connection value is read off the pod, or a secret manager source or IAM auth borrows
+    /// its cloud identity.
+    ConnectionValues,
+    /// The engine itself reads the pod, so only setting a target helps.
+    Engine,
+}
+
 impl DatabaseBranchConfig {
     /// The fields every branch shares, when the variant has them. Local Redis branches don't -
     /// mirrord runs them itself, so they never reach the operator and carry only an `id`.
@@ -947,15 +959,25 @@ impl DatabaseBranchConfig {
         })
     }
 
-    /// True when the branch cannot be provisioned without the target pod. A session without a
-    /// target has no pod, so the CLI refuses such a branch for it. The pod is needed for:
-    /// - a value read from it: its env, `envFrom`, or a ConfigMap found through one of its
+    /// Why this branch cannot be provisioned without the target pod, or `None` when it can. A
+    /// session without a target has no pod, so the CLI refuses such a branch for it before
+    /// creating anything; the operator applies the same rule to CRs created some other way
+    /// (`targetless_refusal` in `operator-db-branching`), so both sides agree.
+    ///
+    /// Literal values, Secrets and ConfigMaps named directly resolve without a pod. Checked,
+    /// first match wins:
+    /// - an engine that reads the pod itself: Spanner finds the database it copies from through
+    ///   the app's emulator-host var on the pod and signs in with the pod's Google credentials,
+    ///   so no connection value lifts the need
+    /// - a value read from the pod: its env, `envFrom`, or a ConfigMap found through one of its
     ///   volumes
     /// - its service account and AWS env: secret manager sources and IAM auth are fetched by
     ///   the branch pod under the target's cloud identity
-    ///
-    /// Literal values, Secrets and ConfigMaps named directly resolve without one.
-    pub fn needs_target_pod(&self) -> bool {
+    pub fn target_pod_need(&self) -> Option<TargetPodNeed> {
+        if matches!(self, DatabaseBranchConfig::Spanner(_)) {
+            return Some(TargetPodNeed::Engine);
+        }
+
         let params_need_pod = self.all_connection_params().any(|params| {
             params.all_sources().any(|source| {
                 matches!(
@@ -992,7 +1014,8 @@ impl DatabaseBranchConfig {
                 ConnectionSource::Params(_) => false,
             });
 
-        params_need_pod || urls_need_pod || self.iam_auth().is_some()
+        (params_need_pod || urls_need_pod || self.iam_auth().is_some())
+            .then_some(TargetPodNeed::ConnectionValues)
     }
 
     /// True when a param or the `url` is read from AWS SSM Parameter Store. The CLI uses it to
@@ -2798,23 +2821,23 @@ mod tests {
         json!({ "url": { "type": "aws_secrets_manager", "secret_ref": "prod/pg" } }),
         true
     )]
-    fn needs_target_pod_names_pod_bound_sources(
-        #[case] connection: Value,
-        #[case] needs_pod: bool,
-    ) {
+    fn target_pod_need_names_pod_bound_sources(#[case] connection: Value, #[case] needs_pod: bool) {
         let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
             "type": "pg",
             "connection": connection,
         }))
         .unwrap();
 
-        assert_eq!(branch.needs_target_pod(), needs_pod);
+        assert_eq!(
+            branch.target_pod_need(),
+            needs_pod.then_some(TargetPodNeed::ConnectionValues)
+        );
     }
 
     /// IAM auth signs with the target pod's keys or runs the branch pod under its service
     /// account, so a Secret-sourced connection still needs the pod once `iam_auth` is set.
     #[test]
-    fn needs_target_pod_for_iam_auth() {
+    fn target_pod_need_for_iam_auth() {
         let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
             "type": "pg",
             "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } },
@@ -2822,7 +2845,32 @@ mod tests {
         }))
         .unwrap();
 
-        assert!(branch.needs_target_pod());
+        assert_eq!(
+            branch.target_pod_need(),
+            Some(TargetPodNeed::ConnectionValues)
+        );
+    }
+
+    /// A Spanner branch has no password: the operator always reads the app's emulator-host var
+    /// and Google credentials off the target pod. With only the connection sources checked, a
+    /// Secret-only Spanner branch passed here, the CLI created the branch and preview CRs, and
+    /// the operator failed the branch late with `MalformedResource`. The engine rule refuses it
+    /// before anything is created.
+    #[test]
+    fn spanner_always_needs_the_target_pod() {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
+            "type": "spanner",
+            "connection": {
+                "params": {
+                    "project": { "secret": "spanner", "key": "project" },
+                    "instance": { "secret": "spanner", "key": "instance" },
+                    "database_id": { "secret": "spanner", "key": "database" }
+                }
+            },
+        }))
+        .unwrap();
+
+        assert_eq!(branch.target_pod_need(), Some(TargetPodNeed::Engine));
     }
 
     /// A Redis Cluster node only has database 0, so `cluster: true` pairs with no `name` or

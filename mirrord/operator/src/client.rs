@@ -34,7 +34,8 @@ use mirrord_config::{
     config::EnvKey,
     feature::{
         database_branches::{
-            DatabaseBranchConfig, SplitConfigDbBranches, default_creation_timeout_secs,
+            DatabaseBranchConfig, SplitConfigDbBranches, TargetPodNeed,
+            default_creation_timeout_secs,
         },
         split_queues::{QueueKind, QueueSplit, SplitQueuesConfig},
     },
@@ -1071,19 +1072,28 @@ where
         // own. Checked before the operator gate so a config that cannot work anywhere is
         // reported as such, not as a missing operator feature.
         if matches!(target, Target::Targetless) {
-            if let Some(position) = layer_config
+            if let Some((position, need)) = layer_config
                 .feature
                 .db_branches
                 .iter()
-                .position(DatabaseBranchConfig::needs_target_pod)
+                .enumerate()
+                .find_map(|(position, branch)| Some((position, branch.target_pod_need()?)))
             {
-                return Err(OperatorApiError::UnsupportedTargetConfig(format!(
-                    "`feature.db_branches[{position}]` needs the target pod (its env, a \
-                     ConfigMap volume, or its cloud identity for a secret manager source or IAM \
-                     auth), but this session has no target; give each connection value as a \
-                     literal, a Kubernetes Secret, or a ConfigMap named directly, or set a \
-                     `target`"
-                )));
+                let message = match need {
+                    TargetPodNeed::ConnectionValues => format!(
+                        "`feature.db_branches[{position}]` needs the target pod (its env, a \
+                         ConfigMap volume, or its cloud identity for a secret manager source or \
+                         IAM auth), but this session has no target; give each connection value \
+                         as a literal, a Kubernetes Secret, or a ConfigMap named directly, or \
+                         set a `target`"
+                    ),
+                    TargetPodNeed::Engine => format!(
+                        "`feature.db_branches[{position}]` is a Spanner branch, which always \
+                         reads the app's emulator-host var and Google credentials off the \
+                         target pod, but this session has no target; set a `target`"
+                    ),
+                };
+                return Err(OperatorApiError::UnsupportedTargetConfig(message));
             }
             self.operator
                 .spec
