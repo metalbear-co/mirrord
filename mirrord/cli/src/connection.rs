@@ -775,6 +775,8 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
 
     config.experimental.disable_reuseaddr = config.experimental.disable_reuseaddr.or(Some(true));
     config.experimental.go_asmcgocall = config.experimental.go_asmcgocall.or(Some(true));
+    config.experimental.hook_libc_syscall = config.experimental.hook_libc_syscall.or(Some(true));
+    config.experimental.old_glibc_support = config.experimental.old_glibc_support.or(Some(true));
 
     Ok(())
 }
