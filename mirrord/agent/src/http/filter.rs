@@ -1,4 +1,10 @@
-use std::{fmt::Debug, io::Read, ops::Not, sync::LazyLock, time::Duration};
+use std::{
+    fmt::{self, Debug},
+    io::Read,
+    ops::Not,
+    sync::LazyLock,
+    time::Duration,
+};
 
 use fancy_regex::Regex;
 use http::HeaderMap;
@@ -14,6 +20,60 @@ use serde_json::Value;
 use serde_json_path::JsonPath;
 use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{Instrument, Level};
+
+/// What a filter can see of a request body when asked whether the request matches.
+#[derive(Clone, Copy)]
+pub enum RequestBody<T> {
+    /// Still arriving. A filter that needs it answers [`MatchResult::NeedsBody`], so the caller
+    /// buffers the body and asks again.
+    Pending,
+    /// Was never buffered (over the size limit, or too slow to arrive) and never will be. A body
+    /// filter cannot match it: a user stealing by body does not get requests nobody could check.
+    /// A `Not` over it therefore matches, which is the safe side for a preview pod that steals
+    /// everything but preview traffic: a request whose body nobody could check goes back to the
+    /// stable pods instead of being served by preview code.
+    Unavailable,
+    /// Fully buffered.
+    Complete(T),
+}
+
+impl<T> Debug for RequestBody<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Pending => "Pending",
+            Self::Unavailable => "Unavailable",
+            Self::Complete(..) => "Complete",
+        })
+    }
+}
+
+/// Answer of [`HttpFilter::matches`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchResult {
+    Match,
+    NoMatch,
+    /// The headers alone cannot decide and the body is still [`RequestBody::Pending`]. Buffer it
+    /// and ask again.
+    NeedsBody,
+}
+
+impl From<bool> for MatchResult {
+    fn from(matches: bool) -> Self {
+        if matches { Self::Match } else { Self::NoMatch }
+    }
+}
+
+impl Not for MatchResult {
+    type Output = Self;
+
+    fn not(self) -> Self {
+        match self {
+            Self::Match => Self::NoMatch,
+            Self::NoMatch => Self::Match,
+            Self::NeedsBody => Self::NeedsBody,
+        }
+    }
+}
 
 /// Currently supported filtering criterias.
 #[derive(Debug, Clone)]
@@ -111,52 +171,61 @@ impl TryFrom<&mirrord_protocol::tcp::HttpBodyFilter> for HttpBodyFilter {
 
 impl HttpFilter {
     /// Checks whether the given request [`Parts`] match this filter.
-    #[tracing::instrument(level = Level::DEBUG, skip_all, fields(has_body = body.is_some()), ret)]
-    pub async fn matches<T: Read + Copy>(&self, parts: &mut Parts, body: Option<T>) -> bool {
+    ///
+    /// Headers decide as much as they can on their own: a composite short-circuits on a definite
+    /// answer and only reports [`MatchResult::NeedsBody`] when some body filter is the one left
+    /// undecided, so a request is buffered only when its body really is the deciding factor.
+    #[tracing::instrument(level = Level::DEBUG, skip_all, fields(?body), ret)]
+    pub async fn matches<T: Read + Copy>(
+        &self,
+        parts: &mut Parts,
+        body: RequestBody<T>,
+    ) -> MatchResult {
         match self {
             Self::Header(filter) => {
                 let headers = parts
                     .extensions
                     .get_or_insert_with(|| NormalizedHeaders::from_headers(&parts.headers));
 
-                headers.has_match(filter)
+                headers.has_match(filter).into()
             }
 
-            Self::Path(filter) => parts.uri.path_and_query().is_some_and(|path_and_query| {
-                // For backward compatability, we first match path then we match path and query
-                // together and return true if any of them matches
-                let path = path_and_query.path();
-                let matched = filter
-                    .is_match(path)
-                    .inspect_err(|error| {
-                        tracing::error!(path, ?error, "Error while matching path");
-                    })
-                    .unwrap_or(false);
-                if matched {
-                    return true;
-                }
+            Self::Path(filter) => parts
+                .uri
+                .path_and_query()
+                .is_some_and(|path_and_query| {
+                    // For backward compatability, we first match path then we match path and query
+                    // together and return true if any of them matches
+                    let path = path_and_query.path();
+                    let matched = filter
+                        .is_match(path)
+                        .inspect_err(|error| {
+                            tracing::error!(path, ?error, "Error while matching path");
+                        })
+                        .unwrap_or(false);
+                    if matched {
+                        return true;
+                    }
 
-                let path = path_and_query.as_str();
-                filter
-                    .is_match(path)
-                    .inspect_err(|error| {
-                        tracing::error!(path, ?error, "Error while matching path+query");
-                    })
-                    .unwrap_or(false)
-            }),
+                    let path = path_and_query.as_str();
+                    filter
+                        .is_match(path)
+                        .inspect_err(|error| {
+                            tracing::error!(path, ?error, "Error while matching path+query");
+                        })
+                        .unwrap_or(false)
+                })
+                .into(),
 
-            Self::Method(filter) => parts.method.as_str().eq_ignore_ascii_case(filter.as_ref()),
+            Self::Method(filter) => parts
+                .method
+                .as_str()
+                .eq_ignore_ascii_case(filter.as_ref())
+                .into(),
 
-            Self::Not(filter) => {
-                // Without the body, an inner body filter says "no match" because it cannot look,
-                // not because the body differs. Negating that would mirror or steal the request
-                // before its body is read, so the answer is "no match" until the body is there.
-                if body.is_none() && filter.needs_body() {
-                    return false;
-                }
-
-                Box::pin(filter.matches(parts, body)).await.not()
-            }
+            // Flips a definite answer and leaves "needs the body" to the caller: negating "cannot
+            // look yet" would steal or mirror the request before its body is read.
+            Self::Not(filter) => Box::pin(filter.matches(parts, body)).await.not(),
 
             Self::Composite { all: true, filters } => {
                 // Since we require `body` to be Clone + Copy, each
@@ -164,27 +233,37 @@ impl HttpFilter {
                 // beginning. Need to make sure that we don't read
                 // anything from `body` before passing (copies of) it
                 // to other fns.
+                let mut result = MatchResult::Match;
                 for filter in filters {
-                    if Box::pin(filter.matches(parts, body)).await.not() {
-                        return false;
+                    match Box::pin(filter.matches(parts, body)).await {
+                        MatchResult::NoMatch => return MatchResult::NoMatch,
+                        MatchResult::NeedsBody => result = MatchResult::NeedsBody,
+                        MatchResult::Match => {}
                     }
                 }
-                true
+                result
             }
             Self::Composite {
                 all: false,
                 filters,
             } => {
                 // Same as above
+                let mut result = MatchResult::NoMatch;
                 for filter in filters {
-                    if Box::pin(filter.matches(parts, body)).await {
-                        return true;
+                    match Box::pin(filter.matches(parts, body)).await {
+                        MatchResult::Match => return MatchResult::Match,
+                        MatchResult::NeedsBody => result = MatchResult::NeedsBody,
+                        MatchResult::NoMatch => {}
                     }
                 }
-                false
+                result
             }
             Self::Body(filter) => {
-                let Some(body) = body else { return false };
+                let body = match body {
+                    RequestBody::Pending => return MatchResult::NeedsBody,
+                    RequestBody::Unavailable => return MatchResult::NoMatch,
+                    RequestBody::Complete(body) => body,
+                };
 
                 match filter {
                     HttpBodyFilter::Json { query, matches } => {
@@ -192,19 +271,22 @@ impl HttpFilter {
                             Ok(json) => json,
                             Err(error) => {
                                 tracing::debug!(?error, "json filter failed to parse body json");
-                                return false;
+                                return MatchResult::NoMatch;
                             }
                         };
 
                         let results = query.query(&json);
 
-                        results.iter().any(|v| {
-                            match v {
-                                Value::String(s) => matches.is_match(s),
-                                other => matches.is_match(&other.to_string()),
-                            }
-                            .is_ok_and(|t| t)
-                        })
+                        results
+                            .iter()
+                            .any(|v| {
+                                match v {
+                                    Value::String(s) => matches.is_match(s),
+                                    other => matches.is_match(&other.to_string()),
+                                }
+                                .is_ok_and(|t| t)
+                            })
+                            .into()
                     }
                 }
             }
@@ -215,7 +297,7 @@ impl HttpFilter {
 
                 for header in headers.0.iter() {
                     match eval_jaq(filter.clone(), header.clone()).await {
-                        Ok(true) => return true,
+                        Ok(true) => return MatchResult::Match,
                         Ok(false) => (),
                         Err(err) => {
                             tracing::error!(?err, ?header, ?filter, "failed to run jaq query");
@@ -223,17 +305,8 @@ impl HttpFilter {
                     }
                 }
 
-                false
+                MatchResult::NoMatch
             }
-        }
-    }
-
-    pub fn needs_body(&self) -> bool {
-        match self {
-            HttpFilter::Composite { filters, .. } => filters.iter().any(HttpFilter::needs_body),
-            HttpFilter::Not(filter) => filter.needs_body(),
-            HttpFilter::Body(_) => true,
-            _ => false,
         }
     }
 }
@@ -343,67 +416,135 @@ impl NormalizedHeaders {
 
 #[cfg(test)]
 mod test {
-    use std::{ops::Not, str::FromStr};
+    use std::str::FromStr;
 
     use hyper::Request;
     use mirrord_protocol::tcp::{self, Filter, HttpMethodFilter, JsonPathQuery};
 
-    use super::HttpFilter;
+    use super::{HttpFilter, MatchResult, RequestBody};
+
+    /// No body in hand and none coming: what a header-only filter sees at the head.
+    const NO_BODY: RequestBody<&[u8]> = RequestBody::Pending;
+
+    fn head(uri: &str, headers: &[(&str, &str)]) -> hyper::http::request::Parts {
+        let mut request = Request::builder().uri(uri);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        request.body(()).unwrap().into_parts().0
+    }
+
+    fn body_filter(tenant: &str) -> tcp::HttpFilter {
+        tcp::HttpFilter::Body(tcp::HttpBodyFilter::Json {
+            query: JsonPathQuery::new("$.tenant".to_owned()).unwrap(),
+            matches: Filter::new(tenant.to_owned()).unwrap(),
+        })
+    }
+
+    fn header_filter(header: &str) -> tcp::HttpFilter {
+        tcp::HttpFilter::Header(Filter::new(header.to_owned()).unwrap())
+    }
 
     /// A `Not` filter steals exactly the requests its inner filter leaves alone, so a preview
     /// pod can send everything that is not preview traffic back to the stable pods.
     #[tokio::test]
     async fn not_filter_inverts_its_inner_filter() {
-        let tcp_filter = tcp::HttpFilter::Not(Box::new(tcp::HttpFilter::Header(
-            Filter::new("baggage: .*mirrord=preview-key".to_owned()).unwrap(),
-        )));
+        let tcp_filter =
+            tcp::HttpFilter::Not(Box::new(header_filter("baggage: .*mirrord=preview-key")));
         let filter = HttpFilter::try_from(&tcp_filter).unwrap();
-        assert!(!filter.needs_body());
 
-        let (mut preview, _) = Request::builder()
-            .uri("/orders")
-            .header("baggage", "mirrord=preview-key")
-            .body(())
-            .unwrap()
-            .into_parts();
-        assert!(!filter.matches::<&[u8]>(&mut preview, None).await);
+        let mut preview = head("/orders", &[("baggage", "mirrord=preview-key")]);
+        assert_eq!(
+            filter.matches(&mut preview, NO_BODY).await,
+            MatchResult::NoMatch
+        );
 
-        let (mut live, _) = Request::builder()
-            .uri("/orders")
-            .body(())
-            .unwrap()
-            .into_parts();
-        assert!(filter.matches::<&[u8]>(&mut live, None).await);
+        let mut live = head("/orders", &[]);
+        assert_eq!(filter.matches(&mut live, NO_BODY).await, MatchResult::Match);
     }
 
-    /// Mirroring matches once before the body is buffered. A `Not` over a body filter must not
-    /// read "no body yet" as "body does not match", or the request is mirrored before its body
-    /// is seen, and a body that does match slips through.
+    /// Mirroring and stealing check a request once before the body is buffered. A `Not` over a
+    /// body filter must not read "no body yet" as "body does not match", or the request is
+    /// handed over before its body is seen and a body that does match slips through. It asks for
+    /// the body instead, and decides once the body is there.
     #[tokio::test]
-    async fn not_over_body_filter_waits_for_the_body() {
-        let tcp_filter =
-            tcp::HttpFilter::Not(Box::new(tcp::HttpFilter::Body(tcp::HttpBodyFilter::Json {
-                query: JsonPathQuery::new("$.tenant".to_owned()).unwrap(),
-                matches: Filter::new("preview".to_owned()).unwrap(),
-            })));
+    async fn not_over_body_filter_asks_for_the_body() {
+        let tcp_filter = tcp::HttpFilter::Not(Box::new(body_filter("preview")));
         let filter = HttpFilter::try_from(&tcp_filter).unwrap();
-        assert!(filter.needs_body());
 
-        let (mut parts, _) = Request::builder()
-            .uri("/orders")
-            .body(())
-            .unwrap()
-            .into_parts();
-        assert!(!filter.matches::<&[u8]>(&mut parts, None).await);
-        assert!(
-            !filter
-                .matches(&mut parts, Some(br#"{"tenant":"preview"}"#.as_slice()))
-                .await
+        let mut parts = head("/orders", &[]);
+        assert_eq!(
+            filter.matches(&mut parts, NO_BODY).await,
+            MatchResult::NeedsBody
         );
-        assert!(
+        assert_eq!(
             filter
-                .matches(&mut parts, Some(br#"{"tenant":"live"}"#.as_slice()))
-                .await
+                .matches(
+                    &mut parts,
+                    RequestBody::Complete(br#"{"tenant":"preview"}"#.as_slice())
+                )
+                .await,
+            MatchResult::NoMatch
+        );
+        assert_eq!(
+            filter
+                .matches(
+                    &mut parts,
+                    RequestBody::Complete(br#"{"tenant":"live"}"#.as_slice())
+                )
+                .await,
+            MatchResult::Match
+        );
+    }
+
+    /// Buffering gives up on a body over the size limit or one that arrives too slowly. A body
+    /// filter cannot match a body nobody read, and its negation then matches: the preview pod
+    /// sends the request back to the stable pods rather than serving a body it could not check.
+    /// Returning "no match" for the negation would leak exactly those requests to the preview
+    /// pod's own code.
+    #[tokio::test]
+    async fn unavailable_body_matches_a_negated_body_filter_only() {
+        let negated =
+            HttpFilter::try_from(&tcp::HttpFilter::Not(Box::new(body_filter("preview")))).unwrap();
+        let plain = HttpFilter::try_from(&body_filter("preview")).unwrap();
+
+        let mut parts = head("/orders", &[]);
+        assert_eq!(
+            negated
+                .matches(&mut parts, RequestBody::<&[u8]>::Unavailable)
+                .await,
+            MatchResult::Match
+        );
+        assert_eq!(
+            plain
+                .matches(&mut parts, RequestBody::<&[u8]>::Unavailable)
+                .await,
+            MatchResult::NoMatch
+        );
+    }
+
+    /// `not (all_of [header, body])` on a request without the header: the inner `all_of` is false
+    /// from the headers alone, so the negation is true without ever looking at the body. Waiting
+    /// for the body here would delay every such request by a full buffer, and lose it entirely
+    /// when buffering fails. Only a request that does carry the header needs its body.
+    #[tokio::test]
+    async fn headers_decide_a_negated_composite_without_the_body() {
+        let tcp_filter = tcp::HttpFilter::Not(Box::new(tcp::HttpFilter::Composite {
+            all: true,
+            filters: vec![header_filter("x-tenant: preview"), body_filter("preview")],
+        }));
+        let filter = HttpFilter::try_from(&tcp_filter).unwrap();
+
+        let mut without_header = head("/orders", &[]);
+        assert_eq!(
+            filter.matches(&mut without_header, NO_BODY).await,
+            MatchResult::Match
+        );
+
+        let mut with_header = head("/orders", &[("x-tenant", "preview")]);
+        assert_eq!(
+            filter.matches(&mut with_header, NO_BODY).await,
+            MatchResult::NeedsBody
         );
     }
 
@@ -428,7 +569,10 @@ mod test {
             .into_parts()
             .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(filter.matches::<&[u8]>(&mut input, None).await);
+        assert_eq!(
+            filter.matches(&mut input, NO_BODY).await,
+            MatchResult::Match
+        );
 
         // should fail
         let mut input = Request::builder()
@@ -439,7 +583,10 @@ mod test {
             .unwrap()
             .into_parts()
             .0;
-        assert!(filter.matches::<&[u8]>(&mut input, None).await.not());
+        assert_eq!(
+            filter.matches(&mut input, NO_BODY).await,
+            MatchResult::NoMatch
+        );
     }
 
     #[tokio::test]
@@ -465,7 +612,10 @@ mod test {
             .into_parts()
             .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(filter.matches::<&[u8]>(&mut input, None).await);
+        assert_eq!(
+            filter.matches(&mut input, NO_BODY).await,
+            MatchResult::Match
+        );
 
         // should fail
         let mut input = Request::builder()
@@ -477,6 +627,9 @@ mod test {
             .into_parts()
             .0;
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(!filter.matches::<&[u8]>(&mut input, None).await);
+        assert_eq!(
+            filter.matches(&mut input, NO_BODY).await,
+            MatchResult::NoMatch
+        );
     }
 }

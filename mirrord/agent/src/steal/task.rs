@@ -22,7 +22,7 @@ use super::{
     subscriptions::{PortSubscription, PortSubscriptions},
 };
 use crate::{
-    http::filter::HttpFilter,
+    http::filter::{HttpFilter, MatchResult},
     incoming::{RedirectedHttp, RedirectedTcp, RedirectorTaskError, StealHandle, StolenTraffic},
     util::{ChannelClosedFuture, ClientId, protocol_version::ClientProtocolVersion},
 };
@@ -240,35 +240,55 @@ impl TcpStealerTask {
             }
         };
 
-        if filters.values().any(HttpFilter::needs_body) {
-            ongoing.spawn(async move {
-                if let Err(error) = http.buffer_body().await {
-                    tracing::debug!(?error, "failed to buffer request body");
-                };
-                http
-            });
-        } else {
-            Self::finish_stealing(clients, filters, http, protocol_version_req).await
+        match Self::decide(filters, &mut http).await {
+            StealDecision::BufferBody => {
+                ongoing.spawn(async move {
+                    if let Err(error) = http.buffer_body().await {
+                        tracing::debug!(?error, "failed to buffer request body");
+                    };
+                    http
+                });
+            }
+            StealDecision::Matched(matched) => {
+                Self::finish_stealing(clients, matched, http, protocol_version_req).await
+            }
         }
+    }
+
+    /// Runs every client's filter over a stolen request.
+    ///
+    /// The body is buffered only when a filter asks for it, which happens when the headers alone
+    /// leave that filter undecided. After a buffering attempt the body is either complete or
+    /// unavailable for good, so the filters always come back with a definite answer.
+    async fn decide(
+        filters: &HashMap<ClientId, HttpFilter>,
+        http: &mut RedirectedHttp,
+    ) -> StealDecision {
+        let (parts, body) = http.parts_and_body();
+        let mut matched = vec![];
+
+        for (client_id, filter) in filters {
+            match filter.matches(parts, body).await {
+                MatchResult::Match => matched.push(*client_id),
+                MatchResult::NoMatch => {}
+                MatchResult::NeedsBody => return StealDecision::BufferBody,
+            }
+        }
+
+        StealDecision::Matched(matched)
     }
 
     async fn finish_stealing(
         clients: &HashMap<ClientId, Client>,
-        filters: &HashMap<ClientId, HttpFilter>,
-        mut http: RedirectedHttp,
+        matched: Vec<ClientId>,
+        http: RedirectedHttp,
         protocol_version_req: Cow<'static, semver::VersionReq>,
     ) {
         let mut send_to = None; // the client that will receive the request
         let mut preempted = vec![]; // other clients that could receive the request as well
         let mut blocked_on_protocol = vec![]; // clients that cannot receive the request due to their protocol version
 
-        let (parts, body_reader) = http.parts_and_body();
-
-        for (client_id, filter) in filters {
-            if filter.matches(parts, body_reader).await.not() {
-                continue;
-            }
-
+        for client_id in &matched {
             let Some(client) = clients.get(client_id) else {
                 tracing::error!(
                     client_id,
@@ -373,7 +393,7 @@ impl TcpStealerTask {
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
-    async fn handle_buffered_http(&mut self, http: RedirectedHttp) {
+    async fn handle_buffered_http(&mut self, mut http: RedirectedHttp) {
         let Some(subscription) = self
             .subscriptions
             .get(http.info().original_destination.port())
@@ -396,8 +416,30 @@ impl TcpStealerTask {
         };
 
         let protocol_version_req = Self::protocol_version_req_http(subscription, &http);
-        Self::finish_stealing(&self.clients, filters, http, protocol_version_req).await;
+        match Self::decide(filters, &mut http).await {
+            StealDecision::Matched(matched) => {
+                Self::finish_stealing(&self.clients, matched, http, protocol_version_req).await
+            }
+            StealDecision::BufferBody => {
+                tracing::error!(
+                    ?http,
+                    "A filter asked to buffer a request body that was already buffered or given up on. \
+                    This is a bug in the agent, please report it.",
+                );
+                http.pass_through();
+            }
+        }
     }
+}
+
+/// Outcome of running the clients' filters over a stolen request.
+#[derive(Debug, PartialEq, Eq)]
+enum StealDecision {
+    /// Clients whose filter matches, in filter map order. The first connected one with a good
+    /// enough protocol version gets the request, the rest are told another user took it.
+    Matched(Vec<ClientId>),
+    /// Some filter can only decide once the body is buffered.
+    BufferBody,
 }
 
 impl fmt::Debug for TcpStealerTask {

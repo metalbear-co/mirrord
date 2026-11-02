@@ -780,6 +780,125 @@ async fn body_filters_fail(
     );
 }
 
+/// A preview pod steals with `not (preview filter)` so that every request that is not preview
+/// traffic goes back to the stable pods. When the preview filter looks at the body and buffering
+/// gives up (body over the size limit, or too slow), nobody can check the body, and the request
+/// has to be stolen anyway: letting it through would hand exactly the traffic INT-893 sends back
+/// to the preview pod's own app, for large uploads and slow clients in particular.
+#[rstest]
+#[tokio::test(flavor = "current_thread")]
+async fn not_over_body_filter_steals_when_buffering_fails(
+    #[values(TestHttpKind::Http1, TestHttpKind::Http2)] http_kind: TestHttpKind,
+    #[values(FailReason::Timeout, FailReason::TooBig)] reason: FailReason,
+) {
+    let mut setup = TestSetup::new_http(http_kind, RedirectorTaskConfig::from_env()).await;
+
+    let payload = Bytes::from(
+        json!({
+            "tenant": "preview",
+            "payload": Alphanumeric
+            .sample_string(&mut rand::rng(), match reason {
+                FailReason::Timeout => 48 * 1024,
+                FailReason::TooBig => 128 * 1024,
+            })
+        })
+        .to_string(),
+    );
+
+    let payload_2 = payload.clone();
+
+    let request = TestRequest {
+        path: "/".into(),
+        id_header: 0,
+        user_header: 0,
+        upgrade: None,
+        kind: http_kind,
+        connector: setup.tls.as_ref().map(|s| s.connector(http_kind.alpn())),
+        acceptor: setup.tls.as_ref().map(SimpleStore::acceptor),
+        body: Some(TestBody::new(
+            move || {
+                let mut initial = Full::new(payload.clone());
+                let (tx, rx) = mpsc::channel(1);
+                tokio::spawn(async move {
+                    while let Some(frame) = initial.frame().await {
+                        match (frame, reason) {
+                            (Ok(frame), FailReason::Timeout) => {
+                                let Some(data) = frame.data_ref() else {
+                                    tx.send(Ok(frame))
+                                        .await
+                                        .expect("other end of channel closed");
+                                    continue;
+                                };
+                                for chunk in data.chunks(1024) {
+                                    tokio::time::sleep(Duration::from_millis(25)).await;
+                                    tx.send(Ok(hyper::body::Frame::data(Bytes::copy_from_slice(
+                                        chunk,
+                                    ))))
+                                    .await
+                                    .expect("other end of channel closed");
+                                }
+                            }
+                            (frame, _) => {
+                                tx.send(frame).await.expect("other end of channel closed");
+                            }
+                        }
+                    }
+                });
+                WithSizeHint::new(
+                    StreamBody::new(ReceiverStream::new(rx)).map_err(|_| unreachable!()),
+                    SizeHintType::Original.hint(payload.len() as u64),
+                )
+            },
+            move |_parts, mut body| {
+                let mut remaining = payload_2.clone();
+                Box::pin(async move {
+                    while let Some(frame) = body.frame().await {
+                        let frame = frame
+                            .expect("invalid frame")
+                            .into_data()
+                            .expect("received non-data frame");
+
+                        assert!(remaining.len() >= frame.len());
+                        assert_eq!(&remaining[..frame.len()], &frame[..]);
+                        remaining.advance(frame.len());
+                    }
+                    assert!(remaining.is_empty());
+                })
+            },
+        )),
+    };
+
+    let mut client = StealingClient::new(
+        0,
+        setup.stealer_tx.clone(),
+        "1.22.1",
+        StealType::FilteredHttpEx(
+            setup.original_server.local_addr().unwrap().port(),
+            HttpFilter::Not(Box::new(HttpFilter::Body(HttpBodyFilter::Json {
+                query: JsonPathQuery::new_unchecked("$.tenant".into()),
+                matches: Filter::new("preview".into()).unwrap(),
+            }))),
+        ),
+        setup.stealer_status.clone(),
+    )
+    .await;
+
+    let conn = setup
+        .conn_tx
+        .make_connection(setup.original_server.local_addr().unwrap())
+        .await;
+
+    tokio::join!(
+        async {
+            client.expect_request(&request).await;
+        },
+        async {
+            let mut sender = request.make_connection(conn).await;
+            request.send(&mut sender, 0).await;
+        }
+    );
+}
+
 /// Verifies that when body filters work and correctly forward the
 /// packets to the desired destination.
 #[rstest]

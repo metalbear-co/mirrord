@@ -30,7 +30,9 @@ use tracing::instrument;
 
 use super::{ConnectionInfo, IncomingStream, body_utils::FramesReader};
 use crate::{
-    http::{BoxResponse, body::RolledBackBody, extract_requests::ExtractedRequest},
+    http::{
+        BoxResponse, body::RolledBackBody, extract_requests::ExtractedRequest, filter::RequestBody,
+    },
     incoming::{
         ConnError, IncomingStreamItem, RedirectorTaskConfig,
         connection::{
@@ -46,6 +48,8 @@ use crate::{
 /// is started with either [`Self::steal`] or [`Self::pass_through`].
 pub struct RedirectedHttp {
     request: ExtractedRequest,
+    /// Set when [`Self::buffer_body`] gave up, so filters stop asking for the body.
+    body_unavailable: bool,
     info: Arc<ConnectionInfo>,
     mirror_tx: Option<broadcast::Sender<IncomingStreamItem>>,
     /// Handle to the [`tokio::runtime`] in which this struct was created.
@@ -80,6 +84,7 @@ impl RedirectedHttp {
     ) -> Self {
         Self {
             request,
+            body_unavailable: false,
             info,
             mirror_tx: None,
             runtime_handle: Handle::current(),
@@ -135,6 +140,7 @@ impl RedirectedHttp {
                 body_finished: self.request.body_tail.is_none(),
             },
             stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
+            body_unavailable: false,
         }
     }
 
@@ -193,18 +199,31 @@ impl RedirectedHttp {
         self.runtime_handle.spawn(task.run());
     }
 
-    pub fn parts_and_body(&mut self) -> (&mut Parts, Option<FramesReader<'_, Frame<Bytes>>>) {
-        (
-            &mut self.request.parts,
-            self.request
-                .body_tail
-                .is_none()
-                .then_some(FramesReader::from(&*self.request.body_head)),
-        )
+    pub fn parts_and_body(&mut self) -> (&mut Parts, RequestBody<FramesReader<'_, Frame<Bytes>>>) {
+        let body = if self.request.body_tail.is_none() {
+            RequestBody::Complete(FramesReader::from(&*self.request.body_head))
+        } else if self.body_unavailable {
+            RequestBody::Unavailable
+        } else {
+            RequestBody::Pending
+        };
+
+        (&mut self.request.parts, body)
     }
 
+    /// Reads the rest of the body into [`ExtractedRequest::body_head`], within the size and time
+    /// limits. On failure the body stays [`RequestBody::Unavailable`] for good, so a filter that
+    /// needs it gets a definite answer instead of asking to buffer again.
     #[instrument(level = "trace", ret)]
     pub async fn buffer_body(&mut self) -> Result<(), BufferBodyError> {
+        let result = self.read_body_tail().await;
+        if result.is_err() {
+            self.body_unavailable = true;
+        }
+        result
+    }
+
+    async fn read_body_tail(&mut self) -> Result<(), BufferBodyError> {
         let Some(tail) = self.request.body_tail.as_mut() else {
             return Ok(());
         };
@@ -420,27 +439,42 @@ pub struct MirroredHttp {
     pub request_head: RequestHead,
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
+    /// Set when [`Self::buffer_body`] gave up, so filters stop asking for the body.
+    pub body_unavailable: bool,
 }
 
 impl MirroredHttp {
-    /// Returns a mutable reference to the request parts and a shared
-    /// reference to buffered body, if any.
+    /// Returns a mutable reference to the request parts and the body as far as it is buffered.
     pub fn parts_and_body(
         &mut self,
     ) -> (
         &mut request::Parts,
-        Option<FramesReader<'_, InternalHttpBodyFrame>>,
+        RequestBody<FramesReader<'_, InternalHttpBodyFrame>>,
     ) {
-        (
-            &mut self.request_head.parts,
-            self.request_head
-                .body_finished
-                .then_some(FramesReader::from(&*self.request_head.body_head)),
-        )
+        let body = if self.request_head.body_finished {
+            RequestBody::Complete(FramesReader::from(&*self.request_head.body_head))
+        } else if self.body_unavailable {
+            RequestBody::Unavailable
+        } else {
+            RequestBody::Pending
+        };
+
+        (&mut self.request_head.parts, body)
     }
 
+    /// Reads the rest of the body into [`RequestHead::body_head`], within the size and time
+    /// limits. On failure the body stays [`RequestBody::Unavailable`] for good, so a filter that
+    /// needs it gets a definite answer instead of asking to buffer again.
     #[instrument(level = "trace", ret)]
     pub async fn buffer_body(&mut self) -> Result<(), BufferBodyError> {
+        let result = self.read_body_tail().await;
+        if result.is_err() {
+            self.body_unavailable = true;
+        }
+        result
+    }
+
+    async fn read_body_tail(&mut self) -> Result<(), BufferBodyError> {
         if self.request_head.body_finished {
             return Ok(());
         }
