@@ -26,9 +26,9 @@ use crate::{
     ui::ui_command,
 };
 
-pub(crate) mod db_branches;
+pub(crate) mod checks;
 
-use db_branches::NoOperator;
+use checks::NoOperator;
 
 /// Context for sessions started by `mirrord up`.
 #[derive(Clone, Debug)]
@@ -345,9 +345,9 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
 
     let mut services =
         mirrord_up::resolve_services(up_config, &args.config_file, args.context, &key).await?;
-    let mut operators = db_branches::usable_operators(&services).await?;
-    db_branches::check_queue_splits(&services, &operators)?;
-    let requesting = db_branches::check_db_branches(&mut services, &mut operators).await?;
+    let mut operators = checks::usable_operators(&services).await?;
+    checks::check_queue_splits(&services, &operators)?;
+    let requesting = checks::check_db_branches(&mut services, &mut operators).await?;
     let modes = services
         .iter()
         .map(|service| (service.service_name.clone(), service.mode.clone()))

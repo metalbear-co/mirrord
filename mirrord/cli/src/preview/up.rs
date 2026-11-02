@@ -50,7 +50,7 @@ use crate::{
     },
     data::{GlobalConfig, UserData},
     error::{CliError, CliResult, GENERAL_HELP},
-    up::db_branches::{DEFAULT_DB_BRANCHES_UNSUPPORTED, resolves_default_db_branches},
+    up::checks::{DEFAULT_DB_BRANCHES_UNSUPPORTED, resolves_default_db_branches},
 };
 
 /// Handle `mirrord preview up` or `mirrord preview sync`, which `run` names, reporting one
