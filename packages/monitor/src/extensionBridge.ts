@@ -1,4 +1,4 @@
-import { sendToExtension } from './extensionTransport'
+import { isFirefox, sendToExtension } from './extensionTransport'
 import { emitUserBlocked } from './analytics'
 
 const PING_TIMEOUT_MS = 250
@@ -115,6 +115,6 @@ const CHROME_WEB_STORE_URL =
 
 const FIREFOX_ADDONS_URL = 'https://addons.mozilla.org/firefox/addon/mirrord/'
 
-export const EXTENSION_INSTALL_URL = navigator.userAgent.includes('Firefox/')
+export const EXTENSION_INSTALL_URL = isFirefox()
   ? FIREFOX_ADDONS_URL
   : CHROME_WEB_STORE_URL

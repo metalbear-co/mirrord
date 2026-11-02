@@ -12,6 +12,14 @@ interface ChromeRuntime {
   lastError?: { message?: string }
 }
 
+export function isFirefox(): boolean {
+  return navigator.userAgent.includes('Firefox/')
+}
+
+export function hasChromeRuntime(): boolean {
+  return getChromeRuntime() !== null
+}
+
 function getChromeRuntime(): ChromeRuntime | null {
   const runtime = (
     window as unknown as { chrome?: { runtime?: ChromeRuntime } }
@@ -85,8 +93,10 @@ export function sendToExtension<T = unknown>(
       const runtime = getChromeRuntime()
       if (runtime) {
         sendViaRuntime(runtime, message, settle)
-      } else {
+      } else if (isFirefox()) {
         cleanup = sendViaPage(message, settle)
+      } else {
+        settle(null)
       }
     } catch {
       settle(null)

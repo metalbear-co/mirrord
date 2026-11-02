@@ -1,7 +1,11 @@
-import { sendToExtension } from './extensionTransport'
+import {
+  hasChromeRuntime,
+  isFirefox,
+  sendToExtension,
+} from './extensionTransport'
 
-const PROBE_TIMEOUT_MS = 250
 const CONFIGURE_TIMEOUT_MS = 1500
+const FIREFOX_CONFIGURE_TIMEOUT_MS = 5000
 
 // The token arrives as a `?token=` query param the first time `mirrord ui` hands the user its
 // URL. When the page is opened without it — the extension's "Open mirrord ui" button links to the
@@ -24,18 +28,24 @@ async function resolveToken(): Promise<string | null> {
 }
 
 export async function autoConfigureExtension(): Promise<void> {
-  // Bail before fetching the token when there's no extension to receive it.
-  if (!(await sendToExtension({ type: 'ping' }, PROBE_TIMEOUT_MS))) return
-
-  const token = await resolveToken()
-  if (!token) return
-
+  if (hasChromeRuntime()) {
+    const token = await resolveToken()
+    if (!token) return
+    await sendToExtension(
+      {
+        type: 'mirrord-ui-configure',
+        backend: window.location.origin,
+        token,
+      },
+      CONFIGURE_TIMEOUT_MS,
+    )
+    return
+  }
+  if (!isFirefox()) return
+  // The Firefox content script reads the token from this origin itself, so it never goes
+  // through page messages that other scripts on the page could observe.
   await sendToExtension(
-    {
-      type: 'mirrord-ui-configure',
-      backend: window.location.origin,
-      token,
-    },
-    CONFIGURE_TIMEOUT_MS,
+    { type: 'mirrord-ui-configure' },
+    FIREFOX_CONFIGURE_TIMEOUT_MS,
   )
 }
