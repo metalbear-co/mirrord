@@ -976,8 +976,7 @@ pub struct SqlBranchCopyConfig {
     /// it replaces the operator's dump defaults. An empty list means no dump args.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dump_args: Option<Vec<String>>,
-    /// Tables the copy leaves out, by name or `*`/`?` pattern. MySQL and MariaDB honor it; a
-    /// branch of any other dialect that sets it fails to start, naming the field.
+    /// Tables the copy leaves out, by name or `*`/`?` pattern. Honored for MySQL and MariaDB.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_tables: Vec<String>,
 }
