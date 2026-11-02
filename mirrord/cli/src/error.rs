@@ -508,7 +508,9 @@ pub(crate) enum CliError {
     )]
     #[diagnostic(help(
         "It was created by {created_by}. Every session under one key shares the branch: ask for \
-         the copy mode it was created with, or start under a different key."
+         the copy mode it was created with, start under a different key, or, if nothing uses it \
+         anymore, remove it with `mirrord db-branches destroy` (`mirrord db-branches status` \
+         lists the names)."
     ))]
     BranchCopyModeMismatch {
         branch_id: String,
