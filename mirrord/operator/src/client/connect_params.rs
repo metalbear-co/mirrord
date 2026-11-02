@@ -348,17 +348,34 @@ impl BranchDbNames {
     /// The dialects that travel in the unified `branch_db_names` param, in one place so a new
     /// dialect cannot reach one call site and miss another.
     pub fn unified(&mut self) -> Vec<String> {
+        let Self {
+            pg: _,
+            mysql: _,
+            mongodb: _,
+            connection_sources: _,
+            mssql,
+            mariadb,
+            redis,
+            dynamodb,
+            spanner,
+            clickhouse,
+            cockroachdb,
+            generic,
+            s3,
+            turbopuffer,
+        } = self;
+
         [
-            &mut self.mssql,
-            &mut self.mariadb,
-            &mut self.redis,
-            &mut self.dynamodb,
-            &mut self.spanner,
-            &mut self.clickhouse,
-            &mut self.cockroachdb,
-            &mut self.generic,
-            &mut self.s3,
-            &mut self.turbopuffer,
+            mssql,
+            mariadb,
+            redis,
+            dynamodb,
+            spanner,
+            clickhouse,
+            cockroachdb,
+            generic,
+            s3,
+            turbopuffer,
         ]
         .into_iter()
         .flat_map(std::mem::take)
@@ -366,20 +383,40 @@ impl BranchDbNames {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.pg.is_empty()
-            && self.mysql.is_empty()
-            && self.mariadb.is_empty()
-            && self.dynamodb.is_empty()
-            && self.mongodb.is_empty()
-            && self.mssql.is_empty()
-            && self.redis.is_empty()
-            && self.dynamodb.is_empty()
-            && self.spanner.is_empty()
-            && self.clickhouse.is_empty()
-            && self.cockroachdb.is_empty()
-            && self.generic.is_empty()
-            && self.s3.is_empty()
-            && self.turbopuffer.is_empty()
+        let Self {
+            pg,
+            mysql,
+            mariadb,
+            dynamodb,
+            mongodb,
+            mssql,
+            redis,
+            spanner,
+            clickhouse,
+            cockroachdb,
+            generic,
+            s3,
+            turbopuffer,
+            connection_sources: _,
+        } = self;
+
+        [
+            pg,
+            mysql,
+            mariadb,
+            dynamodb,
+            mongodb,
+            mssql,
+            redis,
+            spanner,
+            clickhouse,
+            cockroachdb,
+            generic,
+            s3,
+            turbopuffer,
+        ]
+        .iter()
+        .all(|names| names.is_empty())
     }
 }
 

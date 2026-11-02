@@ -54,6 +54,7 @@ use mirrord_kube::{
 };
 use mirrord_operator_websocket::{connection::OperatorConnection, upgrade};
 use mirrord_progress::Progress;
+use preview_sync::PreviewSyncConnection;
 use semver::Version;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tower::{buffer::BufferLayer, retry::RetryLayer};
@@ -82,7 +83,7 @@ use crate::{
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
-            branch_database::{BranchDatabase, BranchDatabaseSpec, DatabaseDialect},
+            branch_database::{BranchDatabase, BranchDatabaseSpec, DatabaseDialect, DialectConfig},
             mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase,
             pg::PgBranchDatabase,
@@ -104,6 +105,7 @@ mod credentials;
 pub mod database_branches;
 mod discovery;
 pub mod error;
+pub mod preview_sync;
 mod queue_split_progress;
 pub mod split_config_branches;
 
@@ -129,7 +131,7 @@ pub fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> Operato
 pub trait ClientCertificateState: fmt::Debug {}
 
 /// Represents a [`ClientCertificateState`] where we don't have the certificate.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NoClientCert {
     /// [`Config::headers`] here contain some extra entries:
     /// 1. [`CLIENT_HOSTNAME_HEADER`] (if available)
@@ -292,6 +294,7 @@ pub struct PreparedSession {
 }
 
 /// Wrapper over mirrord operator API.
+#[derive(Clone)]
 pub struct OperatorApi<C> {
     /// For making requests to kubernetes API server.
     client: Client,
@@ -807,6 +810,29 @@ where
             .map_err(|e| OperatorApiError::PreviewSecretMountCreation(e.to_string()))?;
 
         Ok(response.secret_name)
+    }
+
+    /// Opens the code sync websocket of the preview session `name` in `namespace`, through which
+    /// the CLI pushes its local tree into the preview pod.
+    pub async fn connect_preview_sync(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> OperatorApiResult<PreviewSyncConnection> {
+        let request = Request::builder()
+            .uri(format!(
+                "/apis/operator.metalbear.co/v1alpha1/namespaces/{namespace}/previews/{name}/sync"
+            ))
+            .body(vec![])
+            .map_err(OperatorApiError::ConnectRequestBuildError)?;
+
+        upgrade::connect_ws(&self.client, request)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::WebsocketConnection,
+            })
+            .map(PreviewSyncConnection::new)
     }
 
     /// The workload `layer_config` targets and its namespace, as the `splitconfigdbbranches`
@@ -1619,32 +1645,23 @@ where
                     .clone()
                     .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))?;
 
-                if branch.spec.postgres_options.is_some() {
-                    names.pg.push(name);
-                } else if branch.spec.mysql_options.is_some() {
-                    names.mysql.push(name);
-                } else if branch.spec.mariadb_options.is_some() {
-                    names.mariadb.push(name);
-                } else if branch.spec.mongodb_options.is_some() {
-                    names.mongodb.push(name);
-                } else if branch.spec.mssql_options.is_some() {
-                    names.mssql.push(name);
-                } else if branch.spec.redis_options.is_some() {
-                    names.redis.push(name);
-                } else if branch.spec.dynamodb_options.is_some() {
-                    names.dynamodb.push(name);
-                } else if branch.spec.spanner_options.is_some() {
-                    names.spanner.push(name);
-                } else if branch.spec.clickhouse_options.is_some() {
-                    names.clickhouse.push(name);
-                } else if branch.spec.cockroachdb_options.is_some() {
-                    names.cockroachdb.push(name);
-                } else if branch.spec.generic_options.is_some() {
-                    names.generic.push(name);
-                } else if branch.spec.s3_options.is_some() {
-                    names.s3.push(name);
-                } else if branch.spec.turbopuffer_options.is_some() {
-                    names.turbopuffer.push(name);
+                let Some(dialect) = branch.spec.configured_dialects().next() else {
+                    continue;
+                };
+                match dialect {
+                    DialectConfig::Postgres(_) => names.pg.push(name),
+                    DialectConfig::Mysql(_) => names.mysql.push(name),
+                    DialectConfig::Mariadb(_) => names.mariadb.push(name),
+                    DialectConfig::Dynamodb(_) => names.dynamodb.push(name),
+                    DialectConfig::Mongodb(_) => names.mongodb.push(name),
+                    DialectConfig::Mssql(_) => names.mssql.push(name),
+                    DialectConfig::Redis(_) => names.redis.push(name),
+                    DialectConfig::Spanner(_) => names.spanner.push(name),
+                    DialectConfig::Clickhouse(_) => names.clickhouse.push(name),
+                    DialectConfig::Cockroachdb(_) => names.cockroachdb.push(name),
+                    DialectConfig::S3(_) => names.s3.push(name),
+                    DialectConfig::Turbopuffer(_) => names.turbopuffer.push(name),
+                    DialectConfig::Generic(_) => names.generic.push(name),
                 }
             }
             Ok(names)
