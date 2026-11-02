@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-10-30T00:00:00.000Z
+lastmod: 2026-11-02T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -673,9 +673,10 @@ Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by
 
 Hooks libc's generic `syscall` function on Linux, to handle scenarios where libraries
 like libuv opt into doing syscalls by hand instead of through the libc export (for
-example, for `statx` or `close`). Currently experimental.
+example, for `statx` or `close`).
 
-Defaults to `false`.
+Defaults to `true` in OSS.
+Defaults to `false` in mfT.
 
 ### _experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}
 
@@ -748,7 +749,8 @@ Binaries linked against glibc older than 2.33, such as the official Node.js buil
 these instead of `fstat`. Without this hook they see the local placeholder of a remote
 file: an empty character device. In Node.js, `fs.copyFileSync` then copies nothing.
 
-Defaults to `false`.
+Defaults to `true` in OSS.
+Defaults to `false` in mfT.
 
 ### _experimental_ sip_log_destination {#experimental-sip_log_destination}
 
@@ -1006,6 +1008,16 @@ Only the entries with these ids:
 }
 ```
 
+Every entry, seeded with the `schema` copy mode instead of each entry's own `copy.mode`
+(`entries` takes `"*"` or a list of ids):
+```json
+{
+  "feature": {
+    "db_branches": { "entries": "*", "copy": { "mode": "schema" } }
+  }
+}
+```
+
 With `"*"` or a list of ids the operator resolves the entries, and sessions started under
 the same key that point at the same entry share one branch (its id is the entry id plus the
 key). An id that matches no entry fails the session, naming the ids the workload has; a
@@ -1013,8 +1025,13 @@ workload with no `dbBranches` gives no branches and the session continues. An op
 that cannot resolve entries fails the session before it starts. Inline definitions always
 win: with them, any `dbBranches` on the workload are ignored with a warning.
 
-`"*"` or a list of entry ids, resolved by the operator against the target's
-`MirrordSplitConfig`.
+A requested `copy.mode` replaces only the `copy.mode` of each entry, and only for the entry's
+own database: the rest of its `copy` block and its additional databases stay as the entry
+defines them. The operator refuses a mode missing from the entry's `copy.allowedModes`, and
+ignores it for generic entries, which have no copy modes.
+
+`"*"` or a list of entry ids, optionally with a copy mode, resolved by the operator
+against the target's `MirrordSplitConfig`.
 
 Branches defined in this config.
 
