@@ -1223,8 +1223,9 @@ pub struct SubprocessCfg {
 /// when the operator can't serve them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RequestOrigin {
-    /// The service's own config or `config_patch`, or nothing is requested: handled as in a
-    /// plain `mirrord.json`.
+    /// `mirrord up` added nothing: either the service's own config or `config_patch` decides,
+    /// or the mode requests nothing, as a mode that splits no queues. Handled as in a plain
+    /// `mirrord.json`.
     Config,
     /// What a mode adds without the matching line (`db_branching`, `queues`): the run goes on
     /// without it when the operator can't serve it.
