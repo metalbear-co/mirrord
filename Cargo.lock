@@ -5489,6 +5489,7 @@ dependencies = [
  "bytes",
  "futures",
  "mirrord-protocol",
+ "nix 0.31.3",
  "thiserror 2.0.20",
  "tokio",
  "tokio-util",

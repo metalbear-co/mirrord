@@ -7,6 +7,8 @@
 //! * prefix: 4 bytes containing payload length in bytes (big-endian [`u32`])
 //! * payload: a value of a known type, encoded with [`bincode`]
 
+#[cfg(unix)]
+use std::os::fd::{FromRawFd, RawFd};
 use std::{
     io::{self, ErrorKind, Read, Write},
     num::TryFromIntError,
@@ -18,6 +20,8 @@ use bincode::{
 };
 use bytes::BytesMut;
 use mirrord_protocol::DecodeCtx;
+#[cfg(unix)]
+use nix::fcntl::{FcntlArg, fcntl};
 use thiserror::Error;
 
 #[cfg(feature = "codec-async")]
@@ -153,8 +157,34 @@ where
     }
 }
 
+/// Lowest fd number for the streams of [`make_sync_framed`].
+///
+/// In a fresh process the layer's connection to the internal proxy would take fds 3 and 4 because
+/// a new fd gets the lowest free number. Applications use these low numbers without asking for a
+/// free one, e.g. shell scripts with `exec 3>file`, `read <&3` or `exec 3<&-`, which would
+/// overwrite, read from or close the connection.
+#[cfg(unix)]
+const SYNC_FRAMED_MIN_FD: RawFd = 100;
+
+/// Moves `stream` to the lowest free fd at or above [`SYNC_FRAMED_MIN_FD`], and closes its
+/// original fd, so the application gets that number back.
+///
+/// Keeps the original fd when the move fails.
+#[cfg(unix)]
+fn move_to_high_fd(stream: std::net::TcpStream) -> std::net::TcpStream {
+    let Ok(fd) = fcntl(&stream, FcntlArg::F_DUPFD_CLOEXEC(SYNC_FRAMED_MIN_FD)) else {
+        return stream;
+    };
+
+    // SAFETY: `fd` is a new fd that nothing else owns. Dropping `stream` closes only its original
+    // fd; the socket stays open through `fd`.
+    unsafe { std::net::TcpStream::from_raw_fd(fd) }
+}
+
 /// Creates a new pair of [`SyncEncoder`] and [`SyncDecoder`], using the given synchronous
 /// [`TcpStream`](std::net::TcpStream).
+///
+/// On unix, both streams are moved to fds at or above [`SYNC_FRAMED_MIN_FD`].
 pub fn make_sync_framed<T1, T2>(
     stream: std::net::TcpStream,
 ) -> Result<(
@@ -165,7 +195,11 @@ where
     T1: Encode,
     T2: for<'de> BorrowDecode<'de, DecodeCtx>,
 {
+    #[cfg(unix)]
+    let stream = move_to_high_fd(stream);
     let stream_cloned = stream.try_clone()?;
+    #[cfg(unix)]
+    let stream_cloned = move_to_high_fd(stream_cloned);
 
     let sender = SyncEncoder::new(stream);
     let receiver = SyncDecoder::new(stream_cloned);
