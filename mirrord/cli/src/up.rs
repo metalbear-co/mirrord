@@ -7,7 +7,7 @@ use mirrord_analytics::{
     AnalyticValue, Analytics, AnalyticsReporter, CollectAnalytics, Reporter, SanitizedString,
     UpSessionDbBranch,
 };
-use mirrord_config::config::EnvKey;
+use mirrord_config::{config::EnvKey, target::Target};
 use mirrord_operator::{
     client::UpSession,
     crd::{NewOperatorFeature, session::UpSessionInfo},
@@ -108,14 +108,19 @@ pub enum UpCliError {
     /// defined.
     #[error(
         "{service} has no DB branch definitions: mode `{mode}` sets `db_branching`, but no \
-         MirrordSplitConfig defines `dbBranches` for its workload"
+         MirrordSplitConfig defines `dbBranches` for `{target}` in namespace `{namespace}`"
     )]
     #[diagnostic(help(
         "To run against the source databases, set `db_branching: off` for mode `{mode}` in \
          mirrord-up.yaml. Or ask the MirrordSplitConfig owner to add `dbBranches` for the \
          workload."
     ))]
-    ModeDbBranchesNoDefinitions { service: Arc<str>, mode: Arc<str> },
+    ModeDbBranchesNoDefinitions {
+        service: Arc<str>,
+        mode: Arc<str>,
+        target: Target,
+        namespace: String,
+    },
 
     /// A mode's `queues` line asks for queue splitting, but the service's cluster has no usable
     /// mirrord operator to split them.

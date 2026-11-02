@@ -18,6 +18,7 @@ use mirrord_analytics::NullReporter;
 use mirrord_config::{
     LayerConfig,
     feature::database_branches::{DatabaseBranchEngine, DatabaseBranchesConfig},
+    target::Target,
 };
 use mirrord_operator::{
     client::{
@@ -324,10 +325,29 @@ pub(super) async fn check_db_branches(
             }
         };
 
+        let api = apis
+            .get(&key)
+            .and_then(|operator| operator.as_ref().ok())
+            .expect("requesting services have a usable operator");
+        let namespace = service
+            .config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(api.client().default_namespace())
+            .to_owned();
+
         if response.entries.is_empty() && service.db_branches_origin == RequestOrigin::ModeLine {
             return Err(UpCliError::ModeDbBranchesNoDefinitions {
                 service: service.service_name.clone(),
                 mode: service.mode.clone(),
+                target: service
+                    .config
+                    .target
+                    .path
+                    .clone()
+                    .unwrap_or(Target::Targetless),
+                namespace,
             });
         }
         if response.entries.is_empty() {
@@ -338,11 +358,6 @@ pub(super) async fn check_db_branches(
             service.config.feature.db_branches = DatabaseBranchesConfig::default();
             continue;
         }
-
-        let api = apis
-            .get(&key)
-            .and_then(|operator| operator.as_ref().ok())
-            .expect("requesting services have a usable operator");
 
         // The session refuses an entry whose engine the operator has turned off, once the run
         // has started; checked here, a request nobody asked for is dropped instead.
@@ -372,13 +387,6 @@ pub(super) async fn check_db_branches(
             _ => {}
         }
 
-        let namespace = service
-            .config
-            .target
-            .namespace
-            .as_deref()
-            .unwrap_or(api.client().default_namespace())
-            .to_owned();
         for entry in &resolved.entries {
             if let (Some(branch), Some(mode)) = (
                 entry.base().and_then(|base| base.id.clone()),
