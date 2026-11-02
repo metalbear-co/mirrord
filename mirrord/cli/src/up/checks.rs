@@ -14,6 +14,7 @@ use std::{
 };
 
 use futures::future::join_all;
+use itertools::Itertools;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
     LayerConfig,
@@ -67,30 +68,30 @@ impl std::fmt::Display for NoOperator {
 /// [`OperatorKey`]. An operator the config requires (`operator: true`) but that can't be used
 /// stops the run with the error the session would give.
 pub(super) async fn usable_operators(services: &[SubprocessCfg]) -> Result<Operators, UpCliError> {
-    let mut operators = Operators::new();
-    for service in services.iter().filter(|service| {
-        service
-            .config
-            .feature
-            .db_branches
-            .split_config_request()
-            .is_some()
-            || service.queues_origin != RequestOrigin::Config
-    }) {
-        let key = operator_key(&service.config);
-        if operators.contains_key(&key) {
-            continue;
-        }
-        let operator =
-            usable_operator(&service.config)
-                .await
-                .map_err(|error| UpCliError::DbBranches {
-                    service: service.service_name.clone(),
-                    error: Box::new(error),
-                })?;
-        operators.insert(key, operator);
-    }
-    Ok(operators)
+    let lookups = services
+        .iter()
+        .filter(|service| {
+            service
+                .config
+                .feature
+                .db_branches
+                .split_config_request()
+                .is_some()
+                || service.queues_origin != RequestOrigin::Config
+        })
+        .unique_by(|service| operator_key(&service.config))
+        .map(|service| async move {
+            let operator =
+                usable_operator(&service.config)
+                    .await
+                    .map_err(|error| UpCliError::DbBranches {
+                        service: service.service_name.clone(),
+                        error: Box::new(error),
+                    })?;
+            Ok((operator_key(&service.config), operator))
+        });
+    // `join_all` keeps the service order, so the failure reported is the first failing service's.
+    join_all(lookups).await.into_iter().collect()
 }
 
 /// Stops the run when a mode's `queues` line can't be served: the service has no usable operator,
