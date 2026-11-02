@@ -598,6 +598,14 @@ impl DatabaseBranchesConfig {
         }
     }
 
+    /// `true` when at least one inline branch is provisioned by the operator. Local Redis
+    /// branches are not: mirrord runs them on the user's machine, so a config holding only
+    /// those asks the operator for nothing. A `"*"` / ids request is `false` too, since it
+    /// holds no branches until the operator's lookup resolves it.
+    pub fn any_provisioned_by_operator(&self) -> bool {
+        self.iter().any(|branch| branch.base().is_some())
+    }
+
     /// Counts branches matching a predicate. The building block for the usage
     /// analytics counters in [`CollectAnalytics`], so each new counter is one
     /// `count_branches` call instead of its own iteration method.
@@ -3698,6 +3706,30 @@ mod tests {
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized, "json was: {json}");
+    }
+
+    /// A preview without a target is allowed only to have the operator provision branch
+    /// databases. A local Redis branch is provisioned by mirrord on the user's machine and never
+    /// reaches the operator, so a config holding only those is no branch request at all: the
+    /// preview would be a session with no branches, no pod and nothing to do for its whole TTL.
+    /// A `"*"` request holds no branches either until the operator resolves it.
+    #[test]
+    fn only_local_redis_branches_are_not_provisioned_by_the_operator() {
+        let local_redis = json!({
+            "type": "redis",
+            "location": "local",
+            "connection": { "url": { "type": "env", "variable": "REDIS_URL" } },
+        });
+        let remote_pg = json!({
+            "type": "pg",
+            "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } },
+        });
+        let parse = |value: Value| serde_json::from_value::<DatabaseBranchesConfig>(value).unwrap();
+
+        assert!(!parse(json!([local_redis])).any_provisioned_by_operator());
+        assert!(!parse(json!("*")).any_provisioned_by_operator());
+        assert!(!parse(json!([])).any_provisioned_by_operator());
+        assert!(parse(json!([local_redis, remote_pg])).any_provisioned_by_operator());
     }
 
     /// A ConfigMap source with both extractors has two candidate values and no rule to pick

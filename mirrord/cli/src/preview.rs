@@ -291,7 +291,8 @@ impl PreparedPreview {
     ) -> CliResult<Self> {
         // A preview without a target is its branch databases: the operator provisions them and
         // keeps them for the preview's TTL, and runs no pod. So the target may only be left out
-        // when there are branches to provision, and nothing that needs a pod can come along.
+        // when there are branches for the operator to provision, and nothing that needs a pod
+        // can come along.
         let config_target = layer_config
             .target
             .path
@@ -299,7 +300,24 @@ impl PreparedPreview {
             .unwrap_or(Target::Targetless);
         let targetless = matches!(config_target, Target::Targetless);
         if targetless {
-            if layer_config.feature.db_branches.is_empty() {
+            if layer_config
+                .feature
+                .db_branches
+                .split_config_request()
+                .is_some()
+            {
+                return Err(CliError::UnsupportedTargetConfig(
+                    "`feature.db_branches` as `\"*\"` or a list of ids is looked up in the target \
+                     workload's `MirrordSplitConfig`, so it needs a target; define the branches \
+                     inline or set a `target`"
+                        .to_owned(),
+                ));
+            }
+            if !layer_config
+                .feature
+                .db_branches
+                .any_provisioned_by_operator()
+            {
                 return Err(CliError::PreviewTargetRequired);
             }
             if !sources.is_empty() {
