@@ -110,5 +110,11 @@ export async function leaveViaExtension(): Promise<{
   return { ok: response.ok ?? false, error: response.error }
 }
 
-export const CHROME_WEB_STORE_URL =
+const CHROME_WEB_STORE_URL =
   'https://chromewebstore.google.com/detail/mirrord/bijejadnnfgjkfdocgocklekjhnhkhkf'
+
+const FIREFOX_ADDONS_URL = 'https://addons.mozilla.org/firefox/addon/mirrord/'
+
+export const EXTENSION_INSTALL_URL = navigator.userAgent.includes('Firefox/')
+  ? FIREFOX_ADDONS_URL
+  : CHROME_WEB_STORE_URL
