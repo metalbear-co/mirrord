@@ -14,18 +14,17 @@ use std::{
 };
 
 use futures::future::join_all;
-use itertools::Itertools;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
     LayerConfig,
-    feature::database_branches::{
-        DatabaseBranchConfig, DatabaseBranchEngine, DatabaseBranchesConfig,
-    },
+    feature::database_branches::{DatabaseBranchEngine, DatabaseBranchesConfig},
 };
 use mirrord_operator::{
     client::{
-        NoClientCert, OperatorApi, error::OperatorApiError, required_branching_feature,
-        split_config_branches::apply_resolved_entries,
+        NoClientCert, OperatorApi,
+        error::OperatorApiError,
+        required_branching_feature,
+        split_config_branches::{apply_resolved_entries, entry_copy_modes},
     },
     crd::NewOperatorFeature,
 };
@@ -383,7 +382,7 @@ pub(super) async fn check_db_branches(
         for entry in &resolved.entries {
             if let (Some(branch), Some(mode)) = (
                 entry.base().and_then(|base| base.id.clone()),
-                copy_modes(entry),
+                entry_copy_modes(entry),
             ) {
                 let engine = <&str>::from(DatabaseBranchEngine::from(entry));
                 branch_modes
@@ -457,25 +456,6 @@ pub(super) async fn check_db_branches(
     }
 
     Ok(requested.into_iter().chain(inline).collect())
-}
-
-/// The copy modes a branch is created with, compared as a session attaching to it compares them:
-/// the entry's own and, for PostgreSQL, each additional database's (`schema, analytics: empty`).
-/// `None` for engines without copy modes.
-fn copy_modes(entry: &DatabaseBranchConfig) -> Option<String> {
-    let mut modes = <&str>::from(entry.copy_mode()?).to_owned();
-    for database in entry
-        .pg_additional_databases()
-        .iter()
-        .sorted_by(|a, b| a.name.cmp(&b.name))
-    {
-        modes.push_str(&format!(
-            ", {}: {}",
-            database.name,
-            <&str>::from(database.copy.mode())
-        ));
-    }
-    Some(modes)
 }
 
 /// The settings that decide which operator a session finds and whether it has to use it, so

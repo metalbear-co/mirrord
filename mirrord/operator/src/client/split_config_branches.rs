@@ -106,6 +106,8 @@ pub fn apply_resolved_entries(
 /// followed by the modes of a PostgreSQL branch's additional databases. `None` when the spec
 /// leaves the choice to the operator: a generic branch without `copy` may still get a copy Job
 /// from its admin profile, so two such specs cannot be compared here.
+///
+/// Keep in step with [`entry_copy_modes`], the same comparison before a spec exists.
 pub fn copy_mode(spec: &BranchDatabaseSpec) -> Option<String> {
     let copy = match spec.dialect().ok()? {
         DialectConfig::Postgres(options) => {
@@ -132,6 +134,21 @@ pub fn copy_mode(spec: &BranchDatabaseSpec) -> Option<String> {
         DialectConfig::Generic(options) => return options.copy.is_some().then(|| "job".to_owned()),
     };
     mode_of(copy.ok()?)
+}
+
+/// [`copy_mode`] for a config entry, for comparing entries before any branch spec exists.
+///
+/// `None` for generic entries as well, with or without a copy Job: [`check_attach_copy_mode`]
+/// never refuses a generic branch, so there is nothing to compare.
+pub fn entry_copy_modes(entry: &DatabaseBranchConfig) -> Option<String> {
+    let mut modes = <&str>::from(entry.copy_mode()?).to_owned();
+    let mut additional = entry.pg_additional_databases().iter().collect::<Vec<_>>();
+    additional.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+    for database in additional {
+        let database_mode = <&str>::from(database.copy.mode());
+        modes.push_str(&format!(", {}: {database_mode}", database.name));
+    }
+    Some(modes)
 }
 
 fn sql_copy_mode(copy: &SqlBranchCopyConfig) -> Option<String> {
