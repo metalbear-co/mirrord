@@ -14,6 +14,7 @@ on:
       - tests/**
       - "!tests/src/**"
       - "!tests/README.md"
+      - "!tests/AGENTS.md"
       - scripts/**
       - mirrord/layer-tests/tests/apps/**/*.go
       - mirrord/layer-tests/tests/apps/**/go.mod
