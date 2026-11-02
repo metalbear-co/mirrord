@@ -976,7 +976,8 @@ pub struct SqlBranchCopyConfig {
     /// it replaces the operator's dump defaults. An empty list means no dump args.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dump_args: Option<Vec<String>>,
-    /// Tables the copy leaves out, by name or `*`/`?` pattern. Only MySQL honors it.
+    /// Tables the copy leaves out, by name or `*`/`?` pattern. MySQL and MariaDB honor it; a
+    /// branch of any other dialect that sets it fails to start, naming the field.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_tables: Vec<String>,
 }
@@ -1235,23 +1236,34 @@ impl From<MysqlBranchCopyConfig> for SqlBranchCopyConfig {
 impl From<MariadbBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: MariadbBranchCopyConfig) -> Self {
         match config {
-            MariadbBranchCopyConfig::Empty { tables, dump_args } => SqlBranchCopyConfig {
+            MariadbBranchCopyConfig::Empty {
+                tables,
+                dump_args,
+                exclude_tables,
+            } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
                 dump_args,
-                exclude_tables: Vec::new(),
+                exclude_tables: exclude_tables.unwrap_or_default(),
             },
-            MariadbBranchCopyConfig::Schema { tables, dump_args } => SqlBranchCopyConfig {
+            MariadbBranchCopyConfig::Schema {
+                tables,
+                dump_args,
+                exclude_tables,
+            } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
                 dump_args,
-                exclude_tables: Vec::new(),
+                exclude_tables: exclude_tables.unwrap_or_default(),
             },
-            MariadbBranchCopyConfig::All { dump_args } => SqlBranchCopyConfig {
+            MariadbBranchCopyConfig::All {
+                dump_args,
+                exclude_tables,
+            } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args,
-                exclude_tables: Vec::new(),
+                exclude_tables: exclude_tables.unwrap_or_default(),
             },
         }
     }

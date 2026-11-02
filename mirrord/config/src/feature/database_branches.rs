@@ -3670,6 +3670,46 @@ mod tests {
         );
     }
 
+    /// The MariaDB copy config takes the same `exclude_tables` as MySQL's, in every mode, so the
+    /// two engines of the MySQL family read alike.
+    #[test]
+    fn mariadb_copy_exclude_tables_parse_for_all_modes() {
+        let empty: MariadbBranchCopyConfig =
+            serde_json::from_str(r#"{ "mode": "empty", "exclude_tables": ["staging_*"] }"#)
+                .unwrap();
+        assert_eq!(
+            empty,
+            MariadbBranchCopyConfig::Empty {
+                tables: None,
+                dump_args: None,
+                exclude_tables: Some(vec!["staging_*".to_owned()]),
+            }
+        );
+
+        let schema: MariadbBranchCopyConfig =
+            serde_json::from_str(r#"{ "mode": "schema", "exclude_tables": [] }"#).unwrap();
+        assert_eq!(
+            schema,
+            MariadbBranchCopyConfig::Schema {
+                tables: None,
+                dump_args: None,
+                exclude_tables: Some(vec![]),
+            }
+        );
+
+        let all: MariadbBranchCopyConfig = serde_json::from_str(
+            r#"{ "mode": "all", "exclude_tables": ["staging_*", "import_tmp"] }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            all,
+            MariadbBranchCopyConfig::All {
+                dump_args: None,
+                exclude_tables: Some(vec!["staging_*".to_owned(), "import_tmp".to_owned()]),
+            }
+        );
+    }
+
     #[test]
     fn pg_copy_dump_args_parse_for_all_modes() {
         let empty: PgBranchCopyConfig = serde_json::from_str(

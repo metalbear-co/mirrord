@@ -956,7 +956,7 @@ pub enum NewOperatorFeature {
     DbBranchSsmParameter,
 
     /// This operator leaves the tables named in `feature.db_branches[].copy.exclude_tables` out
-    /// of a MySQL branch copy. Gated so the CLI fails fast: an older operator's CRD schema prunes
+    /// of a MySQL or MariaDB branch copy. Gated so the CLI fails fast: an older operator's CRD schema prunes
     /// `excludeTables`, and the copy would then fail on the very tables the user excluded when
     /// they disappear mid-dump.
     MysqlBranchExcludeTables,

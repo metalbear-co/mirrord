@@ -47,6 +47,11 @@ pub struct MariadbBranchConfig {
 /// All copy modes accept `dump_args`, passed to `mariadb-dump` as-is, which can leave out what the
 /// copy mode copies, such as stored routines with `--skip-routines`.
 ///
+/// All copy modes also accept `exclude_tables`: table names or patterns (`*` matches any run of
+/// characters, `?` one character) the copy leaves out entirely. Use it for tables another service
+/// creates and drops while the copy runs, such as `["staging_*", "import_tmp"]`, which would
+/// otherwise fail the copy when they disappear mid-dump.
+///
 /// - Empty
 ///
 ///   Creates an empty database. If the source DB connection options are found from the chosen
@@ -69,17 +74,23 @@ pub enum MariadbBranchCopyConfig {
         tables: Option<BTreeMap<String, MariadbBranchTableCopyConfig>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dump_args: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exclude_tables: Option<Vec<String>>,
     },
 
     Schema {
         tables: Option<BTreeMap<String, MariadbBranchTableCopyConfig>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dump_args: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exclude_tables: Option<Vec<String>>,
     },
 
     All {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dump_args: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exclude_tables: Option<Vec<String>>,
     },
 }
 
@@ -88,6 +99,7 @@ impl Default for MariadbBranchCopyConfig {
         MariadbBranchCopyConfig::Empty {
             tables: Default::default(),
             dump_args: None,
+            exclude_tables: None,
         }
     }
 }
