@@ -1,17 +1,7 @@
-const EXTENSION_ID = 'bijejadnnfgjkfdocgocklekjhnhkhkf'
+import { sendToExtension } from './extensionTransport'
 
-interface ChromeRuntime {
-  sendMessage: (
-    extensionId: string,
-    message: unknown,
-    callback?: (response: unknown) => void,
-  ) => void
-  lastError?: { message?: string }
-}
-
-interface ChromeGlobal {
-  runtime?: ChromeRuntime
-}
+const PROBE_TIMEOUT_MS = 250
+const CONFIGURE_TIMEOUT_MS = 1500
 
 // The token arrives as a `?token=` query param the first time `mirrord ui` hands the user its
 // URL. When the page is opened without it — the extension's "Open mirrord ui" button links to the
@@ -34,27 +24,18 @@ async function resolveToken(): Promise<string | null> {
 }
 
 export async function autoConfigureExtension(): Promise<void> {
-  const chromeGlobal = (window as unknown as { chrome?: ChromeGlobal }).chrome
-  const runtime = chromeGlobal?.runtime
   // Bail before fetching the token when there's no extension to receive it.
-  if (!runtime || typeof runtime.sendMessage !== 'function') return
+  if (!(await sendToExtension({ type: 'ping' }, PROBE_TIMEOUT_MS))) return
 
   const token = await resolveToken()
   if (!token) return
 
-  try {
-    runtime.sendMessage(
-      EXTENSION_ID,
-      {
-        type: 'mirrord-ui-configure',
-        backend: window.location.origin,
-        token,
-      },
-      () => {
-        void runtime.lastError
-      },
-    )
-  } catch {
-    return
-  }
+  await sendToExtension(
+    {
+      type: 'mirrord-ui-configure',
+      backend: window.location.origin,
+      token,
+    },
+    CONFIGURE_TIMEOUT_MS,
+  )
 }
