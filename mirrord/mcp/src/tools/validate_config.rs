@@ -170,6 +170,10 @@ pub fn validate_config(
                         .render_with_formatter(&serde_saphyr::UserMessageFormatter),
                     allowed_values: None,
                 })
+                .map(|mut value: Value| {
+                    restore_db_branching(&mut value, &rendered);
+                    value
+                })
             });
             match parsed {
                 Ok(value) => {
@@ -441,6 +445,32 @@ fn service_issue(error: ServiceError) -> ConfigIssue {
         path: format!("/services/{}", escape_pointer_token(error.service())),
         message: error.to_string(),
         allowed_values: None,
+    }
+}
+
+/// Gives each mode's `db_branching` its text back. `mirrord up` reads the field into an enum, where
+/// `off` is a variant, but untyped YAML takes `off` for a boolean, which the schema refuses. Only
+/// this field is taken from a strict read: elsewhere `mirrord up` does accept `yes` as a boolean,
+/// and here `no` and `false` have to stay as invalid as they are for `mirrord up`.
+fn restore_db_branching(value: &mut Value, rendered: &str) {
+    let strict = serde_saphyr::from_str_with_options::<Value>(
+        rendered,
+        serde_saphyr::options! { strict_booleans: true },
+    );
+    let (Some(modes), Ok(strict)) = (
+        value.get_mut("modes").and_then(Value::as_object_mut),
+        strict,
+    ) else {
+        return;
+    };
+    for (name, mode) in modes {
+        let text = strict.pointer(&format!(
+            "/modes/{}/db_branching",
+            escape_pointer_token(name)
+        ));
+        if let (Some(field), Some(text)) = (mode.get_mut("db_branching"), text) {
+            *field = text.clone();
+        }
     }
 }
 
