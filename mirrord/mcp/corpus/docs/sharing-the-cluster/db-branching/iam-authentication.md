@@ -7,6 +7,8 @@ tags:
   - enterprise
 ---
 
+# IAM Authentication
+
 mirrord supports IAM authentication for **AWS RDS** and **GCP Cloud SQL**. Credentials come from the **target pod**: either from its environment, just like connection URLs, or from its cloud identity (IRSA (min version **operator:3.186.0**) / EKS Pod Identity on AWS, Workload Identity on GCP). For general concepts and the full list of config fields, see the [DB Branching overview](../db-branching.md).
 
 {% hint style="info" %}
