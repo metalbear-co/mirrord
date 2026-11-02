@@ -265,6 +265,20 @@ struct PreparedSync {
     api: OperatorApi<MaybeClientCert>,
 }
 
+/// Drops what only a preview pod could use from the config and flags of a preview without a
+/// target, which the targetless config check already reported as ignored. Done before the
+/// feature check and the file reads of `prepare`, so an unused queue split is not held against
+/// the operator and an unused mount file is never opened. `auto_queue_splitting` is `mirrord up`
+/// asking the operator to split queues by default; with no pod to consume them it goes off too,
+/// otherwise the operator would set up splits for a session that never reads a message.
+fn drop_pod_settings(layer_config: &mut LayerConfig, auto_queue_splitting: &mut bool) {
+    layer_config.feature.split_queues = Default::default();
+    layer_config.feature.kafka_branch = false;
+    layer_config.feature.preview.secret_mounts.clear();
+    layer_config.feature.preview.config_mounts.clear();
+    *auto_queue_splitting = false;
+}
+
 impl PreparedPreview {
     /// Runs every check `mirrord preview start` can run before it changes anything in the
     /// cluster, against the operator and API from [`create_preview_api`].
@@ -284,7 +298,7 @@ impl PreparedPreview {
         api: Api<PreviewSession>,
         sources: &ManifestSources,
         mut supplied_objects: Option<Vec<resources::SuppliedObject>>,
-        auto_queue_splitting: bool,
+        mut auto_queue_splitting: bool,
         sync: Option<sync::ServiceSync>,
         progress: &ProgressTracker,
         mut analytics: AnalyticsReporter,
@@ -342,13 +356,7 @@ impl PreparedPreview {
                 progress.warning(&warning);
             }
             verified?;
-            // The config check above warned about these. Dropped here, before the feature
-            // check and the file reads below, so an unused queue split is not held against the
-            // operator and an unused mount file is never opened.
-            layer_config.feature.split_queues = Default::default();
-            layer_config.feature.kafka_branch = false;
-            layer_config.feature.preview.secret_mounts.clear();
-            layer_config.feature.preview.config_mounts.clear();
+            drop_pod_settings(&mut layer_config, &mut auto_queue_splitting);
         }
 
         let is_cronjob_target = matches!(layer_config.target.path, Some(Target::CronJob(_)));
@@ -2766,6 +2774,27 @@ mod tests {
     use mirrord_operator::crd::preview::{PreviewSyncConfig, PreviewSyncEntry};
 
     use super::*;
+
+    /// `mirrord up` turns `auto_queue_splitting` on whenever the operator advertises
+    /// `PreviewAutoQueueSplitting`, and `prepare` clears the queue splits of a preview without a
+    /// target but used to pass that flag through. The session then asked the operator to split
+    /// queues by default for a preview with no pod to consume them. Everything only a pod could
+    /// use goes, the flag included.
+    #[test]
+    fn targetless_preview_never_asks_for_auto_queue_splitting() {
+        let mut layer_config = LayerConfig::resolve(&mut ConfigContext::default().strict_env(true))
+            .expect("the default config is valid");
+        layer_config.feature.kafka_branch = true;
+        let mut auto_queue_splitting = true;
+
+        drop_pod_settings(&mut layer_config, &mut auto_queue_splitting);
+
+        assert!(!auto_queue_splitting);
+        assert!(!layer_config.feature.kafka_branch);
+        assert!(!layer_config.feature.split_queues.is_set());
+        assert!(layer_config.feature.preview.secret_mounts.is_empty());
+        assert!(layer_config.feature.preview.config_mounts.is_empty());
+    }
 
     /// A sync session of the key `pr-123` with `spec`'s settings, in `phase`, whose TTL runs out
     /// at `expires_at`.
