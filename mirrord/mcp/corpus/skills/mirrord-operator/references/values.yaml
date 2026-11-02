@@ -264,6 +264,18 @@ operator:
   # operator branches namespaces through turbopuffer's API with the API key it reads off the
   # target workload; there is no branch pod and no `turbopufferBranchConfig`.
   turbopufferBranching: false
+  # Has to be set to `true` for db branches to run in a namespace of their own per session
+  # key (`feature.db_branches[].namespace: true` creates `mirrord-<key>`). Grants the
+  # operator `create`, `list`, `patch` and `delete` on namespaces cluster-wide, and `get`/`patch` on
+  # ServiceAccounts and ConfigMaps to copy what the branch pod reads into that namespace. The
+  # operator only deletes namespaces it created (labelled
+  # `operator.metalbear.co/db-branch-namespace: "true"`). Has no effect with `namespaced: true`.
+  dbBranchNamespaces: false
+  # Exactly one {{key}} placeholder, with up to 53 lowercase letters, digits or hyphens
+  # around it. For example, "t-{{key}}" creates t-alice for key alice. Invalid key
+  # characters and long names are normalized with a hash suffix. Existing branches keep
+  # their namespace when this changes; new branches use this pattern.
+  dbBranchNamespacePattern: "mirrord-{{key}}"
   # Settings for the turbopuffer namespace branching feature.
   turbopufferOptions:
     # Domains a turbopuffer branch may send its API key to, on top of `turbopuffer.com`, which
@@ -330,6 +342,43 @@ operator:
 
     # The pull policy to use for preview environment's images.
     # imagePullPolicy: "Always"
+
+    # Code sync: previews from `mirrord preview sync` for services with `sync` run their image, or
+    # the target's, on code that the CLI pushes into the preview pod.
+    # codeSync:
+    #   storage:
+    #     # Where the pushed code lives. `pvc` (the default) keeps it on a claim of the session,
+    #     # so it survives a replaced pod and a session that scales to zero. `emptyDir` needs no
+    #     # StorageClass, but the code is deleted with the pod: the CLI must push again after
+    #     # the pod is replaced, and sessions never scale to zero. An upgrade to another operator
+    #     # image replaces the pods of sync previews, so it fails each `emptyDir` session that no
+    #     # `mirrord preview sync --watch` is attached to, and its code must be pushed again with
+    #     # `mirrord preview sync`. A preview keeps the kind that it started with.
+    #     kind: pvc
+    #     # The StorageClass of the claim, for example `standard-rwo` on GKE. Unset uses the
+    #     # cluster's default class, and a session fails if the cluster has none.
+    #     # storageClassName: standard-rwo
+    #     # The size of the claim, or the size limit of the `emptyDir`. Defaults to 2Gi. A push
+    #     # that changes most of the tree needs room for the old and the new tree at once, so it
+    #     # should be about twice the size of the pushed tree. The kubelet evicts a pod whose
+    #     # `emptyDir` goes past its limit.
+    #     size: 2Gi
+    #   # The fsGroup of a preview pod when neither the pod nor its app container names a
+    #   # `runAsGroup`, `runAsUser` or `fsGroup`, so that a non-root app can write to the code
+    #   # volume. The fsGroup applies to every volume of the pod. Defaults to 65532. `null` sets
+    #   # none, for platforms that assign groups themselves.
+    #   fsGroup: 65532
+    #   # The most bytes, unpacked, that one push of `mirrord preview sync` may write to the code
+    #   # volume. Unset allows as much as the volume holds.
+    #   # maxPushBytes: 1073741824
+    #   # Resources of the `mirrord-sync` sidecar and its `mirrord-sync-install` init container.
+    #   # Unset uses these values.
+    #   sidecarResources:
+    #     requests:
+    #       cpu: 10m
+    #       memory: 32Mi
+    #     limits:
+    #       memory: 256Mi
 
   # dbBranching:
   #   # Size of the init volume that stages the copy. On emptyDir
@@ -658,6 +707,8 @@ operator:
   ##  You can adjust the format of the created kafka topic names to suit your needs. The default value is:
   ## `mirrord-tmp-{{RANDOM}}{{FALLBACK}}{{ORIGINAL_TOPIC}}`
   ## see docs here https://metalbear.co/mirrord/docs/using-mirrord/queue-splitting/#customizing-mirrord-created-kafka-topic-names
+  ## `spec.tmpNameTemplate` of a `MirrordSplitConfig` takes precedence over this format for the workloads it selects.
+  ## That template uses `{{ORIGINAL}}` instead of `{{ORIGINAL_TOPIC}}`, and its `{{FALLBACK}}` is `-main-` rather than `-fallback-`.
   # kafkaSplittingTopicFormat: "mirrord-tmp-{{RANDOM}}{{FALLBACK}}{{ORIGINAL_TOPIC}}"
 
   # kafkaBranchConfig:
@@ -703,6 +754,14 @@ operator:
     limits:
       cpu: 200m
       memory: 200Mi
+    # Define additional environment variables for the sidecar, in the same format as
+    # `operator.extraEnv`.
+    extraEnv:
+    #   JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75"
+    #   HOST_IP:
+    #     valueFrom:
+    #       fieldRef:
+    #         fieldPath: status.hostIP
 
   # Linger timeout for legacy SQS splits (in milliseconds).
   # Applies only to old MirrordWorkloadQueueRegistry objects: once their last SQS
@@ -1307,6 +1366,11 @@ operator:
   ##   most once per branch. The copy image also goes through `allowedImages`. If your
   ##   cluster uses NetworkPolicies, the Job (in the target's namespace) must be able to
   ##   reach both the source database and the branch pod's IP.
+  ## - `dbPod.copyDeadlineSecs` (default 3600) is the longest a copy Job may run. A running
+  ##   copy keeps its branch alive past the branch TTL, so this stops a copy that hangs: the
+  ##   Job is stopped and the branch fails with a message naming the deadline. It applies to
+  ##   the user's `copy` from mirrord.json too, and a profile without it inherits the
+  ##   default `dbPod`'s, so it can be set once at the default level.
   ##
   ## Both fields are engine-specific, so they are only honored inside a named profile -
   ## a generic branch that uses no profile fails when the default-level `dbPod` sets
@@ -1408,6 +1472,8 @@ agent:
   #  tolerations:
   #    - operator: Exists
   #  privileged: true
+  #  # Max HTTP/2 header size, in bytes, accepted by the agent on intercepted traffic (default 16KB).
+  #  http2_max_header_list_size: 16384
 
 license:
   ## ID of a Google Secret Manager secret containing the license PEM file.

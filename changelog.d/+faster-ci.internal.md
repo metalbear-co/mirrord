@@ -1,1 +1,0 @@
-Speed up CI: the integration test jobs link aarch64 with mold, build with line tables instead of full debug information and compile the unit tests in one cargo invocation, and the arm64 CLI image is cross-compiled on an x86_64 runner, as releases do.
