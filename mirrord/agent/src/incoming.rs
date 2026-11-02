@@ -17,6 +17,9 @@ use std::{
 };
 
 use composed::ComposedRedirector;
+/// Lets unit tests outside this module build a mirrored request by hand.
+#[cfg(test)]
+pub use connection::{ConnectionInfo, http::RequestHead};
 pub use connection::{
     IncomingStream, IncomingStreamItem,
     http::{MirroredHttp, RedirectedHttp, ResponseBodyProvider, ResponseProvider, StolenHttp},

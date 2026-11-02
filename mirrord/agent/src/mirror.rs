@@ -29,6 +29,19 @@ use crate::{
     util::protocol_version::ClientProtocolVersion,
 };
 
+/// What [`TcpMirrorApi`] does with a mirrored HTTP request after checking it against the
+/// port's filter.
+#[derive(Debug, PartialEq, Eq)]
+enum MirrorDecision {
+    /// The filter matches, send the request to the client.
+    Mirror,
+    /// The filter does not match, the client never sees this request.
+    Drop,
+    /// The filter needs the request body and it has not fully arrived yet, check again once it
+    /// is buffered.
+    BufferBody,
+}
+
 /// Agent client's API for using the TCP mirror feature.
 ///
 /// Wrapper over a [`MirrorHandle`].
@@ -93,6 +106,26 @@ impl TcpMirrorApi {
         Ok(())
     }
 
+    /// Decides what to do with a mirrored HTTP request, given the body frames seen so far.
+    ///
+    /// A request whose body is still arriving has no body for the filter to look at. A filter
+    /// that needs the body cannot answer yet, so the request waits for the rest of the body
+    /// instead of being mirrored or dropped on a partial view.
+    async fn decide(filter: &HttpFilter, http: &mut MirroredHttp) -> MirrorDecision {
+        let body_finished = http.request_head.body_finished;
+        let (parts, body) = http.parts_and_body();
+
+        if filter.matches(parts, body).await {
+            return MirrorDecision::Mirror;
+        }
+
+        if body_finished.not() && filter.needs_body() {
+            return MirrorDecision::BufferBody;
+        }
+
+        MirrorDecision::Drop
+    }
+
     #[instrument(level = Level::TRACE, ret)]
     async fn next(
         handle: &mut MirrorHandle,
@@ -113,16 +146,15 @@ impl TcpMirrorApi {
                             }
 
                             let port = http.info.original_destination.port();
-                            let (parts, body) = http.parts_and_body();
                             let Some(filter) = filters.get(&port) else {
                                 tracing::warn!("have no filter for request with buffered body.");
                                 return Ok(M::Http(http));
                             };
 
-                            if filter.matches(parts, body).await {
-                                Ok(M::Http(http))
-                            } else {
-                                continue
+                            // The body is complete here, so the filter gives its final answer.
+                            match Self::decide(filter, &mut http).await {
+                                MirrorDecision::Mirror => Ok(M::Http(http)),
+                                MirrorDecision::Drop | MirrorDecision::BufferBody => continue,
                             }
                         },
                         Err(error) => {
@@ -146,24 +178,23 @@ impl TcpMirrorApi {
 
                         M::Http(mut http) if version.matches(&MODE_AGNOSTIC_HTTP_REQUESTS) => {
                             let port = http.info.original_destination.port();
-                            let (parts, body) = http.parts_and_body();
                             let Some(filter) = filters.get(&port) else {
                                 return Ok(M::Http(http));
                             };
 
-                            if filter.matches(parts, body).await {
-                                return Ok(M::Http(http));
+                            match Self::decide(filter, &mut http).await {
+                                MirrorDecision::Mirror => return Ok(M::Http(http)),
+                                MirrorDecision::Drop => continue,
+                                MirrorDecision::BufferBody => {
+                                    ongoing.spawn(async move {
+                                        if let Err(error) = http.buffer_body().await {
+                                            tracing::debug!(?error, "failed to buffer request body");
+                                        };
+                                        http
+                                    });
+                                    continue
+                                }
                             }
-
-                            if filter.needs_body() {
-                                ongoing.spawn(async move {
-                                    if let Err(error) = http.buffer_body().await {
-                                        tracing::debug!(?error, "failed to buffer request body");
-                                    };
-                                    http
-                                });
-                            }
-                            continue
                         }
 
                         M::Http(http) => {
@@ -312,5 +343,149 @@ impl TcpMirrorApi {
         };
 
         Ok(DaemonMessage::Tcp(message))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        net::SocketAddr,
+        sync::{Arc, Mutex},
+    };
+
+    use bytes::Bytes;
+    use hyper::Request;
+    use mirrord_protocol::{
+        Payload,
+        tcp::{self, Filter, InternalHttpBodyFrame, JsonPathQuery},
+    };
+    use tokio::sync::broadcast;
+    use tokio_stream::wrappers::BroadcastStream;
+
+    use super::{MirrorDecision, TcpMirrorApi};
+    use crate::{
+        http::filter::HttpFilter,
+        incoming::{ConnectionInfo, IncomingStream, IncomingStreamItem, MirroredHttp, RequestHead},
+    };
+
+    /// A mirrored request whose body arrives in two frames: `first_frame` is already in hand,
+    /// `rest` comes later through the connection stream.
+    fn split_body_request(
+        first_frame: &'static [u8],
+        rest: impl IntoIterator<Item = IncomingStreamItem>,
+    ) -> MirroredHttp {
+        let (tx, rx) = broadcast::channel(8);
+        for item in rest {
+            tx.send(item).unwrap();
+        }
+
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let (parts, _) = Request::builder()
+            .method("POST")
+            .uri("/orders")
+            .body(())
+            .unwrap()
+            .into_parts();
+
+        MirroredHttp {
+            info: Arc::new(ConnectionInfo {
+                original_destination: addr,
+                local_addr: addr,
+                peer_addr: addr,
+                tls_connector: None,
+                passthrough_original_dst: false,
+                passthrough_stream: Arc::new(Mutex::new(None)),
+            }),
+            request_head: RequestHead {
+                parts,
+                body_head: vec![InternalHttpBodyFrame::Data(Payload(Bytes::from_static(
+                    first_frame,
+                )))],
+                body_finished: false,
+            },
+            stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
+        }
+    }
+
+    /// The mirror checks a request against its filter as soon as the head arrives, before the
+    /// body is complete. With only part of the body in hand, a body filter cannot match, and a
+    /// `Not` over it used to read that as "body does not match" and mirror the request right
+    /// away. The decision has to wait for the rest of the body, and once the full body does
+    /// match the inner filter, the request must not be mirrored.
+    #[tokio::test]
+    async fn not_over_body_filter_decides_only_on_the_full_body() {
+        let tcp_filter =
+            tcp::HttpFilter::Not(Box::new(tcp::HttpFilter::Body(tcp::HttpBodyFilter::Json {
+                query: JsonPathQuery::new("$.tenant".to_owned()).unwrap(),
+                matches: Filter::new("preview".to_owned()).unwrap(),
+            })));
+        let filter = HttpFilter::try_from(&tcp_filter).unwrap();
+
+        let mut http = split_body_request(
+            br#"{"tenant":"pre"#,
+            [
+                IncomingStreamItem::Frame(InternalHttpBodyFrame::Data(Payload(
+                    Bytes::from_static(br#"view"}"#),
+                ))),
+                IncomingStreamItem::NoMoreFrames,
+            ],
+        );
+        assert_eq!(
+            TcpMirrorApi::decide(&filter, &mut http).await,
+            MirrorDecision::BufferBody,
+        );
+
+        http.buffer_body().await.unwrap();
+        assert!(http.request_head.body_finished);
+        assert_eq!(
+            TcpMirrorApi::decide(&filter, &mut http).await,
+            MirrorDecision::Drop,
+        );
+
+        // The same split body for another tenant is not preview traffic, so it is mirrored.
+        let mut http = split_body_request(
+            br#"{"tenant":"li"#,
+            [
+                IncomingStreamItem::Frame(InternalHttpBodyFrame::Data(Payload(
+                    Bytes::from_static(br#"ve"}"#),
+                ))),
+                IncomingStreamItem::NoMoreFrames,
+            ],
+        );
+        assert_eq!(
+            TcpMirrorApi::decide(&filter, &mut http).await,
+            MirrorDecision::BufferBody,
+        );
+        http.buffer_body().await.unwrap();
+        assert_eq!(
+            TcpMirrorApi::decide(&filter, &mut http).await,
+            MirrorDecision::Mirror,
+        );
+    }
+
+    /// A filter that never looks at the body answers on the head alone, so a partial body does
+    /// not delay mirroring and a non-matching request is dropped right away.
+    #[tokio::test]
+    async fn header_filters_decide_on_the_head_without_waiting_for_the_body() {
+        let tcp_filter = tcp::HttpFilter::Not(Box::new(tcp::HttpFilter::Header(
+            Filter::new("baggage: .*mirrord=preview-key".to_owned()).unwrap(),
+        )));
+        let filter = HttpFilter::try_from(&tcp_filter).unwrap();
+
+        let mut http = split_body_request(b"partial", []);
+        assert_eq!(
+            TcpMirrorApi::decide(&filter, &mut http).await,
+            MirrorDecision::Mirror,
+        );
+
+        let mut http = split_body_request(b"partial", []);
+        http.request_head
+            .parts
+            .headers
+            .insert("baggage", "mirrord=preview-key".parse().unwrap());
+        assert_eq!(
+            TcpMirrorApi::decide(&filter, &mut http).await,
+            MirrorDecision::Drop,
+        );
     }
 }
