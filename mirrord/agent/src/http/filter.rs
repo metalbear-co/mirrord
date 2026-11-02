@@ -33,6 +33,10 @@ pub enum RequestBody<T> {
     /// everything but preview traffic: a request whose body nobody could check goes back to the
     /// stable pods instead of being served by preview code.
     Unavailable,
+    /// The connection broke while the body was being read, so there is nothing left to serve. A
+    /// body filter answers [`MatchResult::Undecided`]: no client should get a request with a
+    /// broken body, not even through a `Not`.
+    Failed,
     /// Fully buffered.
     Complete(T),
 }
@@ -42,6 +46,7 @@ impl<T> Debug for RequestBody<T> {
         f.write_str(match self {
             Self::Pending => "Pending",
             Self::Unavailable => "Unavailable",
+            Self::Failed => "Failed",
             Self::Complete(..) => "Complete",
         })
     }
@@ -56,7 +61,8 @@ pub enum MatchResult {
     /// and ask again.
     NeedsBody,
     /// The filter could not be run: a jq query that fails or times out, a regex that hits its
-    /// backtrack limit, or a JSON body filter over a body that is not JSON. This is not a verdict on the request, so `Not` passes it through unchanged
+    /// backtrack limit, a JSON body filter over a body that is not JSON, or a body that broke
+    /// mid-transfer. This is not a verdict on the request, so `Not` passes it through unchanged
     /// instead of turning a broken filter into "steal everything". The callers resolve it as no
     /// match, which is what a failed plain filter always did.
     Undecided,
@@ -307,6 +313,7 @@ impl HttpFilter {
                 let body = match body {
                     RequestBody::Pending => return MatchResult::NeedsBody,
                     RequestBody::Unavailable => return MatchResult::NoMatch,
+                    RequestBody::Failed => return MatchResult::Undecided,
                     RequestBody::Complete(body) => body,
                 };
 
@@ -638,6 +645,29 @@ mod test {
         assert_eq!(
             working.matches(&mut parts, NO_BODY).await,
             MatchResult::NoMatch
+        );
+    }
+
+    /// A body that broke mid-transfer is a request nobody can serve. Unlike a body that was too
+    /// big or too slow, it must not be stolen by `not (body ...)` either: the stealing client
+    /// would get a request whose body already errored.
+    #[tokio::test]
+    async fn failed_body_stays_undecided_even_under_not() {
+        let plain = HttpFilter::try_from(&body_filter("preview")).unwrap();
+        let negated = HttpFilter::try_from(&not(body_filter("preview"))).unwrap();
+
+        let mut parts = head("/orders", &[]);
+        assert_eq!(
+            plain
+                .matches(&mut parts, RequestBody::<&[u8]>::Failed)
+                .await,
+            MatchResult::Undecided
+        );
+        assert_eq!(
+            negated
+                .matches(&mut parts, RequestBody::<&[u8]>::Failed)
+                .await,
+            MatchResult::Undecided
         );
     }
 

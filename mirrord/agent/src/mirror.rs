@@ -336,7 +336,10 @@ mod test {
 
     use crate::{
         http::filter::{HttpFilter, MatchResult},
-        incoming::{ConnectionInfo, IncomingStream, IncomingStreamItem, MirroredHttp, RequestHead},
+        incoming::{
+            BodyBuffering, ConnectionInfo, IncomingStream, IncomingStreamItem, MirroredHttp,
+            RequestHead,
+        },
     };
 
     /// A mirrored request whose body arrives in two frames: `first_frame` is already in hand,
@@ -375,7 +378,7 @@ mod test {
                 body_finished: false,
             },
             stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
-            body_unavailable: false,
+            body_buffering: BodyBuffering::default(),
         }
     }
 

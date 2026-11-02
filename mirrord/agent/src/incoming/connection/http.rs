@@ -48,8 +48,8 @@ use crate::{
 /// is started with either [`Self::steal`] or [`Self::pass_through`].
 pub struct RedirectedHttp {
     request: ExtractedRequest,
-    /// Set when [`Self::buffer_body`] gave up, so filters stop asking for the body.
-    body_unavailable: bool,
+    /// How [`Self::buffer_body`] ended, so filters stop asking for a body that is not coming.
+    body_buffering: BodyBuffering,
     info: Arc<ConnectionInfo>,
     mirror_tx: Option<broadcast::Sender<IncomingStreamItem>>,
     /// Handle to the [`tokio::runtime`] in which this struct was created.
@@ -73,6 +73,45 @@ pub enum BufferBodyError {
     Timeout(#[from] Elapsed),
 }
 
+/// Where a request stands with buffering its body, kept on the request so that a filter asking
+/// for the body gets a final answer instead of a second buffering attempt.
+///
+/// The two failures are kept apart because they mean different things to a `Not` filter: a body
+/// that was too big or too slow is a body nobody could check, and the preview pod's `not (body
+/// ...)` matches it to keep it away from preview code; a body that broke mid-transfer is a request
+/// nobody can serve, and no filter should match it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BodyBuffering {
+    /// Not attempted yet, or the body is already complete.
+    #[default]
+    Possible,
+    /// Gave up within the limits: the body is over [`MAX_BODY_BUFFER_SIZE`] or arrives slower than
+    /// [`MAX_BODY_BUFFER_TIMEOUT`]. Filters see [`RequestBody::Unavailable`].
+    GaveUp,
+    /// The connection failed while the body was being read. Filters see [`RequestBody::Failed`].
+    Failed,
+}
+
+impl From<&BufferBodyError> for BodyBuffering {
+    fn from(error: &BufferBodyError) -> Self {
+        match error {
+            BufferBodyError::BodyTooBig | BufferBodyError::Timeout(..) => Self::GaveUp,
+            BufferBodyError::Conn(..) => Self::Failed,
+        }
+    }
+}
+
+/// The body as a filter sees it, when it is not complete.
+impl<T> From<BodyBuffering> for RequestBody<T> {
+    fn from(buffering: BodyBuffering) -> Self {
+        match buffering {
+            BodyBuffering::Possible => Self::Pending,
+            BodyBuffering::GaveUp => Self::Unavailable,
+            BodyBuffering::Failed => Self::Failed,
+        }
+    }
+}
+
 impl RedirectedHttp {
     /// Should be called in the target's Linux network namespace,
     /// as [`Handle::current()`] is stored in this struct.
@@ -84,7 +123,7 @@ impl RedirectedHttp {
     ) -> Self {
         Self {
             request,
-            body_unavailable: false,
+            body_buffering: BodyBuffering::default(),
             info,
             mirror_tx: None,
             runtime_handle: Handle::current(),
@@ -140,7 +179,7 @@ impl RedirectedHttp {
                 body_finished: self.request.body_tail.is_none(),
             },
             stream: IncomingStream::Mirror(BroadcastStream::new(rx)),
-            body_unavailable: false,
+            body_buffering: BodyBuffering::default(),
         }
     }
 
@@ -202,23 +241,21 @@ impl RedirectedHttp {
     pub fn parts_and_body(&mut self) -> (&mut Parts, RequestBody<FramesReader<'_, Frame<Bytes>>>) {
         let body = if self.request.body_tail.is_none() {
             RequestBody::Complete(FramesReader::from(&*self.request.body_head))
-        } else if self.body_unavailable {
-            RequestBody::Unavailable
         } else {
-            RequestBody::Pending
+            self.body_buffering.into()
         };
 
         (&mut self.request.parts, body)
     }
 
     /// Reads the rest of the body into [`ExtractedRequest::body_head`], within the size and time
-    /// limits. On failure the body stays [`RequestBody::Unavailable`] for good, so a filter that
-    /// needs it gets a definite answer instead of asking to buffer again.
+    /// limits. A failure is remembered as [`BodyBuffering`] for good, so a filter that needs the
+    /// body gets a definite answer instead of asking to buffer again.
     #[instrument(level = "trace", ret)]
     pub async fn buffer_body(&mut self) -> Result<(), BufferBodyError> {
         let result = self.read_body_tail().await;
-        if result.is_err() {
-            self.body_unavailable = true;
+        if let Err(error) = &result {
+            self.body_buffering = error.into();
         }
         result
     }
@@ -439,8 +476,8 @@ pub struct MirroredHttp {
     pub request_head: RequestHead,
     /// Will not return frames that are already in [`Self::request_head`].
     pub stream: IncomingStream,
-    /// Set when [`Self::buffer_body`] gave up, so filters stop asking for the body.
-    pub body_unavailable: bool,
+    /// How [`Self::buffer_body`] ended, so filters stop asking for a body that is not coming.
+    pub body_buffering: BodyBuffering,
 }
 
 impl MirroredHttp {
@@ -453,23 +490,21 @@ impl MirroredHttp {
     ) {
         let body = if self.request_head.body_finished {
             RequestBody::Complete(FramesReader::from(&*self.request_head.body_head))
-        } else if self.body_unavailable {
-            RequestBody::Unavailable
         } else {
-            RequestBody::Pending
+            self.body_buffering.into()
         };
 
         (&mut self.request_head.parts, body)
     }
 
     /// Reads the rest of the body into [`RequestHead::body_head`], within the size and time
-    /// limits. On failure the body stays [`RequestBody::Unavailable`] for good, so a filter that
-    /// needs it gets a definite answer instead of asking to buffer again.
+    /// limits. A failure is remembered as [`BodyBuffering`] for good, so a filter that needs the
+    /// body gets a definite answer instead of asking to buffer again.
     #[instrument(level = "trace", ret)]
     pub async fn buffer_body(&mut self) -> Result<(), BufferBodyError> {
         let result = self.read_body_tail().await;
-        if result.is_err() {
-            self.body_unavailable = true;
+        if let Err(error) = &result {
+            self.body_buffering = error.into();
         }
         result
     }

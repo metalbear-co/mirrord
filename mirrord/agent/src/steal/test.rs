@@ -22,7 +22,7 @@ use rand::distr::{Alphanumeric, SampleString};
 use rstest::rstest;
 use rustls::pki_types::ServerName;
 use serde_json::json;
-use tokio::{net::TcpListener, sync::mpsc};
+use tokio::{io::AsyncWriteExt, net::TcpListener, sync::mpsc};
 use tokio_rustls::TlsStream;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
@@ -896,6 +896,54 @@ async fn not_over_body_filter_steals_when_buffering_fails(
             let mut sender = request.make_connection(conn).await;
             request.send(&mut sender, 0).await;
         }
+    );
+}
+
+/// A client that goes away mid-upload leaves a request whose body nobody can read or serve. Under
+/// `not (body ...)` that must not count as "body does not match": handing it to the stealing
+/// client would give it a request whose body already errored. Only a body that is too big or too
+/// slow is stolen by the negation; a broken one is passed through, as it is for a plain body
+/// filter.
+#[tokio::test(flavor = "current_thread")]
+async fn client_reset_mid_upload_is_not_stolen_by_a_negated_body_filter() {
+    let mut setup =
+        TestSetup::new_http(TestHttpKind::Http1, RedirectorTaskConfig::from_env()).await;
+    let original_destination = setup.original_server.local_addr().unwrap();
+
+    let mut client = StealingClient::new(
+        0,
+        setup.stealer_tx.clone(),
+        "1.22.1",
+        StealType::FilteredHttpEx(
+            original_destination.port(),
+            HttpFilter::Not(Box::new(HttpFilter::Body(HttpBodyFilter::Json {
+                query: JsonPathQuery::new_unchecked("$.tenant".into()),
+                matches: Filter::new("preview".into()).unwrap(),
+            }))),
+        ),
+        setup.stealer_status.clone(),
+    )
+    .await;
+
+    let mut conn = setup.conn_tx.make_connection(original_destination).await;
+    conn.write_all(
+        b"POST /orders HTTP/1.1\r\nhost: localhost\r\ncontent-length: 64\r\n\r\n{\"tenant\":\"pre",
+    )
+    .await
+    .unwrap();
+    // Closing with most of the body still owed makes the agent's body read fail.
+    drop(conn);
+
+    // The request goes where it would have gone without the client.
+    tokio::time::timeout(Duration::from_secs(5), setup.original_server.accept())
+        .await
+        .expect("the request is passed through to its original destination")
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), client.recv())
+            .await
+            .is_err(),
+        "the stealing client must not receive a request with a broken body"
     );
 }
 
