@@ -855,8 +855,8 @@ impl ServiceConfig {
     /// [`CommonConfig::base_config`].
     ///
     /// For [`SessionKind::Preview`], the config is for the service's `mirrord preview up` or
-    /// `mirrord preview sync` session instead: it is assembled as in `split` mode whatever the
-    /// service's `default_mode`, and without `env`.
+    /// `mirrord preview sync` session instead: it is assembled without `env`, and `mode` is the
+    /// `split` mode whatever the service's `default_mode`.
     #[allow(clippy::too_many_arguments)]
     fn assemble(
         mut self,
@@ -869,14 +869,10 @@ impl ServiceConfig {
         kind: SessionKind,
     ) -> Result<SubprocessCfg, ConfigPatchErrorKind> {
         let preview = kind == SessionKind::Preview;
-        let split = ModeConfig::from(ServiceMode::Split);
-        let mode = if preview {
+        if preview {
             self.default_mode = ServiceMode::Split.into();
             self.env = EnvConfig::default();
-            &split
-        } else {
-            mode
-        };
+        }
 
         let kube_context = up_context.get_context(self.context.clone());
         let mut cfg = self.unpatched_config(base, mode, &key, kube_context.clone());
@@ -1765,7 +1761,13 @@ impl UpConfig {
             .into_iter()
             .map(|(service_name, svc)| {
                 let mode = ModeConfig::named(&modes, &svc.default_mode)?;
-                // A preview session runs as `split` whatever the mode, so nothing is ignored.
+                // A preview session runs as `split` whatever the mode, so nothing below is ignored.
+                let mode = match kind {
+                    SessionKind::Up => mode,
+                    SessionKind::Preview => {
+                        ModeConfig::named(&modes, <&str>::from(ServiceMode::Split))?
+                    }
+                };
                 if kind == SessionKind::Up && mode.incoming() == ServiceMode::Replace {
                     if svc.http_filter.is_filter_set() {
                         eprintln!(
