@@ -55,6 +55,11 @@ pub enum MatchResult {
     /// The headers alone cannot decide and the body is still [`RequestBody::Pending`]. Buffer it
     /// and ask again.
     NeedsBody,
+    /// The filter could not be run: a jq query that fails or times out, a regex that hits its
+    /// backtrack limit, or a JSON body filter over a body that is not JSON. This is not a verdict on the request, so `Not` passes it through unchanged
+    /// instead of turning a broken filter into "steal everything". The callers resolve it as no
+    /// match, which is what a failed plain filter always did.
+    Undecided,
 }
 
 impl From<bool> for MatchResult {
@@ -71,7 +76,28 @@ impl Not for MatchResult {
             Self::Match => Self::NoMatch,
             Self::NoMatch => Self::Match,
             Self::NeedsBody => Self::NeedsBody,
+            Self::Undecided => Self::Undecided,
         }
+    }
+}
+
+/// Folds the answers of one regex over several candidates, where `None` is a candidate the regex
+/// could not be run over: the first match decides, otherwise a single failure leaves the filter
+/// undecided rather than quietly counting as "no match".
+fn any_match(answers: impl IntoIterator<Item = Option<bool>>) -> MatchResult {
+    let mut failed = false;
+    for answer in answers {
+        match answer {
+            Some(true) => return MatchResult::Match,
+            Some(false) => {}
+            None => failed = true,
+        }
+    }
+
+    if failed {
+        MatchResult::Undecided
+    } else {
+        MatchResult::NoMatch
     }
 }
 
@@ -187,35 +213,29 @@ impl HttpFilter {
                     .extensions
                     .get_or_insert_with(|| NormalizedHeaders::from_headers(&parts.headers));
 
-                headers.has_match(filter).into()
+                headers.has_match(filter)
             }
 
-            Self::Path(filter) => parts
-                .uri
-                .path_and_query()
-                .is_some_and(|path_and_query| {
-                    // For backward compatability, we first match path then we match path and query
-                    // together and return true if any of them matches
-                    let path = path_and_query.path();
-                    let matched = filter
-                        .is_match(path)
-                        .inspect_err(|error| {
-                            tracing::error!(path, ?error, "Error while matching path");
-                        })
-                        .unwrap_or(false);
-                    if matched {
-                        return true;
-                    }
+            Self::Path(filter) => {
+                let Some(path_and_query) = parts.uri.path_and_query() else {
+                    return MatchResult::NoMatch;
+                };
 
-                    let path = path_and_query.as_str();
-                    filter
-                        .is_match(path)
-                        .inspect_err(|error| {
-                            tracing::error!(path, ?error, "Error while matching path+query");
-                        })
-                        .unwrap_or(false)
-                })
-                .into(),
+                // For backward compatibility, the path alone is tried first, then the path with
+                // the query; either one matching is enough.
+                any_match(
+                    [path_and_query.path(), path_and_query.as_str()]
+                        .into_iter()
+                        .map(|path| {
+                            filter
+                                .is_match(path)
+                                .inspect_err(|error| {
+                                    tracing::error!(path, ?error, "Error while matching path");
+                                })
+                                .ok()
+                        }),
+                )
+            }
 
             Self::Method(filter) => parts
                 .method
@@ -223,40 +243,65 @@ impl HttpFilter {
                 .eq_ignore_ascii_case(filter.as_ref())
                 .into(),
 
-            // Flips a definite answer and leaves "needs the body" to the caller: negating "cannot
-            // look yet" would steal or mirror the request before its body is read.
+            // Flips a definite answer only. "Needs the body" stays with the caller, since negating
+            // "cannot look yet" would steal or mirror the request before its body is read, and
+            // "undecided" stays undecided, since a filter that could not run says nothing about
+            // the request either way.
             Self::Not(filter) => Box::pin(filter.matches(parts, body)).await.not(),
 
+            // Since we require `body` to be Clone + Copy, each iteration creates a new version
+            // that reads from the beginning. Need to make sure that we don't read anything from
+            // `body` before passing (copies of) it to other fns.
+            //
+            // One "no match" settles the whole thing. Otherwise a child still waiting for the body
+            // may yet answer "no match", which is a definite answer even next to a child that
+            // failed, so the body is asked for first and only then does a failed child leave the
+            // composite undecided.
             Self::Composite { all: true, filters } => {
-                // Since we require `body` to be Clone + Copy, each
-                // iteration creates a new version that reads from the
-                // beginning. Need to make sure that we don't read
-                // anything from `body` before passing (copies of) it
-                // to other fns.
-                let mut result = MatchResult::Match;
+                let mut needs_body = false;
+                let mut undecided = false;
                 for filter in filters {
                     match Box::pin(filter.matches(parts, body)).await {
                         MatchResult::NoMatch => return MatchResult::NoMatch,
-                        MatchResult::NeedsBody => result = MatchResult::NeedsBody,
+                        MatchResult::NeedsBody => needs_body = true,
+                        MatchResult::Undecided => undecided = true,
                         MatchResult::Match => {}
                     }
                 }
-                result
+
+                if needs_body {
+                    MatchResult::NeedsBody
+                } else if undecided {
+                    MatchResult::Undecided
+                } else {
+                    MatchResult::Match
+                }
             }
+            // One match settles the whole thing. Otherwise a child still waiting for the body may
+            // yet match, so the body is asked for first; a failed child only counts once nothing
+            // else matched, and then it leaves the composite undecided rather than "no match".
             Self::Composite {
                 all: false,
                 filters,
             } => {
-                // Same as above
-                let mut result = MatchResult::NoMatch;
+                let mut needs_body = false;
+                let mut undecided = false;
                 for filter in filters {
                     match Box::pin(filter.matches(parts, body)).await {
                         MatchResult::Match => return MatchResult::Match,
-                        MatchResult::NeedsBody => result = MatchResult::NeedsBody,
+                        MatchResult::NeedsBody => needs_body = true,
+                        MatchResult::Undecided => undecided = true,
                         MatchResult::NoMatch => {}
                     }
                 }
-                result
+
+                if needs_body {
+                    MatchResult::NeedsBody
+                } else if undecided {
+                    MatchResult::Undecided
+                } else {
+                    MatchResult::NoMatch
+                }
             }
             Self::Body(filter) => {
                 let body = match body {
@@ -271,22 +316,20 @@ impl HttpFilter {
                             Ok(json) => json,
                             Err(error) => {
                                 tracing::debug!(?error, "json filter failed to parse body json");
-                                return MatchResult::NoMatch;
+                                return MatchResult::Undecided;
                             }
                         };
 
-                        let results = query.query(&json);
-
-                        results
-                            .iter()
-                            .any(|v| {
-                                match v {
-                                    Value::String(s) => matches.is_match(s),
-                                    other => matches.is_match(&other.to_string()),
-                                }
-                                .is_ok_and(|t| t)
+                        any_match(query.query(&json).iter().map(|value| {
+                            match value {
+                                Value::String(s) => matches.is_match(s),
+                                other => matches.is_match(&other.to_string()),
+                            }
+                            .inspect_err(|error| {
+                                tracing::error!(?error, "Error while matching body value");
                             })
-                            .into()
+                            .ok()
+                        }))
                     }
                 }
             }
@@ -295,22 +338,31 @@ impl HttpFilter {
                     .extensions
                     .get_or_insert_with(|| NormalizedHeaders::from_headers(&parts.headers));
 
+                let mut failed = false;
                 for header in headers.0.iter() {
                     match eval_jaq(filter.clone(), header.clone()).await {
                         Ok(true) => return MatchResult::Match,
                         Ok(false) => (),
                         Err(err) => {
                             tracing::error!(?err, ?header, ?filter, "failed to run jaq query");
+                            failed = true;
                         }
                     }
                 }
 
-                MatchResult::NoMatch
+                if failed {
+                    MatchResult::Undecided
+                } else {
+                    MatchResult::NoMatch
+                }
             }
         }
     }
 }
 
+/// Runs the query over one header. A query that does not compile, errors on this input, panics or
+/// runs past [`JAQ_TIME_LIMIT`] is an `Err`, so the filter can stay undecided instead of
+/// answering "no match" for a header it never really checked.
 async fn eval_jaq(query: JqQuery, payload: String) -> Result<bool, String> {
     static TIME_LIMIT: LazyLock<Duration> = LazyLock::new(|| {
         Duration::from_secs(JAQ_TIME_LIMIT.try_from_env().ok().flatten().unwrap_or(500))
@@ -337,18 +389,22 @@ async fn eval_jaq(query: JqQuery, payload: String) -> Result<bool, String> {
             .map_err(|errors| format!("failed to compile the filter: {errors:?}"))?;
 
         let inputs = RcIter::new(core::iter::empty());
-        let mut out = filter.run((Ctx::new([], &inputs), Val::from(payload)));
+        let out = filter.run((Ctx::new([], &inputs), Val::from(payload)));
 
-        let found_match = out
-            .find_map(|item| {
-                if let Ok(Val::Bool(value)) = &item {
-                    Some(*value)
-                } else {
-                    None
+        // A `true` anywhere in the output wins; otherwise an error in the output means the query
+        // broke on this input, which is not the same as it answering `false`.
+        let mut error = None;
+        for item in out {
+            match item {
+                Ok(Val::Bool(true)) => return Ok(true),
+                Ok(..) => {}
+                Err(err) => {
+                    error.get_or_insert_with(|| format!("the filter failed: {err:?}"));
                 }
-            })
-            .unwrap_or(false);
-        Ok(found_match)
+            }
+        }
+
+        error.map_or(Ok(false), Err)
     });
 
     tokio::select! {
@@ -357,7 +413,7 @@ async fn eval_jaq(query: JqQuery, payload: String) -> Result<bool, String> {
                 Ok(r) => r,
                 Err(join) => {
                     tracing::error!(?join, "panic in jaq evaluation task");
-                    Ok(false)
+                    Err(format!("the filter panicked: {join}"))
                 }
             }
         }
@@ -375,7 +431,7 @@ async fn eval_jaq(query: JqQuery, payload: String) -> Result<bool, String> {
                 }
             }.instrument(span));
 
-            Ok(false)
+            Err("the filter ran past the time limit".to_owned())
         }
     }
 }
@@ -388,15 +444,15 @@ struct NormalizedHeaders(Vec<String>);
 
 impl NormalizedHeaders {
     /// Checks whether any header in this set matches the given [`Regex`].
-    fn has_match(&self, regex: &Regex) -> bool {
-        self.0.iter().any(|header| {
+    fn has_match(&self, regex: &Regex) -> MatchResult {
+        any_match(self.0.iter().map(|header| {
             regex
                 .is_match(header)
                 .inspect_err(|error| {
                     tracing::error!(header, ?regex, ?error, "Error while matching header");
                 })
-                .unwrap_or_default()
-        })
+                .ok()
+        }))
     }
 
     fn from_headers(headers: &HeaderMap) -> Self {
@@ -419,7 +475,7 @@ mod test {
     use std::str::FromStr;
 
     use hyper::Request;
-    use mirrord_protocol::tcp::{self, Filter, HttpMethodFilter, JsonPathQuery};
+    use mirrord_protocol::tcp::{self, Filter, HttpMethodFilter, JqQuery, JsonPathQuery};
 
     use super::{HttpFilter, MatchResult, RequestBody};
 
@@ -443,6 +499,15 @@ mod test {
 
     fn header_filter(header: &str) -> tcp::HttpFilter {
         tcp::HttpFilter::Header(Filter::new(header.to_owned()).unwrap())
+    }
+
+    /// A jq query that compiles but fails on every header it is run over.
+    fn failing_jq_filter() -> tcp::HttpFilter {
+        tcp::HttpFilter::HeaderJq(JqQuery::new("error").unwrap())
+    }
+
+    fn not(filter: tcp::HttpFilter) -> tcp::HttpFilter {
+        tcp::HttpFilter::Not(Box::new(filter))
     }
 
     /// A `Not` filter steals exactly the requests its inner filter leaves alone, so a preview
@@ -520,6 +585,122 @@ mod test {
                 .matches(&mut parts, RequestBody::<&[u8]>::Unavailable)
                 .await,
             MatchResult::NoMatch
+        );
+    }
+
+    /// A JSON body filter cannot say anything about a body that is not JSON: a GET with an empty
+    /// body, a form post, plain text. That used to count as "no match", which a `Not` turned into
+    /// a match, so `not (body json ...)` stole every such request. The filter is undecided
+    /// instead, and `Not` leaves undecided alone, so neither side steals it.
+    #[tokio::test]
+    async fn not_over_json_body_filter_stays_undecided_on_a_body_that_is_not_json() {
+        let plain = HttpFilter::try_from(&body_filter("preview")).unwrap();
+        let negated = HttpFilter::try_from(&not(body_filter("preview"))).unwrap();
+
+        for body in [b"".as_slice(), b"tenant=preview", b"hello there"] {
+            let mut parts = head("/orders", &[]);
+            assert_eq!(
+                plain.matches(&mut parts, RequestBody::Complete(body)).await,
+                MatchResult::Undecided
+            );
+            assert_eq!(
+                negated
+                    .matches(&mut parts, RequestBody::Complete(body))
+                    .await,
+                MatchResult::Undecided
+            );
+        }
+    }
+
+    /// A jq query that fails at runtime (and the same goes for a compile error or running past
+    /// the time limit) checked nothing, so its answer must not be flipped by `Not` into stealing
+    /// every request on the port. Both the plain filter and its negation stay undecided.
+    #[tokio::test]
+    async fn jq_error_under_not_stays_undecided() {
+        let plain = HttpFilter::try_from(&failing_jq_filter()).unwrap();
+        let negated = HttpFilter::try_from(&not(failing_jq_filter())).unwrap();
+
+        let mut parts = head("/orders", &[("x-tenant", "live")]);
+        assert_eq!(
+            plain.matches(&mut parts, NO_BODY).await,
+            MatchResult::Undecided
+        );
+        assert_eq!(
+            negated.matches(&mut parts, NO_BODY).await,
+            MatchResult::Undecided
+        );
+
+        // A query that does run still decides as usual, in both directions.
+        let working = not(tcp::HttpFilter::HeaderJq(
+            JqQuery::new(r#"test("x-tenant: live")"#).unwrap(),
+        ));
+        let working = HttpFilter::try_from(&working).unwrap();
+        assert_eq!(
+            working.matches(&mut parts, NO_BODY).await,
+            MatchResult::NoMatch
+        );
+    }
+
+    /// A failed child counts the way it always did inside a composite: it cannot satisfy an
+    /// `all`, and an `any` ignores it as long as another child matches. What changes is the
+    /// answer when the failed child was the deciding one: undecided, not "no match", so a `Not`
+    /// around the composite does not turn a broken filter into a match. A child that still waits
+    /// for the body is asked for it first, because its answer can still settle the composite.
+    #[tokio::test]
+    async fn composites_do_not_let_a_failed_child_decide() {
+        let all = |filters| {
+            HttpFilter::try_from(&not(tcp::HttpFilter::Composite { all: true, filters })).unwrap()
+        };
+        let any = |filters| {
+            HttpFilter::try_from(&not(tcp::HttpFilter::Composite {
+                all: false,
+                filters,
+            }))
+            .unwrap()
+        };
+
+        // Both requests carry a header, so the failing jq query has something to fail on.
+        let mut with_header = head("/orders", &[("x-tenant", "preview")]);
+        let mut without_header = head("/orders", &[("x-request-id", "42")]);
+
+        // `all`: a definite "no match" from the header wins over the failure; otherwise undecided.
+        let filter = all(vec![
+            header_filter("x-tenant: preview"),
+            failing_jq_filter(),
+        ]);
+        assert_eq!(
+            filter.matches(&mut without_header, NO_BODY).await,
+            MatchResult::Match
+        );
+        assert_eq!(
+            filter.matches(&mut with_header, NO_BODY).await,
+            MatchResult::Undecided
+        );
+
+        // `any`: a match from the header wins over the failure; otherwise undecided.
+        let filter = any(vec![
+            header_filter("x-tenant: preview"),
+            failing_jq_filter(),
+        ]);
+        assert_eq!(
+            filter.matches(&mut with_header, NO_BODY).await,
+            MatchResult::NoMatch
+        );
+        assert_eq!(
+            filter.matches(&mut without_header, NO_BODY).await,
+            MatchResult::Undecided
+        );
+
+        // A pending body is asked for before the failure gets the last word, in both composites.
+        let filter = all(vec![body_filter("preview"), failing_jq_filter()]);
+        assert_eq!(
+            filter.matches(&mut with_header, NO_BODY).await,
+            MatchResult::NeedsBody
+        );
+        let filter = any(vec![body_filter("preview"), failing_jq_filter()]);
+        assert_eq!(
+            filter.matches(&mut with_header, NO_BODY).await,
+            MatchResult::NeedsBody
         );
     }
 

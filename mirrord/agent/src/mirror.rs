@@ -123,7 +123,9 @@ impl TcpMirrorApi {
                             let (parts, body) = http.parts_and_body();
                             match filter.matches(parts, body).await {
                                 MatchResult::Match => Ok(M::Http(http)),
-                                MatchResult::NoMatch | MatchResult::NeedsBody => continue,
+                                MatchResult::NoMatch
+                                | MatchResult::Undecided
+                                | MatchResult::NeedsBody => continue,
                             }
                         },
                         Err(error) => {
@@ -154,7 +156,7 @@ impl TcpMirrorApi {
                             let (parts, body) = http.parts_and_body();
                             match filter.matches(parts, body).await {
                                 MatchResult::Match => return Ok(M::Http(http)),
-                                MatchResult::NoMatch => continue,
+                                MatchResult::NoMatch | MatchResult::Undecided => continue,
                                 MatchResult::NeedsBody => {
                                     ongoing.spawn(async move {
                                         if let Err(error) = http.buffer_body().await {

@@ -258,8 +258,9 @@ impl TcpStealerTask {
     /// Runs every client's filter over a stolen request.
     ///
     /// The body is buffered only when a filter asks for it, which happens when the headers alone
-    /// leave that filter undecided. After a buffering attempt the body is either complete or
-    /// unavailable for good, so the filters always come back with a definite answer.
+    /// cannot settle that filter. After a buffering attempt the body is complete, given up on, or
+    /// broken for good, so the filters always come back with a final answer. A filter that could
+    /// not be run does not steal: the request goes where it would have gone without that client.
     async fn decide(
         filters: &HashMap<ClientId, HttpFilter>,
         http: &mut RedirectedHttp,
@@ -270,7 +271,7 @@ impl TcpStealerTask {
         for (client_id, filter) in filters {
             match filter.matches(parts, body).await {
                 MatchResult::Match => matched.push(*client_id),
-                MatchResult::NoMatch => {}
+                MatchResult::NoMatch | MatchResult::Undecided => {}
                 MatchResult::NeedsBody => return StealDecision::BufferBody,
             }
         }
