@@ -223,18 +223,12 @@ impl ModeConfig {
 }
 
 impl From<ServiceMode> for ModeConfig {
-    /// The built-in mode as a custom one.
+    /// The built-in mode as a custom one: its queues follow `incoming`, as they do for a custom
+    /// mode without `queues`.
     fn from(incoming: ServiceMode) -> Self {
-        let queues = match incoming {
-            ServiceMode::Split => Some(QueueSplitMode::Split),
-            ServiceMode::Mirror => Some(QueueSplitMode::Mirror),
-            // Replacing the target takes over its queues whole, so they aren't split.
-            ServiceMode::Replace => None,
-        };
         Self {
             incoming: Some(incoming),
-            queues,
-            db_branching: None,
+            ..Self::default()
         }
     }
 }
@@ -981,13 +975,10 @@ impl ServiceConfig {
                     cfg.target.path,
                     Some(Target::Deployment(_) | Target::Rollout(_) | Target::StatefulSet(_))
                 ));
-        // A built-in mode's `queues` is its own definition, not a line the user wrote: entries
-        // named after one can't set it.
-        let builtin = ServiceMode::from_name(&self.default_mode).is_some();
         let queues_origin = match mode.queues {
             _ if splits_queues.not() => RequestOrigin::Config,
-            Some(_) if builtin.not() => RequestOrigin::ModeLine,
-            _ => RequestOrigin::Default,
+            Some(_) => RequestOrigin::ModeLine,
+            None => RequestOrigin::Default,
         };
         if splits_queues {
             // Without the line, queue messages are shared the way incoming traffic is.
