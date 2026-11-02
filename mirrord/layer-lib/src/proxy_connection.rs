@@ -88,6 +88,11 @@ impl ProxyConnection {
         session: NewSessionRequest,
         timeout: Duration,
     ) -> Result<Self> {
+        // Holds the lowest free fd (fd 3 in a fresh process) until the connection is set up, so
+        // neither the socket nor its clone lands there. s6-overlay's `/init` reads fd 3 for a
+        // readiness notification and would block forever on the idle proxy socket.
+        #[cfg(target_os = "linux")]
+        let _reserved_fd = std::fs::File::open("/dev/null")?;
         let connection = TcpStream::connect(proxy_addr)?;
         connection.set_read_timeout(Some(timeout))?;
         connection.set_write_timeout(Some(timeout))?;
