@@ -42,6 +42,7 @@ use feature::{
         },
         outgoing::OutgoingFilterConfig,
     },
+    preview::PreviewTtl,
     split_queues::QueueKind,
 };
 use k8s_openapi::api::core::v1::PodSpec;
@@ -1537,6 +1538,18 @@ impl LayerConfig {
                 return Err(ConfigError::Conflict(
                     "`feature.preview.idle` cannot be used in a preview without a target: it \
                      only provisions branch databases and has no pods to scale."
+                        .to_owned(),
+                ));
+            }
+
+            // The TTL is the only thing that ends a preview without a target: it has no pod to
+            // watch, nothing idles or pauses it, so with no TTL its branch databases would stay
+            // up until someone deletes the session by hand. The operator refuses it as well.
+            if self.feature.preview.resolved_ttl_secs() >= PreviewTtl::INFINITE_TTL_SECS {
+                return Err(ConfigError::Conflict(
+                    "`feature.preview.ttl_secs` (or `ttl_mins`) cannot be infinite in a preview without a \
+                     target: the TTL is what ends it and frees its branch databases, as it runs \
+                     no pod that could be stopped instead. Set a finite TTL, or set a `target`."
                         .to_owned(),
                 ));
             }
@@ -3134,6 +3147,38 @@ mod tests {
             .expect_err("idle has no pod to scale without a target");
         assert!(
             matches!(&error, ConfigError::Conflict(message) if message.contains("without a target")),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// A preview without a target has only its TTL to end it: no pod, no idle, no pause. An
+    /// infinite TTL would keep its branch databases up until someone deletes the session by
+    /// hand, so the config check refuses it before anything is created.
+    #[test]
+    fn targetless_preview_with_branches_refuses_an_infinite_ttl() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "preview": { "ttl_secs": "infinite" },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify_for_preview_env(&mut context)
+            .expect_err("an infinite TTL must be refused without a target");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot be infinite in a preview without a target"),
             "unexpected error: {error}"
         );
     }
