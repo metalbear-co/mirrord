@@ -34,8 +34,7 @@ use mirrord_config::{
     config::EnvKey,
     feature::{
         database_branches::{
-            DatabaseBranchConfig, MariadbBranchCopyConfig, MysqlBranchCopyConfig,
-            SplitConfigDbBranches, default_creation_timeout_secs,
+            DatabaseBranchConfig, SplitConfigDbBranches, default_creation_timeout_secs,
         },
         split_queues::{QueueKind, QueueSplit, SplitQueuesConfig},
     },
@@ -1136,24 +1135,7 @@ where
             .feature
             .db_branches
             .iter()
-            .any(|branch_config| {
-                let exclude_tables = match branch_config {
-                    DatabaseBranchConfig::Mysql(mysql) => match &mysql.copy {
-                        MysqlBranchCopyConfig::Empty { exclude_tables, .. }
-                        | MysqlBranchCopyConfig::Schema { exclude_tables, .. }
-                        | MysqlBranchCopyConfig::All { exclude_tables, .. } => exclude_tables,
-                    },
-                    DatabaseBranchConfig::Mariadb(mariadb) => match &mariadb.copy {
-                        MariadbBranchCopyConfig::Empty { exclude_tables, .. }
-                        | MariadbBranchCopyConfig::Schema { exclude_tables, .. }
-                        | MariadbBranchCopyConfig::All { exclude_tables, .. } => exclude_tables,
-                    },
-                    _ => return false,
-                };
-                exclude_tables
-                    .as_ref()
-                    .is_some_and(|tables| !tables.is_empty())
-            })
+            .any(|branch_config| !branch_config.exclude_tables().is_empty())
         {
             self.operator
                 .spec
