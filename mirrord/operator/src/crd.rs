@@ -1172,7 +1172,7 @@ impl Display for NewOperatorFeature {
                 "DB branches in a dedicated namespace per key"
             }
             NewOperatorFeature::RedisClusterBranching => "Redis Cluster branching",
-            NewOperatorFeature::MysqlBranchExcludeTables => "MySQL branch table exclusions",
+            NewOperatorFeature::MysqlBranchExcludeTables => "MySQL/MariaDB branch table exclusions",
             NewOperatorFeature::DbBranchSsmParameter => {
                 "DB branching connection values from AWS SSM Parameter Store"
             }
