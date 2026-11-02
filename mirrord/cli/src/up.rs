@@ -149,8 +149,8 @@ async fn list_services(args: &UpArgs, format: UpListFormat) -> Result<(), UpCliE
     let key = session_key(args.key.clone())?;
     let mut up_config = load_config(args, &key)?;
     up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
-    if let Some(mode) = args.mode {
-        up_config.override_mode(mode);
+    if let Some(mode) = &args.mode {
+        up_config.override_mode(mode).map_err(UpError::from)?;
     }
 
     let listing = UpListing::new(&up_config, &args.config_file, &key, args.context.clone())?;
@@ -184,8 +184,8 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     analytics
         .get_mut()
         .add("mode_override", args.mode.is_some());
-    if let Some(mode) = args.mode {
-        up_config.override_mode(mode);
+    if let Some(mode) = &args.mode {
+        up_config.override_mode(mode).map_err(UpError::from)?;
     }
 
     #[cfg(target_os = "windows")]
@@ -231,7 +231,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     let requesting = db_branches::check_db_branches(&mut services).await?;
     let modes = services
         .iter()
-        .map(|service| (service.service_name.clone(), service.mode))
+        .map(|service| (service.service_name.clone(), service.mode.clone()))
         .collect::<Vec<_>>();
 
     let result = mirrord_up::launch(services, correlation_id, &args.debug, ready.clone()).await;
@@ -252,11 +252,12 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     Ok(result?)
 }
 
-/// One entry per service, in no particular order and without names: its mode, whether it requested
+/// One entry per service, in no particular order and without names: its mode (`custom` for one
+/// defined under `modes`, whose name is the user's), whether it requested
 /// DB branching, and whether its session created a branch, attached to an existing one, and shares
 /// one with another service of the run.
 fn service_analytics(
-    modes: &[(Arc<str>, ServiceMode)],
+    modes: &[(Arc<str>, Arc<str>)],
     requesting: &[Arc<str>],
     db_branches: &HashMap<Arc<str>, Vec<UpSessionDbBranch>>,
 ) -> Vec<AnalyticValue> {
@@ -273,7 +274,8 @@ fn service_analytics(
         .map(|(name, mode)| {
             let branches = db_branches.get(name).map(Vec::as_slice).unwrap_or_default();
             let mut service = Analytics::default();
-            service.add("mode", SanitizedString::new_plaintext(&mode.to_string()));
+            let mode = ServiceMode::from_name(mode).map_or("custom", <&str>::from);
+            service.add("mode", SanitizedString::new_plaintext(mode));
             service.add("db_branching_requested", requesting.contains(name));
             service.add(
                 "db_branch_created",
@@ -323,6 +325,8 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::ConfigPatch(_))
             | UpCliError::Up(UpError::Tera(_))
             | UpCliError::Up(UpError::Mode(_))
+            | UpCliError::Up(UpError::BuiltinModeName(_))
+            | UpCliError::Up(UpError::UnknownMode(_))
             | UpCliError::Up(UpError::NoInferredTarget { .. })
             | UpCliError::Up(UpError::PreviewTargetless { .. })
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
@@ -438,7 +442,8 @@ mod tests {
         let v = category(UpCliError::Up(UpError::Mode(vec![
             TargetValidationError::IncompatibleTargets(vec![IncompatibleTarget {
                 service: "svc".into(),
-                mode: ServiceMode::Replace,
+                mode: ServiceMode::Replace.into(),
+                incoming: ServiceMode::Replace,
                 target_type: TargetType::Targetless,
             }]),
         ])));

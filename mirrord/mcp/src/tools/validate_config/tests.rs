@@ -749,3 +749,40 @@ fn up_yaml_runnable_service(#[case] service: &str) {
     );
     assert!(output.valid, "{:?}", output.issues);
 }
+
+/// A service in a custom mode is assembled with what the mode sets.
+#[rstest]
+#[case::split_queues("{ queues: split }", "target: none", None)]
+#[case::targetless_replace("{ incoming: replace }", "target: none", Some("targetless target"))]
+#[case::deployment_replace("{ incoming: replace }", "target: { path: deployment/app }", None)]
+fn up_yaml_custom_mode(#[case] mode: &str, #[case] target: &str, #[case] message: Option<&str>) {
+    let content = format!(
+        "modes:\n  custom: {mode}\nservices:\n  app:\n    {target}\n    default_mode: custom\n    run:\n      command: [\"true\"]\n"
+    );
+    match message {
+        Some(message) => {
+            let issue = single_issue(ConfigFormat::MirrordUpYaml, &content);
+            assert_eq!(issue.path, "/services/app");
+            assert!(issue.message.contains(message), "{}", issue.message);
+        }
+        None => {
+            let output = validate(ConfigFormat::MirrordUpYaml, &content);
+            assert!(output.valid, "{:?}", output.issues);
+        }
+    }
+}
+
+/// A mode name `mirrord up` can't use is reported once.
+#[rstest]
+#[case::unknown(
+    "modes:\n  fast: {}\nservices:\n  app:\n    default_mode: fsat\n    run:\n      command: [\"true\"]\n",
+    "unknown mode `fsat`; did you mean `fast`?"
+)]
+#[case::builtin(
+    "modes:\n  split: {}\nservices:\n  app:\n    run:\n      command: [\"true\"]\n",
+    "conflicts with the built-in `split` mode"
+)]
+fn up_yaml_unusable_mode_name(#[case] content: &str, #[case] message: &str) {
+    let issue = single_issue(ConfigFormat::MirrordUpYaml, content);
+    assert!(issue.message.contains(message), "{}", issue.message);
+}

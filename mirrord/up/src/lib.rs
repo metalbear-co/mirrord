@@ -18,11 +18,11 @@ use std::{
 };
 
 pub use config::{
-    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, InstallConfig,
-    PreviewImageError, PreviewImageSource, PreviewImages, PreviewRun, RunConfig, RunType,
-    SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SkipReason,
-    SubprocessCfg, SyncConfig, SyncEntry, SyncRunConfig, TargetValidationError, UpConfig,
-    WindowsSupportError, preview_image_env,
+    BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget,
+    InstallConfig, ModeConfig, PreviewImageError, PreviewImageSource, PreviewImages, PreviewRun,
+    QueueSplitMode, RunConfig, RunType, SERVICE_LAYER_PATHS, SelectError, ServiceConfig,
+    ServiceError, ServiceMode, SkipReason, SubprocessCfg, SyncConfig, SyncEntry, SyncRunConfig,
+    TargetValidationError, UnknownMode, UpConfig, WindowsSupportError, preview_image_env,
 };
 use config::{
     ResolvedTarget, SessionKind, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets,
@@ -30,6 +30,7 @@ use config::{
 use futures::TryStreamExt;
 pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
+use itertools::Itertools;
 use k8s_openapi::api::core::v1::Namespace;
 pub use list::{LISTING_VERSION, UpListing};
 use miette::Diagnostic;
@@ -154,6 +155,16 @@ pub enum UpError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Select(#[from] SelectError),
+
+    /// A custom mode is defined under a built-in mode's name.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    BuiltinModeName(#[from] BuiltinModeName),
+
+    /// A mode is selected that isn't built-in or defined under `modes`.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    UnknownMode(#[from] UnknownMode),
 
     /// One or more services cannot use their resolved targets.
     #[error("target validation failed")]
@@ -354,17 +365,44 @@ impl UpConfig {
     /// Doesn't look at the filesystem, so it also serves to validate a config that isn't on disk
     /// (e.g. in `mirrord mcp`); [`load_up_config`] runs it before resolving the services' paths.
     pub fn verify(&self) -> Result<(), UpError> {
-        for (service, service_config) in &self.services {
-            if service_config.run.directory.is_some()
-                && matches!(service_config.run.r#type, config::RunType::Container)
-            {
-                return Err(UpError::ContainerRunDirectory {
-                    service: service.clone(),
-                });
-            }
-        }
+        self.verify_all().into_iter().next().map_or(Ok(()), Err)
+    }
 
-        Ok(())
+    /// Every reason [`Self::verify`] rejects the config for, so `mirrord mcp` can report them all
+    /// at once.
+    pub fn verify_all(&self) -> Vec<UpError> {
+        let builtin_names = self
+            .modes
+            .keys()
+            .filter(|name| ServiceMode::from_name(name).is_some())
+            .map(|name| BuiltinModeName(name.clone()).into());
+        // `services` is a `HashMap`, so its entries are sorted here and below: [`Self::verify`]
+        // then reports the same first error on every run.
+        let unknown_modes = self
+            .services
+            .values()
+            .map(|service| &service.default_mode)
+            .sorted()
+            .dedup()
+            .filter_map(|name| ModeConfig::named(&self.modes, name).err())
+            .map(UpError::from);
+        let container_directories = self
+            .services
+            .iter()
+            .filter(|(_, service)| {
+                service.run.directory.is_some()
+                    && matches!(service.run.r#type, config::RunType::Container)
+            })
+            .map(|(service, _)| service)
+            .sorted()
+            .map(|service| UpError::ContainerRunDirectory {
+                service: service.clone(),
+            });
+
+        builtin_names
+            .chain(unknown_modes)
+            .chain(container_directories)
+            .collect()
     }
 }
 
@@ -946,6 +984,7 @@ fn service_commands(
                 run,
                 sync: _,
                 mode: _,
+                incoming: _,
                 default_db_branches: _,
                 default_split_queues: _,
             } = config;
@@ -1031,15 +1070,15 @@ mod tests {
         Some("target")
     )]
     #[case::value_typo(
-        "services:\n  api:\n    default_mode: splt\n    run:\n      command: [x]\n",
+        "modes:\n  m:\n    incoming: splt\nservices:\n  api:\n    run:\n      command: [x]\n",
         Some("split")
     )]
     #[case::value_in_uppercase(
-        "services:\n  api:\n    default_mode: MIRROR\n    run:\n      command: [x]\n",
+        "modes:\n  m:\n    incoming: MIRROR\nservices:\n  api:\n    run:\n      command: [x]\n",
         Some("mirror")
     )]
     #[case::unrelated_value(
-        "services:\n  api:\n    default_mode: zzzzzz\n    run:\n      command: [x]\n",
+        "modes:\n  m:\n    incoming: zzzzzz\nservices:\n  api:\n    run:\n      command: [x]\n",
         None
     )]
     #[case::other_error("services:\n  api:\n    default_mode: split\n", None)]
@@ -1065,7 +1104,8 @@ mod tests {
     /// The report shows the YAML snippet once: in the message, with its suggestion.
     #[test]
     fn parse_error_report_shows_the_snippet_once() {
-        let yaml = "services:\n  api:\n    default_mode: mirorr\n    run:\n      command: [x]\n";
+        let yaml =
+            "modes:\n  m:\n    incoming: mirorr\nservices:\n  api:\n    run:\n      command: [x]\n";
         let error = template(yaml, &EnvKey::Provided("key".to_owned())).unwrap_err();
 
         let mut report = String::new();
@@ -1077,6 +1117,44 @@ mod tests {
             report.matches("--> <input>").count(),
             1,
             "the parse error must not repeat as its own source:\n{report}"
+        );
+    }
+
+    /// A custom mode can't take a built-in mode's name.
+    #[rstest::rstest]
+    fn verify_rejects_custom_mode_named_after_builtin(
+        #[values("split", "replace", "mirror")] name: &str,
+    ) {
+        let yaml = format!(
+            "modes:\n  {name}:\n    incoming: mirror\nservices:\n  api:\n    run:\n      command: [x]\n"
+        );
+        let config = template(&yaml, &EnvKey::Provided("key".to_owned())).unwrap();
+
+        let Err(UpError::BuiltinModeName(BuiltinModeName(builtin))) = config.verify() else {
+            panic!("expected a built-in name error");
+        };
+        assert_eq!(&*builtin, name);
+    }
+
+    /// An unknown `default_mode` fails `verify`, naming the closest and every known mode.
+    #[test]
+    fn verify_rejects_unknown_default_mode() {
+        let yaml = "modes:\n  fast: {}\nservices:\n  api:\n    default_mode: fsat\n    run:\n      command: [x]\n";
+        let config = template(yaml, &EnvKey::Provided("key".to_owned())).unwrap();
+
+        let Err(UpError::UnknownMode(UnknownMode {
+            name,
+            suggestion,
+            known,
+        })) = config.verify()
+        else {
+            panic!("expected an unknown mode error");
+        };
+        assert_eq!(&*name, "fsat");
+        assert_eq!(suggestion.as_deref(), Some("fast"));
+        assert_eq!(
+            known.iter().map(AsRef::as_ref).collect::<Vec<&str>>(),
+            ["split", "replace", "mirror", "fast"]
         );
     }
 

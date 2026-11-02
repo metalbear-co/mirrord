@@ -1128,7 +1128,8 @@ fn service(entries: &[(&str, &str)], install: Option<InstallConfig>) -> Subproce
             install,
             restart_on_change: false,
         }),
-        mode: ServiceMode::default(),
+        mode: ServiceMode::default().into(),
+        incoming: ServiceMode::default(),
         default_db_branches: false,
         default_split_queues: false,
     }
