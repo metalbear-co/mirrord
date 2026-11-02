@@ -8,6 +8,24 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.283.0](https://github.com/metalbear-co/mirrord/tree/3.283.0) - 2026-11-01
+
+
+### Added
+
+- Added `mirrord preview sync`, which previews each service with `sync` in
+  `mirrord-up.yaml` with your local code instead of a built image: the CLI
+  pushes the `sync.files` directories into the preview pod, `sync.install`
+  installs the dependencies again when they change, and `--watch` keeps pushing
+  your edits. A service runs its image from `--image` or
+  `MIRRORD_<SERVICE>_IMAGE`, or the target's own image without one. `mirrord
+  preview status` shows the sync of each session.
+
+
+### Changed
+
+- Update the bundled apple-utils to `v10`.
+
 ## [3.282.0](https://github.com/metalbear-co/mirrord/tree/3.282.0) - 2026-10-30
 
 
