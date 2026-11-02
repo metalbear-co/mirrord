@@ -381,6 +381,7 @@ impl UpConfig {
             .values()
             .map(|service| &service.default_mode)
             .sorted()
+            .dedup()
             .filter_map(|name| ModeConfig::named(&self.modes, name).err())
             .map(UpError::from);
         let container_directories = self
