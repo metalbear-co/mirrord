@@ -260,12 +260,12 @@ impl MessageFilterConfig {
 /// The queue ids have to match those defined in the target's `MirrordSplitConfig` (or the legacy
 /// `MirrordWorkloadQueueRegistry` / `MirrordKafkaTopicsConsumer`).
 ///
-/// An entry that sets neither `filter`, `message_filter` nor `jq_filter` uses the `filter` /
-/// `jqFilter` the `MirrordSplitConfig` queue entry defines. A filter set here always takes
-/// precedence over the one in the split config, and an empty `message_filter` map is such a
-/// filter: it keeps meaning "split the queue, deliver nothing". A queue missing from
-/// `split_queues` altogether delivers nothing to the local application, whatever the split
-/// config says.
+/// An entry that sets neither `filter`, `message_filter` nor `jq_filter` receives the messages
+/// carrying the session's `key`, found with the `keyJqFilter` of the `MirrordSplitConfig` queue
+/// entry. A filter set here takes precedence over it, unless the queue entry has `enforceFilter`,
+/// which rejects the session instead. An empty `message_filter` map is not rejected: it keeps
+/// meaning "split the queue, deliver nothing". A queue missing from `split_queues` altogether
+/// delivers nothing to the local application, whatever the split config says.
 ///
 /// Two shapes are accepted. The classic map form keys each entry by its queue id, which means a
 /// given id can appear only once:
