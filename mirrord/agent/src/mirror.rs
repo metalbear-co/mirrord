@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
-    ops::{Not, RangeInclusive},
+    ops::RangeInclusive,
 };
 
 use futures::StreamExt;
@@ -106,20 +106,18 @@ impl TcpMirrorApi {
                 Some(finished) = ongoing.join_next() => {
                     match finished {
                         Ok(mut http) => {
-                            // Now that we've buffered everything, we should have
-                            // no more body frames remaining.
-                            if http.request_head.body_finished.not() {
-                                continue;
-                            }
-
                             let port = http.info.original_destination.port();
                             let Some(filter) = filters.get(&port) else {
                                 tracing::warn!("have no filter for request with buffered body.");
                                 return Ok(M::Http(http));
                             };
 
-                            // Buffering either completed the body or gave up on it for good,
-                            // so this answer is final.
+                            // Buffering either completed the body or gave up on it for good, so
+                            // the filter gets to see every buffered request, including one whose
+                            // body never finished: a `Not` over a body filter mirrors exactly
+                            // those. Only the filter decides here; it never asks for the body
+                            // again after a buffering attempt, and if it did, dropping the request
+                            // beats buffering it twice.
                             let (parts, body) = http.parts_and_body();
                             match filter.matches(parts, body).await {
                                 MatchResult::Match => Ok(M::Http(http)),
@@ -321,8 +319,10 @@ impl TcpMirrorApi {
 #[cfg(test)]
 mod test {
     use std::{
+        collections::HashMap,
         net::SocketAddr,
         sync::{Arc, Mutex},
+        time::Duration,
     };
 
     use bytes::Bytes;
@@ -331,16 +331,60 @@ mod test {
         Payload,
         tcp::{self, Filter, InternalHttpBodyFrame, JsonPathQuery},
     };
-    use tokio::sync::broadcast;
+    use tokio::{sync::broadcast, task::JoinSet};
     use tokio_stream::wrappers::BroadcastStream;
 
+    use super::TcpMirrorApi;
     use crate::{
         http::filter::{HttpFilter, MatchResult},
         incoming::{
-            BodyBuffering, ConnectionInfo, IncomingStream, IncomingStreamItem, MirroredHttp,
-            RequestHead,
+            BodyBuffering, ConnError, ConnectionInfo, IncomingStream, IncomingStreamItem,
+            MirrorHandle, MirroredHttp, MirroredTraffic, RedirectorTask, RedirectorTaskConfig,
+            RequestHead, test::DummyRedirector,
         },
+        util::protocol_version::ClientProtocolVersion,
     };
+
+    /// The port every request built by [`split_body_request`] is addressed to.
+    const PORT: u16 = 8080;
+
+    /// A mirror handle with no mirrored ports, so [`TcpMirrorApi::next`] only ever yields what
+    /// the body buffering tasks hand back.
+    fn idle_mirror_handle() -> MirrorHandle {
+        let (redirector, _state, _conn_tx) = DummyRedirector::new();
+        let (_task, _steal_handle, mirror_handle) = RedirectorTask::new(
+            redirector,
+            Default::default(),
+            Default::default(),
+            RedirectorTaskConfig::from_env(),
+        );
+        mirror_handle
+    }
+
+    /// Buffers the request's body in the background and runs [`TcpMirrorApi::next`] over the
+    /// result, the way the mirror does once a filter asked for the body. Returns the mirrored
+    /// request, or `None` when the mirror dropped it.
+    async fn next_after_buffering(
+        filter: HttpFilter,
+        mut http: MirroredHttp,
+    ) -> Option<MirroredHttp> {
+        let filters = HashMap::from([(PORT, filter)]);
+        let version = ClientProtocolVersion::default();
+        let mut handle = idle_mirror_handle();
+        let mut ongoing = JoinSet::new();
+        ongoing.spawn(async move {
+            let _ = http.buffer_body().await;
+            http
+        });
+
+        let next = TcpMirrorApi::next(&mut handle, &mut ongoing, &version, &filters);
+        match tokio::time::timeout(Duration::from_millis(500), next).await {
+            Ok(Ok(MirroredTraffic::Http(http))) => Some(http),
+            Ok(other) => panic!("expected a mirrored HTTP request, got {other:?}"),
+            // A dropped request leaves `next` with nothing to yield.
+            Err(_elapsed) => None,
+        }
+    }
 
     /// A mirrored request whose body arrives in two frames: `first_frame` is already in hand,
     /// `rest` comes later through the connection stream.
@@ -353,7 +397,7 @@ mod test {
             tx.send(item).unwrap();
         }
 
-        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let addr = SocketAddr::from(([127, 0, 0, 1], PORT));
         let (parts, _) = Request::builder()
             .method("POST")
             .uri("/orders")
@@ -437,7 +481,8 @@ mod test {
 
     /// A body the agent refuses to buffer (here: `Content-Length` over the limit) never becomes
     /// available. The request must not stay undecided after that: the body filter counts as not
-    /// matching, so its negation matches and the request is mirrored.
+    /// matching, so its negation matches. `next_mirrors_a_request_whose_body_buffering_gave_up`
+    /// covers the same request going through the mirror loop.
     #[tokio::test]
     async fn not_over_body_filter_matches_once_buffering_gave_up() {
         let filter = not_preview_tenant();
@@ -452,6 +497,78 @@ mod test {
         http.buffer_body().await.unwrap_err();
         assert!(!http.request_head.body_finished);
         assert_eq!(check(&filter, &mut http).await, MatchResult::Match);
+    }
+
+    /// `next` used to drop every buffered request whose body did not finish, before the filter saw
+    /// it. A body that buffering gave up on never finishes, so `not (body ...)` never mirrored such
+    /// a request, while the steal path took it. The filter gets to decide: a given-up body matches
+    /// the negation and the request is mirrored, body unfinished.
+    #[tokio::test]
+    async fn next_mirrors_a_request_whose_body_buffering_gave_up() {
+        let mut http = split_body_request(br#"{"tenant":"pre"#, []);
+        http.request_head.parts.headers.insert(
+            "content-length",
+            (1024 * 1024 * 1024).to_string().parse().unwrap(),
+        );
+
+        let mirrored = next_after_buffering(not_preview_tenant(), http)
+            .await
+            .expect("the request is mirrored");
+        assert_eq!(mirrored.body_buffering, BodyBuffering::GaveUp);
+        assert!(!mirrored.request_head.body_finished);
+    }
+
+    /// A connection error while the body is being read is not the same as giving up on a body
+    /// that is too big or too slow: there is nothing left to mirror. `not (body ...)` must not
+    /// read it as "body does not match" and mirror a request with a broken body.
+    #[tokio::test]
+    async fn next_drops_a_request_whose_body_broke_even_under_not() {
+        let http = split_body_request(
+            br#"{"tenant":"pre"#,
+            [IncomingStreamItem::Finished(Err(ConnError::AgentBug(
+                "client went away".to_owned(),
+            )))],
+        );
+
+        assert!(
+            next_after_buffering(not_preview_tenant(), http)
+                .await
+                .is_none()
+        );
+    }
+
+    /// A body that the mirror does buffer in full is decided through `next` the same way it is
+    /// decided by hand: preview traffic is dropped, everything else is mirrored.
+    #[tokio::test]
+    async fn next_decides_a_fully_buffered_body() {
+        let preview = split_body_request(
+            br#"{"tenant":"pre"#,
+            [
+                IncomingStreamItem::Frame(InternalHttpBodyFrame::Data(Payload(
+                    Bytes::from_static(br#"view"}"#),
+                ))),
+                IncomingStreamItem::NoMoreFrames,
+            ],
+        );
+        assert!(
+            next_after_buffering(not_preview_tenant(), preview)
+                .await
+                .is_none()
+        );
+
+        let live = split_body_request(
+            br#"{"tenant":"li"#,
+            [
+                IncomingStreamItem::Frame(InternalHttpBodyFrame::Data(Payload(
+                    Bytes::from_static(br#"ve"}"#),
+                ))),
+                IncomingStreamItem::NoMoreFrames,
+            ],
+        );
+        let mirrored = next_after_buffering(not_preview_tenant(), live)
+            .await
+            .expect("the request is mirrored");
+        assert!(mirrored.request_head.body_finished);
     }
 
     /// A filter that never looks at the body answers on the head alone, so a partial body does
