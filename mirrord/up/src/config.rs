@@ -168,7 +168,8 @@ pub struct ModeConfig {
 
     /// Which DB branches the service requests, from the `dbBranches` defined on the workload's
     /// `MirrordSplitConfig`: `empty`, `schema` or `all` to copy every one with that copy mode,
-    /// `inherit` to copy each with its own, `off` for none. Applies whatever `incoming` is.
+    /// `inherit` to copy each with its own, `off` for none. Applies whatever `incoming` is, and
+    /// is ignored with a message when the target isn't a single workload.
     ///
     /// When not set, a mode whose `incoming` is `split` or `mirror` requests the same branches as
     /// `inherit` when the target is a single workload, but runs against the source databases
@@ -907,17 +908,9 @@ impl ServiceConfig {
             },
         };
 
-        // The operator resolves `"*"` against the `MirrordSplitConfig` of one targeted
-        // workload, so a targetless or label-selected service has nothing to ask for. Every
-        // service of a run shares the key, so services pointing at one entry land on one branch.
-        // Branches set in the base config, or by `config_patch` below, take precedence.
-        let single_workload = cfg.target.path.as_ref().is_some_and(|path| {
-            matches!(
-                path,
-                Target::Targetless | Target::Serverless(_) | Target::Label(_)
-            )
-            .not()
-        });
+        // Every service of a run shares the key, so services pointing at one entry land on one
+        // branch. Branches set in the base config, or by `config_patch` below, take precedence.
+        let single_workload = is_single_workload(cfg.target.path.as_ref());
         let all = || SplitConfigDbBranches::All(AllSplitConfigDbBranches::All);
         let copy = |mode| {
             SplitConfigRequest::WithCopy(SplitConfigRequestWithCopy {
@@ -928,6 +921,8 @@ impl ServiceConfig {
         let shares_traffic = matches!(mode.incoming(), ServiceMode::Split | ServiceMode::Mirror);
         let request = match mode.db_branching {
             _ if cfg.feature.db_branches.is_empty().not() => None,
+            // A mode applies to every service on it, and the line means nothing on these.
+            Some(_) if single_workload.not() => None,
             Some(DbBranching::Empty) => Some(copy(BranchCopyMode::Empty)),
             Some(DbBranching::Schema) => Some(copy(BranchCopyMode::Schema)),
             Some(DbBranching::All) => Some(copy(BranchCopyMode::All)),
@@ -1217,6 +1212,19 @@ pub struct SubprocessCfg {
     /// are the `"*"` splits `mirrord up` adds, which a preview session asks its operator to drop
     /// where it can't serve them rather than failing.
     pub queues_origin: RequestOrigin,
+}
+
+/// Whether `target` is one workload. The operator resolves a DB branching request against the
+/// `MirrordSplitConfig` of one targeted workload, so a targetless or label-selected service has
+/// nothing to ask for.
+fn is_single_workload(target: Option<&Target>) -> bool {
+    target.is_some_and(|path| {
+        matches!(
+            path,
+            Target::Targetless | Target::Serverless(_) | Target::Label(_)
+        )
+        .not()
+    })
 }
 
 /// Where a service's DB branches or queue splits came from, which decides what `mirrord up` does
@@ -1771,22 +1779,34 @@ impl UpConfig {
                         );
                     }
                 }
-                svc.assemble(
-                    &service_name,
-                    base_config.clone(),
-                    &mode,
-                    key.clone(),
-                    resolved_targets,
-                    up_context.clone(),
-                    kind,
-                )
-                .map_err(|source| {
-                    ConfigPatchError {
+                let mode_name = svc.default_mode.clone();
+                let service = svc
+                    .assemble(
+                        &service_name,
+                        base_config.clone(),
+                        &mode,
+                        key.clone(),
+                        resolved_targets,
+                        up_context.clone(),
+                        kind,
+                    )
+                    .map_err(|source| ConfigPatchError {
                         service: service_name.clone(),
                         source,
-                    }
-                    .into()
-                })
+                    })?;
+                let asks_for_branches = mode
+                    .db_branching
+                    .is_some_and(|branching| branching != DbBranching::Off);
+                if kind == SessionKind::Up
+                    && asks_for_branches
+                    && is_single_workload(service.config.target.path.as_ref()).not()
+                    && service.config.feature.db_branches.is_empty()
+                {
+                    eprintln!(
+                        "{service_name}: `db_branching` of mode `{mode_name}` is ignored, it needs a single workload target",
+                    );
+                }
+                Ok(service)
             })
             .collect()
     }
