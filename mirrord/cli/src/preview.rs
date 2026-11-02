@@ -316,7 +316,15 @@ impl PreparedPreview {
                         .to_owned(),
                 ));
             }
-            // The config check already warned about these. Dropped here, before the feature
+            // Run here, not with the general config check: that one also loads the config for
+            // `preview stop` and friends, where a missing `-t` is not a preview without a target.
+            let mut context = ConfigContext::default();
+            let verified = layer_config.verify_for_targetless_preview(&mut context);
+            for warning in context.into_warnings() {
+                progress.warning(&warning);
+            }
+            verified?;
+            // The config check above warned about these. Dropped here, before the feature
             // check and the file reads below, so an unused queue split is not held against the
             // operator and an unused mount file is never opened.
             layer_config.feature.split_queues = Default::default();
@@ -387,7 +395,6 @@ impl PreparedPreview {
                     .spec
                     .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
             }
-
             Ok::<(), CliError>(())
         };
         if let Err(error) = feature_support.await {

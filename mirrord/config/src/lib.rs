@@ -1526,90 +1526,12 @@ impl LayerConfig {
             );
         }
 
-        // targetless with branches - the preview is its branch databases and runs no pod, so
-        // nothing can receive traffic, consume queues, mount files, scale, or idle. Without
-        // branches a missing target is the CLI's call: `preview status` and friends need none.
-
+        // A branch-only preview (branches, no target) sends no incoming, so its steal check runs
+        // below on the config as it is sent. The pod-bound settings themselves are checked in
+        // `verify_for_targetless_preview`, by the commands that start such a preview: a missing
+        // `-t` on `preview stop` or `status` is not a preview without a target.
         let branch_only = matches!(self.target.path, None | Some(Target::Targetless))
             && !self.feature.db_branches.is_empty();
-
-        if branch_only {
-            if self.feature.preview.idle.is_enabled() {
-                return Err(ConfigError::Conflict(
-                    "`feature.preview.idle` cannot be used in a preview without a target: it \
-                     only provisions branch databases and has no pods to scale."
-                        .to_owned(),
-                ));
-            }
-
-            // The TTL is the only thing that ends a preview without a target: it has no pod to
-            // watch, nothing idles or pauses it, so with no TTL its branch databases would stay
-            // up until someone deletes the session by hand. The operator refuses it as well.
-            if self.feature.preview.resolved_ttl_secs() >= PreviewTtl::INFINITE_TTL_SECS {
-                return Err(ConfigError::Conflict(
-                    "`feature.preview.ttl_secs` (or `ttl_mins`) cannot be infinite in a preview without a \
-                     target: the TTL is what ends it and frees its branch databases, as it runs \
-                     no pod that could be stopped instead. Set a finite TTL, or set a `target`."
-                        .to_owned(),
-                ));
-            }
-
-            let ignored_without_target = |field: &str, because: &str| {
-                format!(
-                    "`{field}` is ignored in a preview without a target: it only provisions \
-                     branch databases and runs no pod {because}."
-                )
-            };
-
-            if self.feature.network.incoming != default.feature.network.incoming {
-                context.add_warning(ignored_without_target(
-                    "feature.network.incoming",
-                    "to receive traffic",
-                ));
-            }
-
-            if self.feature.split_queues.is_set() {
-                context.add_warning(ignored_without_target(
-                    "feature.split_queues",
-                    "to route messages to",
-                ));
-            }
-
-            if self.feature.kafka_branch {
-                context.add_warning(ignored_without_target(
-                    "feature.kafka_branch",
-                    "to point at the branch broker",
-                ));
-            }
-
-            if self.feature.preview.replicas != default.feature.preview.replicas {
-                context.add_warning(ignored_without_target(
-                    "feature.preview.replicas",
-                    "to scale",
-                ));
-            }
-
-            if self.feature.preview.image.is_some() {
-                context.add_warning(ignored_without_target(
-                    "feature.preview.image",
-                    "to run the image in",
-                ));
-            }
-
-            if !self.feature.preview.config_mounts.is_empty() {
-                context.add_warning(ignored_without_target(
-                    "feature.preview.config_mounts",
-                    "to mount them in",
-                ));
-            }
-
-            if !self.feature.preview.secret_mounts.is_empty() {
-                context.add_warning(ignored_without_target(
-                    "feature.preview.secret_mounts",
-                    "to mount them in",
-                ));
-            }
-        }
 
         // feature.preview.idle - needs a wake source, otherwise an idle session could never
         // scale back up.
@@ -1638,6 +1560,100 @@ impl LayerConfig {
         }
 
         self.verify(context)
+    }
+
+    /// Checks the settings only a preview pod could use, for a preview that `start` or `up`
+    /// decided runs without a target: it provisions its branch databases and nothing else, so
+    /// nothing can receive traffic, consume queues, mount files, scale, or idle. Idle and an
+    /// infinite TTL are refused, the rest is reported as ignored.
+    ///
+    /// Separate from [`Self::verify_for_preview_env`] because that one also runs for `stop`,
+    /// `status`, `logs` and `diff`, which take no target at all: a config that started a
+    /// targeted preview with `idle` must still stop it when `-t` is left out.
+    pub fn verify_for_targetless_preview(
+        &self,
+        context: &mut ConfigContext,
+    ) -> Result<(), ConfigError> {
+        let default = Self::resolve(&mut ConfigContext::default().strict_env(true))
+            .expect("default config must be valid");
+
+        if self.feature.preview.idle.is_enabled() {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.idle` cannot be used in a preview without a target: it \
+                 only provisions branch databases and has no pods to scale."
+                    .to_owned(),
+            ));
+        }
+
+        // The TTL is the only thing that ends a preview without a target: it has no pod to
+        // watch, nothing idles or pauses it, so with no TTL its branch databases would stay
+        // up until someone deletes the session by hand. The operator refuses it as well.
+        if self.feature.preview.resolved_ttl_secs() >= PreviewTtl::INFINITE_TTL_SECS {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.ttl_secs` (or `ttl_mins`) cannot be infinite in a preview without a \
+                 target: the TTL is what ends it and frees its branch databases, as it runs \
+                 no pod that could be stopped instead. Set a finite TTL, or set a `target`."
+                    .to_owned(),
+            ));
+        }
+
+        let ignored_without_target = |field: &str, because: &str| {
+            format!(
+                "`{field}` is ignored in a preview without a target: it only provisions \
+                 branch databases and runs no pod {because}."
+            )
+        };
+
+        if self.feature.network.incoming != default.feature.network.incoming {
+            context.add_warning(ignored_without_target(
+                "feature.network.incoming",
+                "to receive traffic",
+            ));
+        }
+
+        if self.feature.split_queues.is_set() {
+            context.add_warning(ignored_without_target(
+                "feature.split_queues",
+                "to route messages to",
+            ));
+        }
+
+        if self.feature.kafka_branch {
+            context.add_warning(ignored_without_target(
+                "feature.kafka_branch",
+                "to point at the branch broker",
+            ));
+        }
+
+        if self.feature.preview.replicas != default.feature.preview.replicas {
+            context.add_warning(ignored_without_target(
+                "feature.preview.replicas",
+                "to scale",
+            ));
+        }
+
+        if self.feature.preview.image.is_some() {
+            context.add_warning(ignored_without_target(
+                "feature.preview.image",
+                "to run the image in",
+            ));
+        }
+
+        if !self.feature.preview.config_mounts.is_empty() {
+            context.add_warning(ignored_without_target(
+                "feature.preview.config_mounts",
+                "to mount them in",
+            ));
+        }
+
+        if !self.feature.preview.secret_mounts.is_empty() {
+            context.add_warning(ignored_without_target(
+                "feature.preview.secret_mounts",
+                "to mount them in",
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -3081,7 +3097,8 @@ mod tests {
     #[test]
     fn targetless_preview_with_branches_warns_about_pod_settings() {
         // Written both ways: `target` left out and `target: "targetless"`. Steal would be
-        // refused for a targetless agent, but a branch-only preview never sends incoming.
+        // refused for a targetless agent, but a branch-only preview never sends incoming, which
+        // the general preview check knows; the pod-bound settings are the start check's.
         for target in ["", r#""target": "targetless","#] {
             let config = ConfigType::Json.parse(&format!(
                 r#"{{
@@ -3108,6 +3125,9 @@ mod tests {
             resolved
                 .verify_for_preview_env(&mut context)
                 .expect("branches with self-contained sources need no target");
+            resolved
+                .verify_for_targetless_preview(&mut context)
+                .expect("pod-bound settings are only ignored, not refused");
 
             let warnings = context.into_warnings();
             for field in [
@@ -3143,7 +3163,7 @@ mod tests {
             .generate_config(&mut context)
             .expect("config generation should succeed before verification");
         let error = resolved
-            .verify_for_preview_env(&mut context)
+            .verify_for_targetless_preview(&mut context)
             .expect_err("idle has no pod to scale without a target");
         assert!(
             matches!(&error, ConfigError::Conflict(message) if message.contains("without a target")),
@@ -3173,7 +3193,7 @@ mod tests {
             .generate_config(&mut context)
             .expect("config generation should succeed before verification");
         let error = resolved
-            .verify_for_preview_env(&mut context)
+            .verify_for_targetless_preview(&mut context)
             .expect_err("an infinite TTL must be refused without a target");
         assert!(
             error
@@ -3181,6 +3201,45 @@ mod tests {
                 .contains("cannot be infinite in a preview without a target"),
             "unexpected error: {error}"
         );
+    }
+
+    /// `preview stop`, `status`, `logs` and `diff` load the config through the same preview check
+    /// as `start`, and take no target: `preview stop -f cfg.json` with no `-t` deletes every
+    /// session under the key. A config that started a targeted preview with `idle` and an
+    /// infinite TTL is valid, so the same config with `-t` left out must still load for the stop;
+    /// only the start check, run once a preview is known to have no target, refuses it.
+    #[test]
+    fn stop_without_a_target_does_not_run_the_targetless_start_checks() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "preview": { "ttl_secs": "infinite", "idle": { "sleep_after_secs": 60 } },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify_for_preview_env(&mut context)
+            .expect("the config of a running targeted preview must load for its stop");
+        let warnings = context.into_warnings();
+        assert!(
+            warnings
+                .iter()
+                .all(|warning| !warning.contains("without a target")),
+            "the stop flow is not a preview without a target: {warnings:?}"
+        );
+
+        resolved
+            .verify_for_targetless_preview(&mut ConfigContext::default())
+            .expect_err("the start check still refuses idle and an infinite TTL");
     }
 
     /// Serializes the magic.aws tests that mutate the global `HOME` /
