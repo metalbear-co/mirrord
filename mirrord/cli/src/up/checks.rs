@@ -32,6 +32,7 @@ use mirrord_operator::{
 };
 use mirrord_progress::NullProgress;
 use mirrord_up::{RequestOrigin, SubprocessCfg};
+use thiserror::Error;
 
 use super::UpCliError;
 use crate::{
@@ -62,6 +63,54 @@ impl std::fmt::Display for NoOperator {
             }
         })
     }
+}
+
+/// Why a service's DB branching request can't be served.
+#[derive(Debug, Error)]
+pub(crate) enum Unservable {
+    #[error("there is no usable mirrord operator ({0})")]
+    NoOperator(NoOperator),
+    #[error("no MirrordSplitConfig defines `dbBranches` for `{target}` in namespace `{namespace}`")]
+    NoDefinitions { target: Target, namespace: String },
+    #[error("the mirrord operator doesn't support {0}")]
+    Unsupported(NewOperatorFeature),
+}
+
+impl Unservable {
+    /// What else the user can do, besides turning the mode's `db_branching` off.
+    fn hint(&self) -> &'static str {
+        match self {
+            Self::NoOperator(_) => "DB branching needs the mirrord operator.",
+            Self::NoDefinitions { .. } => {
+                "Or ask the MirrordSplitConfig owner to add `dbBranches` for the workload."
+            }
+            Self::Unsupported(_) => "Or upgrade the mirrord operator, or enable the feature in it.",
+        }
+    }
+
+    /// The failure of a request from the mode's `db_branching` line, naming the mode.
+    fn mode_error(self, service: &SubprocessCfg) -> UpCliError {
+        UpCliError::ModeDbBranchesUnservable {
+            service: service.service_name.clone(),
+            mode: service.mode.clone(),
+            hint: self.hint(),
+            reason: Box::new(self),
+        }
+    }
+}
+
+/// A request from the mode's `db_branching` line fails the run. Any other one is dropped, saying
+/// so, and the service runs against the source databases.
+fn drop_or_fail(service: &mut SubprocessCfg, reason: Unservable) -> Result<(), UpCliError> {
+    if service.db_branches_origin == RequestOrigin::ModeLine {
+        return Err(reason.mode_error(service));
+    }
+    println!(
+        "{}: {reason}, running against the source DB",
+        service.service_name
+    );
+    service.config.feature.db_branches = DatabaseBranchesConfig::default();
+    Ok(())
 }
 
 /// Looks up the operator of every service that requests DB branching or splits queues, once per
@@ -200,20 +249,7 @@ pub(super) async fn check_db_branches(
         }
         let key = operator_key(&service.config);
         match apis.get(&key) {
-            Some(Err(reason)) if service.db_branches_origin == RequestOrigin::ModeLine => {
-                return Err(UpCliError::ModeDbBranchesNoOperator {
-                    service: service.service_name.clone(),
-                    mode: service.mode.clone(),
-                    reason: *reason,
-                });
-            }
-            Some(Err(reason)) => {
-                println!(
-                    "{}: no usable mirrord operator ({reason}), running against the source DB",
-                    service.service_name
-                );
-                service.config.feature.db_branches = DatabaseBranchesConfig::default();
-            }
+            Some(Err(reason)) => drop_or_fail(service, Unservable::NoOperator(*reason))?,
             // One the user set fails below, as it would in a session.
             Some(Ok(api))
                 if service.db_branches_origin == RequestOrigin::Default
@@ -314,11 +350,7 @@ pub(super) async fn check_db_branches(
                 OperatorApiError::UnsupportedFeature { feature, .. }
                 | OperatorApiError::FeatureDisabled { feature },
             ) if service.db_branches_origin == RequestOrigin::ModeLine => {
-                return Err(UpCliError::ModeDbBranchesUnsupported {
-                    service: service.service_name.clone(),
-                    mode: service.mode.clone(),
-                    feature,
-                });
+                return Err(Unservable::Unsupported(feature).mode_error(service));
             }
             Err(error) => {
                 if service.db_branches_origin != RequestOrigin::Default
@@ -358,25 +390,14 @@ pub(super) async fn check_db_branches(
             .unwrap_or(api.client().default_namespace())
             .to_owned();
 
-        if response.entries.is_empty() && service.db_branches_origin == RequestOrigin::ModeLine {
-            return Err(UpCliError::ModeDbBranchesNoDefinitions {
-                service: service.service_name.clone(),
-                mode: service.mode.clone(),
-                target: service
-                    .config
-                    .target
-                    .path
-                    .clone()
-                    .unwrap_or(Target::Targetless),
-                namespace,
-            });
-        }
         if response.entries.is_empty() {
-            println!(
-                "{}: no DB branch definitions, running against the source DB",
-                service.service_name
-            );
-            service.config.feature.db_branches = DatabaseBranchesConfig::default();
+            let target = service
+                .config
+                .target
+                .path
+                .clone()
+                .unwrap_or(Target::Targetless);
+            drop_or_fail(service, Unservable::NoDefinitions { target, namespace })?;
             continue;
         }
 
@@ -388,24 +409,11 @@ pub(super) async fn check_db_branches(
             .iter()
             .filter_map(required_branching_feature)
             .find(|feature| supported.contains(feature).not());
-        match (disabled, service.db_branches_origin) {
-            (Some(feature), RequestOrigin::ModeLine) => {
-                return Err(UpCliError::ModeDbBranchesUnsupported {
-                    service: service.service_name.clone(),
-                    mode: service.mode.clone(),
-                    feature,
-                });
-            }
-            (Some(feature), RequestOrigin::Default) => {
-                println!(
-                    "{}: the mirrord operator doesn't support {feature}, running against the \
-                     source DB",
-                    service.service_name
-                );
-                service.config.feature.db_branches = DatabaseBranchesConfig::default();
-                continue;
-            }
-            _ => {}
+        if let Some(feature) = disabled
+            && service.db_branches_origin != RequestOrigin::Config
+        {
+            drop_or_fail(service, Unservable::Unsupported(feature))?;
+            continue;
         }
 
         for entry in &resolved.entries {
