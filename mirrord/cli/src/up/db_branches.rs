@@ -174,8 +174,9 @@ pub(crate) fn resolves_default_db_branches(operator: &OperatorApi<NoClientCert>)
 /// default `"*"` whose operator can't resolve it, and services that get no entries back.
 ///
 /// A request from the mode's `db_branching` line is never dropped: the user asked for branches,
-/// so running against the source databases instead would be a surprise. No usable operator, no
-/// entries, or a copy mode an entry doesn't allow stops the run, naming the mode to change.
+/// so running against the source databases instead would be a surprise. No usable operator, one
+/// that doesn't support the request, no entries, or a copy mode an entry doesn't allow stops the
+/// run, naming the mode to change.
 ///
 /// Services that define their branches inline (e.g. through `config_patch`) have nothing to look
 /// up; they are only announced.
@@ -299,6 +300,25 @@ pub(super) async fn check_db_branches(
                     message,
                 });
             }
+            Err(OperatorApiError::UnsupportedFeature {
+                feature: NewOperatorFeature::DbBranchesSplitConfigCopyMode,
+                ..
+            }) if service.db_branches_origin == RequestOrigin::ModeLine => {
+                return Err(UpCliError::ModeCopyModeUnsupported {
+                    service: service.service_name.clone(),
+                    mode: service.mode.clone(),
+                });
+            }
+            Err(
+                OperatorApiError::UnsupportedFeature { feature, .. }
+                | OperatorApiError::FeatureDisabled { feature },
+            ) if service.db_branches_origin == RequestOrigin::ModeLine => {
+                return Err(UpCliError::ModeDbBranchesUnsupported {
+                    service: service.service_name.clone(),
+                    mode: service.mode.clone(),
+                    feature,
+                });
+            }
             Err(error) => {
                 if service.db_branches_origin != RequestOrigin::Default
                     && let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error
@@ -369,7 +389,7 @@ pub(super) async fn check_db_branches(
             .find(|feature| supported.contains(feature).not());
         match (disabled, service.db_branches_origin) {
             (Some(feature), RequestOrigin::ModeLine) => {
-                return Err(UpCliError::ModeDbBranchesFeatureDisabled {
+                return Err(UpCliError::ModeDbBranchesUnsupported {
                     service: service.service_name.clone(),
                     mode: service.mode.clone(),
                     feature,

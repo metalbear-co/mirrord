@@ -148,21 +148,34 @@ pub enum UpCliError {
     ))]
     ModeQueuesUnsupported { service: Arc<str>, mode: Arc<str> },
 
-    /// A mode's `db_branching` line asks for DB branches of an engine the service's operator has
-    /// turned off.
+    /// A mode's `db_branching` line needs a feature the service's operator is too old for or has
+    /// turned off: resolving `"*"` from the MirrordSplitConfig, or one of the entries' engines.
     #[error(
         "{service}: mode `{mode}` sets `db_branching`, but the mirrord operator doesn't support \
          {feature}"
     )]
     #[diagnostic(help(
-        "Enable it in the mirrord operator, or set `db_branching: off` for mode `{mode}` in \
-         mirrord-up.yaml to run against the source databases."
+        "Upgrade the mirrord operator or enable the feature in it, or set `db_branching: off` for \
+         mode `{mode}` in mirrord-up.yaml to run against the source databases."
     ))]
-    ModeDbBranchesFeatureDisabled {
+    ModeDbBranchesUnsupported {
         service: Arc<str>,
         mode: Arc<str>,
         feature: NewOperatorFeature,
     },
+
+    /// A mode's `db_branching` line sets a copy mode, which the service's operator is too old to
+    /// apply.
+    #[error(
+        "{service}: mode `{mode}` sets a copy mode in `db_branching`, but the mirrord operator \
+         doesn't support overriding it"
+    )]
+    #[diagnostic(help(
+        "Upgrade the mirrord operator, or change `db_branching` for mode `{mode}` in \
+         mirrord-up.yaml: `inherit` uses each entry's own copy mode, `off` runs against the \
+         source databases."
+    ))]
+    ModeCopyModeUnsupported { service: Arc<str>, mode: Arc<str> },
 
     /// Services that share a DB branch ask for it with different copy modes. The branch is
     /// created once, so all but one would fail when they attach to it.
@@ -441,7 +454,8 @@ impl From<&UpCliError> for ErrorCategory {
             UpCliError::DbBranches { .. }
             | UpCliError::ModeDbBranchesNoOperator { .. }
             | UpCliError::ModeDbBranchesNoDefinitions { .. }
-            | UpCliError::ModeDbBranchesFeatureDisabled { .. }
+            | UpCliError::ModeDbBranchesUnsupported { .. }
+            | UpCliError::ModeCopyModeUnsupported { .. }
             | UpCliError::BranchCopyModeConflict { .. }
             | UpCliError::ModeCopyModeNotAllowed { .. } => Self::DbBranching,
             UpCliError::ModeQueuesNoOperator { .. } | UpCliError::ModeQueuesUnsupported { .. } => {
