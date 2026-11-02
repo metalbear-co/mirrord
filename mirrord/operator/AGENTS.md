@@ -11,7 +11,10 @@ create some CRDs.
 ## Command Reference
 
 ```bash
-cargo check -p mirrord-operator --all-features
+CARGO_BUILD_WARNINGS=deny cargo clippy -p mirrord-operator --all-targets --all-features --keep-going -- -Wclippy::indexing_slicing
+
+# CI also checks the `crd` feature on its own
+cargo check -p mirrord-operator --features crd
 ```
 
 ## Modifying a CRD
@@ -22,6 +25,13 @@ charts.
 ```bash
 cargo test -p operator-crd generate_helm_crd_yaml -- --ignored --nocapture
 ```
+
+Kubernetes drops the fields an installed CRD's schema doesn't know, so a CRD change only shows on a cluster whose CRDs
+were generated from it.
+
+A CRD whose objects the operator finalizes also goes in `FINALIZED_CRDS`
+(`mirrord/cli/src/operator/install/uninstall.rs`): `mirrord operator uninstall` has the operator finalize the objects of
+each CRD listed there before removing it.
 
 ## Backwards Compatibility
 

@@ -20,7 +20,8 @@
 # places.
 #
 # 1. The `test-images` repo, if your e2e wants to use a custom image, that's not already there, and;
-# 2. The local `.github/actions/e2e-setup/action.yaml`, where you should add the compilation call.
+# 2. `scripts/prepare_e2e.sh`, where you should add the compilation call. It builds the apps into the CI runner
+#    image; the CI section of `AGENTS.md` says when that image is rebuilt.
 #
 # Forgetting (2) will probably net you a message saying that `mirrord exec` could not find the path of the app,
 # while forgetting (1) nets you a message saying that the service could not be reached/found.
@@ -28,8 +29,6 @@
 # Caveats:
 #
 # You cannot use `workspace` dependencies in the test app, it fails to build, must fully specify the dependency.
-#
-# Related to (2): If you modify `mirrord-ci/actions.yaml`, you'll be affecting every PR!
 name: CI
 
 on:
@@ -154,6 +153,7 @@ jobs:
           files_ignore: |
             tests/src/**
             tests/README.md
+            tests/AGENTS.md
       - name: get install script changes
         id: changed-install-script
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -193,6 +193,8 @@ jobs:
         with:
           files: |
             mirrord/protocol/**
+          files_ignore: |
+            mirrord/protocol/**/*.md
       - name: get protocol toml changes
         id: changed-protocol-toml
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
