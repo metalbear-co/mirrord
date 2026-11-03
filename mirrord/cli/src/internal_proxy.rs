@@ -519,7 +519,8 @@ pub(crate) async fn connect_and_ping(
                 )));
             }
 
-            message @ Some(DaemonMessage::UdpOutgoing(_))
+            message @ Some(DaemonMessage::LocalShare(_))
+            | message @ Some(DaemonMessage::UdpOutgoing(_))
             | message @ Some(DaemonMessage::Tcp(_))
             | message @ Some(DaemonMessage::TcpSteal(_))
             | message @ Some(DaemonMessage::TcpOutgoing(_))

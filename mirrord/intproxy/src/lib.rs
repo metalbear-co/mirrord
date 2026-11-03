@@ -838,6 +838,11 @@ impl IntProxy {
                     .send(IncomingProxyMessage::AgentSteal(msg))
                     .await
             }
+            DaemonMessage::LocalShare(event) => {
+                return Err(
+                    UnexpectedAgentMessage(Box::new(DaemonMessage::LocalShare(event))).into(),
+                );
+            }
             DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
                 let previous = self.protocol_version.replace(protocol_version.clone());
                 if previous.is_none() {

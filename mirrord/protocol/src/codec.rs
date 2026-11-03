@@ -203,6 +203,9 @@ pub enum ClientMessage {
     /// Sent by the operator. Supported from
     /// [`SHARE_LINK_VERSION`](crate::share_link::SHARE_LINK_VERSION).
     ShareLink(ShareLinkRequest),
+    /// Share link control, sent to the operator after the client's protocol version matches
+    /// [`LOCAL_SHARE_VERSION`](crate::local_share::LOCAL_SHARE_VERSION). The agent rejects it.
+    LocalShare(crate::local_share::LocalShareClientMessage),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -270,6 +273,9 @@ pub enum DaemonMessage {
     /// Sent by the agent in response to [`ClientMessage::ReverseDnsLookup`].
     ReverseDnsLookup(RemoteResult<ReverseDnsLookupResponse>),
     SeqpacketOutgoing(DaemonSeqpacket),
+    /// Sent by the operator after it receives
+    /// [`LocalShareClientMessage::Start`](crate::local_share::LocalShareClientMessage::Start).
+    LocalShare(crate::local_share::LocalShareEvent),
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone, From, Into, Deref)]

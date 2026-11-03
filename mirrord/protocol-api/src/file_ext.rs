@@ -242,7 +242,8 @@ impl FileResponseExt for DaemonMessage {
     fn remote_fd_mut(&mut self) -> Option<&mut u64> {
         match self {
             Self::File(res) => res.remote_fd_mut(),
-            Self::Close(_)
+            Self::LocalShare(_)
+            | Self::Close(_)
             | Self::Tcp(_)
             | Self::TcpSteal(_)
             | Self::TcpOutgoing(_)
