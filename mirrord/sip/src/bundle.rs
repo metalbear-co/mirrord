@@ -5,7 +5,7 @@ use crate::logger::SipLoggerGuard;
 /// Paths to system directories that are bundled in our SIP util bundle.
 ///
 /// If an executed binary is located in one of these, we try to find it in the bundle.
-pub const BUNDLED_DIRS: [&str; 4] = ["/bin", "/sbin", "/usr/bin", "/usr/sbin"];
+pub const BUNDLED_DIRS: [&str; 5] = ["/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/libexec"];
 
 pub(super) fn lookup_suffix(binary: &Path) -> Option<&Path> {
     BUNDLED_DIRS
@@ -71,6 +71,11 @@ mod test {
     ///     * /bin
     ///         * /cat
     ///     * /sbin
+    ///     * /libexec
+    ///         * /path_helper
+    ///         * /cups
+    ///             * /daemon
+    ///                 * /cups-exec
     fn make_bundle() -> TempDir {
         let root = tempfile::tempdir().unwrap();
 
@@ -82,6 +87,9 @@ mod test {
         std::fs::create_dir(root.path().join("usr/bin")).unwrap();
         std::fs::write(root.path().join("usr/bin/cat"), []).unwrap();
         std::fs::create_dir(root.path().join("usr/sbin")).unwrap();
+        std::fs::create_dir_all(root.path().join("usr/libexec/cups/daemon")).unwrap();
+        std::fs::write(root.path().join("usr/libexec/path_helper"), []).unwrap();
+        std::fs::write(root.path().join("usr/libexec/cups/daemon/cups-exec"), []).unwrap();
 
         root
     }
@@ -94,6 +102,9 @@ mod test {
     #[case(Path::new("/usr/sbin/ifconfig"), true)]
     #[case(Path::new("/usr/sbin/mount"), false)]
     #[case(Path::new("/sbin/ifconfig"), true)]
+    #[case(Path::new("/usr/libexec/path_helper"), true)]
+    #[case(Path::new("/usr/libexec/cups/daemon/cups-exec"), true)]
+    #[case(Path::new("/usr/libexec/missing_helper"), false)]
     #[test]
     fn find_in_bundle(#[case] binary: &Path, #[case] expect_found: bool) {
         let bundle = make_bundle();

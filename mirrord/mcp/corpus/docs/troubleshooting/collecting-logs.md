@@ -8,6 +8,8 @@ tags:
   - enterprise
 ---
 
+# Collecting Logs
+
 A mirrord session runs several processes: the CLI, the layer loaded into your application, the internal proxy on your machine, the agent in the cluster, and the operator if you use mirrord for Teams. Each one logs on its own. When something misbehaves, the logs from the component that failed are what we need to help you.
 
 ## CLI and layer

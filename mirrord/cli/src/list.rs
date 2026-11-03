@@ -224,6 +224,7 @@ static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
 /// Otherwise:
 /// 1. targets are printed as a plain JSON array of strings (backward compatibility);
 /// 2. all available target types are fetched.
+#[mirrord_macros::boxed_future]
 pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> CliResult<()> {
     let mut cfg_config =
         ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file);

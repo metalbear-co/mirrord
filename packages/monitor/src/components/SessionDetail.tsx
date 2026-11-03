@@ -14,7 +14,7 @@ import { useChaosRules, type ChaosRuleFields } from '../hooks/useChaosRules'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
 import MetadataStrip from './MetadataStrip'
-import { extractLicenseKey } from '../utils'
+import { extractSessionKey } from '../utils'
 import JoinBar from './JoinBar'
 import ResizableSplit from './ResizableSplit'
 import Widget from './Widget'
@@ -263,9 +263,9 @@ function metadataItems(
   const items: { label: string; value: React.ReactNode }[] = [
     { label: 'Session ID', value: session.session_id },
   ]
-  const licenseKey = extractLicenseKey(session.config)
-  if (licenseKey) {
-    items.push({ label: 'License key', value: licenseKey })
+  const sessionKey = extractSessionKey(session.config)
+  if (sessionKey) {
+    items.push({ label: 'Session key', value: sessionKey })
   }
   if (portSubs.length > 0) {
     items.push({

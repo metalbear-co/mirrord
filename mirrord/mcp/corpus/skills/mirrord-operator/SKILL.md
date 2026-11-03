@@ -3,7 +3,7 @@ name: mirrord-operator
 description: Help users install and configure the mirrord Operator for team/enterprise environments. Use when users ask about operator setup, Helm installation, cloud API key or license configuration, air-gapped/offline licensing, enabling features (queue splitting, DB branching, preview environments, multi-cluster), internal registries, OpenShift/GKE Autopilot, RBAC, or multi-user mirrord deployments. Also use when an AI agent hits a Team or Enterprise feature on a cluster with no license and needs to offer the user a trial (agent-started trial; the trial is Enterprise tier).
 metadata:
   author: MetalBear
-  version: "2.17"
+  version: "2.21"
 ---
 
 # Mirrord Operator Skill
@@ -64,6 +64,27 @@ kubectl auth can-i create deployments -n mirrord       # sufficient RBAC (usuall
 ```
 
 You also need a **mirrord for Teams license**. Register at [app.metalbear.com](https://app.metalbear.com). If there's no license yet, an agent can start a trial for the user once they agree — see [No License Yet? Agent-Started Trials](#no-license-yet-agent-started-trials).
+
+## Cluster Requirements
+
+Check these before installing — most install failures trace back to one of them:
+
+- **Kubernetes version:** the Operator needs Kubernetes `1.22`+. Some features need newer:
+
+  | Feature | Minimum Kubernetes version |
+  | --- | --- |
+  | Agent as an ephemeral container (`agent.ephemeral`) | `1.23` |
+  | AppArmor profile for the agent (`agent.security_context`) | `1.30` |
+  | Queue splitting | `1.30` |
+  | Multi-cluster | `1.30` on the Primary cluster |
+  | Multi-cluster preview replicas with DB branching | `1.29` on the workload clusters |
+- **Permissions:** the Helm chart creates cluster-scoped objects (CRDs, ClusterRoles, an APIService, a PriorityClass for agent pods). Whoever runs `helm install` needs permission to create these — in most clusters, the `cluster-admin` role.
+- **Nodes:** Operator and agent images are built for `linux/amd64` and `linux/arm64`. Nodes where agents run need **Linux kernel 5.4+** and a containerd, CRI-O, or Docker runtime — most features work on older kernels, but traffic stealing can be unreliable before 5.4. An agent for a target runs on that target pod's node; a targetless agent can run on any node.
+- **Network:**
+  - **API server → Operator:** the Kubernetes API server must reach the Operator pods over TCP on `operator.port` (443 by default) through the APIService. Private clusters often need a firewall rule for this (see [`mirrord operator status` fails with `503` on GKE](references/troubleshooting.md#mirrord-operator-status-fails-with-503-service-unavailable-on-gke)).
+  - **Operator → MetalBear:** a cloud-connected Operator calls `app.metalbear.com` (license) and `analytics.metalbear.com` (telemetry). Team and Free licenses require telemetry — if it's unreachable for more than an hour, new sessions are blocked; Enterprise telemetry is optional. A cluster with no outbound access needs an Enterprise license certificate or a self-hosted license server — see [Air-gapped / offline](#air-gapped--offline-enterprise).
+  - **Image pulls:** nodes pull operator/agent images from `ghcr.io/metalbear-co`, plus other public images for some features (e.g. DB branch engine images). See [Using an Internal Registry](#using-an-internal-registry-optional) if nodes can't reach these registries.
+- **Resources:** the Operator runs as one pod by default; agent pods run only while a session uses them. See [Footprint & Agent Resources](#footprint--agent-resources).
 
 ## Installation
 
@@ -133,40 +154,45 @@ Most features are **off by default** and gated behind a Helm value under `operat
 | DB branching (per engine) | `operator.mysqlBranching`, `pgBranching`, `mariadbBranching`, `mongodbBranching`, `mssqlBranching`, `redisBranching`, `dynamodbBranching`, `clickhouseBranching`, `cockroachdbBranching`, `spannerBranching` |
 | Generic DB branching (user-supplied images) | `operator.genericBranching: true` (⚠️ lets branch creators run arbitrary images; restrict with `genericBranchConfig.dbPod.allowedImages`) |
 | Preview environments | `operator.previewEnv: true` — default on recent chart versions, so only needs setting explicitly on older ones (+ `operator.shareIngress.shareDomain` and the `mirrord-share-ingress` chart for link sharing) |
-| Multi-cluster orchestration | `operator.multiCluster.enabled: true` on the **primary** cluster; `operator.multiClusterMember: true` on members |
-| Preview environments as multi-cluster replicas | `operator.multiCluster.preview.mode: replicas` on **every** cluster (default `default-cluster`; needs operator/chart `3.193.0`+ and mirrord `3.247.0`+) |
+| Multi-cluster orchestration | `operator.multiCluster.enabled: true` on the **primary** cluster; `operator.multiClusterMember: true` on members (needs Kubernetes `1.30`+ on the Primary, `1.22`+ on downstream clusters — `1.30`+ on downstream clusters too if they use queue splitting) |
+| Preview environments as multi-cluster replicas | `operator.multiCluster.preview.mode: replicas` on **every** cluster (default `default-cluster`; needs operator/chart `3.193.0`+ and mirrord `3.247.0`+; workload clusters need Kubernetes `1.29`+ if the previews use DB branching, since the operator adds a native sidecar to the preview replicas) |
 | Prometheus metrics | `operator.metrics: true` |
 
 > For the specific minimum operator/CLI/chart versions each feature needs, see the corresponding feature skill (e.g. `mirrord-db-branching`, `mirrord-kafka`, `mirrord-prev-env`).
 
 ## No License Yet? Agent-Started Trials
 
-If the cluster has no mirrord for Teams license, an agent can offer the user a seven-day Enterprise trial instead of stopping. Run `mirrord operator status` first: if it succeeds, the cluster already runs the Operator (possibly from a trial an earlier session started), so don't sign up again. Otherwise, once the user agrees:
+If the cluster has no mirrord for Teams license, an agent can offer the user a seven-day Enterprise trial instead of stopping. Run `mirrord operator status` first: if it succeeds, the cluster already runs the Operator (possibly from a trial an earlier session started), so don't sign up again. If the user already has a MetalBear organization, install with that instead (see [Already have an organization?](#already-have-an-organization) below) — signing up again creates a second organization to clean up. Otherwise, once the user agrees:
 
 ```bash
-mirrord operator install --no-browser
+mirrord operator signup
+mirrord operator install --from-signup
 ```
 
-This runs against the cluster of the current kubecontext, or the one named with `--context`. No authentication, no credit card, and no API key for the agent to handle. In a terminal, the command first asks you to confirm the kubecontext and namespace before it starts the trial or changes the cluster — `--yes` skips the question; an agent usually runs without a terminal, and then it isn't asked either way.
+These run against the cluster of the current kubecontext, or the one named with `--context` (give both commands the same one). No authentication, no credit card, and no API key for the agent to handle.
 
-The command starts the trial, installs the Operator from the default Helm chart (no Helm needed), and prints the trial's end date, a `claim_url` for the user to open to take ownership of the organization, and the trial's API key. `--no-browser` keeps it from opening the claim page itself (it's skipped automatically whenever the command isn't running in a terminal). It sends the cluster's ID (the UID of its `default` namespace) as a hint so the user can recognize the cluster on the claim page; `--cluster-hint <name>` sends a different name, `--no-hint` sends none. If an Operator is already installed, or an earlier install left objects behind, the command stops and tells you rather than touching anything.
+`mirrord operator signup` starts the trial and prints its end date and a `claim_url` for the user to open to take ownership of the organization. It saves the trial's API key on this machine instead of printing it. It sends the cluster's ID (the UID of its `default` namespace) as a hint so the user can recognize the cluster on the claim page; `--cluster-hint <name>` sends a different name, `--no-hint` sends none.
 
-If the install fails or is stopped half-way, don't start another trial — remove what was installed and retry with the trial's key (the command prints both commands, filled in, when it fails):
+`mirrord operator install --from-signup` installs the Operator from the default Helm chart (no Helm needed) using the saved key. In a terminal, it first asks you to confirm the kubecontext and namespace before it changes the cluster — `--yes` skips the question; an agent usually runs without a terminal, and then it isn't asked either way. If an Operator is already installed, or an earlier install left objects behind, the command stops and tells you rather than touching anything.
+
+If the install fails or is stopped half-way, don't start another trial — remove what was installed and retry the install with the saved key:
 
 ```bash
 mirrord operator uninstall
-mirrord operator install --api-key <key>
+mirrord operator install --from-signup
 ```
 
-Give both commands the same `--context` if the first attempt used one.
+Treat the trial's API key like any other secret material (see Security Boundaries) — don't echo it; if you move the install to Helm later, pass it via a Secret reference, not `--set`.
 
-Treat the returned API key like any other secret material (see Security Boundaries) — don't echo it; if you move the install to Helm later, pass it via a Secret reference, not `--set`.
-
-**Confirm with the user before running `mirrord operator install`** — it creates an external organization and installs into the cluster; treat it with the same care as any other cluster-modifying action.
+**Confirm with the user before running `mirrord operator signup`** — it creates an external organization and installs into the cluster; treat it with the same care as any other cluster-modifying action.
 
 Because the trial is an Enterprise license, it also covers Preview Environments. The Helm chart enables `operator.previewEnv` by default, so an Operator installed this way supports them as-is — no extra flag needed.
 
 To remove an Operator that `mirrord operator install` set up (also after a half-finished install), run `mirrord operator uninstall`. It first lets the Operator end its sessions so the workloads they changed are restored, then deletes everything the install created, including the mirrord CRDs (so it also deletes the cluster's mirrord policies and profiles). Like install, it takes `--context` and asks for confirmation in a terminal. If the install was later taken over by Helm (via the `helm install` command `mirrord operator install` prints for anything beyond the default setup), use `helm uninstall` instead — `mirrord operator uninstall` detects this and stops rather than acting.
+
+### Already have an organization?
+
+No trial needed. Running `mirrord operator install` with no flags logs you (or the agent, with your approval) into [app.metalbear.com](https://app.metalbear.com) in the browser (or reuses a recent `mirrord login` from the same machine), creates the organization's operator API key, and installs the Operator with it — without ever showing the key to the agent. If no browser opens, it prints the URL to visit and waits up to five minutes for approval. This only works for an organization admin, and only while the organization has no operator API key yet; if it already has one, install with `mirrord operator install --api-key <key>` using a key from a cluster that already runs the Operator, or ask an admin to generate one under **API Keys** in the dashboard.
 
 ### Without the mirrord CLI
 
@@ -226,6 +252,33 @@ agent:
 
 Feature images are pulled only when the feature is enabled (Kafka sidecar, MSSQL tools, Flyway, Liquibase) and DB branch pods pull a per-engine database image — both have registry overrides under `operator.<engine>BranchConfig.dbPod.image` and `imagePullSecrets`. See `references/helm-values.md`.
 
+## Footprint & Agent Resources
+
+mirrord adds a small, mostly idle footprint to the cluster. In a default install, the Operator pod (one replica by default) is the only thing that runs all the time; any optional component installed separately, such as a license server, also runs all the time. Agent pods run only while a session uses them, and the Operator deletes one once no session needs it. The chart's other installed objects — CRDs, RBAC, a Service, a ConfigMap, the agent PriorityClass — live in etcd and cost no node CPU/memory.
+
+Unless overridden, each agent pod uses:
+
+| Resource | Request | Limit |
+|----------|---------|-------|
+| CPU | 1m | 1 |
+| Memory | 1Mi | 100Mi |
+
+The requests are tiny so agent pods barely affect scheduling; the limits just stop one from using too much of a node. Agent lifecycle depends on the session type:
+- **Session with a target:** one agent pod per ready target pod, shared by every session on that target; deleted once nothing uses it.
+- **Targetless session:** all targetless sessions in a namespace share one agent pod there.
+- **Ephemeral agent:** a container in the target pod, not a separate pod — a cluster admin sets `ephemeral: true` under `agent.extraConfig`. Kubernetes doesn't allow setting resources on ephemeral containers, so the table above doesn't apply, and the Operator ignores the agent settings in the user's mirrord config.
+
+To change agent resources cluster-wide, set `agent.resources` in Helm values (operator **3.197.0+**). A field set to `null` is left out of the agent pod spec entirely — for example, this runs agents with no CPU limit:
+
+```yaml helm-values
+agent:
+  resources:
+    limits:
+      cpu: null
+```
+
+Some features allocate more for a session: [copy target](https://metalbear.com/mirrord/docs/using-mirrord/copy-target) makes a full copy of the target pod, DB branching makes a branch database (its own pod for most engines, see [Branch Storage & Resources](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching) in the `mirrord-db-branching` skill), and queue splitting makes temporary queues. The default resource envelope supports roughly 200 concurrent sessions — raise `operator.requests`/`operator.limits` for more (see [Operator deployment](references/helm-values.md#operator-deployment--operator) in the Helm values reference).
+
 ## Platform notes
 
 - **OpenShift** — set `openshift: true` in values (renders a SecurityContextConstraints), covering the `mirrord-operator` and `default` service accounts in the mirrord namespace.
@@ -266,6 +319,24 @@ Clients use the operator automatically when it's present. To force operator mode
 mirrord exec --target pod/my-app -- node app.js
 ```
 
+To make `operator` the default across every project instead of setting it in each `mirrord.json`, a developer can store it in their user-wide config (`~/.mirrord/mirrord.json`, created empty on first use):
+
+```bash
+mirrord config set operator true    # or false, to disable it by default
+mirrord config unset operator       # back to the usual auto-detect behavior
+```
+
+`operator` and `kube_context` are currently the **only** fields the CLI actually applies from the global file as session defaults — other fields can be stored there but don't yet affect sessions, so point users at their project config for anything else. An explicit project config value (including `false`) or `MIRRORD_OPERATOR_ENABLE` still wins over the global `operator` default. If a session starts successfully through the Operator, mirrord also remembers `operator: true` in the global file for next time.
+
+To point every mirrord command (including `mirrord up`, `mirrord ui`, and the `mirrord operator` commands) at one cluster without changing the kubeconfig's current context:
+
+```bash
+mirrord config set kube_context staging
+mirrord config unset kube_context   # back to following the kubeconfig's current context
+```
+
+A `--context` flag, a `kube_context` in the project config, or `MIRRORD_KUBE_CONTEXT` still wins over the global default. If `mirrord ui` is already running, restart it (`mirrord ui stop`, then run it again) to pick up the change.
+
 ## Upgrade / Uninstall
 
 ```bash
@@ -282,7 +353,7 @@ Coordinate upgrades: in-flight sessions can break. Check with `kubectl get sessi
 
 ## Response Guidelines
 
-1. **Check prerequisites** — kubectl, helm, cluster access, and that they have a Teams license. No license and no organization yet? Offer an agent-started trial (see Prerequisites) instead of stopping, and start it only once the user agrees.
+1. **Check prerequisites** — kubectl, helm, cluster access, and that they have a mirrord for Teams license. No license and no organization yet? Offer an agent-started trial (see Prerequisites) instead of stopping, and start it only once the user agrees.
 2. **Pick the auth path** — cloud API key (default) vs license key vs air-gapped PEM/license server. Never ask the user to share the secret value with you.
 3. **Never put secrets on the CLI or in committed values** — use Secret/GSM refs.
 4. **Enable only the features they need** — each is an `operator.*` flag; call out the generic-branching and preview security implications.

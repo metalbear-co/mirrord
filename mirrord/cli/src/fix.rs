@@ -10,6 +10,7 @@ use crate::{
     config::{FixArgs, FixCommand, FixKubeconfig},
 };
 
+#[mirrord_macros::boxed_future]
 pub async fn fix_command(args: FixArgs) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord fix");
     match args.command {

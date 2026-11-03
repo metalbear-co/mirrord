@@ -10,7 +10,7 @@ docs: null
 teams: null
 weight: 550
 toc: true
-description: Recording and displaying user session metrics in Jira
+description: "Show the mirrord session time and session count for each Jira issue, inside the issue itself."
 tags:
   - alpha
   - team

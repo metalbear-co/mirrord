@@ -1,11 +1,11 @@
-//! Common ProxyConnection implementation shared between Unix and Windows layers.
+//! Common [`ProxyConnection`] implementation shared between Unix and Windows layers.
+
 use std::{
-    collections::HashMap,
     fmt::Debug,
     io,
     net::{SocketAddr, TcpStream},
     sync::{
-        OnceLock, PoisonError,
+        Arc, OnceLock, PoisonError,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
@@ -14,14 +14,17 @@ use std::{
 use mirrord_intproxy_protocol::{
     IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
     MessageId, NewSessionRequest, ProxyToLayerMessage,
-    codec::{self, CodecError, SyncDecoder, SyncEncoder},
+    codec::{self, CodecError, SyncEncoder},
 };
 use thiserror::Error;
 
 use crate::{
     error::{HookError, HookResult},
     mutex::Mutex,
+    proxy_connection::responses::ResponseManager,
 };
+
+mod responses;
 
 // TODO: We don't really need a lock, we just need a type that:
 //  1. Can be initialized as static (with a const constructor or whatever)
@@ -40,9 +43,7 @@ pub static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
 #[derive(Debug, Error)]
 pub enum ProxyError {
     #[error("{0}")]
-    CodecError(#[from] CodecError),
-    #[error("connection closed")]
-    ConnectionClosed,
+    CodecError(#[from] Arc<CodecError>),
     #[error("unexpected response: {0:?}")]
     UnexpectedResponse(
         /// Boxed due to large size difference.
@@ -58,18 +59,24 @@ pub enum ProxyError {
     IoFailed(#[from] io::Error),
 }
 
+impl From<CodecError> for ProxyError {
+    fn from(value: CodecError) -> Self {
+        Arc::new(value).into()
+    }
+}
+
 impl<T> From<PoisonError<T>> for ProxyError {
     fn from(_value: PoisonError<T>) -> Self {
         Self::LockPoisoned
     }
 }
 
-pub type Result<T> = core::result::Result<T, ProxyError>;
+pub type Result<T, E = ProxyError> = core::result::Result<T, E>;
 
 #[derive(Debug)]
 pub struct ProxyConnection {
     sender: Mutex<SyncEncoder<LocalMessage<LayerToProxyMessage>, TcpStream>>,
-    responses: Mutex<ResponseManager>,
+    responses: ResponseManager,
     next_message_id: AtomicU64,
     layer_id: LayerId,
     proxy_addr: SocketAddr,
@@ -101,7 +108,7 @@ impl ProxyConnection {
             inner: LayerToProxyMessage::NewSession(session),
         })?;
 
-        let mut responses = ResponseManager::new(receiver);
+        let responses = ResponseManager::new(receiver);
         let response = responses.receive(0)?;
         let ProxyToLayerMessage::NewSession(layer_id) = &response else {
             return Err(ProxyError::UnexpectedResponse(Box::new(response)));
@@ -109,7 +116,7 @@ impl ProxyConnection {
 
         Ok(Self {
             sender: Mutex::new(sender),
-            responses: Mutex::new(responses),
+            responses,
             next_message_id: AtomicU64::new(1),
             layer_id: *layer_id,
             proxy_addr,
@@ -135,7 +142,7 @@ impl ProxyConnection {
     }
 
     pub fn receive(&self, response_id: u64) -> Result<ProxyToLayerMessage> {
-        let response = self.responses.lock()?.receive(response_id)?;
+        let response = self.responses.receive(response_id)?;
         match response {
             ProxyToLayerMessage::ProxyFailed {
                 agent_reported: true,
@@ -176,41 +183,6 @@ impl ProxyConnection {
 
     pub fn proxy_addr(&self) -> SocketAddr {
         self.proxy_addr
-    }
-}
-
-#[derive(Debug)]
-struct ResponseManager {
-    receiver: SyncDecoder<LocalMessage<ProxyToLayerMessage>, TcpStream>,
-    outstanding_responses: HashMap<u64, ProxyToLayerMessage>,
-}
-
-impl ResponseManager {
-    fn new(receiver: SyncDecoder<LocalMessage<ProxyToLayerMessage>, TcpStream>) -> Self {
-        Self {
-            receiver,
-            outstanding_responses: Default::default(),
-        }
-    }
-
-    fn receive(&mut self, response_id: u64) -> Result<ProxyToLayerMessage> {
-        if let Some(response) = self.outstanding_responses.remove(&response_id) {
-            return Ok(response);
-        }
-
-        loop {
-            let response = self
-                .receiver
-                .receive()?
-                .ok_or(ProxyError::ConnectionClosed)?;
-
-            if response.message_id == response_id {
-                break Ok(response.inner);
-            }
-
-            self.outstanding_responses
-                .insert(response.message_id, response.inner);
-        }
     }
 }
 

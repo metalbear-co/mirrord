@@ -37,6 +37,10 @@ pub struct InternalProxyConfig {
     ///
     /// How much time to wait for the first connection to the proxy in seconds.
     ///
+    /// Defaults to 60. When an IDE extension starts mirrord, the proxy instead waits for the
+    /// first connection for as long as the session lasts, since the IDE may build the
+    /// application before starting it.
+    ///
     /// Common cases would be running with dlv or any other debugger, which sets a breakpoint
     /// on process execution, delaying the layer startup and connection to proxy.
     ///
@@ -47,8 +51,7 @@ pub struct InternalProxyConfig {
     ///   }
     /// }
     /// ```
-    #[config(default = 60)]
-    pub start_idle_timeout: u64,
+    pub start_idle_timeout: Option<u64>,
 
     /// ### internal_proxy.idle_timeout {#internal_proxy-idle_timeout}
     ///
@@ -151,4 +154,15 @@ pub struct InternalProxyConfig {
     /// ```
     #[config(default = 60)]
     pub process_logging_interval: u64,
+}
+
+impl InternalProxyConfig {
+    /// [`Self::start_idle_timeout`] when it is unset and no IDE extension started mirrord.
+    pub const DEFAULT_START_IDLE_TIMEOUT: u64 = 60;
+
+    /// Makes an unset [`Self::start_idle_timeout`] wait for the first connection for as long as
+    /// the session lasts.
+    pub fn wait_indefinitely_by_default(&mut self) {
+        self.start_idle_timeout.get_or_insert(u64::MAX);
+    }
 }

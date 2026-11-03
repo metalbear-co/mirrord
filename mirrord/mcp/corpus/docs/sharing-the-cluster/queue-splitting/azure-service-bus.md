@@ -238,7 +238,7 @@ Each item in `queue`, `topic`, or `subscription` is an `AppConfigRef` that descr
 | `fallback`      | Value to use when the `env` variable is not present in the pod. Useful for topics whose name is fixed but not exposed via an environment variable (see [When the topic name is not in an environment variable](azure-service-bus.md#when-the-topic-name-is-not-in-an-environment-variable)). Only with `env`. |             No            |
 | `valueSelector` |                                                                                                                JSON selector to extract value(s) from the variable content (e.g. `.key`, `.[]`)                                                                                                               |             No            |
 | `valuePattern`  |                                                           Regex that captures the resource name embedded in a larger value (a URL, path, or connection string). See [Preserving the value format](azure-service-bus.md#preserving-the-value-format).                                                          |             No            |
-| `containers`    |                                                                                                                      Limit resolution to specific containers. Defaults to all containers.                                                                                                                     |             No            |
+| `containerNames`    |                                                                                                                      Limit resolution to specific containers. Defaults to all containers.                                                                                                                     |             No            |
 
 Example with multiple options:
 
@@ -250,7 +250,7 @@ queues:
       queue:
         - env: SERVICE_BUS_QUEUE_NAME
           fallback: orders
-          containers:
+          containerNames:
             - main
         - envLike: "^SB_QUEUE_.*"
 ```
@@ -476,3 +476,5 @@ Check that:
 ### Temporary queues are not being cleaned up
 
 After all splitting sessions end, the operator deletes temporary queues. If they linger, check that the operator has `Manage` rights on the Service Bus namespace and that the operator pod is running. You can also set `drainTimeout` in the `MirrordSplitConfig` to control how long fallback queues are kept alive after sessions end.
+
+For compatibility with older operator releases and the legacy `containers` spelling, see [Selecting Containers](../queue-splitting.md#selecting-containers).

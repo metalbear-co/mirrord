@@ -104,7 +104,7 @@ mod main {
     ///
     /// Must be kept in sync with the version downloaded by `xtask` (see
     /// `xtask/src/tasks/sip_binaries.rs`).
-    pub const APPLE_UTILS_VERSION: &str = "v9";
+    pub const APPLE_UTILS_VERSION: &str = "v10";
 
     /// Set on the first patched process when SIP patching had to use an x86_64 system binary.
     pub const MIRRORD_SIP_X64_FALLBACK_ENV: &str = "MIRRORD_SIP_X64_FALLBACK";
@@ -836,6 +836,18 @@ mod main {
         )?;
 
         Ok(output)
+    }
+
+    /// Whether macOS strips `DYLD_INSERT_LIBRARIES` when `binary_path` runs as it is, unpatched:
+    /// it's a SIP-protected binary, or a script whose shebang leads to one.
+    ///
+    /// Unlike [`sip_patch`], ignores the user's patch and skip lists, so it tells whether a binary
+    /// left unpatched will load the layer. A file that can't be inspected reads as `false`.
+    pub fn is_sip_protected(binary_path: &str) -> bool {
+        matches!(
+            get_sip_status(binary_path, SipPatchOptions::default()),
+            Ok(SipBinary { .. } | SipScript { .. })
+        )
     }
 
     /// Check if the file that the user wants to execute is a SIP protected binary

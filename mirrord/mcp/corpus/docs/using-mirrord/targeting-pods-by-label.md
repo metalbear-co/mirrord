@@ -68,8 +68,10 @@ Minimum versions required are mirrord operator v3.192.0 and mirrord CLI v3.246.0
 ### Limitations
 
 - An empty label selector is rejected, so it can't accidentally match every pod in the namespace.
-- Not yet supported: copy_target, queue splitting, DB branching, multi-cluster targeting, and preview environments. 
+- Not yet supported: copy_target, queue splitting, DB branching, and multi-cluster targeting.
+- [Preview environments](../use-cases/preview-environments.md) can target pods by label (requires operator v3.213.0 and CLI v3.266.0 or later). A single preview session takes traffic from every pod the selector matches. Queue splitting and DB branching are not supported in preview environments with a label target.
 - Kubernetes' label selector syntax is not supported.
+
 Combining label targeting with any of these currently returns an error rather than silently falling back to single-pod behavior.
 
 ### Not `mirrord up`

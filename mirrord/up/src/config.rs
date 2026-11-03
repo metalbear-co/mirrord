@@ -1,12 +1,11 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     ops::Not,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
-use clap::{ValueEnum, builder::PossibleValue};
 use itertools::Itertools;
 use miette::Diagnostic;
 use mirrord_analytics::{Analytics, CollectAnalytics};
@@ -15,6 +14,10 @@ use mirrord_config::{
     config::{ConfigContext, ConfigError, EnvKey, MirrordConfig},
     feature::{
         copy_target::CopyTargetConfig,
+        database_branches::{
+            AllSplitConfigDbBranches, BranchCopyMode, DatabaseBranchesConfig, SplitConfigCopy,
+            SplitConfigDbBranches, SplitConfigRequest, SplitConfigRequestWithCopy,
+        },
         env::{EnvConfig, EnvFileConfig},
         network::incoming::{
             IncomingMode,
@@ -35,7 +38,7 @@ use thiserror::Error;
 
 use crate::{UpError, kube_context::UpKubeContext};
 
-/// Incoming traffic mode for a service. Also used as the mode for splitting the service's queues.
+/// A built-in mode. Also the `incoming` of a custom mode: how the service handles incoming traffic.
 #[derive(
     Clone,
     Copy,
@@ -77,22 +80,19 @@ pub enum ServiceMode {
     Mirror,
 }
 
-// Manual impl because we want different user-facing docs
-impl ValueEnum for ServiceMode {
-    fn value_variants<'a>() -> &'a [Self] {
-        Self::VARIANTS
+impl From<ServiceMode> for Arc<str> {
+    fn from(mode: ServiceMode) -> Self {
+        <&str>::from(mode).into()
     }
+}
 
-    fn to_possible_value(&self) -> Option<PossibleValue> {
-        let name: &'static str = self.into();
-        match self {
-            ServiceMode::Split => Some(PossibleValue::new(name).help("Incoming traffic is split between the local and original services using HTTP filtering.
-If no filter is provided, a header filter matching the regex `baggage: .*mirrord-session={session key}.*` will be used.")),
-            ServiceMode::Replace => Some(PossibleValue::new(name).help("The local service replaces the original one: the target workload is copied and scaled down to zero, so all incoming traffic reaches your local process.
-Any configured HTTP filter is ignored. Requires a target that supports copy target with scale down.")),
-            ServiceMode::Mirror => Some(PossibleValue::new(name).help("Incoming traffic is mirrored to the local service using HTTP filtering.
-If no filter is provided, a header filter matching the regex `baggage: .*mirrord-session={session key}.*` will be used.")),
-        }
+impl ServiceMode {
+    /// The built-in mode named `name`, if there is one.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::VARIANTS
+            .iter()
+            .copied()
+            .find(|mode| <&str>::from(mode) == name)
     }
 }
 
@@ -106,12 +106,130 @@ impl Into<IncomingMode> for ServiceMode {
     }
 }
 
-#[allow(clippy::from_over_into)]
-impl Into<QueueMode> for ServiceMode {
-    fn into(self) -> QueueMode {
-        match self {
-            ServiceMode::Split | ServiceMode::Replace => QueueMode::Steal,
-            ServiceMode::Mirror => QueueMode::Mirror,
+/// How a custom mode splits the service's queues.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum QueueSplitMode {
+    /// Messages matching the session are consumed by the local service only
+    /// (`queue_mode: steal`).
+    Split,
+
+    /// Messages matching the session reach both the local and the original service
+    /// (`queue_mode: mirror`).
+    Mirror,
+}
+
+impl From<QueueSplitMode> for QueueMode {
+    fn from(mode: QueueSplitMode) -> Self {
+        match mode {
+            QueueSplitMode::Split => QueueMode::Steal,
+            QueueSplitMode::Mirror => QueueMode::Mirror,
+        }
+    }
+}
+
+/// Which DB branches a mode requests.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DbBranching {
+    /// Branches of every database defined on the workload's `MirrordSplitConfig`, created empty.
+    Empty,
+    /// Like `empty`, with the source database's schema copied.
+    Schema,
+    /// Like `empty`, with the source database's schema and data copied.
+    All,
+    /// Branches of every database defined on the workload's `MirrordSplitConfig`, each copied
+    /// with its own `copy.mode`.
+    Inherit,
+    /// No branches: the service runs against the source databases.
+    Off,
+}
+
+/// A custom mode, defined under `modes` and selected by name with `default_mode` or
+/// `mirrord up --mode`.
+///
+/// An entry named after a built-in mode (`split`, `replace`, `mirror`) may set only
+/// `db_branching`, which then applies to that built-in mode for every service.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ModeConfig {
+    /// How incoming traffic is handled, as in the built-in mode of the same name. Defaults to
+    /// `split`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incoming: Option<ServiceMode>,
+
+    /// How the service's queues are split. When not set, every queue defined in the cluster is
+    /// split like `incoming`: mirrored with `incoming: mirror`, stolen (`queue_mode: steal`)
+    /// otherwise.
+    ///
+    /// Ignored with `incoming: replace`, which doesn't split queues.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queues: Option<QueueSplitMode>,
+
+    /// Which DB branches the service requests, from the `dbBranches` defined on the workload's
+    /// `MirrordSplitConfig`: `empty`, `schema` or `all` to copy every one with that copy mode,
+    /// `inherit` to copy each with its own, `off` for none. Applies whatever `incoming` is, and
+    /// is ignored with a message when the target isn't a single workload.
+    ///
+    /// When not set, a mode whose `incoming` is `split` or `mirror` requests the same branches as
+    /// `inherit` when the target is a single workload, but runs against the source databases
+    /// instead of failing when the operator can't branch or there is nothing to branch. With
+    /// `incoming: replace` it requests none. A service that sets `db_branches` itself keeps
+    /// them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub db_branching: Option<DbBranching>,
+}
+
+impl ModeConfig {
+    /// The mode named `name`: a built-in one, with the `db_branching` of its entry under
+    /// `modes` if it has one, or a custom one defined under `modes`.
+    pub fn named(modes: &BTreeMap<Arc<str>, ModeConfig>, name: &str) -> Result<Self, UnknownMode> {
+        if let Some(builtin) = ServiceMode::from_name(name) {
+            return Ok(Self {
+                db_branching: modes.get(name).and_then(|entry| entry.db_branching),
+                ..builtin.into()
+            });
+        }
+
+        if let Some(mode) = modes.get(name) {
+            return Ok(mode.clone());
+        }
+
+        let known = ServiceMode::VARIANTS
+            .iter()
+            .map(|mode| Arc::from(<&str>::from(mode)))
+            .chain(
+                modes
+                    .keys()
+                    .filter(|name| ServiceMode::from_name(name).is_none())
+                    .cloned(),
+            )
+            .collect::<Vec<_>>();
+
+        let suggestion =
+            crate::closest_name(name, &known.iter().map(AsRef::as_ref).collect::<Vec<_>>())
+                .map(Arc::from);
+
+        Err(UnknownMode {
+            name: name.into(),
+            suggestion,
+            known,
+        })
+    }
+
+    /// How incoming traffic is handled.
+    pub fn incoming(&self) -> ServiceMode {
+        self.incoming.unwrap_or_default()
+    }
+}
+
+impl From<ServiceMode> for ModeConfig {
+    /// The built-in mode as a custom one: its queues follow `incoming`, as they do for a custom
+    /// mode without `queues`.
+    fn from(incoming: ServiceMode) -> Self {
+        Self {
+            incoming: Some(incoming),
+            ..Self::default()
         }
     }
 }
@@ -192,7 +310,8 @@ pub struct CommonConfig {
     /// Kube context to use for all services, from your kubeconfig.
     ///
     /// A service's own `context` takes precedence, and `mirrord up --context` takes precedence
-    /// over both.
+    /// over both. When none is set, the global config's `kube_context` is used, then the
+    /// kubeconfig's current context.
     pub(crate) context: Option<Arc<str>>,
 }
 
@@ -431,6 +550,37 @@ fn inline_schema_without_docs<T: JsonSchema>(generator: &mut SchemaGenerator) ->
     schema
 }
 
+/// Reads a mode entry with no value (`watch:` in YAML) as a mode with every default, as
+/// `common:` with no value is. The schema accepts it too.
+fn deserialize_modes<'de, D>(deserializer: D) -> Result<BTreeMap<Arc<str>, ModeConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(
+        BTreeMap::<Arc<str>, Option<ModeConfig>>::deserialize(deserializer)?
+            .into_iter()
+            .map(|(name, mode)| (name, mode.unwrap_or_default()))
+            .collect(),
+    )
+}
+
+fn default_mode_name() -> Arc<str> {
+    ServiceMode::default().into()
+}
+
+/// A built-in mode, documented, or the name of one under `modes`.
+fn mode_name_schema(generator: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "anyOf": [
+            generator.subschema_for::<ServiceMode>(),
+            {
+                "description": "A mode defined under `modes`.",
+                "type": "string"
+            }
+        ]
+    })
+}
+
 /// Per-service configuration.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -459,11 +609,12 @@ pub struct ServiceConfig {
     pub(crate) env: EnvConfig,
 
     /// How incoming traffic and queue messages are shared between the local and the original
-    /// service. Defaults to `split`.
+    /// service: a built-in mode or one defined under `modes`. Defaults to `split`.
     ///
     /// `mirrord up --mode` overrides this for every service.
-    #[serde(default)]
-    pub(crate) default_mode: ServiceMode,
+    #[serde(default = "default_mode_name")]
+    #[schemars(schema_with = "mode_name_schema")]
+    pub(crate) default_mode: Arc<str>,
 
     /// HTTP filter that selects which requests reach the local service in `split` and `mirror`
     /// modes.
@@ -484,8 +635,10 @@ pub struct ServiceConfig {
     #[serde(default)]
     pub(crate) ignore_ports: BTreeSet<u16>,
 
-    /// Don't launch this service unless it is named on the `mirrord up` command line. Defaults to
-    /// `false`.
+    /// Don't launch this service unless it is named on the `mirrord up` command line, and don't
+    /// preview it with `mirrord preview sync` unless `--image` or `MIRRORD_<SERVICE>_IMAGE` gives
+    /// it an image. `mirrord preview up` ignores it: an image alone picks its services. Defaults
+    /// to `false`.
     #[serde(default)]
     pub(crate) skip: bool,
 
@@ -504,6 +657,126 @@ pub struct ServiceConfig {
 
     /// How to launch the service's local process.
     pub(crate) run: RunConfig,
+
+    /// How `mirrord preview sync` previews the service with local code: the local directories
+    /// that it pushes into the service's preview pod, and how the pod runs them. The preview runs
+    /// the image from `--image` or `MIRRORD_<SERVICE>_IMAGE`, or the target's image without one.
+    /// For example:
+    ///
+    /// ```yaml
+    /// sync:
+    ///   files:
+    ///     - local: frontend
+    ///       remote: /app
+    ///   run:
+    ///     command: ["npm", "run", "dev"]
+    ///     directory: /app
+    ///   install:
+    ///     command: ["npm", "ci"]
+    ///     on_change: ["frontend/package-lock.json"]
+    ///   restart_on_change: false
+    /// ```
+    ///
+    /// `mirrord up` and `mirrord preview up` ignore this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
+    pub(crate) sync: Option<SyncConfig>,
+}
+
+/// How `mirrord preview sync` previews a service with local code.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncConfig {
+    /// The local directories to push into the preview pod.
+    pub files: Vec<SyncEntry>,
+
+    /// How the preview pod runs the app on the pushed code.
+    #[serde(default)]
+    pub run: SyncRunConfig,
+
+    /// The command that installs the app's dependencies in the preview pod.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install: Option<InstallConfig>,
+
+    /// Whether the preview pod restarts the app after each push. Set it to `false` for a dev
+    /// server that reloads changed files on its own. Defaults to `true`.
+    #[serde(default = "default_restart_on_change")]
+    pub restart_on_change: bool,
+}
+
+fn default_restart_on_change() -> bool {
+    true
+}
+
+/// How the preview pod of a service with `sync` runs the app.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SyncRunConfig {
+    /// The command that runs the app in the preview's container, as a list of the program and
+    /// its arguments, e.g. `["npm", "run", "dev"]`. Defaults to `run.command`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+
+    /// The absolute working directory of `command` in the preview's container, e.g. `/app`.
+    /// When not set, `command` runs in the working directory of the container, which is `/` for
+    /// an image without a `WORKDIR`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
+}
+
+/// The command that installs a service's dependencies in its preview pod.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InstallConfig {
+    /// The command to run, as a list of the program and its arguments, e.g. `["npm", "ci"]`. It
+    /// runs in the preview's container before the app starts, and again after a push that
+    /// changes a file that `on_change` matches.
+    pub command: Vec<String>,
+
+    /// The absolute working directory of `command` in the preview's container, e.g. `/app`.
+    /// Defaults to `sync.run.directory`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
+
+    /// The files whose changes run `command` again, as globs relative to the directory that
+    /// contains `mirrord-up.yaml`, e.g. `frontend/package-lock.json`. Each must lie under the
+    /// `local` of a `sync.files` entry. The preview pod reads every file that a glob matches after
+    /// each push, including the files that `command` wrote, so a glob with `**` over a
+    /// directory such as `node_modules` hashes every match on every push. Name the files, such
+    /// as `frontend/package-lock.json` or `packages/*/package.json`, to keep that cheap.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub on_change: Vec<PathBuf>,
+
+    /// The absolute paths in the container that `command` writes to outside every `sync`
+    /// `remote`, e.g. `/usr/local/lib/python3.12/site-packages`. The preview keeps them on the
+    /// volume that holds the pushed code, so the installed files survive a restart of the pod. A
+    /// path under a `remote` is on that volume already and needs no entry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub persist: Vec<String>,
+}
+
+/// One local directory that `mirrord preview sync` pushes into a preview pod.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncEntry {
+    /// The local directory to push. A relative path is resolved against the directory that
+    /// contains `mirrord-up.yaml`. The push leaves out `.git`, `.jj`, the paths that git ignores
+    /// and the paths that `ignore` leaves out. Those paths keep what the pod has at them, such as
+    /// the image's files or what the install wrote, and every other path in `remote` holds the
+    /// local tree.
+    pub local: PathBuf,
+
+    /// The absolute path in the preview's container that holds the pushed directory. A push makes
+    /// it a mirror of `local`, so it deletes what the image has there, except at the paths that
+    /// the push leaves out (see `local`).
+    pub remote: String,
+
+    /// More paths that the push leaves out, written as the lines of a `.gitignore` in `local`,
+    /// e.g. `coverage/`. They take precedence over git's rules, so a `!` line pushes a file that
+    /// a `.gitignore` excludes, e.g. `!.env.preview`. A `!` line can't bring back a file in an
+    /// ignored directory, as in git.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore: Vec<String>,
 }
 
 /// Top-level `mirrord-up.yaml` configuration.
@@ -517,6 +790,19 @@ pub struct UpConfig {
     #[serde(default)]
     #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
     pub common: CommonConfig,
+    /// Custom modes keyed by name, selected with a service's `default_mode` or
+    /// `mirrord up --mode`. An entry named after a built-in mode (`split`, `replace`, `mirror`)
+    /// may set only `db_branching`.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_modes",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(
+        with = "BTreeMap<Arc<str>, Option<ModeConfig>>",
+        extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss)
+    )]
+    pub modes: BTreeMap<Arc<str>, ModeConfig>,
     /// Per-service configurations keyed by service name.
     #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
     pub services: HashMap<Arc<str>, ServiceConfig>,
@@ -560,23 +846,48 @@ pub const SERVICE_LAYER_PATHS: &[(&str, &str)] = &[
 ];
 
 impl ServiceConfig {
+    /// The name of the mode this service runs in, unless `mirrord up --mode` overrides it.
+    pub fn default_mode(&self) -> &str {
+        &self.default_mode
+    }
+
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `base` from
     /// [`CommonConfig::base_config`].
     ///
     /// Relative `payload_protobuf` paths in `config_patch` resolve from `invocation_directory`,
     /// the directory `mirrord up` is started from (not the service's `run.directory`), or from
     /// the working directory of this process when it's [`None`].
+    ///
+    /// For [`SessionKind::Preview`], the config is for the service's `mirrord preview up` or
+    /// `mirrord preview sync` session instead: it is assembled without `env`, and `mode` is the
+    /// `split` mode whatever the service's `default_mode`.
+    #[allow(clippy::too_many_arguments)]
     fn assemble(
-        self,
+        mut self,
         service_name: &Arc<str>,
         base: LayerConfig,
+        mode: &ModeConfig,
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
         invocation_directory: Option<&Path>,
-    ) -> Result<(LayerConfig, RunConfig), ConfigPatchErrorKind> {
+        kind: SessionKind,
+    ) -> Result<SubprocessCfg, ConfigPatchErrorKind> {
+        let preview = kind == SessionKind::Preview;
+        if preview {
+            self.default_mode = ServiceMode::Split.into();
+            self.env = EnvConfig::default();
+        }
+
         let kube_context = up_context.get_context(self.context.clone());
-        let mut cfg = self.unpatched_config(base, &key, kube_context.clone());
+        let mut cfg = self.unpatched_config(base, mode, &key, kube_context.clone());
+
+        // `PreviewIncomingConfig` falls back to the anchored `^baggage: ...$` filter only when
+        // none is set, and share ingress only serves sessions with exactly that filter, so up's
+        // own default must not get in the way.
+        if preview && self.http_filter.is_filter_set().not() {
+            cfg.feature.network.incoming.http_filter = HttpFilterConfig::default();
+        }
 
         cfg.target = match self.target.as_resolved(service_name, kube_context) {
             Ok(resolved) => resolved,
@@ -598,11 +909,105 @@ impl ServiceConfig {
             },
         };
 
+        // Every service of a run shares the key, so services pointing at one entry land on one
+        // branch. Branches set in the base config, or by `config_patch` below, take precedence.
+        let single_workload = is_single_workload(cfg.target.path.as_ref());
+        let all = || SplitConfigDbBranches::All(AllSplitConfigDbBranches::All);
+        let copy = |mode| {
+            SplitConfigRequest::WithCopy(SplitConfigRequestWithCopy {
+                entries: all(),
+                copy: SplitConfigCopy { mode },
+            })
+        };
+        let shares_traffic = matches!(mode.incoming(), ServiceMode::Split | ServiceMode::Mirror);
+        let request = match mode.db_branching {
+            _ if cfg.feature.db_branches.is_empty().not() => None,
+            // A mode applies to every service on it, and the line means nothing on these.
+            Some(_) if single_workload.not() => None,
+            Some(DbBranching::Empty) => Some(copy(BranchCopyMode::Empty)),
+            Some(DbBranching::Schema) => Some(copy(BranchCopyMode::Schema)),
+            Some(DbBranching::All) => Some(copy(BranchCopyMode::All)),
+            Some(DbBranching::Inherit) => Some(SplitConfigRequest::Entries(all())),
+            Some(DbBranching::Off) => None,
+            // Without the line, modes that share traffic with the original service branch.
+            None if shares_traffic && single_workload => Some(SplitConfigRequest::Entries(all())),
+            None => None,
+        };
+        let mut db_branches_origin = match (&request, mode.db_branching) {
+            (None, _) => RequestOrigin::Config,
+            (Some(_), None) => RequestOrigin::Default,
+            (Some(_), Some(_)) => RequestOrigin::ModeLine,
+        };
+        if let Some(request) = request {
+            cfg.feature.db_branches = DatabaseBranchesConfig::FromSplitConfig(request);
+        }
+
+        let patch_sets_split_queues = self
+            .config_patch
+            .as_ref()
+            .is_some_and(|patch| patch.pointer("/feature/split_queues").is_some());
+
         if let Some(patch) = self.config_patch {
+            if preview && patch.pointer("/feature/preview/image").is_some() {
+                return Err(ConfigPatchErrorKind::PreviewImage);
+            }
+
+            // A patch that sets `db_branches` or `split_queues` decides them itself, `[]`
+            // included, so whatever it holds afterwards was asked for by the user.
+            if patch.pointer("/feature/db_branches").is_some() {
+                db_branches_origin = RequestOrigin::Config;
+                // The merge would otherwise go into an object form key by key.
+                cfg.feature.db_branches = DatabaseBranchesConfig::default();
+            }
             cfg = apply_config_patch(cfg, patch, &key, invocation_directory)?;
         }
 
-        Ok((cfg, self.run))
+        // `incoming: replace` splits no queues.
+        let splits_queues = matches!(mode.incoming(), ServiceMode::Split | ServiceMode::Mirror)
+            && patch_sets_split_queues.not()
+            && matches!(cfg.target.path, Some(Target::Label(_))).not()
+            && (preview.not()
+                || matches!(
+                    cfg.target.path,
+                    Some(Target::Deployment(_) | Target::Rollout(_) | Target::StatefulSet(_))
+                ));
+        let queues_origin = match mode.queues {
+            _ if splits_queues.not() => RequestOrigin::Config,
+            Some(_) => RequestOrigin::ModeLine,
+            None => RequestOrigin::Default,
+        };
+        if splits_queues {
+            // Without the line, queue messages are shared the way incoming traffic is.
+            let queue_mode = match (mode.queues, mode.incoming()) {
+                (Some(queues), _) => queues.into(),
+                (None, ServiceMode::Mirror) => QueueMode::Mirror,
+                (None, _) => QueueMode::Steal,
+            };
+            let splits = SplitQueuesConfig::all_wildcard_with_mode(&key, queue_mode);
+            // A Kafka branch serves every Kafka queue, so it does not need generated Kafka splits.
+            cfg.feature.split_queues = if cfg.feature.kafka_branch {
+                SplitQueuesConfig::from_splits(
+                    splits
+                        .splits()
+                        .iter()
+                        .filter(|split| split.queue_type != QueueKind::Kafka)
+                        .cloned(),
+                )
+            } else {
+                splits
+            };
+        }
+
+        Ok(SubprocessCfg {
+            config: cfg,
+            service_name: service_name.clone(),
+            run: self.run,
+            sync: self.sync,
+            mode: self.default_mode,
+            incoming: mode.incoming(),
+            db_branches_origin,
+            queues_origin,
+        })
     }
 
     /// The mirrord config `mirrord up` merges this service's `config_patch` into, as JSON, but
@@ -616,6 +1021,7 @@ impl ServiceConfig {
         &self,
         service_name: &Arc<str>,
         common: &CommonConfig,
+        mode: &ModeConfig,
         key: &EnvKey,
     ) -> Result<serde_json::Value, UpError> {
         let base = common.base_config(&mut ConfigContext::default().strict_env(true))?;
@@ -624,7 +1030,7 @@ impl ServiceConfig {
             common_context: common.context.clone(),
         }
         .get_context(self.context.clone());
-        let config = self.unpatched_config(base, key, kube_context);
+        let config = self.unpatched_config(base, mode, key, kube_context);
         patchable(config, key).map_err(|source| {
             ConfigPatchError {
                 service: service_name.clone(),
@@ -635,18 +1041,19 @@ impl ServiceConfig {
     }
 
     /// The mirrord config of this service before its target is set and its `config_patch` is
-    /// merged in: `base` with the service's own settings and what its mode implies.
+    /// merged in: `base` with the service's own settings and what `mode` implies.
     fn unpatched_config(
         &self,
         mut cfg: LayerConfig,
+        mode: &ModeConfig,
         key: &EnvKey,
         kube_context: Option<Arc<str>>,
     ) -> LayerConfig {
         cfg.kube_context = kube_context.as_deref().map(Into::into);
         cfg.feature.env = self.env.clone();
-        cfg.feature.network.incoming.mode = self.default_mode.into();
+        cfg.feature.network.incoming.mode = mode.incoming().into();
 
-        match self.default_mode {
+        match mode.incoming() {
             ServiceMode::Split | ServiceMode::Mirror => {
                 cfg.feature.network.incoming.http_filter = if self.http_filter.is_filter_set() {
                     self.http_filter.clone()
@@ -660,12 +1067,11 @@ impl ServiceConfig {
                     }
                 };
 
-                cfg.feature.split_queues =
-                    SplitQueuesConfig::all_wildcard_with_mode(key, self.default_mode.into());
+                cfg.feature.split_queues = SplitQueuesConfig::default();
             }
 
-            // `Replace` mode should steal all traffic from the copied target, so `http_filter` is
-            // ignored; `service_configs` tells the user.
+            // `Replace` mode should steal all traffic and messages from the copied target, so
+            // `http_filter` and `queues` are ignored; `service_configs` tells the user.
             ServiceMode::Replace => {
                 cfg.feature.copy_target = CopyTargetConfig {
                     enabled: true,
@@ -710,6 +1116,12 @@ enum ConfigPatchErrorKind {
 
     #[error("the merged mirrord config failed validation: {0}")]
     Validation(#[from] mirrord_config::config::ConfigError),
+
+    #[error(
+        "it sets `feature.preview.image`, which `mirrord preview up` and `mirrord preview sync` \
+         take from `--image` or `MIRRORD_<SERVICE>_IMAGE` instead"
+    )]
+    PreviewImage,
 }
 
 /// Here we merge the `config` with the `patch` (`config_patch` from the `mirrord-up.yaml` config
@@ -736,13 +1148,6 @@ fn apply_config_patch(
     key: &EnvKey,
     invocation_directory: Option<&Path>,
 ) -> Result<LayerConfig, ConfigPatchErrorKind> {
-    let generated_kafka_splits = config
-        .feature
-        .split_queues
-        .of_kind(QueueKind::Kafka)
-        .cloned()
-        .collect::<Vec<_>>();
-
     let mut layer_config_json = patchable(config, key).map_err(ConfigPatchErrorKind::Serialize)?;
     json_patch::merge(&mut layer_config_json, &patch);
 
@@ -756,19 +1161,6 @@ fn apply_config_patch(
         .invocation_directory(invocation_directory.map(Path::to_owned));
     let mut config = file_config.generate_config(&mut context)?;
     config.key = key.clone();
-
-    // A Kafka branch serves every Kafka queue, so the Kafka splits the mode generated give way.
-    if config.feature.kafka_branch {
-        config.feature.split_queues = SplitQueuesConfig::from_splits(
-            config
-                .feature
-                .split_queues
-                .splits()
-                .iter()
-                .filter(|split| generated_kafka_splits.contains(split).not())
-                .cloned(),
-        );
-    }
 
     config.verify(&mut context)?;
 
@@ -791,6 +1183,15 @@ fn patchable(config: LayerConfig, key: &EnvKey) -> Result<serde_json::Value, ser
     Ok(json)
 }
 
+/// Which command a service's session is assembled for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SessionKind {
+    /// A `mirrord up` session, running the service's local process.
+    Up,
+    /// A `mirrord preview up` or `mirrord preview sync` session, running in the cluster.
+    Preview,
+}
+
 /// All the information necessary to start and manage one of the child
 /// mirrord sessions.
 pub struct SubprocessCfg {
@@ -800,40 +1201,95 @@ pub struct SubprocessCfg {
     pub service_name: Arc<str>,
     /// How to run this service (exec vs container, and the command).
     pub run: RunConfig,
-    /// Mode this service was assembled for. Used only to name it in
-    /// [`validate_targets`] errors; its effects are already in `config`.
-    pub mode: ServiceMode,
+    /// How `mirrord preview sync` previews the service with local code, if it can.
+    pub sync: Option<SyncConfig>,
+    /// Name of the mode this service was assembled for. Its effects are already in `config`; it
+    /// names the mode in [`validate_targets`] errors and in what `mirrord up` reports about the
+    /// service.
+    pub mode: Arc<str>,
+    /// How the mode handles incoming traffic, for [`validate_targets`] errors on custom modes,
+    /// whose name doesn't say it.
+    pub incoming: ServiceMode,
+    /// Where `config.feature.db_branches` came from.
+    pub db_branches_origin: RequestOrigin,
+    /// Where `config.feature.split_queues` came from. Unless it's [`RequestOrigin::Config`], they
+    /// are the `"*"` splits `mirrord up` adds, which a preview session asks its operator to drop
+    /// where it can't serve them rather than failing.
+    pub queues_origin: RequestOrigin,
+}
+
+/// Whether `target` is one workload. The operator resolves a DB branching request against the
+/// `MirrordSplitConfig` of one targeted workload, so a targetless or label-selected service has
+/// nothing to ask for.
+fn is_single_workload(target: Option<&Target>) -> bool {
+    target.is_some_and(|path| {
+        matches!(
+            path,
+            Target::Targetless | Target::Serverless(_) | Target::Label(_)
+        )
+        .not()
+    })
+}
+
+/// Where a service's DB branches or queue splits came from, which decides what `mirrord up` does
+/// when the operator can't serve them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequestOrigin {
+    /// `mirrord up` added nothing: either the service's own config or `config_patch` decides,
+    /// or the mode requests nothing, as a mode that splits no queues. Handled as in a plain
+    /// `mirrord.json`.
+    Config,
+    /// What a mode adds without the matching line (`db_branching`, `queues`): the run goes on
+    /// without it when the operator can't serve it.
+    Default,
+    /// The mode's own `db_branching` or `queues` line: the run fails when the operator can't
+    /// serve it.
+    ModeLine,
 }
 
 /// Rejects services whose resolved target cannot support the features their
 /// mode enabled.
-pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), ModeError> {
-    let incompatible = cfgs
-        .iter()
-        .filter_map(|cfg| {
-            let target_type = cfg
-                .config
-                .target
-                .path
-                .as_ref()
-                .map_or(TargetType::Targetless, TargetType::from);
+pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), Vec<TargetValidationError>> {
+    let (mut incompatible, mut unsupported) = (vec![], vec![]);
+    for cfg in cfgs {
+        let target_type = cfg
+            .config
+            .target
+            .path
+            .as_ref()
+            .map_or(TargetType::Targetless, TargetType::from);
 
-            target_type
-                .compatible_with(&cfg.config.feature)
-                .not()
-                .then(|| IncompatibleTarget {
-                    service: cfg.service_name.clone(),
-                    mode: cfg.mode,
-                    target_type,
-                })
-        })
-        .collect::<Vec<_>>();
+        if target_type == TargetType::Label {
+            unsupported.push(UnsupportedTarget {
+                service: cfg.service_name.clone(),
+                target_type,
+            })
+        }
 
-    if incompatible.is_empty().not() {
-        return Err(ModeError::IncompatibleTargets(incompatible));
+        if target_type.compatible_with(&cfg.config.feature).not() {
+            incompatible.push(IncompatibleTarget {
+                service: cfg.service_name.clone(),
+                mode: cfg.mode.clone(),
+                incoming: cfg.incoming,
+                target_type,
+            });
+        }
     }
 
-    Ok(())
+    if unsupported.is_empty() && incompatible.is_empty() {
+        return Ok(());
+    }
+
+    let mut errors = vec![];
+    if unsupported.is_empty().not() {
+        errors.push(TargetValidationError::UnsupportedTargetTypes(unsupported));
+    }
+
+    if incompatible.is_empty().not() {
+        errors.push(TargetValidationError::IncompatibleTargets(incompatible));
+    }
+
+    Err(errors)
 }
 
 /// A service whose mode and target cannot be used together.
@@ -841,8 +1297,10 @@ pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), ModeError> 
 pub struct IncompatibleTarget {
     /// Name of the offending service.
     pub service: Arc<str>,
-    /// Mode the service was configured to run in.
-    pub mode: ServiceMode,
+    /// Name of the mode the service was configured to run in.
+    pub mode: Arc<str>,
+    /// How that mode handles incoming traffic.
+    pub incoming: ServiceMode,
     /// Kind of the target the service resolved to.
     pub target_type: TargetType,
 }
@@ -852,22 +1310,69 @@ impl std::fmt::Display for IncompatibleTarget {
         let Self {
             service,
             mode,
+            incoming,
             target_type,
         } = self;
 
-        write!(
-            f,
-            "`{service}` is `{mode}` mode with a {target_type} target"
-        )
+        // A built-in mode's name already says how it handles incoming traffic.
+        match ServiceMode::from_name(mode) {
+            Some(_) => write!(
+                f,
+                "`{service}` is `{mode}` mode with a {target_type} target"
+            ),
+            None => write!(
+                f,
+                "`{service}` is `{mode}` mode (`incoming: {incoming}`) with a {target_type} target"
+            ),
+        }
+    }
+}
+
+/// A service whose target type is not (yet) supported.
+#[derive(Debug)]
+pub struct UnsupportedTarget {
+    /// Name of the offending service.
+    pub service: Arc<str>,
+    /// Kind of the target the service resolved to.
+    pub target_type: TargetType,
+}
+
+impl std::fmt::Display for UnsupportedTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            service,
+            target_type,
+        } = self;
+
+        match target_type {
+            TargetType::Label => write!(
+                f,
+                "Service `{service}` uses a label selector target, which isn't supported with \
+                 `mirrord up` yet. Target a specific workload instead."
+            ),
+            _ => write!(
+                f,
+                "Service `{service}` has a {target_type} target, which isn't supported with \
+                 `mirrord up` yet."
+            ),
+        }
     }
 }
 
 /// Error produced by [`validate_targets`].
 #[derive(Debug, Error, Diagnostic)]
-pub enum ModeError {
+pub enum TargetValidationError {
     /// One or more services resolved to a target their mode cannot use.
     #[error("incompatible mode and target: {}", .0.iter().format("; "))]
     IncompatibleTargets(Vec<IncompatibleTarget>),
+
+    /// One or more services resolved to a target with a type that isn't yet supported.
+    #[error("{}", .0.iter().format("; "))]
+    #[diagnostic(help(
+        "If you need support for this type with `mirrord up` sooner, let us know on \
+        Slack (https://metalbear.com/slack) or GitHub (https://github.com/metalbear-co/mirrord/issues)."
+    ))]
+    UnsupportedTargetTypes(Vec<UnsupportedTarget>),
 }
 
 /// A service that `mirrord up` would refuse to run, found by [`UpConfig::verify_services`].
@@ -891,6 +1396,10 @@ pub enum ServiceError {
     /// The service's mode needs features its target doesn't support.
     #[error("incompatible mode and target: {0}")]
     IncompatibleTarget(IncompatibleTarget),
+
+    /// The service uses a target type that `mirrord up` doesn't support.
+    #[error("{0}")]
+    UnsupportedTarget(UnsupportedTarget),
 }
 
 impl ServiceError {
@@ -900,11 +1409,19 @@ impl ServiceError {
             Self::ConfigPatch(error) => &error.service,
             Self::Validation { service, .. } => service,
             Self::IncompatibleTarget(target) => &target.service,
+            Self::UnsupportedTarget(target) => &target.service,
         }
     }
 }
 
 impl UpConfig {
+    /// Uses `context` as the common context when the config sets none.
+    pub fn default_context(&mut self, context: Option<Arc<str>>) {
+        if self.common.context.is_none() {
+            self.common.context = context;
+        }
+    }
+
     /// Verifies the config without touching the cluster, similar to
     /// what `verify_config` does for [`LayerConfig`].
     ///
@@ -942,14 +1459,19 @@ impl UpConfig {
         let mut errors = Vec::new();
         let mut assembled = Vec::new();
         for (service_name, service) in self.services.iter().sorted_by_key(|(name, _)| *name) {
-            let mode = service.default_mode;
-            let (config, run) = match service.clone().assemble(
+            // An unknown mode is reported by `verify`.
+            let Ok(mode) = ModeConfig::named(&self.modes, &service.default_mode) else {
+                continue;
+            };
+            let subprocess = match service.clone().assemble(
                 service_name,
                 base.clone(),
+                &mode,
                 key.clone(),
                 &mut resolved_targets,
                 up_context.clone(),
                 invocation_directory,
+                SessionKind::Up,
             ) {
                 Ok(assembled) => assembled,
                 Err(source) => {
@@ -964,7 +1486,7 @@ impl UpConfig {
             // As in the service's `mirrord exec` session, which doesn't take a missing target for
             // targetless when verifying; `validate_targets` checks the mode against it below.
             let mut context = ConfigContext::default().strict_env(true);
-            if let Err(source) = config.verify(&mut context) {
+            if let Err(source) = subprocess.config.verify(&mut context) {
                 errors.push(ServiceError::Validation {
                     service: service_name.clone(),
                     source,
@@ -972,20 +1494,20 @@ impl UpConfig {
                 continue;
             }
 
-            assembled.push(SubprocessCfg {
-                config,
-                service_name: service_name.clone(),
-                run,
-                mode,
-            });
+            assembled.push(subprocess);
         }
 
-        if let Err(ModeError::IncompatibleTargets(incompatible)) = validate_targets(&assembled) {
-            errors.extend(
-                incompatible
-                    .into_iter()
-                    .map(ServiceError::IncompatibleTarget),
-            );
+        if let Err(validation_errors) = validate_targets(&assembled) {
+            for error in validation_errors {
+                match error {
+                    TargetValidationError::IncompatibleTargets(targets) => {
+                        errors.extend(targets.into_iter().map(ServiceError::IncompatibleTarget))
+                    }
+                    TargetValidationError::UnsupportedTargetTypes(targets) => {
+                        errors.extend(targets.into_iter().map(ServiceError::UnsupportedTarget))
+                    }
+                }
+            }
         }
 
         Ok(errors)
@@ -1010,13 +1532,17 @@ impl UpConfig {
             .map_or(Ok(()), Err)
     }
 
-    /// Force services to run in `mode`, discarding the `default_mode` set in the config file.
+    /// Force services to run in the mode named `mode`, discarding the `default_mode` set in the
+    /// config file. Fails if no such mode exists.
     ///
     /// Meant for the `--mode` flag, so it should be called *after* [`Self::select_services`].
-    pub fn override_mode(&mut self, mode: ServiceMode) {
+    pub fn override_mode(&mut self, mode: &str) -> Result<(), UnknownMode> {
+        ModeConfig::named(&self.modes, mode)?;
+        let mode = Arc::<str>::from(mode);
         for svc in self.services.values_mut() {
-            svc.default_mode = mode;
+            svc.default_mode = mode.clone();
         }
+        Ok(())
     }
 
     /// Restrict which services will be launched.
@@ -1026,8 +1552,22 @@ impl UpConfig {
     /// a service overrides its `skip` flag. When `selected` is empty,
     /// keeps every service except those marked `skip: true`.
     ///
-    /// Errors if no service remains to be launched.
-    pub fn select_services(&mut self, selected: &[String]) -> Result<(), SelectError> {
+    /// Errors if no service remains to be launched, or if any of `debug`, the services `--debug`
+    /// holds for a debugger, is unknown, not among those kept, or runs in a container. Each error
+    /// lists every offending name.
+    pub fn select_services(
+        &mut self,
+        selected: &[String],
+        debug: &[String],
+    ) -> Result<(), SelectError> {
+        let unknown = self.missing_services(debug);
+        if unknown.is_empty().not() {
+            return Err(SelectError::UnknownServices {
+                unknown,
+                available: self.service_names(),
+            });
+        }
+
         if selected.is_empty() {
             self.services.retain(|_, svc| svc.skip.not());
 
@@ -1035,23 +1575,170 @@ impl UpConfig {
                 return Err(SelectError::AllSkipped);
             }
         } else {
-            let unknown: Vec<String> = selected
-                .iter()
-                .filter(|name| self.services.contains_key(name.as_str()).not())
-                .cloned()
-                .collect();
+            let unknown = self.missing_services(selected);
             if unknown.is_empty().not() {
-                let mut available: Vec<String> =
-                    self.services.keys().map(|name| name.to_string()).collect();
-                available.sort();
-                return Err(SelectError::UnknownServices { unknown, available });
+                return Err(SelectError::UnknownServices {
+                    unknown,
+                    available: self.service_names(),
+                });
             }
 
             self.services
                 .retain(|name, _| selected.iter().any(|s| s.as_str() == name.as_ref()));
         }
 
+        let not_launched = self.missing_services(debug);
+        if not_launched.is_empty().not() {
+            return Err(SelectError::DebugNotSelected {
+                services: not_launched,
+            });
+        }
+
+        let in_containers: Vec<String> = debug
+            .iter()
+            .filter(|name| {
+                self.services
+                    .get(name.as_str())
+                    .is_some_and(|service| service.run.r#type == RunType::Container)
+            })
+            .cloned()
+            .collect();
+        if in_containers.is_empty().not() {
+            return Err(SelectError::DebugNotExec {
+                services: in_containers,
+            });
+        }
+
         Ok(())
+    }
+
+    /// Those of `names` that aren't among [`Self::services`], in the order given.
+    fn missing_services(&self, names: &[String]) -> Vec<String> {
+        names
+            .iter()
+            .filter(|name| self.services.contains_key(name.as_str()).not())
+            .cloned()
+            .collect()
+    }
+
+    /// Every service name in the config, sorted.
+    fn service_names(&self) -> Vec<String> {
+        self.services
+            .keys()
+            .map(|name| name.to_string())
+            .sorted()
+            .collect()
+    }
+
+    /// Picks the image of every service for a `run` of `mirrord preview up` or `mirrord preview
+    /// sync`, and drops the services that get no preview.
+    ///
+    /// [`PreviewRun::Up`] previews every service with an image. [`PreviewRun::Sync`] previews only
+    /// the services with `sync`, except those with `skip` and no image, and a service without an
+    /// image runs the target's image.
+    ///
+    /// `flags` are the `--image <service>=<ref>` values. A service's image comes from its flag,
+    /// then its `MIRRORD_<SERVICE>_IMAGE` environment variable (see [`preview_image_env`]; empty
+    /// counts as unset). For [`PreviewRun::Sync`], an image overrides `skip`, because passing one
+    /// selects the service, as naming it does in `mirrord up <service>`. The variables are read
+    /// through `context`.
+    pub fn select_preview_images(
+        &mut self,
+        flags: &[String],
+        context: &ConfigContext,
+        run: PreviewRun,
+    ) -> Result<PreviewImages, PreviewImageError> {
+        let mut from_flags: HashMap<&str, &str> = HashMap::new();
+        for flag in flags {
+            let (service, image) = flag
+                .split_once('=')
+                .filter(|(service, image)| service.is_empty().not() && image.is_empty().not())
+                .ok_or_else(|| PreviewImageError::InvalidFlag(flag.clone()))?;
+            if self.services.contains_key(service).not() {
+                return Err(PreviewImageError::UnknownService {
+                    service: service.to_owned(),
+                    available: self
+                        .services
+                        .keys()
+                        .map(|name| name.to_string())
+                        .sorted()
+                        .collect(),
+                });
+            }
+            if from_flags.insert(service, image).is_some() {
+                return Err(PreviewImageError::DuplicateFlag(service.to_owned()));
+            }
+        }
+
+        // A service with a flag doesn't read its variable, so it can't make one ambiguous.
+        let mut env_names: HashMap<String, Vec<&Arc<str>>> = HashMap::new();
+        for service in self
+            .services
+            .keys()
+            .filter(|service| from_flags.contains_key(service.as_ref()).not())
+        {
+            env_names
+                .entry(preview_image_env(service))
+                .or_default()
+                .push(service);
+        }
+        let mut from_env = HashMap::new();
+        for (env, services) in env_names {
+            let Some(image) = context
+                .get_env(&env)
+                .ok()
+                .filter(|image| image.is_empty().not())
+            else {
+                continue;
+            };
+            if let [service] = services.as_slice() {
+                from_env.insert((*service).clone(), image);
+            } else {
+                return Err(PreviewImageError::AmbiguousEnv {
+                    env,
+                    services: services
+                        .iter()
+                        .map(|name| name.to_string())
+                        .sorted()
+                        .collect(),
+                });
+            }
+        }
+
+        let mut images = PreviewImages::default();
+        self.services.retain(|name, service| {
+            let picked = match from_flags.get(name.as_ref()) {
+                Some(image) => Some(((*image).to_owned(), PreviewImageSource::Flag)),
+                None => from_env
+                    .remove(name)
+                    .map(|image| (image, PreviewImageSource::Env)),
+            };
+
+            let skipped = match run {
+                PreviewRun::Up if picked.is_none() => Some(SkipReason::NoImage),
+                PreviewRun::Sync if service.sync.is_none() => Some(SkipReason::NoSync),
+                PreviewRun::Sync if service.skip && picked.is_none() => Some(SkipReason::Skip),
+                PreviewRun::Up | PreviewRun::Sync => None,
+            };
+            match (skipped, picked) {
+                (Some(reason), _) => images.skipped.push((name.clone(), reason)),
+                (None, Some(picked)) => {
+                    images.picked.insert(name.clone(), picked);
+                }
+                (None, None) => {}
+            }
+            skipped.is_none()
+        });
+        images.skipped.sort();
+
+        if self.services.is_empty() {
+            return Err(match run {
+                PreviewRun::Up => PreviewImageError::NoImages,
+                PreviewRun::Sync => PreviewImageError::NothingToSync,
+            });
+        }
+
+        Ok(images)
     }
 
     /// Produces one [`SubprocessCfg`] per service defined in the configuration.
@@ -1071,37 +1758,90 @@ impl UpConfig {
         up_context: UpKubeContext,
         context: &mut ConfigContext,
     ) -> Result<Vec<SubprocessCfg>, UpError> {
+        self.assemble_services(key, resolved_targets, up_context, context, SessionKind::Up)
+    }
+
+    /// Like [`Self::service_configs`], for the sessions of `kind` (see
+    /// [`ServiceConfig::assemble`]).
+    pub(crate) fn assemble_services(
+        self,
+        key: &EnvKey,
+        resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
+        up_context: UpKubeContext,
+        context: &mut ConfigContext,
+        kind: SessionKind,
+    ) -> Result<Vec<SubprocessCfg>, UpError> {
         let base_config = self.common.base_config(context)?;
+        let modes = self.modes;
 
         self.services
             .into_iter()
             .map(|(service_name, svc)| {
-                let mode = svc.default_mode;
-                if mode == ServiceMode::Replace && svc.http_filter.is_filter_set() {
-                    eprintln!(
-                        "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
-                    );
+                let mode = ModeConfig::named(&modes, &svc.default_mode)?;
+                // A preview session runs as `split` whatever the mode, so nothing below is ignored.
+                let mode = match kind {
+                    SessionKind::Up => mode,
+                    SessionKind::Preview => {
+                        ModeConfig::named(&modes, <&str>::from(ServiceMode::Split))?
+                    }
+                };
+                if kind == SessionKind::Up && mode.incoming() == ServiceMode::Replace {
+                    if svc.http_filter.is_filter_set() {
+                        eprintln!(
+                            "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
+                        );
+                    }
+                    if mode.queues.is_some() {
+                        eprintln!(
+                            "{service_name}: `queues` of mode `{}` is ignored with `incoming: replace`, all queue messages are handled locally",
+                            svc.default_mode
+                        );
+                    }
                 }
-                let (config, run) = svc
+                let mode_name = svc.default_mode.clone();
+                let service = svc
                     .assemble(
                         &service_name,
                         base_config.clone(),
+                        &mode,
                         key.clone(),
                         resolved_targets,
                         up_context.clone(),
                         None,
+                        kind,
                     )
                     .map_err(|source| ConfigPatchError {
                         service: service_name.clone(),
                         source,
                     })?;
-                Ok(SubprocessCfg {
-                    config,
-                    service_name,
-                    run,
-                    mode,
-                })
+                let asks_for_branches = mode
+                    .db_branching
+                    .is_some_and(|branching| branching != DbBranching::Off);
+                if kind == SessionKind::Up
+                    && asks_for_branches
+                    && is_single_workload(service.config.target.path.as_ref()).not()
+                    && service.config.feature.db_branches.is_empty()
+                {
+                    eprintln!(
+                        "{service_name}: `db_branching` of mode `{mode_name}` is ignored, it needs a single workload target",
+                    );
+                }
+                Ok(service)
             })
+            .collect()
+    }
+
+    /// The kube contexts the services run in, picked as for their sessions: `context_arg`
+    /// (`--context`), then the service's `context`, then `common.context`. `None` stands for the
+    /// kubeconfig's current context.
+    pub fn service_contexts(&self, context_arg: Option<Arc<str>>) -> BTreeSet<Option<Arc<str>>> {
+        let up_context = UpKubeContext {
+            command_arg: context_arg,
+            common_context: self.common.context.clone(),
+        };
+        self.services
+            .values()
+            .map(|service| up_context.get_context(service.context.clone()))
             .collect()
     }
 
@@ -1116,6 +1856,34 @@ impl UpConfig {
             .iter()
             .filter_map(move |(name, svc)| svc.resolve_target(name, up_context.clone()).err())
     }
+}
+
+/// An entry named after a built-in mode sets more than `db_branching`.
+#[derive(Debug, Error, Diagnostic)]
+#[error("`modes.{0}` overrides the built-in `{0}` mode, which may only set `db_branching`")]
+#[diagnostic(help(
+    "Remove the other settings, or rename the mode to define a custom one: `split`, `replace` \
+     and `mirror` are reserved."
+))]
+pub struct BuiltinModeName(pub Arc<str>);
+
+/// A mode was selected that is neither built-in nor defined under `modes`.
+#[derive(Debug, Error, Diagnostic)]
+#[error(
+    "unknown mode `{name}`{}",
+    suggestion
+        .as_ref()
+        .map(|closest| format!("; did you mean `{closest}`?"))
+        .unwrap_or_default()
+)]
+#[diagnostic(help("Known modes: {}", known.join(", ")))]
+pub struct UnknownMode {
+    /// The name that was selected.
+    pub name: Arc<str>,
+    /// The closest known name, if one is close enough.
+    pub suggestion: Option<Arc<str>>,
+    /// Every mode that can be selected.
+    pub known: Vec<Arc<str>>,
 }
 
 /// Error produced by [`UpConfig::select_services`].
@@ -1136,6 +1904,139 @@ pub enum SelectError {
     #[error("no services to launch: every service is marked `skip: true`")]
     #[diagnostic(help("Name a service explicitly to run it, or remove a `skip: true` flag."))]
     AllSkipped,
+
+    /// Services named by `--debug` are in the config, but not among those launched.
+    #[error("cannot debug service(s) that are not launched: {}", services.join(", "))]
+    #[diagnostic(help(
+        "Name them among the services to launch, or remove their `skip: true` flags."
+    ))]
+    DebugNotSelected {
+        /// The services named by `--debug` that aren't launched.
+        services: Vec<String>,
+    },
+
+    /// Services named by `--debug` run with `type: container`. Their local process is the
+    /// container runtime's client, not the app, so holding it gives a debugger nothing to debug.
+    #[error("cannot debug service(s) that run in a container: {}", services.join(", "))]
+    #[diagnostic(help(
+        "`--debug` only holds services that run with `type: exec`. Drop these from `--debug`."
+    ))]
+    DebugNotExec {
+        /// The services named by `--debug` that run with `type: container`.
+        services: Vec<String>,
+    },
+}
+
+/// The environment variable that sets the image of `service` for `mirrord preview up` and
+/// `mirrord preview sync`: `MIRRORD_<SERVICE>_IMAGE`, with the service name in upper case and
+/// every character that isn't an ASCII letter or digit turned into `_` (`cake-maker` reads
+/// `MIRRORD_CAKE_MAKER_IMAGE`).
+pub fn preview_image_env(service: &str) -> String {
+    let service = service
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("MIRRORD_{service}_IMAGE")
+}
+
+/// Which command picks the services to preview, see [`UpConfig::select_preview_images`]. Its
+/// static string is the command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, IntoStaticStr)]
+pub enum PreviewRun {
+    /// `mirrord preview up`: the services with an image, without code sync.
+    #[strum(serialize = "mirrord preview up")]
+    Up,
+    /// `mirrord preview sync`: the services with `sync`, with code sync.
+    #[strum(serialize = "mirrord preview sync")]
+    Sync,
+}
+
+/// Why [`UpConfig::select_preview_images`] gives a service no preview.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SkipReason {
+    /// [`PreviewRun::Up`]: the service has no image.
+    NoImage,
+    /// [`PreviewRun::Sync`]: the service has `skip: true` and no image.
+    Skip,
+    /// [`PreviewRun::Sync`]: the service has no `sync`.
+    NoSync,
+}
+
+/// Where `mirrord preview up` or `mirrord preview sync` took a service's image from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewImageSource {
+    /// `--image <service>=<ref>`.
+    Flag,
+    /// `MIRRORD_<SERVICE>_IMAGE`.
+    Env,
+}
+
+/// What [`UpConfig::select_preview_images`] picked.
+#[derive(Debug, Default)]
+pub struct PreviewImages {
+    /// The image of every service left in the config, and where it came from.
+    pub picked: HashMap<Arc<str>, (String, PreviewImageSource)>,
+    /// The services that get no preview, and why, sorted by name.
+    pub skipped: Vec<(Arc<str>, SkipReason)>,
+}
+
+/// Error produced by [`UpConfig::select_preview_images`].
+#[derive(Debug, Error, Diagnostic)]
+pub enum PreviewImageError {
+    /// An `--image` value isn't `<service>=<ref>` with both parts set.
+    #[error("invalid `--image {0}`: expected `<service>=<image ref>`")]
+    InvalidFlag(String),
+
+    /// An `--image` value names a service the config doesn't define.
+    #[error("`--image` for unknown service `{service}`")]
+    #[diagnostic(help("Available services: {}", available.join(", ")))]
+    UnknownService {
+        /// The name that wasn't found.
+        service: String,
+        /// The service names defined in the config.
+        available: Vec<String>,
+    },
+
+    /// Two `--image` values name the same service.
+    #[error("`--image` is given twice for service `{0}`")]
+    DuplicateFlag(String),
+
+    /// A set `MIRRORD_<SERVICE>_IMAGE` stands for more than one service.
+    #[error("`{env}` is set, but it could be the image of any of: {}", services.join(", "))]
+    #[diagnostic(help("Use `--image <service>=<image ref>` for these services instead."))]
+    AmbiguousEnv {
+        /// The environment variable.
+        env: String,
+        /// The services whose names map onto it.
+        services: Vec<String>,
+    },
+
+    /// No service got an image, so `mirrord preview up` has nothing to preview.
+    #[error("no service has an image to preview")]
+    #[diagnostic(help(
+        "Pass `--image <service>=<image ref>` or set `MIRRORD_<SERVICE>_IMAGE`. To preview the \
+         services with `sync` without building an image, run `mirrord preview sync`."
+    ))]
+    NoImages,
+
+    /// Every service lacks `sync`, or has `sync` and `skip` but no image, so `mirrord preview
+    /// sync` has nothing to push.
+    #[error(
+        "no service to sync: no service has `sync`, or every service with `sync` is marked \
+         `skip: true` and has no image"
+    )]
+    #[diagnostic(help(
+        "Add `sync` to a service, remove `skip: true` from one, or pass `--image \
+         <service>=<image ref>` for it. `mirrord preview up` previews the services that have an \
+         image."
+    ))]
+    NothingToSync,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
@@ -1191,6 +2092,7 @@ impl CollectAnalytics for &UpConfig {
         let mut count_mode_split: u32 = 0;
         let mut count_mode_replace: u32 = 0;
         let mut count_mode_mirror: u32 = 0;
+        let mut count_mode_custom: u32 = 0;
 
         for svc in self.services.values() {
             let ServiceConfig {
@@ -1203,6 +2105,8 @@ impl CollectAnalytics for &UpConfig {
                 run,
                 context,
                 config_patch,
+                // `mirrord up` ignores it.
+                sync: _,
             } = svc;
 
             if *target != TargetConfig::UNSPECIFIED {
@@ -1211,13 +2115,16 @@ impl CollectAnalytics for &UpConfig {
             if *env != EnvConfig::default() {
                 count_env += 1;
             }
-            if *default_mode != ServiceMode::default() {
+            let builtin = ServiceMode::from_name(default_mode);
+            if builtin != Some(ServiceMode::default()) {
                 count_default_mode += 1;
             }
-            match default_mode {
-                ServiceMode::Split => count_mode_split += 1,
-                ServiceMode::Replace => count_mode_replace += 1,
-                ServiceMode::Mirror => count_mode_mirror += 1,
+            // Custom mode names are the user's, so they are only counted.
+            match builtin {
+                Some(ServiceMode::Split) => count_mode_split += 1,
+                Some(ServiceMode::Replace) => count_mode_replace += 1,
+                Some(ServiceMode::Mirror) => count_mode_mirror += 1,
+                None => count_mode_custom += 1,
             }
             if http_filter.is_filter_set() {
                 count_http_filter += 1;
@@ -1269,7 +2176,22 @@ impl CollectAnalytics for &UpConfig {
         modes.add("split", count_mode_split);
         modes.add("replace", count_mode_replace);
         modes.add("mirror", count_mode_mirror);
+        modes.add("custom", count_mode_custom);
         analytics.add("modes", modes);
+        analytics.add(
+            "num_custom_modes",
+            self.modes
+                .keys()
+                .filter(|name| ServiceMode::from_name(name).is_none())
+                .count(),
+        );
+        analytics.add(
+            "num_db_branching_modes",
+            self.modes
+                .values()
+                .filter(|mode| mode.db_branching.is_some())
+                .count(),
+        );
     }
 }
 
@@ -1456,7 +2378,7 @@ mod tests {
             svc.env.r#override.as_ref().unwrap()["NODE_ENV"],
             "development"
         );
-        assert_eq!(svc.default_mode, ServiceMode::Split);
+        assert_eq!(svc.default_mode, Arc::<str>::from(ServiceMode::Split));
         assert_eq!(
             svc.http_filter.header_filter.as_deref(),
             Some("x-session: local")
@@ -1481,7 +2403,7 @@ mod tests {
     #[test]
     fn windows_validation_accepts_exec_without_ci() {
         let mut config = windows_validation_fixture();
-        config.select_services(&["exec".to_owned()]).unwrap();
+        config.select_services(&["exec".to_owned()], &[]).unwrap();
 
         config.validate_windows(false).unwrap();
     }
@@ -1501,15 +2423,28 @@ mod tests {
                   command: ["docker"]
             "#,
         );
-        config.select_services(&[]).unwrap();
+        config.select_services(&[], &[]).unwrap();
 
         config.validate_windows(false).unwrap();
     }
 
     #[test]
+    fn windows_validation_rejects_selected_container_services() {
+        let mut config = windows_validation_fixture();
+        config
+            .select_services(&["exec".to_owned(), "zeta-container".to_owned()], &[])
+            .unwrap();
+
+        assert!(matches!(
+            config.validate_windows(false),
+            Err(WindowsSupportError::Container(name)) if &*name == "zeta-container"
+        ));
+    }
+
+    #[test]
     fn windows_validation_rejects_ci_for_exec_services() {
         let mut config = windows_validation_fixture();
-        config.select_services(&["exec".to_owned()]).unwrap();
+        config.select_services(&["exec".to_owned()], &[]).unwrap();
 
         assert!(matches!(
             config.validate_windows(true),
@@ -1755,7 +2690,10 @@ mod tests {
                   command: ["echo"]
             "#,
         );
-        assert_eq!(config.services["svc"].default_mode, ServiceMode::Replace);
+        assert_eq!(
+            config.services["svc"].default_mode,
+            Arc::<str>::from(ServiceMode::Replace)
+        );
     }
 
     #[test]
@@ -1852,28 +2790,275 @@ mod tests {
             "#,
         );
 
-        config.override_mode(ServiceMode::Replace);
+        config.override_mode(ServiceMode::Replace.into()).unwrap();
         assert!(
             config
                 .services
                 .values()
-                .all(|svc| svc.default_mode == ServiceMode::Replace)
+                .all(|svc| svc.default_mode == Arc::<str>::from(ServiceMode::Replace))
         );
 
-        config.override_mode(ServiceMode::Split);
+        config.override_mode(ServiceMode::Split.into()).unwrap();
         assert!(
             config
                 .services
                 .values()
-                .all(|svc| svc.default_mode == ServiceMode::Split)
+                .all(|svc| svc.default_mode == Arc::<str>::from(ServiceMode::Split))
         );
 
-        config.override_mode(ServiceMode::Mirror);
+        config.override_mode(ServiceMode::Mirror.into()).unwrap();
         assert!(
             config
                 .services
                 .values()
-                .all(|svc| svc.default_mode == ServiceMode::Mirror)
+                .all(|svc| svc.default_mode == Arc::<str>::from(ServiceMode::Mirror))
+        );
+    }
+
+    // -- Custom modes --
+
+    /// The config `mirrord up` generates for the one service of `yaml`.
+    fn only_config(yaml: &str) -> LayerConfig {
+        parse(yaml)
+            .service_configs(
+                &EnvKey::Provided("key".to_owned()),
+                &mut HashMap::new(),
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
+            .unwrap()
+            .remove(0)
+            .config
+    }
+
+    /// `incoming` and `queues` set the incoming and queue modes; `queues` defaults to following
+    /// `incoming`, and a mode without `incoming` is `split`.
+    #[rstest]
+    #[case::empty("{}", IncomingMode::Steal, QueueMode::Steal)]
+    #[case::split_queues("{ queues: split }", IncomingMode::Steal, QueueMode::Steal)]
+    #[case::mirror_queues("{ queues: mirror }", IncomingMode::Steal, QueueMode::Mirror)]
+    #[case::mirror("{ incoming: mirror }", IncomingMode::Mirror, QueueMode::Mirror)]
+    #[case::mirror_mirror_queues(
+        "{ incoming: mirror, queues: mirror }",
+        IncomingMode::Mirror,
+        QueueMode::Mirror
+    )]
+    fn custom_mode_sets_incoming_and_queue_modes(
+        #[case] mode: &str,
+        #[case] incoming: IncomingMode,
+        #[case] queues: QueueMode,
+    ) {
+        let config = only_config(&format!(
+            r#"
+            modes:
+              custom: {mode}
+            services:
+              svc:
+                default_mode: custom
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        ));
+
+        assert_eq!(config.feature.network.incoming.mode, incoming);
+        assert_eq!(
+            config
+                .feature
+                .network
+                .incoming
+                .http_filter
+                .header_filter
+                .as_deref(),
+            Some("baggage: .*mirrord-session=key.*")
+        );
+        assert!(
+            config
+                .feature
+                .split_queues
+                .is_all_wildcard_with_mode(&EnvKey::Provided("key".to_owned()), queues)
+        );
+    }
+
+    /// A custom mode without `db_branching` requests DB branching like the built-in mode its
+    /// `incoming` names: `split` and `mirror` ask for every `MirrordSplitConfig` entry, `replace`
+    /// for none. `queues` plays no part.
+    #[rstest]
+    #[case::split("{ incoming: split, queues: mirror }", true)]
+    #[case::mirror("{ incoming: mirror, queues: split }", true)]
+    #[case::replace("{ incoming: replace, queues: split }", false)]
+    fn custom_mode_db_branching_follows_incoming(#[case] mode: &str, #[case] branches: bool) {
+        let service = parse(&format!(
+            r#"
+            modes:
+              custom: {mode}
+            services:
+              svc:
+                default_mode: custom
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        ))
+        .service_configs(
+            &EnvKey::Provided("key".to_owned()),
+            &mut HashMap::new(),
+            UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
+        )
+        .unwrap()
+        .remove(0);
+
+        let origin = match branches {
+            true => RequestOrigin::Default,
+            false => RequestOrigin::Config,
+        };
+        assert_eq!(service.db_branches_origin, origin);
+        assert_eq!(
+            service.config.feature.db_branches.is_empty(),
+            branches.not()
+        );
+    }
+
+    /// `incoming: replace` copies the target like built-in `replace`, and splits no queues even
+    /// when the mode sets `queues`.
+    #[test]
+    fn custom_replace_mode_ignores_queues() {
+        let config = only_config(
+            r#"
+            modes:
+              takeover:
+                incoming: replace
+                queues: mirror
+            services:
+              svc:
+                default_mode: takeover
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        assert!(config.feature.copy_target.enabled);
+        assert!(config.feature.copy_target.scale_down);
+        assert_eq!(config.feature.split_queues, SplitQueuesConfig::default());
+    }
+
+    /// `config_patch` is applied over what the mode sets.
+    #[test]
+    fn config_patch_overrides_custom_mode() {
+        let config = only_config(
+            r#"
+            modes:
+              custom:
+                queues: mirror
+            services:
+              svc:
+                default_mode: custom
+                target:
+                  path: "deployment/web"
+                config_patch:
+                  feature:
+                    network:
+                      incoming:
+                        mode: mirror
+                    split_queues: []
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        assert_eq!(config.feature.network.incoming.mode, IncomingMode::Mirror);
+        assert_eq!(config.feature.split_queues, SplitQueuesConfig::default());
+    }
+
+    #[test]
+    fn override_mode_selects_custom_modes() {
+        let mut config = parse(
+            r#"
+            modes:
+              custom: {}
+            services:
+              a:
+                default_mode: replace
+                run:
+                  command: ["echo"]
+              b:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        config.override_mode("custom").unwrap();
+        assert!(
+            config
+                .services
+                .values()
+                .all(|svc| &*svc.default_mode == "custom")
+        );
+    }
+
+    /// An unknown `--mode` leaves every service's mode as it was.
+    #[test]
+    fn override_mode_rejects_unknown_modes() {
+        let mut config = parse(
+            r#"
+            modes:
+              custom: {}
+            services:
+              a:
+                default_mode: replace
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let UnknownMode { name, known, .. } = config.override_mode("bogus").unwrap_err();
+        assert_eq!(&*name, "bogus");
+        assert!(known.iter().any(|mode| &**mode == "custom"));
+        assert_eq!(&*config.services["a"].default_mode, "replace");
+    }
+
+    /// `incoming: replace` on a targetless service fails the target check like built-in
+    /// `replace`, naming the custom mode.
+    #[test]
+    fn verify_services_rejects_targetless_custom_replace_mode() {
+        let config = parse(
+            r#"
+            modes:
+              takeover:
+                incoming: replace
+            services:
+              svc:
+                default_mode: takeover
+                target: none
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let errors = config
+            .verify_services(&EnvKey::Provided("key".to_owned()), None)
+            .unwrap();
+        let [ServiceError::IncompatibleTarget(target)] = errors.as_slice() else {
+            panic!("expected one incompatible target, got {errors:?}");
+        };
+        assert_eq!(&*target.mode, "takeover");
+        assert_eq!(target.target_type, TargetType::Targetless);
+    }
+
+    #[test]
+    fn unknown_mode_field_is_rejected() {
+        let err = serde_saphyr::from_str::<UpConfig>(
+            "modes:\n  custom:\n    incomming: mirror\nservices:\n  svc:\n    run:\n      command: [x]\n",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown field `incomming`"),
+            "{err}"
         );
     }
 
@@ -1899,7 +3084,8 @@ mod tests {
             )
             .unwrap();
 
-            validate_targets(&services).unwrap_or_else(|err| panic!("{path} rejected: {err}"));
+            validate_targets(&services)
+                .unwrap_or_else(|errors| panic!("{path} rejected: {}", errors.iter().format("; ")));
         }
     }
 
@@ -1914,9 +3100,8 @@ mod tests {
                 run:
                   command: ["echo"]
               b:
-                default_mode: replace
                 target:
-                  path: "deployment/ok"
+                  path: "label/app=web"
                 run:
                   command: ["echo"]
               c:
@@ -1935,8 +3120,18 @@ mod tests {
         )
         .unwrap();
 
-        let ModeError::IncompatibleTargets(incompatible) =
-            validate_targets(&services).expect_err("`a` and `c` are not usable in replace mode");
+        let errors = validate_targets(&services)
+            .expect_err("`a` and `c` are incompatible and `b` is unsupported");
+        let [
+            TargetValidationError::UnsupportedTargetTypes(unsupported),
+            TargetValidationError::IncompatibleTargets(incompatible),
+        ] = errors.as_slice()
+        else {
+            panic!("unexpected errors while validating targets: {errors:?}")
+        };
+
+        assert_eq!(unsupported.len(), 1);
+        assert_eq!(unsupported[0].service.as_ref(), "b");
 
         let mut names = incompatible
             .iter()
@@ -1944,6 +3139,32 @@ mod tests {
             .collect::<Vec<_>>();
         names.sort();
         assert_eq!(names, ["a", "c"]);
+    }
+
+    #[test]
+    fn verify_services_rejects_label_target() {
+        let errors = parse(
+            r#"
+            services:
+              worker:
+                target:
+                  path: label/app=worker
+                run:
+                  command: ["echo"]
+            "#,
+        )
+        .verify_services(&EnvKey::Provided("a-session".to_owned()), None)
+        .unwrap();
+
+        assert!(matches!(
+            errors.as_slice(),
+            [ServiceError::UnsupportedTarget(_)]
+        ));
+        assert_eq!(
+            errors[0].to_string(),
+            "Service `worker` uses a label selector target, which isn't supported with `mirrord \
+             up` yet. Target a specific workload instead."
+        );
     }
 
     #[test]
@@ -2331,21 +3552,7 @@ mod tests {
     // -- Service selection --
 
     fn selection_fixture() -> UpConfig {
-        parse(
-            r#"
-            services:
-              a:
-                run:
-                  command: ["echo", "a"]
-              b:
-                skip: true
-                run:
-                  command: ["echo", "b"]
-              c:
-                run:
-                  command: ["echo", "c"]
-            "#,
-        )
+        parse(include_str!("testdata/selection.yaml"))
     }
 
     fn service_names(config: &UpConfig) -> HashSet<String> {
@@ -2355,7 +3562,7 @@ mod tests {
     #[test]
     fn no_selection_drops_skipped_services() {
         let mut config = selection_fixture();
-        config.select_services(&[]).unwrap();
+        config.select_services(&[], &[]).unwrap();
         assert_eq!(
             service_names(&config),
             HashSet::from(["a".to_owned(), "c".to_owned()]),
@@ -2365,14 +3572,14 @@ mod tests {
     #[test]
     fn selection_keeps_only_named_services() {
         let mut config = selection_fixture();
-        config.select_services(&["a".to_owned()]).unwrap();
+        config.select_services(&["a".to_owned()], &[]).unwrap();
         assert_eq!(service_names(&config), HashSet::from(["a".to_owned()]));
     }
 
     #[test]
     fn explicit_selection_overrides_skip() {
         let mut config = selection_fixture();
-        config.select_services(&["b".to_owned()]).unwrap();
+        config.select_services(&["b".to_owned()], &[]).unwrap();
         assert_eq!(service_names(&config), HashSet::from(["b".to_owned()]));
     }
 
@@ -2380,7 +3587,7 @@ mod tests {
     fn unknown_service_errors_and_lists_available() {
         let mut config = selection_fixture();
         let err = config
-            .select_services(&["nope".to_owned(), "a".to_owned()])
+            .select_services(&["nope".to_owned(), "a".to_owned()], &[])
             .unwrap_err();
         match err {
             SelectError::UnknownServices { unknown, available } => {
@@ -2389,6 +3596,93 @@ mod tests {
             }
             other => panic!("expected UnknownServices, got {other:?}"),
         }
+    }
+
+    fn owned(names: &[&str]) -> Vec<String> {
+        names.iter().map(|&name| name.to_owned()).collect()
+    }
+
+    /// `--debug` takes services that run: ones named explicitly, or ones not skipped when none
+    /// are named.
+    #[rstest::rstest]
+    #[case::named(&["b"], &["b"])]
+    #[case::not_skipped(&[], &["a"])]
+    #[case::several_not_skipped(&[], &["c", "a"])]
+    #[case::several_named(&["a", "b"], &["b", "a"])]
+    fn debugging_launched_services_is_accepted(#[case] selected: &[&str], #[case] debug: &[&str]) {
+        let mut config = selection_fixture();
+        config
+            .select_services(&owned(selected), &owned(debug))
+            .expect("every debugged service is launched");
+    }
+
+    /// Every unknown `--debug` name is reported at once, and the known one among them is not.
+    #[test]
+    fn debugging_unknown_services_errors_and_lists_them_all() {
+        let mut config = selection_fixture();
+        match config
+            .select_services(&[], &owned(&["nope", "a", "gone"]))
+            .unwrap_err()
+        {
+            SelectError::UnknownServices { unknown, available } => {
+                assert_eq!(
+                    unknown,
+                    ["nope", "gone"],
+                    "only the unknown names, all of them"
+                );
+                assert_eq!(available, ["a", "b", "c"]);
+            }
+            other => panic!("expected UnknownServices, got {other:?}"),
+        }
+    }
+
+    /// A known service that does not run can't be held: the IDE would wait for a hold line
+    /// that never comes. Every such service is reported, and none that is launched.
+    #[rstest::rstest]
+    #[case::another_one_named(&["a"], &["c"], &["c"])]
+    #[case::skipped(&[], &["b"], &["b"])]
+    #[case::some_of_several(&["a"], &["b", "a", "c"], &["b", "c"])]
+    fn debugging_services_that_are_not_launched_errors(
+        #[case] selected: &[&str],
+        #[case] debug: &[&str],
+        #[case] expected: &[&str],
+    ) {
+        let mut config = selection_fixture();
+        match config
+            .select_services(&owned(selected), &owned(debug))
+            .unwrap_err()
+        {
+            SelectError::DebugNotSelected { services } => assert_eq!(services, expected),
+            other => panic!("expected DebugNotSelected, got {other:?}"),
+        }
+    }
+
+    /// A container service's local process is the container runtime's client, not the app, so
+    /// it can't be held. Every such service is reported at once, in the order given, and the exec
+    /// one among them is not.
+    #[test]
+    fn debugging_container_services_errors_and_lists_them_all() {
+        let mut config = parse(include_str!("testdata/debug-run-types.yaml"));
+        match config
+            .select_services(&[], &owned(&["queue", "api", "db"]))
+            .unwrap_err()
+        {
+            SelectError::DebugNotExec { services } => assert_eq!(
+                services,
+                ["queue", "db"],
+                "only the container services, all of them"
+            ),
+            other => panic!("expected DebugNotExec, got {other:?}"),
+        }
+    }
+
+    /// An exec service can be held while container services run next to it.
+    #[test]
+    fn debugging_an_exec_service_beside_containers_is_accepted() {
+        let mut config = parse(include_str!("testdata/debug-run-types.yaml"));
+        config
+            .select_services(&[], &owned(&["api"]))
+            .expect("`api` runs with `type: exec`, so it can be held");
     }
 
     #[test]
@@ -2403,8 +3697,129 @@ mod tests {
             "#,
         );
         assert!(matches!(
-            config.select_services(&[]).unwrap_err(),
+            config.select_services(&[], &[]).unwrap_err(),
             SelectError::AllSkipped
+        ));
+    }
+
+    // -- Preview image selection --
+
+    fn preview_fixture() -> UpConfig {
+        parse(
+            r#"
+            services:
+              built:
+                run:
+                  command: ["echo"]
+              synced:
+                run:
+                  command: ["echo"]
+                sync:
+                  files:
+                    - local: app
+                      remote: /app
+              skipped-sync:
+                skip: true
+                run:
+                  command: ["echo"]
+                sync:
+                  files:
+                    - local: app
+                      remote: /app
+              plain:
+                run:
+                  command: ["echo"]
+            "#,
+        )
+    }
+
+    /// `mirrord preview up` previews only the services with an image.
+    #[test]
+    fn preview_up_takes_only_the_services_with_an_image() {
+        let mut config = preview_fixture();
+        let context = ConfigContext::default()
+            .override_env(preview_image_env("synced"), "registry.example/synced:v1");
+
+        let images = config
+            .select_preview_images(&[], &context, PreviewRun::Up)
+            .unwrap();
+
+        assert_eq!(service_names(&config), HashSet::from(["synced".to_owned()]));
+        assert_eq!(
+            images.skipped,
+            vec![
+                (Arc::from("built"), SkipReason::NoImage),
+                (Arc::from("plain"), SkipReason::NoImage),
+                (Arc::from("skipped-sync"), SkipReason::NoImage),
+            ]
+        );
+    }
+
+    /// `mirrord preview sync` previews only the services with `sync`, each of its image or else of
+    /// the target's image, and keeps their `sync` also with an image. An image names its service,
+    /// so it previews a service with `skip` too.
+    #[test]
+    fn preview_sync_takes_only_the_services_with_sync() {
+        let mut config = preview_fixture();
+        let context = ConfigContext::default()
+            .override_env(preview_image_env("synced"), "registry.example/synced:v1");
+
+        let images = config
+            .select_preview_images(&[], &context, PreviewRun::Sync)
+            .unwrap();
+
+        assert_eq!(service_names(&config), HashSet::from(["synced".to_owned()]));
+        assert_eq!(
+            images.picked["synced"],
+            (
+                "registry.example/synced:v1".to_owned(),
+                PreviewImageSource::Env
+            )
+        );
+        assert_eq!(
+            images.skipped,
+            vec![
+                (Arc::from("built"), SkipReason::NoSync),
+                (Arc::from("plain"), SkipReason::NoSync),
+                (Arc::from("skipped-sync"), SkipReason::Skip),
+            ]
+        );
+
+        let mut config = preview_fixture();
+        let flags = ["skipped-sync=registry.example/skipped:v1".to_owned()];
+        let images = config
+            .select_preview_images(&flags, &ConfigContext::default(), PreviewRun::Sync)
+            .unwrap();
+        assert_eq!(
+            service_names(&config),
+            HashSet::from(["synced".to_owned(), "skipped-sync".to_owned()])
+        );
+        assert_eq!(
+            images.skipped,
+            vec![
+                (Arc::from("built"), SkipReason::NoSync),
+                (Arc::from("plain"), SkipReason::NoSync),
+            ]
+        );
+    }
+
+    /// A run with nothing to preview fails: `preview up` when no service has an image, and
+    /// `preview sync` when no service has `sync` without `skip`.
+    #[test]
+    fn a_run_with_nothing_to_preview_fails() {
+        let mut config = preview_fixture();
+        assert!(matches!(
+            config.select_preview_images(&[], &ConfigContext::default(), PreviewRun::Up),
+            Err(PreviewImageError::NoImages)
+        ));
+
+        let mut config = preview_fixture();
+        config
+            .services
+            .retain(|name, _| ["plain", "skipped-sync"].contains(&name.as_ref()));
+        assert!(matches!(
+            config.select_preview_images(&[], &ConfigContext::default(), PreviewRun::Sync),
+            Err(PreviewImageError::NothingToSync)
         ));
     }
 
@@ -2424,21 +3839,6 @@ mod tests {
             err.to_string().contains("missing field `run`"),
             "expected error about missing run, got: {err}"
         );
-    }
-
-    #[test]
-    fn error_invalid_mode() {
-        let result: Result<UpConfig, _> = serde_saphyr::from_str(
-            r#"
-            services:
-              svc:
-                default_mode: bogus
-                run:
-                  exec:
-                    command: ["echo"]
-            "#,
-        );
-        assert!(result.is_err());
     }
 
     /// A typo of `target: none` gets `none` added to the message as a hint.
@@ -2510,9 +3910,40 @@ mod tests {
                     "split": 1,
                     "replace": 0,
                     "mirror": 0,
+                    "custom": 0,
                 },
+                "num_custom_modes": 0,
+                "num_db_branching_modes": 0,
             }),
         );
+    }
+
+    /// Services in custom modes are counted, but the user's mode names are never sent.
+    #[test]
+    fn analytics_counts_custom_modes_without_their_names() {
+        let config = parse(
+            r#"
+            modes:
+              secret-name: {}
+              unused: {}
+            services:
+              a:
+                default_mode: secret-name
+                run:
+                  command: ["echo"]
+              b:
+                default_mode: mirror
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let analytics = collect(&config);
+        assert_eq!(analytics["modes"]["custom"], 1);
+        assert_eq!(analytics["modes"]["mirror"], 1);
+        assert_eq!(analytics["num_custom_modes"], 2);
+        assert_eq!(analytics["config_fields_used"]["default_mode"], 2);
+        assert!(analytics.to_string().contains("secret-name").not());
     }
 
     #[test]

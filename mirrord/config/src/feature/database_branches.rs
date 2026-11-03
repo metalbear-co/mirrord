@@ -365,6 +365,43 @@ pub enum IamAuthConfig {
     },
 }
 
+impl IamAuthConfig {
+    /// The first field set to an `aws_ssm_parameter` source. The operator reads IAM credentials
+    /// from the target pod's env only, so such a field would reach it as a source kind it cannot
+    /// resolve.
+    fn ssm_parameter_field(&self) -> Option<&'static str> {
+        let fields = match self {
+            Self::AwsRds {
+                region,
+                access_key_id,
+                secret_access_key,
+                session_token,
+            } => vec![
+                ("region", region),
+                ("access_key_id", access_key_id),
+                ("secret_access_key", secret_access_key),
+                ("session_token", session_token),
+            ],
+            Self::GcpCloudSql {
+                credentials_json,
+                credentials_path,
+                project,
+            } => vec![
+                ("credentials_json", credentials_json),
+                ("credentials_path", credentials_path),
+                ("project", project),
+            ],
+        };
+        fields.into_iter().find_map(|(field, source)| {
+            matches!(
+                source,
+                Some(TargetEnvironmentVariableSource::AwsSsmParameter { .. })
+            )
+            .then_some(field)
+        })
+    }
+}
+
 /// The branch databases a session runs with. Either defined here, or taken from the
 /// `dbBranches` entries a cluster admin put on the target's `MirrordSplitConfig`, so `mirrord
 /// exec` and `mirrord up` use one definition that does not drift.
@@ -420,20 +457,35 @@ pub enum IamAuthConfig {
 /// }
 /// ```
 ///
+/// Every entry, seeded with the `schema` copy mode instead of each entry's own `copy.mode`
+/// (`entries` takes `"*"` or a list of ids):
+/// ```json
+/// {
+///   "feature": {
+///     "db_branches": { "entries": "*", "copy": { "mode": "schema" } }
+///   }
+/// }
+/// ```
+///
 /// With `"*"` or a list of ids the operator resolves the entries, and sessions started under
 /// the same key that point at the same entry share one branch (its id is the entry id plus the
 /// key). An id that matches no entry fails the session, naming the ids the workload has; a
 /// workload with no `dbBranches` gives no branches and the session continues. An operator
 /// that cannot resolve entries fails the session before it starts. Inline definitions always
 /// win: with them, any `dbBranches` on the workload are ignored with a warning.
+///
+/// A requested `copy.mode` replaces only the `copy.mode` of each entry, and only for the entry's
+/// own database: the rest of its `copy` block and its additional databases stay as the entry
+/// defines them. The operator refuses a mode missing from the entry's `copy.allowedModes`, and
+/// ignores it for generic entries, which have no copy modes.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize)]
 #[serde(untagged)]
 pub enum DatabaseBranchesConfig {
     /// Branches defined in this config.
     Inline(Vec<DatabaseBranchConfig>),
-    /// `"*"` or a list of entry ids, resolved by the operator against the target's
-    /// `MirrordSplitConfig`.
-    FromSplitConfig(SplitConfigDbBranches),
+    /// `"*"` or a list of entry ids, optionally with a copy mode, resolved by the operator
+    /// against the target's `MirrordSplitConfig`.
+    FromSplitConfig(SplitConfigRequest),
 }
 
 /// Dispatches on the value's shape by hand instead of `#[serde(untagged)]`: an untagged enum
@@ -448,9 +500,11 @@ impl<'de> Deserialize<'de> for DatabaseBranchesConfig {
     {
         let value = serde_json::Value::deserialize(deserializer)?;
         match value {
-            serde_json::Value::String(star) if star == "*" => Ok(Self::FromSplitConfig(
-                SplitConfigDbBranches::All(AllSplitConfigDbBranches::All),
-            )),
+            serde_json::Value::String(star) if star == "*" => {
+                Ok(Self::FromSplitConfig(SplitConfigRequest::Entries(
+                    SplitConfigDbBranches::All(AllSplitConfigDbBranches::All),
+                )))
+            }
             serde_json::Value::Array(items)
                 if items.is_empty().not() && items.iter().all(serde_json::Value::is_string) =>
             {
@@ -458,14 +512,23 @@ impl<'de> Deserialize<'de> for DatabaseBranchesConfig {
                     .into_iter()
                     .filter_map(|item| item.as_str().map(str::to_owned))
                     .collect();
-                Ok(Self::FromSplitConfig(SplitConfigDbBranches::Ids(ids)))
+                Ok(Self::FromSplitConfig(SplitConfigRequest::Entries(
+                    SplitConfigDbBranches::Ids(ids),
+                )))
+            }
+            // Only an object with `entries` is the copy form, so a single inline entry written
+            // without its list still gets the message naming every form.
+            value @ serde_json::Value::Object(_) if value.get("entries").is_some() => {
+                serde_json::from_value(value)
+                    .map(|request| Self::FromSplitConfig(SplitConfigRequest::WithCopy(request)))
+                    .map_err(D::Error::custom)
             }
             value @ serde_json::Value::Array(_) => serde_json::from_value(value)
                 .map(Self::Inline)
                 .map_err(D::Error::custom),
             other => Err(D::Error::custom(format!(
-                "expected `\"*\"`, a list of MirrordSplitConfig entry ids, or a list of branch \
-                 definitions, got {other}"
+                "expected `\"*\"`, a list of MirrordSplitConfig entry ids, an object with \
+                 `entries` and `copy`, or a list of branch definitions, got {other}"
             ))),
         }
     }
@@ -490,6 +553,55 @@ pub enum AllSplitConfigDbBranches {
     #[serde(rename = "*")]
     #[default]
     All,
+}
+
+/// <!--${internal}-->
+/// A session's request for `dbBranches` entries of the target's `MirrordSplitConfig`: just the
+/// entries, or the entries with a copy mode that replaces each one's own.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize)]
+#[serde(untagged)]
+pub enum SplitConfigRequest {
+    /// `"*"` or a list of entry ids.
+    Entries(SplitConfigDbBranches),
+    /// `{ "entries": ..., "copy": { "mode": ... } }`.
+    WithCopy(SplitConfigRequestWithCopy),
+}
+
+/// <!--${internal}-->
+/// The object form of [`SplitConfigRequest`].
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SplitConfigRequestWithCopy {
+    /// `"*"` or a list of entry ids.
+    pub entries: SplitConfigDbBranches,
+    pub copy: SplitConfigCopy,
+}
+
+/// <!--${internal}-->
+/// How the requested entries are seeded.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SplitConfigCopy {
+    /// Replaces each entry's `copy.mode`.
+    pub mode: BranchCopyMode,
+}
+
+impl SplitConfigRequest {
+    /// The entries asked for.
+    pub fn entries(&self) -> &SplitConfigDbBranches {
+        match self {
+            Self::Entries(entries) => entries,
+            Self::WithCopy(request) => &request.entries,
+        }
+    }
+
+    /// The copy mode replacing each entry's own, if any.
+    pub fn copy_mode(&self) -> Option<BranchCopyMode> {
+        match self {
+            Self::Entries(_) => None,
+            Self::WithCopy(request) => Some(request.copy.mode),
+        }
+    }
 }
 
 impl Default for DatabaseBranchesConfig {
@@ -538,7 +650,7 @@ impl DatabaseBranchesConfig {
 
     /// The request to resolve against the target's `MirrordSplitConfig`, if this config asks
     /// for one instead of defining branches inline.
-    pub fn split_config_request(&self) -> Option<&SplitConfigDbBranches> {
+    pub fn split_config_request(&self) -> Option<&SplitConfigRequest> {
         match self {
             Self::FromSplitConfig(request) => Some(request),
             Self::Inline(_) => None,
@@ -556,8 +668,10 @@ impl DatabaseBranchesConfig {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Inline(branches) => branches.is_empty(),
-            Self::FromSplitConfig(SplitConfigDbBranches::Ids(ids)) => ids.is_empty(),
-            Self::FromSplitConfig(SplitConfigDbBranches::All(_)) => false,
+            Self::FromSplitConfig(request) => match request.entries() {
+                SplitConfigDbBranches::Ids(ids) => ids.is_empty(),
+                SplitConfigDbBranches::All(_) => false,
+            },
         }
     }
 
@@ -571,7 +685,9 @@ impl DatabaseBranchesConfig {
     /// Verifies invariants that span individual branch configs (e.g. `ttl_secs`/`ttl_mins`
     /// mutual exclusion).
     pub fn verify(&self, context: &mut config::ConfigContext) -> Result<(), ConfigError> {
-        if let Some(SplitConfigDbBranches::Ids(ids)) = self.split_config_request() {
+        if let Some(SplitConfigDbBranches::Ids(ids)) =
+            self.split_config_request().map(SplitConfigRequest::entries)
+        {
             let mut seen = std::collections::BTreeSet::new();
             for id in ids {
                 if id.is_empty() {
@@ -605,6 +721,16 @@ impl DatabaseBranchesConfig {
             }
             for source in branch.url_sources() {
                 source.verify()?;
+            }
+            if let Some(field) = branch
+                .iam_auth()
+                .and_then(IamAuthConfig::ssm_parameter_field)
+            {
+                return Err(ConfigError::Conflict(format!(
+                    "`feature.db_branches[].iam_auth.{field}` is an `aws_ssm_parameter` source, \
+                     but IAM credentials are read from the target pod's env only; use \
+                     `{{ \"type\": \"env\", \"variable\": ... }}` instead."
+                )));
             }
 
             match branch {
@@ -648,9 +774,11 @@ impl DatabaseBranchesConfig {
     }
 }
 
-/// Engine-agnostic seeding mode of a branch, used for usage analytics. Engines
-/// without copy modes (generic, local Redis) have none.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Engine-agnostic seeding mode of a branch: what a split-config request asks for, and what usage
+/// analytics count. Engines without copy modes (generic, local Redis) have none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize, IntoStaticStr)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum BranchCopyMode {
     Empty,
     Schema,
@@ -832,11 +960,7 @@ impl DatabaseBranchConfig {
                 MysqlBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
                 MysqlBranchCopyConfig::All { .. } => BranchCopyMode::All,
             },
-            DatabaseBranchConfig::Pg(cfg) => match cfg.copy {
-                PgBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
-                PgBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
-                PgBranchCopyConfig::All { .. } => BranchCopyMode::All,
-            },
+            DatabaseBranchConfig::Pg(cfg) => cfg.copy.mode(),
             DatabaseBranchConfig::Redis(cfg) => match &**cfg {
                 RedisBranchConfig::Local(_) => return None,
                 RedisBranchConfig::Remote(remote) => match remote.copy {
@@ -900,6 +1024,21 @@ impl DatabaseBranchConfig {
         })
     }
 
+    /// True when a param or the `url` is read from AWS SSM Parameter Store. The CLI uses it to
+    /// refuse the config on an operator that predates the source kind.
+    pub fn uses_ssm_parameter_source(&self) -> bool {
+        self.all_connection_params().any(|params| {
+            params
+                .all_sources()
+                .any(|source| matches!(source, ParamSource::AwsSsmParameter { .. }))
+        }) || self.url_sources().any(|source| {
+            matches!(
+                source,
+                TargetEnvironmentVariableSource::AwsSsmParameter { .. }
+            )
+        })
+    }
+
     /// True when a Google or AWS secret manager source (a param or the `url`) narrows the
     /// secret with `value_selector` or `value_pattern`. The CLI uses it to refuse the config
     /// on an operator that predates the extractors.
@@ -913,8 +1052,38 @@ impl DatabaseBranchConfig {
             .any(TargetEnvironmentVariableSource::extracts_from_secret_manager)
     }
 
+    /// True for a remote Redis branch that runs as a one node Redis Cluster. The CLI uses it
+    /// to refuse the config on an operator that predates cluster branches.
+    pub fn uses_redis_cluster(&self) -> bool {
+        match self {
+            DatabaseBranchConfig::Redis(cfg) => match &**cfg {
+                RedisBranchConfig::Remote(remote) => remote.cluster,
+                RedisBranchConfig::Local(_) => false,
+            },
+            _ => false,
+        }
+    }
+
     /// The more databases a PostgreSQL branch copies next to its own. Empty for every other
     /// engine.
+    fn iam_auth(&self) -> Option<&IamAuthConfig> {
+        match self {
+            DatabaseBranchConfig::Dynamodb(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Mariadb(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Mongodb(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Mysql(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Pg(cfg) => cfg.iam_auth.as_ref(),
+            DatabaseBranchConfig::Clickhouse(_)
+            | DatabaseBranchConfig::Cockroachdb(_)
+            | DatabaseBranchConfig::Generic(_)
+            | DatabaseBranchConfig::Mssql(_)
+            | DatabaseBranchConfig::Redis(_)
+            | DatabaseBranchConfig::S3(_)
+            | DatabaseBranchConfig::Spanner(_)
+            | DatabaseBranchConfig::Turbopuffer(_) => None,
+        }
+    }
+
     pub fn pg_additional_databases(&self) -> &[PgAdditionalDatabaseConfig] {
         match self {
             DatabaseBranchConfig::Pg(cfg) => &cfg.additional_databases,
@@ -1072,6 +1241,51 @@ impl ConnectionSource {
         keys
     }
 
+    /// The source database a literal `value` names: the `database` param when its first source
+    /// is a literal, else the path of a literal URL (`url` or the `url` param) when no
+    /// `database` param is declared.
+    ///
+    /// The CLI moves literals into a Secret the operator never reads, so when the config sets
+    /// no `name` the operator does not know the database and the app's branch URL falls back
+    /// to the engine's default database (`postgres`) while the branch holds the real one.
+    ///
+    /// Only the first source counts, because it is the one the connection uses, and a declared
+    /// `database` param overrides the URL's path. A name that depends on a non-literal source,
+    /// or a percent-encoded path, yields `None`, leaving `name` unset as before.
+    pub fn literal_database_name(&self) -> Option<&str> {
+        fn first_literal(sources: &Option<SingleOrVec<ParamSource>>) -> Option<&str> {
+            match sources.as_ref()?.0.first()? {
+                ParamSource::Env {
+                    value: Some(value), ..
+                } => Some(value),
+                _ => None,
+            }
+        }
+
+        let url = match self {
+            Self::Url {
+                url:
+                    TargetEnvironmentVariableSource::Env {
+                        value: Some(value), ..
+                    },
+            } => value.as_str(),
+            Self::Url { .. } | Self::FlatUrl { .. } => return None,
+            Self::Params(config) if config.params.database.is_some() => {
+                return first_literal(&config.params.database);
+            }
+            Self::Params(config) => first_literal(&config.params.url)?,
+        };
+
+        // Userinfo cannot hold a raw `/`, so the first `/` after the scheme ends the authority.
+        let (_authority, path) = strip_jdbc_prefix(url)
+            .split_once("://")?
+            .1
+            .split_once('/')?;
+        path.split(['?', '#', '/'])
+            .next()
+            .filter(|name| !name.is_empty() && !name.contains('%'))
+    }
+
     /// Literal `value`s this connection sets, as `(env var, value)`, extras included. The
     /// CLI moves them into one credential Secret keyed by env var name.
     pub(crate) fn literal_values(&self) -> Vec<(&str, &str)> {
@@ -1108,6 +1322,7 @@ impl ConnectionSource {
                 TargetEnvironmentVariableSource::Secret { .. }
                     | TargetEnvironmentVariableSource::GcpSecretManager { .. }
                     | TargetEnvironmentVariableSource::AwsSecretsManager { .. }
+                    | TargetEnvironmentVariableSource::AwsSsmParameter { .. }
             ),
             Self::FlatUrl { .. } => false,
             Self::Params(config) => config.params.uses_secret(),
@@ -1139,6 +1354,16 @@ impl TargetEnvironmentVariableSource {
                 value_selector.is_some(),
                 value_pattern.is_some(),
             ),
+            Self::AwsSsmParameter {
+                parameter,
+                value_selector,
+                value_pattern,
+                ..
+            } => verify_single_extractor(
+                &format!("`url` `aws_ssm_parameter` source `{parameter}`"),
+                value_selector.is_some(),
+                value_pattern.is_some(),
+            ),
             Self::Env { .. } | Self::EnvFrom { .. } | Self::Secret { .. } => Ok(()),
         }
     }
@@ -1150,6 +1375,7 @@ impl TargetEnvironmentVariableSource {
             self,
             Self::GcpSecretManager { value_selector, value_pattern, .. }
                 | Self::AwsSecretsManager { value_selector, value_pattern, .. }
+                | Self::AwsSsmParameter { value_selector, value_pattern, .. }
                 if value_selector.is_some() || value_pattern.is_some()
         )
     }
@@ -1168,6 +1394,10 @@ impl TargetEnvironmentVariableSource {
             | Self::AwsSecretsManager {
                 env_var_name: Some(name),
                 ..
+            }
+            | Self::AwsSsmParameter {
+                env_var_name: Some(name),
+                ..
             } => out.push(name),
             Self::Secret {
                 env_var_name: None, ..
@@ -1176,6 +1406,9 @@ impl TargetEnvironmentVariableSource {
                 env_var_name: None, ..
             }
             | Self::AwsSecretsManager {
+                env_var_name: None, ..
+            }
+            | Self::AwsSsmParameter {
                 env_var_name: None, ..
             } => {}
         }
@@ -1311,6 +1544,26 @@ impl ConnectionParamsVars {
 ///
 /// ```json
 /// { "type": "redis", "profile": "telapp", "connection": { "url": "REDIS_URL" } }
+/// ```
+///
+/// #### feature.db_branches[].namespace (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, spanner) {#feature-db_branches-sql-namespace}
+///
+/// When `true`, the branch database runs in its own namespace named `mirrord-<key>`, where
+/// `<key>` is the session [`key`](#key). The operator creates the namespace on first use,
+/// copies the Secrets, ConfigMaps and service account the branch pod reads from the target's
+/// namespace into it, and deletes the namespace once no branch runs there anymore. Every
+/// branch started under the same key shares that namespace, which makes it easy to see and
+/// clean up everything one key created.
+///
+/// A key with characters a namespace name cannot hold (uppercase letters, `_`, ...) is turned
+/// into a valid name, with a short hash added to keep it unique. Set a `key` explicitly:
+/// without one, every run gets a fresh key and with it a fresh namespace. Cloud workload
+/// identity (GKE Workload Identity, AWS IRSA, EKS Pod Identity) is bound to a namespace, so
+/// IAM authentication and secret manager sources need a binding for the `mirrord-<key>`
+/// namespace too. Defaults to `false`.
+///
+/// ```json
+/// { "type": "pg", "namespace": true, "connection": { "url": "DATABASE_URL" } }
 /// ```
 ///
 /// #### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}
@@ -1511,6 +1764,11 @@ pub struct BranchBaseConfig {
     /// Name of an admin-defined operator branch-config profile to use for this branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+
+    /// Run the branch in the operator-managed `mirrord-<key>` namespace instead of the
+    /// target's namespace.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub namespace: bool,
 }
 
 impl Default for BranchBaseConfig {
@@ -1521,6 +1779,7 @@ impl Default for BranchBaseConfig {
             ttl_mins: None,
             creation_timeout_secs: default_creation_timeout_secs(),
             profile: None,
+            namespace: false,
         }
     }
 }
@@ -1825,6 +2084,30 @@ pub enum ParamSource {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         env_var_name: Option<String>,
     },
+    /// Value fetched from AWS Systems Manager Parameter Store at branch data-copy time by the
+    /// init container, using the target pod's service account (IRSA / EKS Pod Identity), for
+    /// apps that read their connection details from SSM at startup. `aws_ssm_parameter` is a
+    /// parameter name (`/dev/app/database/url`) or full ARN, passed to `GetParameter` with
+    /// decryption on, so `SecureString` parameters work. mirrord does not read the value; only
+    /// the branch init container does, so the operator needs no access to the parameter.
+    ///
+    /// Setup: the branch pod inherits the target pod's service account, so that account's IAM
+    /// role must allow `ssm:GetParameter` on the parameter, plus `kms:Decrypt` on its key for a
+    /// `SecureString`. No operator-level permissions are required.
+    ///
+    /// `env_var_name` and `value_selector` / `value_pattern` work the same as on
+    /// `aws_secrets_manager`: `{ "aws_ssm_parameter": "/dev/app/db", "value_selector":
+    /// ".password" }`.
+    AwsSsmParameter {
+        #[serde(rename = "aws_ssm_parameter")]
+        parameter: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
     /// Value read from a Kubernetes ConfigMap in the target's namespace, for apps whose
     /// connection details live in a mounted config file rather than in env vars.
     ///
@@ -1903,6 +2186,7 @@ impl ParamSource {
             Self::Secret { .. }
             | Self::GcpSecretManager { .. }
             | Self::AwsSecretsManager { .. }
+            | Self::AwsSsmParameter { .. }
             | Self::ConfigMap { .. } => None,
         }
     }
@@ -1943,6 +2227,16 @@ impl ParamSource {
                 value_selector.is_some(),
                 value_pattern.is_some(),
             ),
+            Self::AwsSsmParameter {
+                parameter,
+                value_selector,
+                value_pattern,
+                ..
+            } => verify_single_extractor(
+                &format!("`aws_ssm_parameter` source `{parameter}`"),
+                value_selector.is_some(),
+                value_pattern.is_some(),
+            ),
             Self::Variable(_) | Self::Secret { .. } | Self::Pattern { .. } | Self::Env { .. } => {
                 Ok(())
             }
@@ -1956,6 +2250,7 @@ impl ParamSource {
             self,
             Self::GcpSecretManager { value_selector, value_pattern, .. }
                 | Self::AwsSecretsManager { value_selector, value_pattern, .. }
+                | Self::AwsSsmParameter { value_selector, value_pattern, .. }
                 if value_selector.is_some() || value_pattern.is_some()
         )
     }
@@ -1978,6 +2273,10 @@ impl ParamSource {
                 env_var_name: Some(name),
                 ..
             }
+            | ParamSource::AwsSsmParameter {
+                env_var_name: Some(name),
+                ..
+            }
             | ParamSource::ConfigMap {
                 env_var_name: Some(name),
                 ..
@@ -1989,6 +2288,9 @@ impl ParamSource {
                 env_var_name: None, ..
             }
             | ParamSource::AwsSecretsManager {
+                env_var_name: None, ..
+            }
+            | ParamSource::AwsSsmParameter {
                 env_var_name: None, ..
             }
             | ParamSource::ConfigMap {
@@ -2016,7 +2318,8 @@ impl ParamSource {
             | Self::ConfigMap { .. } => false,
             Self::Secret { .. }
             | Self::GcpSecretManager { .. }
-            | Self::AwsSecretsManager { .. } => true,
+            | Self::AwsSecretsManager { .. }
+            | Self::AwsSsmParameter { .. } => true,
         }
     }
 
@@ -2113,6 +2416,7 @@ pub struct ConnectionParamsVars {
 /// - `secret` read directly from a Kubernetes Secret.
 /// - `gcp_secret_manager` fetched from Google Secret Manager by the init container.
 /// - `aws_secrets_manager` fetched from AWS Secrets Manager by the init container.
+/// - `aws_ssm_parameter` fetched from AWS Systems Manager Parameter Store by the init container.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
 #[schemars(rename = "DbBranchingConnectionSourceKind")]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -2154,6 +2458,18 @@ pub enum TargetEnvironmentVariableSource {
     /// `value_selector` / `value_pattern` included.
     AwsSecretsManager {
         secret_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
+    /// Fetched from AWS Systems Manager Parameter Store by the branch init container using
+    /// the target pod's service account. Same semantics as `ParamSource::AwsSsmParameter`,
+    /// `value_selector` / `value_pattern` included.
+    AwsSsmParameter {
+        parameter: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         value_selector: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2474,6 +2790,51 @@ mod tests {
         };
         assert_eq!(local.id.as_deref(), Some("my-branch"));
         assert_eq!(local.local.port, 6380);
+    }
+
+    /// A Redis Cluster node only has database 0, so `cluster: true` pairs with no `name` or
+    /// `name: "0"` and nothing else.
+    #[test]
+    fn redis_cluster_branch_rejects_a_database_other_than_zero() {
+        let branch = |name: Option<&str>| {
+            let config = json!({
+                "type": "redis",
+                "cluster": true,
+                "connection": { "url": "REDIS_URL" },
+                "name": name,
+            });
+            serde_json::from_value::<DatabaseBranchConfig>(config).unwrap()
+        };
+
+        let DatabaseBranchConfig::Redis(redis) = branch(None) else {
+            panic!("expected a Redis branch");
+        };
+        let RedisBranchConfig::Remote(remote) = *redis else {
+            panic!("expected a remote Redis branch");
+        };
+        assert!(remote.cluster);
+        remote.verify().expect("no `name` is fine for a cluster");
+
+        let DatabaseBranchConfig::Redis(redis) = branch(Some("0")) else {
+            panic!("expected a Redis branch");
+        };
+        let RedisBranchConfig::Remote(remote) = *redis else {
+            panic!("expected a remote Redis branch");
+        };
+        remote
+            .verify()
+            .expect("`name: \"0\"` is fine for a cluster");
+
+        let DatabaseBranchConfig::Redis(redis) = branch(Some("3")) else {
+            panic!("expected a Redis branch");
+        };
+        let RedisBranchConfig::Remote(remote) = *redis else {
+            panic!("expected a remote Redis branch");
+        };
+        assert!(matches!(
+            remote.verify(),
+            Err(ConfigError::ConflictAt { setting, .. }) if setting == "feature.db_branches[].name"
+        ));
     }
 
     /// Checks that [`S3BranchConfig`] properly deserializes.
@@ -4039,16 +4400,18 @@ mod tests {
 
         assert_eq!(
             parse(json!("*")).unwrap(),
-            DatabaseBranchesConfig::FromSplitConfig(SplitConfigDbBranches::All(
-                AllSplitConfigDbBranches::All
+            DatabaseBranchesConfig::FromSplitConfig(SplitConfigRequest::Entries(
+                SplitConfigDbBranches::All(AllSplitConfigDbBranches::All)
             ))
         );
         assert_eq!(
             parse(json!(["orders-pg", "sessions-redis"])).unwrap(),
-            DatabaseBranchesConfig::FromSplitConfig(SplitConfigDbBranches::Ids(vec![
-                "orders-pg".to_owned(),
-                "sessions-redis".to_owned()
-            ]))
+            DatabaseBranchesConfig::FromSplitConfig(SplitConfigRequest::Entries(
+                SplitConfigDbBranches::Ids(vec![
+                    "orders-pg".to_owned(),
+                    "sessions-redis".to_owned()
+                ])
+            ))
         );
         assert_eq!(
             parse(json!([])).unwrap(),

@@ -12,6 +12,7 @@ use crate::{
     kube::kube_client_from_layer_config,
 };
 
+#[mirrord_macros::boxed_future]
 pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord vpn");
     let mut analytics = NullReporter::default();

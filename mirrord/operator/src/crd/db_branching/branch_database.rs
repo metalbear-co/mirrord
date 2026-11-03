@@ -16,6 +16,7 @@ use mirrord_config::feature::database_branches::{
 use schemars::{JsonSchema, Schema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use strum::{IntoDiscriminant, VariantArray, VariantNames};
 use strum_macros::{EnumDiscriminants, EnumIter};
 
@@ -28,6 +29,7 @@ use crate::crd::session::KubeResourceTarget;
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "dbs.mirrord.metalbear.co",
+    group_resolver = "crate::types::keyed_group",
     version = "v1alpha1",
     kind = "BranchDatabase",
     category = "mirrord",
@@ -115,6 +117,48 @@ pub struct BranchDatabaseSpec {
     /// Schema migrations to run on the branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub migrations: Option<MigrationsSpec>,
+    /// Session key whose operator-managed namespace (`mirrord-<key>`) runs the branch's pods,
+    /// Services, claims and Jobs. The branch resource itself stays in the target's namespace.
+    /// When unset, everything runs in the branch resource's namespace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dedicated_namespace_key: Option<String>,
+}
+
+/// Prefix of every namespace the operator creates for a session key.
+pub const DEDICATED_NAMESPACE_PREFIX: &str = "mirrord-";
+
+/// Longest name a Namespace may have: a DNS-1123 label.
+const NAMESPACE_NAME_LIMIT: usize = 63;
+
+/// Name of the namespace the branches started under `key` run in: `mirrord-<key>`.
+///
+/// A key is any string the user typed, so characters a namespace name cannot hold become `-`.
+/// When that changes the key, or the name would run past the 63 characters a namespace name
+/// allows, the name ends in a hash of the whole key instead, so two keys that clean up to the
+/// same text still get namespaces of their own.
+pub fn dedicated_namespace_name(key: &str) -> String {
+    let cleaned: String = key
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | '0'..='9' | '-' => c,
+            _ => '-',
+        })
+        .collect();
+    let cleaned = cleaned.trim_matches('-');
+
+    let name = format!("{DEDICATED_NAMESPACE_PREFIX}{cleaned}");
+    if !cleaned.is_empty() && cleaned == key && name.len() <= NAMESPACE_NAME_LIMIT {
+        return name;
+    }
+
+    let suffix: String = Sha256::digest(key.as_bytes())
+        .iter()
+        .take(4)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let keep = NAMESPACE_NAME_LIMIT - suffix.len() - 1;
+    let head = name[..name.len().min(keep)].trim_end_matches('-');
+    format!("{head}-{suffix}")
 }
 
 /// Keeps every [`BranchDatabaseSpec`] field but `migrations` as the branch was created, so the
@@ -435,6 +479,11 @@ pub struct MongodbOptions {
 pub struct RedisOptions {
     #[serde(default)]
     pub copy: RedisCopySpec,
+
+    /// Run the branch as a one node Redis Cluster that owns every hash slot, so Redis Cluster
+    /// clients can discover and use it. Only database 0 exists on such a node.
+    #[serde(default)]
+    pub cluster: bool,
 }
 
 /// DynamoDB-specific branch options.
@@ -795,32 +844,52 @@ pub struct CommonFieldsRef<'a> {
 }
 
 impl BranchDatabaseSpec {
+    /// Every dialect whose options the spec sets, in [`DatabaseDialect`] order.
+    pub fn configured_dialects(&self) -> impl Iterator<Item = DialectConfig<'_>> {
+        DatabaseDialect::VARIANTS
+            .iter()
+            .filter_map(|dialect| match dialect {
+                DatabaseDialect::Postgres => {
+                    self.postgres_options.as_ref().map(DialectConfig::Postgres)
+                }
+                DatabaseDialect::Mysql => self.mysql_options.as_ref().map(DialectConfig::Mysql),
+                DatabaseDialect::Mariadb => {
+                    self.mariadb_options.as_ref().map(DialectConfig::Mariadb)
+                }
+                DatabaseDialect::Dynamodb => {
+                    self.dynamodb_options.as_ref().map(DialectConfig::Dynamodb)
+                }
+                DatabaseDialect::Mongodb => {
+                    self.mongodb_options.as_ref().map(DialectConfig::Mongodb)
+                }
+                DatabaseDialect::Mssql => self.mssql_options.as_ref().map(DialectConfig::Mssql),
+                DatabaseDialect::Redis => self.redis_options.as_ref().map(DialectConfig::Redis),
+                DatabaseDialect::Spanner => {
+                    self.spanner_options.as_ref().map(DialectConfig::Spanner)
+                }
+                DatabaseDialect::Clickhouse => self
+                    .clickhouse_options
+                    .as_ref()
+                    .map(DialectConfig::Clickhouse),
+                DatabaseDialect::Cockroachdb => self
+                    .cockroachdb_options
+                    .as_ref()
+                    .map(DialectConfig::Cockroachdb),
+                DatabaseDialect::S3 => self.s3_options.as_ref().map(DialectConfig::S3),
+                DatabaseDialect::Turbopuffer => self
+                    .turbopuffer_options
+                    .as_ref()
+                    .map(DialectConfig::Turbopuffer),
+                DatabaseDialect::Generic => {
+                    self.generic_options.as_ref().map(DialectConfig::Generic)
+                }
+            })
+    }
+
     /// Validate and extract the dialect config from the spec.
     /// Exactly one dialect option field must be set.
     pub fn dialect(&self) -> Result<DialectConfig<'_>, DialectValidationError> {
-        let mut dialects = [
-            self.postgres_options.as_ref().map(DialectConfig::Postgres),
-            self.mysql_options.as_ref().map(DialectConfig::Mysql),
-            self.mariadb_options.as_ref().map(DialectConfig::Mariadb),
-            self.dynamodb_options.as_ref().map(DialectConfig::Dynamodb),
-            self.mongodb_options.as_ref().map(DialectConfig::Mongodb),
-            self.mssql_options.as_ref().map(DialectConfig::Mssql),
-            self.redis_options.as_ref().map(DialectConfig::Redis),
-            self.spanner_options.as_ref().map(DialectConfig::Spanner),
-            self.clickhouse_options
-                .as_ref()
-                .map(DialectConfig::Clickhouse),
-            self.cockroachdb_options
-                .as_ref()
-                .map(DialectConfig::Cockroachdb),
-            self.s3_options.as_ref().map(DialectConfig::S3),
-            self.turbopuffer_options
-                .as_ref()
-                .map(DialectConfig::Turbopuffer),
-            self.generic_options.as_ref().map(DialectConfig::Generic),
-        ]
-        .into_iter()
-        .flatten();
+        let mut dialects = self.configured_dialects();
 
         let config = dialects.next().ok_or(DialectValidationError::NoneSet)?;
         if dialects.next().is_some() {
@@ -1368,6 +1437,38 @@ mod tests {
     use super::*;
     use crate::crd::db_branching::core::ConnectionParamsSpec;
 
+    /// A key that already is a valid name keeps it; any other key still yields a valid name of
+    /// its own, since the operator creates a namespace with it.
+    #[test]
+    fn dedicated_namespace_name_is_always_a_valid_unique_label() {
+        assert_eq!(
+            dedicated_namespace_name("alice-feature"),
+            "mirrord-alice-feature"
+        );
+
+        let keys = ["Alice_Feature", "alice-feature-", "", "ü", &"k".repeat(80)];
+        let names: Vec<String> = keys
+            .iter()
+            .map(|key| dedicated_namespace_name(key))
+            .collect();
+        for name in &names {
+            assert!(name.len() <= 63, "{name}");
+            assert!(name.starts_with(DEDICATED_NAMESPACE_PREFIX), "{name}");
+            assert!(
+                name.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                "{name}"
+            );
+            assert!(!name.ends_with('-'), "{name}");
+        }
+        let unique: BTreeSet<&String> = names.iter().collect();
+        assert_eq!(unique.len(), names.len(), "{names:?}");
+        assert_ne!(
+            dedicated_namespace_name("Alice_Feature"),
+            "mirrord-alice-feature"
+        );
+    }
+
     /// `Unknown` exists for deserialization only; publishing it in the CRD's `flavor` enum
     /// would make it a value users can set.
     #[test]
@@ -1651,6 +1752,7 @@ mod tests {
             turbopuffer_options: None,
             generic_options: None,
             migrations: None,
+            dedicated_namespace_key: None,
         };
 
         assert!(spec("sslmode").dialect().is_ok());

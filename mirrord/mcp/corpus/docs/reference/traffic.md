@@ -13,8 +13,10 @@ tags:
   - oss
   - team
   - enterprise
-description: Reference to working with network traffic with mirrord
+description: "How mirrord handles incoming and outgoing network traffic for your local process."
 ---
+
+# Network Traffic
 
 ## Incoming
 

@@ -261,6 +261,13 @@ impl MessageFilterConfig {
 /// The queue ids have to match those defined in the target's `MirrordSplitConfig` (or the legacy
 /// `MirrordWorkloadQueueRegistry` / `MirrordKafkaTopicsConsumer`).
 ///
+/// An entry that sets neither `filter`, `message_filter` nor `jq_filter` receives the messages
+/// carrying the session's `key`, found with the `keyJqFilter` of the `MirrordSplitConfig` queue
+/// entry. A filter set here takes precedence over it, unless the queue entry has `enforceFilter`,
+/// which rejects the session instead. An empty `message_filter` map is not rejected: it keeps
+/// meaning "split the queue, deliver nothing". A queue missing from `split_queues` altogether
+/// delivers nothing to the local application, whatever the split config says.
+///
 /// Two shapes are accepted. The classic map form keys each entry by its queue id, which means a
 /// given id can appear only once:
 ///
@@ -431,6 +438,14 @@ impl QueueSplit {
         self.filter.is_some()
     }
 
+    /// Whether this entry sets any filter of its own. An entry without one leaves the choice of
+    /// messages to the `MirrordSplitConfig` queue entry, which older operators cannot do. An
+    /// empty `message_filter` map counts as a filter: it is the documented way to split a queue
+    /// and receive nothing from it.
+    pub fn has_filter(&self) -> bool {
+        self.message_filter.is_some() || self.filter.is_some() || self.jq_filter.is_some()
+    }
+
     fn verify(&self) -> Result<(), QueueSplittingVerificationError> {
         let queue_name = &self.queue_id;
 
@@ -583,6 +598,12 @@ impl SplitQueuesConfig {
     /// Whether any entry uses the composable `filter` shape, which older operators cannot read.
     pub fn uses_composed_filters(&self) -> bool {
         self.0.iter().any(QueueSplit::has_composed_filter)
+    }
+
+    /// Whether any entry leaves its filter to the `MirrordSplitConfig`, which older operators
+    /// cannot read.
+    pub fn uses_split_config_filters(&self) -> bool {
+        self.0.iter().any(|split| !split.has_filter())
     }
 
     /// Queue ids whose mode is not the default `steal`, paired with their mode. Only these need to

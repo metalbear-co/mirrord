@@ -4,7 +4,7 @@ date: 2026-01-05T12:00:00.000Z
 lastmod: 2026-01-05T12:00:00.000Z
 draft: false
 toc: true
-description: Using the mirrord wizard to speed up onboarding setup
+description: "Use the mirrord onboarding wizard to learn the basics and create your first config file."
 tags:
   - oss
   - team
@@ -19,7 +19,7 @@ The mirrord onboarding wizard is designed to make getting started with mirrord e
 This feature is available in mirrord version 3.178.0 and onwards.
 {% endhint %}
 
-### Launching the wizard
+## Launching the wizard
 
 Starting the wizard will open a locally hosted webapp in your browser. To launch the wizard, install mirrord and run the following command:
 
@@ -31,11 +31,11 @@ Make sure that you are connected (and if necessary signed in) to your cluster an
 
 ![The Onboarding Wizard Homepage](../.gitbook/assets/wiz-home.png)
 
-#### Learning overview
+### Learning overview
 
 As a new user, you may want to learn some mirrord basics before jumping into creating a configuration file. You can do this from the wizard landing page, by leafing through the overview before getting to the configuration options.
 
-### Creating a configuration
+## Creating a configuration
 
 There are four parts to configuration creation:
 
@@ -44,7 +44,7 @@ There are four parts to configuration creation:
 3. Network configuration
 4. Export
 
-#### Boilerplate selection
+### Boilerplate selection
 
 ![Wizard Boilerplate Selection](../.gitbook/assets/wiz-boiler.png)
 
@@ -52,7 +52,7 @@ There are three options for boilerplate configurations that you can choose betwe
 
 _Note that using "Replace" mode requires the operator (not available in OSS)_.
 
-#### Target configuration
+### Target configuration
 
 ![Wizard Target Selection](../.gitbook/assets/wiz-target.png)
 
@@ -60,7 +60,7 @@ Select a target from a given namespace in your cluster, optionally filtering by 
 
 If there are namespaces or resources missing, it could be that there is an issue with your connection to the cluster, or that the resources require the operator and you are using OSS.
 
-#### Network configuration
+### Network configuration
 
 Optionally configure traffic filters and/or ports.
 
@@ -80,7 +80,7 @@ Here, you can configure specific ports that you are interested in mirroring or s
 
 Additionally, if you wish to map ports that differ on the local and remote, you can do so by editing the remote port for the corresponding entry in the list.
 
-#### Export
+### Export
 
 ![Wizard Configuration Export](../.gitbook/assets/wiz-export.png)
 

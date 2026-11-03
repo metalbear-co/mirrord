@@ -494,7 +494,7 @@ export type ExternalProxyStartIdleTimeoutExternalProxyStartIdleTimeout =
   | null
 export type FeatureRootFeature = FeatureFileConfig | null
 /**
- * Creates a new copy of the target. mirrord will use this copy instead of the original target (e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/overview/teams/?utm_source=copytarget).
+ * Creates a new copy of the target. mirrord will use this copy instead of the original target (e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/getting-started/what-is-mirrord#mirrord-for-teams).
  *
  * This feature is not compatible with rollout targets and running without a target (`targetless` mode).
  */
@@ -673,7 +673,7 @@ export type ToggleableConfigFor_FsUserConfig = boolean | FeatureFsFs
 /**
  * Changes file operations behavior based on user configuration.
  *
- * See the file operations [reference](https://metalbear.com/mirrord/docs/reference/fileops/) for more details, and [fs advanced](#fs-advanced) for more information on how to fully setup mirrord file operations.
+ * See the file operations [reference](https://metalbear.com/mirrord/docs/reference/fileops) for more details, and [fs advanced](#fs-advanced) for more information on how to fully setup mirrord file operations.
  *
  * ### Minimal `fs` config {#fs-minimal}
  *
@@ -811,7 +811,7 @@ export type ToggleableConfigFor_IncomingFileConfig = boolean | IncomingNetwork
 /**
  * Controls the incoming TCP traffic feature.
  *
- * See the incoming [reference](https://metalbear.com/mirrord/docs/reference/traffic/#incoming) for more details.
+ * See the incoming [reference](https://metalbear.com/mirrord/docs/reference/traffic#incoming) for more details.
  *
  * Incoming traffic supports 2 modes of operation:
  *
@@ -1489,7 +1489,7 @@ export interface ExternalProxyFileConfig {
 /**
  * Controls mirrord features.
  *
- * See the [technical reference, Technical Reference](https://metalbear.com/mirrord/docs/reference/) to learn more about what each feature does.
+ * See the [technical reference, Technical Reference](https://metalbear.com/mirrord/docs/reference/architecture) to learn more about what each feature does.
  *
  * The [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options have support for a shortened version, that you can see [here](#root-shortened).
  *
@@ -1513,7 +1513,7 @@ export interface FeatureFileConfig {
  *
  * Which environment variables to load from the remote pod are controlled by setting either [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).
  *
- * See the environment variables [reference](https://metalbear.com/mirrord/docs/reference/env/) for more details.
+ * See the environment variables [reference](https://metalbear.com/mirrord/docs/reference/env) for more details.
  *
  * ```json { "feature": { "env": { "include": "DATABASE_USER;PUBLIC_ENV;MY_APP_*", "override": { "DATABASE_CONNECTION": "db://localhost:7777/my-db", "LOCAL_BEAR": "panda" }, "mapping": { ".+_TIMEOUT": "1000" } } } } ```
  */
@@ -1549,7 +1549,7 @@ export interface EnvFileConfig {
  *
  * 4. If none of the above match, use the default behavior (mode).
  *
- * For more information, check the file operations [technical reference](https://metalbear.com/mirrord/docs/reference/fileops/).
+ * For more information, check the file operations [technical reference](https://metalbear.com/mirrord/docs/reference/fileops).
  *
  * ```json { "feature": { "fs": { "mode": "write", "read_write": ".+\\.json" , "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ], "local": [ ".+\\.js", ".+\\.mjs" ], "not_found": [ "\\.config/gcloud" ] } } } ```
  */
@@ -1565,7 +1565,7 @@ export interface AdvancedFsUserConfig {
 /**
  * Controls mirrord network operations.
  *
- * See the network traffic [reference](https://metalbear.com/mirrord/docs/reference/traffic/) for more details.
+ * See the network traffic [reference](https://metalbear.com/mirrord/docs/reference/traffic) for more details.
  *
  * ```json { "feature": { "network": { "incoming": { "mode": "steal", "http_filter": { "header_filter": "host: api\\..+" }, "port_mapping": [[ 7777, 8888 ]], "ignore_localhost": false, "ignore_ports": [9999, 10000] }, "outgoing": { "tcp": true, "udp": true, "filter": { "local": ["tcp://1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"] }, "ignore_localhost": false, "unix_streams": "bear.+" }, "dns": { "enabled": true, "filter": { "local": ["1.1.1.0/24:1337", "1.1.5.0/24", "google.com"] } } } } } ```
  */
@@ -1686,7 +1686,7 @@ export interface LocalTlsDelivery {
 /**
  * Tunnel outgoing network operations through mirrord.
  *
- * See the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic/#outgoing) for more details.
+ * See the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic#outgoing) for more details.
  *
  * You can use either the `remote` or `local` value to turn outgoing traffic tunneling on or off.
  *

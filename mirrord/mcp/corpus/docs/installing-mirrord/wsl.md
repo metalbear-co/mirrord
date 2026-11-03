@@ -1,6 +1,6 @@
 ---
 title: WSL (deprecated)
-description: Installing and using mirrord on Windows with WSL
+description: "How to install and use mirrord inside WSL on Windows. mirrord now also runs natively on Windows."
 ---
 
 # WSL (deprecated)
@@ -11,19 +11,19 @@ mirrord now runs natively on Windows — no WSL needed. See the [CLI](cli.md), [
 
 Another way to run mirrord on Windows is using the _Linux Subsystem for Windows_ (_WSL_). You’ll also need a Kubernetes cluster. If you don’t have one, you can set one up locally using [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/). mirrord works with any Kubernetes cluster, be it remote or local.
 
-### Setting up WSL
+## Setting up WSL
 
 You can read about the prerequisites and installation options on the official Microsoft documentation for [How to install Linux on Windows with WSL](https://learn.microsoft.com/en-us/windows/wsl/install).
 
 The mirrord guide uses the default installation options, which has Ubuntu as the Linux distro. mirrord itself is not limited to any particular distro.
 
-#### From the Microsoft Store
+### From the Microsoft Store
 
 To install WSL from the Microsoft Store just open the Microsoft Store app, then search for the name of the Linux distro you want. We recommend installing Ubuntu, but mirrord works with any Linux distro.
 
 After installation is complete, click on the Open button and a terminal window will appear.
 
-#### From the Terminal
+### From the Terminal
 
 Open a terminal with **administrator privileges**.
 
@@ -53,7 +53,7 @@ To start a session in WSL, now enter the `wsl` command:
 wsl
 ```
 
-#### Setting up the Linux distro
+### Setting up the Linux distro
 
 After starting a new WSL session (either from the command line, or from the Microsoft Store) you’ll be prompted to set up a Linux user. The username and password does not need to match your Windows user.
 
@@ -63,7 +63,7 @@ After setting up your Linux user, it’s time to prepare the Linux environment f
 
 Some IDEs may support running in WSL from Windows directly (the IDE is installed on Windows), such as VS Code and the IntelliJ family of IDEs, while others may require being installed in Linux itself.
 
-### Kubernetes on WSL
+## Kubernetes on WSL
 
 * Setting up a Kubernetes cluster is out of scope for this guide - we’re assuming that you have a remote cluster to target with mirrord. If you don’t have a Kubernetes cluster to use and still want to try out mirrord, we recommend checking out the Docker Desktop guide on [Install Docker Desktop on Windows](https://docs.docker.com/desktop/install/windows-install/).
 
@@ -79,13 +79,13 @@ service/kubernetes   ClusterIP   10.96.0.1	     <none>    	       443/TCP    1d
 * If you got a `command not found` error instead, this means that `kubectl` is not installed. Some Kubernetes tools install it as part of their setup, but you can also manually install it directly, follow the [official guide](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/) for installing it on Linux. You can also [install it on Windows](https://kubernetes.io/docs/tasks/tools/install-kubectl-windows/), but this may require changing the `KUBECONFIG` environment variable.
 * If you’re not seeing any of your Kubernetes resources, you might need to change your Kubernetes configuration. Refer to the [`kube config` manual](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_config/) manual.
 
-### Running a project on WSL
+## Running a project on WSL
 
 Before starting your IDE, it’s recommended that you copy your project files from the Windows file system to Linux, to avoid performance issues. The best practice is to have everything inside Linux.
 
 You can do this from the command line (from within Linux, the Windows file system should be something like `/mnt/{windows-drive-letter}`, so by default it’ll be `/mnt/c`), or from File Explorer.
 
-#### Creating a playground project
+### Creating a playground project
 
 * If you already have your own project, you may [skip this section](wsl.md#root-project-vscode).
 
@@ -128,7 +128,7 @@ Hello, mirrord
 
 We can finally move on to installing and using mirrord.
 
-#### Using mirrord in VS Code
+### Using mirrord in VS Code
 
 * Microsoft provides a very good guide on [how to use WSL with VS Code](https://learn.microsoft.com/windows/wsl/tutorials/wsl-vscode).
 
@@ -147,7 +147,7 @@ With mirrord installed, open up your project.
 
 * Keep in mind that you’ll be navigating the directories with Linux style paths. If you have not copied your project files to WSL, you can navigate the Windows files from the `/mnt` directory.
 
-#### Using mirrord in IntelliJ
+### Using mirrord in IntelliJ
 
 * Jetbrains provides a very good guide on [how to use WSL with IntelliJ](https://www.jetbrains.com/help/idea/how-to-use-wsl-development-environment-in-product.html).
 
@@ -171,7 +171,7 @@ After clicking to install it, the install button will change to `Restart IDE`. I
 
 * If you get an error saying that mirrord does not support the Windows platform, this means that you’re trying to install it on the Windows IDE. Uninstall the mirrord extension, and follow the previous steps to start the WSL IDE.
 
-#### Using mirrord from the CLI
+### Using mirrord from the CLI
 
 In your WSL terminal, you can download and install mirrord by running the following command:
 
@@ -198,9 +198,9 @@ mirrord exec --target “targetless” node app.mjs
 
 You can use `mirrord exec –help` to list other `exec` options.
 
-### Troubleshooting
+## Troubleshooting
 
-#### IntelliJ failed to update mirrord binary
+### IntelliJ failed to update mirrord binary
 
 If you're seeing a mirrord notification pop-up that says something along the lines of:
 
@@ -220,7 +220,7 @@ And issuing the following command:
 keytool -importcert -trustcacerts -alias <alias-name> -file <path/to/file.crt> -keystore cacerts
 ```
 
-#### IntelliJ mirrord does not launch and settings `Select Active` does not work
+### IntelliJ mirrord does not launch and settings `Select Active` does not work
 
 If you don't see the mirrord UI for selecting the active configuration when clicking `Select Active`, this usually means that the mirrord plugin has been installed only on one side (host or client). This issue might also prevent mirrord from running inside WSL.
 

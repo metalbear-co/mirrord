@@ -75,9 +75,12 @@ pub struct App {
 }
 
 impl App {
-    /// Builds the application.
-    pub fn new(telemetry: Telemetry) -> Self {
-        let scope = watch::Sender::new(Scope::default());
+    /// Builds the application, starting on `context` when given.
+    pub fn new(telemetry: Telemetry, context: Option<String>) -> Self {
+        let scope = watch::Sender::new(Scope {
+            context,
+            namespace: None,
+        });
         let client = watch::Sender::new(None);
         let local_sessions = watch::Sender::new(None);
         let local_only = watch::Sender::new(false);

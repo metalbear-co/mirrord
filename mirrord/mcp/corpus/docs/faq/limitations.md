@@ -13,8 +13,10 @@ tags:
   - oss
   - team
   - enterprise
-description: What are the limitations to using mirrord?
+description: "Which languages, Kubernetes versions, and cluster setups mirrord supports, and where it does not work yet."
 ---
+
+# Limitations
 
 ## What frameworks/languages does mirrord support?
 

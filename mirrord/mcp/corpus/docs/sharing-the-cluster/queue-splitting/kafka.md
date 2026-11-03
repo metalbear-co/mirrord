@@ -119,11 +119,11 @@ spec:
         topic:
           - env: KAFKA_TOPIC_NAME
             fallback: views-topic # optional, used when the variable is absent
-            containers:
+            containerNames:
               - consumer
         groupId:
           - env: KAFKA_GROUP_ID
-            containers:
+            containerNames:
               - consumer
 ```
 
@@ -156,7 +156,7 @@ Each entry in the `spec.queues` list describes one or more Kafka queues consumed
   * `fallback` - fallback topic name if the variable is absent (only valid with `env`). The env var is still rewritten to point at the temporary topic.
   * `valueSelector` - a selector extracting the topic name from the variable's value: nested keys (`.kafka.topic`) and `.[]` to iterate arrays or object values. Useful when the value holds JSON rather than a plain name. Pipes, functions, and other jq operators are not supported.
   * `valuePattern` - a regex used when the topic name is embedded in a larger string. The capture group (named `value`, otherwise the first group) marks the part that is the name; only that part is swapped for the temporary topic and the surrounding text is kept as-is.
-  * `containers` - limit to specific containers (optional, defaults to all non-infra containers).
+  * `containerNames` - limit to specific containers (optional, defaults to all non-infra containers).
 *   One of the following must be set:
 
     * `appConfig.groupId` - how the application discovers the consumer Kafka group id. Use for standard Kafka consumers. The operator's forwarder joins this group, and the consumer's environment is left untouched.
@@ -330,6 +330,115 @@ Temporary group names follow the temporary topic name format (`mirrord-tmp-...`)
 {% hint style="info" %}
 `mirrord.temporary_group_id` requires mirrord operator `3.195.0` or later, and `mirrord.group_join_timeout` requires operator `3.204.0` or later - earlier operators reject it as an unknown `mirrord.` key.
 {% endhint %}
+
+### Kafka Branching
+
+With Kafka branching, a session's Kafka traffic does not touch the cluster's Kafka at all. The operator runs a single-node Kafka broker for each session key, and points every session with that key at it, whatever its namespace. Topics keep their names on the branch broker. Messages produced in the session stay on the branch, so no workload outside the session sees them, and the deployed workload is never patched.
+
+{% hint style="info" %}
+Kafka branching requires mirrord operator `3.222.0` or later, operator Helm chart `3.222.0`, and mirrord CLI `3.275.0` or later.
+{% endhint %}
+
+Enable it in the Helm chart, along with Kafka splitting:
+
+```yaml
+operator:
+  kafkaSplitting: true
+  kafkaBranching: true
+```
+
+Every workload in the session that uses Kafka needs a `MirrordSplitConfig` with `kafkaBranch`, or its session fails to start. For an API that publishes orders and a worker that consumes them:
+
+```yaml
+apiVersion: queues.mirrord.metalbear.co/v1
+kind: MirrordSplitConfig
+metadata:
+  name: orders-api
+  namespace: shop
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: orders-api
+  kafkaBranch:
+    # Where the app reads its bootstrap servers. The operator replaces each value with the
+    # branch broker's address. Only `env` and `envLike` sources are supported.
+    bootstrapServers:
+      - env: KAFKA_BOOTSTRAP_SERVERS
+  # The API only produces, so it lists no queues. Topics it writes to are created on first use.
+---
+apiVersion: queues.mirrord.metalbear.co/v1
+kind: MirrordSplitConfig
+metadata:
+  name: orders-worker
+  namespace: shop
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: orders-worker
+  kafkaBranch:
+    bootstrapServers:
+      - env: KAFKA_BOOTSTRAP_SERVERS
+        containerNames: [worker]
+  # The queues the worker consumes, with the same fields as for splitting. When a session
+  # starts, the operator creates their topics on the branch and sets each group's start offset,
+  # so the worker reads messages produced before it joined, and an idle preview environment
+  # wakes when its group has messages waiting.
+  queues:
+    - id: orders
+      kind: kafka
+      appConfig:
+        topic:
+          - env: ORDERS_TOPIC
+        groupId:
+          - env: ORDERS_GROUP_ID
+```
+
+Then enable it in the mirrord configuration of each session. The branch broker accepts plaintext connections without authentication from anywhere in the cluster, so if the application connects with SASL or TLS, override its security settings:
+
+```json
+{
+  "feature": {
+    "kafka_branch": true,
+    "env": {
+      "override": {
+        "KAFKA_SECURITY_PROTOCOL": "PLAINTEXT"
+      }
+    }
+  }
+}
+```
+
+The session reads only messages produced on the branch: nothing from the cluster's Kafka reaches it, so Kafka branching takes no filter. mirrord refuses a session that sets `feature.kafka_branch` and lists Kafka queues under `feature.split_queues`. Queues of other kinds can still be split with filters in the same session.
+
+The broker is deleted when the last session with its key ends. It keeps its data inside its pod, so a broker pod that is replaced, for example after an eviction, starts empty. Kafka branching is not available in multi-cluster sessions.
+
+Cluster administrators can configure the broker with the `operator.kafkaBranchConfig` Helm chart value:
+
+```yaml
+operator:
+  kafkaBranchConfig:
+    brokerPod:
+      # Any image configured through `KAFKA_` environment variables, like `apache/kafka`.
+      image: "docker.io/apache/kafka:4.1.0"
+      imagePullSecrets:
+        - name: kafka-registry
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+      # The broker's JVM heap is at most half its memory limit.
+      resources:
+        requests:
+          memory: 2Gi
+        limits:
+          memory: 2Gi
+    # Partitions of every topic created on a branch broker (default: 1).
+    partitions: 1
+    # Broker configs (https://kafka.apache.org/documentation/#brokerconfigs) of every branch
+    # broker, except the listener, KRaft, storage, and partition settings the operator manages.
+    brokerConfig:
+      message.max.bytes: 10485760
+```
 
 ## Setting a filter
 
@@ -617,3 +726,5 @@ openssl pkcs12 -in truststore.p12 -nokeys -out ca-cert.pem
 ```
 
 Then, follow the guide for [authenticating with an SSL certificate](kafka.md#how-do-i-authenticate-the-operators-kafka-client-with-an-ssl-certificate).
+
+For compatibility with older operator releases and the legacy `containers` spelling, see [Selecting Containers](../queue-splitting.md#selecting-containers).

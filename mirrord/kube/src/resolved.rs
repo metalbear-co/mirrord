@@ -273,6 +273,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
 impl ResolvedTarget<false> {
     /// Gets a target from k8s with the [`Client`] that is passed here.
     /// Currently this `client` comes set up with a mirrord-operator config.
+    #[mirrord_macros::boxed_future]
     #[tracing::instrument(level = Level::DEBUG, skip(client), ret, err)]
     pub async fn new(
         client: &Client,

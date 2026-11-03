@@ -51,6 +51,7 @@ winapi = { workspace = true, features = [
     "excpt",
 ] }
 zip = { version = "2", default-features = false }
+rustc-demangle = "0.1"
 windows-sys = { version = "0.59", features = [
     "Wdk_Foundation",
     "Wdk_Storage_FileSystem",

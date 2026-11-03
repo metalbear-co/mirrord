@@ -11,6 +11,8 @@ tags: ["team", "enterprise"]
 description: Restricting which resources and endpoints can be accessed when using mirrord
 ---
 
+# Outgoing Traffic Policies
+
 Cluster administrators can restrict which resources and endpoints can be accessed when using mirrord.
 Outgoing traffic restrictions are defined using a `MirrordPolicy` or `MirrordClusterPolicy` resource and enforced by the mirrord operator.
 
@@ -20,7 +22,7 @@ This feature is available to users on the Team and Enterprise pricing plans.
 {% endhint %}
 
 
-### Example Policy 
+## Example Policy 
 ```yaml
 apiVersion: policies.mirrord.metalbear.co/v1alpha
 kind: MirrordPolicy

@@ -139,6 +139,20 @@ impl GlobalConfig {
     /// or environment values.
     pub(crate) fn apply_to(&self, project_config: &mut LayerConfig) {
         project_config.operator = project_config.operator.or(self.config.operator);
+        project_config.kube_context = project_config
+            .kube_context
+            .take()
+            .or_else(|| self.config.kube_context.clone());
+    }
+
+    pub(crate) fn kube_context(&self) -> Option<&str> {
+        self.config.kube_context.as_deref()
+    }
+
+    /// Reads `kube_context` from disk on every call, so the long-lived `mirrord ui` daemon sees
+    /// `mirrord config set` changes without a restart.
+    pub(crate) async fn fresh_kube_context() -> Option<String> {
+        Self::from_default_path().await.ok()?.config.kube_context
     }
 }
 
@@ -199,6 +213,7 @@ impl GlobalConfigError {
 }
 
 /// Handles all `mirrord config` subcommands.
+#[mirrord_macros::boxed_future]
 pub(crate) async fn global_config_command(args: GlobalConfigArgs) -> Result<(), GlobalConfigError> {
     match args.command {
         GlobalConfigCommand::Set(args) => set(args).await,

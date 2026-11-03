@@ -388,7 +388,8 @@ fn connection_envs(connection: &ConnectionSource, scheme: Option<&'static str>) 
             },
             TargetEnvironmentVariableSource::Secret { .. }
             | TargetEnvironmentVariableSource::GcpSecretManager { .. }
-            | TargetEnvironmentVariableSource::AwsSecretsManager { .. } => return None,
+            | TargetEnvironmentVariableSource::AwsSecretsManager { .. }
+            | TargetEnvironmentVariableSource::AwsSsmParameter { .. } => return None,
         },
         ConnectionSource::FlatUrl { url, .. } => Envs {
             url: Some(ParamVar::plain(url.first()?.clone())),

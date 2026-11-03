@@ -129,6 +129,21 @@ pub enum ConnectionSourceKind {
         env_var_name: Option<String>,
     },
 
+    /// Value fetched from AWS Systems Manager Parameter Store by the branch init container at
+    /// data-copy time, using the target pod's service account. `parameter` is a parameter name
+    /// or full ARN, read with decryption so `SecureString` parameters work. Same semantics as
+    /// `AwsSecretsManager` otherwise, extractors included. Operators that predate it cannot
+    /// deserialize the spec, so the CLI gates on `NewOperatorFeature::DbBranchSsmParameter`.
+    AwsSsmParameter {
+        parameter: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_pattern: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        env_var_name: Option<String>,
+    },
+
     /// Value read by the operator from a Kubernetes ConfigMap in the target namespace at
     /// resolution time. `key` picks the data entry; `value_selector` (a `.a.b` selector over
     /// the entry parsed as JSON/YAML) or `value_pattern` (a regex over the raw text) narrows
@@ -223,6 +238,17 @@ impl From<TargetEnvironmentVariableSource> for ConnectionSourceKind {
                 value_pattern,
                 env_var_name,
             },
+            TargetEnvironmentVariableSource::AwsSsmParameter {
+                parameter,
+                value_selector,
+                value_pattern,
+                env_var_name,
+            } => ConnectionSourceKind::AwsSsmParameter {
+                parameter,
+                value_selector,
+                value_pattern,
+                env_var_name,
+            },
         }
     }
 }
@@ -272,6 +298,17 @@ impl From<&TargetEnvironmentVariableSource> for ConnectionSourceKind {
                 env_var_name,
             } => ConnectionSourceKind::AwsSecretsManager {
                 secret_ref: secret_ref.clone(),
+                value_selector: value_selector.clone(),
+                value_pattern: value_pattern.clone(),
+                env_var_name: env_var_name.clone(),
+            },
+            TargetEnvironmentVariableSource::AwsSsmParameter {
+                parameter,
+                value_selector,
+                value_pattern,
+                env_var_name,
+            } => ConnectionSourceKind::AwsSsmParameter {
+                parameter: parameter.clone(),
                 value_selector: value_selector.clone(),
                 value_pattern: value_pattern.clone(),
                 env_var_name: env_var_name.clone(),
@@ -334,6 +371,17 @@ pub fn param_source_to_kind(
             env_var_name,
         } => ConnectionSourceKind::AwsSecretsManager {
             secret_ref: secret_ref.clone(),
+            value_selector: value_selector.clone(),
+            value_pattern: value_pattern.clone(),
+            env_var_name: env_var_name.clone(),
+        },
+        ParamSource::AwsSsmParameter {
+            parameter,
+            value_selector,
+            value_pattern,
+            env_var_name,
+        } => ConnectionSourceKind::AwsSsmParameter {
+            parameter: parameter.clone(),
             value_selector: value_selector.clone(),
             value_pattern: value_pattern.clone(),
             env_var_name: env_var_name.clone(),

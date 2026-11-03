@@ -1,6 +1,6 @@
 ---
 title: License Server Setup
-description: Set up the mirrord dashboard served by a self-hosted license server
+description: "How to set up the mirrord Dashboard on your own self-hosted license server."
 tags:
   - alpha
   - enterprise

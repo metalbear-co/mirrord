@@ -22,9 +22,9 @@ import sys
 
 import tomlkit
 
-# Fragments whose only effect is invisible to users, in towncrier category order of
-# increasing significance. Anything outside this set warrants a minor bump.
-PATCH_CATEGORIES = frozenset({"internal", "fixed"})
+# Fragments that only warrant a patch release: work invisible to users, bug fixes and
+# security fixes. Anything outside this set warrants a minor bump.
+PATCH_CATEGORIES = frozenset({"internal", "fixed", "security"})
 
 # Fragments recording work that no user can observe. A release made up entirely of
 # these is optional, hence `--release-on-internal-only`.

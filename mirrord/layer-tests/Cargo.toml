@@ -45,6 +45,9 @@ mirrord-test-utils = { path = "../../test-utils" }
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }
 
+[target.'cfg(windows)'.dev-dependencies]
+winapi.workspace = true
+
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 mirrord-sip = { path = "../sip" }
 apple-codesign.workspace = true

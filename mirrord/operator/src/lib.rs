@@ -17,5 +17,7 @@ pub mod crd;
 #[cfg(feature = "crd")]
 pub mod preview_template;
 
+pub mod sync;
+
 /// Types used in the operator that don't require any special dependencies
 pub mod types;

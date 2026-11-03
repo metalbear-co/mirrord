@@ -1,11 +1,13 @@
 ---
 title: MySQL
-description: Spin up an isolated MySQL branch of your remote database with mirrord
+description: "Spin up an isolated MySQL branch of your remote database with mirrord."
 tags:
   - beta
   - team
   - enterprise
 ---
+
+# MySQL
 
 This page covers DB branching for MySQL. For the general concepts, the full list of config fields, and how a session behaves, see the [DB Branching overview](../db-branching.md).
 

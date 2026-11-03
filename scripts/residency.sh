@@ -62,7 +62,7 @@ tags:
   - open source
   - team
   - enterprise
-description: Getting started with mirrord configuration.
+description: Configure mirrord with a mirrord.json file, from a minimal setup to templated values and complete example configurations.
 ---
 "
 printf "%s\n" "$(echo "$readmefrontmatter"; cat docs_0)" > README.md

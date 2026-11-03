@@ -30,6 +30,9 @@ pub(crate) async fn kube_client_from_layer_config(
     .await
     .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
     add_baggage_header(&mut config, layer_config.baggage.as_deref())?;
+    // `startup_retry` below is the only retry: kube's own, nested under it, turns a 503 into
+    // minutes of silent waiting.
+    config.default_retry = false;
 
     ClientBuilder::try_from(config)
         .map_err(KubeApiError::from)

@@ -1055,6 +1055,9 @@ fn describe_source_kind(kind: &ConnectionSourceKind) -> (&'static str, String) {
         ConnectionSourceKind::AwsSecretsManager { secret_ref, .. } => {
             ("awsSecretsManager", secret_ref.clone())
         }
+        ConnectionSourceKind::AwsSsmParameter { parameter, .. } => {
+            ("awsSsmParameter", parameter.clone())
+        }
         ConnectionSourceKind::ConfigMap {
             config_map, key, ..
         } => {

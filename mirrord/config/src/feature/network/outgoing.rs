@@ -73,7 +73,7 @@ pub enum OutgoingFilterConfig {
 
 /// Tunnel outgoing network operations through mirrord.
 ///
-/// See the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic/#outgoing) for more
+/// See the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic#outgoing) for more
 /// details.
 ///
 /// You can use either the `true` or `false` values to turn outgoing traffic tunneling on or off.

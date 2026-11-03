@@ -115,7 +115,7 @@ Each entry in the `spec.queues` list describes a Redis channel consumed by the w
 * `id` - arbitrary queue ID that developers [reference](redis-pubsub.md#setting-a-filter) from their mirrord config.
 * `kind` - must be `redisPubSub`.
 * `clientConfig` (optional) - name of a `MirrordPropertyList` with the Redis connection. Can also be set once for all Redis queues with `spec.clientConfigs.redisPubSub`.
-* Exactly one of the following describes how the application subscribes. Each uses the same structure as other queue services (`env`, `envLike`, `volume`, `fallback`, `valueSelector`, `valuePattern`, `containers`):
+* Exactly one of the following describes how the application subscribes. Each uses the same structure as other queue services (`env`, `envLike`, `volume`, `fallback`, `valueSelector`, `valuePattern`, `containerNames`):
   * `appConfig.channel` - exact channel, matching a `SUBSCRIBE`.
   * `appConfig.channelPattern` - glob pattern, matching a `PSUBSCRIBE`.
   * `appConfig.shardChannel` - sharded channel, matching a `SSUBSCRIBE` (Redis 7+).
@@ -192,3 +192,5 @@ In the example above, the local application will receive only messages whose JSO
 {% hint style="info" %}
 Non-JSON payloads never match attribute or jq filters, so they are routed to the deployed (cluster) application.
 {% endhint %}
+
+For compatibility with older operator releases and the legacy `containers` spelling, see [Selecting Containers](../queue-splitting.md#selecting-containers).

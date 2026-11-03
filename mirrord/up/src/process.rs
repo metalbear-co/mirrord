@@ -6,11 +6,12 @@ use std::{
     ops::Not,
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
 
+use mirrord_analytics::{UP_DB_BRANCHES_REPORT_PREFIX, UpSessionDbBranch};
 use mirrord_progress::messages::SESSION_READY_MESSAGE;
 #[cfg(unix)]
 use nix::sys::signal::killpg;
@@ -37,6 +38,16 @@ use platform::{ShutdownSignal, SignalStreams, receive_signal, signal_streams};
 // Matching that window lets container services clean up before escalation
 // kills the runtime client that is responsible for removing the container.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+
+/// How long an exited session's stdout is still read before telling whether it got as far as
+/// [`SESSION_READY_MESSAGE`]. The exit can be seen before the forwarding task has read the last
+/// lines, and a descendant still holding the pipe open must not hold up the error.
+const STDOUT_DRAIN: Duration = Duration::from_secs(1);
+
+/// How the line a held program's `mirrord exec` prints starts: `debug-hold pid=<pid>
+/// release=<release>`. `mirrord-layer-lib`'s debug hold prints it once the program is held and
+/// an IDE may attach.
+const DEBUG_HOLD_LINE_PREFIX: &str = "debug-hold ";
 
 /// Records when every service has emitted its session-ready marker.
 ///
@@ -81,6 +92,9 @@ impl Readiness {
 struct Service {
     /// Name used when reporting an unexpected service exit.
     name: Arc<str>,
+    /// Whether `mirrord up --debug` holds the service's program for a debugger. See
+    /// [`ServiceCommands::debugged`].
+    debugged: bool,
     /// The mirrord session to spawn once `child`, the service's
     /// `run.pre_command`, exits successfully. `None` once `child` is the
     /// session itself.
@@ -90,6 +104,24 @@ struct Service {
     /// Unix process-group ID retained to probe surviving descendants.
     #[cfg(unix)]
     group: Pid,
+    /// Set once the session printed [`SESSION_READY_MESSAGE`], i.e. it got as far as launching
+    /// the service's process. Tells a session that failed to start from a service that crashed.
+    started: Arc<AtomicBool>,
+    /// Set once the session printed its [`DEBUG_HOLD_LINE_PREFIX`] line, i.e. the program is held
+    /// and an IDE may attach. From then on a debugged program's exit is the debugger's doing.
+    held: Arc<AtomicBool>,
+    /// Resolves once the forwarding of the session's stdout ended, so `started` and `held` are
+    /// final.
+    stdout_closed: Option<oneshot::Receiver<()>>,
+}
+
+/// What forwarding a session's stdout (not a pre-command's) reports back.
+struct SessionOutput {
+    readiness: Arc<Readiness>,
+    started: Arc<AtomicBool>,
+    held: Arc<AtomicBool>,
+    /// Dropped when forwarding ends, which resolves [`Service::stdout_closed`].
+    _closed: oneshot::Sender<()>,
 }
 
 impl Service {
@@ -99,6 +131,7 @@ impl Service {
     /// pre-command (one with a `then`) doesn't count toward `readiness`.
     fn spawn(
         name: Arc<str>,
+        debugged: bool,
         command: Command,
         then: Option<Command>,
         readiness: &Arc<Readiness>,
@@ -118,22 +151,35 @@ impl Service {
             .id()
             .map(|pid| Pid::from_raw(pid as i32))
             .ok_or_else(|| io::Error::other("spawned child has no process ID"))?;
+        let started = Arc::new(AtomicBool::new(false));
+        let held = Arc::new(AtomicBool::new(false));
+        let mut stdout_closed = None;
         if let Some(stdout) = child.stdout().take() {
-            output.spawn(forward_output(
-                stdout,
-                name.clone(),
-                then.is_none().then(|| readiness.clone()),
-            ));
+            let session = then.is_none().then(|| {
+                let (closed, receiver) = oneshot::channel();
+                stdout_closed = Some(receiver);
+                SessionOutput {
+                    readiness: readiness.clone(),
+                    started: started.clone(),
+                    held: held.clone(),
+                    _closed: closed,
+                }
+            });
+            output.spawn(forward_output(stdout, name.clone(), session));
         }
         if let Some(stderr) = child.stderr().take() {
             output.spawn(forward_output(stderr, name.clone(), None));
         }
         Ok(Self {
             name,
+            debugged,
             then,
             child,
             #[cfg(unix)]
             group,
+            started,
+            held,
+            stdout_closed,
         })
     }
 
@@ -226,11 +272,18 @@ impl Service {
         self.force_stop().await
     }
 
-    /// Job Object termination reaches every descendant before the direct child
-    /// is reaped, matching the Unix forced-shutdown guarantee.
+    /// Job Object termination reaches every descendant along with the direct
+    /// child, matching the Unix forced-shutdown guarantee.
+    ///
+    /// Only the direct child is waited for, not process-wrap's whole-job `wait`.
+    /// That one waits for an event on the job's completion port, and polling
+    /// the child's `try_wait` during supervision takes those events off the
+    /// port. After a service exits on its own the port can be empty for good,
+    /// and the job `wait` would block forever.
     #[cfg(windows)]
     async fn force_stop(&mut self) -> io::Result<()> {
-        Box::into_pin(self.child.kill()).await?;
+        self.child.start_kill()?;
+        self.child.inner_mut().wait().await?;
         Ok(())
     }
 }
@@ -315,6 +368,10 @@ async fn receive_second_signal(
 /// The processes `mirrord up` runs for one service.
 pub(super) struct ServiceCommands {
     pub(super) name: Arc<str>,
+    /// Whether `mirrord up --debug` holds the service's program for a debugger. Once the session
+    /// printed its hold line, the debugger owns the program's life: when it ends the program (an
+    /// IDE's Stop Debugging does), the run ends without calling it a crash.
+    pub(super) debugged: bool,
     /// `run.pre_command`, run to completion without mirrord before `session`.
     pub(super) pre: Option<Command>,
     /// The `mirrord exec`/`mirrord container` child that runs `run.command`.
@@ -360,14 +417,25 @@ async fn wait_for_first_exit(
                 continue;
             };
             let Some(session) = service.then.take() else {
-                return if status.success() {
-                    Ok(())
+                if status.success() {
+                    return Ok(());
+                }
+                if let Some(closed) = service.stdout_closed.take() {
+                    let _ = tokio::time::timeout(STDOUT_DRAIN, closed).await;
+                }
+                let name = service.name.clone();
+                let started = service.started.load(Ordering::Relaxed);
+                // A hold that failed before announcing never reached a debugger, so its exit
+                // still reports as a crash or a failed start.
+                if service.debugged && service.held.load(Ordering::Relaxed) {
+                    println!("{name}: exited with {status} while debugged, stopping");
+                    return Ok(());
+                }
+                return Err(if started {
+                    UpError::ServiceCrashed { name, status }
                 } else {
-                    Err(UpError::ServiceCrashed {
-                        name: service.name.clone(),
-                        status,
-                    })
-                };
+                    UpError::ServiceFailedToStart { name }
+                });
             };
             // Only the leader has exited. Anything it left running in its tree
             // would outlive `mirrord up`, because shutdown only reaches the
@@ -375,7 +443,14 @@ async fn wait_for_first_exit(
             service.force_stop().await?;
             if status.success() {
                 println!("{}: `run.pre_command` succeeded, starting", service.name);
-                *service = Service::spawn(service.name.clone(), session, None, readiness, output)?;
+                *service = Service::spawn(
+                    service.name.clone(),
+                    service.debugged,
+                    session,
+                    None,
+                    readiness,
+                    output,
+                )?;
                 index += 1;
             } else {
                 let name = services.swap_remove(index).name;
@@ -389,25 +464,54 @@ async fn wait_for_first_exit(
     }
 }
 
+/// Prints each line of `stream` prefixed with the service's name. On a session's stdout, also
+/// picks up the readiness marker and the branch databases report, which is not printed.
+///
+/// Lines are decoded lossily: a program may write in another encoding (a Windows console's code
+/// page, say), and one bad byte must not stop the forwarding, which would close the pipe on the
+/// program's next write.
 async fn forward_output(
     stream: impl AsyncRead + Unpin,
     name: Arc<str>,
-    readiness: Option<Arc<Readiness>>,
+    session: Option<SessionOutput>,
 ) {
-    let mut lines = BufReader::new(stream).lines();
+    let mut reader = BufReader::new(stream);
+    let mut buffer = Vec::new();
     let mut counted = false;
     loop {
-        match lines.next_line().await {
-            Ok(Some(line)) => {
-                if counted.not() && line.trim() == SESSION_READY_MESSAGE {
-                    counted = true;
-                    if let Some(readiness) = &readiness {
-                        readiness.mark();
+        buffer.clear();
+        match reader.read_until(b'\n', &mut buffer).await {
+            Ok(0) => break,
+            Ok(_) => {
+                let line = String::from_utf8_lossy(
+                    buffer
+                        .strip_suffix(b"\n")
+                        .map(|line| line.strip_suffix(b"\r").unwrap_or(line))
+                        .unwrap_or(&buffer),
+                );
+                if let Some(session) = &session {
+                    if counted.not() && line.trim() == SESSION_READY_MESSAGE {
+                        counted = true;
+                        session.started.store(true, Ordering::Relaxed);
+                        session.readiness.mark();
+                    } else if let Some(report) = line.strip_prefix(UP_DB_BRANCHES_REPORT_PREFIX) {
+                        // Only analytics read the report, so one that doesn't parse is dropped
+                        // rather than shown.
+                        if let Ok(branches) = serde_json::from_str::<Vec<UpSessionDbBranch>>(report)
+                        {
+                            session
+                                .readiness
+                                .tracker
+                                .record_db_branches(name.clone(), branches);
+                        }
+                        continue;
+                    } else if line.starts_with(DEBUG_HOLD_LINE_PREFIX) {
+                        // Still printed: the IDE reads the hold line from `mirrord up`'s output.
+                        session.held.store(true, Ordering::Relaxed);
                     }
                 }
                 println!("{name}: {line}");
             }
-            Ok(None) => break,
             Err(error) => {
                 eprintln!("{name} output error: {error}");
                 break;
@@ -416,7 +520,7 @@ async fn forward_output(
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 async fn supervise(
     commands: Vec<ServiceCommands>,
     ready: ReadyTracker,
@@ -447,13 +551,26 @@ async fn supervise_with_second_signal(
     let mut spawn_error = None;
     let mut pre_command_spawn_error = None;
 
-    for ServiceCommands { name, pre, session } in commands {
+    for ServiceCommands {
+        name,
+        debugged,
+        pre,
+        session,
+    } in commands
+    {
         let spawned = match pre {
             Some(pre) => {
                 println!("{name}: running `run.pre_command`");
                 // Like a failing pre-command, one that can't start (e.g. its
                 // program is not on PATH) only drops its own service.
-                match Service::spawn(name.clone(), pre, Some(session), &readiness, &mut output) {
+                match Service::spawn(
+                    name.clone(),
+                    debugged,
+                    pre,
+                    Some(session),
+                    &readiness,
+                    &mut output,
+                ) {
                     Err(error) => {
                         eprintln!("{name}: `run.pre_command` failed to start: {error}");
                         pre_command_spawn_error = Some(UpError::PreCommandSpawn {
@@ -465,7 +582,7 @@ async fn supervise_with_second_signal(
                     spawned => spawned,
                 }
             }
-            None => Service::spawn(name, session, None, &readiness, &mut output),
+            None => Service::spawn(name, debugged, session, None, &readiness, &mut output),
         };
         match spawned {
             Ok(service) => services.push(service),
@@ -555,6 +672,55 @@ async fn supervise_with_second_signal(
     Ok((result, forced_signal))
 }
 
+#[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+
+    /// A line in another encoding (`£` in a Windows console's code page 850, here) doesn't stop
+    /// the forwarding: the readiness marker after it is still read.
+    #[tokio::test]
+    async fn a_line_that_is_not_utf8_does_not_stop_the_forwarding() {
+        let readiness = Arc::new(Readiness {
+            count: AtomicUsize::new(0),
+            total: 1,
+            start: Instant::now(),
+            tracker: ReadyTracker::default(),
+        });
+        let started = Arc::new(AtomicBool::new(false));
+        let (closed, _receiver) = oneshot::channel();
+        let output = [
+            b"price: \x9c5\r\n".as_slice(),
+            SESSION_READY_MESSAGE.as_bytes(),
+            b"\n",
+        ]
+        .concat();
+
+        forward_output(
+            output.as_slice(),
+            Arc::from("shop"),
+            Some(SessionOutput {
+                readiness: readiness.clone(),
+                started: started.clone(),
+                held: Arc::new(AtomicBool::new(false)),
+                _closed: closed,
+            }),
+        )
+        .await;
+
+        assert!(
+            started.load(Ordering::Relaxed),
+            "the readiness marker comes after the bad byte, so it must still be read"
+        );
+        assert_eq!(readiness.count.load(Ordering::Relaxed), 1);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests;
+
 #[cfg(all(test, unix))]
 mod tests {
     use std::{path::Path, process::Stdio};
@@ -565,9 +731,10 @@ mod tests {
     use tempfile::TempDir;
     use tokio::process::Child;
 
-    use super::*;
-
-    const TEST_GRACE: Duration = Duration::from_millis(200);
+    use super::{
+        test_support::{TEST_GRACE, wait_for_file, wait_for_helper_ready},
+        *,
+    };
 
     fn command(script: &str, directory: &Path) -> ServiceCommands {
         let mut command = resolve_tokio_command("sh");
@@ -581,19 +748,31 @@ mod tests {
             .kill_on_drop(true);
         ServiceCommands {
             name: Arc::from("test"),
+            debugged: false,
             pre: None,
             session: command,
         }
     }
 
-    async fn wait_for_file(path: &Path) {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while path.exists().not() {
-                tokio::time::sleep(Duration::from_millis(10)).await;
+    async fn wait_for_process_group_exit(group: Pid) {
+        // Killed descendants are adopted by an external reaper, so their group
+        // entries can outlast direct-child reaping.
+        let exited = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match killpg(group, None) {
+                    Ok(()) => tokio::time::sleep(Duration::from_millis(10)).await,
+                    Err(Errno::ESRCH) => break,
+                    Err(error) => {
+                        panic!("failed to inspect service process group {group}: {error}")
+                    }
+                }
             }
         })
-        .await
-        .expect("child did not start");
+        .await;
+        assert!(
+            exited.is_ok(),
+            "service process group {group} must disappear after forced cleanup"
+        );
     }
 
     #[tokio::test]
@@ -653,7 +832,7 @@ mod tests {
     async fn second_shutdown_error_forces_cleanup_before_returning() {
         let directory = TempDir::new().unwrap();
         let command = command(
-            "trap '' TERM; echo $$ > pid; touch started; exec sleep 60",
+            "trap '' TERM; echo $$ > pid; : > started; exec sleep 60",
             directory.path(),
         );
         let first_shutdown = async {
@@ -685,7 +864,7 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(kill(pid, None), Err(Errno::ESRCH));
-        assert_eq!(killpg(pid, None), Err(Errno::ESRCH));
+        wait_for_process_group_exit(pid).await;
     }
 
     #[tokio::test]
@@ -741,20 +920,82 @@ mod tests {
             directory.path(),
         );
         let failing = command(
-            "while [ ! -f started ]; do sleep 0.02; done; exit 7",
+            "while [ ! -f started ]; do sleep 0.02; done; echo \"$READY_MESSAGE\"; exit 7",
             directory.path(),
         );
-        let result = supervise(
-            vec![sibling, failing],
-            ReadyTracker::default(),
-            std::future::pending(),
-            TEST_GRACE,
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            supervise(
+                vec![sibling, failing],
+                ReadyTracker::default(),
+                std::future::pending(),
+                TEST_GRACE,
+            ),
         )
-        .await;
+        .await
+        .expect("the crash did not end supervision");
         assert!(
             matches!(result, Err(UpError::ServiceCrashed { status, .. }) if status.code() == Some(7))
         );
         assert!(directory.path().join("stopped").exists());
+    }
+
+    /// Supervises a sibling next to a debugged service that prints the session-ready line, then
+    /// `hold_line` if any, then exits with 7. Returns what supervision returned once the sibling
+    /// was stopped.
+    async fn supervise_debugged_exit(hold_line: Option<&str>) -> Result<(), UpError> {
+        let directory = TempDir::new().unwrap();
+        let sibling = command(
+            "trap 'touch stopped; exit 0' TERM; touch started; while :; do sleep 0.02; done",
+            directory.path(),
+        );
+        let mut debugged = command(
+            "while [ ! -f started ]; do sleep 0.02; done; echo \"$READY_MESSAGE\"; \
+             if [ -n \"$HOLD_LINE\" ]; then echo \"$HOLD_LINE\"; fi; exit 7",
+            directory.path(),
+        );
+        debugged.debugged = true;
+        if let Some(hold_line) = hold_line {
+            debugged.session.env("HOLD_LINE", hold_line);
+        }
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            supervise(
+                vec![sibling, debugged],
+                ReadyTracker::default(),
+                std::future::pending(),
+                TEST_GRACE,
+            ),
+        )
+        .await
+        .expect("the exit did not end supervision");
+        assert!(
+            directory.path().join("stopped").exists(),
+            "any exit stops the siblings"
+        );
+        result
+    }
+
+    /// An IDE's Stop Debugging ends a held program with a non-zero code. That ends the run, and
+    /// its siblings, as any exit does, but isn't a crash.
+    #[tokio::test]
+    async fn debugged_service_exit_stops_siblings_without_a_crash() {
+        let result = supervise_debugged_exit(Some("debug-hold pid=1 release=test")).await;
+        assert!(
+            result.is_ok(),
+            "the program was held, so its exit is the debugger's doing: {result:?}"
+        );
+    }
+
+    /// A debugged service that never printed its hold line was never held, so no debugger can
+    /// have ended it: its exit is still a crash.
+    #[tokio::test]
+    async fn debugged_service_exit_before_its_hold_is_a_crash() {
+        let result = supervise_debugged_exit(None).await;
+        assert!(
+            matches!(&result, Err(UpError::ServiceCrashed { status, .. }) if status.code() == Some(7)),
+            "no hold line was seen, so the exit must report as a crash: {result:?}"
+        );
     }
 
     #[tokio::test]
@@ -783,6 +1024,7 @@ mod tests {
         let valid = command("exec sleep 60", directory.path());
         let missing = ServiceCommands {
             name: Arc::from("missing"),
+            debugged: false,
             pre: None,
             session: resolve_tokio_command(directory.path().join("missing")),
         };
@@ -814,7 +1056,9 @@ mod tests {
             if natural_exit {
                 "echo \"$READY_MESSAGE\"; exit 0"
             } else if ignores_term {
-                "trap 'touch first-term' TERM; echo $$ > child_pid; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
+                // Ignoring TERM before forking keeps the persistent descendant resistant
+                // through exec, so leader-only forced cleanup cannot pass.
+                "trap '' TERM; echo $$ > child_pid; (exec sleep 60) & trap ': > first-term' TERM; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
             } else {
                 "trap 'touch stopped-int; exit 0' INT; trap 'touch stopped-term; exit 0' TERM; trap 'touch stopped-hup; exit 0' HUP; echo \"$READY_MESSAGE\"; while :; do sleep 0.02; done"
             },
@@ -826,25 +1070,6 @@ mod tests {
             std::fs::write(directory.join("draining"), []).unwrap();
             tokio::time::sleep(Duration::from_secs(60)).await;
         }
-    }
-
-    async fn wait_for_helper_ready(helper: &mut Child) {
-        let mut lines = BufReader::new(helper.stdout.take().unwrap()).lines();
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let line = lines
-                    .next_line()
-                    .await
-                    .unwrap()
-                    .expect("helper exited before readiness");
-                if line.contains(SESSION_READY_MESSAGE) {
-                    break;
-                }
-            }
-        })
-        .await
-        .unwrap();
-        tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
     }
 
     fn signal_test_helper(
@@ -928,7 +1153,7 @@ mod tests {
             .unwrap();
         assert_eq!(status.code(), Some(130));
         assert_eq!(kill(child, None), Err(Errno::ESRCH));
-        assert_eq!(killpg(child, None), Err(Errno::ESRCH));
+        wait_for_process_group_exit(child).await;
     }
 
     #[tokio::test]

@@ -90,6 +90,8 @@ use hooks::HookManager;
 ))]
 use libc::c_char;
 use libc::{c_int, pid_t};
+#[cfg(target_os = "linux")]
+use libc::{c_long, statx};
 use load::ExecuteArgs;
 #[cfg(doc)]
 use mirrord_config::feature::fs::FsConfig;
@@ -97,6 +99,8 @@ use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, feature::env::mapper::EnvVarsRemapper,
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
+#[cfg(target_os = "linux")]
+use mirrord_layer_lib::detour::DetourExt;
 #[cfg(doc)]
 use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_lib::{
@@ -163,6 +167,8 @@ mod integration_tests_deps {
 }
 
 mod common;
+#[cfg(target_os = "linux")]
+mod diagnostics;
 mod exec_hooks;
 #[cfg(target_os = "macos")]
 mod exec_utils;
@@ -170,6 +176,8 @@ mod file;
 mod hooks;
 mod load;
 mod macros;
+mod program_stdout;
+mod ready;
 mod socket;
 #[cfg(target_os = "macos")]
 mod tls;
@@ -292,6 +300,9 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         LoadType::SIPOnly => sip_only_layer_start(config, patch_binaries, skip_patch_binaries),
         LoadType::Skip => load_only_layer_start(&config),
     }
+
+    // Every start above, early returns included, ends here.
+    ready::layer_ready()?;
 
     Ok(())
 }
@@ -440,6 +451,8 @@ fn layer_start(config: LayerConfig) {
         .filter(|(k, _v)| k != LayerConfig::RESOLVED_CONFIG_ENV)
         .collect();
     tracing::info!("Initializing mirrord-layer!");
+    #[cfg(target_os = "linux")]
+    diagnostics::log_environment();
     tracing::debug!(
         executable = ?EXECUTABLE_PATH.get(),
         args = ?EXECUTABLE_ARGS.get(),
@@ -552,6 +565,8 @@ fn fetch_env_vars() -> HashMap<String, String> {
         Default::default()
     };
 
+    setup().layer_config().sanitize_remote_env(&mut env_vars);
+
     if let Some(file) = &setup().env_config().env_file {
         let envs_from_file = dotenvy::from_path_iter(file)
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
@@ -662,6 +677,17 @@ fn enable_hooks(state: &LayerSetup) {
             );
         };
 
+        #[cfg(target_os = "linux")]
+        if state.experimental().hook_libc_syscall.unwrap_or_default() {
+            replace!(
+                &mut hook_manager,
+                "syscall",
+                syscall_detour,
+                FnSyscall,
+                FN_SYSCALL
+            );
+        };
+
         replace!(&mut hook_manager, "fork", fork_detour, FnFork, FN_FORK);
         replace!(&mut hook_manager, "vfork", vfork_detour, FnVfork, FN_VFORK);
     };
@@ -747,7 +773,9 @@ pub(crate) static CLOSE_FORK_LOCK: Mutex<()> = Mutex::new(());
 
 /// Shared code for closing `fd` in our data structures.
 ///
-/// Callers should call their respective close before calling this.
+/// Callers should call this before their respective close: once the kernel frees `fd`, another
+/// thread can get the same number for a new remote file, and a later call here would drop that
+/// file instead.
 ///
 /// ## Details
 ///
@@ -829,9 +857,9 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     unsafe {
-        let res = FN_CLOSE(fd);
+        // `close_layer_fd` first, then the real close.
         close_layer_fd(fd);
-        res
+        FN_CLOSE(fd)
     }
 }
 
@@ -864,8 +892,8 @@ thread_local! {
 /// We acquire these locks across the `fork` syscall. The child inherits them locked right after
 /// the syscall. [`atfork_release`] unlocks them.
 ///
-/// We can't lock these in [`fork_detour`] before calling FN_FORK. Because if the user app registers
-/// a fork handler that tries acquiring these locks, the app reaches a deadlock.
+/// We can't lock these in [`fork_with_detour_guard`] before calling FN_FORK. Because if the user app
+/// registers a fork handler that tries acquiring these locks, the app reaches a deadlock.
 ///
 /// `prepare` handlers are ran in the reverse order of their registration. We register before
 /// user app starts so our handler runs after user apps' handlers.
@@ -923,6 +951,18 @@ fn register_atfork_handlers() {
 /// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
+    unsafe { fork_with_detour_guard() }
+}
+
+/// Gives forked children their own connection before application code can close inherited resources.
+/// Both fork hooks call this directly: calling another guarded hook would bypass child initialization
+/// while the caller's detour guard is active.
+///
+/// # Safety
+///
+/// The caller must hold the current thread's active detour guard throughout this call and any
+/// surrounding layer I/O, so connection initialization cannot recursively enter layer hooks.
+unsafe fn fork_with_detour_guard() -> pid_t {
     unsafe {
         tracing::debug!("Process {} forking!.", std::process::id());
 
@@ -1023,7 +1063,7 @@ pub(crate) unsafe extern "C" fn vfork_detour() -> pid_t {
         }
     };
 
-    let fork_result = unsafe { fork_detour() };
+    let fork_result = unsafe { fork_with_detour_guard() };
     match fork_result.cmp(&0) {
         // We're the child.
         // Write end of the pipe will be dropped when we exit or exec,
@@ -1114,6 +1154,70 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
         // execution does not return to here after calling `FN_UV_FS_CLOSE`.
         close_layer_fd(fd);
         FN_UV_FS_CLOSE(a, b, fd, c)
+    }
+}
+
+/// ## Hook
+///
+/// Some libraries make syscalls by hand through libc's generic `syscall` instead of calling the
+/// libc export, so the named hooks never see them and the layer's placeholder fds reach the
+/// kernel. Handled here:
+///
+/// - `SYS_statx` / `statx` (COR-2032): libuv stats paths and fds this way, so it builds against
+///   libcs without a `statx` wrapper. Unhooked, remote paths fail with `ENOENT` and remote fds
+///   describe the placeholder.
+///   <https://github.com/nodejs/node/blob/80dc632040e6bada37aac1220dde9c79581c9c22/deps/uv/src/unix/linux.c#L396-L412>
+/// - `SYS_close` / `close` (COR-2032): libuv closes fds this way, to skip the cancellation point
+///   in [`libc::close`]. Unhooked, a closed fd stays in [`OPEN_FILES`], so the next local file
+///   that reuses its number reads the remote file.
+///   <https://github.com/nodejs/node/blob/80dc632040e6bada37aac1220dde9c79581c9c22/deps/uv/src/unix/core.c#L618-L619>
+///
+/// Every other syscall goes straight to the original, before taking a [`DetourGuard`]: Rust's std
+/// and tokio call `syscall` for futexes, including inside the layer.
+#[cfg(target_os = "linux")]
+#[hook_fn]
+pub(crate) unsafe extern "C" fn syscall_detour(number: c_long, mut args: ...) -> c_long {
+    unsafe {
+        // The kernel takes at most six arguments. Like glibc's own `syscall`, read all six: the
+        // ones a caller didn't pass are never used by the kernel.
+        let a1: c_long = args.next_arg();
+        let a2: c_long = args.next_arg();
+        let a3: c_long = args.next_arg();
+        let a4: c_long = args.next_arg();
+        let a5: c_long = args.next_arg();
+        let a6: c_long = args.next_arg();
+
+        match number {
+            libc::SYS_close => {
+                // `close_layer_fd` first, then the real close.
+                let guard = DetourGuard::new();
+                if guard.is_some() {
+                    close_layer_fd(a1 as c_int);
+                }
+                FN_SYSCALL(number, a1, a2, a3, a4, a5, a6)
+            }
+            libc::SYS_statx if setup().fs_config().is_active() => {
+                let guard = DetourGuard::new();
+                if guard.is_none() {
+                    return FN_SYSCALL(number, a1, a2, a3, a4, a5, a6);
+                }
+
+                let path_name = a2 as *const c_char;
+                file::ops::statx_logic(
+                    a1 as RawFd,
+                    path_name,
+                    a3 as c_int,
+                    a4 as c_int,
+                    a5 as *mut statx,
+                )
+                .map(c_long::from)
+                .unwrap_or_bypass_with(|bypass| {
+                    let path_name = file::hooks::update_ptr_from_bypass(path_name, &bypass);
+                    FN_SYSCALL(number, a1, path_name as c_long, a3, a4, a5, a6)
+                })
+            }
+            _ => FN_SYSCALL(number, a1, a2, a3, a4, a5, a6),
+        }
     }
 }
 

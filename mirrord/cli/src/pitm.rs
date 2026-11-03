@@ -161,6 +161,8 @@ pub(crate) fn pitm_command(args: PitmArgs) -> CliResult<()> {
         // so IntelliJ/Gradle abruptly stopping the run can't orphan it (an orphaned,
         // still-connected layer keeps the agent alive → "dirty iptables" next session).
         true,
+        // Only the program `mirrord exec` starts is ever held for a debugger.
+        false,
         None::<NullProgress>,
     )
     .map_err(|e| CliError::PitmExecuteFailed(exe.to_owned(), e.to_string()))?;

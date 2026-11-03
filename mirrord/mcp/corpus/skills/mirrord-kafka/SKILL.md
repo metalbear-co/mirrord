@@ -12,7 +12,7 @@ description: >
   Kafka, or connecting mirrord to a Kafka cluster. This is a Team/Enterprise feature of mirrord.
 metadata:
   author: MetalBear
-  version: "2.6"
+  version: "2.8"
 ---
 
 # mirrord Kafka Splitting Configuration Skill
@@ -171,11 +171,13 @@ spec:
         topic:
           - env: <TOPIC_ENV_VAR>
             fallback: <topic-name>       # optional
-            containers: [<container>]
+            containerNames: [<container>]
         groupId:
           - env: <GROUP_ID_ENV_VAR>
-            containers: [<container>]
+            containerNames: [<container>]
 ```
+
+`containerNames` is the current spelling (works with Kustomize's `images:` transformer); the legacy `containers` spelling still works on existing manifests — don't set both on the same reference. Don't adopt `containerNames` until the operator and its CRD are upgraded to a release that supports it and the rollout has completed; an older operator can reject or ignore the field.
 
 `appConfig.topic`/`groupId`/`appId` sources also support `envLike` (regex over var names), `volume` (read the name from a file mounted from a ConfigMap volume instead of an env var — requires operator **3.198.0+**; see `references/mirrord-split-config-crd.md`), `podFile` (read the name from a file that exists only inside the running pods — e.g. rendered by `vault-agent-injector` or a secrets-store CSI driver, with no ConfigMap/Secret behind it — requires operator **3.201.0+**; see below), `valueSelector` (a selector over nested keys / `.[]` for JSON-valued env vars — not a full jq expression, no pipes or functions), and `valuePattern` (regex to swap an embedded name). See the split-config reference.
 
@@ -184,6 +186,8 @@ spec:
 ### 4. Generate mirrord.json split_queues section
 
 Show the developer-facing config referencing the topic IDs. Two filter kinds, and you can combine them:
+
+Before picking which Kafka header to filter on, check whether the producing services already forward tracing-related metadata for you — many stacks propagate it out of the box, especially for Kafka headers. Prefer enabling that over hand-rolled propagation code. A filter only matches past the first service if every upstream service forwards the header on its own outgoing publishes — see the `mirrord-header-propagation` skill, which finds the Kafka producer/consumer flows in a codebase and wires this up.
 
 **Filter on Kafka headers (`message_filter`):**
 ```json mirrord

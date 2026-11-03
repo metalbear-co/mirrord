@@ -130,7 +130,7 @@
     },
     "kube_context": {
       "title": "kube_context {#root-kube_context}",
-      "description": "Kube context to use from the kubeconfig file.\nWill use current context if not specified.\n\n```json\n{\n  \"kube_context\": \"mycluster\"\n}\n```",
+      "description": "Kube context to use from the kubeconfig file.\nIf not specified, uses `kube_context` from the global `~/.mirrord/mirrord.json`, then the\nkubeconfig's current context.\n\n```json\n{\n  \"kube_context\": \"mycluster\"\n}\n```",
       "type": [
         "string",
         "null"
@@ -172,6 +172,18 @@
         "null"
       ],
       "x-mirrord-plan": "team"
+    },
+    "sessions_manager": {
+      "title": "sessions_manager {#root-sessions_manager}",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SessionsManagerFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "x-mirrord-plan": "enterprise"
     },
     "sip_binaries": {
       "title": "sip_binaries {#root-sip_binaries}",
@@ -289,7 +301,7 @@
   "additionalProperties": false,
   "$defs": {
     "AdvancedFsUserConfig": {
-      "description": "Allows the user to specify the default behavior for file operations:\n\n1. `\"read\"` or `true` - Read from the remote file system (default)\n2. `\"write\"` - Read/Write from the remote file system.\n3. `\"local\"` or `false` - Read from the local file system.\n4. `\"localwithoverrides\"` - perform fs operation locally, unless the path matches a pre-defined\n   or user-specified exception.\n\n> Note: by default, some paths are read locally or remotely, regardless of the selected FS mode.\n> This is described in further detail below.\n\nBesides the default behavior, the user can specify behavior for specific regex patterns.\nCase insensitive.\n\n1. `\"read_write\"` - List of patterns that should be read/write remotely.\n2. `\"read_only\"` - List of patterns that should be read only remotely.\n3. `\"local\"` - List of patterns that should be read locally.\n4. `\"not_found\"` - List of patterns that should never be read nor written. These files should be\n   treated as non-existent.\n4. `\"mapping\"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))\n\nThe logic for choosing the behavior is as follows:\n\n\n1. Check against \"mapping\" if path needs to be replaced, if matched then continue to next step\n   with new path after replacements otherwise continue as usual.\n2. Check if one of the patterns match the file path, do the corresponding action. There's no\n   specified order if two lists match the same path, we will use the first one (and we do not\n   guarantee what is first).\n\n   **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined\n   behaviour.\n\n3. There are pre-defined exceptions to the set FS mode.\n  1. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_local_by_default.rs)\n     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_local_by_default.rs)\n     are read locally by default.\n  2. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_remote_by_default.rs)\n     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_remote_by_default.rs)\n     are read remotely by default when the mode is `localwithoverrides`.\n  3. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/not_found_by_default.rs)\n     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/not_found_by_default.rs)\n     under the running user's home directory will not be found by the application when the mode\n     is not `local`.\n\n  In order to override that default setting for a path, or a pattern, include it the\n  appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even\n  though it is covered by the set of pre-defined patterns that are read locally by default,\n  add `\"^/etc/.\"` to the `read_only` set.\n\n4. If none of the above match, use the default behavior (mode).\n\nFor more information, check the file operations\n[technical reference](https://metalbear.com/mirrord/docs/reference/fileops/).\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ],\n      \"not_found\": [ \"\\\\.config/gcloud\" ],\n      \"prefetch\": [ \"/etc/ssl\" ]\n    }\n  }\n}\n```\n\n#### Windows paths {#fs-windows-paths}\n\nOn Windows, the patterns of `read_write`, `read_only`, `local`, `not_found` and `mapping` are\nmatched against two forms of the path, both with forward slashes:\n\n| Form | `D:\\Workspaces\\myapp\\app.json` becomes | A pattern for this form matches |\n|---|---|---|\n| without the drive | `/Workspaces/myapp/app.json` | the path on every drive |\n| with the drive | `D:/Workspaces/myapp/app.json` | the path on that drive only |\n\nA pattern applies when it matches either form. So `^/Workspaces/` matches the folder on\nevery drive, and `^D:/Workspaces/` matches it on `D:` only. Like the rest of a pattern, the\ndrive letter ignores case.\n\nWrite patterns with forward slashes. A pattern that needs a backslash in the path (`\\\\`, or\n`C:\\` copied from Explorer) never matches, since neither form has one, and mirrord warns about\nit. A backslash that escapes a regex character (`\\.`, `\\d`), or one choice in a class\n(`[\\\\/]`), is fine.\n\nFor a path from the environment, use the `path_pattern` template filter. It gives the path's\nform with the drive, escaped so that it matches literally and fits in any config format.\n\n`%TEMP%` is read locally by default. To use the pod's `/tmp` instead, map it:\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mapping\": {\n        \"^{{ get_env(name='TEMP') | path_pattern }}/(.*)$\": \"/tmp/$1\"\n      }\n    }\n  }\n}\n```\n\n- **Both the short and long name of a folder match.** Windows can give a folder an old-style\n  short name, like `FIRSTN~1` for `First Name`, and `%TEMP%` often uses it. `path_pattern`\n  matches both, as long as the folder exists.\n- **The result never ends in a separator.** Add `/` to match what's inside the folder.\n- **For text that isn't a path,** such as a user name, `regex_escape` escapes it as-is.",
+      "description": "Allows the user to specify the default behavior for file operations:\n\n1. `\"read\"` or `true` - Read from the remote file system (default)\n2. `\"write\"` - Read/Write from the remote file system.\n3. `\"local\"` or `false` - Read from the local file system.\n4. `\"localwithoverrides\"` - perform fs operation locally, unless the path matches a pre-defined\n   or user-specified exception.\n\n> Note: by default, some paths are read locally or remotely, regardless of the selected FS mode.\n> This is described in further detail below.\n\nBesides the default behavior, the user can specify behavior for specific regex patterns.\nCase insensitive.\n\n1. `\"read_write\"` - List of patterns that should be read/write remotely.\n2. `\"read_only\"` - List of patterns that should be read only remotely.\n3. `\"local\"` - List of patterns that should be read locally.\n4. `\"not_found\"` - List of patterns that should never be read nor written. These files should be\n   treated as non-existent.\n4. `\"mapping\"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))\n\nThe logic for choosing the behavior is as follows:\n\n\n1. Check against \"mapping\" if path needs to be replaced, if matched then continue to next step\n   with new path after replacements otherwise continue as usual.\n2. Check if one of the patterns match the file path, do the corresponding action. There's no\n   specified order if two lists match the same path, we will use the first one (and we do not\n   guarantee what is first).\n\n   **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined\n   behaviour.\n\n3. There are pre-defined exceptions to the set FS mode.\n  1. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_local_by_default.rs)\n     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_local_by_default.rs)\n     are read locally by default.\n  2. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/read_remote_by_default.rs)\n     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/read_remote_by_default.rs)\n     are read remotely by default when the mode is `localwithoverrides`.\n  3. Paths that match the pre-defined patterns [for Linux/MacOS](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/unix/not_found_by_default.rs)\n     or [for Windows](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer-lib/src/file/windows/not_found_by_default.rs)\n     under the running user's home directory will not be found by the application when the mode\n     is not `local`.\n\n  In order to override that default setting for a path, or a pattern, include it the\n  appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even\n  though it is covered by the set of pre-defined patterns that are read locally by default,\n  add `\"^/etc/.\"` to the `read_only` set.\n\n4. If none of the above match, use the default behavior (mode).\n\nFor more information, check the file operations\n[technical reference](https://metalbear.com/mirrord/docs/reference/fileops).\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ],\n      \"not_found\": [ \"\\\\.config/gcloud\" ],\n      \"prefetch\": [ \"/etc/ssl\" ]\n    }\n  }\n}\n```\n\n#### Windows paths {#fs-windows-paths}\n\nOn Windows, the patterns of `read_write`, `read_only`, `local`, `not_found` and `mapping` are\nmatched against two forms of the path, both with forward slashes:\n\n| Form | `D:\\Workspaces\\myapp\\app.json` becomes | A pattern for this form matches |\n|---|---|---|\n| without the drive | `/Workspaces/myapp/app.json` | the path on every drive |\n| with the drive | `D:/Workspaces/myapp/app.json` | the path on that drive only |\n\nA pattern applies when it matches either form. So `^/Workspaces/` matches the folder on\nevery drive, and `^D:/Workspaces/` matches it on `D:` only. Like the rest of a pattern, the\ndrive letter ignores case.\n\nWrite patterns with forward slashes. A pattern that needs a backslash in the path (`\\\\`, or\n`C:\\` copied from Explorer) never matches, since neither form has one, and mirrord warns about\nit. A backslash that escapes a regex character (`\\.`, `\\d`), or one choice in a class\n(`[\\\\/]`), is fine.\n\nFor a path from the environment, use the `path_pattern` template filter. It gives the path's\nform with the drive, escaped so that it matches literally and fits in any config format.\n\n`%TEMP%` is read locally by default. To use the pod's `/tmp` instead, map it:\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mapping\": {\n        \"^{{ get_env(name='TEMP') | path_pattern }}/(.*)$\": \"/tmp/$1\"\n      }\n    }\n  }\n}\n```\n\n- **Both the short and long name of a folder match.** Windows can give a folder an old-style\n  short name, like `FIRSTN~1` for `First Name`, and `%TEMP%` often uses it. `path_pattern`\n  matches both, as long as the folder exists.\n- **The result never ends in a separator.** Add `/` to match what's inside the folder.\n- **For text that isn't a path,** such as a user name, `regex_escape` escapes it as-is.",
       "type": "object",
       "properties": {
         "local": {
@@ -499,6 +511,16 @@
             "boolean",
             "null"
           ]
+        },
+        "http2_max_header_list_size": {
+          "title": "agent.http2_max_header_list_size {#agent-http2_max_header_list_size}",
+          "description": "Maximum size, in bytes, of the header list the agent accepts on HTTP/2 connections it\nintercepts. Applies to request headers sent by clients of the target, and to response\nheaders sent back by the target when requests are passed through to it.\n\nThe agent advertises this value as `SETTINGS_MAX_HEADER_LIST_SIZE`. Clients that respect\nit refuse to send larger headers, so set this to at least the header size limit your\nservices allow.\n\nDefaults to 16 Kb.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
         },
         "http_detection_timeout": {
           "title": "agent.http_detection_timeout {#agent-http_detection_timeout}",
@@ -814,6 +836,15 @@
             "matches"
           ]
         }
+      ]
+    },
+    "BranchCopyMode": {
+      "description": "Engine-agnostic seeding mode of a branch: what a split-config request asks for, and what usage\nanalytics count. Engines without copy modes (generic, local Redis) have none.",
+      "type": "string",
+      "enum": [
+        "empty",
+        "schema",
+        "all"
       ]
     },
     "BranchItemCopyConfig": {
@@ -1307,7 +1338,7 @@
       "x-mirrord-plan": "team"
     },
     "DatabaseBranchConfig": {
-      "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```\n\nThe fields below are shared by every engine. Not every engine has every one of them: an\nengine that mirrord does not spawn as a pod in the cluster takes no `image`/`version`, and\none that is not reached over a connection to a server hosting many databases takes no\n`name` and locates its source its own way. Engine-specific fields (copy modes, `iam_auth`,\n`connection_settings`, `emulator_host`) are documented under each `type`.\n\n#### feature.db_branches[].id (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}\n\nUsers can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.\n\n#### feature.db_branches[].name (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}\n\nWhen source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.\n\n#### feature.db_branches[].ttl_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}\n\nMirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).\n\n#### feature.db_branches[].ttl_mins (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}\n\nSame as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).\n\n#### feature.db_branches[].creation_timeout_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}\n\nThe timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.\n\n#### feature.db_branches[].version (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}\n\nMirrord operator uses a default version of the database image unless `version` is given.\n\nMutually exclusive with [`image`](#feature-db_branches-sql-image).\n\n#### feature.db_branches[].image (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-image}\n\nFull image reference for the branch database container, including the tag\n(e.g. `registry.example.com/postgresql:15-partman`). Setting `image` overrides both the\noperator's built-in default image and any registry configured cluster-wide by the operator\nadmin. Cluster admins can restrict which images are accepted with the per-database\n`dbPod.allowedImages` list in the operator's Helm values; when that list is not set, any\nimage is allowed.\n\nMutually exclusive with [`version`](#feature-db_branches-sql-version), as the image\nreference already carries the tag.\n\n#### feature.db_branches[].profile (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, s3, spanner) {#feature-db_branches-sql-profile}\n\nName of an operator branch-config profile to use for this branch. Cluster admins can define\nnamed profiles under the per-database `profiles` map in the operator's Helm values\n(e.g. `redisBranchConfig.profiles`), each carrying its own pod settings such as TLS mode,\nserver arguments, pull secrets, and allowed images. When `profile` is not set, the\noperator's default branch config applies. Referencing a profile the operator does not\ndefine fails the branch with an error listing the available profiles.\n\n```json\n{ \"type\": \"redis\", \"profile\": \"telapp\", \"connection\": { \"url\": \"REDIS_URL\" } }\n```\n\n#### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}\n\n`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's. It accepts a connection URL or individual params:\n\n```json\n{ \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } }\n```\n```json\n{ \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" }\n```\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } }\n```\n\nAny param can also be read from a Kubernetes Secret instead of a target-pod env var:\n\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"password\": { \"secret\": \"my-secret\", \"key\": \"password\" }, \"database\": \"DB_NAME\" } }\n```\n\nOr from a Kubernetes ConfigMap, for apps whose connection details live in a mounted config\nfile. `configmap` is the ConfigMap's name, or `{ \"volume\": \"<name>\" }` to follow a `configMap`\nvolume of the target pod (this keeps working when the ConfigMap is renamed per release).\n`key` is the data key; `value_selector` (a `.a.b` path into the JSON/YAML entry) or\n`value_pattern` (a regex over the raw text) picks the value out of it; `env_var_name` hands\nthe branch's value to the local app under that name:\n\n```json\n{\n  \"params\": {\n    \"host\": { \"configmap\": { \"volume\": \"app-config\" }, \"key\": \"config.yml\", \"value_selector\": \".database.host\", \"env_var_name\": \"DB_HOST\" },\n    \"database\": { \"configmap\": \"app-config\", \"key\": \"config.yml\", \"value_pattern\": \"name: '(?P<database>[^']+)'\", \"env_var_name\": \"DB_NAME\" },\n    \"user\": \"DB_USER\",\n    \"password\": \"DB_PASSWORD\"\n  }\n}\n```\n\nWhen the operator's branch config (or the branch's `profile`) sets `dbPod.sourceConfigMap`,\n`configmap` and `key` may be omitted and are filled from there, so a param is just its\nselector: `{ \"value_selector\": \".database.host\", \"env_var_name\": \"DB_HOST\" }`. A param with\nonly `value_pattern` and `env_var_name` is the env var pattern source instead, so a pattern\nagainst the profile's ConfigMap keeps `key`. ConfigMap sources need operator `3.204.0` and\nmirrord `3.255.0` or later.\n\nA `gcp_secret_manager` or `aws_secrets_manager` source takes the same `value_selector` /\n`value_pattern` to pick one field out of a secret that holds several, such as a JSON blob\nof credentials. The branch init container applies it right after fetching the secret:\n\n```json\n{ \"params\": { \"password\": { \"aws_secrets_manager\": \"db-creds\", \"value_selector\": \".password\" } } }\n```\n\n#### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}\n\nSchema migrations to run on the branch after it is created. The `flavor` field selects how\nthey run.\n\n[Flyway](https://documentation.red-gate.com/flyway) with a local migrations directory:\n\n```json\n{ \"migrations\": { \"flavor\": \"flyway\", \"path\": \"./migrations\" } }\n```\n\n- `path`: local directory holding the migration files, resolved relative to the working\n  directory.\n- `image`: optional container image override for the migration runner.\n\nFlyway with the SQL baked into the job image, running against in-image paths:\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"flyway\",\n    \"image\": \"registry.example.com/my-migrations:latest\",\n    \"locations\": [\"filesystem:/flyway/sql\"]\n  }\n}\n```\n\n- `locations`: Flyway locations inside `image` holding the migration files. Mutually exclusive\n  with `path`, and requires `image`.\n\n[Liquibase](https://docs.liquibase.com) with a local changelog directory:\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"liquibase\",\n    \"path\": \"./changelog\",\n    \"changelog_file\": \"db.changelog-master.xml\"\n  }\n}\n```\n\n- `path`: local directory holding the changelog files, resolved relative to the working\n  directory.\n- `changelog_file`: root changelog file, relative to `path`.\n- `image`: optional container image override for the migration runner.\n\nLiquibase with the changelogs baked into the job image, running against in-image paths:\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"liquibase\",\n    \"image\": \"registry.example.com/my-migrations:latest\",\n    \"search_path\": [\"/liquibase/changelog\"],\n    \"changelog_file\": \"db.changelog-master.xml\"\n  }\n}\n```\n\n- `search_path`: Liquibase search path inside `image`. Mutually exclusive with `path`, and\n  requires `image`.\n\n`changelog_file` is resolved inside the search root - a leading `/` is accepted and normalised\nto the same name - and is recorded in `DATABASECHANGELOG`, so changing it re-runs every\nchangeset.\n\nA user-provided image and command, for apps that ship migrations in their own image\n(e.g. a setup script that runs the framework's migration command):\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"container\",\n    \"image\": \"registry.example.com/my-app:latest\",\n    \"command\": [\"./db_setup.sh\"],\n    \"env\": {\n      \"DATABASE_URL\": \"mysql://$(MIRRORD_DB_USER):$(MIRRORD_DB_PASSWORD)@$(MIRRORD_DB_HOST):$(MIRRORD_DB_PORT)/$(MIRRORD_DB_NAME)\"\n    }\n  }\n}\n```\n\n- `image`: full image reference for the migration container, including the tag.\n- `command`/`args`: optional entrypoint overrides; when unset, the image's own entrypoint runs.\n- `env`: extra environment variables. The operator injects the branch connection as\n  `MIRRORD_DB_HOST`, `MIRRORD_DB_PORT`, `MIRRORD_DB_USER`, `MIRRORD_DB_PASSWORD`, and\n  `MIRRORD_DB_NAME`; `env` values (and `command`/`args`) can reference them with Kubernetes\n  `$(VAR)` expansion.\n\nRequires [`name`](#feature-db_branches-sql-name) to be set.",
+      "description": "Configuration for a database branch.\n\nExample:\n\n```json\n{\n  \"id\": \"my-branch-db\",\n  \"name\": \"my-database-name\",\n  \"ttl_secs\": 120,\n  \"type\": \"mysql\",\n  \"version\": \"8.0\",\n  \"connection\": {\n    \"url\": {\n      \"type\": \"env\",\n      \"variable\": \"DB_CONNECTION_URL\"\n    }\n  }\n}\n```\n\nThe fields below are shared by every engine. Not every engine has every one of them: an\nengine that mirrord does not spawn as a pod in the cluster takes no `image`/`version`, and\none that is not reached over a connection to a server hosting many databases takes no\n`name` and locates its source its own way. Engine-specific fields (copy modes, `iam_auth`,\n`connection_settings`, `emulator_host`) are documented under each `type`.\n\n#### feature.db_branches[].id (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-id}\n\nUsers can choose to specify a unique `id`. This is useful for reusing or sharing\nthe same database branch among Kubernetes users.\n\n#### feature.db_branches[].name (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-name}\n\nWhen source database connection detail is not accessible to mirrord operator, users\ncan specify the database `name` so it is included in the connection options mirrord\nuses as the override.\n\n#### feature.db_branches[].ttl_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_secs}\n\nMirrord operator starts counting the TTL when a branch is no longer used by any session.\nThe time-to-live (TTL) for the branch database is set to 300 seconds by default.\nUsers can set `ttl_secs` to customize this value according to their need. Please note\nthat longer TTL paired with frequent mirrord session turnover can result in increased\nresource usage. For this reason, branch database TTL caps out at 15 min.\n\nMutually exclusive with [`ttl_mins`](#feature-db_branches-sql-ttl_mins).\n\n#### feature.db_branches[].ttl_mins (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-ttl_mins}\n\nSame as [`ttl_secs`](#feature-db_branches-sql-ttl_secs) but expressed in minutes.\n\nMutually exclusive with [`ttl_secs`](#feature-db_branches-sql-ttl_secs).\n\n#### feature.db_branches[].creation_timeout_secs (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-creation_timeout_secs}\n\nThe timeout in seconds to wait for a database branch to become ready after creation.\nDefaults to 60 seconds. Adjust this value based on your database size and cluster\nperformance.\n\n#### feature.db_branches[].version (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}\n\nMirrord operator uses a default version of the database image unless `version` is given.\n\nMutually exclusive with [`image`](#feature-db_branches-sql-image).\n\n#### feature.db_branches[].image (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-image}\n\nFull image reference for the branch database container, including the tag\n(e.g. `registry.example.com/postgresql:15-partman`). Setting `image` overrides both the\noperator's built-in default image and any registry configured cluster-wide by the operator\nadmin. Cluster admins can restrict which images are accepted with the per-database\n`dbPod.allowedImages` list in the operator's Helm values; when that list is not set, any\nimage is allowed.\n\nMutually exclusive with [`version`](#feature-db_branches-sql-version), as the image\nreference already carries the tag.\n\n#### feature.db_branches[].profile (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, s3, spanner) {#feature-db_branches-sql-profile}\n\nName of an operator branch-config profile to use for this branch. Cluster admins can define\nnamed profiles under the per-database `profiles` map in the operator's Helm values\n(e.g. `redisBranchConfig.profiles`), each carrying its own pod settings such as TLS mode,\nserver arguments, pull secrets, and allowed images. When `profile` is not set, the\noperator's default branch config applies. Referencing a profile the operator does not\ndefine fails the branch with an error listing the available profiles.\n\n```json\n{ \"type\": \"redis\", \"profile\": \"telapp\", \"connection\": { \"url\": \"REDIS_URL\" } }\n```\n\n#### feature.db_branches[].namespace (type: clickhouse, cockroachdb, dynamodb, generic, mariadb, mongodb, mssql, mysql, pg, redis, spanner) {#feature-db_branches-sql-namespace}\n\nWhen `true`, the branch database runs in its own namespace named `mirrord-<key>`, where\n`<key>` is the session [`key`](#key). The operator creates the namespace on first use,\ncopies the Secrets, ConfigMaps and service account the branch pod reads from the target's\nnamespace into it, and deletes the namespace once no branch runs there anymore. Every\nbranch started under the same key shares that namespace, which makes it easy to see and\nclean up everything one key created.\n\nA key with characters a namespace name cannot hold (uppercase letters, `_`, ...) is turned\ninto a valid name, with a short hash added to keep it unique. Set a `key` explicitly:\nwithout one, every run gets a fresh key and with it a fresh namespace. Cloud workload\nidentity (GKE Workload Identity, AWS IRSA, EKS Pod Identity) is bound to a namespace, so\nIAM authentication and secret manager sources need a binding for the `mirrord-<key>`\nnamespace too. Defaults to `false`.\n\n```json\n{ \"type\": \"pg\", \"namespace\": true, \"connection\": { \"url\": \"DATABASE_URL\" } }\n```\n\n#### feature.db_branches[].connection (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-connection}\n\n`connection` describes how to get the connection information to the source database.\nWhen the branch database is ready for use, Mirrord operator will replace the connection\ninformation with the branch database's. It accepts a connection URL or individual params:\n\n```json\n{ \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" } }\n```\n```json\n{ \"type\": \"env\", \"url\": \"DB_CONNECTION_URL\" }\n```\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"user\": \"DB_USER\", \"password\": \"DB_PASSWORD\", \"database\": \"DB_NAME\" } }\n```\n\nAny param can also be read from a Kubernetes Secret instead of a target-pod env var:\n\n```json\n{ \"type\": \"env\", \"params\": { \"host\": \"DB_HOST\", \"password\": { \"secret\": \"my-secret\", \"key\": \"password\" }, \"database\": \"DB_NAME\" } }\n```\n\nOr from a Kubernetes ConfigMap, for apps whose connection details live in a mounted config\nfile. `configmap` is the ConfigMap's name, or `{ \"volume\": \"<name>\" }` to follow a `configMap`\nvolume of the target pod (this keeps working when the ConfigMap is renamed per release).\n`key` is the data key; `value_selector` (a `.a.b` path into the JSON/YAML entry) or\n`value_pattern` (a regex over the raw text) picks the value out of it; `env_var_name` hands\nthe branch's value to the local app under that name:\n\n```json\n{\n  \"params\": {\n    \"host\": { \"configmap\": { \"volume\": \"app-config\" }, \"key\": \"config.yml\", \"value_selector\": \".database.host\", \"env_var_name\": \"DB_HOST\" },\n    \"database\": { \"configmap\": \"app-config\", \"key\": \"config.yml\", \"value_pattern\": \"name: '(?P<database>[^']+)'\", \"env_var_name\": \"DB_NAME\" },\n    \"user\": \"DB_USER\",\n    \"password\": \"DB_PASSWORD\"\n  }\n}\n```\n\nWhen the operator's branch config (or the branch's `profile`) sets `dbPod.sourceConfigMap`,\n`configmap` and `key` may be omitted and are filled from there, so a param is just its\nselector: `{ \"value_selector\": \".database.host\", \"env_var_name\": \"DB_HOST\" }`. A param with\nonly `value_pattern` and `env_var_name` is the env var pattern source instead, so a pattern\nagainst the profile's ConfigMap keeps `key`. ConfigMap sources need operator `3.204.0` and\nmirrord `3.255.0` or later.\n\nA `gcp_secret_manager` or `aws_secrets_manager` source takes the same `value_selector` /\n`value_pattern` to pick one field out of a secret that holds several, such as a JSON blob\nof credentials. The branch init container applies it right after fetching the secret:\n\n```json\n{ \"params\": { \"password\": { \"aws_secrets_manager\": \"db-creds\", \"value_selector\": \".password\" } } }\n```\n\n#### feature.db_branches[].migrations (type: mysql, mariadb, pg, mssql, clickhouse) {#feature-db_branches-sql-migrations}\n\nSchema migrations to run on the branch after it is created. The `flavor` field selects how\nthey run.\n\n[Flyway](https://documentation.red-gate.com/flyway) with a local migrations directory:\n\n```json\n{ \"migrations\": { \"flavor\": \"flyway\", \"path\": \"./migrations\" } }\n```\n\n- `path`: local directory holding the migration files, resolved relative to the working\n  directory.\n- `image`: optional container image override for the migration runner.\n\nFlyway with the SQL baked into the job image, running against in-image paths:\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"flyway\",\n    \"image\": \"registry.example.com/my-migrations:latest\",\n    \"locations\": [\"filesystem:/flyway/sql\"]\n  }\n}\n```\n\n- `locations`: Flyway locations inside `image` holding the migration files. Mutually exclusive\n  with `path`, and requires `image`.\n\n[Liquibase](https://docs.liquibase.com) with a local changelog directory:\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"liquibase\",\n    \"path\": \"./changelog\",\n    \"changelog_file\": \"db.changelog-master.xml\"\n  }\n}\n```\n\n- `path`: local directory holding the changelog files, resolved relative to the working\n  directory.\n- `changelog_file`: root changelog file, relative to `path`.\n- `image`: optional container image override for the migration runner.\n\nLiquibase with the changelogs baked into the job image, running against in-image paths:\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"liquibase\",\n    \"image\": \"registry.example.com/my-migrations:latest\",\n    \"search_path\": [\"/liquibase/changelog\"],\n    \"changelog_file\": \"db.changelog-master.xml\"\n  }\n}\n```\n\n- `search_path`: Liquibase search path inside `image`. Mutually exclusive with `path`, and\n  requires `image`.\n\n`changelog_file` is resolved inside the search root - a leading `/` is accepted and normalised\nto the same name - and is recorded in `DATABASECHANGELOG`, so changing it re-runs every\nchangeset.\n\nA user-provided image and command, for apps that ship migrations in their own image\n(e.g. a setup script that runs the framework's migration command):\n\n```json\n{\n  \"migrations\": {\n    \"flavor\": \"container\",\n    \"image\": \"registry.example.com/my-app:latest\",\n    \"command\": [\"./db_setup.sh\"],\n    \"env\": {\n      \"DATABASE_URL\": \"mysql://$(MIRRORD_DB_USER):$(MIRRORD_DB_PASSWORD)@$(MIRRORD_DB_HOST):$(MIRRORD_DB_PORT)/$(MIRRORD_DB_NAME)\"\n    }\n  }\n}\n```\n\n- `image`: full image reference for the migration container, including the tag.\n- `command`/`args`: optional entrypoint overrides; when unset, the image's own entrypoint runs.\n- `env`: extra environment variables. The operator injects the branch connection as\n  `MIRRORD_DB_HOST`, `MIRRORD_DB_PORT`, `MIRRORD_DB_USER`, `MIRRORD_DB_PASSWORD`, and\n  `MIRRORD_DB_NAME`; `env` values (and `command`/`args`) can reference them with Kubernetes\n  `$(VAR)` expansion.\n\nRequires [`name`](#feature-db_branches-sql-name) to be set.",
       "oneOf": [
         {
           "description": "When configuring a branch for ClickHouse, set `type` to `clickhouse`.",
@@ -1351,6 +1382,10 @@
                 "string",
                 "null"
               ]
+            },
+            "namespace": {
+              "description": "Run the branch in the operator-managed `mirrord-<key>` namespace instead of the\ntarget's namespace.",
+              "type": "boolean"
             },
             "profile": {
               "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
@@ -1448,6 +1483,10 @@
                 "string",
                 "null"
               ]
+            },
+            "namespace": {
+              "description": "Run the branch in the operator-managed `mirrord-<key>` namespace instead of the\ntarget's namespace.",
+              "type": "boolean"
             },
             "profile": {
               "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
@@ -1547,6 +1586,10 @@
                 "null"
               ]
             },
+            "namespace": {
+              "description": "Run the branch in the operator-managed `mirrord-<key>` namespace instead of the\ntarget's namespace.",
+              "type": "boolean"
+            },
             "profile": {
               "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
               "type": [
@@ -1591,7 +1634,7 @@
           ]
         },
         {
-          "description": "When branching a database, cache, or any other stateful service that mirrord has no built-in\nengine for, set `type` to `generic`.\n\nA generic branch runs the container image you supply, starting empty - there are no built-in\ncopy modes, IAM auth, or schema handling. The operator resolves each parameter you declare\nunder `connection.params` from the target pod and injects it into the branch container as an\nenv var named `MIRRORD_PARAM_<NAME>` (a Secret-backed param arrives as a `secretKeyRef`; the\noperator never reads its value). Reference these in `command`, `args`, and `env` with\nKubernetes' native `$(VAR)` syntax so the branch bootstraps itself with the *same* values the\napp already uses. mirrord then only redirects the app's `host`/`port` vars to the branch -\neverything else in the app's environment keeps working unchanged.\n\nTo fill the branch with schema and data, supply a `copy` Job (below) - your own image that\ncopies from the source into the branch. The branch only turns Ready once the Job succeeds.\n\nTwo built-ins are always available alongside the params: `MIRRORD_BRANCH_ID` and, when the\nshared `name` field is set, `MIRRORD_DATABASE_NAME`.\n\n#### feature.db_branches[].image (type: generic) {#feature-db_branches-generic-image}\n\nFull image reference for the branch container, including the tag\n(e.g. `docker.io/library/influxdb:2.7`). This is the shared `image` field, but unlike the\nbuilt-in engines a generic branch has no default image, so it is required - unless the\nshared `profile` field is set and the admin's profile supplies the image (the operator\nfails the branch if neither does). The shared `version` field is not allowed for generic\nbranches - the tag lives here.\n\n#### feature.db_branches[].port (type: generic) {#feature-db_branches-generic-port}\n\nThe port the branched service listens on. Used as the default readiness probe target and as\nthe port the app's connection is redirected to. Required, unless the shared `profile` field\nis set and the admin's profile supplies the port.\n\n#### feature.db_branches[].copy (type: generic) {#feature-db_branches-generic-copy}\n\nA one-shot Kubernetes Job that copies schema and data from the source into the branch,\nusing an image you author. It runs after the branch container turns ready, and the branch\nonly becomes usable once the Job exits successfully. The Job's environment carries the same\n`MIRRORD_PARAM_<NAME>` vars as the branch container (the source connection), plus\n`MIRRORD_BRANCH_HOST` and `MIRRORD_BRANCH_PORT` (where to write). What to copy\n(full/schema-only/filtered) is entirely up to the image's own command.\n\nThe copy runs at most once per branch: reusing a Ready branch (by `id`) never re-runs it,\neven if the copy config changed - use a new `id` for a fresh copy.\n\n```json\n{\n  \"copy\": {\n    \"image\": \"ghcr.io/acme/opensearch-copy:1.0\",\n    \"command\": [\"./copy.sh\"],\n    \"args\": [\"--mode=all\"]\n  }\n}\n```\n\nWhen the shared `profile` field is set, the admin's profile can supply the copy Job instead\n(`dbPod.copy` in the operator's generic branch config); a `copy` here wins over the\nprofile's.\n\n#### feature.db_branches[].command / args (type: generic) {#feature-db_branches-generic-command}\n\nOptional entrypoint override for the branch container. Values may reference declared params\nwith `$(MIRRORD_PARAM_<NAME>)`; use `$$(...)` for a literal `$(...)`. Values written\ndirectly into `args` are visible in the pod spec - reference params via `$(VAR)` instead of\ninlining secrets.\n\n#### feature.db_branches[].env (type: generic) {#feature-db_branches-generic-env}\n\nExtra environment variables for the branch container. Values support the same\n`$(MIRRORD_PARAM_<NAME>)` references as `command`/`args`. Keys must not start with\n`MIRRORD_PARAM_` or collide with the built-ins.\n\n#### feature.db_branches[].readiness (type: generic) {#feature-db_branches-generic-readiness}\n\nReadiness check for the branch container. Defaults to a TCP probe on `port`.\n\n```json\n{ \"readiness\": { \"type\": \"http_get\", \"path\": \"/health\" } }\n```\n```json\n{ \"readiness\": { \"type\": \"exec\", \"command\": [\"redis-cli\", \"ping\"] } }\n```\n\nExample - an empty InfluxDB branch, bootstrapped with the app's own token/org/bucket so the\napp's untouched credential vars stay valid against the branch:\n\n```json\n{\n  \"type\": \"generic\",\n  \"id\": \"my-influx-branch\",\n  \"image\": \"docker.io/library/influxdb:2.7\",\n  \"port\": 8086,\n  \"connection\": {\n    \"params\": {\n      \"host\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \"https?://([^:/]+)\" },\n      \"port\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \":([0-9]+)\" },\n      \"token\": { \"secret\": \"influx-creds\", \"key\": \"token\" },\n      \"org\": \"INFLUXDB_ORG\",\n      \"bucket\": \"INFLUXDB_BUCKET\"\n    }\n  },\n  \"env\": {\n    \"DOCKER_INFLUXDB_INIT_MODE\": \"setup\",\n    \"DOCKER_INFLUXDB_INIT_USERNAME\": \"admin\",\n    \"DOCKER_INFLUXDB_INIT_PASSWORD\": \"mirrord-branch\",\n    \"DOCKER_INFLUXDB_INIT_ADMIN_TOKEN\": \"$(MIRRORD_PARAM_TOKEN)\",\n    \"DOCKER_INFLUXDB_INIT_ORG\": \"$(MIRRORD_PARAM_ORG)\",\n    \"DOCKER_INFLUXDB_INIT_BUCKET\": \"$(MIRRORD_PARAM_BUCKET)\"\n  }\n}\n```\n\n`token`, `org`, and `bucket` are custom params - any key works under `connection.params`,\nnot just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use\nparams mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and\n`gcp_secret_manager`/`aws_secrets_manager` sources are not supported for generic branches.",
+          "description": "When branching a database, cache, or any other stateful service that mirrord has no built-in\nengine for, set `type` to `generic`.\n\nA generic branch runs the container image you supply, starting empty - there are no built-in\ncopy modes, IAM auth, or schema handling. The operator resolves each parameter you declare\nunder `connection.params` from the target pod and injects it into the branch container as an\nenv var named `MIRRORD_PARAM_<NAME>` (a Secret-backed param arrives as a `secretKeyRef`; the\noperator never reads its value). Reference these in `command`, `args`, and `env` with\nKubernetes' native `$(VAR)` syntax so the branch bootstraps itself with the *same* values the\napp already uses. mirrord then only redirects the app's `host`/`port` vars to the branch -\neverything else in the app's environment keeps working unchanged.\n\nTo fill the branch with schema and data, supply a `copy` Job (below) - your own image that\ncopies from the source into the branch. The branch only turns Ready once the Job succeeds.\n\nTwo built-ins are always available alongside the params: `MIRRORD_BRANCH_ID` and, when the\nshared `name` field is set, `MIRRORD_DATABASE_NAME`.\n\n#### feature.db_branches[].image (type: generic) {#feature-db_branches-generic-image}\n\nFull image reference for the branch container, including the tag\n(e.g. `docker.io/library/influxdb:2.7`). This is the shared `image` field, but unlike the\nbuilt-in engines a generic branch has no default image, so it is required - unless the\nshared `profile` field is set and the admin's profile supplies the image (the operator\nfails the branch if neither does). The shared `version` field is not allowed for generic\nbranches - the tag lives here.\n\n#### feature.db_branches[].port (type: generic) {#feature-db_branches-generic-port}\n\nThe port the branched service listens on. Used as the default readiness probe target and as\nthe port the app's connection is redirected to. Required, unless the shared `profile` field\nis set and the admin's profile supplies the port.\n\n#### feature.db_branches[].copy (type: generic) {#feature-db_branches-generic-copy}\n\nA one-shot Kubernetes Job that copies schema and data from the source into the branch,\nusing an image you author. It runs after the branch container turns ready, and the branch\nonly becomes usable once the Job exits successfully. The Job's environment carries the same\n`MIRRORD_PARAM_<NAME>` vars as the branch container (the source connection), plus\n`MIRRORD_BRANCH_HOST` and `MIRRORD_BRANCH_PORT` (where to write). What to copy\n(full/schema-only/filtered) is entirely up to the image's own command.\n\nThe copy runs at most once per branch: reusing a Ready branch (by `id`) never re-runs it,\neven if the copy config changed - use a new `id` for a fresh copy.\n\n```json\n{\n  \"copy\": {\n    \"image\": \"ghcr.io/acme/opensearch-copy:1.0\",\n    \"command\": [\"./copy.sh\"],\n    \"args\": [\"--mode=all\"]\n  }\n}\n```\n\nWhen the shared `profile` field is set, the admin's profile can supply the copy Job instead\n(`dbPod.copy` in the operator's generic branch config); a `copy` here wins over the\nprofile's.\n\n#### feature.db_branches[].command / args (type: generic) {#feature-db_branches-generic-command}\n\nOptional entrypoint override for the branch container. Values may reference declared params\nwith `$(MIRRORD_PARAM_<NAME>)`; use `$$(...)` for a literal `$(...)`. Values written\ndirectly into `args` are visible in the pod spec - reference params via `$(VAR)` instead of\ninlining secrets.\n\n#### feature.db_branches[].env (type: generic) {#feature-db_branches-generic-env}\n\nExtra environment variables for the branch container. Values support the same\n`$(MIRRORD_PARAM_<NAME>)` references as `command`/`args`. Keys must not start with\n`MIRRORD_PARAM_` or collide with the built-ins.\n\n#### feature.db_branches[].readiness (type: generic) {#feature-db_branches-generic-readiness}\n\nReadiness check for the branch container. Defaults to a TCP probe on `port`.\n\n```json\n{ \"readiness\": { \"type\": \"http_get\", \"path\": \"/health\" } }\n```\n```json\n{ \"readiness\": { \"type\": \"exec\", \"command\": [\"redis-cli\", \"ping\"] } }\n```\n\nExample - an empty InfluxDB branch, bootstrapped with the app's own token/org/bucket so the\napp's untouched credential vars stay valid against the branch:\n\n```json\n{\n  \"type\": \"generic\",\n  \"id\": \"my-influx-branch\",\n  \"image\": \"docker.io/library/influxdb:2.7\",\n  \"port\": 8086,\n  \"connection\": {\n    \"params\": {\n      \"host\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \"https?://([^:/]+)\" },\n      \"port\": { \"env_var_name\": \"INFLUXDB_URL\", \"value_pattern\": \":([0-9]+)\" },\n      \"token\": { \"secret\": \"influx-creds\", \"key\": \"token\" },\n      \"org\": \"INFLUXDB_ORG\",\n      \"bucket\": \"INFLUXDB_BUCKET\"\n    }\n  },\n  \"env\": {\n    \"DOCKER_INFLUXDB_INIT_MODE\": \"setup\",\n    \"DOCKER_INFLUXDB_INIT_USERNAME\": \"admin\",\n    \"DOCKER_INFLUXDB_INIT_PASSWORD\": \"mirrord-branch\",\n    \"DOCKER_INFLUXDB_INIT_ADMIN_TOKEN\": \"$(MIRRORD_PARAM_TOKEN)\",\n    \"DOCKER_INFLUXDB_INIT_ORG\": \"$(MIRRORD_PARAM_ORG)\",\n    \"DOCKER_INFLUXDB_INIT_BUCKET\": \"$(MIRRORD_PARAM_BUCKET)\"\n  }\n}\n```\n\n`token`, `org`, and `bucket` are custom params - any key works under `connection.params`,\nnot just the fixed `host`/`port`/`user`/`password`/`database` slots. The connection must use\nparams mode (URL-shaped env vars are covered by `value_pattern` on `host`/`port`), and\n`gcp_secret_manager`/`aws_secrets_manager`/`aws_ssm_parameter` sources are not supported for\ngeneric branches.",
           "type": "object",
           "properties": {
             "args": {
@@ -1663,6 +1706,10 @@
                 "string",
                 "null"
               ]
+            },
+            "namespace": {
+              "description": "Run the branch in the operator-managed `mirrord-<key>` namespace instead of the\ntarget's namespace.",
+              "type": "boolean"
             },
             "port": {
               "description": "The port the branched service listens on. Required unless `profile` is set and the\nprofile supplies it.",
@@ -1794,6 +1841,10 @@
                 "null"
               ]
             },
+            "namespace": {
+              "description": "Run the branch in the operator-managed `mirrord-<key>` namespace instead of the\ntarget's namespace.",
+              "type": "boolean"
+            },
             "profile": {
               "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
               "type": [
@@ -1892,6 +1943,10 @@
                 "null"
               ]
             },
+            "namespace": {
+              "description": "Run the branch in the operator-managed `mirrord-<key>` namespace instead of the\ntarget's namespace.",
+              "type": "boolean"
+            },
             "profile": {
               "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
               "type": [
@@ -1988,6 +2043,10 @@
                 "string",
                 "null"
               ]
+            },
+            "namespace": {
+              "description": "Run the branch in the operator-managed `mirrord-<key>` namespace instead of the\ntarget's namespace.",
+              "type": "boolean"
             },
             "profile": {
               "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
@@ -2097,6 +2156,10 @@
                 "string",
                 "null"
               ]
+            },
+            "namespace": {
+              "description": "Run the branch in the operator-managed `mirrord-<key>` namespace instead of the\ntarget's namespace.",
+              "type": "boolean"
             },
             "profile": {
               "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
@@ -2223,6 +2286,10 @@
                 "null"
               ]
             },
+            "namespace": {
+              "description": "Run the branch in the operator-managed `mirrord-<key>` namespace instead of the\ntarget's namespace.",
+              "type": "boolean"
+            },
             "profile": {
               "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
               "type": [
@@ -2338,6 +2405,12 @@
               "description": "Configuration for a remote Redis branch.",
               "type": "object",
               "properties": {
+                "cluster": {
+                  "title": "feature.db_branches[].cluster (type: redis) {#feature-db_branches-redis-cluster}",
+                  "description": "Run the branch as a one node Redis Cluster instead of a standalone server.\n\nSet this when the application connects with a Redis Cluster client (one that runs\n`CLUSTER SLOTS` / `CLUSTER SHARDS` on connect): such clients refuse a standalone server.\nThe branch node owns all 16384 hash slots, so every key the application uses lands on\nit, and the cluster limits apply like on any Redis Cluster: only database `0` exists,\nso `name` must be unset or `0`, and multi key commands must keep all keys in one hash\nslot.\n\nWith `copy.mode: all` the source may be a standalone server or a Redis Cluster; from a\ncluster, keys are copied from every master node.\n\nDefaults to `false`.",
+                  "type": "boolean",
+                  "default": false
+                },
                 "connection": {
                   "description": "How to source the connection info for the source database. The operator swaps it for\nthe branch's connection once the branch is ready.",
                   "$ref": "#/$defs/DbBranchingConnectionSource"
@@ -2382,6 +2455,10 @@
                     "string",
                     "null"
                   ]
+                },
+                "namespace": {
+                  "description": "Run the branch in the operator-managed `mirrord-<key>` namespace instead of the\ntarget's namespace.",
+                  "type": "boolean"
                 },
                 "profile": {
                   "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
@@ -2450,6 +2527,10 @@
                 "string",
                 "null"
               ]
+            },
+            "namespace": {
+              "description": "Run the branch in the operator-managed `mirrord-<key>` namespace instead of the\ntarget's namespace.",
+              "type": "boolean"
             },
             "profile": {
               "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
@@ -2547,6 +2628,10 @@
                 "null"
               ]
             },
+            "namespace": {
+              "description": "Run the branch in the operator-managed `mirrord-<key>` namespace instead of the\ntarget's namespace.",
+              "type": "boolean"
+            },
             "profile": {
               "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
               "type": [
@@ -2616,6 +2701,10 @@
                 "null"
               ]
             },
+            "namespace": {
+              "description": "Run the branch in the operator-managed `mirrord-<key>` namespace instead of the\ntarget's namespace.",
+              "type": "boolean"
+            },
             "profile": {
               "description": "Name of an admin-defined operator branch-config profile to use for this branch.",
               "type": [
@@ -2660,7 +2749,7 @@
       ]
     },
     "DatabaseBranchesConfig": {
-      "description": "The branch databases a session runs with. Either defined here, or taken from the\n`dbBranches` entries a cluster admin put on the target's `MirrordSplitConfig`, so `mirrord\nexec` and `mirrord up` use one definition that does not drift.\n\nInline, using a connection URL:\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\n      {\n        \"type\": \"mysql\",\n        \"connection\": {\n          \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" }\n        }\n      }\n    ]\n  }\n}\n```\n\nInline, using individual connection params:\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\n      {\n        \"type\": \"mysql\",\n        \"connection\": {\n          \"type\": \"env\",\n          \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"database\": \"DB_NAME\" }\n        }\n      }\n    ]\n  }\n}\n```\n\nEvery `dbBranches` entry of the target's `MirrordSplitConfig`:\n```json\n{\n  \"feature\": {\n    \"db_branches\": \"*\"\n  }\n}\n```\n\nOnly the entries with these ids:\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\"orders-pg\", \"sessions-redis\"]\n  }\n}\n```\n\nWith `\"*\"` or a list of ids the operator resolves the entries, and sessions started under\nthe same key that point at the same entry share one branch (its id is the entry id plus the\nkey). An id that matches no entry fails the session, naming the ids the workload has; a\nworkload with no `dbBranches` gives no branches and the session continues. An operator\nthat cannot resolve entries fails the session before it starts. Inline definitions always\nwin: with them, any `dbBranches` on the workload are ignored with a warning.",
+      "description": "The branch databases a session runs with. Either defined here, or taken from the\n`dbBranches` entries a cluster admin put on the target's `MirrordSplitConfig`, so `mirrord\nexec` and `mirrord up` use one definition that does not drift.\n\nInline, using a connection URL:\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\n      {\n        \"type\": \"mysql\",\n        \"connection\": {\n          \"url\": { \"type\": \"env\", \"variable\": \"DB_CONNECTION_URL\" }\n        }\n      }\n    ]\n  }\n}\n```\n\nInline, using individual connection params:\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\n      {\n        \"type\": \"mysql\",\n        \"connection\": {\n          \"type\": \"env\",\n          \"params\": { \"host\": \"DB_HOST\", \"port\": \"DB_PORT\", \"database\": \"DB_NAME\" }\n        }\n      }\n    ]\n  }\n}\n```\n\nEvery `dbBranches` entry of the target's `MirrordSplitConfig`:\n```json\n{\n  \"feature\": {\n    \"db_branches\": \"*\"\n  }\n}\n```\n\nOnly the entries with these ids:\n```json\n{\n  \"feature\": {\n    \"db_branches\": [\"orders-pg\", \"sessions-redis\"]\n  }\n}\n```\n\nEvery entry, seeded with the `schema` copy mode instead of each entry's own `copy.mode`\n(`entries` takes `\"*\"` or a list of ids):\n```json\n{\n  \"feature\": {\n    \"db_branches\": { \"entries\": \"*\", \"copy\": { \"mode\": \"schema\" } }\n  }\n}\n```\n\nWith `\"*\"` or a list of ids the operator resolves the entries, and sessions started under\nthe same key that point at the same entry share one branch (its id is the entry id plus the\nkey). An id that matches no entry fails the session, naming the ids the workload has; a\nworkload with no `dbBranches` gives no branches and the session continues. An operator\nthat cannot resolve entries fails the session before it starts. Inline definitions always\nwin: with them, any `dbBranches` on the workload are ignored with a warning.\n\nA requested `copy.mode` replaces only the `copy.mode` of each entry, and only for the entry's\nown database: the rest of its `copy` block and its additional databases stay as the entry\ndefines them. The operator refuses a mode missing from the entry's `copy.allowedModes`, and\nignores it for generic entries, which have no copy modes.",
       "anyOf": [
         {
           "description": "Branches defined in this config.",
@@ -2670,8 +2759,8 @@
           }
         },
         {
-          "description": "`\"*\"` or a list of entry ids, resolved by the operator against the target's\n`MirrordSplitConfig`.",
-          "$ref": "#/$defs/SplitConfigDbBranches"
+          "description": "`\"*\"` or a list of entry ids, optionally with a copy mode, resolved by the operator\nagainst the target's `MirrordSplitConfig`.",
+          "$ref": "#/$defs/SplitConfigRequest"
         }
       ]
     },
@@ -2718,7 +2807,7 @@
       ]
     },
     "DbBranchingConnectionSourceKind": {
-      "description": "<!--${internal}-->\nDifferent ways to source the connection options.\n\nSupport:\n- `env` in the target's pod spec.\n- `envFrom` in the target's pod spec.\n- `secret` read directly from a Kubernetes Secret.\n- `gcp_secret_manager` fetched from Google Secret Manager by the init container.\n- `aws_secrets_manager` fetched from AWS Secrets Manager by the init container.",
+      "description": "<!--${internal}-->\nDifferent ways to source the connection options.\n\nSupport:\n- `env` in the target's pod spec.\n- `envFrom` in the target's pod spec.\n- `secret` read directly from a Kubernetes Secret.\n- `gcp_secret_manager` fetched from Google Secret Manager by the init container.\n- `aws_secrets_manager` fetched from AWS Secrets Manager by the init container.\n- `aws_ssm_parameter` fetched from AWS Systems Manager Parameter Store by the init container.",
       "oneOf": [
         {
           "type": "object",
@@ -2872,6 +2961,42 @@
             "type",
             "secret_ref"
           ]
+        },
+        {
+          "description": "Fetched from AWS Systems Manager Parameter Store by the branch init container using\nthe target pod's service account. Same semantics as `ParamSource::AwsSsmParameter`,\n`value_selector` / `value_pattern` included.",
+          "type": "object",
+          "properties": {
+            "env_var_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "parameter": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "aws_ssm_parameter"
+            },
+            "value_pattern": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "value_selector": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "parameter"
+          ]
         }
       ]
     },
@@ -3002,7 +3127,7 @@
       ]
     },
     "EnvFileConfig": {
-      "description": "Allows the user to set or override the local process' environment variables with the ones\nfrom the remote pod.\n\nCan be set to one of the options:\n\n1. `false` - Disables the feature, won't have remote environment variables.\n2. `true` - Enables the feature, will obtain remote environment variables.\n3. object - see below (means `true` + additional configuration).\n\nWhich environment variables to load from the remote pod are controlled by setting either\n[`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).\n\nSee the environment variables [reference](https://metalbear.com/mirrord/docs/reference/env/) for more details.\n\n```json\n{\n  \"feature\": {\n    \"env\": {\n      \"include\": \"DATABASE_USER;PUBLIC_ENV;MY_APP_*\",\n      \"override\": {\n        \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\",\n        \"LOCAL_BEAR\": \"panda\"\n      },\n      \"mapping\": {\n        \".+_TIMEOUT\": \"1000\"\n      }\n    }\n  }\n}\n```",
+      "description": "Allows the user to set or override the local process' environment variables with the ones\nfrom the remote pod.\n\nCan be set to one of the options:\n\n1. `false` - Disables the feature, won't have remote environment variables.\n2. `true` - Enables the feature, will obtain remote environment variables.\n3. object - see below (means `true` + additional configuration).\n\nWhich environment variables to load from the remote pod are controlled by setting either\n[`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).\n\nSee the environment variables [reference](https://metalbear.com/mirrord/docs/reference/env) for more details.\n\n```json\n{\n  \"feature\": {\n    \"env\": {\n      \"include\": \"DATABASE_USER;PUBLIC_ENV;MY_APP_*\",\n      \"override\": {\n        \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\",\n        \"LOCAL_BEAR\": \"panda\"\n      },\n      \"mapping\": {\n        \".+_TIMEOUT\": \"1000\"\n      }\n    }\n  }\n}\n```",
       "type": "object",
       "properties": {
         "env_file": {
@@ -3162,6 +3287,14 @@
             "null"
           ]
         },
+        "hook_libc_syscall": {
+          "title": "_experimental_ hook_libc_syscall {#experimental-hook_libc_syscall}",
+          "description": "Hooks libc's generic `syscall` function on Linux, to handle scenarios where libraries\nlike libuv opt into doing syscalls by hand instead of through the libc export (for\nexample, for `statx` or `close`).\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "idle_local_http_connection_timeout": {
           "title": "_experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}",
           "description": "Sets a timeout for idle local HTTP connections (in milliseconds).\n\nHTTP requests stolen with a filter are delivered to the local application\nfrom a HTTP connection made from the local machine. Once a request is delivered,\nthe connection is cached for some time, so that it can be reused to deliver\nthe next request.\n\nThis timeout determines for how long such connections are cached.\n\nSet to 0 to disable caching local HTTP connections (connections will be dropped as soon as\nthe request is delivered).\n\nDefaults to 3000ms.",
@@ -3201,6 +3334,14 @@
             "null"
           ],
           "deprecated": true
+        },
+        "old_glibc_support": {
+          "title": "_experimental_ old_glibc_support {#experimental-old_glibc_support}",
+          "description": "Hooks `__fxstat` and `__fxstat64` on Linux.\n\nBinaries linked against glibc older than 2.33, such as the official Node.js builds, call\nthese instead of `fstat`. Without this hook they see the local placeholder of a remote\nfile: an empty character device. In Node.js, `fs.copyFileSync` then copies nothing.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "sip_log_destination": {
           "title": "_experimental_ sip_log_destination {#experimental-sip_log_destination}",
@@ -3314,12 +3455,12 @@
       "additionalProperties": false
     },
     "FeatureFileConfig": {
-      "description": "Controls mirrord features.\n\nSee the\n[technical reference, Technical Reference](https://metalbear.com/mirrord/docs/reference/)\nto learn more about what each feature does.\n\nThe [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options\nhave support for a shortened version, that you can see [here](#root-shortened).\n\n```json\n{\n  \"feature\": {\n    \"env\": {\n      \"include\": \"DATABASE_USER;PUBLIC_ENV\",\n      \"override\": {\n        \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\",\n        \"LOCAL_BEAR\": \"panda\"\n      }\n    },\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ],\n      \"prefetch\": [ \"/etc/ssl\" ]\n    },\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        },\n        \"port_mapping\": [[ 7777, 8888 ]],\n        \"ignore_localhost\": false,\n        \"ignore_ports\": [9999, 10000]\n      },\n      \"outgoing\": {\n        \"tcp\": true,\n        \"udp\": true,\n        \"filter\": {\n          \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"]\n        },\n        \"ignore_localhost\": false,\n        \"unix_streams\": \"bear.+\"\n      },\n      \"dns\": false\n    },\n    \"copy_target\": false,\n    \"hostname\": true\n  }\n}\n```",
+      "description": "Controls mirrord features.\n\nSee the\n[technical reference, Technical Reference](https://metalbear.com/mirrord/docs/reference/architecture)\nto learn more about what each feature does.\n\nThe [`env`](#feature-env), [`fs`](#feature-fs) and [`network`](#feature-network) options\nhave support for a shortened version, that you can see [here](#root-shortened).\n\n```json\n{\n  \"feature\": {\n    \"env\": {\n      \"include\": \"DATABASE_USER;PUBLIC_ENV\",\n      \"override\": {\n        \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\",\n        \"LOCAL_BEAR\": \"panda\"\n      }\n    },\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ],\n      \"prefetch\": [ \"/etc/ssl\" ]\n    },\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        },\n        \"port_mapping\": [[ 7777, 8888 ]],\n        \"ignore_localhost\": false,\n        \"ignore_ports\": [9999, 10000]\n      },\n      \"outgoing\": {\n        \"tcp\": true,\n        \"udp\": true,\n        \"filter\": {\n          \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"]\n        },\n        \"ignore_localhost\": false,\n        \"unix_streams\": \"bear.+\"\n      },\n      \"dns\": false\n    },\n    \"copy_target\": false,\n    \"hostname\": true\n  }\n}\n```",
       "type": "object",
       "properties": {
         "copy_target": {
           "title": "feature.copy_target {#feature-copy_target}",
-          "description": "Creates a new copy of the target. mirrord will use this copy instead of the original target\n(e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/overview/teams/?utm_source=copytarget).\n\nThis feature is not compatible with rollout targets and running without a target\n(`targetless` mode).",
+          "description": "Creates a new copy of the target. mirrord will use this copy instead of the original target\n(e.g. intercept network traffic). This feature requires a [mirrord operator](https://metalbear.com/mirrord/docs/getting-started/what-is-mirrord#mirrord-for-teams).\n\nThis feature is not compatible with rollout targets and running without a target\n(`targetless` mode).",
           "anyOf": [
             {
               "$ref": "#/$defs/CopyTargetFileConfig"
@@ -3498,7 +3639,7 @@
     },
     "FsUserConfig": {
       "title": "feature.fs {#fs}",
-      "description": "Changes file operations behavior based on user configuration.\n\nSee the file operations [reference](https://metalbear.com/mirrord/docs/reference/fileops/)\nfor more details, and [fs advanced](#fs-advanced) for more information on how to fully setup\nmirrord file operations.\n\n### Minimal `fs` config {#fs-minimal}\n\n```json\n{\n  \"feature\": {\n    \"fs\": \"read\"\n  }\n}\n```\n\n### Advanced `fs` config {#fs-advanced}\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ],\n      \"prefetch\": [ \"/etc/ssl\" ]\n    }\n  }\n}\n```",
+      "description": "Changes file operations behavior based on user configuration.\n\nSee the file operations [reference](https://metalbear.com/mirrord/docs/reference/fileops)\nfor more details, and [fs advanced](#fs-advanced) for more information on how to fully setup\nmirrord file operations.\n\n### Minimal `fs` config {#fs-minimal}\n\n```json\n{\n  \"feature\": {\n    \"fs\": \"read\"\n  }\n}\n```\n\n### Advanced `fs` config {#fs-advanced}\n\n```json\n{\n  \"feature\": {\n    \"fs\": {\n      \"mode\": \"write\",\n      \"read_write\": \".+\\\\.json\" ,\n      \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ],\n      \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ],\n      \"prefetch\": [ \"/etc/ssl\" ]\n    }\n  }\n}\n```",
       "anyOf": [
         {
           "description": "<!--${internal}-->\nBasic configuration that controls the env vars `MIRRORD_FILE_OPS` and `MIRRORD_FILE_RO_OPS`\n(default).",
@@ -3962,7 +4103,7 @@
     },
     "IncomingFileConfig": {
       "title": "incoming (network)",
-      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://metalbear.com/mirrord/docs/reference/traffic/#incoming) for more\ndetails.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested\n   listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it to the local process, see\n   [`steal`](##steal);\n\n### Minimal `incoming` config\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"incoming\": \"steal\"\n    }\n  }\n}\n```\n\n### Advanced `incoming` config\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        },\n        \"port_mapping\": [[ 7777, 8888 ]],\n        \"ignore_localhost\": false,\n        \"ignore_ports\": [9999, 10000],\n        \"listen_ports\": [[80, 8111]]\n      }\n    }\n  }\n}\n```",
+      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://metalbear.com/mirrord/docs/reference/traffic#incoming) for more\ndetails.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested\n   listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it to the local process, see\n   [`steal`](##steal);\n\n### Minimal `incoming` config\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"incoming\": \"steal\"\n    }\n  }\n}\n```\n\n### Advanced `incoming` config\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        },\n        \"port_mapping\": [[ 7777, 8888 ]],\n        \"ignore_localhost\": false,\n        \"ignore_ports\": [9999, 10000],\n        \"listen_ports\": [[80, 8111]]\n      }\n    }\n  }\n}\n```",
       "anyOf": [
         {
           "anyOf": [
@@ -4149,7 +4290,7 @@
         },
         "start_idle_timeout": {
           "title": "internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}",
-          "description": "How much time to wait for the first connection to the proxy in seconds.\n\nCommon cases would be running with dlv or any other debugger, which sets a breakpoint\non process execution, delaying the layer startup and connection to proxy.\n\n```json\n{\n  \"internal_proxy\": {\n    \"start_idle_timeout\": 60\n  }\n}\n```",
+          "description": "How much time to wait for the first connection to the proxy in seconds.\n\nDefaults to 60. When an IDE extension starts mirrord, the proxy instead waits for the\nfirst connection for as long as the session lasts, since the IDE may build the\napplication before starting it.\n\nCommon cases would be running with dlv or any other debugger, which sets a breakpoint\non process execution, delaying the layer startup and connection to proxy.\n\n```json\n{\n  \"internal_proxy\": {\n    \"start_idle_timeout\": 60\n  }\n}\n```",
           "type": [
             "integer",
             "null"
@@ -4369,6 +4510,14 @@
         "aws": {
           "title": "feature.magic.aws {#feature-magic-aws}",
           "description": "The AWS CLI prefers local credentials (e.g. `~/.aws`, `AWS_PROFILE`) over the remote pod's\nidentity (IAM role, instance profile, IRSA). When those local credentials are present, the\npod's own identity is never used, which is rarely what you want in a mirrord session.\n\nWhen enabled, mirrord makes local AWS configuration unavailable to the process by:\n- Unsetting `AWS_PROFILE` and related AWS environment variables.\n- Mapping `~/.aws` to a temporary directory, so the AWS CLI cannot read local credentials\n  and also has a writable location for its credential cache (avoiding errors on cache\n  writes).\n\nThis allows the remote pod's IAM role / instance profile to be used as intended.\n\nDisable this only if you intentionally need local AWS credentials inside the local mirrord'\nprocess.\n\nDefaults to `true`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "java_agents": {
+          "title": "feature.magic.java_agents {#feature-magic-java_agents}",
+          "description": "Remote Java agents often refer to files that do not exist on the local machine. When\nenabled, mirrord removes `-javaagent:` options from the remote `JDK_JAVA_OPTIONS` value\nbefore it starts the local process.\n\nDisable this only if the remote Java agent is also available locally.\n\nDefaults to `true`.",
           "type": [
             "boolean",
             "null"
@@ -4729,7 +4878,7 @@
       ]
     },
     "NetworkFileConfig": {
-      "description": "Controls mirrord network operations.\n\nSee the network traffic [reference](https://metalbear.com/mirrord/docs/reference/traffic/)\nfor more details.\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        },\n        \"port_mapping\": [[ 7777, 8888 ]],\n        \"ignore_localhost\": false,\n        \"ignore_ports\": [9999, 10000]\n      },\n      \"outgoing\": {\n        \"tcp\": true,\n        \"udp\": true,\n        \"filter\": {\n          \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"]\n        },\n        \"ignore_localhost\": false,\n        \"unix_streams\": \"bear.+\"\n      },\n      \"dns\": {\n        \"enabled\": true,\n        \"filter\": {\n          \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"]\n        }\n      }\n    }\n  }\n}\n```",
+      "description": "Controls mirrord network operations.\n\nSee the network traffic [reference](https://metalbear.com/mirrord/docs/reference/traffic)\nfor more details.\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"incoming\": {\n        \"mode\": \"steal\",\n        \"http_filter\": {\n          \"header_filter\": \"^baggage: .*mirrord-session={{ key }}.*$\"\n        },\n        \"port_mapping\": [[ 7777, 8888 ]],\n        \"ignore_localhost\": false,\n        \"ignore_ports\": [9999, 10000]\n      },\n      \"outgoing\": {\n        \"tcp\": true,\n        \"udp\": true,\n        \"filter\": {\n          \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"]\n        },\n        \"ignore_localhost\": false,\n        \"unix_streams\": \"bear.+\"\n      },\n      \"dns\": {\n        \"enabled\": true,\n        \"filter\": {\n          \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"]\n        }\n      }\n    }\n  }\n}\n```",
       "type": "object",
       "properties": {
         "dns": {
@@ -4777,7 +4926,7 @@
       "additionalProperties": false
     },
     "OutgoingFileConfig": {
-      "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic/#outgoing) for more\ndetails.\n\nYou can use either the `true` or `false` values to turn outgoing traffic tunneling on or off.\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"outgoing\": true\n    }\n  }\n}\n```\n\nAlternatively, you can use more fine-grained configuration.\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"outgoing\": {\n        \"tcp\": true,\n        \"udp\": true,\n        \"ignore_localhost\": false,\n        \"filter\": {\n          \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"]\n        },\n        \"unix_streams\": \"bear.+\"\n      }\n    }\n  }\n}\n```",
+      "description": "Tunnel outgoing network operations through mirrord.\n\nSee the outgoing [reference](https://metalbear.com/mirrord/docs/reference/traffic#outgoing) for more\ndetails.\n\nYou can use either the `true` or `false` values to turn outgoing traffic tunneling on or off.\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"outgoing\": true\n    }\n  }\n}\n```\n\nAlternatively, you can use more fine-grained configuration.\n\n```json\n{\n  \"feature\": {\n    \"network\": {\n      \"outgoing\": {\n        \"tcp\": true,\n        \"udp\": true,\n        \"ignore_localhost\": false,\n        \"filter\": {\n          \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"]\n        },\n        \"unix_streams\": \"bear.+\"\n      }\n    }\n  }\n}\n```",
       "type": "object",
       "properties": {
         "filter": {
@@ -5746,6 +5895,21 @@
       ],
       "x-mirrord-plan": "team"
     },
+    "SessionsManagerFileConfig": {
+      "description": "Selects the sessions-manager that pairs a serverless target with the agent running beside it.\n\nWithout it, mirrord connects through the MetalBear Cloud sessions-manager, unless\n[`operator`](#root-operator) is `true`, in which case the sessions-manager hosted by the\nmirrord operator is used and this section is ignored.\n\n```json\n{\n  \"sessions_manager\": {\n    \"url\": \"https://sessions-manager.example.com/sm\"\n  }\n}\n```",
+      "type": "object",
+      "properties": {
+        "url": {
+          "title": "sessions_manager.url {#sessions_manager-url}",
+          "description": "Base URL of a standalone sessions-manager, including any path prefix it is served under,\ne.g. `https://example.com/sm`.\n\nThe `MIRRORD_SESSIONS_MANAGER_URL` environment variable overrides it.\n\nDefaults to the MetalBear Cloud sessions-manager,\n`https://sm-aws-use1.app.metalbear.com/sm`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "SingleOrVec_ParamSource": {
       "x-kubernetes-preserve-unknown-fields": true
     },
@@ -5814,6 +5978,20 @@
         }
       ]
     },
+    "SplitConfigCopy": {
+      "description": "<!--${internal}-->\nHow the requested entries are seeded.",
+      "type": "object",
+      "properties": {
+        "mode": {
+          "description": "Replaces each entry's `copy.mode`.",
+          "$ref": "#/$defs/BranchCopyMode"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ]
+    },
     "SplitConfigDbBranches": {
       "description": "<!--${internal}-->\nWhich `dbBranches` entries of the target's `MirrordSplitConfig` a session asks for:\n`\"*\"` for all of them, or a list of entry ids.",
       "anyOf": [
@@ -5828,6 +6006,37 @@
             "type": "string"
           }
         }
+      ]
+    },
+    "SplitConfigRequest": {
+      "description": "<!--${internal}-->\nA session's request for `dbBranches` entries of the target's `MirrordSplitConfig`: just the\nentries, or the entries with a copy mode that replaces each one's own.",
+      "anyOf": [
+        {
+          "description": "`\"*\"` or a list of entry ids.",
+          "$ref": "#/$defs/SplitConfigDbBranches"
+        },
+        {
+          "description": "`{ \"entries\": ..., \"copy\": { \"mode\": ... } }`.",
+          "$ref": "#/$defs/SplitConfigRequestWithCopy"
+        }
+      ]
+    },
+    "SplitConfigRequestWithCopy": {
+      "description": "<!--${internal}-->\nThe object form of [`SplitConfigRequest`].",
+      "type": "object",
+      "properties": {
+        "copy": {
+          "$ref": "#/$defs/SplitConfigCopy"
+        },
+        "entries": {
+          "description": "`\"*\"` or a list of entry ids.",
+          "$ref": "#/$defs/SplitConfigDbBranches"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "entries",
+        "copy"
       ]
     },
     "SplitQueuesConfig": {

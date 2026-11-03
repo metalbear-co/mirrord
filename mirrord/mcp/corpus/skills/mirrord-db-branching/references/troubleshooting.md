@@ -159,7 +159,7 @@ An interrupted Liquibase run can leave a lock row held in `DATABASECHANGELOGLOCK
 
 ## `container` migration fails: connection variables can't be redirected
 
-`flavor: container` migration Jobs automatically inherit the target container's `env`/`envFrom`, and the operator redirects the branch's `connection` variables inside that inherited environment so the migration lands on the branch. This fails if the `connection` is declared via a `secret`, `gcp_secret_manager`, or `aws_secrets_manager` source **without `env_var_name` set** — the operator then has no variable name to redirect, so it fails the migration rather than silently running it against the source connection.
+`flavor: container` migration Jobs automatically inherit the target container's `env`/`envFrom`, and the operator redirects the branch's `connection` variables inside that inherited environment so the migration lands on the branch. This fails if the `connection` is declared via a `secret`, `gcp_secret_manager`, `aws_secrets_manager`, or `aws_ssm_parameter` source **without `env_var_name` set** — the operator then has no variable name to redirect, so it fails the migration rather than silently running it against the source connection.
 
 **Solution:** Set `env_var_name` on that connection source, e.g.:
 

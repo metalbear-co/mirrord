@@ -403,13 +403,25 @@ async fn helm_adopts_installation(#[future] kube_client: KubeClient) {
 
     let output = install(&[]).await;
     output.assert_success();
-    let commands = output
-        .stdout
-        .find("helm repo add")
-        .map(|start| &output.stdout[start..])
-        .unwrap_or_else(|| panic!("no helm commands in the output: {}", output.stdout));
+    assert!(output.stdout.contains("helm").not(), "{}", output.stdout);
+    let deployments = Api::<Deployment>::namespaced(client.clone(), "mirrord")
+        .list(&ListParams::default().labels(&format!("{}={}", OPERATOR_LABEL.0, OPERATOR_LABEL.1)))
+        .await
+        .unwrap();
+    let chart = deployments
+        .items
+        .first()
+        .and_then(|deployment| deployment.labels().get("helm.sh/chart"))
+        .expect("the operator Deployment has a chart label")
+        .clone();
+    let chart_version = chart.strip_prefix("mirrord-operator-").unwrap();
+    let commands = format!(
+        "helm repo add metalbear https://metalbear-co.github.io/charts\n\
+        helm install {RELEASE_NAME} metalbear/mirrord-operator --version {chart_version} \
+        --set cloud.apiKey.key={API_KEY}"
+    );
 
-    run_with_helm("sh", &["-ec", commands]).await;
+    run_with_helm("sh", &["-ec", &commands]).await;
     operator_status(&client).await.unwrap();
 
     // helm only removes the objects of its release, so nothing is left if it adopted them all.

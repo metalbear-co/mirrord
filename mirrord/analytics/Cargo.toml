@@ -26,6 +26,7 @@ drain.workspace = true
 uuid.workspace = true
 ci_info.workspace = true
 sha2.workspace = true
+strum_macros.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

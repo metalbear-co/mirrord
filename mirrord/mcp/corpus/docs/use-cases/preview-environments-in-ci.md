@@ -13,6 +13,8 @@ menu:
     parent: preview-environments
 ---
 
+# Preview Environments in CI
+
 This guide explains how to automate [Preview Environments](preview-environments.md) in your CI pipeline. By integrating mirrord preview with your pull request workflow, each PR gets its own ephemeral environment that reviewers can access via a shared URL and a simple header—no local mirrord setup required.
 
 {% hint style="info" %}
@@ -252,7 +254,16 @@ The `--force` flag makes repeat runs with the same key replace the existing prev
   mirrord preview stop -k "pr-${{ github.event.pull_request.number }}" || true
   ```
 
-- **Multiple services:** Use the same key for all preview pods in a PR so they form one logical environment. Run `mirrord preview start` once per service, each with `-k "pr-123"`.
+- **Multiple services:** Use the same key for all preview pods in a PR so they form one logical environment. With a [`mirrord-up.yaml`](../using-mirrord/multiple-concurrent-sessions.md) that defines them, `mirrord preview up` starts all of them in one step, with one `--image` per service you built. Run `mirrord preview down` when the PR closes. See [Previewing Several Services](preview-environments.md#previewing-several-services).
+  ```bash
+  mirrord preview up \
+    --image user-auth-service=ghcr.io/org/user-auth-service:preview-pr-123-abc1234 \
+    --image stage-user-dashboard-app=ghcr.io/org/stage-user-dashboard-app:preview-pr-123-abc1234 \
+    -k "pr-123" \
+    --timeout 600
+
+  mirrord preview down -k "pr-123"
+  ```
 
 ## Troubleshooting
 
@@ -262,5 +273,5 @@ The `--force` flag makes repeat runs with the same key replace the existing prev
 | `preview start` refuses because a session already exists for the key and target | A previous run's session is still alive. Pass `--force` to replace it. |
 | The preview fails or times out and the reason is in the application, not mirrord | `preview start` prints the last output from the preview pods alongside the error, which usually names the cause — a missing config file, a failed connection, a stack trace. If the job's log has scrolled away, `mirrord preview logs --key <key>` prints the same output for as long as the failed session is retained. |
 | Preview pod never shows `Ready` | Intentional — mirrord inserts a readiness gate that never passes, so the target's Service doesn't route unfiltered traffic to the preview pod. See [Readiness](preview-environments.md#readiness). Use `mirrord preview status` to check the session's actual state. |
-| Preview worked, then disappeared before the PR closed | The session's TTL elapsed. Re-run the workflow to recreate it, and consider a longer `ttl_mins`. |
+| Preview worked, then disappeared before the PR closed | Two causes look the same from the outside. Either the session's TTL elapsed, or the session failed and the Operator deleted it after `operator.preview.cleanupAfterMins`. While the failed session is still retained, `mirrord preview status --failed` lists it with its failure message. A common one is `no live mirrord-agent`: the target lost all its pods, for example when a spot node was reclaimed, and no replacement was ready within `noPodTargetsSessionTimeoutMillis`; see [What happens to an active session](../managing-mirrord/node-upgrades.md#what-happens-to-an-active-session). If no failed session shows up, the TTL is the cause: re-run the workflow to recreate the preview, and consider a longer `ttl_mins`. |
 | Requests with the header still hit the regular deployment | The header value must match the running session's key exactly — check `mirrord preview status` and make sure the config's `header_filter` uses the `{{ key }}` template rather than a hardcoded key. For requests made by backends (not the browser), confirm the header is [propagated](#header-propagation-for-backend-testing). The [`mirrord-header-propagation`](https://github.com/metalbear-co/skills/tree/main/skills/mirrord-header-propagation) skill reports which hops drop it. |

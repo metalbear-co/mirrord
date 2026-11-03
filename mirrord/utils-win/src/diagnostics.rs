@@ -17,6 +17,7 @@ pub mod dump;
 pub(crate) mod handle;
 pub mod monitor;
 pub mod report;
+pub mod stack;
 
 /// The env var naming the layer-log directory. Crash artifacts are grouped there when it is set.
 ///

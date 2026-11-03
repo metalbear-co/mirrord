@@ -2,10 +2,6 @@ name: Check Cargo Deny
 
 on:
   workflow_call:
-    inputs:
-      rust_toolchain:
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -16,5 +12,3 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: metalbear-co/cargo-deny-action@76cd80eb775d7bbbd2d80292136d74d39e1b4918
-        with:
-          rust-version: ${{ inputs.rust_toolchain }}

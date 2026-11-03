@@ -9,6 +9,7 @@ use std::{
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use strum_macros::IntoStaticStr;
 use tracing::{Level, info};
 use uuid::Uuid;
 
@@ -26,6 +27,24 @@ pub fn read_correlation_id_from_env() -> Option<Uuid> {
     std::env::var(MIRRORD_UP_CORRELATION_ID_ENV)
         .ok()
         .and_then(|value| value.parse().ok())
+}
+
+/// Prefix of the stdout line on which a session started by `mirrord up` reports the branch
+/// databases it uses, as a JSON list of [`UpSessionDbBranch`]. `mirrord up` reads it from the
+/// session's output for its own analytics and doesn't show it.
+pub const UP_DB_BRANCHES_REPORT_PREFIX: &str = "mirrord-up-db-branches:";
+
+/// One branch database a session started by `mirrord up` uses (see
+/// [`UP_DB_BRANCHES_REPORT_PREFIX`]).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpSessionDbBranch {
+    /// Resource name of the branch. It is unique within a cluster only, so services of one run
+    /// use the same branch when they report the same name and the same `cluster`.
+    pub name: String,
+    /// URL of the API server of the cluster the branch lives in.
+    pub cluster: String,
+    /// The session created the branch, rather than attaching to one that existed.
+    pub created: bool,
 }
 
 /// Environment variables carrying the connected cluster's Kubernetes
@@ -122,7 +141,8 @@ impl FromStr for ExecutionKind {
 /// Reported on analytics events as the numeric `ai_agent` property (alongside the
 /// `is_ai_agent` boolean), so AI-agent-driven usage can be distinguished from direct
 /// human usage. The numeric mapping keeps the analytics schema stable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
 #[repr(u32)]
 pub enum AiAgent {
     ClaudeCode = 1,
@@ -312,6 +332,12 @@ impl<T: CollectAnalytics> From<T> for AnalyticValue {
 }
 
 pub trait Reporter: Sized {
+    /// Workstation identity is exported only with telemetry consent. Non-CLI reporters need not
+    /// invent one for operator reports.
+    fn machine_id(&self) -> Option<Uuid> {
+        None
+    }
+
     fn get_mut(&mut self) -> &mut Analytics;
 
     fn set_operator_properties(&mut self, operator_properties: AnalyticsOperatorProperties);
@@ -338,6 +364,8 @@ pub enum ReportTarget {
     OperatorUninstall,
     /// An ARM mac had to use Rosetta for some binaries.
     MissingX86Binaries,
+    /// One run of `mirrord preview up`, or of `mirrord preview sync`, which reports `sync`.
+    PreviewUp,
 }
 
 /// Header the client sets to tell the analytics-server which event a report is.
@@ -359,6 +387,7 @@ impl ReportTarget {
             ReportTarget::OperatorInstall => "operator-install",
             ReportTarget::OperatorUninstall => "operator-uninstall",
             ReportTarget::MissingX86Binaries => "missing-x86-binaries",
+            ReportTarget::PreviewUp => "preview-up",
         }
     }
 }
@@ -375,6 +404,7 @@ pub struct AnalyticsReporter {
     watch: drain::Watch,
     target: ReportTarget,
     session_key: Option<String>,
+    machine_id: Uuid,
 }
 
 impl AnalyticsReporter {
@@ -405,6 +435,7 @@ impl AnalyticsReporter {
             watch,
             target: ReportTarget::ClientSession,
             session_key,
+            machine_id,
         }
     }
 
@@ -433,6 +464,7 @@ impl AnalyticsReporter {
             watch,
             target: ReportTarget::TuiEvent,
             session_key: None,
+            machine_id,
         }
     }
 
@@ -492,6 +524,7 @@ impl AnalyticsReporter {
             watch,
             target,
             session_key: None,
+            machine_id,
         }
     }
 
@@ -543,6 +576,10 @@ impl AnalyticsReporter {
 }
 
 impl Reporter for AnalyticsReporter {
+    fn machine_id(&self) -> Option<Uuid> {
+        self.enabled.then_some(self.machine_id)
+    }
+
     fn get_mut(&mut self) -> &mut Analytics {
         &mut self.analytics
     }

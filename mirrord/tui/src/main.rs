@@ -21,5 +21,5 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // No telemetry: this binary exists for working on the interface itself.
-    mirrord_tui::run(None).await
+    mirrord_tui::run(None, None).await
 }

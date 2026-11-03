@@ -1,6 +1,6 @@
 ---
 title: "Managing Sessions"
-description: "View and manage active mirrord sessions in the cluster"
+description: "See which mirrord sessions are active in your cluster, and stop them when you need to."
 date: 2024-03-04T00:00:00+00:00
 lastmod: 2024-03-04T00:00:00+00:00
 draft: false
@@ -12,6 +12,8 @@ weight: 170
 toc: true
 tags: ["team", "enterprise"]
 ---
+# Managing Sessions
+
 Whenever a user starts mirrord on a cluster where mirrord for Teams is installed, the Operator assigns a
 session to this user, until they stop running mirrord, at which point the session is closed
 in the Operator automatically.

@@ -249,6 +249,7 @@ fn param_source_is_blank(source: &ParamSource) -> bool {
         ParamSource::Env { env_var_name, .. } => blank(env_var_name),
         ParamSource::GcpSecretManager { secret_ref, .. }
         | ParamSource::AwsSecretsManager { secret_ref, .. } => blank(secret_ref),
+        ParamSource::AwsSsmParameter { parameter, .. } => blank(parameter),
         ParamSource::ConfigMap { key, .. } => key.as_deref().is_some_and(blank),
     }
 }

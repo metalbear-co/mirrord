@@ -1,6 +1,6 @@
 ---
 title: JetBrains IDEs
-description: Installing and using the mirrord plugin in JetBrains IDEs
+description: "How to install and use the mirrord plugin in IntelliJ IDEA and other JetBrains IDEs."
 ---
 
 # JetBrains IDEs
@@ -27,7 +27,7 @@ The toolbar button enables/disables mirrord for all run and debug sessions.
 
 mirrord's initial state on startup can be configured in the plugin settings (`Settings -> Tools -> mirrord -> Enable mirrord on startup`)
 
-### Enabling/disabling mirrord for a specific run configuration
+## Enabling/disabling mirrord for a specific run configuration
 
 mirrord can be persistently enabled or disabled for a specific run configuration, regardless of the toolbar button state. This is controlled via the `MIRRORD_ACTIVE` environment variable in your run configuration.
 
@@ -35,7 +35,7 @@ To have mirrord always enabled for the given run configuration, set `MIRRORD_ACT
 
 In some cases, mirrord will not run for a specific run configuration regardless of if it is enabled or not. This may occur when the run configuration is a build task, a Tomcat task, or a Gradle task with "build" in the name. If required, this behaviour can be overridden by setting `MIRRORD_FORCE_RUN=true` in the run configuration's env vars. Note that mirrord _must still be enabled_ to run, with either `MIRRORD_ACTIVE` or the toolbar button.
 
-### Selecting session target
+## Selecting session target
 
 mirrord's target can be specified in two ways:
 
@@ -45,11 +45,11 @@ mirrord's target can be specified in two ways:
    * If you want to see targets in a different namespace, there is a dropdown to choose between namespaces.
 2. in the mirrord config's [target section](https://metalbear.com/mirrord/docs/config#target)
 
-### Using the mirrord config
+## Using the mirrord config
 
 The plugin allows for using the [mirrord config](https://metalbear.com/mirrord/docs/config). For any run/debug session, the mirrord config to be used can be specified in multiple ways:
 
-#### Active config
+### Active config
 
 The toolbar dropdown menu allows for specifying a temporary mirrord config override. This config will be used for all run/debug sessions.
 
@@ -61,19 +61,19 @@ You will be prompted with a dialog where you can select a mirrord config from yo
 
 You can remove the override using the same action.
 
-#### Config for run configuration
+### Config for run configuration
 
 If no active config is specified, the plugin will try to read the config file path from the `MIRRORD_CONFIG_FILE` environment variable specified in the run configuration.
 
 This path should be absolute.
 
-#### Config from default path
+### Config from default path
 
 If the config file path is not specified in the run configuration environment, the plugin will try to find a default config.
 
 The default config is the lexicographically first file in `<PROJECT ROOT>/.mirrord` directory that ends with either `.json`, `.yaml` or `.toml`.
 
-### Managing the mirrord binary
+## Managing the mirrord binary
 
 The plugin relies on the standard mirrord CLI binary.
 
@@ -81,6 +81,6 @@ By default, the plugin checks the latest release version and downloads the most 
 
 You can also pin the binary version in the plugin settings (`Settings -> Tools -> mirrord -> mirrord binary version`).
 
-### WSL
+## WSL
 
 The guide on how to use the plugin with remote development on WSL can be found [here](wsl.md#using-mirrord-in-intellij).

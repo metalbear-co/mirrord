@@ -1,7 +1,9 @@
 ---
 title: Installing mirrord
-description: How to install mirrord, and what your machine and cluster need
+description: "How to install mirrord, and what your machine and your cluster need before you start."
 ---
+
+# Installing mirrord
 
 mirrord can be installed and used in several ways depending on your development workflow:
 

@@ -11,7 +11,9 @@ use std::{
 };
 
 use kube::ResourceExt;
-use mirrord_config::feature::database_branches::DatabaseBranchConfig;
+use mirrord_config::{
+    LayerConfig, config::ConfigContext, feature::database_branches::DatabaseBranchConfig,
+};
 
 use crate::{
     client::error::OperatorApiError,
@@ -30,6 +32,10 @@ use crate::{
 /// session can find the other branches under its key and tell when two of them point at the
 /// same source database.
 pub const MIRRORD_SESSION_KEY_LABEL: &str = "mirrord-session-key";
+
+/// Annotation naming the `mirrord up` service whose session created a branch resolved from a
+/// `MirrordSplitConfig`, so the services attaching to it can say whom they share it with.
+pub const UP_SERVICE_ANNOTATION: &str = "mirrord.metalbear.co/up-service";
 
 /// The branches a `"*"` / ids request resolved to, as this session's inline entries.
 #[derive(Debug, Default)]
@@ -71,10 +77,37 @@ pub fn entries_from_response(
     Ok(resolved)
 }
 
+/// Writes the entries a `"*"` / ids request resolved to into `layer_config` as inline entries, so
+/// every later reader (branch creation, portforwards, the internal proxy) sees concrete entries,
+/// and runs the branch checks the config couldn't run while it only held the request (each
+/// entry's own checks, and the env override conflict).
+///
+/// The session applies the answer to its config this way, and `mirrord up`'s check before launch
+/// applies it to a copy of each service's config, so it rejects exactly what the session would.
+/// Returns the resolved branches and the checks' warnings.
+pub fn apply_resolved_entries(
+    layer_config: &mut LayerConfig,
+    response: &ResolveSplitConfigDbBranchesResponse,
+) -> Result<(ResolvedSplitConfigBranches, Vec<String>), OperatorApiError> {
+    let resolved = entries_from_response(response, layer_config.key.as_str())?;
+    layer_config
+        .feature
+        .db_branches
+        .set_inline(resolved.entries.clone());
+
+    let mut context = ConfigContext::default();
+    layer_config
+        .verify_db_branches(&mut context)
+        .map_err(OperatorApiError::ResolvedDbBranchesInvalid)?;
+    Ok((resolved, context.into_warnings()))
+}
+
 /// The copy mode a branch spec asks for, as the user spells it (`empty`, `schema`, `all`),
 /// followed by the modes of a PostgreSQL branch's additional databases. `None` when the spec
 /// leaves the choice to the operator: a generic branch without `copy` may still get a copy Job
 /// from its admin profile, so two such specs cannot be compared here.
+///
+/// Keep in step with [`entry_copy_modes`], the same comparison before a spec exists.
 pub fn copy_mode(spec: &BranchDatabaseSpec) -> Option<String> {
     let copy = match spec.dialect().ok()? {
         DialectConfig::Postgres(options) => {
@@ -103,6 +136,21 @@ pub fn copy_mode(spec: &BranchDatabaseSpec) -> Option<String> {
     mode_of(copy.ok()?)
 }
 
+/// [`copy_mode`] for a config entry, for comparing entries before any branch spec exists.
+///
+/// `None` for generic entries as well, with or without a copy Job: [`check_attach_copy_mode`]
+/// never refuses a generic branch, so there is nothing to compare.
+pub fn entry_copy_modes(entry: &DatabaseBranchConfig) -> Option<String> {
+    let mut modes = <&str>::from(entry.copy_mode()?).to_owned();
+    let mut additional = entry.pg_additional_databases().iter().collect::<Vec<_>>();
+    additional.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+    for database in additional {
+        let database_mode = <&str>::from(database.copy.mode());
+        modes.push_str(&format!(", {}: {database_mode}", database.name));
+    }
+    Some(modes)
+}
+
 fn sql_copy_mode(copy: &SqlBranchCopyConfig) -> Option<String> {
     mode_of(serde_json::to_value(copy).ok()?)
 }
@@ -127,11 +175,19 @@ pub fn check_attach_copy_mode(
     if existing_mode == requested_mode {
         return Ok(());
     }
+    let created_by = match existing.annotations().get(UP_SERVICE_ANNOTATION) {
+        Some(service) => format!("the `mirrord up` service `{service}`"),
+        None => format!(
+            "a session targeting `{}/{}`",
+            existing.spec.target.kind.to_lowercase(),
+            existing.spec.target.name
+        ),
+    };
     Err(OperatorApiError::BranchCopyModeMismatch {
         branch_id: existing.spec.id.clone(),
         existing_mode,
         requested_mode,
-        creator: existing.spec.target.name.clone(),
+        created_by,
     })
 }
 
@@ -263,6 +319,7 @@ mod tests {
                 turbopuffer_options: None,
                 generic_options: None,
                 migrations: None,
+                dedicated_namespace_key: None,
             },
             status: None,
         }
@@ -340,7 +397,7 @@ mod tests {
     }
 
     /// Attaching with the creator's copy mode is fine; a different mode is refused, naming the
-    /// branch, both modes, and the workload that created it.
+    /// branch, both modes, and, without a `mirrord up` service to name, the creator's target.
     #[test]
     fn attach_copy_mode_must_match_the_creator() {
         let existing = pg_branch(
@@ -358,7 +415,7 @@ mod tests {
             branch_id,
             existing_mode,
             requested_mode,
-            creator,
+            created_by,
         } = error
         else {
             panic!("unexpected error {error:?}");
@@ -366,7 +423,7 @@ mod tests {
         assert_eq!(branch_id, "orders-pg-a1b2c3");
         assert_eq!(existing_mode, "schema");
         assert_eq!(requested_mode, "empty");
-        assert_eq!(creator, "cake-maker");
+        assert_eq!(created_by, "a session targeting `deployment/cake-maker`");
     }
 
     /// A PostgreSQL entry's additional databases are copied too, so their modes are part of

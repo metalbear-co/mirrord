@@ -13,8 +13,10 @@ toc: true
 tags:
   - team
   - enterprise
-description: Making mirrord copy a target and use the copy instead of the original
+description: "Make mirrord run against a copy of the target pod instead of the original."
 ---
+
+# Copying a Target
 
 When you set the [`copy_target`](https://metalbear.com/mirrord/docs/config#feature.copy_target) configuration field, instead of using the [target](../reference/targets.md) of the run directly, mirrord will create a new pod using the pod spec of the original target, and use that new pod as a target.
 

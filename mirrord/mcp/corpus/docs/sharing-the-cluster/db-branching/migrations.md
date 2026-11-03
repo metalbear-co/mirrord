@@ -1,11 +1,13 @@
 ---
 title: Schema Migrations
-description: Automatically run schema migrations against a mirrord DB branch
+description: "Run schema migrations against a mirrord DB branch automatically, before your local code connects."
 tags:
   - alpha
   - team
   - enterprise
 ---
+
+# Schema Migrations
 
 A DB branch includes the source database's schema as of when it was cloned - or starts with no schema at all, depending on `copy.mode`. Either way, it won't include migrations that exist only in your working tree and haven't been applied to the source database yet.
 

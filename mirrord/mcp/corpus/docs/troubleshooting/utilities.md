@@ -4,6 +4,8 @@ date: 2026-02-02T12:59:39.000Z
 description: Lightweight options that provide additional insight when debugging mirrord
 ---
 
+# Troubleshooting Utilities
+
 ## Response Header Injection
 Indicate whether the request was handled by mirrord.
 

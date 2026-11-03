@@ -1,6 +1,6 @@
 use std::{
     backtrace::Backtrace,
-    sync::{LockResult, MutexGuard, TryLockError},
+    sync::{LockResult, MutexGuard, TryLockError, TryLockResult},
     time::{Duration, Instant},
 };
 
@@ -57,5 +57,9 @@ impl<T> Mutex<T> {
                 }
             }
         }
+    }
+
+    pub fn try_lock(&self) -> TryLockResult<MutexGuard<'_, T>> {
+        self.inner.try_lock()
     }
 }

@@ -175,11 +175,11 @@ spec:
       appConfig:
         subscription:
           - env: PUBSUB_SUBSCRIPTION
-            containers:
+            containerNames:
               - consumer
         projectId:
           - env: GCP_PROJECT_ID
-            containers:
+            containerNames:
               - consumer
 ```
 
@@ -212,7 +212,7 @@ Each entry in the `spec.queues` list describes one or more Pub/Sub subscriptions
   * `fallback` - fallback subscription name if the variable is not found.
   * `valueSelector` - a selector extracting the subscription name from the variable's value: nested keys and `.[]` to iterate arrays or object values. Useful when the env var contains JSON rather than a plain name. Pipes, functions, and other jq operators are not supported.
   * `valuePattern` - a regex used when the subscription name is embedded in a larger string such as a Go CDK URL (`gcppubsub://projects/my-project/subscriptions/my-subscription`) or a resource path. See [Preserving the value format](gcp-pubsub.md#preserving-the-value-format) below.
-  * `containers` - limit to specific containers (optional, defaults to all).
+  * `containerNames` - limit to specific containers (optional, defaults to all).
 * `appConfig.projectId` - how the application discovers the GCP project ID. Uses the same structure as `subscription`.
 * `clientConfig` (optional) - name of a `MirrordPropertyList` containing GCP-specific connection properties. Can also be set at the top level in `spec.clientConfigs.googlePubSub`. If neither is set, the operator looks for a `MirrordPropertyList` named `default`.
 * `queueConfig` (optional) - name of a `MirrordPropertyList` with per-queue options: settings for temporary resources (see [Configuring temporary subscriptions](gcp-pubsub.md#configuring-temporary-subscriptions)) and `gcs_event` (see [Filtering Cloud Storage notifications](gcp-pubsub.md#filtering-cloud-storage-notifications)).
@@ -493,3 +493,5 @@ Using the `*` wildcard to apply one filter to all subscriptions in the `MirrordS
 ```
 
 In the example above, the local application will receive a subset of messages from **all** Pub/Sub subscriptions described in the target's `MirrordSplitConfig`. All received messages will have a Pub/Sub attribute `env` with the value `dev`. `*` resolves to all queues defined in the `MirrordSplitConfig` for the target workload. If no `MirrordSplitConfig` exists, the wildcard is silently ignored.
+
+For compatibility with older operator releases and the legacy `containers` spelling, see [Selecting Containers](../queue-splitting.md#selecting-containers).

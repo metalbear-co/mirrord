@@ -1,6 +1,6 @@
 ---
 title: Dashboard
-description: Dashboard for monitoring mirrord usage
+description: "Use the mirrord Dashboard to see who uses mirrord, on which targets, and how much time it saves your organization."
 tags:
   - alpha
   - team

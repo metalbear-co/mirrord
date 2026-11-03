@@ -1,7 +1,7 @@
-use std::{borrow::Cow, collections::BTreeMap};
+use std::borrow::Cow;
 
 use k8s_openapi::api::core::v1::Pod;
-use kube::Client;
+use kube::{Client, core::Selector};
 use mirrord_config::target::rollout::RolloutTarget;
 
 use super::ResolvedResource;
@@ -26,11 +26,11 @@ impl RuntimeDataFromLabels for ResolvedResource<Rollout> {
         self.container.as_deref()
     }
 
-    fn get_selector_match_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
-        RolloutTarget::get_selector_match_labels(resource)
+    fn get_selector(resource: &Self::Resource) -> Result<Selector> {
+        RolloutTarget::get_selector(resource)
     }
 
-    // Override auto implementaion because `LabelSelector` needs to be async fetched for Rollout
+    // Workload references require an async fetch to resolve the complete selector.
     async fn get_pods(resource: &Self::Resource, client: &Client) -> Result<Vec<Pod>> {
         RolloutTarget::get_pods(resource, client).await
     }

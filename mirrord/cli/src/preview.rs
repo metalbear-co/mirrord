@@ -11,19 +11,23 @@ use std::{
     ffi::OsStr,
     ops::Not,
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use base64::prelude::*;
-use futures::StreamExt;
+use futures::{StreamExt, future::join_all};
 use glob::Pattern;
 use itertools::Itertools;
-use k8s_openapi::{ByteString, jiff::Timestamp};
+use k8s_openapi::{
+    ByteString,
+    jiff::{SignedDuration, Timestamp},
+};
 use kube::{
     Api, Client, Resource, ResourceExt,
     api::{DeleteParams, ListParams, ObjectMeta, PostParams},
     runtime::{
-        wait::delete,
+        wait::{await_condition, delete},
         watcher::{self, Event, watcher},
     },
 };
@@ -45,14 +49,17 @@ use mirrord_config::{
 };
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
-    client::{NoClientCert, OperatorApi, connect_params::BranchDbNames, temporal_mirror_warning},
+    client::{
+        MaybeClientCert, NoClientCert, OperatorApi, connect_params::BranchDbNames,
+        error::OperatorApiError, temporal_mirror_warning,
+    },
     crd::{
         MirrordOperatorSpec, NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
             PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvVarsConfig,
             PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs,
             PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
-            PreviewSessionPhase, PreviewSessionSpec, PreviewTlsClientAuth,
+            PreviewSessionPhase, PreviewSessionSpec, PreviewSyncStatus, PreviewTlsClientAuth,
             PreviewTlsClientAuthFromTarget, PreviewTlsDelivery,
             view::{PreviewEnv, PreviewMessageKind},
         },
@@ -61,22 +68,28 @@ use mirrord_operator::{
     types::OPERATOR_OWNERSHIP_LABEL,
 };
 use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_up::{PreviewRun, SyncEntry};
 use prettytable::{Table, row};
+use tokio_util::task::AbortOnDropHandle;
 use tracing::Level;
 
 use crate::{
     config::{
         ManifestSourceArgs, PreviewArgs, PreviewCommand, PreviewCommonArgs, PreviewDiffArgs,
-        PreviewLogsArgs, PreviewStartArgs, PreviewStatusArgs, PreviewStopArgs,
+        PreviewLogsArgs, PreviewStartArgs, PreviewStatusArgs, PreviewStopArgs, PreviewSyncArgs,
     },
+    connection::report_local_feature_gate,
     data::UserData,
     error::{CliError, CliResult, format_preview_logs},
 };
 
 mod multicluster;
 pub(crate) mod resources;
+mod sync;
+mod up;
 
 /// Handle commands related to preview environments: `mirrord preview ...`
+#[mirrord_macros::boxed_future]
 pub(crate) async fn preview_command(
     args: PreviewArgs,
     watch: drain::Watch,
@@ -88,10 +101,30 @@ pub(crate) async fn preview_command(
         PreviewCommand::Start(start_args) => {
             preview_start(&common, start_args, watch, user_data).await
         }
+        PreviewCommand::Up(up_args) => {
+            up::preview_up(&common, up_args, PreviewRun::Up, false, watch, user_data).await
+        }
+        PreviewCommand::Sync(PreviewSyncArgs {
+            up: up_args,
+            watch: watch_files,
+        }) => {
+            up::preview_up(
+                &common,
+                up_args,
+                PreviewRun::Sync,
+                watch_files,
+                watch,
+                user_data,
+            )
+            .await
+        }
         PreviewCommand::Status(status_args) => {
             preview_status(&common, status_args, watch, user_data).await
         }
-        PreviewCommand::Stop(stop_args) => preview_stop(&common, stop_args, watch, user_data).await,
+        PreviewCommand::Stop(stop_args) => {
+            preview_stop(&common, stop_args, StopMode::Stop, watch, user_data).await
+        }
+        PreviewCommand::Down => up::preview_down(&common, watch, user_data).await,
         PreviewCommand::Logs(logs_args) => preview_logs(&common, logs_args, watch, user_data).await,
         PreviewCommand::Diff(diff_args) => preview_diff(&common, diff_args, watch, user_data).await,
     }
@@ -118,11 +151,12 @@ async fn preview_start(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview start");
 
-    let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
+    let mut layer_config =
+        load_preview_config(args.as_env_vars(common), false, &mut progress).await?;
 
     // Read before contacting the cluster, so a broken manifest fails without side effects.
     let sources = manifest_sources(args.manifests, &mut layer_config);
-    let mut supplied_objects = if sources.paths.is_empty() {
+    let supplied_objects = if sources.paths.is_empty() {
         None
     } else {
         Some(load_manifests(&sources.paths, &progress)?)
@@ -138,407 +172,756 @@ async fn preview_start(
 
     let (operator_api, api) =
         create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
-    operator_api.check_feature_support(&layer_config, false)?;
 
-    if !sources.is_empty() {
-        require_spec_resources_support(&operator_api.operator().spec)?;
-    }
-    // The chart renders under the target's namespace, which the kube client resolves when the
-    // config leaves it out, so this waits for the connection. Rendering still touches nothing
-    // in the cluster.
-    if let Some(chart) = &sources.chart {
-        let rendered = render_chart(
-            chart,
-            &layer_config,
-            target_namespace(&operator_api, &layer_config),
-            &progress,
-        )
-        .await?;
-        supplied_objects.get_or_insert_default().extend(rendered);
-    }
+    let (summary, _) = PreparedPreview::prepare(
+        layer_config,
+        operator_api,
+        api,
+        &sources,
+        supplied_objects,
+        false,
+        None,
+        &progress,
+        analytics,
+    )
+    .await?
+    .start(false, &mut progress)
+    .await?;
 
-    let is_cronjob_target = matches!(layer_config.target.path, Some(Target::CronJob(_)));
-    if is_cronjob_target {
-        operator_api
-            .operator()
-            .spec
-            .require_feature(NewOperatorFeature::PreviewCronJobTarget)?;
-    }
-    if let Some(Target::Label(label_target)) = &layer_config.target.path {
-        operator_api
-            .operator()
-            .spec
-            .require_feature(NewOperatorFeature::PreviewLabelTarget)?;
+    progress.success(Some("preview environment created successfully"));
+    summary.report(&progress);
 
-        // Branch preparation reads a single workload out of the target and a label selector
-        // names none, so it would fail later. Refuse here, before the existing session with the
-        // same key is replaced, so a bad config never tears down a running preview.
-        if !layer_config.feature.db_branches.is_empty() {
-            return Err(CliError::UnsupportedTargetConfig(format!(
-                "database branching does not support label target `{label_target}`; remove \
-                 `feature.db_branches` or target a single workload"
-            )));
+    Ok(())
+}
+
+/// What [`PreparedPreview::start`] reports about the preview session it created.
+struct PreviewSummary {
+    key: String,
+    namespace: String,
+    session_name: String,
+    share_host: Option<String>,
+    /// The session started idle, its pods boot on first traffic.
+    idle: bool,
+}
+
+impl PreviewSummary {
+    /// Reports the session's key, namespace, name and preview URL on `progress`, one task each.
+    fn report(&self, progress: &ProgressTracker) {
+        // These lines are parsed by the github action to generate its outputs, so please update
+        // it as well if you're gonna change them. We're doing this weird .subtask().success()
+        // stuff because otherwise it messes up the ordering or looks weird in some other way :'(
+        progress
+            .subtask(&format!("key: {}", self.key))
+            .success(None);
+        progress
+            .subtask(&format!("namespace: {}", self.namespace))
+            .success(None);
+        progress
+            .subtask(&format!("session: {}", self.session_name))
+            .success(None);
+
+        if let Some(share_host) = &self.share_host {
+            progress
+                .subtask(&format!("preview URL: https://{share_host}"))
+                .success(None);
         }
     }
-    // A `"*"` / ids request needs the operator's lookup. Refuse here too, before the existing
-    // session with the same key is replaced, so an older operator never tears down a running
-    // preview and then fails to start its replacement.
-    if layer_config
-        .feature
-        .db_branches
-        .split_config_request()
-        .is_some()
-    {
-        operator_api
-            .operator()
-            .spec
-            .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
-    }
+}
 
-    // Create the `PreviewSession` resource in the cluster. The CR name is derived from
-    // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).
-    // The operator watches for these resources and reconciles them into preview pods.
+/// A preview session checked against the operator and the cluster, but not created yet: nothing
+/// in the cluster has changed, so a preview running under the same key and target is untouched.
+///
+/// Split from [`PreparedPreview::start`] so that `mirrord preview up` and `mirrord preview sync`
+/// can check every service's session before they replace any, and one invalid service doesn't
+/// leave the others replaced.
+struct PreparedPreview {
+    layer_config: LayerConfig,
+    operator_api: OperatorApi<NoClientCert>,
+    api: Api<PreviewSession>,
+    /// Retained through startup so refusals during branch preparation can also be reported.
+    analytics: AnalyticsReporter,
+    /// The "preparing preview session" task, which [`PreparedPreview::start`] finishes once the
+    /// session resource is created.
+    subtask: ProgressTracker,
+    config_target: Target,
+    /// The image of the target's container, when the operator reports it, which decides whether
+    /// a sync session without an image of its own is reused.
+    target_image: Option<String>,
+    /// Sent to the operator once the session exists, see [`resolve_secret_mounts`].
+    secret_values: BTreeMap<String, ByteString>,
+    /// The session's spec, but for what [`PreparedPreview::start`] fills in: `db_branching`,
+    /// from the branches it prepares, and `share_host`, from the session it replaces.
+    spec: PreviewSessionSpec,
+    /// The code sync of a session with `sync`.
+    sync: Option<PreparedSync>,
+}
 
-    let mut subtask = progress.subtask("creating preview session resource");
+/// The code sync of a session with `sync`, which [`PreparedPreview::start`] runs while it waits
+/// for the session to be ready.
+struct PreparedSync {
+    /// The service's `sync` entries, in the order of `spec.sync`.
+    entries: Vec<SyncEntry>,
+    /// The client of the sync websocket, with the user's certificate if the user has one.
+    api: OperatorApi<MaybeClientCert>,
+}
 
-    // Owned, like the image below: branch preparation edits the config while both are still
-    // needed.
-    let config_target = layer_config.target.path.clone().ok_or_else(|| {
-        subtask.failure(None);
-        CliError::PreviewTargetRequired
-    })?;
+impl PreparedPreview {
+    /// Runs every check `mirrord preview start` can run before it changes anything in the
+    /// cluster, against the operator and API from [`create_preview_api`].
+    ///
+    /// `supplied_objects` are the manifests read from `sources.paths`, the chart in
+    /// `sources.chart` is rendered here. With `auto_queue_splitting`, `feature.split_queues` are
+    /// defaults the operator drops what it can't serve of, so they aren't checked against its
+    /// features. A session with `sync` needs no `feature.preview.image`, because without
+    /// one it runs the target's image.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "The prepared session owns its reporter so branch refusals during startup can be attributed."
+    )]
+    async fn prepare(
+        mut layer_config: LayerConfig,
+        operator_api: OperatorApi<NoClientCert>,
+        api: Api<PreviewSession>,
+        sources: &ManifestSources,
+        mut supplied_objects: Option<Vec<resources::SuppliedObject>>,
+        auto_queue_splitting: bool,
+        sync: Option<sync::ServiceSync>,
+        progress: &ProgressTracker,
+        mut analytics: AnalyticsReporter,
+    ) -> CliResult<Self> {
+        let is_cronjob_target = matches!(layer_config.target.path, Some(Target::CronJob(_)));
+        let feature_support = async {
+            operator_api.check_feature_support(&layer_config, auto_queue_splitting)?;
 
-    // Owned: branch preparation below edits the config while the image is still needed.
-    let image = layer_config.feature.preview.image.clone().ok_or_else(|| {
-        subtask.failure(None);
-        CliError::PreviewImageRequired
-    })?;
-
-    // Reject unsupported or invalid delivery before replacing a running preview.
-    let mut secret_values = BTreeMap::new();
-    // A CronJob preview has no long-running pod to steal traffic to, so incoming is never
-    // sent (the config check already warned when the user configured it). The `cronjob`
-    // block travels only for cronjob targets, so the CR stays identical to what older CLIs
-    // send for every other kind.
-    let (incoming, cronjob) = if is_cronjob_target {
-        (
-            None,
-            Some(PreviewCronJobConfig {
-                schedule: layer_config.feature.preview.cronjob.schedule.clone(),
-                // Only the opt-out travels: the CR stays identical to what older CLIs send
-                // for the default, and `None` means "trigger" on the operator side.
-                trigger_on_start: (!layer_config.feature.preview.cronjob.trigger_on_start)
-                    .then_some(false),
-            }),
-        )
-    } else {
-        let mut incoming = PreviewIncomingConfig::from_config(
-            &layer_config.feature.network.incoming,
-            layer_config.key.as_str(),
-        );
-
-        if let Some(incoming) = incoming.as_mut() {
-            let tls_config = layer_config
+            // A preview session carries only entries with a filter of their own, so an entry that
+            // leaves the filter to the `MirrordSplitConfig` would be dropped and its queue left
+            // unrequested. Refuse here, before the existing session with the same key is replaced.
+            if layer_config
                 .feature
-                .network
-                .incoming
-                .tls_delivery
-                .as_ref()
-                .or(layer_config
+                .split_queues
+                .uses_split_config_filters()
+            {
+                let queue_ids = layer_config
+                    .feature
+                    .split_queues
+                    .splits()
+                    .iter()
+                    .filter(|split| !split.has_filter())
+                    .map(|split| format!("`{}`", split.queue_id))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(CliError::UnsupportedTargetConfig(format!(
+                    "preview environments do not take the queue filter from the MirrordSplitConfig \
+                     yet; set `message_filter`, `filter` or `jq_filter` on the `split_queues` \
+                     entries {queue_ids}"
+                )));
+            }
+
+            if !sources.is_empty() {
+                require_spec_resources_support(&operator_api.operator().spec)?;
+            }
+            // The chart renders under the target's namespace, which the kube client resolves when the
+            // config leaves it out, so this waits for the connection. Rendering still touches nothing
+            // in the cluster.
+            if let Some(chart) = &sources.chart {
+                let rendered = render_chart(
+                    chart,
+                    &layer_config,
+                    target_namespace(&operator_api, &layer_config),
+                    progress,
+                )
+                .await?;
+                supplied_objects.get_or_insert_default().extend(rendered);
+            }
+
+            if is_cronjob_target {
+                operator_api
+                    .operator()
+                    .spec
+                    .require_feature(NewOperatorFeature::PreviewCronJobTarget)?;
+            }
+
+            if let Some(sync) = &sync {
+                check_sync(sync, &operator_api.operator().spec)?;
+            }
+
+            if let Some(Target::Label(label_target)) = &layer_config.target.path {
+                operator_api
+                    .operator()
+                    .spec
+                    .require_feature(NewOperatorFeature::PreviewLabelTarget)?;
+
+                // Branch preparation reads a single workload out of the target and a label selector
+                // names none, so it would fail later. Refuse here, before the existing session with the
+                // same key is replaced, so a bad config never tears down a running preview.
+                if !layer_config.feature.db_branches.is_empty() {
+                    return Err(CliError::UnsupportedTargetConfig(format!(
+                        "database branching does not support label target `{label_target}`; remove \
+                     `feature.db_branches` or target a single workload"
+                    )));
+                }
+            }
+            // A `"*"` / ids request needs the operator's lookup. Refuse here too, before the existing
+            // session with the same key is replaced, so an older operator never tears down a running
+            // preview and then fails to start its replacement.
+            if layer_config
+                .feature
+                .db_branches
+                .split_config_request()
+                .is_some()
+            {
+                operator_api
+                    .operator()
+                    .spec
+                    .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
+            }
+
+            Ok::<(), CliError>(())
+        };
+        if let Err(error) = feature_support.await {
+            if let CliError::LocalPaidFeatureRequiresPlan { feature, .. } = &error {
+                report_local_feature_gate(
+                    operator_api,
+                    *feature,
+                    &layer_config,
+                    progress,
+                    &mut analytics,
+                )
+                .await;
+            }
+            return Err(error);
+        }
+
+        let mut subtask = progress.subtask("preparing preview session");
+
+        // Owned, like the image below: `PreparedPreview` keeps them for `start`.
+        let config_target = layer_config.target.path.clone().ok_or_else(|| {
+            subtask.failure(None);
+            CliError::PreviewTargetRequired
+        })?;
+
+        // An empty image, such as from `-i ""`, counts as no image.
+        let image = match layer_config
+            .feature
+            .preview
+            .image
+            .clone()
+            .filter(|image| image.is_empty().not())
+        {
+            Some(image) => image,
+            None if sync.is_some() => String::new(),
+            None => {
+                subtask.failure(None);
+                return Err(CliError::PreviewImageRequired);
+            }
+        };
+
+        // Reject unsupported or invalid delivery before replacing a running preview.
+        let mut secret_values = BTreeMap::new();
+        // A CronJob preview has no long-running pod to steal traffic to, so incoming is never
+        // sent (the config check already warned when the user configured it). The `cronjob`
+        // block travels only for cronjob targets, so the CR stays identical to what older CLIs
+        // send for every other kind.
+        let (incoming, cronjob) = if is_cronjob_target {
+            (
+                None,
+                Some(PreviewCronJobConfig {
+                    schedule: layer_config.feature.preview.cronjob.schedule.clone(),
+                    // Only the opt-out travels: the CR stays identical to what older CLIs send
+                    // for the default, and `None` means "trigger" on the operator side.
+                    trigger_on_start: (!layer_config.feature.preview.cronjob.trigger_on_start)
+                        .then_some(false),
+                }),
+            )
+        } else {
+            let mut incoming = PreviewIncomingConfig::from_config(
+                &layer_config.feature.network.incoming,
+                layer_config.key.as_str(),
+            );
+
+            if let Some(incoming) = incoming.as_mut() {
+                let tls_config = layer_config
                     .feature
                     .network
                     .incoming
-                    .https_delivery
-                    .as_ref());
-            let (tls_delivery, warnings) = resolve_tls_delivery(
-                tls_config,
-                &mut secret_values,
-                &operator_api.operator().spec,
-            )?;
-            for warning in warnings {
-                subtask.warning(&warning);
+                    .tls_delivery
+                    .as_ref()
+                    .or(layer_config
+                        .feature
+                        .network
+                        .incoming
+                        .https_delivery
+                        .as_ref());
+                let (tls_delivery, warnings) = match resolve_tls_delivery(
+                    tls_config,
+                    &mut secret_values,
+                    &operator_api.operator().spec,
+                ) {
+                    Ok(delivery) => delivery,
+                    Err(error) => {
+                        if let CliError::LocalPaidFeatureRequiresPlan { feature, .. } = &error {
+                            report_local_feature_gate(
+                                operator_api,
+                                *feature,
+                                &layer_config,
+                                progress,
+                                &mut analytics,
+                            )
+                            .await;
+                        }
+                        return Err(error);
+                    }
+                };
+                for warning in warnings {
+                    subtask.warning(&warning);
+                }
+                incoming.tls_delivery = tls_delivery;
             }
-            incoming.tls_delivery = tls_delivery;
-        }
 
-        (incoming, None)
-    };
+            (incoming, None)
+        };
 
-    let session_target = resolve_config_target(
-        &config_target,
-        operator_api.client(),
-        layer_config.target.namespace.as_deref(),
-    )
-    .await
-    .inspect_err(|_| subtask.failure(None))?;
-
-    // Planned before an existing session is replaced. `plan` dry-runs the manifests and rejects
-    // a template that would widen the preview's access, so either failure leaves the running
-    // preview alone.
-    if let Some(objects) = supplied_objects.as_mut() {
-        resources::resolve_workload_refs(
+        let (session_target, target_image) = resolve_config_target(
+            &config_target,
             operator_api.client(),
-            objects,
-            resources_target(&session_target).inspect_err(|_| subtask.failure(None))?,
-            target_namespace(&operator_api, &layer_config),
+            layer_config.target.namespace.as_deref(),
         )
         .await
         .inspect_err(|_| subtask.failure(None))?;
-    }
-    let resource_plan = match &supplied_objects {
-        Some(objects) => {
-            let plan = resources::plan(
+
+        // Planned before an existing session is replaced. `plan` dry-runs the manifests and rejects
+        // a template that would widen the preview's access, so either failure leaves the running
+        // preview alone.
+        if let Some(objects) = supplied_objects.as_mut() {
+            resources::resolve_workload_refs(
                 operator_api.client(),
                 objects,
-                sources.label(),
-                resources_target(&session_target)?,
+                resources_target(&session_target).inspect_err(|_| subtask.failure(None))?,
                 target_namespace(&operator_api, &layer_config),
             )
             .await
             .inspect_err(|_| subtask.failure(None))?;
-            for message in resources::summary(&plan) {
-                subtask.info(&message);
-            }
-            if let Some(hint) = release_name_hint(&plan, &sources, &layer_config) {
-                subtask.warning(&hint);
-            }
-            for note in &plan.notes {
-                subtask.warning(note);
-            }
-            Some(plan)
         }
-        None => None,
-    };
-    let spec_resources = resource_plan
-        .as_ref()
-        .map(|plan| plan.spec_resources(&mut secret_values))
-        .transpose()?
-        .flatten();
-
-    // Label targets with branches were rejected above, so an empty config is the only way a
-    // label target gets here and it skips branch preparation entirely. The branches are
-    // prepared before an existing preview under the same key is replaced: a lookup or
-    // creation that fails must not have taken the running preview down first, and branches
-    // are keyed by the session key, so the replacement attaches to the same ones.
-    let branch_db_names = if layer_config.feature.db_branches.is_empty() {
-        BranchDbNames::default()
-    } else {
-        operator_api
-            .prepare_branch_dbs(&mut layer_config, &progress)
-            .await?
-    };
-
-    // Check for an existing session with the same key+target.
-    let key = layer_config.key.as_str();
-    let existing_sessions = KeyMatcher::Simple(key)
-        .list_matching_sessions(&api)
-        .await
-        .inspect_err(|_| subtask.failure(None))?;
-
-    let mut replaced_sessions = existing_sessions
-        .into_iter()
-        .filter(|session| session.spec.target == session_target)
-        .collect::<Vec<_>>();
-
-    // Same key and target means the same preview, so the new session asks the operator for the
-    // host the old one was shared on: links posted in a PR or Slack keep working after a new
-    // image. The operator decides whether it can honour the request.
-    //
-    // The newest session is the one the link currently points at, so it is asked first. A
-    // session replaced before the operator stamped its status (two pushes in quick succession)
-    // still carries the host it asked for on its spec, so that is the fallback.
-    replaced_sessions.sort_by(|a, b| {
-        b.metadata
-            .creation_timestamp
-            .cmp(&a.metadata.creation_timestamp)
-    });
-    let share_host = replaced_sessions.iter().find_map(|session| {
-        session
-            .status
-            .as_ref()
-            .and_then(|status| status.share_host.clone())
-            .or_else(|| session.spec.share_host.clone())
-    });
-
-    for session in replaced_sessions {
-        let name = session.name_any();
-
-        subtask.warning(&format!("replacing existing session '{name}'"));
-        if session.spec.image == image {
-            subtask.warning(&format!("configured image and existing session's image are the same ('{image}'), this command will only restart the existing deployment"));
-        }
-
-        // Delete and wait for the existing session to be fully removed.
-        match tokio::time::timeout(
-            Duration::from_secs(60),
-            delete::delete_and_finalize(api.clone(), &name, &DeleteParams::default()),
-        )
-        .await
-        {
-            Err(_) => {
-                subtask.failure(None);
-                return Err(CliError::PreviewDeleteFailed {
-                    name: name.clone(),
-                    reason: "timed out waiting for previous session to be deleted".to_owned(),
-                });
+        let resource_plan = match &supplied_objects {
+            Some(objects) => {
+                let plan = resources::plan(
+                    operator_api.client(),
+                    objects,
+                    sources.label(),
+                    resources_target(&session_target)?,
+                    target_namespace(&operator_api, &layer_config),
+                )
+                .await
+                .inspect_err(|_| subtask.failure(None))?;
+                for message in resources::summary(&plan) {
+                    subtask.info(&message);
+                }
+                if let Some(hint) = release_name_hint(&plan, sources, &layer_config) {
+                    subtask.warning(&hint);
+                }
+                for note in &plan.notes {
+                    subtask.warning(note);
+                }
+                Some(plan)
             }
-            Ok(Err(e)) => {
-                subtask.failure(None);
-                return Err(CliError::PreviewDeleteFailed {
-                    name,
-                    reason: e.to_string(),
-                });
-            }
-            _ => continue,
+            None => None,
         };
-    }
+        let spec_resources = resource_plan
+            .as_ref()
+            .map(|plan| plan.spec_resources(&mut secret_values))
+            .transpose()?
+            .flatten();
 
-    let session_name = PreviewSession::make_resource_name(&config_target, key.to_owned());
-
-    // Operators compiled with a custom OPERATOR_ISOLATION_MARKER only reconcile preview
-    // sessions labeled with their marker (see the label selector in the preview-env
-    // controller). The runtime env var check here allows developers to label the session
-    // so it gets picked up by an isolated operator instead of the production one.
-    let session_labels = {
-        let mut labels = BTreeMap::from([(
-            PREVIEW_SESSION_KEY_LABEL.to_owned(),
-            EnvKey::to_hashed_label_value(layer_config.key.as_str()),
-        )]);
-        if let Ok(marker) = std::env::var("OPERATOR_ISOLATION_MARKER") {
-            labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
-        }
-        labels
-    };
-
-    // The namespace the session (and therefore the preview pod) lands in.
-    let session_namespace = preview_namespace(&operator_api, &layer_config);
-
-    // Secret mounts never travel on the CR. Their contents are sent to the operator (which creates
-    // the backing Secret, naming it after the session) once the session exists; the spec carries
-    // only where each key mounts. The TLS client certificate for stolen traffic rides in the same
-    // Secret.
-    let secret_mounts = resolve_secret_mounts(
-        std::mem::take(&mut layer_config.feature.preview.secret_mounts),
-        &mut secret_values,
-    )?;
-
-    let idle_config = &layer_config.feature.preview.idle;
-    let idle = idle_config.is_enabled().then_some(PreviewIdleConfig {
-        start_idle: idle_config.start_idle,
-        sleep_after_secs: idle_config.sleep_after_secs,
-        wake_timeout_secs: idle_config.wake_timeout_secs,
-    });
-
-    // Preview start never opens an operator websocket, so `QueueSplitProgress` never runs.
-    // The config already names the Temporal queues it asked to mirror (including `*` from
-    // `mirrord up`), so warn from that before the session is created.
-    for id in temporal_mirror_requested(&layer_config.feature.split_queues) {
-        subtask.warning(&temporal_mirror_warning(&id));
-    }
-
-    let session_spec = PreviewSessionSpec {
-        image: image.clone(),
-        key: layer_config.key.as_str().to_owned(),
-        target: session_target,
-        ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
-        replicas: layer_config.feature.preview.replicas,
-        incoming,
-        queue_splitting: PreviewQueueSplittingConfig::from_config(
-            &layer_config.feature.split_queues,
-            layer_config.feature.kafka_branch,
-        ),
-        db_branching: PreviewDbBranchingConfig::from_db_names(branch_db_names),
-        env: PreviewEnvVarsConfig::from_config(&layer_config.feature.env).map_err(|error| {
-            CliError::EnvFileAccessError(
-                layer_config
-                    .feature
-                    .env
-                    .env_file
-                    .clone()
-                    .unwrap_or_default(),
-                error,
-            )
-        })?,
-        labels: PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),
-        config_mounts: layer_config
-            .feature
-            .preview
-            .config_mounts
+        // The files these name are read here, so one that is missing or unreadable fails before
+        // an existing session is replaced.
+        //
+        // Secret mounts never travel on the CR. Their contents are sent to the operator (which
+        // creates the backing Secret, naming it after the session) once the session exists; the
+        // spec carries only where each key mounts. The TLS client certificate for stolen traffic
+        // rides in the same Secret.
+        let secret_mounts = resolve_secret_mounts(
+            std::mem::take(&mut layer_config.feature.preview.secret_mounts),
+            &mut secret_values,
+        )?;
+        let env =
+            PreviewEnvVarsConfig::from_config(&layer_config.feature.env).map_err(|error| {
+                CliError::EnvFileAccessError(
+                    layer_config
+                        .feature
+                        .env
+                        .env_file
+                        .clone()
+                        .unwrap_or_default(),
+                    error,
+                )
+            })?;
+        let config_mounts = std::mem::take(&mut layer_config.feature.preview.config_mounts)
             .into_iter()
             .map(|m| m.resolve().map(Into::into))
-            .collect::<Result<Vec<_>, _>>()?,
-        secret_mounts,
-        idle,
-        cronjob,
-        spec_resources,
-        share_host,
-    };
+            .collect::<Result<Vec<_>, _>>()?;
 
-    let annotations = operator_api
-        .operator()
-        .spec
-        .operator_namespace
-        .is_some()
-        .then(|| {
-            let target_ns = layer_config
-                .target
-                .namespace
-                .as_deref()
-                .unwrap_or(operator_api.client().default_namespace());
-            BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_owned(), target_ns.to_owned())])
+        let idle_config = &layer_config.feature.preview.idle;
+        let idle = idle_config.is_enabled().then_some(PreviewIdleConfig {
+            start_idle: idle_config.start_idle,
+            sleep_after_secs: idle_config.sleep_after_secs,
+            wake_timeout_secs: idle_config.wake_timeout_secs,
         });
 
-    let session = PreviewSession {
-        metadata: ObjectMeta {
-            name: Some(session_name.clone()),
-            labels: Some(session_labels),
-            annotations,
-            ..Default::default()
-        },
-        spec: session_spec,
-        status: None,
-    };
-
-    let session = api
-        .create(&PostParams::default(), &session)
-        .await
-        .map_err(|e| {
-            subtask.failure(None);
-            CliError::PreviewSessionRejected(e.to_string())
-        })?;
-
-    // Now that the session exists we can hand its secret-mount contents to the operator, tagging
-    // the Secret with the session's owner reference so it is garbage-collected together with the
-    // session. Done after creation so a rejected session never leaves an orphaned Secret.
-    if !secret_values.is_empty() {
-        let owner_ref = session.owner_ref(&()).ok_or_else(|| {
-            subtask.failure(None);
-            CliError::PreviewSecretMountFailed("created session is missing a UID".to_owned())
-        })?;
-
-        if let Err(error) = operator_api
-            .create_preview_secret_mounts(&session_namespace, owner_ref, secret_values)
-            .await
-        {
-            // The session can never become ready without its Secret, so remove it.
-            let _ = api.delete(&session_name, &DeleteParams::default()).await;
-            subtask.failure(None);
-            return Err(CliError::PreviewSecretMountFailed(error.to_string()));
+        // Preview start never opens an operator websocket, so `QueueSplitProgress` never runs.
+        // The config already names the Temporal queues it asked to mirror (including `*` from
+        // `mirrord up`), so warn from that before the session is created.
+        for id in temporal_mirror_requested(&layer_config.feature.split_queues) {
+            subtask.warning(&temporal_mirror_warning(&id));
         }
+
+        let (sync_entries, sync_config) = sync.map(|sync| (sync.entries, sync.config)).unzip();
+        let spec = PreviewSessionSpec {
+            image,
+            key: layer_config.key.as_str().to_owned(),
+            target: session_target,
+            ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
+            replicas: layer_config.feature.preview.replicas,
+            incoming,
+            queue_splitting: PreviewQueueSplittingConfig::from_config(
+                &layer_config.feature.split_queues,
+                layer_config.feature.kafka_branch,
+            ),
+            db_branching: None,
+            env,
+            labels: PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),
+            config_mounts,
+            secret_mounts,
+            idle,
+            cronjob,
+            spec_resources,
+            share_host: None,
+            auto_queue_splitting,
+            sync: sync_config,
+        };
+
+        // The sync websocket claims a developer seat, as a target connection does, so the
+        // operator needs the user's certificate on it. A user without a certificate gets a
+        // client without one, and the operator's sync route then refuses the sync. A session
+        // without `sync` opens no websocket, so it doesn't get the certificate.
+        let sync = match sync_entries {
+            None => None,
+            Some(entries) => Some(PreparedSync {
+                entries,
+                api: operator_api
+                    .clone()
+                    .with_client_certificate(&mut analytics, progress, &layer_config)
+                    .await,
+            }),
+        };
+
+        Ok(Self {
+            layer_config,
+            operator_api,
+            api,
+            analytics,
+            subtask,
+            config_target,
+            target_image,
+            secret_values,
+            spec,
+            sync,
+        })
     }
 
-    subtask.success(Some("preview session resource created"));
+    /// Creates the session, replacing the preview under the same key and target, and waits for
+    /// it to be ready. A session with `sync` and no image of its own reuses the live session under
+    /// the same key and target when its spec is the same (see [`reusable_session`]). Once a
+    /// session with `sync` is ready, its sync has pushed the local code, and the preview pod's
+    /// supervisor is done with that push. With `watch_files`, also returns the sync's task, which
+    /// keeps pushing the changes; without it, the sync stops once the session is ready.
+    async fn start(
+        self,
+        watch_files: bool,
+        progress: &mut ProgressTracker,
+    ) -> CliResult<(PreviewSummary, Option<SyncTask>)> {
+        let Self {
+            mut layer_config,
+            operator_api,
+            api,
+            mut analytics,
+            mut subtask,
+            config_target,
+            target_image,
+            secret_values,
+            mut spec,
+            sync,
+        } = self;
 
-    // Watch the `PreviewSession` status until it reaches `Ready` or `Failed`. Emits
-    // periodic warnings if initialization is taking longer than expected, so the user knows
-    // the command hasn't hung. If the session does not become `Ready` within the timeout,
-    // the CLI deletes the session resource.
+        // Label targets with branches were rejected in `prepare`, so an empty config is the only
+        // way a label target gets here and it skips branch preparation entirely. The branches are
+        // prepared before an existing preview under the same key is replaced: a lookup or
+        // creation that fails must not have taken the running preview down first, and branches
+        // are keyed by the session key, so the replacement attaches to the same ones.
+        let branch_db_names = if layer_config.feature.db_branches.is_empty() {
+            BranchDbNames::default()
+        } else {
+            match operator_api
+                .prepare_branch_dbs(&mut layer_config, None, &*progress)
+                .await
+            {
+                Ok(names) => names,
+                Err(error) => {
+                    if let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error {
+                        report_local_feature_gate(
+                            operator_api,
+                            *feature,
+                            &layer_config,
+                            &*progress,
+                            &mut analytics,
+                        )
+                        .await;
+                    }
+                    return Err(error.into());
+                }
+            }
+        };
 
+        // Check for an existing session with the same key+target.
+        let key = layer_config.key.as_str();
+        let existing_sessions = KeyMatcher::Simple(key)
+            .list_matching_sessions(&api)
+            .await
+            .inspect_err(|_| subtask.failure(None))?;
+
+        let mut replaced_sessions = existing_sessions
+            .into_iter()
+            .filter(|session| session.spec.target == spec.target)
+            .collect::<Vec<_>>();
+
+        // Same key and target means the same preview, so the new session asks the operator for the
+        // host the old one was shared on: links posted in a PR or Slack keep working after a new
+        // image. The operator decides whether it can honour the request.
+        //
+        // The newest session is the one the link currently points at, so it is asked first. A
+        // session replaced before the operator stamped its status (two pushes in quick succession)
+        // still carries the host it asked for on its spec, so that is the fallback.
+        replaced_sessions.sort_by(|a, b| {
+            b.metadata
+                .creation_timestamp
+                .cmp(&a.metadata.creation_timestamp)
+        });
+        let share_host = replaced_sessions.iter().find_map(|session| {
+            session
+                .status
+                .as_ref()
+                .and_then(|status| status.share_host.clone())
+                .or_else(|| session.spec.share_host.clone())
+        });
+
+        // The namespace the session (and therefore the preview pod) lands in.
+        let session_namespace = preview_namespace(&operator_api, &layer_config);
+
+        spec.db_branching = PreviewDbBranchingConfig::from_db_names(branch_db_names);
+
+        // Only a sync session without an image of its own is reused. A session with an image is
+        // replaced, so that a rerun with the same tag pulls the image again, and a session
+        // without `sync` is always replaced.
+        let now = Timestamp::now();
+        let reused = if sync.is_some() && spec.image.is_empty() {
+            reusable_session(
+                &replaced_sessions,
+                &spec,
+                target_image.as_deref(),
+                secret_values.is_empty().not(),
+                now,
+            )
+            .cloned()
+        } else {
+            None
+        };
+
+        let created = reused.is_none();
+        let session = match reused {
+            Some(session) => {
+                let remaining = session
+                    .status
+                    .as_ref()
+                    .and_then(|status| status.expires_at.as_ref())
+                    .and_then(|expires_at| {
+                        Duration::try_from(expires_at.0.duration_since(now)).ok()
+                    })
+                    .map(|left| humantime::format_duration(Duration::from_secs(left.as_secs())));
+                let ttl = match remaining {
+                    _ if session.spec.has_infinite_ttl() => "no TTL".to_owned(),
+                    Some(remaining) => format!("{remaining} of its TTL left"),
+                    None => "its TTL not started yet".to_owned(),
+                };
+                subtask.success(Some(&format!(
+                    "reusing session '{}', which has the same settings ({ttl})",
+                    session.name_any()
+                )));
+                session
+            }
+            None => {
+                for session in replaced_sessions {
+                    let name = session.name_any();
+
+                    subtask.warning(&format!("replacing existing session '{name}'"));
+                    // Two sync sessions without an image of their own both run the target's
+                    // image, which is no image to name.
+                    if session.spec.image == spec.image && spec.image.is_empty().not() {
+                        subtask.warning(&format!(
+                            "the existing session runs the same image ('{}'), so the new session \
+                             runs the same code unless the image's tag now points to a new image",
+                            spec.image
+                        ));
+                    }
+
+                    // Delete and wait for the existing session to be fully removed.
+                    match tokio::time::timeout(
+                        Duration::from_secs(60),
+                        delete::delete_and_finalize(api.clone(), &name, &DeleteParams::default()),
+                    )
+                    .await
+                    {
+                        Err(_) => {
+                            subtask.failure(None);
+                            return Err(CliError::PreviewDeleteFailed {
+                                name: name.clone(),
+                                reason: "timed out waiting for previous session to be deleted"
+                                    .to_owned(),
+                            });
+                        }
+                        Ok(Err(e)) => {
+                            subtask.failure(None);
+                            return Err(CliError::PreviewDeleteFailed {
+                                name,
+                                reason: e.to_string(),
+                            });
+                        }
+                        _ => continue,
+                    };
+                }
+
+                spec.share_host = share_host;
+                let session = create_session(
+                    &api,
+                    &operator_api,
+                    &layer_config,
+                    &config_target,
+                    spec,
+                    secret_values,
+                    &session_namespace,
+                )
+                .await
+                .inspect_err(|_| subtask.failure(None))?;
+
+                subtask.success(Some("preview session resource created"));
+                session
+            }
+        };
+        let session_name = session.name_any();
+
+        let Started {
+            share_host,
+            idle,
+            sync_task,
+        } = wait_until_started(
+            &api,
+            operator_api.client(),
+            &session_namespace,
+            &session_name,
+            sync,
+            created,
+            watch_files,
+            Duration::from_secs(layer_config.feature.preview.creation_timeout_secs),
+            progress,
+        )
+        .await?;
+
+        // Display summary of the created preview environment.
+
+        let namespace = layer_config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(operator_api.client().default_namespace());
+
+        // On multicluster, `Ready` above reflects the default cluster; the other clusters'
+        // replicas converge on their own. Wait for them (bounded) so "ready" means ready
+        // EVERYWHERE, without letting one dead cluster hold the start hostage.
+        let outcome = multicluster::wait_for_replica_clusters(
+            operator_api.client().clone(),
+            namespace,
+            &session_name,
+            progress,
+        )
+        .await;
+        match outcome {
+            multicluster::ReplicaOutcome::Live => {}
+            // The preview is gone: reporting a successful start would print a key and session
+            // name for something the user cannot use.
+            multicluster::ReplicaOutcome::Failed(message) => {
+                let error = session_failed(
+                    operator_api.client(),
+                    &session_namespace,
+                    &session_name,
+                    message,
+                )
+                .await;
+
+                progress.failure(None);
+                return Err(error);
+            }
+            multicluster::ReplicaOutcome::Deleted => {
+                progress.failure(None);
+                return Err(CliError::PreviewSessionDeleted);
+            }
+        }
+
+        let summary = PreviewSummary {
+            key: layer_config.key.as_str().to_owned(),
+            namespace: namespace.to_owned(),
+            session_name,
+            share_host,
+            idle,
+        };
+
+        Ok((summary, sync_task))
+    }
+}
+
+/// A session that [`wait_until_started`] saw start.
+struct Started {
+    /// The host that the session is shared on.
+    share_host: Option<String>,
+
+    /// Whether the session started idle, see `feature.preview.idle.start_idle`.
+    idle: bool,
+
+    /// With `watch_files`, the task of the session's sync, which keeps pushing the changes.
+    sync_task: Option<SyncTask>,
+}
+
+/// Waits for the session `session_name` in `session_namespace` to reach `Ready` or `Idle`, and,
+/// with `sync`, runs its sync meanwhile, which pushes the local code. A session with `sync` only
+/// counts as started once the preview pod's supervisor is done with the first push.
+///
+/// Emits periodic warnings while the start takes long, so that the user knows that the command
+/// hasn't hung. A session that doesn't start within `creation_timeout`, which for a session with
+/// `sync` counts only time without progress, fails, and when `created`, the CLI deletes it.
+#[allow(clippy::too_many_arguments)]
+async fn wait_until_started(
+    api: &Api<PreviewSession>,
+    client: &Client,
+    session_namespace: &str,
+    session_name: &str,
+    sync: Option<PreparedSync>,
+    created: bool,
+    watch_files: bool,
+    creation_timeout: Duration,
+    progress: &mut ProgressTracker,
+) -> CliResult<Started> {
     let mut subtask = progress.subtask("waiting for preview to be ready");
 
     let mut stream = std::pin::pin!(watcher(
         api.clone(),
-        watcher::Config::default().fields(&format!("metadata.name={}", session.name_any())),
+        watcher::Config::default().fields(&format!("metadata.name={session_name}")),
     ));
 
     let initialization_start = Instant::now();
@@ -546,36 +929,123 @@ async fn preview_start(
     // First tick is instant
     long_initialization_timer.tick().await;
 
-    let mut timeout = std::pin::pin!(tokio::time::sleep(Duration::from_secs(
-        layer_config.feature.preview.creation_timeout_secs,
-    )));
+    let mut deadline = ProgressDeadline::new(creation_timeout);
 
     let mut last_known_phase: &str = "unknown";
-    // Assigned exactly once, in the `Ready` arm below, which is the only path that leaves the loop.
-    let share_host;
+    let mut previous_phase = None;
 
-    loop {
+    // Fails the start with `error`. Deletes the session only if this run created it, and the
+    // session still exists and is of use: another CLI that took over its sync uses it now, and a
+    // session that failed or was deleted has nothing to delete.
+    let fail = async |error: CliError, subtask: &mut ProgressTracker| {
+        let gone = matches!(
+            error,
+            CliError::PreviewSyncReplaced
+                | CliError::PreviewSessionFailed { .. }
+                | CliError::PreviewSessionDeleted
+        );
+        if created && gone.not() {
+            abandon_session(api, session_name, subtask, error).await
+        } else {
+            subtask.failure(None);
+            error
+        }
+    };
+
+    // The pod of a session with `sync` becomes ready only once its sidecar holds a push, so
+    // the sync runs while the loop below waits for `Ready`.
+    let (mut sync_task, mut activity) = match sync {
+        None => (None, None),
+        Some(PreparedSync {
+            entries,
+            api: sync_api,
+        }) => {
+            // The driver creates the watcher of `--watch`, which can fail after this run created
+            // the session, such as when the user has no inotify instances left.
+            let (driver, activity) = match sync::SyncDriver::new(
+                Arc::new(sync_api),
+                session_namespace.to_owned(),
+                session_name.to_owned(),
+                entries,
+                watch_files,
+                progress.subtask("pushing the local code"),
+            ) {
+                Ok(driver) => driver,
+                Err(error) => return Err(fail(error, &mut subtask).await),
+            };
+            let api = api.clone();
+            let client = client.clone();
+            let (namespace, name) = (session_namespace.to_owned(), session_name.to_owned());
+            let task = async move {
+                let error = driver.run().await;
+                sync_end(&api, &client, &namespace, &name, error).await
+            };
+            (Some(SyncTask::new(tokio::spawn(task))), Some(activity))
+        }
+    };
+
+    // The session's `share_host` and whether it is idle, once it is `Ready` or `Idle`. The
+    // session can turn `Ready` before the supervisor in the preview pod is done with the first
+    // push, so the loop also waits for that, which the creation timeout bounds too.
+    let mut started = None;
+    let (share_host, idle) = loop {
+        // The `Ready` of a reused session predates the push, and the volume holds the push
+        // before the supervisor ran its install and restarted the app, so the first push only
+        // counts once the supervisor is done with it. The `changed` arm below only wakes the
+        // loop, so the loop hands each activity that it reads to the deadline here, and the
+        // deadline sees every change of the sync's work.
+        let first_push_handled = match &mut activity {
+            None => true,
+            Some(activity) => {
+                let activity = *activity.borrow_and_update();
+                deadline.on_activity(&activity);
+                match activity.first_push {
+                    Some(first_push) if activity.handled >= Some(first_push) => {
+                        if activity.install_failed {
+                            return Err(
+                                fail(CliError::PreviewSyncInstallFailed, &mut subtask).await
+                            );
+                        }
+                        true
+                    }
+                    _ => false,
+                }
+            }
+        };
+        if first_push_handled && let Some(outcome) = started.take() {
+            break outcome;
+        }
+
         tokio::select! {
-            _ = &mut timeout => {
+            result = async {
+                match &mut sync_task {
+                    Some(task) => task.await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                return Err(fail(sync_task_error(result), &mut subtask).await);
+            }
+            Ok(()) = async {
+                match &mut activity {
+                    Some(activity) => activity.changed().await,
+                    None => std::future::pending().await,
+                }
+            } => {}
+            _ = deadline.expired() => {
                 // Read the pods before deleting the session: the delete tears down the
                 // deployment, and their output goes with it.
-                let logs = fetch_preview_logs_best_effort(
-                    operator_api.client(),
-                    &session_namespace,
-                    &session.name_any(),
-                )
-                .await;
+                let logs = fetch_preview_logs_best_effort(client, session_namespace, session_name)
+                    .await;
 
-                if let Err(err) = delete::delete_and_finalize(api, &session.name_any(), &DeleteParams::default()).await {
-                    subtask.warning(&format!(
-                        "failed to delete timed out session '{}': {err}, \
-                         you may need to delete it manually or with `mirrord preview stop`",
-                        session.name_any(),
-                    ));
-                }
-
-                subtask.failure(None);
-                return Err(CliError::PreviewTimeout { logs });
+                let paused = activity
+                    .as_ref()
+                    .is_some_and(|activity| activity.borrow().paused);
+                let error = if paused {
+                    CliError::PreviewSyncPaused { logs }
+                } else {
+                    CliError::PreviewTimeout { logs }
+                };
+                return Err(fail(error, &mut subtask).await);
             }
             _ = long_initialization_timer.tick() => {
                 subtask.warning(&format!(
@@ -588,45 +1058,48 @@ async fn preview_start(
                 match event {
                     Some(Ok(Event::Apply(current) | Event::InitApply(current))) => {
                         if let Some(status) = &current.status {
+                            // A new phase is progress too, for a session with `sync`, whose
+                            // timeout counts time without progress. The timeout of any other
+                            // session counts from its start.
+                            if activity.is_some()
+                                && previous_phase.replace(status.phase) != Some(status.phase)
+                            {
+                                deadline.on_progress();
+                            }
+
                             match &status.phase {
+                                // A session that leaves `Ready` or `Idle`, such as a reused
+                                // one that the sync woke, isn't started any more.
                                 PreviewSessionPhase::Initializing => {
                                     last_known_phase = "initializing preview env";
+                                    started = None;
                                 }
                                 PreviewSessionPhase::Waiting => {
                                     last_known_phase = "waiting for preview pod to be ready";
+                                    started = None;
                                 }
                                 PreviewSessionPhase::Ready => {
-                                    share_host = status.share_host.clone();
-                                    subtask.success(Some("preview session is ready"));
-                                    break;
+                                    started = Some((status.share_host.clone(), false));
                                 }
                                 // Sessions started with `feature.preview.idle.start_idle` never
                                 // pass through `Ready` on creation — `Idle` is their terminal
                                 // success state (pods boot on first traffic).
                                 PreviewSessionPhase::Idle => {
-                                    share_host = status.share_host.clone();
-                                    subtask.success(Some(
-                                        "preview session is idle (pods will boot on first traffic)",
-                                    ));
-                                    break;
+                                    started = Some((status.share_host.clone(), true));
                                 }
                                 PreviewSessionPhase::Failed => {
-                                    let failure_message = status.failure_message.clone().expect("Failed session must have failure_message");
-                                    let logs = fetch_preview_logs_best_effort(
-                                        operator_api.client(),
-                                        &session_namespace,
-                                        &session.name_any(),
+                                    let error = session_failed(
+                                        client,
+                                        session_namespace,
+                                        session_name,
+                                        status.failure_message.clone().unwrap_or_default(),
                                     )
                                     .await;
-
-                                    subtask.failure(None);
-                                    return Err(CliError::PreviewSessionFailed {
-                                        message: failure_message,
-                                        logs,
-                                    });
+                                    return Err(fail(error, &mut subtask).await);
                                 }
                                 PreviewSessionPhase::Paused => {
                                     last_known_phase = "preview session is paused";
+                                    started = None;
                                 }
                                 PreviewSessionPhase::Unknown => last_known_phase = "unknown",
                             }
@@ -634,8 +1107,7 @@ async fn preview_start(
                     }
 
                     Some(Ok(Event::Delete(_))) => {
-                        subtask.failure(None);
-                        return Err(CliError::PreviewSessionDeleted);
+                        return Err(fail(CliError::PreviewSessionDeleted, &mut subtask).await);
                     }
 
                     Some(Ok(Event::Init | Event::InitDone)) => continue,
@@ -652,71 +1124,304 @@ async fn preview_start(
                 }
             }
         }
-    }
+    };
 
-    // Display summary of the created preview environment.
+    // Without `--watch`, nothing needs the sync once the session is ready, and dropping the
+    // task stops it.
+    let sync_task = sync_task.filter(|_| watch_files);
 
-    let namespace = layer_config
-        .target
-        .namespace
-        .as_deref()
-        .unwrap_or(operator_api.client().default_namespace());
+    subtask.success(Some(if idle {
+        "preview session is idle (pods will boot on first traffic)"
+    } else {
+        "preview session is ready"
+    }));
 
-    // On multicluster, `Ready` above reflects the default cluster; the other clusters'
-    // replicas converge on their own. Wait for them (bounded) so "ready" means ready
-    // EVERYWHERE, without letting one dead cluster hold the start hostage.
-    let outcome = multicluster::wait_for_replica_clusters(
-        operator_api.client().clone(),
-        namespace,
-        &session_name,
-        &mut progress,
-    )
-    .await;
-    match outcome {
-        multicluster::ReplicaOutcome::Live => {}
-        // The preview is gone: reporting a successful start would print a key and session
-        // name for something the user cannot use.
-        multicluster::ReplicaOutcome::Failed(message) => {
-            let logs = fetch_preview_logs_best_effort(
-                operator_api.client(),
-                &session_namespace,
-                &session_name,
-            )
-            .await;
+    Ok(Started {
+        share_host,
+        idle,
+        sync_task,
+    })
+}
 
-            progress.failure(None);
-            return Err(CliError::PreviewSessionFailed { message, logs });
+/// Creates the session `spec` describes for `config_target`, and hands `secret_values` to the
+/// operator once it exists. The session's namespace is `session_namespace`.
+async fn create_session(
+    api: &Api<PreviewSession>,
+    operator_api: &OperatorApi<NoClientCert>,
+    layer_config: &LayerConfig,
+    config_target: &Target,
+    spec: PreviewSessionSpec,
+    secret_values: BTreeMap<String, ByteString>,
+    session_namespace: &str,
+) -> CliResult<PreviewSession> {
+    let session_name =
+        PreviewSession::make_resource_name(config_target, layer_config.key.as_str().to_owned());
+
+    // Operators running with a custom OPERATOR_ISOLATION_MARKER only reconcile preview
+    // sessions labeled with their marker (see the label selector in the preview-env
+    // controller). The runtime env var check here allows developers to label the session
+    // so it gets picked up by an isolated operator instead of the production one.
+    let session_labels = {
+        let mut labels = BTreeMap::from([(
+            PREVIEW_SESSION_KEY_LABEL.to_owned(),
+            EnvKey::to_hashed_label_value(layer_config.key.as_str()),
+        )]);
+        if let Ok(marker) = std::env::var("OPERATOR_ISOLATION_MARKER") {
+            labels.insert(OPERATOR_OWNERSHIP_LABEL.to_owned(), marker);
         }
-        multicluster::ReplicaOutcome::Deleted => {
-            progress.failure(None);
-            return Err(CliError::PreviewSessionDeleted);
+        labels
+    };
+
+    let annotations = operator_api
+        .operator()
+        .spec
+        .operator_namespace
+        .is_some()
+        .then(|| {
+            let target_ns = layer_config
+                .target
+                .namespace
+                .as_deref()
+                .unwrap_or(operator_api.client().default_namespace());
+            BTreeMap::from([(TARGET_NAMESPACE_ANNOTATION.to_owned(), target_ns.to_owned())])
+        });
+
+    // Create the `PreviewSession` resource in the cluster. The CR name is derived from
+    // the target with a short random suffix to avoid collisions (e.g. `deploy-my-app-a1b2c3d4`).
+    // The operator watches for these resources and reconciles them into preview pods.
+    let session = PreviewSession {
+        metadata: ObjectMeta {
+            name: Some(session_name.clone()),
+            labels: Some(session_labels),
+            annotations,
+            ..Default::default()
+        },
+        spec,
+        status: None,
+    };
+
+    let session = api
+        .create(&PostParams::default(), &session)
+        .await
+        .map_err(|e| CliError::PreviewSessionRejected(e.to_string()))?;
+
+    // Now that the session exists we can hand its secret-mount contents to the operator, tagging
+    // the Secret with the session's owner reference so it is garbage-collected together with the
+    // session. Done after creation so a rejected session never leaves an orphaned Secret.
+    if !secret_values.is_empty() {
+        let owner_ref = session.owner_ref(&()).ok_or_else(|| {
+            CliError::PreviewSecretMountFailed("created session is missing a UID".to_owned())
+        })?;
+
+        if let Err(error) = operator_api
+            .create_preview_secret_mounts(session_namespace, owner_ref, secret_values)
+            .await
+        {
+            // The session can never become ready without its Secret, so remove it.
+            let _ = api.delete(&session_name, &DeleteParams::default()).await;
+            return Err(CliError::PreviewSecretMountFailed(error.to_string()));
         }
     }
 
-    progress.success(Some("preview environment created successfully"));
+    Ok(session)
+}
 
-    let key = layer_config.key.as_str();
+/// The task of a session's code sync, which ends only with the error that ended the sync (see
+/// [`sync::SyncDriver::run`] and [`sync_end`]). Dropping it stops the sync, so a start that fails
+/// or a run that ends leaves no sync running.
+pub(crate) type SyncTask = AbortOnDropHandle<CliError>;
 
-    // This line is parsed by the github action to generate an output,
-    // so please update it as well if you're gonna change this line.
-    // We're doing this weird .subtask().success() stuff because
-    // otherwise it messes up the ordering or looks weird in some
-    // other way :'(
-    progress.subtask(&format!("key: {key}")).success(None);
-    progress
-        .subtask(&format!("namespace: {namespace}"))
-        .success(None);
-    progress
-        .subtask(&format!("session: {session_name}"))
-        .success(None);
+/// The error that ended a code sync task. A panic of the task becomes
+/// [`CliError::PreviewSyncFailed`].
+fn sync_task_error(result: Result<CliError, tokio::task::JoinError>) -> CliError {
+    result.unwrap_or_else(|error| CliError::PreviewSyncFailed(Box::new(error)))
+}
 
-    if let Some(share_host) = share_host {
-        progress
-            .subtask(&format!("preview URL: https://{share_host}"))
-            .success(None);
+/// How long the CLI waits for the status of a session whose code sync ended, to tell whether the
+/// session failed or was deleted. The controller writes a failure into the status a few seconds
+/// after the operator ends the sync.
+const SYNC_END_STATUS_WAIT: Duration = Duration::from_secs(10);
+
+/// The error to report for the code sync of the session `name` in `namespace`, which `error`
+/// ended. The operator ends the sync of a session that failed or was deleted with an error that
+/// only says that the preview doesn't run, so the session's own failure, or its deletion, is
+/// reported instead, once the session shows it within [`SYNC_END_STATUS_WAIT`]. An error of the
+/// CLI's own, or another CLI's takeover, says all there is to say.
+async fn sync_end(
+    api: &Api<PreviewSession>,
+    client: &Client,
+    namespace: &str,
+    name: &str,
+    error: CliError,
+) -> CliError {
+    if matches!(
+        error,
+        CliError::PreviewSyncReplaced
+            | CliError::PreviewSyncReadFailed { .. }
+            | CliError::PreviewSyncWatchFailed { .. }
+    ) {
+        return error;
     }
 
-    Ok(())
+    let ended = await_condition(api.clone(), name, |session: Option<&PreviewSession>| {
+        session.is_none_or(|session| {
+            session.metadata.deletion_timestamp.is_some()
+                || session
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| status.phase == PreviewSessionPhase::Failed)
+        })
+    });
+
+    match tokio::time::timeout(SYNC_END_STATUS_WAIT, ended).await {
+        Ok(Ok(Some(session))) if session.metadata.deletion_timestamp.is_none() => {
+            let message = session
+                .status
+                .and_then(|status| status.failure_message)
+                .unwrap_or_default();
+            session_failed(client, namespace, name, message).await
+        }
+        Ok(Ok(_)) => CliError::PreviewSessionDeleted,
+        // The watch failed, or the session showed no failure or deletion in time.
+        Ok(Err(_)) | Err(_) => error,
+    }
+}
+
+/// The error of the session `name` in `namespace`, which failed with `message`, with the logs of
+/// its pods.
+async fn session_failed(client: &Client, namespace: &str, name: &str, message: String) -> CliError {
+    let logs = fetch_preview_logs_best_effort(client, namespace, name).await;
+    CliError::PreviewSessionFailed { message, logs }
+}
+
+/// The least TTL a session must have left to be reused, enough for a push and a start. A session
+/// with less is replaced, so that the operator doesn't delete it soon after the start.
+const MIN_REUSED_TTL: SignedDuration = SignedDuration::from_mins(5);
+
+/// The session that a sync session with `spec` can keep using rather than replace: the one live
+/// session in `sessions` with the same spec and at least [`MIN_REUSED_TTL`] left at `now`.
+/// `sessions` holds the sessions under the same key and target. A failed session or one that is
+/// being deleted isn't live. `share_host` doesn't count: a session that replaced another one asks for its host,
+/// and one that didn't has its host only in its status, so the field differs between two runs
+/// with the same settings.
+///
+/// A session without an image of its own runs the image that the target named when the operator
+/// built its pod, so it must still be `target_image`, the image that the target names now. A
+/// session whose status doesn't name its image yet, and a target whose image is unknown, give a
+/// new session, which runs the current image whatever it is.
+///
+/// With `secret_mounts`, there is none: the operator can't tell whether the session's Secret
+/// holds the current contents of the files, so the session is replaced, which writes them again.
+fn reusable_session<'a>(
+    sessions: &'a [PreviewSession],
+    spec: &PreviewSessionSpec,
+    target_image: Option<&str>,
+    secret_mounts: bool,
+    now: Timestamp,
+) -> Option<&'a PreviewSession> {
+    let [session] = sessions else {
+        return None;
+    };
+
+    let live = session.metadata.deletion_timestamp.is_none()
+        && session
+            .status
+            .as_ref()
+            .is_none_or(|status| status.phase != PreviewSessionPhase::Failed);
+
+    let lasts = session
+        .status
+        .as_ref()
+        .and_then(|status| status.expires_at.as_ref())
+        .is_none_or(|expires_at| expires_at.0.duration_since(now) >= MIN_REUSED_TTL);
+
+    let same_spec = PreviewSessionSpec {
+        share_host: session.spec.share_host.clone(),
+        ..spec.clone()
+    } == session.spec;
+
+    let session_image = session
+        .status
+        .as_ref()
+        .and_then(|status| status.sync.as_ref())
+        .and_then(|sync| sync.image.as_deref());
+    let same_image =
+        spec.image.is_empty().not() || (target_image.is_some() && session_image == target_image);
+
+    (secret_mounts.not() && live && lasts && same_spec && same_image).then_some(session)
+}
+
+/// The creation timeout of a preview session. For a session with `sync`, it measures time without
+/// progress: each report of progress starts the timeout again, and while the preview pod does
+/// work whose length the CLI can't predict, such as an install, the timeout doesn't run at all.
+/// For any other session, nothing reports progress, so it measures the time since its start.
+struct ProgressDeadline {
+    timeout: Duration,
+
+    /// When the timeout runs out, or `None` while it doesn't run.
+    at: Option<tokio::time::Instant>,
+
+    /// The count of progress reports in the last [`sync::SyncActivity`] seen.
+    progress: u64,
+}
+
+impl ProgressDeadline {
+    fn new(timeout: Duration) -> Self {
+        Self {
+            timeout,
+            at: Some(tokio::time::Instant::now() + timeout),
+            progress: 0,
+        }
+    }
+
+    /// Starts the timeout again, unless it doesn't run.
+    fn on_progress(&mut self) {
+        if self.at.is_some() {
+            self.at = Some(tokio::time::Instant::now() + self.timeout);
+        }
+    }
+
+    /// Takes in the code sync's `activity`: stops the timeout while the pod is busy, and starts
+    /// it again after progress, or when the pod stops being busy.
+    fn on_activity(&mut self, activity: &sync::SyncActivity) {
+        let progressed = activity.progress != self.progress;
+        self.progress = activity.progress;
+
+        if activity.busy {
+            self.at = None;
+        } else if progressed || self.at.is_none() {
+            self.at = Some(tokio::time::Instant::now() + self.timeout);
+        }
+    }
+
+    /// Waits until the timeout runs out, and forever while it doesn't run.
+    async fn expired(&self) {
+        match self.at {
+            Some(at) => tokio::time::sleep_until(at).await,
+            None => std::future::pending().await,
+        }
+    }
+}
+
+/// Deletes the session `session_name`, whose start failed with `error`, and fails `subtask`.
+/// Returns `error`, so that the caller can return it.
+async fn abandon_session(
+    api: &Api<PreviewSession>,
+    session_name: &str,
+    subtask: &mut ProgressTracker,
+    error: CliError,
+) -> CliError {
+    if let Err(err) =
+        delete::delete_and_finalize(api.clone(), session_name, &DeleteParams::default()).await
+    {
+        subtask.warning(&format!(
+            "failed to delete session '{session_name}': {err}, you may need to delete it manually \
+             or with `mirrord preview stop`",
+        ));
+    }
+
+    subtask.failure(None);
+    error
 }
 
 /// Handle `mirrord preview status` command.
@@ -732,7 +1437,7 @@ async fn preview_status(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview status");
 
-    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
+    let layer_config = load_preview_config(args.as_env_vars(common), false, &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -830,7 +1535,8 @@ async fn preview_status(
         "Namespace",
         "Status",
         "Clusters",
-        "Message"
+        "Message",
+        "Sync"
     ]);
 
     for (key, sessions) in sessions_by_key {
@@ -907,6 +1613,13 @@ async fn preview_status(
                 })
                 .unwrap_or_default();
 
+            let sync = session
+                .status
+                .as_ref()
+                .and_then(|status| status.sync.as_ref())
+                .map(describe_sync_status)
+                .unwrap_or_default();
+
             table.add_row(row![
                 key,
                 session_name,
@@ -914,7 +1627,8 @@ async fn preview_status(
                 session.metadata.namespace.as_deref().unwrap_or_default(),
                 status,
                 clusters,
-                message
+                message,
+                sync
             ]);
 
             if let Some(license_fingerprint) =
@@ -940,6 +1654,53 @@ async fn preview_status(
     Ok(())
 }
 
+/// The code sync of a session in `mirrord preview status`, one line per fact: whether a CLI is
+/// attached, when the last push was applied and its generation, the install with the last line of its
+/// error, the app, and why idle mode is off.
+fn describe_sync_status(sync: &PreviewSyncStatus) -> String {
+    let mut lines = Vec::new();
+
+    lines.push(match sync.cli_attached {
+        Some(true) => "CLI attached".to_owned(),
+        _ => "no CLI attached".to_owned(),
+    });
+
+    match (&sync.last_synced_at, sync.generation) {
+        (Some(synced_at), generation) => {
+            let ago = Duration::try_from(Timestamp::now().duration_since(synced_at.0))
+                .map(|ago| humantime::format_duration(Duration::from_secs(ago.as_secs())))
+                .map(|ago| format!("{ago} ago"))
+                .unwrap_or_else(|_| "just now".to_owned());
+            lines.push(match generation {
+                Some(generation) => format!("last push {ago} (generation {generation})"),
+                None => format!("last push {ago}"),
+            });
+        }
+        (None, Some(generation)) => lines.push(format!("holds generation {generation}")),
+        (None, None) => lines.push("no push yet".to_owned()),
+    }
+
+    if let Some(install) = &sync.install {
+        let last_error_line = install.error.as_deref().and_then(|error| {
+            error
+                .lines()
+                .rev()
+                .find(|line| line.trim().is_empty().not())
+        });
+        lines.extend(sync::describe_install(install, last_error_line));
+    }
+
+    if let Some(app) = &sync.app {
+        lines.push(format!("app: {}", sync::describe_app(app)));
+    }
+
+    if let Some(reason) = &sync.idle_disabled {
+        lines.push(format!("idle off: {reason}"));
+    }
+
+    lines.join("\n")
+}
+
 /// Handle `mirrord preview logs` command.
 ///
 /// Prints what the preview pods of every matching environment have written. Unlike
@@ -954,7 +1715,7 @@ async fn preview_logs(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview logs");
 
-    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
+    let layer_config = load_preview_config(args.as_env_vars(common), false, &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -992,7 +1753,8 @@ async fn preview_logs(
                 layer_config.target.namespace.as_deref(),
             )
             .await
-            .inspect_err(|_| subtask.failure(None))?,
+            .inspect_err(|_| subtask.failure(None))?
+            .0,
         ),
         None => None,
     };
@@ -1066,6 +1828,17 @@ async fn print_session_logs(
     Ok(())
 }
 
+/// Which command [`preview_stop`] runs as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StopMode {
+    /// `mirrord preview stop`.
+    Stop,
+    /// `mirrord preview down`: the config comes from `common` and the global config alone, so
+    /// neither a mirrord config nor `MIRRORD_*` variables in the environment (like
+    /// `MIRRORD_IMPERSONATED_TARGET`) can narrow what it deletes, and finding nothing succeeds.
+    Down,
+}
+
 /// Handle `mirrord preview stop` command.
 ///
 /// Deletes preview environments matching the given key and, optionally, a target filter and
@@ -1074,12 +1847,18 @@ async fn print_session_logs(
 async fn preview_stop(
     common: &PreviewCommonArgs,
     args: PreviewStopArgs,
+    mode: StopMode,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
-    let mut progress = ProgressTracker::from_env("mirrord preview stop");
+    let down = mode == StopMode::Down;
+    let mut progress = ProgressTracker::from_env(if down {
+        "mirrord preview down"
+    } else {
+        "mirrord preview stop"
+    });
 
-    let layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
+    let layer_config = load_preview_config(args.as_env_vars(common), down, &mut progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(
         layer_config.telemetry,
@@ -1117,7 +1896,8 @@ async fn preview_stop(
                 layer_config.target.namespace.as_deref(),
             )
             .await
-            .inspect_err(|_| subtask.failure(None))?,
+            .inspect_err(|_| subtask.failure(None))?
+            .0,
         ),
         None => None,
     };
@@ -1135,6 +1915,11 @@ async fn preview_stop(
         .collect();
 
     if sessions_to_delete.is_empty() {
+        if down {
+            subtask.success(Some("no sessions to delete"));
+            progress.success(None);
+            return Ok(());
+        }
         subtask.failure(None);
         return Err(CliError::PreviewNotFound(matcher.as_str().to_owned()));
     }
@@ -1153,8 +1938,9 @@ async fn preview_stop(
 
     let mut delete_subtask = progress.subtask("deleting sessions");
 
-    let mut result = Ok(());
-    for session in sessions_to_delete {
+    // Deleted together: each deletion waits for the operator to finalize the session, so one at
+    // a time `mirrord preview down` would take that long once per service.
+    let deletions = sessions_to_delete.iter().map(|session| {
         let name = session
             .metadata
             .name
@@ -1165,24 +1951,36 @@ async fn preview_stop(
             .namespace
             .as_deref()
             .expect("preview session should have a namespace");
-
         let namespaced_api =
             Api::<PreviewSession>::namespaced(operator_api.client().clone(), namespace);
 
-        if let Err(e) =
-            delete::delete_and_finalize(namespaced_api.clone(), name, &DeleteParams::default())
+        async move {
+            delete::delete_and_finalize(namespaced_api, name, &DeleteParams::default())
                 .await
-        {
-            result = Err(CliError::PreviewDeleteFailed {
-                name: name.to_owned(),
-                reason: e.to_string(),
-            });
+                .map_err(|error| (name, error))
         }
-    }
+    });
+    let failures = join_all(deletions)
+        .await
+        .into_iter()
+        .filter_map(Result::err)
+        .collect::<Vec<_>>();
 
-    if result.is_err() {
+    if let [(name, error)] = failures.as_slice() {
         delete_subtask.failure(None);
-        return result;
+        return Err(CliError::PreviewDeleteFailed {
+            name: (*name).to_owned(),
+            reason: error.to_string(),
+        });
+    }
+    if failures.is_empty().not() {
+        delete_subtask.failure(None);
+        return Err(CliError::PreviewDeletesFailed(
+            failures
+                .iter()
+                .map(|(name, error)| format!("`{name}`: {error}"))
+                .collect(),
+        ));
     }
 
     delete_subtask.success(Some("all sessions deleted"));
@@ -1204,7 +2002,8 @@ async fn preview_diff(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord preview diff");
 
-    let mut layer_config = load_preview_config(args.as_env_vars(common), &mut progress).await?;
+    let mut layer_config =
+        load_preview_config(args.as_env_vars(common), false, &mut progress).await?;
 
     let sources = manifest_sources(args.manifests, &mut layer_config);
     if sources.is_empty() {
@@ -1248,7 +2047,7 @@ async fn preview_diff(
         CliError::PreviewTargetRequired
     })?;
 
-    let session_target = resolve_config_target(
+    let (session_target, _) = resolve_config_target(
         config_target,
         operator_api.client(),
         layer_config.target.namespace.as_deref(),
@@ -1427,6 +2226,29 @@ fn require_spec_resources_support(spec: &MirrordOperatorSpec) -> CliResult<()> {
     reject_management_only(spec)
 }
 
+/// Refuses a session with `sync` before the cluster changes when the operator `spec` lacks
+/// `PreviewCodeSync`, when the operator is a multicluster primary, or when a `local` isn't a
+/// directory. A multicluster preview runs a pod in each cluster, and only one pod at a time can
+/// write the code volume. [`sync::ServiceSync::of_service`] refuses the settings of the service
+/// that a sync preview can't run.
+fn check_sync(sync: &sync::ServiceSync, spec: &MirrordOperatorSpec) -> CliResult<()> {
+    spec.require_feature(NewOperatorFeature::PreviewCodeSync)?;
+
+    // Previews ignore `multi_cluster`, so every preview of a primary operator is multicluster.
+    if spec
+        .supported_features()
+        .contains(&NewOperatorFeature::MultiClusterPrimary)
+    {
+        return Err(CliError::PreviewSyncMultiCluster);
+    }
+
+    if let Some(entry) = sync.entries.iter().find(|entry| entry.local.is_dir().not()) {
+        return Err(CliError::PreviewSyncLocalNotADirectory(entry.local.clone()));
+    }
+
+    Ok(())
+}
+
 fn reject_management_only(spec: &MirrordOperatorSpec) -> CliResult<()> {
     if spec.operator_namespace.is_some() {
         return Err(CliError::PreviewResourcesManagementOnly);
@@ -1469,13 +2291,15 @@ fn target_namespace<'a>(
 /// A label target is sent as written: it has no single workload for the operator to fetch,
 /// and the pods it matches can each name their container differently. The operator reports
 /// a selector that matches no ready pod as a failed session.
+///
+/// Also returns the image of the target's container, when the operator reports one.
 async fn resolve_config_target(
     config_target: &Target,
     client: &kube::Client,
     namespace: Option<&str>,
-) -> CliResult<SessionTarget> {
+) -> CliResult<(SessionTarget, Option<String>)> {
     if let Target::Label(label_target) = config_target {
-        return Ok(label_session_target(label_target));
+        return Ok((label_session_target(label_target), None));
     }
 
     let ns = namespace.unwrap_or(client.default_namespace());
@@ -1501,9 +2325,11 @@ async fn resolve_config_target(
         target.set_container(runtime_data.container_name);
     }
 
-    SessionTarget::from_config(target).ok_or_else(|| {
+    let session_target = SessionTarget::from_config(target).ok_or_else(|| {
         CliError::PreviewTargetResolutionFailed("no valid container found".to_owned())
-    })
+    })?;
+
+    Ok((session_target, target_crd.spec.image))
 }
 
 /// Builds the session target for a label target. An empty container tells the operator to
@@ -1515,13 +2341,18 @@ fn label_session_target(label_target: &LabelTarget) -> SessionTarget {
     ))
 }
 
+/// Resolves the mirrord config of a `mirrord preview` command from `env_overrides` (the CLI
+/// flags) over the process environment. With `strict_env`, only `env_overrides` are read.
 async fn load_preview_config(
     env_overrides: HashMap<&OsStr, Cow<'_, OsStr>>,
+    strict_env: bool,
     progress: &mut ProgressTracker,
 ) -> CliResult<LayerConfig> {
     let mut subtask = progress.subtask("loading configuration");
 
-    let mut cfg_context = ConfigContext::default().override_envs(env_overrides);
+    let mut cfg_context = ConfigContext::default()
+        .override_envs(env_overrides)
+        .strict_env(strict_env);
 
     let config = crate::util::resolve_layer_config(&mut cfg_context)
         .await
@@ -1778,13 +2609,17 @@ async fn create_preview_api(
 
     operator_api.check_license_validity(progress)?;
 
-    operator_api
+    if let Err(error) = operator_api
         .operator()
         .spec
         .require_feature(NewOperatorFeature::PreviewEnv)
-        .inspect_err(|_| {
-            subtask.failure(None);
-        })?;
+    {
+        subtask.failure(None);
+        if let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error {
+            report_local_feature_gate(operator_api, *feature, config, progress, analytics).await;
+        }
+        return Err(error.into());
+    }
 
     subtask.success(Some("connected to operator"));
 
@@ -1872,8 +2707,190 @@ mod tests {
         feature::network::incoming::tls_delivery::LocalClientIdentity,
         target::deployment::DeploymentTarget,
     };
+    use mirrord_operator::crd::preview::{PreviewSyncConfig, PreviewSyncEntry};
 
     use super::*;
+
+    /// A sync session of the key `pr-123` with `spec`'s settings, in `phase`, whose TTL runs out
+    /// at `expires_at`.
+    fn session(
+        spec: &PreviewSessionSpec,
+        phase: PreviewSessionPhase,
+        expires_at: &str,
+    ) -> PreviewSession {
+        let mut session = PreviewSession::new("deployment-app-pr-123-a1b2c3d4", spec.clone());
+        session.status = Some(
+            serde_json::from_value(serde_json::json!({
+                "phase": phase,
+                "startedAt": "2026-10-30T00:00:00Z",
+                "expiresAt": expires_at,
+                "sync": { "image": "app:v1" },
+            }))
+            .unwrap(),
+        );
+        session
+    }
+
+    fn sync_spec() -> PreviewSessionSpec {
+        serde_json::from_value(serde_json::json!({
+            "image": "",
+            "key": "pr-123",
+            "target": {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "name": "app",
+                "container": "app",
+            },
+            "ttlSecs": 3600,
+            "sync": {
+                "entries": [{ "remote": "/app" }],
+                "runCommand": ["npm", "run", "dev"],
+            },
+        }))
+        .unwrap()
+    }
+
+    /// A sync session is reused only when it is the one live session under the key and target,
+    /// has the same settings and has enough of its TTL left, so that a run with changed settings,
+    /// or a session that is gone, failed, ambiguous or about to expire, gets a fresh session. A
+    /// session without an image of its own must also run the image that the target names now, or
+    /// a rerun after the target moved to a new image would keep the old one. The host that a
+    /// session is shared on isn't a setting of the run, so it doesn't keep a rerun from reusing
+    /// the session. With secret mounts, the operator can't tell whether the session's Secret
+    /// holds the current files, so the session is replaced.
+    #[test]
+    fn only_a_live_session_with_the_same_settings_is_reused() {
+        let spec = sync_spec();
+        let now: Timestamp = "2026-10-30T00:30:00Z".parse().unwrap();
+        let in_an_hour = "2026-10-30T01:30:00Z";
+        let ready = session(&spec, PreviewSessionPhase::Ready, in_an_hour);
+        let reusable = |sessions: &[PreviewSession], secret_mounts| {
+            reusable_session(sessions, &spec, Some("app:v1"), secret_mounts, now).is_some()
+        };
+
+        assert!(reusable(std::slice::from_ref(&ready), false));
+        assert!(reusable(
+            &[session(&spec, PreviewSessionPhase::Idle, in_an_hour)],
+            false
+        ));
+        assert!(reusable(std::slice::from_ref(&ready), true).not());
+
+        // The target moved to another image, or its image is unknown, or the operator hasn't
+        // written which image the session runs yet.
+        for target_image in [Some("app:v2"), None] {
+            assert!(
+                reusable_session(
+                    std::slice::from_ref(&ready),
+                    &spec,
+                    target_image,
+                    false,
+                    now
+                )
+                .is_none()
+            );
+        }
+        assert!(
+            reusable(
+                &[PreviewSession::new(
+                    "deployment-app-pr-123-a1b2c3d4",
+                    spec.clone()
+                )],
+                false
+            )
+            .not()
+        );
+        assert!(
+            reusable(
+                &[session(&spec, PreviewSessionPhase::Failed, in_an_hour)],
+                false
+            )
+            .not()
+        );
+        assert!(reusable(&[ready.clone(), ready.clone()], false).not());
+        assert!(reusable(&[], false).not());
+
+        let mut deleting = ready.clone();
+        deleting.metadata.deletion_timestamp =
+            Some(k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(now));
+        assert!(reusable(&[deleting], false).not());
+
+        // The operator writes the host that it shares a session on into the status, and a
+        // session that replaced another one carries the replaced session's host in its spec,
+        // while the spec of a rerun asks for none.
+        let mut shared = ready.clone();
+        if let Some(status) = shared.status.as_mut() {
+            status.share_host = Some("pr-123-abc.preview.example.com".to_owned());
+        }
+        assert!(reusable(std::slice::from_ref(&shared), false));
+        shared.spec.share_host = Some("pr-123-abc.preview.example.com".to_owned());
+        assert!(reusable(&[shared], false));
+
+        let mut changed = sync_spec();
+        changed.ttl_secs = 7200;
+        assert!(
+            reusable(
+                &[session(&changed, PreviewSessionPhase::Ready, in_an_hour)],
+                false
+            )
+            .not()
+        );
+
+        for expires_at in ["2026-10-30T00:00:00Z", "2026-10-30T00:32:00Z"] {
+            assert!(
+                reusable(
+                    &[session(&spec, PreviewSessionPhase::Ready, expires_at)],
+                    false
+                )
+                .not()
+            );
+        }
+    }
+
+    /// The creation timeout of a session with `sync` measures time without progress: it doesn't
+    /// run while the preview pod is busy, such as during an install, and each report of progress
+    /// starts it again.
+    #[tokio::test(start_paused = true)]
+    async fn the_creation_timeout_counts_time_without_progress() {
+        let timeout = Duration::from_secs(60);
+        let mut deadline = ProgressDeadline::new(timeout);
+        let expires_within = async |deadline: &ProgressDeadline, within: Duration| {
+            tokio::time::timeout(within, deadline.expired())
+                .await
+                .is_ok()
+        };
+
+        tokio::time::advance(Duration::from_secs(50)).await;
+        deadline.on_activity(&sync::SyncActivity {
+            busy: true,
+            progress: 1,
+            ..Default::default()
+        });
+        // A long install: no timeout at all while it runs.
+        tokio::time::advance(Duration::from_secs(600)).await;
+        assert!(
+            expires_within(&deadline, Duration::from_secs(600))
+                .await
+                .not()
+        );
+
+        deadline.on_activity(&sync::SyncActivity {
+            busy: false,
+            progress: 2,
+            ..Default::default()
+        });
+        assert!(
+            expires_within(&deadline, Duration::from_secs(59))
+                .await
+                .not()
+        );
+        deadline.on_progress();
+        assert!(
+            expires_within(&deadline, Duration::from_secs(59))
+                .await
+                .not()
+        );
+        assert!(expires_within(&deadline, Duration::from_secs(61)).await);
+    }
 
     /// The operator rebuilds the config target from the session target. A label target with no
     /// container must come back with no container, so each matching pod picks its own instead
@@ -2005,6 +3022,52 @@ mod tests {
         assert!(matches!(
             require_spec_resources_support(&supported),
             Err(CliError::PreviewResourcesManagementOnly)
+        ));
+    }
+
+    /// `check_sync` refuses each setting that its doc lists, before the cluster changes.
+    #[test]
+    fn sync_is_refused_where_it_cannot_work() {
+        let local = tempfile::tempdir().unwrap();
+        let sync = |local: PathBuf| sync::ServiceSync {
+            entries: vec![SyncEntry {
+                local,
+                remote: "/app".to_owned(),
+                ignore: Vec::new(),
+            }],
+            config: PreviewSyncConfig {
+                entries: vec![PreviewSyncEntry {
+                    remote: "/app".to_owned(),
+                }],
+                run_command: vec!["npm".to_owned(), "start".to_owned()],
+                working_dir: None,
+                install: None,
+                restart_on_change: true,
+            },
+        };
+        let existing_dir = sync(local.path().to_owned());
+        let supported = operator_with(&[NewOperatorFeature::PreviewCodeSync]);
+
+        assert!(check_sync(&existing_dir, &supported).is_ok());
+
+        let error = check_sync(&existing_dir, &operator(false)).unwrap_err();
+        assert!(
+            matches!(&error, CliError::FeatureNotSupportedInOperatorError { feature, .. } if *feature == NewOperatorFeature::PreviewCodeSync.to_string()),
+            "{error}"
+        );
+
+        let primary = operator_with(&[
+            NewOperatorFeature::PreviewCodeSync,
+            NewOperatorFeature::MultiClusterPrimary,
+        ]);
+        assert!(matches!(
+            check_sync(&existing_dir, &primary),
+            Err(CliError::PreviewSyncMultiCluster)
+        ));
+
+        assert!(matches!(
+            check_sync(&sync(local.path().join("missing")), &supported),
+            Err(CliError::PreviewSyncLocalNotADirectory(_))
         ));
     }
 

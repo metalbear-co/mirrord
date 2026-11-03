@@ -311,22 +311,25 @@ export default function App({
     return () => clearInterval(t)
   }, [refreshExtensionState])
 
-  const handleJoinViaExtension = useCallback(async (key: string) => {
-    const result = await joinViaExtension(key)
-    if (result.ok) {
-      setExtensionState((prev) => ({
-        ...prev,
-        joinedKey: result.joinedKey ?? key,
-      }))
-      emitUserSucceeded('operator_session_joined', { key })
-    } else {
-      emitUserBlocked('operator_session_join_failed', {
-        key,
-        ...(result.error && { error: result.error }),
-      })
-    }
-    return result
-  }, [])
+  const handleJoinViaExtension = useCallback(
+    async (key: string, context: string | null) => {
+      const result = await joinViaExtension(key, context)
+      if (result.ok) {
+        setExtensionState((prev) => ({
+          ...prev,
+          joinedKey: result.joinedKey ?? key,
+        }))
+        emitUserSucceeded('operator_session_joined', { key })
+      } else {
+        emitUserBlocked('operator_session_join_failed', {
+          key,
+          ...(result.error && { error: result.error }),
+        })
+      }
+      return result
+    },
+    [],
+  )
 
   const handleLeaveViaExtension = useCallback(async () => {
     const result = await leaveViaExtension()
@@ -465,14 +468,21 @@ export default function App({
               session={selectedLocal}
               onKill={() => void handleKill(selectedLocal.session_id)}
               extensionState={extensionState}
-              onJoin={() => handleJoinViaExtension(selectedLocal.key ?? '')}
+              onJoin={() =>
+                handleJoinViaExtension(
+                  selectedLocal.key ?? '',
+                  selectedLocal.context ?? null,
+                )
+              }
               onLeave={handleLeaveViaExtension}
             />
           ) : selectedOperator ? (
             <OperatorSessionDetail
               session={selectedOperator}
               extensionState={extensionState}
-              onJoin={() => handleJoinViaExtension(selectedOperator.key)}
+              onJoin={() =>
+                handleJoinViaExtension(selectedOperator.key, effectiveContext)
+              }
               onLeave={handleLeaveViaExtension}
               context={effectiveContext}
             />

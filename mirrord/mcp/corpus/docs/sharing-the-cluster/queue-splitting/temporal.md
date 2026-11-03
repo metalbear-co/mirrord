@@ -180,7 +180,7 @@ The `MirrordSplitConfig` is a namespaced resource. The target workload reference
 
 #### Describe consumed task queues
 
-Each entry in the `spec.queues` list describes a Temporal task queue consumed by the worker. Each `appConfig` field uses the same structure as other queue services (`env`, `envLike`, `volume`, `fallback`, `valueSelector`, `valuePattern`, `containers`):
+Each entry in the `spec.queues` list describes a Temporal task queue consumed by the worker. Each `appConfig` field uses the same structure as other queue services (`env`, `envLike`, `volume`, `fallback`, `valueSelector`, `valuePattern`, `containerNames`):
 
 * `id` - arbitrary queue ID that developers [reference](temporal.md#setting-a-filter) from their mirrord config.
 * `kind` - must be `temporal`.
@@ -230,6 +230,12 @@ After the last session against a target ends, the operator keeps the split's tem
 | unset (both)   | Tear down as soon as the last session ends (same as `0`). |
 | `0`            | Tear down immediately. In-flight work may be lost.        |
 | `N`            | Keep resources for up to `N` seconds, then tear down.     |
+
+## Queue mode
+
+Temporal supports `steal` only. Temporal hands each task to exactly one worker poll, so there is no way to deliver one task to both your local worker and the deployed one.
+
+A `mirror` request - `queue_mode: mirror` on a Temporal queue, or `mirrord up` in mirror mode - runs as `steal`: matching tasks go to your local worker and the deployed worker does not see them. When the session starts, mirrord prints a warning naming each Temporal queue it does this for.
 
 ## Setting a filter
 
@@ -306,3 +312,5 @@ Filtering on a Temporal header:
 ```
 
 In the example above, the local worker will receive only tasks whose first input argument starts with `test-jq-`.
+
+For compatibility with older operator releases and the legacy `containers` spelling, see [Selecting Containers](../queue-splitting.md#selecting-containers).

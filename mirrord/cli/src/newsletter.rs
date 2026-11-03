@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 
 use mirrord_progress::Progress;
-use tracing::trace;
-
-use crate::data::UserData;
 
 /// Link to the mirrord newsletter signup page (with UTM query params)
 const NEWSLETTER_SIGNUP_URL: &str =
@@ -21,9 +18,9 @@ const NEWSLETTER_COUNTER_PROMPT_AFTER_SECOND: u32 = 20;
 /// third time.
 const NEWSLETTER_COUNTER_PROMPT_AFTER_THIRD: u32 = 100;
 
-/// Called during normal execution, suggests newsletter signup if the user has run mirrord a certain
-/// number of times.
-pub async fn suggest_newsletter_signup<P: Progress>(user_data: &mut UserData, progress: &mut P) {
+/// Called during normal execution, suggests newsletter signup if `current_sessions`, the number of
+/// times the user has run mirrord, is a certain number.
+pub fn suggest_newsletter_signup<P: Progress>(current_sessions: u32, progress: &mut P) {
     let newsletter_invites = HashMap::from([
         (
             NEWSLETTER_COUNTER_PROMPT_AFTER_FIRST,
@@ -38,19 +35,6 @@ pub async fn suggest_newsletter_signup<P: Progress>(user_data: &mut UserData, pr
             "Looks like you're doing some serious work with mirrord!".to_owned(),
         ),
     ]);
-
-    let current_sessions = user_data
-        .bump_session_count()
-        .await
-        .inspect_err(|fail| {
-            // in case of failure to update, return the count as zero to prevent any prompts from
-            // being shown repeatedly if the update fails multiple times
-            trace!(
-                %fail,
-                "Failed to update number of previous mirrord runs."
-            );
-        })
-        .unwrap_or_default();
 
     if let Some(message) = newsletter_invites.get(&current_sessions) {
         // print the chosen invite to the user if progress mode is on
@@ -68,6 +52,7 @@ pub async fn suggest_newsletter_signup<P: Progress>(user_data: &mut UserData, pr
 
 /// Attempts to open the mirrord newsletter sign-up page in the default browser.
 /// In case of failure, prints the link.
+#[mirrord_macros::boxed_future]
 pub async fn newsletter_command() {
     // open URL with param utm_source=newslettercmd
     let url = format!("{NEWSLETTER_SIGNUP_URL}cmd");

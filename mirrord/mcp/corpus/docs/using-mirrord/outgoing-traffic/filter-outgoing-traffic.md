@@ -15,6 +15,8 @@ tags:
 description: Control which outgoing connections go through the cluster and which stay local
 ---
 
+# Filtering Outgoing Traffic
+
 There are several features underlying mirrord's ability to let your local app send outgoing network requests to cluster resources:
 
 1. By importing the remote target's environment variables, your app will send the request to the remote hostnames configured in them.

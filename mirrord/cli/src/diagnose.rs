@@ -170,6 +170,7 @@ async fn diagnose_license() -> CliResult<()> {
 }
 
 /// Handle commands related to the operator `mirrord diagnose ...`
+#[mirrord_macros::boxed_future]
 pub(crate) async fn diagnose_command(
     args: DiagnoseArgs,
     _watch: drain::Watch,

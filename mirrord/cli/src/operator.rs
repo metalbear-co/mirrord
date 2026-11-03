@@ -24,6 +24,7 @@ async fn operator_setup() -> CliResult<(), OperatorSetupError> {
 }
 
 /// Handle commands related to the operator `mirrord operator ...`
+#[mirrord_macros::boxed_future]
 pub(crate) async fn operator_command(
     args: OperatorArgs,
     watch: drain::Watch,
@@ -42,6 +43,9 @@ pub(crate) async fn operator_command(
         OperatorCommand::Install(args) => install::operator_install(*args, &telemetry)
             .await
             .map_err(CliError::from),
+        OperatorCommand::Signup(args) => {
+            install::operator_signup(args).await.map_err(CliError::from)
+        }
         OperatorCommand::Uninstall(args) => install::operator_uninstall(args, &telemetry)
             .await
             .map_err(CliError::from),

@@ -1,39 +1,58 @@
 //! The `mirrord up` command - runs multiple mirrord sessions from a `mirrord-up.yaml` file.
 
-use std::io::ErrorKind;
+use std::{collections::HashMap, io::ErrorKind, ops::Not, sync::Arc};
 
 use miette::Diagnostic;
-use mirrord_analytics::{Analytics, AnalyticsReporter, CollectAnalytics, Reporter};
+use mirrord_analytics::{
+    AnalyticValue, Analytics, AnalyticsReporter, CollectAnalytics, Reporter, SanitizedString,
+    UpSessionDbBranch,
+};
 use mirrord_config::config::EnvKey;
-use mirrord_operator::crd::session::UpSessionInfo;
-use mirrord_up::{InitError, ReadyTracker, UpError, load_up_config, run_wizard};
+use mirrord_operator::{client::UpSession, crd::session::UpSessionInfo};
+use mirrord_up::{
+    InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, UpConfig, UpError, UpListing,
+    load_up_config, run_wizard,
+};
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpSubcommand},
-    data::UserData,
+    config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpListFormat, UpSubcommand},
+    data::{GlobalConfig, UserData},
+    error::CliError,
     ui::ui_command,
 };
 
+pub(crate) mod checks;
+
+use checks::{NoOperator, Unservable};
+
 /// Context for sessions started by `mirrord up`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct MirrordUp {
     pub(crate) auto_queue_splitting: bool,
+    /// The service the session runs.
+    pub(crate) service: Arc<str>,
 }
 
 impl MirrordUp {
+    /// `mirrord up` sets both its resolved config and the service name on every session it
+    /// starts, so a session missing either wasn't started by it.
     pub(crate) fn from_env() -> Option<Self> {
-        std::env::var_os(mirrord_up::RESOLVED_CONFIG_ENV)
-            .is_some()
-            .then_some(Self {
-                auto_queue_splitting: true,
-            })
+        std::env::var_os(mirrord_up::RESOLVED_CONFIG_ENV)?;
+        let service = std::env::var(SERVICE_NAME_ENV).ok()?;
+        Some(Self {
+            auto_queue_splitting: true,
+            service: service.into(),
+        })
     }
 
-    pub(crate) fn info(&self) -> UpSessionInfo {
-        UpSessionInfo {
-            auto_queue_splitting: self.auto_queue_splitting.then_some(true),
+    pub(crate) fn session(&self) -> UpSession {
+        UpSession {
+            info: UpSessionInfo {
+                auto_queue_splitting: self.auto_queue_splitting.then_some(true),
+            },
+            service: self.service.clone(),
         }
     }
 }
@@ -45,7 +64,7 @@ pub enum UpCliError {
     Up(#[from] UpError),
 
     #[error(transparent)]
-    Init(#[from] InitError),
+    Init(#[from] Box<InitError>),
 
     #[error("mirrord-up.yaml file not found.")]
     #[diagnostic(help(
@@ -56,21 +75,116 @@ pub enum UpCliError {
     ))]
     ConfigNotFound,
 
+    /// A service's operator couldn't be used though its config requires one, or couldn't tell
+    /// what its DB branching request resolves to, or rejected it. Shown as the session would show it (including its help, e.g. to upgrade the
+    /// operator), prefixed with the service.
+    #[error("{service}: {error}")]
+    #[diagnostic(forward(error))]
+    DbBranches {
+        service: Arc<str>,
+        error: Box<CliError>,
+    },
+
+    /// A mode's `db_branching` line asks for DB branches that can't be had. The reason and what
+    /// else the user can do come from [`Unservable`].
+    #[error("{service}: mode `{mode}` sets `db_branching`, but {reason}")]
+    #[diagnostic(help(
+        "To run against the source databases, set `db_branching: off` for mode `{mode}` in \
+         mirrord-up.yaml. {hint}"
+    ))]
+    ModeDbBranchesUnservable {
+        service: Arc<str>,
+        mode: Arc<str>,
+        reason: Box<Unservable>,
+        hint: &'static str,
+    },
+
+    /// A mode's `queues` line asks for queue splitting, but the service's cluster has no usable
+    /// mirrord operator to split them.
+    #[error(
+        "{service}: mode `{mode}` sets `queues`, but there is no usable mirrord operator: {reason}"
+    )]
+    #[diagnostic(help(
+        "Queue splitting needs the mirrord operator. Remove `queues` from mode `{mode}` in \
+         mirrord-up.yaml to run without requiring it."
+    ))]
+    ModeQueuesNoOperator {
+        service: Arc<str>,
+        mode: Arc<str>,
+        reason: NoOperator,
+    },
+
+    /// A mode's `queues` line asks for queue splitting, but the service's operator splits no
+    /// queues: its queue splitting is off, or its license doesn't include it.
+    #[error(
+        "{service}: mode `{mode}` sets `queues`, but the mirrord operator doesn't split queues"
+    )]
+    #[diagnostic(help(
+        "Enable queue splitting in the mirrord operator, or remove `queues` from mode `{mode}` in \
+         mirrord-up.yaml to run without requiring it."
+    ))]
+    ModeQueuesUnsupported { service: Arc<str>, mode: Arc<str> },
+
+    /// A mode's `db_branching` line sets a copy mode, which the service's operator is too old to
+    /// apply.
+    #[error(
+        "{service}: mode `{mode}` sets a copy mode in `db_branching`, but the mirrord operator \
+         doesn't support overriding it"
+    )]
+    #[diagnostic(help(
+        "Upgrade the mirrord operator, or change `db_branching` for mode `{mode}` in \
+         mirrord-up.yaml: `inherit` uses each entry's own copy mode, `off` runs against the \
+         source databases."
+    ))]
+    ModeCopyModeUnsupported { service: Arc<str>, mode: Arc<str> },
+
+    /// Services that share a DB branch ask for it with different copy modes. The branch is
+    /// created once, so all but one would fail when they attach to it.
+    #[error("DB branch `{branch}` is requested with different copy modes: {requests}")]
+    #[diagnostic(help(
+        "Services started under one key share the branch, so give them the same copy mode (e.g. \
+         the same `db_branching`), or start them under different keys."
+    ))]
+    BranchCopyModeConflict { branch: String, requests: String },
+
+    /// The copy mode of a mode's `db_branching` line is missing from an entry's
+    /// `copy.allowedModes`. The message comes from the operator and names the entry.
+    #[error("{service}: {message}")]
+    #[diagnostic(help(
+        "Change `db_branching` for mode `{mode}` in mirrord-up.yaml (`inherit` uses each entry's \
+         own copy mode), or ask the MirrordSplitConfig owner to add the mode to the entry's \
+         `copy.allowedModes`."
+    ))]
+    ModeCopyModeNotAllowed {
+        service: Arc<str>,
+        mode: Arc<str>,
+        message: String,
+    },
+
     #[error("failed to acquire OS username for key")]
     #[diagnostic(help(
         "The username is used for automatically generating a session key. Please provide a session key manually or ensure your OS user has a valid username."
     ))]
     UsernameFetch(whoami::Error),
+
+    #[error("failed to write the `mirrord up list` JSON output")]
+    ListOutput(#[source] serde_json::Error),
 }
 
 /// The `mirrord up` command handler.
+#[mirrord_macros::boxed_future]
 pub(crate) async fn up_command(
     args: UpArgs,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> Result<(), UpCliError> {
     if let Some(UpSubcommand::Init { output }) = args.command {
-        return Ok(run_wizard(output)?);
+        return Ok(run_wizard(output).await.map_err(Box::new)?);
+    }
+
+    // No analytics: IDE extensions list on every refresh, and no session starts.
+    if let Some(UpSubcommand::List { format }) = args.command {
+        return list_services(&args, format).await;
     }
 
     // We don't yet know whether the user has opted out of telemetry,
@@ -85,19 +199,54 @@ pub(crate) async fn up_command(
     result
 }
 
-async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
-    let key = match args.key {
+/// The session key: `-k`, else the OS username.
+fn session_key(key: Option<String>) -> Result<EnvKey, UpCliError> {
+    Ok(match key {
         Some(key) => EnvKey::Provided(key),
         None => EnvKey::Generated(whoami::username().map_err(UpCliError::UsernameFetch)?),
-    };
+    })
+}
 
-    let mut up_config = match load_up_config(&args.config_file, &key) {
-        Ok(cfg) => cfg,
+fn load_config(args: &UpArgs, key: &EnvKey) -> Result<UpConfig, UpCliError> {
+    match load_up_config(&args.config_file, key) {
+        Ok(cfg) => Ok(cfg),
         Err(UpError::Io(err)) if err.kind() == ErrorKind::NotFound => {
-            return Err(UpCliError::ConfigNotFound);
+            Err(UpCliError::ConfigNotFound)
         }
-        other_error => other_error?,
-    };
+        Err(other_error) => Err(other_error.into()),
+    }
+}
+
+/// `mirrord up list`: prints every service as `mirrord up` would run it, for people or, with
+/// `--format json`, for IDE extensions.
+///
+/// Stays offline: it reads the up file and the global config, and touches no cluster. The kube
+/// context falls back on the global config's, as a run's does, so each listed context is the one
+/// the run would use.
+async fn list_services(args: &UpArgs, format: UpListFormat) -> Result<(), UpCliError> {
+    let key = session_key(args.key.clone())?;
+    let mut up_config = load_config(args, &key)?;
+    up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
+    if let Some(mode) = &args.mode {
+        up_config.override_mode(mode).map_err(UpError::from)?;
+    }
+
+    let listing = UpListing::new(&up_config, &args.config_file, &key, args.context.clone())?;
+    match format {
+        UpListFormat::Pretty => print!("{}", listing.render()),
+        UpListFormat::Json => {
+            let json = serde_json::to_string(&listing).map_err(UpCliError::ListOutput)?;
+            println!("{json}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
+    let key = session_key(args.key.clone())?;
+    let mut up_config = load_config(&args, &key)?;
+
+    up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
 
     analytics.enabled = up_config.telemetry_enabled();
 
@@ -107,14 +256,14 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         .add("num_selected_services", args.services.len());
 
     up_config
-        .select_services(&args.services)
+        .select_services(&args.services, &args.debug)
         .map_err(UpError::from)?;
 
     analytics
         .get_mut()
         .add("mode_override", args.mode.is_some());
-    if let Some(mode) = args.mode {
-        up_config.override_mode(mode);
+    if let Some(mode) = &args.mode {
+        up_config.override_mode(mode).map_err(UpError::from)?;
     }
 
     #[cfg(target_os = "windows")]
@@ -155,15 +304,22 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         });
     }
 
-    let result = mirrord_up::run(
-        up_config,
-        &args.config_file,
-        args.context,
-        key,
-        correlation_id,
-        ready.clone(),
-    )
-    .await;
+    let mut services =
+        mirrord_up::resolve_services(up_config, &args.config_file, args.context, &key).await?;
+    let mut operators = checks::usable_operators(&services).await?;
+    checks::check_queue_splits(&services, &operators)?;
+    let requesting = checks::check_db_branches(&mut services, &mut operators).await?;
+    let modes = services
+        .iter()
+        .map(|service| (service.service_name.clone(), service.mode.clone()))
+        .collect::<Vec<_>>();
+
+    let result = mirrord_up::launch(services, correlation_id, &args.debug, ready.clone()).await;
+
+    analytics.get_mut().add(
+        "services",
+        service_analytics(&modes, &requesting, &ready.db_branches()),
+    );
 
     // Recorded whenever all sessions reached readiness, even if `run` then
     // failed, left absent otherwise (e.g. a session crashed before startup).
@@ -176,6 +332,54 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     Ok(result?)
 }
 
+/// One entry per service, in no particular order and without names: its mode (`custom` for one
+/// defined under `modes`, whose name is the user's), whether it requested
+/// DB branching, and whether its session created a branch, attached to an existing one, and shares
+/// one with another service of the run.
+fn service_analytics(
+    modes: &[(Arc<str>, Arc<str>)],
+    requesting: &[Arc<str>],
+    db_branches: &HashMap<Arc<str>, Vec<UpSessionDbBranch>>,
+) -> Vec<AnalyticValue> {
+    // Branch names are unique within a cluster only.
+    let mut users: HashMap<(&str, &str), usize> = HashMap::new();
+    for branch in db_branches.values().flatten() {
+        *users
+            .entry((branch.cluster.as_str(), branch.name.as_str()))
+            .or_default() += 1;
+    }
+
+    modes
+        .iter()
+        .map(|(name, mode)| {
+            let branches = db_branches.get(name).map(Vec::as_slice).unwrap_or_default();
+            let mut service = Analytics::default();
+            let mode = ServiceMode::from_name(mode).map_or("custom", <&str>::from);
+            service.add("mode", SanitizedString::new_plaintext(mode));
+            service.add("db_branching_requested", requesting.contains(name));
+            service.add(
+                "db_branch_created",
+                branches.iter().any(|branch| branch.created),
+            );
+            service.add(
+                "db_branch_attached",
+                branches.iter().any(|branch| branch.created.not()),
+            );
+            service.add(
+                "db_branch_shared",
+                branches.iter().any(|branch| {
+                    users
+                        .get(&(branch.cluster.as_str(), branch.name.as_str()))
+                        .copied()
+                        .unwrap_or_default()
+                        > 1
+                }),
+            );
+            service.into()
+        })
+        .collect()
+}
+
 /// Coarse bucket assigned to a failed `mirrord up` invocation for analytics.
 #[derive(Debug, Clone, Copy)]
 #[repr(u32)]
@@ -184,6 +388,8 @@ enum ErrorCategory {
     ServiceCrash = 2,
     InternalError = 3,
     PreCommandFailed = 4,
+    ServiceStartFailed = 5,
+    DbBranching = 6,
 }
 
 impl From<&UpCliError> for ErrorCategory {
@@ -199,8 +405,21 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::ConfigPatch(_))
             | UpCliError::Up(UpError::Tera(_))
             | UpCliError::Up(UpError::Mode(_))
+            | UpCliError::Up(UpError::BuiltinModeName(_))
+            | UpCliError::Up(UpError::UnknownMode(_))
+            | UpCliError::Up(UpError::NoInferredTarget { .. })
+            | UpCliError::Up(UpError::PreviewTargetless { .. })
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
+            UpCliError::Up(UpError::ServiceFailedToStart { .. }) => Self::ServiceStartFailed,
+            UpCliError::DbBranches { .. }
+            | UpCliError::ModeDbBranchesUnservable { .. }
+            | UpCliError::ModeCopyModeUnsupported { .. }
+            | UpCliError::BranchCopyModeConflict { .. }
+            | UpCliError::ModeCopyModeNotAllowed { .. } => Self::DbBranching,
+            UpCliError::ModeQueuesNoOperator { .. } | UpCliError::ModeQueuesUnsupported { .. } => {
+                Self::ConfigValidation
+            }
             UpCliError::Up(UpError::PreCommandFailed { .. })
             | UpCliError::Up(UpError::PreCommandSpawn { .. }) => Self::PreCommandFailed,
             UpCliError::Up(UpError::Io(_))
@@ -208,9 +427,11 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::Kube(_))
             | UpCliError::Up(UpError::Inquire(_))
             | UpCliError::Up(UpError::Exited)
+            | UpCliError::Up(UpError::NoWorkloads(_))
             | UpCliError::Up(UpError::YamlPatch(_))
             | UpCliError::Up(UpError::YamlQuery(_))
-            | UpCliError::Init(_) => Self::InternalError,
+            | UpCliError::Init(_)
+            | UpCliError::ListOutput(_) => Self::InternalError,
         }
     }
 }
@@ -235,7 +456,7 @@ mod tests {
     use std::process::ExitStatus;
 
     use mirrord_config::target::TargetType;
-    use mirrord_up::{IncompatibleTarget, ModeError, SelectError, ServiceMode};
+    use mirrord_up::{IncompatibleTarget, SelectError, ServiceMode, TargetValidationError};
 
     use super::*;
 
@@ -305,13 +526,14 @@ mod tests {
 
     #[test]
     fn mode_error_buckets_as_config_validation() {
-        let v = category(UpCliError::Up(UpError::Mode(
-            ModeError::IncompatibleTargets(vec![IncompatibleTarget {
+        let v = category(UpCliError::Up(UpError::Mode(vec![
+            TargetValidationError::IncompatibleTargets(vec![IncompatibleTarget {
                 service: "svc".into(),
-                mode: ServiceMode::Replace,
+                mode: ServiceMode::Replace.into(),
+                incoming: ServiceMode::Replace,
                 target_type: TargetType::Targetless,
             }]),
-        )));
+        ])));
         assert_eq!(v["error_category"], ErrorCategory::ConfigValidation as u32);
     }
 

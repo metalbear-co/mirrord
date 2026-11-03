@@ -7,7 +7,10 @@ use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
 use tower::retry::backoff::InvalidBackoff;
 
-use crate::crd::{NewOperatorFeature, kube_target::UnknownTargetType};
+use crate::{
+    crd::{NewOperatorFeature, kube_target::UnknownTargetType},
+    types::PaidFeatureGate,
+};
 
 /// Operations performed on the operator via [`kube`] API.
 #[derive(Debug)]
@@ -17,6 +20,7 @@ pub enum OperatorOperation {
     WebsocketConnection,
     CopyingTarget,
     GettingStatus,
+    ReportingFeatureGate,
     SessionManagement,
     ListingTargets,
     DbBranching,
@@ -34,6 +38,7 @@ impl fmt::Display for OperatorOperation {
             Self::WebsocketConnection => "creating a websocket connection",
             Self::CopyingTarget => "copying target",
             Self::GettingStatus => "getting status",
+            Self::ReportingFeatureGate => "reporting feature gate hit",
             Self::SessionManagement => "session management",
             Self::ListingTargets => "listing targets",
             Self::DbBranching => "database branching",
@@ -71,12 +76,22 @@ pub enum OperatorApiError {
     },
 
     /// The operator's version knows about the feature but the current deployment doesn't advertise
-    /// it, meaning it's disabled in the operator's configuration. Unlike
+    /// it because it is disabled in the operator's configuration. Unlike
     /// [`Self::UnsupportedFeature`] this is not fixed by upgrading; the cluster admin has to
     /// enable it.
     #[error("feature {feature} is not enabled on this mirrord operator")]
     FeatureDisabled { feature: NewOperatorFeature },
 
+    /// Discovery can stop preparation before the gated operation reaches the operator. The
+    /// terminal async owner reports this refusal without counting server refusals again.
+    #[error("{gate}")]
+    LocalFeatureNotLicensed {
+        feature: NewOperatorFeature,
+        gate: PaidFeatureGate,
+    },
+
+    #[error("{gate}")]
+    FeatureNotLicensed { gate: PaidFeatureGate },
     #[error("mirrord operator does not serve the operator-hosted sessions-manager")]
     ServerlessSessionsManagerNotServed,
 
@@ -137,6 +152,11 @@ pub enum OperatorApiError {
     #[error("failed to resolve db_branches from the target's MirrordSplitConfig: {0}")]
     SplitConfigDbBranches(String),
 
+    /// The requested copy mode is missing from the `copy.allowedModes` of a resolved entry. The
+    /// message comes from the operator and names the entry, the mode and the allowed ones.
+    #[error("{0}")]
+    SplitConfigCopyModeNotAllowed(String),
+
     /// A resolved `dbBranches` entry does not parse with this CLI's config version.
     #[error(
         "dbBranches entry `{id}` on MirrordSplitConfig `{split_configs}` uses a setting this \
@@ -159,15 +179,15 @@ pub enum OperatorApiError {
     /// Attaching to a branch another session created under the same key, from an entry whose
     /// copy mode differs from the one the branch was created with.
     #[error(
-        "branch `{branch_id}` exists with copy mode \"{existing_mode}\", this service asked for \
-         \"{requested_mode}\""
+        "branch `{branch_id}` was created with copy mode \"{existing_mode}\", this session asks \
+         for \"{requested_mode}\""
     )]
     BranchCopyModeMismatch {
         branch_id: String,
         existing_mode: String,
         requested_mode: String,
-        /// The workload whose session created the branch.
-        creator: String,
+        /// Who created the branch: the `mirrord up` service, or else the session's target.
+        created_by: String,
     },
 
     #[error("failed to create preview secret mounts: {0}")]

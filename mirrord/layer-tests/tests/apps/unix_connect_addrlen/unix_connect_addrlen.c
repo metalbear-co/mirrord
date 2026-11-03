@@ -1,6 +1,7 @@
 // Calls `connect(2)` on a Unix socket with the same `sun_path` but different
 // `addrlen` values: the exact length, a padded `sockaddr_un`, and PHP's
-// `offsetof(sockaddr_un, sun_path) + strlen(path)` form that omits the NUL.
+// `offsetof(sockaddr_un, sun_path) + strlen(path)` form that omits the NUL,
+// and libuv >= 1.53's zero-padded 255-byte buffer, larger than `sockaddr_storage`.
 // The layer is expected to send the same complete pathname to the agent.
 
 #include <stddef.h>
@@ -19,10 +20,14 @@ static void try_connect(socklen_t addrlen, const char *label) {
         return;
     }
 
-    struct sockaddr_un addr;
+    // Backed by a 255-byte buffer so every `addrlen` below is readable.
+    union {
+        struct sockaddr_un un;
+        char buf[255];
+    } addr;
     memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
+    addr.un.sun_family = AF_UNIX;
+    strncpy(addr.un.sun_path, SOCKET_PATH, sizeof(addr.un.sun_path) - 1);
 
     int ret = connect(fd, (const struct sockaddr *)&addr, addrlen);
     printf("[%s] connect ret=%d\n", label, ret);
@@ -40,6 +45,8 @@ int main(void) {
     socklen_t php_style =
         (socklen_t)(offsetof(struct sockaddr_un, sun_path) + strlen(SOCKET_PATH));
     try_connect(php_style, "php-style");
+
+    try_connect(255, "libuv-style");
 
     return 0;
 }

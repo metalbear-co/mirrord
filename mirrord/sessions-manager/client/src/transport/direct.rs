@@ -1,6 +1,6 @@
 //! A standalone sessions-manager reached at its own base URL.
 
-use std::{env::VarError, sync::Arc, time::Duration};
+use std::{fmt, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
@@ -22,6 +22,7 @@ use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_sessions_manager_protocol::{
     AssignmentSubscription, ConnectionAssignment, ServiceScope,
 };
+use reqwest::StatusCode;
 use tokio::time::Instant;
 use tokio_tungstenite::WebSocketStream;
 use url::Url;
@@ -33,7 +34,10 @@ use crate::{
         api::{ControlPlaneApi, ControlPlaneEndpoint},
         verify_event_stream,
     },
-    credentials::{CredentialProvider, NoCredentials, credentials_from_env},
+    credentials::{
+        CredentialProvider, LoginTokenSource, NoCredentials, SESSIONS_MANAGER_URL_DEFAULT,
+        credentials_from_env, intproxy_credentials_from_env,
+    },
     error::SessionsManagerClientError,
     retry::with_deadline,
 };
@@ -43,6 +47,57 @@ use crate::{
 /// For example, both `https://example.com/sm` and `https://sm.example.com` are valid; API version
 /// and resource segments are appended to the configured path.
 pub const SESSIONS_MANAGER_URL_ENV: &str = "MIRRORD_SESSIONS_MANAGER_URL";
+
+/// Why a standalone sessions-manager was chosen, so agents and the CLI can tell the user where a
+/// session connects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndpointSource {
+    /// Set by the user, through [`SESSIONS_MANAGER_URL_ENV`] or the CLI's
+    /// `sessions_manager.url`.
+    Explicit,
+    /// Nothing selected a sessions-manager, so it is the MetalBear Cloud one at
+    /// [`SESSIONS_MANAGER_URL_DEFAULT`].
+    Default,
+}
+
+/// Base URL of the standalone sessions-manager to reach, and why it was chosen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionsManagerEndpoint {
+    pub url: Url,
+    pub source: EndpointSource,
+}
+
+impl SessionsManagerEndpoint {
+    /// The sessions-manager at `explicit` when it is set, and the MetalBear Cloud one otherwise.
+    ///
+    /// Choosing the operator-hosted sessions-manager instead comes first and is up to the caller,
+    /// since agents and the CLI each select it in their own way.
+    pub fn resolve(explicit: Option<&str>) -> Result<Self, SessionsManagerClientError> {
+        let (url, source) = match explicit {
+            Some(url) => (url, EndpointSource::Explicit),
+            None => (SESSIONS_MANAGER_URL_DEFAULT, EndpointSource::Default),
+        };
+
+        Ok(Self {
+            url: Url::parse(url)?,
+            source,
+        })
+    }
+}
+
+/// Shows the URL without its username, password, query or fragment, since the endpoint is printed
+/// to CLI output and logs, and an explicit URL may carry credentials in any of them.
+impl fmt::Display for SessionsManagerEndpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut url = self.url.clone();
+        // These fail only for URLs that cannot carry credentials in the first place.
+        let _ = url.set_username("");
+        let _ = url.set_password(None);
+        url.set_query(None);
+        url.set_fragment(None);
+        url.fmt(f)
+    }
+}
 
 /// Bound on establishing the TCP (and TLS) connection for control-plane HTTP requests.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -79,10 +134,23 @@ impl DirectTransport {
         })
     }
 
-    /// Reaches the sessions-manager at [`SESSIONS_MANAGER_URL_ENV`], with the shared secret the
-    /// environment configures, if any.
-    pub fn from_env() -> Result<Self, SessionsManagerClientError> {
-        Ok(Self::new(base_url_from_env()?)?.with_credentials(credentials_from_env()?))
+    /// Reaches the sessions-manager at `endpoint` as an agent, with the shared secret and the API
+    /// key the environment configures, if any.
+    pub fn from_env(endpoint: SessionsManagerEndpoint) -> Result<Self, SessionsManagerClientError> {
+        let credentials = credentials_from_env(endpoint.source)?;
+        Ok(Self::new(endpoint.url)?.with_credentials(credentials))
+    }
+
+    /// Reaches the sessions-manager at `endpoint` as an intproxy, with the shared secret the
+    /// environment configures, if any, and the developer's login token from `login_tokens`.
+    pub fn intproxy_from_env(
+        endpoint: SessionsManagerEndpoint,
+        login_tokens: Option<Arc<dyn LoginTokenSource>>,
+    ) -> Result<Self, SessionsManagerClientError> {
+        let credentials =
+            intproxy_credentials_from_env(endpoint.source, login_tokens, &endpoint.url)?;
+
+        Ok(Self::new(endpoint.url)?.with_credentials(credentials))
     }
 
     pub fn with_credentials(mut self, credentials: Arc<dyn CredentialProvider>) -> Self {
@@ -111,9 +179,6 @@ impl DirectTransport {
         };
 
         let url = assignment.data_plane_endpoint.resolve(base_url, scheme)?;
-        let mut request = Request::builder().uri(url.as_str()).body(Vec::new())?;
-        request.headers_mut().extend(self.credentials.headers()?);
-        request.headers_mut().extend(authorization);
 
         let connector = HttpsConnectorBuilder::new()
             .with_webpki_roots()
@@ -125,6 +190,14 @@ impl DirectTransport {
 
         let started_at = Instant::now();
         tokio::time::timeout(WEBSOCKET_UPGRADE_TIMEOUT, async {
+            // The credentials are gathered inside the timeout: a provider may have to reach the
+            // network for them, and that wait belongs to the upgrade it is holding up.
+            let mut request = Request::builder().uri(url.as_str()).body(Vec::new())?;
+            request
+                .headers_mut()
+                .extend(self.credentials.data_plane_headers().await?);
+            request.headers_mut().extend(authorization);
+
             // The data-plane upgrade request never carries a body, so the (always-empty) `Vec<u8>`
             // built above is simply dropped in favor of the client's own `Empty<Bytes>` body type.
             let stream = connect_ws_direct(request, UpgradeContract::Direct, |request| async {
@@ -168,14 +241,25 @@ impl SessionsManagerTransport for DirectTransport {
             subscription = ?subscription,
             "requesting sessions-manager assignments"
         );
+        // The whole attempt, credentials included, shares one deadline: a provider that has to
+        // fetch something before it can answer is part of what makes subscribing slow.
+        let credentials =
+            with_deadline(Some(deadline), self.credentials.control_plane_headers()).await??;
+        let sent_authorization = credentials.contains_key(AUTHORIZATION);
         let request = self
             .http
             .get(endpoint)
             .query(subscription)
-            .headers(self.credentials.headers()?)
+            .headers(credentials)
             .header(ACCEPT, "text/event-stream")
             .send();
         let response = with_deadline(Some(deadline), request).await??;
+        if response.status() == StatusCode::UNAUTHORIZED
+            && sent_authorization
+            && let Some(error) = self.credentials.unauthorized_error()
+        {
+            return Err(error);
+        }
         verify_event_stream(response.status(), response.headers())?;
 
         Ok(ControlPlaneEventStream::from_bytes(response.bytes_stream()))
@@ -204,15 +288,6 @@ fn data_plane_authorization_headers(
     Ok(headers)
 }
 
-/// Reads the sessions-manager base URL from [`SESSIONS_MANAGER_URL_ENV`].
-fn base_url_from_env() -> Result<Url, SessionsManagerClientError> {
-    match std::env::var(SESSIONS_MANAGER_URL_ENV) {
-        Ok(raw) => Ok(Url::parse(&raw)?),
-        Err(VarError::NotPresent) => Err(SessionsManagerClientError::MissingSessionsManagerUrl),
-        Err(error) => Err(error.into()),
-    }
-}
-
 /// Accepts only hierarchical HTTP(S) URLs without query or fragment, and normalizes the path to
 /// end in `/` so endpoint segments are appended rather than replacing the last one.
 fn validate_base_url(mut base_url: Url) -> Result<Url, SessionsManagerClientError> {
@@ -231,4 +306,105 @@ fn validate_base_url(mut base_url: Url) -> Result<Url, SessionsManagerClientErro
     }
 
     Ok(base_url)
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{Router, response::IntoResponse};
+    use futures::future::{BoxFuture, FutureExt};
+    use mirrord_sessions_manager_protocol::ServiceScope;
+    use tokio::net::TcpListener;
+
+    use super::*;
+    use crate::{IntproxyClient, LoginToken, LoginTokenCredentials, SessionsManagerConnectInfo};
+
+    struct NoLogin;
+
+    impl LoginTokenSource for NoLogin {
+        fn login_token(
+            &self,
+        ) -> BoxFuture<'_, Result<Option<LoginToken>, SessionsManagerClientError>> {
+            std::future::ready(Ok(None)).boxed()
+        }
+    }
+
+    /// No login token was sent, so `mirrord login` is not what refused the session, and the 401
+    /// is reported as is.
+    #[tokio::test]
+    async fn a_401_without_a_login_token_is_reported_as_the_bare_status() {
+        let app = Router::new().fallback(|| async { StatusCode::UNAUTHORIZED.into_response() });
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url =
+            Url::parse(&format!("http://{}/sm", listener.local_addr().unwrap())).unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let transport = DirectTransport::new(base_url.clone())
+            .unwrap()
+            .with_credentials(Arc::new(LoginTokenCredentials::new(
+                Arc::new(NoLogin),
+                &base_url,
+            )));
+        let client = IntproxyClient::with_transport(
+            SessionsManagerConnectInfo {
+                scope: ServiceScope {
+                    environment: "staging".to_owned(),
+                    service: "api".to_owned(),
+                },
+                user_session_id: "session".to_owned(),
+                replica_filter: None,
+            },
+            transport,
+        )
+        .unwrap();
+
+        let error = client.connect(Duration::from_secs(5)).await.unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                SessionsManagerClientError::HttpStatus(StatusCode::UNAUTHORIZED)
+            ),
+            "got {error:?}"
+        );
+    }
+
+    #[test]
+    fn explicit_url_is_used_as_set() {
+        let endpoint = SessionsManagerEndpoint::resolve(Some("https://sm.example.com/sm")).unwrap();
+
+        assert_eq!(endpoint.url.as_str(), "https://sm.example.com/sm");
+        assert_eq!(endpoint.source, EndpointSource::Explicit);
+    }
+
+    #[test]
+    fn metalbear_cloud_is_the_default() {
+        let endpoint = SessionsManagerEndpoint::resolve(None).unwrap();
+
+        assert_eq!(
+            endpoint.url.as_str(),
+            "https://sm-aws-use1.app.metalbear.com/sm"
+        );
+        assert_eq!(endpoint.source, EndpointSource::Default);
+        DirectTransport::new(endpoint.url).expect("the default must be a valid base URL");
+    }
+
+    #[test]
+    fn display_hides_credentials() {
+        let endpoint = SessionsManagerEndpoint::resolve(Some(
+            "https://user:password@sm.example.com/sm?token=secret#fragment",
+        ))
+        .unwrap();
+
+        assert_eq!(endpoint.to_string(), "https://sm.example.com/sm");
+    }
+
+    /// An explicit URL that doesn't parse is an error, not a reason to fall back to MetalBear
+    /// Cloud.
+    #[test]
+    fn invalid_explicit_url_is_an_error() {
+        assert!(matches!(
+            SessionsManagerEndpoint::resolve(Some("not a url")),
+            Err(SessionsManagerClientError::Url(_))
+        ));
+    }
 }

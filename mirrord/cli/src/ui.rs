@@ -190,6 +190,7 @@ fn ui_start_printout(
 ///
 /// `open_path` selects which page the browser opens on when the daemon starts (`/` for the session
 /// monitor, `/wizard` for the config wizard). It has no effect on [`UiSubcommand::Stop`].
+#[mirrord_macros::boxed_future]
 pub async fn ui_command(
     UiCommonArgs {
         port,
@@ -241,6 +242,7 @@ pub async fn ui_command(
 
 /// The entrypoint for the `wizard` command. Starts the local daemon if needed and opens the browser
 /// on the wizard page.
+#[mirrord_macros::boxed_future]
 pub async fn wizard_command(
     args: UiCommonArgs,
     no_telemetry: bool,
@@ -265,6 +267,7 @@ pub async fn wizard_command(
 
 /// The entrypoint for the `chaos` command. Starts the local daemon if needed without opening a
 /// browser, then displays or edits active chaos rules.
+#[mirrord_macros::boxed_future]
 pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
     let details = ui_start(UI_DEFAULT_PORT, true, "").await?;
     info!(?details, "ran mirrord ui start");

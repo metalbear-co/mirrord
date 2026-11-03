@@ -1,7 +1,9 @@
 ---
 title: CLI
-description: Installing and using the mirrord CLI
+description: "How to install the mirrord CLI on your machine and run your first session from the terminal."
 ---
+
+# CLI
 
 The mirrord CLI is the core tool for running mirrord from the command line.
 
@@ -27,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/i
 To install the CLI, run:
 
 ```powershell
-choco install --pre mirrord
+choco install mirrord
 ```
 {% endtab %}
 {% endtabs %}
@@ -56,7 +58,7 @@ mirrord is configured using a JSON or YAML configuration file. The CLI reads its
 mirrord exec -f my-config.json --target pod/app-pod python main.py
 ```
 
-Configuration options are documented in the [configuration reference](https://metalbear.com/mirrord/docs/config). For a user-wide Operator preference, see [Global Configuration](global-configuration.md). Other settings in the global file are not yet applied to sessions.
+Configuration options are documented in the [configuration reference](https://metalbear.com/mirrord/docs/config). For a user-wide Operator preference or default Kubernetes context, see [Global Configuration](global-configuration.md). Other settings in the global file are not yet applied.
 
 ## Interactive Setup
 
