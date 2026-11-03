@@ -3,7 +3,7 @@ name: mirrord-prev-env
 description: Help users create and manage mirrord preview environments — running a modified service as an isolated pod in a shared Kubernetes cluster, scoped by an environment key and HTTP/queue traffic filtering, so teams can validate and review changes against real traffic without affecting live services. Use when a developer wants to run "mirrord preview" ad hoc, share a preview via a link (mirrord-share-ingress), or wire preview environments into CI with the metalbear-co/mirrord-preview GitHub Action (e.g. per-PR previews, least-privilege cluster access).
 metadata:
   author: MetalBear
-  version: "2.8"
+  version: "2.9"
 ---
 
 # Mirrord Preview Environment Skill
@@ -228,6 +228,10 @@ mirrord preview diff -t deployment/app --resource ./k8s/
 
 Requires CLI **3.266.0+** and operator **3.213.0+** (an older operator makes the CLI refuse `--resource` rather than falling back silently), and isn't supported yet with a management-only multi-cluster operator (the target lives in another cluster than the one the CLI talks to).
 
+## Targeting by label
+
+A preview can target every pod a label selector matches, instead of one workload — requires operator **3.213.0+** and CLI **3.266.0+**. A single preview session takes traffic from every matching pod. Queue splitting and DB branching aren't supported when the target is a label selector.
+
 ## Targeting scaled-to-zero workloads (queue splitting only)
 
 A preview environment that **only splits queues** (no HTTP filtering, no DB branching) can target a workload — Deployment, Argo Rollout, or StatefulSet — with **no running pods**. (A [CronJob target](#targeting-cronjobs) never needs running pods either.) This fits consumers that are auto-scaled on queue lag (e.g. with KEDA) and sit at zero replicas until messages arrive: the split needs nothing from a live pod, since the topic and consumer group are read from the workload's spec and messages flow through the queue itself. Matching messages reach the preview pod right away; unmatched ones wait on the target's temporary queue and are consumed once the workload scales back up (its new pods start with the split configuration already applied).
@@ -271,6 +275,38 @@ Override the inherited schedule with `feature.preview.cronjob.schedule` (Kuberne
 A CronJob preview has no long-running pod, so `feature.network.incoming` is ignored (with a warning), `feature.preview.idle` is rejected, and `feature.preview.replicas` doesn't apply. Database branch parameters using `value_pattern` need a running target pod to read the runtime value from, so they're rejected too — plain variable parameters still work.
 
 Requires operator **3.205.0+** and CLI **3.256.0+**, plus `create`/`delete`/`patch` on `batch/cronjobs` and `create` on `batch/jobs` for the operator — the Helm chart grants these when `operator.previewEnv` is enabled.
+
+## Previewing several services (`mirrord preview up`)
+
+`mirrord preview up` starts a preview for every service in a [`mirrord-up.yaml`](https://metalbear.com/mirrord/docs/using-mirrord/multiple-concurrent-sessions) that has an image, all under one key — services already defined there need no separate `mirrord.json`. `mirrord preview down` stops them again. Requires mirrord **3.279.0+**.
+
+```yaml mirrord-up
+services:
+  user-auth-service:
+    run:
+      command: ["python", "-m", "http.server"]
+  stage-user-dashboard-app:
+    run:
+      command: ["node", "app.js"]
+```
+
+```bash
+mirrord preview up \
+  --image user-auth-service=ghcr.io/org/user-auth-service:preview-pr-123-abc1234 \
+  --image stage-user-dashboard-app=ghcr.io/org/stage-user-dashboard-app:preview-pr-123-abc1234 \
+  -k pr-123
+
+mirrord preview down -k pr-123
+```
+
+Key points:
+
+- **Images.** A service's image comes from `--image <service>=<image ref>` (repeat per service) or a `MIRRORD_<SERVICE>_IMAGE` env var (service name upper-cased, non-alphanumerics turned into `_`). A service with no image is skipped.
+- **Key.** Without `-k`/`MIRRORD_KEY`, the key is `GITHUB_HEAD_REF` in a GitHub PR, else the current git branch; on `main`/`master` or with no branch checked out, it's random — pass `-k`/`MIRRORD_KEY` there, since a generated key can't be found again for `preview down`.
+- **Per-service setup.** Each preview is created as `mirrord preview start` would for that service's `target`/`context`/`ignore_ports`/`config_patch`, in `split` mode (`http_filter` replaces the default `baggage: mirrord-session=<key>` filter); `default_mode`/`env`/`run`/`skip` are ignored. Queues are split by the key and, for a single-workload target, the operator's default database branches apply too — set `feature.split_queues`/`feature.db_branches` (`[]` to turn off) in `config_patch` to change either. `config_patch` can set any option except `feature.preview.image`.
+- **Checks first.** Every service is validated before anything starts — an unknown/duplicate `--image` service, no service with an image, a colliding `MIRRORD_<SERVICE>_IMAGE`, a previewed service with `target: none` or an unfindable target (`mirrord preview up` never prompts), two previewed services sharing a target, or an invalid/unsupported `config_patch` all fail the whole command with nothing created.
+- **Reruns.** Running it again with the same key replaces each previewed service's session and keeps its preview URL; a service that gets no image on the rerun keeps its earlier preview until stopped or its TTL expires.
+- **Link sharing.** Leave `operator.shareIngress.stableSlugs` off — a stable slug comes from the key alone, so every service under one key would collide except the first.
 
 ## Sharing a preview via a link
 

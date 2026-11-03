@@ -19,7 +19,7 @@ use mirrord_config::{
     config::{ConfigContext, EnvKey},
     env_key::MIRRORD_ENV_KEY,
     feature::{
-        database_branches::{DatabaseBranchesConfig, SplitConfigDbBranches},
+        database_branches::{DatabaseBranchesConfig, SplitConfigDbBranches, SplitConfigRequest},
         split_queues::SplitQueuesConfig,
     },
     target::Target,
@@ -35,8 +35,8 @@ use mirrord_operator::{
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_up::{
-    PreviewImageSource, PreviewRun, SkipReason, SubprocessCfg, UpError, load_preview_up_config,
-    preview_image_env,
+    PreviewImageSource, PreviewRun, RequestOrigin, SkipReason, SubprocessCfg, UpError,
+    load_preview_up_config, preview_image_env,
 };
 
 use super::{
@@ -51,7 +51,7 @@ use crate::{
     },
     data::{GlobalConfig, UserData},
     error::{CliError, CliResult, GENERAL_HELP},
-    up::db_branches::{DEFAULT_DB_BRANCHES_UNSUPPORTED, resolves_default_db_branches},
+    up::checks::{DEFAULT_DB_BRANCHES_UNSUPPORTED, resolves_default_db_branches},
 };
 
 /// Handle `mirrord preview up` or `mirrord preview sync`, which `run` names, reporting one
@@ -390,10 +390,12 @@ async fn prepare_service(
     };
     let SubprocessCfg {
         mut config,
-        default_db_branches,
-        mut default_split_queues,
+        db_branches_origin,
+        queues_origin,
         ..
     } = service;
+    let default_db_branches = db_branches_origin == RequestOrigin::Default;
+    let mut default_split_queues = queues_origin == RequestOrigin::Default;
 
     // Set over the patched config, so they take precedence over the service's `config_patch`.
     if let Some(ttl) = args.ttl {
@@ -493,11 +495,13 @@ async fn prepare_service(
             config.feature.db_branches = if branchable.is_empty() {
                 DatabaseBranchesConfig::default()
             } else {
-                DatabaseBranchesConfig::FromSplitConfig(SplitConfigDbBranches::Ids(
-                    branchable
-                        .iter()
-                        .map(|(entry, _)| entry.id.clone())
-                        .collect(),
+                DatabaseBranchesConfig::FromSplitConfig(SplitConfigRequest::Entries(
+                    SplitConfigDbBranches::Ids(
+                        branchable
+                            .iter()
+                            .map(|(entry, _)| entry.id.clone())
+                            .collect(),
+                    ),
                 ))
             };
         }

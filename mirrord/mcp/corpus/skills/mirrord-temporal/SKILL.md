@@ -12,7 +12,7 @@ description: >
   feature of mirrord.
 metadata:
   author: MetalBear
-  version: "1.3"
+  version: "1.4"
 ---
 
 # mirrord Temporal Splitting Configuration Skill
@@ -152,7 +152,7 @@ Rules:
 - `spec.targetRef` = `{ apiVersion, kind, name }` (Deployment/StatefulSet/Rollout). A config needs either `targetRef` (one workload) or `targetSelector` (a label selector matching every Deployment/StatefulSet/Rollout in the namespace whose labels match — operator **3.220.0+**), not both.
 - Each `spec.queues[]` needs `id`, `kind: temporal`, a `clientConfig` (the `MirrordPropertyList` name; or set once via `spec.clientConfigs.temporal`), and `appConfig.taskQueue`.
 - `appConfig.temporalAddress` (optional) names the env var holding the frontend address — the operator patches it so the worker connects to the operator's proxy. `appConfig.temporalNamespace` (optional) names the env var holding the Temporal namespace.
-- Each `appConfig` field uses the same source structure as other queue services: `env`, `envLike`, `volume` (read from a file mounted from a ConfigMap volume instead of an env var — operator **3.198.0+**), `podFile` (read from a file that exists only inside the running pods, e.g. Vault- or CSI-injected, with no ConfigMap/Secret behind it — operator **3.201.0+**), `fallback`, `valueSelector`, `valuePattern`, `containers`.
+- Each `appConfig` field uses the same source structure as other queue services: `env`, `envLike`, `volume` (read from a file mounted from a ConfigMap volume instead of an env var — operator **3.198.0+**), `podFile` (read from a file that exists only inside the running pods, e.g. Vault- or CSI-injected, with no ConfigMap/Secret behind it — operator **3.201.0+**), `fallback`, `valueSelector`, `valuePattern`, `containerNames` (legacy spelling `containers` still works — don't set both on the same entry).
 - Per-queue Temporal options (`max_buffered_tasks`) live in a separate `MirrordPropertyList` referenced by the queue's `queueConfig`.
 - `spec.drainTimeout` (seconds) keeps the split's temporary resources alive after the last session ends so a new session can reuse them; unset or `0` tears down immediately. It does **not** wait for in-flight work.
 
@@ -175,7 +175,7 @@ spec:
       appConfig:
         taskQueue:
           - env: <TASK_QUEUE_ENV_VAR>
-            containers: [<container>]
+            containerNames: [<container>]
         temporalAddress:
           - env: <ADDRESS_ENV_VAR>
         temporalNamespace:

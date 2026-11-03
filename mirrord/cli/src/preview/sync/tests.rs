@@ -23,8 +23,8 @@ use mirrord_operator::{
 };
 use mirrord_progress::ProgressTracker;
 use mirrord_up::{
-    InstallConfig, RunConfig, RunType, ServiceMode, SubprocessCfg, SyncConfig, SyncEntry,
-    SyncRunConfig,
+    InstallConfig, RequestOrigin, RunConfig, RunType, ServiceMode, SubprocessCfg, SyncConfig,
+    SyncEntry, SyncRunConfig,
 };
 use tokio::{io::DuplexStream, sync::mpsc, task::JoinHandle};
 use tokio_tungstenite::{
@@ -1128,9 +1128,10 @@ fn service(entries: &[(&str, &str)], install: Option<InstallConfig>) -> Subproce
             install,
             restart_on_change: false,
         }),
-        mode: ServiceMode::default(),
-        default_db_branches: false,
-        default_split_queues: false,
+        mode: ServiceMode::default().into(),
+        incoming: ServiceMode::default(),
+        db_branches_origin: RequestOrigin::Config,
+        queues_origin: RequestOrigin::Config,
     }
 }
 

@@ -3,7 +3,7 @@ name: mirrord-db-branching
 description: Helps users configure mirrord.json for database branching, enabling isolated database copies for safe development and testing. Use when the user wants to set up MySQL, MariaDB, PostgreSQL, MSSQL, MongoDB, Redis, DynamoDB, ClickHouse, Google Spanner, Amazon S3, turbopuffer, or generic branches, configure copy modes, connection sources, schema migrations, IAM authentication, or manage database branches.
 metadata:
   author: MetalBear
-  version: "2.10"
+  version: "2.11"
 ---
 
 # Mirrord DB Branching Skill
@@ -261,7 +261,8 @@ Any param (and, where noted, the `url`) can be sourced beyond a plain env var:
 - **ConfigMap** (params only): read a value out of a config file mounted from a ConfigMap, instead of an env var: `{ "configmap": { "volume": "app-config" }, "key": "config.yml", "value_selector": ".database.host", "env_var_name": "DB_HOST" }`. `configmap` is either the ConfigMap's name (`"configmap": "app-config"`) or, preferred when a deployment tool renames the ConfigMap per release, a `configMap` volume of the target pod (`{ "volume": "app-config" }`) — the volume name in the pod spec stays stable even when the ConfigMap it points at changes. `key` is the entry in the ConfigMap's `data` (with the volume form, the file name inside the volume, resolved through any `items` remapping). `value_selector` runs over the entry parsed as JSON/YAML, supporting nested keys (`.database.host`) and `.[]` to iterate — same restrictions as the composite selectors below; `value_pattern` is a regex capture group for entries that aren't JSON/YAML. The two are mutually exclusive; without either, the whole (trimmed) entry is the value. `env_var_name` delivers the value to your local process the same way as other sources. A cluster admin can set the shared `configmap`/`key` once for everyone with `dbPod.sourceConfigMap` on the operator's [branch config profile](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching#branch-config-profiles), leaving each param to carry only its own `value_selector` and `env_var_name`. Requires operator/Helm chart **3.205.0+** and CLI **3.255.0+**.
 - **Google Secret Manager** (url or params; uses the target pod's GKE Workload Identity): url → `{ "type": "gcp_secret_manager", "secret_ref": "projects/../secrets/../versions/latest", "env_var_name": "DATABASE_URL" }`; param → `{ "gcp_secret_manager": "projects/../secrets/../versions/latest", "env_var_name": "DB_PASSWORD" }`
 - **AWS Secrets Manager** (url or params; uses the target pod's service account via IRSA / EKS Pod Identity, the same way [AWS RDS IAM](#iam-authentication) works): url → `{ "type": "aws_secrets_manager", "secret_ref": "arn:aws:secretsmanager:us-east-1:123456789012:secret:db-url", "env_var_name": "DATABASE_URL" }`; param → `{ "aws_secrets_manager": "db-password", "env_var_name": "DB_PASSWORD" }`. `secret_ref` is a secret name or a full ARN; the region comes from the ARN, or from `AWS_REGION`/`AWS_DEFAULT_REGION` on the target pod for a plain name. Not supported for [generic branches](#generic-branches).
-  - `env_var_name` is normally optional on these three sources, but becomes **required** when the connection is used by a `container`-flavor [migration](#schema-migrations) Job — the operator needs a variable name to redirect the branch connection into the Job's inherited environment. Without it, the migration fails.
+- **AWS SSM Parameter Store** (url or params; uses the target pod's service account the same way AWS Secrets Manager does; `SecureString` parameters are decrypted): url → `{ "type": "aws_ssm_parameter", "parameter": "/dev/app/database/url", "env_var_name": "DATABASE_URL" }`; param → `{ "aws_ssm_parameter": "/dev/app/db-creds", "value_selector": ".password", "env_var_name": "DB_PASSWORD" }`. `parameter` is a parameter name or a full ARN; the region comes from the ARN, or from `AWS_REGION`/`AWS_DEFAULT_REGION` on the target pod for a plain name. Set `name` on the branch when the `url` source is `aws_ssm_parameter` — the operator never reads the literal URL, so without `name` the app gets a branch URL for the `postgres` database instead of its own. Requires operator **3.224.0+** and CLI **3.278.0+**; an older operator can't read it, so the CLI refuses to start the session against one.
+  - `env_var_name` is normally optional on these four sources, but becomes **required** when the connection is used by a `container`-flavor [migration](#schema-migrations) Job — the operator needs a variable name to redirect the branch connection into the Job's inherited environment. Without it, the migration fails.
 - **Literal value** (user-supplied only): `{ "env_var_name": "DB_PASSWORD", "value": "..." }` — stored in a Secret by the CLI. Do not invent values.
 - **Composite env var** (`value_pattern`): extract one part of a packed value, e.g. `host` and `port` from `DB_SERVER=host:5432`. Capture group name follows the param name (`(?P<host>...)`), or use `(?P<value>...)` / a single unnamed group. Must contain ≥1 capture group. This per-name group naming (`(?P<host>...)`) only works for the fixed slots — a `value_pattern` on a **custom** param must name its group `value` (or use a plain unnamed first group).
 - **Multiple sources** (array): both `url` and each param accept an array. The **first** entry is used to locate/clone the source; **every** entry is rewritten to point at the branch (e.g. separate write/read URLs).
@@ -512,6 +513,25 @@ Default env vars from the target pod: `AWS_REGION`/`AWS_DEFAULT_REGION`, `AWS_AC
 ```
 
 > DynamoDB reuses the `aws_rds` type name: `{ "iam_auth": { "type": "aws_rds" } }`.
+
+### Apps that build the connection URL at runtime
+
+Some apps never read a connection URL from an env var — at startup they look up the address in AWS SSM, sign an IAM token, and build the URL in code. mirrord can't redirect that, and the app would ignore a branch URL mirrord set for it anyway. This works without changing the app or the cluster, as long as the code already has a switch that makes it read a URL from an env var instead (e.g. a local-development flag):
+
+```json mirrord=feature.db_branches[]
+{
+  "connection": {
+    "url": {
+      "type": "env",
+      "variable": "DATABASE_URL",
+      "value": "postgresql://app_user@mydb.abc123.us-east-1.rds.amazonaws.com:5432/app?sslmode=require"
+    }
+  },
+  "iam_auth": { "type": "aws_rds" }
+}
+```
+
+Pair it with `"feature": { "env": { "override": { "USE_SSM": "false" } } }` (use the app's own flag name) to flip the switch on your machine only — the deployed workload is untouched. `value` is the source URL the branch copies from; with `iam_auth` set, the branch init container signs its own IAM token, so `value` needs no password and doesn't need to exist in the pod spec. `name` is taken from `value` automatically on mirrord **3.278.0+**; set it explicitly on older CLIs — the operator never reads the literal URL, so without `name` the app gets a branch URL for the `postgres` database instead of its own. To avoid inlining the URL in the config, point `connection.url` at the same SSM parameter the app reads instead, with an [`aws_ssm_parameter` source](#advanced-sources); in that case `name` is required, since mirrord never sees the URL. When copying data (`copy.mode: schema` or `all`), use `sslmode=require` in `value` even if the app itself uses `verify-full` — the branch init container has no copy of the source's CA to verify against, and `require` still encrypts the copy connection.
 
 ### GCP Cloud SQL
 

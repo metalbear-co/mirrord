@@ -503,17 +503,20 @@ pub(crate) enum CliError {
     OperatorBranchCreationFailed(OperatorOperation, String),
 
     #[error(
-        "branch `{branch_id}` exists with copy mode \"{existing_mode}\", this service asked for \
-         \"{requested_mode}\""
+        "branch `{branch_id}` was created with copy mode \"{existing_mode}\", this session asks \
+         for \"{requested_mode}\""
     )]
     #[diagnostic(help(
-        "`{creator}` created it. Put both services on modes with the same copy mode."
+        "It was created by {created_by}. Every session under one key shares the branch: ask for \
+         the copy mode it was created with, start under a different key, or, if nothing uses it \
+         anymore, remove it with `mirrord db-branches destroy` (`mirrord db-branches status` \
+         lists the names)."
     ))]
     BranchCopyModeMismatch {
         branch_id: String,
         existing_mode: String,
         requested_mode: String,
-        creator: String,
+        created_by: String,
     },
 
     #[error(
@@ -532,6 +535,14 @@ pub(crate) enum CliError {
          define the branches inline in `feature.db_branches`."
     ))]
     SplitConfigDbBranches(String),
+
+    #[error("{0}")]
+    #[diagnostic(help(
+        "Request one of the entry's allowed modes in `feature.db_branches.copy.mode`, or drop \
+         `copy` to use each entry's own mode. Or ask the MirrordSplitConfig owner to add the mode \
+         to the entry's `copy.allowedModes`."
+    ))]
+    SplitConfigCopyModeNotAllowed(String),
 
     #[error("mirrord operator API failed: {0} failed with {1}")]
     #[diagnostic(help(
@@ -1368,6 +1379,9 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
             OperatorApiError::SplitConfigDbBranches(msg) => Self::SplitConfigDbBranches(msg),
+            OperatorApiError::SplitConfigCopyModeNotAllowed(msg) => {
+                Self::SplitConfigCopyModeNotAllowed(msg)
+            }
             OperatorApiError::ResolvedDbBranchesInvalid(error) => {
                 Self::ResolvedDbBranchesInvalid(error)
             }
@@ -1378,12 +1392,12 @@ impl From<OperatorApiError> for CliError {
                 branch_id,
                 existing_mode,
                 requested_mode,
-                creator,
+                created_by,
             } => Self::BranchCopyModeMismatch {
                 branch_id,
                 existing_mode,
                 requested_mode,
-                creator,
+                created_by,
             },
             OperatorApiError::PreviewSecretMountCreation(msg) => {
                 Self::PreviewSecretMountFailed(msg)
