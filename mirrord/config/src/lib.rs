@@ -1454,8 +1454,17 @@ impl LayerConfig {
             context.add_warning(ignored("feature.network.incoming.http_filter.ports"));
         }
 
+        // A branch-only preview (branches, no target) sends no incoming, so its steal check runs
+        // on the config as it is sent, below, and no filter is ever used. The pod-bound settings
+        // themselves are checked in `verify_for_targetless_preview`, by the commands that start
+        // such a preview: a missing `-t` on `preview stop` or `status` is not a preview without a
+        // target.
+        let branch_only = matches!(self.target.path, None | Some(Target::Targetless))
+            && !self.feature.db_branches.is_empty();
+
         if matches!(self.feature.network.incoming.mode, IncomingMode::Steal)
             && !self.feature.network.incoming.http_filter.is_filter_set()
+            && !branch_only
         {
             context.add_warning(format!(
                 "using default http header filter: '^baggage: .*mirrord-session={}.*$'.",
@@ -1526,13 +1535,6 @@ impl LayerConfig {
             );
         }
 
-        // A branch-only preview (branches, no target) sends no incoming, so its steal check runs
-        // below on the config as it is sent. The pod-bound settings themselves are checked in
-        // `verify_for_targetless_preview`, by the commands that start such a preview: a missing
-        // `-t` on `preview stop` or `status` is not a preview without a target.
-        let branch_only = matches!(self.target.path, None | Some(Target::Targetless))
-            && !self.feature.db_branches.is_empty();
-
         // feature.preview.idle - needs a wake source, otherwise an idle session could never
         // scale back up.
 
@@ -1550,9 +1552,9 @@ impl LayerConfig {
         }
 
         // The general checks refuse steal for a targetless agent, but a branch-only preview
-        // sends no incoming at all (the CLI drops it, warned about above), so check the config
-        // as it is sent: with the default incoming. This keeps `target: "targetless"` and no
-        // `target` behaving the same.
+        // sends no incoming at all (the CLI drops it, and `verify_for_targetless_preview`
+        // reports it as ignored), so check the config as it is sent: with the default incoming.
+        // This keeps `target: "targetless"` and no `target` behaving the same.
         if branch_only {
             let mut as_sent = self.clone();
             as_sent.feature.network.incoming = default.feature.network.incoming;
@@ -1604,6 +1606,13 @@ impl LayerConfig {
             )
         };
 
+        if self.feature.env != default.feature.env {
+            context.add_warning(ignored_without_target(
+                "feature.env",
+                "to set the variables in",
+            ));
+        }
+
         if self.feature.network.incoming != default.feature.network.incoming {
             context.add_warning(ignored_without_target(
                 "feature.network.incoming",
@@ -1632,6 +1641,13 @@ impl LayerConfig {
             ));
         }
 
+        if self.feature.preview.labels != default.feature.preview.labels {
+            context.add_warning(ignored_without_target(
+                "feature.preview.labels",
+                "to copy the target's labels to",
+            ));
+        }
+
         if self.feature.preview.image.is_some() {
             context.add_warning(ignored_without_target(
                 "feature.preview.image",
@@ -1651,6 +1667,21 @@ impl LayerConfig {
                 "feature.preview.secret_mounts",
                 "to mount them in",
             ));
+        }
+
+        // The CLI cannot see the branch profile, so this is the earliest word the user gets: the
+        // operator refuses the branch only after `start` has created it, when a targeted sibling
+        // of a `mirrord up` run may already have replaced its preview.
+        for (position, branch) in self.feature.db_branches.iter().enumerate() {
+            if branch.relies_on_profile_source_config_map() {
+                context.add_warning(format!(
+                    "`feature.db_branches[{position}]` reads a `configmap` param without naming \
+                     the ConfigMap, so it falls back to the branch profile's `sourceConfigMap`; in \
+                     a preview without a target the operator refuses the branch if that one is a \
+                     pod volume, once the session is created. Name the ConfigMap in the param \
+                     (`\"configmap\": \"<name>\"`), or set a `target`."
+                ));
+            }
         }
 
         Ok(())
@@ -3168,6 +3199,90 @@ mod tests {
         assert!(
             matches!(&error, ConfigError::Conflict(message) if message.contains("without a target")),
             "unexpected error: {error}"
+        );
+    }
+
+    /// A preview without a target sends no `env`, `replicas` or `labels` to the operator, so the
+    /// start check reports them as ignored like every other pod-only setting; before, a config
+    /// with `feature.env.override` started without a word and the user assumed the env was
+    /// carried. A `configmap` param without a locator passes the target pod check, but the
+    /// operator refuses it after the session exists when the profile's `sourceConfigMap` is a
+    /// pod volume, so the check warns that it depends on the profile.
+    #[test]
+    fn targetless_preview_warns_about_env_labels_and_profile_configmaps() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "env": { "override": { "DATABASE_URL": "postgres://branch/app" } },
+                    "preview": { "labels": { "include": ["app"] } },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "params": {
+                            "host": { "key": "host" },
+                            "password": { "secret": "pg", "key": "password" }
+                        } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify_for_targetless_preview(&mut context)
+            .expect("env, labels and a profile ConfigMap are only warned about");
+
+        let warnings = context.into_warnings();
+        for field in ["feature.env", "feature.preview.labels"] {
+            assert!(
+                warnings
+                    .iter()
+                    .any(|warning| warning.contains(&format!("`{field}` is ignored"))),
+                "no warning for {field}: {warnings:?}"
+            );
+        }
+        assert!(
+            warnings.iter().any(|warning| {
+                warning.contains("`feature.db_branches[0]`")
+                    && warning.contains("branch profile's `sourceConfigMap`")
+            }),
+            "no warning for the profile ConfigMap: {warnings:?}"
+        );
+    }
+
+    /// A branch-only preview with `incoming: steal` and no filter sends no incoming at all, so
+    /// the "using default http header filter" warning would contradict the "`feature.network.incoming`
+    /// is ignored" one the start check adds right after it.
+    #[test]
+    fn branch_only_preview_does_not_warn_about_the_default_header_filter() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "network": { "incoming": "steal" },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify_for_preview_env(&mut context)
+            .expect("a branch-only preview never sends incoming, so steal is not refused");
+
+        let warnings = context.into_warnings();
+        assert!(
+            warnings
+                .iter()
+                .all(|warning| !warning.contains("default http header filter")),
+            "a filter nothing uses was warned about: {warnings:?}"
         );
     }
 
