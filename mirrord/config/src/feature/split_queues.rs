@@ -939,7 +939,7 @@ impl KafkaPayloadProtobuf {
                     queue_name,
                     schema_file: schema_file.to_owned(),
                     error: error.to_string(),
-                    include_directories: includes,
+                    include_directories: includes.into_boxed_slice(),
                 }
             } else {
                 QueueSplittingVerificationError::ProtobufCompile {
@@ -1030,7 +1030,9 @@ pub enum QueueSplittingVerificationError {
         schema_file: PathBuf,
         error: String,
         /// The absolute paths of the directories imports were looked up in, in order.
-        include_directories: Vec<PathBuf>,
+        // A boxed slice rather than a `Vec`, because on Windows, where `PathBuf` is larger, a
+        // `Vec` makes `ConfigError` so large that clippy complains when it's used in `Err`.
+        include_directories: Box<[PathBuf]>,
     },
     #[error(
         "{queue_name}.payload_protobuf: failed to compile `{schema_file}`: {errors}. Check that \
