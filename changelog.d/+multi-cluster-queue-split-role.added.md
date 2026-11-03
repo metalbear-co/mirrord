@@ -1,0 +1,1 @@
+Add the `MultiClusterQueueSplitRole` operator feature: an operator advertising it understands the queue split role (consumer or bystander) a multi-cluster primary sends when a `MirrordSplitConfig` names a `consumerCluster`.
