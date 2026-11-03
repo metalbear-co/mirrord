@@ -769,11 +769,19 @@ impl DatabaseBranchesConfig {
                 // the rest of the copy config.
                 DatabaseBranchConfig::Mysql(cfg) => {
                     branch.verify_shared()?;
-                    verify_exclude_tables(cfg.copy.exclude_tables(), cfg.copy.tables())?;
+                    verify_exclude_tables(
+                        branch.copy_mode(),
+                        cfg.copy.exclude_tables(),
+                        cfg.copy.tables(),
+                    )?;
                 }
                 DatabaseBranchConfig::Mariadb(cfg) => {
                     branch.verify_shared()?;
-                    verify_exclude_tables(cfg.copy.exclude_tables(), cfg.copy.tables())?;
+                    verify_exclude_tables(
+                        branch.copy_mode(),
+                        cfg.copy.exclude_tables(),
+                        cfg.copy.tables(),
+                    )?;
                 }
                 // Same for turbopuffer's namespace/api_key/region params.
                 DatabaseBranchConfig::Turbopuffer(cfg) => cfg.verify()?,
@@ -790,10 +798,17 @@ impl DatabaseBranchesConfig {
 /// both filtered through `tables` and left out. Patterns are matched against the `tables` keys
 /// the way the operator matches them against the source tables: `*` any run of characters, `?`
 /// one character, case-insensitive.
+///
+/// The match-all check only applies to the modes that copy tables (`schema`, `all`): `empty`
+/// copies nothing beyond the filtered `tables`, which the overlap check already guards, so a
+/// match-all entry there is harmless.
 fn verify_exclude_tables(
+    mode: Option<BranchCopyMode>,
     exclude_tables: &[String],
     tables: Option<&BTreeMap<String, BranchItemCopyConfig>>,
 ) -> Result<(), ConfigError> {
+    let copies_tables = mode.is_some_and(|mode| mode != BranchCopyMode::Empty);
+
     for pattern in exclude_tables {
         if pattern.is_empty() {
             return Err(ConfigError::Conflict(
@@ -803,7 +818,7 @@ fn verify_exclude_tables(
             ));
         }
 
-        if pattern.chars().all(|c| c == '*') {
+        if copies_tables && matches_every_table(pattern) {
             return Err(ConfigError::Conflict(format!(
                 "`feature.db_branches[].copy.exclude_tables` has the entry `{pattern}`, which \
                  matches every table, so the copy would copy nothing; narrow it to the tables to \
@@ -826,6 +841,13 @@ fn verify_exclude_tables(
     }
 
     Ok(())
+}
+
+/// Whether a `*`/`?` pattern matches every table name. Any mix of the two wildcards with at least
+/// one `*` does (`*`, `**`, `*?`, `?*`, `*?*`); `?` alone only matches names of that exact
+/// length, so `??` does not count.
+fn matches_every_table(pattern: &str) -> bool {
+    pattern.contains('*') && pattern.chars().all(|c| c == '*' || c == '?')
 }
 
 /// Engine-agnostic seeding mode of a branch: what a split-config request asks for, and what usage
@@ -3875,26 +3897,50 @@ mod tests {
         .unwrap()
     }
 
-    /// `exclude_tables: ["*"]` leaves out every table, so `schema` and `all` would copy nothing
-    /// and the user would only find out from an empty branch; the config is rejected instead.
+    /// A pattern made only of wildcards with at least one `*` (`*`, `*?`, `?*`, `*?*`) leaves out
+    /// every table, so `schema` and `all` would copy nothing and the user would only find out
+    /// from an empty branch; the config is rejected instead.
     #[rstest]
-    #[case::mysql_star("mysql", "*")]
-    #[case::mysql_double_star("mysql", "**")]
-    #[case::mariadb_star("mariadb", "*")]
+    #[case::mysql_star("mysql", "all", "*")]
+    #[case::mysql_double_star("mysql", "all", "**")]
+    #[case::mysql_star_question("mysql", "all", "*?")]
+    #[case::mysql_question_star("mysql", "schema", "?*")]
+    #[case::mysql_star_question_star("mysql", "schema", "*?*")]
+    #[case::mariadb_star("mariadb", "all", "*")]
     fn exclude_tables_rejects_pattern_matching_every_table(
         #[case] engine: &str,
+        #[case] mode: &str,
         #[case] pattern: &str,
     ) {
-        let error = mysql_family_branches(
-            engine,
-            json!({ "mode": "all", "exclude_tables": [pattern] }),
-        )
-        .verify(&mut config::ConfigContext::default())
-        .expect_err("a match-everything pattern must be rejected");
+        let error =
+            mysql_family_branches(engine, json!({ "mode": mode, "exclude_tables": [pattern] }))
+                .verify(&mut config::ConfigContext::default())
+                .expect_err("a match-everything pattern must be rejected");
         assert!(
             error.to_string().contains("matches every table"),
             "error should say the pattern leaves nothing to copy: {error}"
         );
+    }
+
+    /// `??` only matches two-character names, so it is a narrow exclusion and passes.
+    #[rstest]
+    #[case::mysql("mysql")]
+    #[case::mariadb("mariadb")]
+    fn exclude_tables_accepts_question_marks_only(#[case] engine: &str) {
+        mysql_family_branches(engine, json!({ "mode": "all", "exclude_tables": ["??"] }))
+            .verify(&mut config::ConfigContext::default())
+            .expect("a `?`-only pattern matches names of one length, not every table");
+    }
+
+    /// `empty` copies nothing beyond the filtered `tables`, so a match-all exclusion there is
+    /// harmless and must not be rejected with a hint to switch to the mode already in use.
+    #[rstest]
+    #[case::mysql("mysql")]
+    #[case::mariadb("mariadb")]
+    fn exclude_tables_accepts_pattern_matching_every_table_in_empty_mode(#[case] engine: &str) {
+        mysql_family_branches(engine, json!({ "mode": "empty", "exclude_tables": ["*"] }))
+            .verify(&mut config::ConfigContext::default())
+            .expect("`empty` copies no tables, so a match-all exclusion changes nothing");
     }
 
     /// `exclude_tables: [""]` is a typo with nothing to match; rejecting it beats letting the
