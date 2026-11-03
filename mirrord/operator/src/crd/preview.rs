@@ -459,6 +459,18 @@ pub struct PreviewSessionStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub share_host: Option<String>,
 
+    /// Port that `mirrord-share-ingress` forwards `share_host` requests to, on the Service
+    /// named after the target workload.
+    ///
+    /// The session steals on container ports, which the Service may expose under different
+    /// ports (`80` to a container's `8080`), so the operator resolves the Service port whose
+    /// `targetPort` is a stolen port, or the stolen port itself for a headless Service, each time
+    /// it starts the session's task. A task that finds no such port keeps the one an earlier task
+    /// found. `None` without a `share_host`, when that Service never had such a port, or when
+    /// running against an older operator that does not set this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_port: Option<u16>,
+
     /// Timestamp of when the session last entered the `Idle` phase.
     ///
     /// Set when the preview pods are scaled to zero due to inactivity (or the session started
@@ -678,6 +690,9 @@ pub struct PreviewStatusUpdate {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub share_host: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub share_port: Option<u16>,
 
     /// Double `Option` so the merge patch can distinguish "leave unchanged" (outer `None`,
     /// skipped) from "clear the field" (`Some(None)`, serialized as an explicit `null`).
