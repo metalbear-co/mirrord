@@ -140,14 +140,11 @@ pub async fn create_mysql_branches<P: Progress>(
         if let Some(status) = &db.status
             && status.phase == BranchDatabasePhase::Failed
         {
-            let error_msg = status
-                .error
-                .clone()
-                .unwrap_or_else(|| "Branch database creation failed".to_owned());
-            return Err(OperatorApiError::BranchCreationFailed {
-                operation: OperatorOperation::MysqlBranching,
-                message: error_msg,
-            });
+            return Err(branch_failed_error(
+                OperatorOperation::MysqlBranching,
+                &db,
+                status.error.as_deref(),
+            ));
         }
     }
 
@@ -303,14 +300,11 @@ pub async fn create_pg_branches<P: Progress>(
         if let Some(status) = &db.status
             && status.phase == BranchDatabasePhase::Failed
         {
-            let error_msg = status
-                .error
-                .clone()
-                .unwrap_or_else(|| "Branch database creation failed".to_owned());
-            return Err(OperatorApiError::BranchCreationFailed {
-                operation: OperatorOperation::PgBranching,
-                message: error_msg,
-            });
+            return Err(branch_failed_error(
+                OperatorOperation::PgBranching,
+                &db,
+                status.error.as_deref(),
+            ));
         }
     }
 
@@ -465,14 +459,11 @@ pub async fn create_mongodb_branches<P: Progress>(
         if let Some(status) = &db.status
             && status.phase == BranchDatabasePhase::Failed
         {
-            let error_msg = status
-                .error
-                .clone()
-                .unwrap_or_else(|| "Branch database creation failed".to_owned());
-            return Err(OperatorApiError::BranchCreationFailed {
-                operation: OperatorOperation::MongodbBranching,
-                message: error_msg,
-            });
+            return Err(branch_failed_error(
+                OperatorOperation::MongodbBranching,
+                &db,
+                status.error.as_deref(),
+            ));
         }
     }
 
@@ -1231,14 +1222,11 @@ pub async fn create_branches<P: Progress>(
         if let Some(status) = &db.status
             && status.phase == BranchDatabasePhase::Failed
         {
-            let error_msg = status
-                .error
-                .clone()
-                .unwrap_or_else(|| "Branch database creation failed".to_owned());
-            return Err(OperatorApiError::BranchCreationFailed {
-                operation: OperatorOperation::DbBranching,
-                message: error_msg,
-            });
+            return Err(branch_failed_error(
+                OperatorOperation::DbBranching,
+                &db,
+                status.error.as_deref(),
+            ));
         }
 
         let name = db.name_any();
@@ -1390,6 +1378,40 @@ pub async fn list_existing_branches<P: Progress>(
     Ok(existing)
 }
 
+/// The error for a branch the operator marked `Failed`.
+///
+/// A failed branch stays in the cluster under the name a retry would take, so the next session
+/// collides with it and reports the same failure instead of starting fresh. The way out is to
+/// delete it, and the error says how, like the check on branches that failed before the session.
+pub(crate) fn branch_failed_error<K: ResourceExt>(
+    operation: OperatorOperation,
+    branch: &K,
+    reason: Option<&str>,
+) -> OperatorApiError {
+    let name = branch.name_any();
+    let reason = reason.unwrap_or("no failure reason recorded");
+    OperatorApiError::BranchCreationFailed {
+        operation,
+        message: format!(
+            "branch database `{name}` failed: {reason}. {}",
+            destroy_branch_hint(branch.namespace().as_deref(), &name)
+        ),
+    }
+}
+
+/// The `mirrord db-branches destroy` invocation that removes a branch, for errors a user fixes
+/// by deleting it. Without a namespace the command falls back to the kubeconfig's, so the flag
+/// is only written when the branch came with one.
+pub(crate) fn destroy_branch_hint(namespace: Option<&str>, name: &str) -> String {
+    let namespace_flag = namespace
+        .map(|namespace| format!("-n {namespace} "))
+        .unwrap_or_default();
+    format!(
+        "Delete it with `mirrord db-branches {namespace_flag}destroy {name}` and start the \
+         session again."
+    )
+}
+
 /// Wait for pending branch databases to become Ready or Failed.
 ///
 /// Returns the branches that reached Ready. Returns an error if any branch failed.
@@ -1436,14 +1458,11 @@ pub async fn wait_for_pending_branches<P: Progress>(
         if let Some(status) = &db.status
             && status.phase == BranchDatabasePhase::Failed
         {
-            let error_msg = status
-                .error
-                .clone()
-                .unwrap_or_else(|| "Branch database creation failed".to_owned());
-            return Err(OperatorApiError::BranchCreationFailed {
-                operation: OperatorOperation::DbBranching,
-                message: error_msg,
-            });
+            return Err(branch_failed_error(
+                OperatorOperation::DbBranching,
+                &db,
+                status.error.as_deref(),
+            ));
         }
 
         ready_branches.insert(name.clone(), db);
@@ -1921,18 +1940,18 @@ pub async fn ensure_branch_migrations<P: Progress>(
             message: format!("failed waiting for branch migrations: {error}"),
         })?;
 
-    if let Some(run) = db
-        .as_ref()
-        .and_then(|db| db.status.as_ref()?.migrations.as_ref())
+    if let Some(db) = db.as_ref()
+        && let Some(run) = db
+            .status
+            .as_ref()
+            .and_then(|status| status.migrations.as_ref())
         && run.phase == MigrationPhase::Failed
     {
-        return Err(OperatorApiError::BranchCreationFailed {
-            operation: OperatorOperation::DbBranching,
-            message: run
-                .error
-                .clone()
-                .unwrap_or_else(|| "branch migrations failed".to_owned()),
-        });
+        return Err(branch_failed_error(
+            OperatorOperation::DbBranching,
+            db,
+            Some(run.error.as_deref().unwrap_or("branch migrations failed")),
+        ));
     }
 
     subtask.success(Some("branch migrations applied"));
@@ -2673,11 +2692,11 @@ mod test {
     use super::{
         BranchDatabase, BranchDatabaseId, ConfigConnectionSource, ConnectionParamsSpec,
         CrdConnectionSource, DatabaseBranchesConfig, MigrationsSpec, ObjectMeta, OperatorApiError,
-        SOURCE_COMPATIBLE_CONDITION, UnifiedBranchParams, UnifiedDatabaseBranchParams,
-        build_migration_archive, classify_existing_branches, convert_connection_source,
-        create_branches, extract_literal_values, read_migrations,
-        replace_spec_values_with_secret_refs, replace_values_with_secret_refs, resolve_branch_id,
-        reused_branch_connection_sources,
+        OperatorOperation, SOURCE_COMPATIBLE_CONDITION, UnifiedBranchParams,
+        UnifiedDatabaseBranchParams, branch_failed_error, build_migration_archive,
+        classify_existing_branches, convert_connection_source, create_branches,
+        extract_literal_values, read_migrations, replace_spec_values_with_secret_refs,
+        replace_values_with_secret_refs, resolve_branch_id, reused_branch_connection_sources,
     };
     use crate::crd::{
         db_branching::{
@@ -2858,6 +2877,35 @@ mod test {
             ["init", "no-status", "pending", "unknown"]
         );
         assert_eq!(ids(&existing.failed), ["failed"]);
+    }
+
+    /// A branch the operator failed keeps its name, so the next session collides with it and
+    /// reports the same failure. The error the user reads therefore leads with the operator's
+    /// reason and ends with the command that removes the branch, namespace included.
+    #[test]
+    fn failed_branch_error_names_the_destroy_command() {
+        let (name, mut branch) = found_branch("orders", Some(BranchDatabasePhase::Failed));
+        branch.metadata.namespace = Some("staging".to_owned());
+
+        let error = branch_failed_error(
+            OperatorOperation::DbBranching,
+            &branch,
+            Some("ImagePullBackOff: image not found"),
+        );
+
+        let OperatorApiError::BranchCreationFailed { message, .. } = error else {
+            panic!("expected BranchCreationFailed, got {error:?}");
+        };
+        assert!(
+            message.starts_with(&format!(
+                "branch database `{name}` failed: ImagePullBackOff: image not found."
+            )),
+            "{message}"
+        );
+        assert!(
+            message.contains(&format!("`mirrord db-branches -n staging destroy {name}`")),
+            "{message}"
+        );
     }
 
     /// The lookup keeps the key the caller asked with, so the caller can subtract the result
