@@ -926,6 +926,11 @@ pub enum NewOperatorFeature {
     /// whether a primary streams the whole setup or just its own cluster.
     MultiClusterSubscribe,
 
+    /// This primary is management-only: it links the workload clusters but runs none itself, so a
+    /// session forced onto it (`multi_cluster: false`, a label target) has nothing to run against.
+    /// Lets the CLI refuse such a session with the cause instead of failing on target resolution.
+    MultiClusterManagementOnly,
+
     ServerlessSessionsManager,
 
     /// Reporting is available on Free so locally rejected demand can be observed without granting
@@ -1055,9 +1060,10 @@ impl NewOperatorFeature {
             | Self::PreviewCodeSync
             | Self::PreviewSpecResources => Some("feature.preview"),
             Self::LabelTargeting | Self::ServerlessSessionsManager => Some("target.path"),
-            Self::MultiClusterPrimary | Self::MultiClusterRemote | Self::MultiClusterSubscribe => {
-                Some("multi_cluster")
-            }
+            Self::MultiClusterPrimary
+            | Self::MultiClusterRemote
+            | Self::MultiClusterSubscribe
+            | Self::MultiClusterManagementOnly => Some("multi_cluster"),
             Self::ProxyApi
             | Self::SessionManagement
             | Self::LayerReconnect
@@ -1158,6 +1164,9 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
             NewOperatorFeature::MultiClusterSubscribe => "multi-cluster subscribe",
+            NewOperatorFeature::MultiClusterManagementOnly => {
+                "multi-cluster management-only primary"
+            }
             NewOperatorFeature::QueueSplittingWithComposedFilters => {
                 "queue splitting with composable message filters"
             }
@@ -1279,6 +1288,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::MultiClusterRemote
             | NewOperatorFeature::MultiClusterPrimary
             | NewOperatorFeature::MultiClusterSubscribe
+            | NewOperatorFeature::MultiClusterManagementOnly
             | NewOperatorFeature::UnifiedBranchDbCrd
             | NewOperatorFeature::ConnectParamsInHeader
             | NewOperatorFeature::CopyTargetFilterIsolation
