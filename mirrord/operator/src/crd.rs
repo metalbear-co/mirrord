@@ -986,6 +986,11 @@ pub enum NewOperatorFeature {
     /// run an empty image.
     PreviewCodeSync,
 
+    /// Supports `mirrord exec --share`: the operator registers a share link for the session and
+    /// keeps it while the session's connection lives and the session steals the port the link
+    /// opens.
+    LocalShare,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -1000,6 +1005,7 @@ impl NewOperatorFeature {
     /// their display name.
     pub fn feature_config_key(self) -> Option<&'static str> {
         match self {
+            Self::LocalShare => Some("share"),
             Self::CopyTarget
             | Self::CopyTargetExcludeContainers
             | Self::CopyTargetFilterIsolation => Some("feature.copy_target"),
@@ -1077,6 +1083,7 @@ impl NewOperatorFeature {
 impl Display for NewOperatorFeature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let name = match self {
+            NewOperatorFeature::LocalShare => "share links",
             NewOperatorFeature::ProxyApi => "proxy API",
             NewOperatorFeature::CopyTarget => "copy target",
             NewOperatorFeature::CopyTargetExcludeContainers => "copy target excluded containers",
@@ -1222,6 +1229,7 @@ impl NewOperatorFeature {
     /// cluster list and default cluster, so a lone `multiCluster.enabled` fails startup).
     pub fn helm_values(&self) -> &'static [&'static str] {
         match self {
+            NewOperatorFeature::LocalShare => &[],
             NewOperatorFeature::PreviewEnv
             | NewOperatorFeature::PreviewTlsDelivery
             | NewOperatorFeature::PreviewTlsClientAuthFromTarget

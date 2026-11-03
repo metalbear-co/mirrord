@@ -5765,6 +5765,7 @@ dependencies = [
  "mirrord-macros",
  "mirrord-operator-websocket",
  "mirrord-progress",
+ "mirrord-protocol",
  "rand 0.10.2",
  "rstest",
  "schemars 1.2.2",

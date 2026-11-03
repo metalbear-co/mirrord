@@ -134,6 +134,11 @@ pub enum OperatorApiError {
     #[error("unsupported target configuration: {0}")]
     UnsupportedTargetConfig(String),
 
+    /// A session started with `share` can't run against this operator or target. The message is
+    /// written for the user, so it is shown as it is.
+    #[error("{0}")]
+    LocalShare(String),
+
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),
 

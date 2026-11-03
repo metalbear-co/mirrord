@@ -55,6 +55,7 @@ use mirrord_kube::{
 };
 use mirrord_operator_websocket::{connection::OperatorConnection, upgrade};
 use mirrord_progress::Progress;
+use mirrord_protocol::local_share::LOCAL_SHARE_VERSION;
 use preview_sync::PreviewSyncConnection;
 use semver::Version;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -96,6 +97,7 @@ use crate::{
         },
         session::{KubeResourceTarget, SessionCiInfo, SessionTarget, UpSessionInfo},
     },
+    share::LocalShareRequest,
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CONNECT_PARAMS_HEADER,
         FeatureGateHitRequest, MIRRORD_CLI_VERSION_HEADER, PaidFeatureGate, SESSION_ID_HEADER,
@@ -1867,6 +1869,26 @@ where
         layer_config: &LayerConfig,
         auto_queue_splitting: bool,
     ) -> OperatorApiResult<()> {
+        if layer_config.share {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::LocalShare)?;
+            if self
+                .operator
+                .spec
+                .protocol_version
+                .as_ref()
+                .and_then(|version| version.parse::<semver::Version>().ok())
+                .is_none_or(|version| LOCAL_SHARE_VERSION.matches(&version).not())
+            {
+                // The requirement is a single `>=` comparator, so what follows it is the oldest
+                // version that works.
+                return Err(OperatorApiError::LocalShare(format!(
+                    "Share links need an operator with protocol version {} or newer. Upgrade the operator.",
+                    LOCAL_SHARE_VERSION.to_string().trim_start_matches(">=")
+                )));
+            }
+        }
         if matches!(layer_config.target.path, Some(Target::Label(_))) {
             self.operator
                 .spec
@@ -2050,6 +2072,29 @@ pub fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOp
         | DatabaseBranchConfig::Clickhouse(_)
         | DatabaseBranchConfig::Redis(_) => None,
     }
+}
+
+/// Why a session started with `share` can't target a Job or a CronJob: mirrord would copy the
+/// target, and the operator doesn't share a copied target.
+const SHARE_JOB_TARGET_ERROR: &str = "Share links don't support Job or CronJob targets yet, because mirrord runs those targets in a copy of their pod (copy_target).";
+
+/// Why a session started with `share` can't target a Deployment that should have pods but has
+/// none available: mirrord would copy the target, and the operator doesn't share a copied target.
+/// The deployment is assumed to be in a bad state only for a while, so a retry can work.
+const SHARE_EMPTY_DEPLOYMENT_ERROR: &str = "The target deployment has no available pod, so mirrord would run the session in a copy of the target (copy_target), and share links aren't supported with copy_target yet. Retry once a pod of the deployment is ready.";
+
+/// Why a session started with `share` can't target a Deployment scaled to zero replicas: mirrord
+/// would copy the target, and the operator doesn't share a copied target. Unlike
+/// [`SHARE_EMPTY_DEPLOYMENT_ERROR`], no pod is on its way, so a retry works only after someone
+/// scales the deployment up.
+const SHARE_SCALED_TO_ZERO_ERROR: &str = "The target deployment is scaled to zero replicas, so mirrord would run the session in a copy of the target (copy_target), and share links aren't supported with copy_target yet. Retry once the deployment is scaled up and a pod of it is ready.";
+
+/// Why a session started with `share` can't split `broker` queues on an operator that splits
+/// them only in a copy of the target.
+fn share_splitting_error(broker: &str) -> String {
+    format!(
+        "Share links don't support {broker} queue splitting with this operator, because it splits queues only in a copy of the target (copy_target), and share links aren't supported with copy_target yet. Upgrade the operator to split {broker} queues without a copy."
+    )
 }
 
 /// Warning shown when [`disable_unsupported_auto_splits`] removes the RabbitMQ splits from an
@@ -2276,6 +2321,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_db_names.clone(),
                 session_ci_info.clone(),
                 layer_config.key.as_str(),
+                LocalShareRequest::from_config(layer_config),
             );
             let session = self.make_operator_session(
                 id,
@@ -2478,6 +2524,7 @@ impl OperatorApi<PreparedClientCert> {
             branch_db_names,
             session_ci_info,
             layer_config.key.as_str(),
+            LocalShareRequest::from_config(layer_config),
         );
         let session_id = copied
             .status
@@ -2567,7 +2614,7 @@ impl OperatorApi<PreparedClientCert> {
             "Connecting to multi-cluster primary - workload cluster will resolve target"
         );
 
-        let do_copy_target = self.should_copy_target_mc(layer_config, auto_queue_splitting);
+        let do_copy_target = self.should_copy_target_mc(layer_config, auto_queue_splitting)?;
 
         let use_proxy_api = self
             .operator
@@ -2640,6 +2687,7 @@ impl OperatorApi<PreparedClientCert> {
                 branch_db_names.clone(),
                 session_ci_info.clone(),
                 layer_config.key.as_str(),
+                LocalShareRequest::from_config(layer_config),
             );
 
             self.make_operator_session(
@@ -2715,6 +2763,11 @@ impl OperatorApi<PreparedClientCert> {
     /// Returns whether the `copy_target` feature should be used,
     /// with an optional reason (in case the feature is not explicitly enabled in the
     /// [`LayerConfig`]).
+    ///
+    /// A session started with `share` gets an error instead of an automatic copy_target: the
+    /// operator refuses to share a copied target, and the user must learn the cause that turned
+    /// copy_target on, before mirrord creates the copy. An explicit copy_target is refused
+    /// earlier, by [`LayerConfig::verify_share`].
     async fn should_copy_target<P: Progress>(
         &self,
         config: &LayerConfig,
@@ -2733,6 +2786,11 @@ impl OperatorApi<PreparedClientCert> {
         ) {
             // Job and CronJob targets have no long-running pod for the agent to attach to,
             // so they can only be reached through a copied pod.
+            if config.share {
+                return Err(OperatorApiError::LocalShare(
+                    SHARE_JOB_TARGET_ERROR.to_owned(),
+                ));
+            }
             return Ok((true, Some("a Job or CronJob target")));
         }
 
@@ -2751,6 +2809,9 @@ impl OperatorApi<PreparedClientCert> {
                     .not()
             {
                 // Operator does not support SQS splitting without copying the target.
+                if config.share {
+                    return Err(OperatorApiError::LocalShare(share_splitting_error("SQS")));
+                }
                 return Ok((true, Some("SQS splitting")));
             }
 
@@ -2768,6 +2829,9 @@ impl OperatorApi<PreparedClientCert> {
                     .not()
             {
                 // Operator does not support Kafka splitting without copying the target.
+                if config.share {
+                    return Err(OperatorApiError::LocalShare(share_splitting_error("Kafka")));
+                }
                 return Ok((true, Some("Kafka splitting")));
             }
         }
@@ -2796,6 +2860,11 @@ impl OperatorApi<PreparedClientCert> {
             // Is configured to have replicas.
             // We assume that the deployment is in bad state only temporarily,
             // and enable copy_target to improve UX.
+            if config.share {
+                return Err(OperatorApiError::LocalShare(
+                    SHARE_EMPTY_DEPLOYMENT_ERROR.to_owned(),
+                ));
+            }
             return Ok((true, Some("empty deployment")));
         }
 
@@ -2849,7 +2918,9 @@ impl OperatorApi<PreparedClientCert> {
             // It might be that rollouts are not even installed in the cluster.
             // Depending on how hardened the cluster is, we might get one of these error codes.
             Err(kube::Error::Api(response)) if [404, 403, 401].contains(&response.code) => {}
-            Err(error) => {
+            // A shared session is refused below without a copy, so saying that it will use
+            // copy_target would be wrong.
+            Err(error) if config.share.not() => {
                 tracing::warn!(
                     deployment = ?resource,
                     %error,
@@ -2861,8 +2932,14 @@ impl OperatorApi<PreparedClientCert> {
                     This session will use the copy_target feature. Error: {error}",
                 ));
             }
+            Err(_) => {}
         }
 
+        if config.share {
+            return Err(OperatorApiError::LocalShare(
+                SHARE_SCALED_TO_ZERO_ERROR.to_owned(),
+            ));
+        }
         Ok((true, Some("empty deployment")))
     }
 
@@ -2870,9 +2947,16 @@ impl OperatorApi<PreparedClientCert> {
     /// replica count because the target lives on a remote cluster. Instead we
     /// only look at things we know on the cluster we are conencted to:
     /// explicit opt-in and queue-splitting config.
-    fn should_copy_target_mc(&self, config: &LayerConfig, auto_queue_splitting: bool) -> bool {
+    ///
+    /// Like [`OperatorApi::should_copy_target`], a session started with `share` gets an error
+    /// instead of an automatic copy_target, before the copy is made.
+    fn should_copy_target_mc(
+        &self,
+        config: &LayerConfig,
+        auto_queue_splitting: bool,
+    ) -> OperatorApiResult<bool> {
         if config.feature.copy_target.enabled {
-            return true;
+            return Ok(true);
         }
 
         // Job and CronJob targets can only be reached through a copied pod. The target type is
@@ -2883,7 +2967,12 @@ impl OperatorApi<PreparedClientCert> {
             .as_ref()
             .is_some_and(Target::requires_copy)
         {
-            return true;
+            if config.share {
+                return Err(OperatorApiError::LocalShare(
+                    SHARE_JOB_TARGET_ERROR.to_owned(),
+                ));
+            }
+            return Ok(true);
         }
 
         if auto_queue_splitting.not() {
@@ -2900,7 +2989,10 @@ impl OperatorApi<PreparedClientCert> {
                     .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
                     .not()
             {
-                return true;
+                if config.share {
+                    return Err(OperatorApiError::LocalShare(share_splitting_error("SQS")));
+                }
+                return Ok(true);
             }
 
             if config
@@ -2916,11 +3008,14 @@ impl OperatorApi<PreparedClientCert> {
                     .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
                     .not()
             {
-                return true;
+                if config.share {
+                    return Err(OperatorApiError::LocalShare(share_splitting_error("Kafka")));
+                }
+                return Ok(true);
             }
         }
 
-        false
+        Ok(false)
     }
 
     /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
@@ -3059,6 +3154,7 @@ impl OperatorApi<PreparedClientCert> {
         mut branch_db_names: BranchDbNames,
         session_ci_info: Option<SessionCiInfo>,
         key: &str,
+        local_share: Option<LocalShareRequest>,
     ) -> String {
         let unified_branch_db_names = branch_db_names.unified();
         let name = crd
@@ -3076,6 +3172,7 @@ impl OperatorApi<PreparedClientCert> {
         let url_path = CopyTargetCrd::url_path(&(), Some(namespace));
 
         let connect_params = ConnectParams {
+            local_share,
             connect: true,
             on_concurrent_steal: None,
             profile,
@@ -3943,6 +4040,7 @@ mod test {
             .collect();
 
         let params = ConnectParams {
+            local_share: None,
             connect: true,
             on_concurrent_steal: Some(concurrent_steal),
             profile,
@@ -4089,6 +4187,7 @@ mod test {
         #[case] expected: &str,
     ) {
         let params = ConnectParams {
+            local_share: None,
             connect: true,
             on_concurrent_steal: Some(ConcurrentSteal::Abort),
             profile: None,

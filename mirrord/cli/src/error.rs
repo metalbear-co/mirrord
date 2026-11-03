@@ -260,8 +260,21 @@ pub(crate) enum OperatorSetupError {
     Deleted,
 }
 
+/// Why a session started with `share` can't run. Each message is written for the user, so it is
+/// shown as it is.
+#[derive(Debug, Error, Diagnostic)]
+pub(crate) enum LocalShareError {
+    /// The operator, or the target that the client resolved through it, can't serve a shared
+    /// session.
+    #[error("{0}")]
+    Operator(String),
+}
+
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum CliError {
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    LocalShare(#[from] LocalShareError),
     /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
     /// for more granular error detection.
     #[error("Failed to create Kubernetes API client: {0}")]
@@ -1372,6 +1385,7 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorTargetResolution(KubeApiError::MalformedResource(msg))
             }
             OperatorApiError::UnsupportedTargetConfig(msg) => Self::UnsupportedTargetConfig(msg),
+            OperatorApiError::LocalShare(msg) => Self::LocalShare(LocalShareError::Operator(msg)),
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }
