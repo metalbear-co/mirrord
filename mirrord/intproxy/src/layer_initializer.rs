@@ -47,7 +47,7 @@ pub(crate) struct LayerInitializerShutdown {
 
 #[derive(Debug)]
 struct InitializedLayer {
-    layer: NewLayer,
+    message: ProxyMessage,
     response_error: Option<CodecError>,
 }
 
@@ -103,13 +103,32 @@ impl LayerInitializer {
             _ = shutdown.cancelled() => return Ok(None),
         };
 
+        Self::handle_session_message(decoder, msg, id, shutdown).await
+    }
+
+    async fn handle_session_message(
+        decoder: AsyncDecoder<LocalMessage<LayerToProxyMessage>, TcpStream>,
+        msg: LocalMessage<LayerToProxyMessage>,
+        id: LayerId,
+        shutdown: &CancellationToken,
+    ) -> Result<Option<InitializedLayer>, LayerInitializerError> {
+        let request = match msg.inner {
+            LayerToProxyMessage::NewSession(request) => request,
+            LayerToProxyMessage::OpenShareControl { layer_id } => {
+                return Ok(Some(InitializedLayer {
+                    message: ProxyMessage::NewShareControl(crate::main_tasks::NewShareControl {
+                        stream: decoder.into_inner(),
+                        layer_id,
+                    }),
+                    response_error: None,
+                }));
+            }
+            other => return Err(LayerInitializerError::UnexpectedMessage(other)),
+        };
         let NewSessionRequest {
             parent_layer,
             process_info,
-        } = match msg.inner {
-            LayerToProxyMessage::NewSession(request) => request,
-            other => return Err(LayerInitializerError::UnexpectedMessage(other)),
-        };
+        } = request;
         if process_info.pid <= 0 {
             return Err(LayerInitializerError::InvalidProcessId(process_info.pid));
         }
@@ -127,12 +146,12 @@ impl LayerInitializer {
         };
 
         Ok(Some(InitializedLayer {
-            layer: NewLayer {
+            message: ProxyMessage::NewLayer(NewLayer {
                 stream: encoder.into_inner(),
                 id,
                 parent_id: parent_layer,
                 process_info,
-            },
+            }),
             response_error,
         }))
     }
@@ -202,7 +221,7 @@ impl BackgroundTask for LayerInitializer {
                         Ok(Some(initialized)) => {
                             // A decoded PID must cross the output channel before quiescence is
                             // acknowledged, even if the response failed or shutdown arrived.
-                            message_bus.send(initialized.layer).await;
+                            message_bus.send(initialized.message).await;
                             if let Some(error) = initialized.response_error {
                                 tracing::warn!(%error, %layer_address, "Failed to send the handshake response to a layer connection");
                             }

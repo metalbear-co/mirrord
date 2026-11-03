@@ -25,7 +25,7 @@ use mirrord_config::{
 #[cfg(windows)]
 use mirrord_config::{MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
-use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_progress::{MIRRORD_SHARE_PROGRESS_ENV, Progress, ProgressTracker};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use mirrord_protocol_api::client::{MirrordClient, MirrordClientRetry};
 #[cfg(target_os = "macos")]
@@ -280,6 +280,15 @@ impl MirrordExecution {
                         .await?
                 }
             };
+
+        if config.share
+            && let Some(mode) = progress.line_mode()
+        {
+            env_vars.insert(
+                MIRRORD_SHARE_PROGRESS_ENV.to_owned(),
+                mode.as_str().to_owned(),
+            );
+        }
 
         #[cfg(target_os = "macos")]
         {

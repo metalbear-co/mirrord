@@ -10,8 +10,11 @@ pub mod logging;
 pub mod macros;
 pub mod mutex;
 pub mod process;
+#[cfg(unix)]
+pub mod program_stdout;
 pub mod proxy_connection;
 pub mod setup;
+pub mod share;
 pub mod socket;
 pub mod trace_only;
 

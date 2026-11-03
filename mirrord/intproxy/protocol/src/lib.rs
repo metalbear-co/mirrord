@@ -1,6 +1,13 @@
 //! Protocol used in communication between the layer and the internal proxy.
 //! This protocol does not have to be backwards compatible and can be changed freely, as the
 //! internal proxy and the layer are shipped together in a single binary.
+//!
+//! A session started with `share` gives each registered layer a second connection, the share
+//! control connection, opened with [`LayerToProxyMessage::OpenShareControl`]. The internal proxy
+//! runs detached from the user's terminal, so it sends what the user must know about the share
+//! link over this connection to the application process, which prints it. The connection belongs
+//! to one process and closes when that process exits, even when a forked child inherits a copy of
+//! the parent's request connection. Only the internal proxy sends on it.
 
 use std::{
     collections::HashMap,
@@ -52,6 +59,9 @@ pub enum LayerToProxyMessage {
     Incoming(IncomingRequest),
     /// Fetch environment variables from the target.
     GetEnv(GetEnvVarsRequest),
+    /// Opens the share control connection of the registered layer `layer_id`, on a connection of
+    /// its own, without registering another layer.
+    OpenShareControl { layer_id: LayerId },
 }
 
 /// Layer process information
@@ -330,6 +340,8 @@ pub enum ProxyToLayerMessage {
         agent_reported: bool,
         message: String,
     },
+    /// A message on the share control connection.
+    ShareControl(ShareControlEvent),
 }
 
 /// A response to layer's [`IncomingRequest`].
@@ -666,3 +678,31 @@ impl_request!(
     req_path = LayerToProxyMessage::File => FileRequest::Fchmod,
     res_path = ProxyToLayerMessage::File => FileResponse::Fchmod,
 );
+
+/// What the internal proxy tells the layer over the share control connection.
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
+pub enum ShareControlEvent {
+    /// The internal proxy attached the control connection to the layer. The layer waits for this
+    /// before the application continues, so the application can't listen on a shared port before
+    /// the internal proxy can reach it to print the link.
+    Registered,
+    /// The application prints this, once.
+    Report(ShareReport),
+}
+
+/// What the application prints about the share link. The internal proxy sends each one to a
+/// single process of the session.
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
+pub enum ShareReport {
+    /// The operator registered the link, and share-ingress routes it only once the application
+    /// listens on `port`. Without this, an application that listens on another port would get no
+    /// link and no reason.
+    Waiting { port: u16 },
+    /// share-ingress routes `url` to the session.
+    Ready { url: String },
+    /// The application stopped listening on `port`, so the operator removed the link for good,
+    /// while the session keeps running.
+    Ended { port: u16 },
+    /// The link failed, and the session ends. `message` is written for the user.
+    Failed { message: String },
+}

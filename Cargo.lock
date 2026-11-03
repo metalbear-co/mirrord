@@ -5656,6 +5656,7 @@ version = "3.284.0"
 dependencies = [
  "actix-codec",
  "apple-codesign",
+ "fancy-regex 0.14.0",
  "futures",
  "libc",
  "mirrord-command",

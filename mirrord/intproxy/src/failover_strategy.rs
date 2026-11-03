@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
+    ops::Not,
     time::Duration,
 };
 
@@ -28,8 +29,11 @@ use crate::{
     process_termination, quiesce_and_collect_layers,
 };
 
-/// Agent failure retains its pre-existing graceful policy; CI shutdown terminates a registered
-/// PID once so stop never escalates using an ID that may have been reused.
+/// How the intproxy terminates the registered processes when the session ends.
+///
+/// An agent failure terminates them gracefully: SIGTERM, then SIGKILL after a grace period. A CI
+/// shutdown or a failed share link sends each registered PID a single SIGKILL, because a second
+/// signal could reach another process that reused the PID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerminationPolicy {
     AgentFailure,
@@ -196,11 +200,21 @@ impl FailoverStrategy {
             failover.send_error_to_layer(layer_id, message_id).await;
         }
 
+        // A failed share link ends the session at once. The application already had its time to
+        // print why (see `LocalShareState::fail`), and an application that kept running would
+        // keep serving a link that no longer exists. So a share failure skips the agent failure's
+        // grace period and the wait for the layers to exit, and terminates every process once.
+        let share_failure = match &failover.fail_cause {
+            ProxyRuntimeError::LocalShare(reason) => Some(reason.clone()),
+            _ => None,
+        };
+        let terminate_at_once = share_failure.is_some();
+
         // The inherited registrations are already handled on entry. A later registration can
         // reuse their PID, but has a different layer ID and must still be terminated on shutdown.
         let mut terminated_layers = HashSet::new();
         let mut termination_error = None;
-        if !shutdown.is_cancelled() {
+        if terminate_at_once.not() && shutdown.is_cancelled().not() {
             let inherited_pids = failover.connected_processes();
             if !inherited_pids.is_empty() {
                 terminated_layers.extend(failover.connected_layers.keys().copied());
@@ -215,22 +229,25 @@ impl FailoverStrategy {
 
         // A timeout must drain decoded registrations too; otherwise an acknowledged layer could
         // survive just because its message had not yet reached the owner.
-        let exit_result: Option<Result<(), ProxyStartupError>> = loop {
-            idle.observe(failover.has_layer_connections());
+        let exit_result: Option<Result<(), ProxyStartupError>> = match share_failure {
+            Some(reason) => Some(Err(ProxyStartupError::LocalShare(reason))),
+            None => loop {
+                idle.observe(failover.has_layer_connections());
 
-            tokio::select! {
-                biased;
-                _ = shutdown.cancelled() => break None,
-                Some((task_id, task_update)) = failover.background_tasks.next() => {
-                    tracing::trace!(
-                        %task_id,
-                        ?task_update,
-                        "Received a task update",
-                    );
-                    failover.handle_task_update(task_id, task_update).await;
+                tokio::select! {
+                    biased;
+                    _ = shutdown.cancelled() => break None,
+                    Some((task_id, task_update)) = failover.background_tasks.next() => {
+                        tracing::trace!(
+                            %task_id,
+                            ?task_update,
+                            "Received a task update",
+                        );
+                        failover.handle_task_update(task_id, task_update).await;
+                    }
+                    result = idle.expired(failover.any_connection_accepted) => break Some(result),
                 }
-                result = idle.expired(failover.any_connection_accepted) => break Some(result),
-            }
+            },
         };
 
         let mut shutdown_layers = quiesce_and_collect_layers(
@@ -244,7 +261,7 @@ impl FailoverStrategy {
             .retain(|layer_id, _| !terminated_layers.contains(layer_id));
         let pids = shutdown_layers.pids();
         if !pids.is_empty() {
-            let policy = if shutdown.is_cancelled() {
+            let policy = if terminate_at_once || shutdown.is_cancelled() {
                 TerminationPolicy::CiShutdown
             } else {
                 TerminationPolicy::AgentFailure

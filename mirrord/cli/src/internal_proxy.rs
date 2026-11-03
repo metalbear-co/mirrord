@@ -437,7 +437,7 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let res = IntProxy::new_with_connection(
+    let mut proxy = IntProxy::new_with_connection(
         agent_conn,
         listener,
         config.feature.fs.readonly_file_buffer,
@@ -446,7 +446,9 @@ pub(crate) async fn proxy(
             .network
             .incoming
             .tls_delivery
-            .or(config.feature.network.incoming.https_delivery)
+            .as_ref()
+            .or(config.feature.network.incoming.https_delivery.as_ref())
+            .cloned()
             .unwrap_or_default(),
         IntProxyIntervals {
             ping: ping_interval,
@@ -455,14 +457,18 @@ pub(crate) async fn proxy(
         &config.experimental,
         monitor_tx,
         chaos_rx,
-    )
-    .run_with_shutdown(
-        first_connection_timeout,
-        consecutive_connection_timeout,
-        shutdown,
-    )
-    .await
-    .map_err(From::from);
+    );
+    if config.share {
+        proxy.enable_local_share(&config.feature.network.incoming);
+    }
+    let res = proxy
+        .run_with_shutdown(
+            first_connection_timeout,
+            consecutive_connection_timeout,
+            shutdown,
+        )
+        .await
+        .map_err(From::from);
 
     if res.is_err()
         && tokio::time::timeout(Duration::from_secs(1), async {

@@ -46,3 +46,6 @@ pub const SESSION_READY_MESSAGE: &str = "Ready!";
 /// On Linux and macOS in `json` mode the layer finishes it from inside the
 /// program, and the IDE matches the finish to the task by this name.
 pub const EXEC_RUNNING_TASK: &str = "running process";
+
+/// The note printed under a share link: how long the link works, and who can open it.
+pub const LOCAL_SHARE_NOTE: &str = "Note: people who open this link reach the service running on your machine until you stop this session. Who can open it is set by your cluster's access rules.";

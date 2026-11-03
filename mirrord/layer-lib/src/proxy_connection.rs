@@ -19,9 +19,10 @@ use mirrord_intproxy_protocol::{
 use thiserror::Error;
 
 use crate::{
-    error::{HookError, HookResult},
+    error::{HookError, HookResult, LayerResult},
     mutex::Mutex,
     proxy_connection::responses::ResponseManager,
+    share::{self, ShareControl},
 };
 
 mod responses;
@@ -78,6 +79,7 @@ pub struct ProxyConnection {
     sender: Mutex<SyncEncoder<LocalMessage<LayerToProxyMessage>, TcpStream>>,
     responses: ResponseManager,
     next_message_id: AtomicU64,
+    share: OnceLock<ShareControl>,
     layer_id: LayerId,
     proxy_addr: SocketAddr,
 }
@@ -118,9 +120,29 @@ impl ProxyConnection {
             sender: Mutex::new(sender),
             responses,
             next_message_id: AtomicU64::new(1),
+            share: OnceLock::new(),
             layer_id: *layer_id,
             proxy_addr,
         })
+    }
+
+    /// Attaches the share control connection of a session started with `share`; see
+    /// [`share`].
+    pub fn start_share_control(&self) -> LayerResult<()> {
+        let control = share::start_share_control(self.proxy_addr, self.layer_id)?;
+        self.share.set(control).map_err(|_| {
+            ProxyError::ProxyFailure("The share control connection is already attached.".to_owned())
+        })?;
+        Ok(())
+    }
+
+    /// Closes the forked child's copy of its parent's share control connection, so the
+    /// connection still ends when the parent exits.
+    #[cfg(unix)]
+    pub fn reset_share_after_fork(&mut self) {
+        if let Some(control) = self.share.take() {
+            control.reset_after_fork();
+        }
     }
 
     fn next_message_id(&self) -> MessageId {

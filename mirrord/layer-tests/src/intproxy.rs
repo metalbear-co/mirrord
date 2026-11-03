@@ -41,6 +41,7 @@ use tokio::{
 pub struct TestIntProxy {
     codec: Framed<TcpStream, DaemonCodec>,
     num_connections: u64,
+    task: tokio::task::JoinHandle<Result<(), mirrord_intproxy::error::ProxyStartupError>>,
 }
 
 impl TestIntProxy {
@@ -48,26 +49,30 @@ impl TestIntProxy {
         let fake_agent_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let fake_agent_address = fake_agent_listener.local_addr().unwrap();
         let mut context = ConfigContext::default();
-        let experimental_config = match config {
+        let (experimental_config, shared_incoming) = match config {
             Some(path) => {
-                LayerFileConfig::from_path(path, &mut context)
+                let config = LayerFileConfig::from_path(path, &mut context)
                     .unwrap()
                     .generate_config(&mut context)
-                    .unwrap()
-                    .experimental
+                    .unwrap();
+                let shared_incoming = config.share.then_some(config.feature.network.incoming);
+                (config.experimental, shared_incoming)
             }
-            None => ExperimentalFileConfig::default()
-                .generate_config(&mut context)
-                .unwrap(),
+            None => (
+                ExperimentalFileConfig::default()
+                    .generate_config(&mut context)
+                    .unwrap(),
+                None,
+            ),
         };
 
         let (_, chaos_rx) = watch::channel(Default::default());
 
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let agent_conn = AgentConnection::new_for_raw_address(fake_agent_address)
                 .await
                 .unwrap();
-            let intproxy = IntProxy::new_with_connection(
+            let mut intproxy = IntProxy::new_with_connection(
                 agent_conn,
                 listener,
                 0,
@@ -80,11 +85,12 @@ impl TestIntProxy {
                 mirrord_intproxy::session_monitor::MonitorTx::disabled(),
                 ChaosWatcherRx::new(chaos_rx),
             );
+            if let Some(incoming) = &shared_incoming {
+                intproxy.enable_local_share(incoming);
+            }
             intproxy
                 .run(Duration::from_secs(15), Duration::from_secs(5))
                 .await
-                .unwrap();
-            println!("test IntProxy finished");
         });
 
         let (stream, _buffer_size) = fake_agent_listener.accept().await.unwrap();
@@ -93,7 +99,12 @@ impl TestIntProxy {
         Self {
             codec,
             num_connections: 0,
+            task,
         }
+    }
+
+    pub async fn wait(self) -> Result<(), mirrord_intproxy::error::ProxyStartupError> {
+        self.task.await.expect("intproxy task panicked")
     }
 
     pub async fn recv(&mut self) -> ClientMessage {

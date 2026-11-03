@@ -21,13 +21,12 @@ use mirrord_layer_lib::{
     detour::DetourGuard,
     error::LayerError,
     process::hold::{Gate, HoldError, hold},
+    program_stdout::ProgramStdout,
 };
 use mirrord_progress::{
     LineMode, finished_task_line,
     messages::{EXEC_RUNNING_TASK, SESSION_READY_MESSAGE},
 };
-
-use crate::program_stdout::ProgramStdout;
 
 /// Finishes the layer's startup: prints `Ready!` if `mirrord exec` left it to the layer, then
 /// holds the program for a debugger if `exec` asked for that.

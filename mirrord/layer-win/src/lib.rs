@@ -76,7 +76,9 @@ fn release_detour_guard() -> LayerResult<()> {
 fn initialize_windows_proxy_connection() -> LayerResult<()> {
     let process_context = detect_process_context()?;
     let connection = create_proxy_connection(&process_context)?;
-
+    if mirrord_layer_lib::setup::setup().layer_config().share {
+        connection.start_share_control()?;
+    }
     install_proxy_connection(connection)
 }
 

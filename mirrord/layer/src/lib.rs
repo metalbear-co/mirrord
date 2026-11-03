@@ -176,7 +176,6 @@ mod file;
 mod hooks;
 mod load;
 mod macros;
-mod program_stdout;
 mod ready;
 mod socket;
 #[cfg(target_os = "macos")]
@@ -365,6 +364,11 @@ fn load_only_layer_start(config: &LayerConfig) {
             .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout)),
     )
     .expect("failed to initialize proxy connection");
+    if config.share {
+        new_connection
+            .start_share_control()
+            .expect("failed to attach the share connection to the internal proxy");
+    }
 
     unsafe {
         // SAFETY
@@ -478,7 +482,9 @@ fn layer_start(config: LayerConfig) {
             },
             proxy_connection_timeout,
         )
-        .unwrap_or_else(|_| panic!("failed to initialize proxy connection at {address}"));
+        .unwrap_or_else(|error| {
+            panic!("failed to initialize proxy connection at {address}: {error}")
+        });
         PROXY_CONNECTION
             .set(new_connection)
             .expect("setting PROXY_CONNECTION singleton")
@@ -523,6 +529,16 @@ fn layer_start(config: LayerConfig) {
             }
             tracing::info!(count, "Finished reading Apple variables");
         }
+    }
+    if setup().layer_config().share {
+        #[allow(static_mut_refs)]
+        unsafe {
+            PROXY_CONNECTION
+                .get()
+                .expect("registered layer")
+                .start_share_control()
+        }
+        .expect("failed to attach the share connection to the internal proxy");
     }
 }
 
@@ -972,7 +988,7 @@ unsafe fn fork_with_detour_guard() -> pid_t {
             Ordering::Equal => {
                 tracing::debug!("Child process initializing layer.");
                 #[allow(static_mut_refs)]
-                let parent_connection = match PROXY_CONNECTION.take() {
+                let mut parent_connection = match PROXY_CONNECTION.take() {
                     Some(conn) => conn,
                     None => {
                         tracing::debug!("Skipping new inptroxy connection (trace only)");
@@ -980,6 +996,7 @@ unsafe fn fork_with_detour_guard() -> pid_t {
                     }
                 };
 
+                parent_connection.reset_share_after_fork();
                 let new_connection = ProxyConnection::new(
                     parent_connection.proxy_addr(),
                     NewSessionRequest {
@@ -995,6 +1012,11 @@ unsafe fn fork_with_detour_guard() -> pid_t {
                         .expect("PROXY_CONNECTION_TIMEOUT should be set by now!"),
                 )
                 .expect("failed to establish proxy connection for child");
+                if setup().layer_config().share {
+                    new_connection
+                        .start_share_control()
+                        .expect("failed to attach the share connection to the internal proxy");
+                }
                 #[allow(static_mut_refs)]
                 PROXY_CONNECTION
                     .set(new_connection)

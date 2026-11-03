@@ -1,7 +1,14 @@
 //! Implementation of `proxy <-> agent` connection through [`mpsc`](tokio::sync::mpsc) channels
 //! created in different mirrord crates.
 
-use std::{fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    fmt, io,
+    net::SocketAddr,
+    ops::{ControlFlow, Not},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 
 use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::{LayerConfig, container::MIRRORD_EXTERNAL_PROXY_HOSTNAME};
@@ -203,7 +210,7 @@ impl AgentConnection {
                         .await?;
                 (
                     Connection::from_channel(connection.conn),
-                    if session.allow_reconnect {
+                    if session.allow_reconnect && config.share.not() {
                         ReconnectFlow::ConnectInfo {
                             config: Box::new(config.clone()),
                             connect_info: AgentConnectInfo::Operator(session),
