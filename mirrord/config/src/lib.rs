@@ -699,6 +699,33 @@ impl LayerConfig {
         Ok(encoded)
     }
 
+    /// Serializes the resolved config in the shape [`LayerFileConfig`] can parse.
+    ///
+    /// `verify-config --resolved` is also a way to run mirrord's config generation from the
+    /// outside: users can inspect the final `resolved_config`, save it to a file, and then use it
+    /// with `mirrord exec -f <file>`. `mirrord up` also merges its services' patches into this
+    /// shape before it parses the result as a config file again.
+    ///
+    /// The file schema has `deny_unknown_fields`, and it doesn't accept every field as the
+    /// resolved config holds it, so this patches just the JSON instead of the config types:
+    /// - `key`: [`LayerConfig`] stores it as an [`EnvKey`], so normal serialization keeps whether
+    ///   it was generated or provided. Config files only accept `key` as a plain string, so it is
+    ///   replaced by its string. A `key_generated` field wouldn't work either: once the user saves
+    ///   the output to a file, `mirrord exec` parses it as [`LayerFileConfig`], which rejects the
+    ///   unknown field.
+    ///
+    /// [`Self::encode`] doesn't use this: the layer and the proxies need those fields as they are.
+    pub fn as_file_config(&self) -> Result<serde_json::Value, serde_json::Error> {
+        let mut value = serde_json::to_value(self)?;
+        if let Some(object) = value.as_object_mut() {
+            object.insert(
+                "key".to_owned(),
+                serde_json::Value::String(self.key.as_str().to_owned()),
+            );
+        }
+        Ok(value)
+    }
+
     /// Resolves the config from the environment variables.
     ///
     /// On success, returns the config and a [`ConfigContext`] that holds warnings.
