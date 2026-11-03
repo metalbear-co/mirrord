@@ -12,7 +12,7 @@ description: >
   Kafka, or connecting mirrord to a Kafka cluster. This is a Team/Enterprise feature of mirrord.
 metadata:
   author: MetalBear
-  version: "2.7"
+  version: "2.8"
 ---
 
 # mirrord Kafka Splitting Configuration Skill
@@ -171,11 +171,13 @@ spec:
         topic:
           - env: <TOPIC_ENV_VAR>
             fallback: <topic-name>       # optional
-            containers: [<container>]
+            containerNames: [<container>]
         groupId:
           - env: <GROUP_ID_ENV_VAR>
-            containers: [<container>]
+            containerNames: [<container>]
 ```
+
+`containerNames` is the current spelling (works with Kustomize's `images:` transformer); the legacy `containers` spelling still works on existing manifests — don't set both on the same reference. Don't adopt `containerNames` until the operator and its CRD are upgraded to a release that supports it and the rollout has completed; an older operator can reject or ignore the field.
 
 `appConfig.topic`/`groupId`/`appId` sources also support `envLike` (regex over var names), `volume` (read the name from a file mounted from a ConfigMap volume instead of an env var — requires operator **3.198.0+**; see `references/mirrord-split-config-crd.md`), `podFile` (read the name from a file that exists only inside the running pods — e.g. rendered by `vault-agent-injector` or a secrets-store CSI driver, with no ConfigMap/Secret behind it — requires operator **3.201.0+**; see below), `valueSelector` (a selector over nested keys / `.[]` for JSON-valued env vars — not a full jq expression, no pipes or functions), and `valuePattern` (regex to swap an embedded name). See the split-config reference.
 

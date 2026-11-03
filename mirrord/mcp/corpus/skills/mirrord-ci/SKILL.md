@@ -3,7 +3,7 @@ name: mirrord-ci
 description: Help users set up mirrord in CI pipelines for testing against real Kubernetes environments. Use when users want to run end-to-end tests, integration tests, or automated tests in CI using mirrord to connect to staging/shared clusters.
 metadata:
   author: MetalBear
-  version: "1.4"
+  version: "1.5"
 ---
 
 # Mirrord CI Skill
@@ -120,7 +120,7 @@ mirrord ci stop
 
 ## CI API Key (for mirrord Enterprise)
 
-This only applies to the Enterprise plan; if you're on the open-source version of mirrord, skip this section. When the mirrord Operator is installed in the cluster, `mirrord ci` commands require a CI API key, and generating one requires an Enterprise plan. Without it, every CI runner registers as a new user and consumes a seat:
+This only applies to the Enterprise plan; if you're on the open-source version of mirrord, skip this section. When the mirrord Operator is installed in the cluster, `mirrord ci` commands require a CI API key, and generating one requires an Enterprise plan. Without it, every CI runner registers as a new user and consumes a seat. Sessions started with a CI API key don't take up seats — they are machine sessions, and they count towards the concurrent machine sessions of your plan instead:
 
 ```bash
 # Generate the key (run locally, not in CI)
@@ -128,6 +128,8 @@ mirrord ci api-key
 ```
 
 Store this as a **secret** environment variable named `MIRRORD_CI_API_KEY` in your CI platform.
+
+The same key and mechanism also cover cloud/background coding agents (Cursor cloud agents, Codex cloud, Claude Code on the web, Devin, etc.) that run `mirrord exec` rather than `mirrord ci start/stop` — each agent environment otherwise registers as a new user. See mirrord's "Using mirrord with Cloud Agents" docs for that setup, including keeping concurrent agent sessions apart with `MIRRORD_KEY`/`--key`.
 
 ## Configuration
 

@@ -954,6 +954,11 @@ pub enum NewOperatorFeature {
     /// branch carrying the source kind and never reconciles it, which surfaces only as a
     /// creation timeout.
     DbBranchSsmParameter,
+    /// This operator applies the copy mode a session requests for its `MirrordSplitConfig`
+    /// entries (`feature.db_branches: { "entries": ..., "copy": { "mode": ... } }`), refusing
+    /// one an entry's `copy.allowedModes` leaves out. Gated so the CLI fails fast: an older
+    /// operator ignores the mode and seeds each branch with the entry's own.
+    DbBranchesSplitConfigCopyMode,
 
     /// This operator leaves the tables named in `feature.db_branches[].copy.exclude_tables` out
     /// of a MySQL or MariaDB branch copy. Gated so the CLI fails fast: an older operator's CRD schema prunes
@@ -1035,6 +1040,7 @@ impl NewOperatorFeature {
             | Self::LiquibaseMigrations
             | Self::PgBranchAdditionalDatabases
             | Self::DbBranchesFromSplitConfig
+            | Self::DbBranchesSplitConfigCopyMode
             | Self::DbBranchSecretManagerExtract
             | Self::DbBranchSsmParameter
             | Self::DbBranchDedicatedNamespace
@@ -1176,6 +1182,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchSsmParameter => {
                 "DB branching connection values from AWS SSM Parameter Store"
             }
+            NewOperatorFeature::DbBranchesSplitConfigCopyMode => {
+                "db_branches copy mode requested for MirrordSplitConfig entries"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -1284,6 +1293,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::KeylessCi
             | NewOperatorFeature::LicenseGateReporting
             | NewOperatorFeature::DbBranchesFromSplitConfig
+            | NewOperatorFeature::DbBranchesSplitConfigCopyMode
             | NewOperatorFeature::DbBranchSecretManagerExtract
             | NewOperatorFeature::DbBranchSsmParameter
             | NewOperatorFeature::MysqlBranchExcludeTables

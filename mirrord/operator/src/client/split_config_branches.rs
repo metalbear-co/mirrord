@@ -106,6 +106,8 @@ pub fn apply_resolved_entries(
 /// followed by the modes of a PostgreSQL branch's additional databases. `None` when the spec
 /// leaves the choice to the operator: a generic branch without `copy` may still get a copy Job
 /// from its admin profile, so two such specs cannot be compared here.
+///
+/// Keep in step with [`entry_copy_modes`], the same comparison before a spec exists.
 pub fn copy_mode(spec: &BranchDatabaseSpec) -> Option<String> {
     let copy = match spec.dialect().ok()? {
         DialectConfig::Postgres(options) => {
@@ -134,6 +136,21 @@ pub fn copy_mode(spec: &BranchDatabaseSpec) -> Option<String> {
     mode_of(copy.ok()?)
 }
 
+/// [`copy_mode`] for a config entry, for comparing entries before any branch spec exists.
+///
+/// `None` for generic entries as well, with or without a copy Job: [`check_attach_copy_mode`]
+/// never refuses a generic branch, so there is nothing to compare.
+pub fn entry_copy_modes(entry: &DatabaseBranchConfig) -> Option<String> {
+    let mut modes = <&str>::from(entry.copy_mode()?).to_owned();
+    let mut additional = entry.pg_additional_databases().iter().collect::<Vec<_>>();
+    additional.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+    for database in additional {
+        let database_mode = <&str>::from(database.copy.mode());
+        modes.push_str(&format!(", {}: {database_mode}", database.name));
+    }
+    Some(modes)
+}
+
 fn sql_copy_mode(copy: &SqlBranchCopyConfig) -> Option<String> {
     mode_of(serde_json::to_value(copy).ok()?)
 }
@@ -158,11 +175,19 @@ pub fn check_attach_copy_mode(
     if existing_mode == requested_mode {
         return Ok(());
     }
+    let created_by = match existing.annotations().get(UP_SERVICE_ANNOTATION) {
+        Some(service) => format!("the `mirrord up` service `{service}`"),
+        None => format!(
+            "a session targeting `{}/{}`",
+            existing.spec.target.kind.to_lowercase(),
+            existing.spec.target.name
+        ),
+    };
     Err(OperatorApiError::BranchCopyModeMismatch {
         branch_id: existing.spec.id.clone(),
         existing_mode,
         requested_mode,
-        creator: existing.spec.target.name.clone(),
+        created_by,
     })
 }
 
@@ -373,7 +398,7 @@ mod tests {
     }
 
     /// Attaching with the creator's copy mode is fine; a different mode is refused, naming the
-    /// branch, both modes, and the workload that created it.
+    /// branch, both modes, and, without a `mirrord up` service to name, the creator's target.
     #[test]
     fn attach_copy_mode_must_match_the_creator() {
         let existing = pg_branch(
@@ -391,7 +416,7 @@ mod tests {
             branch_id,
             existing_mode,
             requested_mode,
-            creator,
+            created_by,
         } = error
         else {
             panic!("unexpected error {error:?}");
@@ -399,7 +424,7 @@ mod tests {
         assert_eq!(branch_id, "orders-pg-a1b2c3");
         assert_eq!(existing_mode, "schema");
         assert_eq!(requested_mode, "empty");
-        assert_eq!(creator, "cake-maker");
+        assert_eq!(created_by, "a session targeting `deployment/cake-maker`");
     }
 
     /// A PostgreSQL entry's additional databases are copied too, so their modes are part of

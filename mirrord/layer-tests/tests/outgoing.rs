@@ -4,6 +4,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     ops::Not,
     path::Path,
+    time::Duration,
 };
 
 #[cfg(unix)]
@@ -213,7 +214,13 @@ async fn outgoing_tcp_from_the_local_app_broken(
     with_config: Option<&str>,
     config_dir: &Path,
 ) {
-    outgoing_tcp_logic(with_config, config_dir).await;
+    // The local connection only fails at the kernel's TCP connect timeout, about two minutes.
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        outgoing_tcp_logic(with_config, config_dir),
+    )
+    .await
+    .expect("timed out waiting for the connection to reach the agent");
 }
 
 /// Tests that outgoing connections are properly handled on sockets that were bound by the user
