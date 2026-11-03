@@ -1,4 +1,4 @@
-use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
+use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf, process::ExitStatus};
 
 use kube::{self, Error, client::AuthError};
 use miette::Diagnostic;
@@ -20,6 +20,7 @@ use mirrord_operator::{
         NewOperatorFeature,
         preview::{PreviewPodLogs, PreviewSyncConfigError},
     },
+    share::LOCAL_SHARE_REJECTED_REASON,
     types::PaidFeatureGate,
 };
 use mirrord_progress::messages::AGENT_OPERATOR_HINT;
@@ -264,6 +265,26 @@ pub(crate) enum OperatorSetupError {
 /// shown as it is.
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum LocalShareError {
+    /// The config has a setting that a shared session can't use.
+    #[error(transparent)]
+    Config(ConfigError),
+
+    #[error(
+        "Share links need a Kubernetes target, and a serverless sessions-manager target can't be shared."
+    )]
+    UnsupportedSessionsManagerTarget,
+
+    #[error("Share links work only with `mirrord exec`, not with `mirrord container`.")]
+    UnsupportedContainer,
+
+    #[error(
+        "`mirrord port-forward` can't create a share link, because no local application listens in it. Use `mirrord exec --share`."
+    )]
+    UnsupportedPortForward,
+
+    #[error("The internal proxy of the shared session stopped ({0}), so its share link is gone.")]
+    ProxyExit(ExitStatus),
+
     /// The operator, or the target that the client resolved through it, can't serve a shared
     /// session.
     #[error("{0}")]
@@ -354,7 +375,7 @@ pub(crate) enum CliError {
 
     #[error("Failed to verify mirrord config: {0}")]
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
-    ConfigError(#[from] mirrord_config::config::ConfigError),
+    ConfigError(mirrord_config::config::ConfigError),
 
     #[cfg(unix)]
     #[error("Failed to set up the local directory for prefetched files: {0}")]
@@ -1263,6 +1284,16 @@ impl From<crate::preview::resources::ResourcesError> for CliError {
     }
 }
 
+/// A share error is written for the user, so it isn't framed as a failed config verification.
+impl From<ConfigError> for CliError {
+    fn from(error: ConfigError) -> Self {
+        match error {
+            ConfigError::Share(_) => Self::LocalShare(LocalShareError::Config(error)),
+            error => Self::ConfigError(error),
+        }
+    }
+}
+
 impl From<mirrord_up::UpError> for CliError {
     fn from(error: mirrord_up::UpError) -> Self {
         Self::PreviewUpConfig(Box::new(error))
@@ -1287,6 +1318,11 @@ impl From<OperatorApiError> for CliError {
         };
         if let Some(gate) = status.and_then(PaidFeatureGate::from_status) {
             return Self::PaidFeatureRequiresPlan { gate };
+        }
+        if let Some(status) = status
+            && status.reason == LOCAL_SHARE_REJECTED_REASON
+        {
+            return Self::LocalShare(LocalShareError::Operator(status.message.clone()));
         }
 
         match value {

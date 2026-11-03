@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
+    ops::Not,
     time::Duration,
 };
 
@@ -53,7 +54,7 @@ use crate::util::reparent_to_init;
 use crate::{
     CliResult, MirrordCi,
     connection::{AGENT_CONNECT_INFO_ENV_KEY, ConnectData, create_and_connect},
-    error::CliError,
+    error::{CliError, LocalShareError},
     extract::extract_library,
     up::MirrordUp,
     util::remove_proxy_env,
@@ -126,6 +127,14 @@ pub(crate) struct MirrordExecution {
 
     /// Whether this run uses mirrord operator.
     pub uses_operator: bool,
+
+    /// Whether this run started with `share`. [`Self::wait`] then reports an internal proxy that
+    /// failed, because that proxy owns the link, and a shared session that lost it ended for
+    /// a reason the user must see.
+    ///
+    /// Not serialized: it only matters in the process that runs [`Self::wait`].
+    #[serde(skip)]
+    share: bool,
 }
 
 /// Struct that when dropped will cancel the token and wait on the join handle
@@ -420,6 +429,7 @@ impl MirrordExecution {
                 .map(|unset| unset.to_vec())
                 .unwrap_or_default(),
             uses_operator,
+            share: config.share,
         })
     }
 
@@ -489,6 +499,10 @@ impl MirrordExecution {
         tls: Option<&SecureChannelSetup>,
         mirrord_for_ci: Option<&MirrordCi>,
     ) -> CliResult<(Self, SocketAddr)> {
+        if config.share {
+            return Err(LocalShareError::UnsupportedContainer.into());
+        }
+
         if !config.use_proxy {
             remove_proxy_env();
         }
@@ -604,6 +618,7 @@ impl MirrordExecution {
                 .map(|unset| unset.to_vec())
                 .unwrap_or_default(),
             uses_operator: connect_info.is_operator(),
+            share: false,
         };
 
         Ok((execution, proxy_addr))
@@ -918,10 +933,13 @@ impl MirrordExecution {
     /// See <https://github.com/metalbear-co/mirrord/issues/1211>
     pub(crate) async fn wait(mut self) -> CliResult<()> {
         if let Some(child) = self.child.as_mut() {
-            child
+            let status = child
                 .wait()
                 .await
                 .map_err(CliError::InternalProxyWaitError)?;
+            if self.share && status.success().not() {
+                return Err(LocalShareError::ProxyExit(status).into());
+            }
         }
 
         Ok(())

@@ -41,6 +41,7 @@ use crate::{
         SessionsManagerRoute,
     },
     data::{AuthStore, GlobalConfig, StoredLogin},
+    error::LocalShareError,
     login::issuer,
     up::MirrordUp,
 };
@@ -194,11 +195,13 @@ where
     })
 }
 
-/// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], prepares an operator
-///    session, connects to it, and returns [`Some`] [`ConnectData`] with an [`OperatorConnector`]
-///    holding that connection.
-/// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], returns [`None`] so
-///    the caller falls back to the OSS flow.
+/// 1. If mirrord-operator is explicitly enabled or sharing is requested in the given [`LayerConfig`],
+///    prepares an operator session, connects to it, and returns [`Some`] [`ConnectData`] with an
+///    [`OperatorConnector`] holding that connection. A missing operator or invalid license is an
+///    error. Sharing requires the operator to provide a link, so it cannot silently fall back to OSS.
+/// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], returns [`None`].
+///    The caller falls back to OSS for ordinary sessions; config validation rejects sharing with
+///    the operator disabled, because OSS cannot provide a share link.
 /// 3. Otherwise, attempts to use the mirrord-operator and returns [`None`] in case mirrord-operator
 ///    is not found or its license is invalid.
 #[mirrord_macros::boxed_future]
@@ -215,7 +218,7 @@ where
     R: Reporter,
 {
     let mut operator_subtask = progress.subtask("checking operator");
-    let required = layer_config.operator == Some(true);
+    let required = layer_config.operator == Some(true) || layer_config.share;
     let api =
         match operator_availability(layer_config, analytics, progress, &operator_subtask).await? {
             OperatorAvailability::Usable(api) => *api,
@@ -514,6 +517,9 @@ pub(crate) async fn create_and_connect<R: Reporter>(
     mirrord_for_ci: Option<&MirrordCi>,
     mirrord_up: Option<&MirrordUp>,
 ) -> CliResult<ConnectData> {
+    if config.share && matches!(config.target.path, Some(Target::Serverless(_))) {
+        return Err(LocalShareError::UnsupportedSessionsManagerTarget.into());
+    }
     if let Some(Target::Serverless(target)) = &config.target.path {
         let service = target.sessions_manager_service()?;
         let user_session_id = std::env::var("MIRRORD_SESSION_ID")

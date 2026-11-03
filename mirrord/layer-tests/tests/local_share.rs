@@ -373,6 +373,50 @@ async fn local_share_resolved_config_keeps_first_port() {
     assert_eq!(handed_off.key, reloaded.key);
 }
 
+/// `mirrord exec --share` refuses a config that a shared session can't use before it starts
+/// anything, and prints the reason as it is, without the generic config error around it.
+#[rstest::rstest]
+#[case::mirror(
+    "share = false\n[feature.network]\nincoming = 'mirror'\n",
+    "Can't share this session yet: share links need incoming mode 'steal'."
+)]
+#[case::copy_target(
+    "[feature]\ncopy_target = true\n[feature.network]\nincoming = 'steal'\n",
+    "Share links aren't supported with copy_target yet."
+)]
+#[tokio::test]
+async fn local_share_exec_rejects_unsupported_config(
+    #[case] contents: &str,
+    #[case] message: &str,
+) {
+    let scenario = tempfile::TempDir::new().unwrap();
+    let tmpdir = scenario.path().to_str().unwrap();
+    let mut config = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
+    config.write_all(contents.as_bytes()).unwrap();
+    let output =
+        mirrord_command::resolve_tokio_command(std::env::var("MIRRORD_TESTS_USE_BINARY").unwrap())
+            .env("TMPDIR", tmpdir)
+            .args([
+                "exec",
+                "--share",
+                "--disable-version-check",
+                "--config-file",
+            ])
+            .arg(config.path())
+            .args(["--", "true"])
+            .output()
+            .await
+            .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success().not(), "{stderr}");
+    assert!(stderr.contains(message), "{stderr}");
+    assert!(
+        stderr.contains("Failed to verify mirrord config").not()
+            && stderr.contains("Conflicting configuration").not(),
+        "{stderr}"
+    );
+}
+
 /// A full stderr pipe, which blocks printing the link, must not stop a share failure from ending
 /// the application.
 #[tokio::test]

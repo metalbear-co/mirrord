@@ -383,6 +383,7 @@ mod verify_config;
 mod vpn;
 mod wsl;
 
+use error::LocalShareError;
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
 use mirrord_layer_lib::process::windows::{
@@ -955,6 +956,9 @@ async fn exec(
     let (config_file_path, mut config) = util::resolve_config(&mut cfg_context).await?;
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
+    config.share |= args.share;
+    // Before the local Redis branch starts, so a misconfigured share starts nothing.
+    config.verify_share()?;
 
     let _local_redis: Option<local_redis::LocalRedis> = if let Some(redis_config) =
         config.feature.db_branches.iter().find_map(|branch| {
@@ -1111,6 +1115,10 @@ async fn port_forward(
         .override_env_opt("MIRRORD_KUBE_CONTEXT", args.context.as_ref())
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.as_ref());
     let mut config = util::resolve_layer_config(&mut cfg_context).await?;
+    if config.share {
+        return Err(LocalShareError::UnsupportedPortForward.into());
+    }
+
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::new(
