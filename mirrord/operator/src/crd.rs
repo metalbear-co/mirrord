@@ -970,6 +970,11 @@ pub enum NewOperatorFeature {
     /// CRD schema prunes `redisOptions.cluster` and brings up a standalone server, which a
     /// Redis Cluster client then refuses to talk to.
     RedisClusterBranching,
+    /// This operator gives a session queue that sets no filter of its own a filter built from the
+    /// `keyJqFilter` of the matching `MirrordSplitConfig` queue entry, so the CLI sends such
+    /// entries in `queue_filters` with no filter. Gated so the CLI fails fast: an older
+    /// operator rejects a `queue_filters` entry without a `filter`.
+    SplitConfigQueueFilters,
     /// This operator drops the queue splits of a `PreviewSession` with `autoQueueSplitting` that
     /// it can't serve (a broker whose splitting is off), instead of failing the session, as it
     /// does for `mirrord up` sessions. Gated so the CLI only sends the splits `mirrord preview
@@ -1019,7 +1024,8 @@ impl NewOperatorFeature {
             | Self::NatsQueueSplitting
             | Self::NatsPubSubQueueSplitting
             | Self::AzureServiceBusQueueSplitting
-            | Self::QueueSplittingWithComposedFilters => Some("feature.split_queues"),
+            | Self::QueueSplittingWithComposedFilters
+            | Self::SplitConfigQueueFilters => Some("feature.split_queues"),
             Self::KafkaBranching => Some("feature.kafka_branch"),
             Self::MySqlBranching
             | Self::PgBranching
@@ -1181,6 +1187,9 @@ impl Display for NewOperatorFeature {
                 "DB branches in a dedicated namespace per key"
             }
             NewOperatorFeature::RedisClusterBranching => "Redis Cluster branching",
+            NewOperatorFeature::SplitConfigQueueFilters => {
+                "queue filters set on the target's MirrordSplitConfig"
+            }
             NewOperatorFeature::DbBranchSsmParameter => {
                 "DB branching connection values from AWS SSM Parameter Store"
             }
@@ -1299,6 +1308,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::DbBranchesSplitConfigCopyMode
             | NewOperatorFeature::DbBranchSecretManagerExtract
             | NewOperatorFeature::DbBranchSsmParameter
+            | NewOperatorFeature::SplitConfigQueueFilters
             | NewOperatorFeature::Unknown => &[],
         }
     }
