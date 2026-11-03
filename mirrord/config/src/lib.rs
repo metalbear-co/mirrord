@@ -619,6 +619,21 @@ pub struct LayerConfig {
     /// }
     /// ```
     ///
+    /// A session started with [`share`](#root-share) doesn't need that `header_filter`, because
+    /// it filters on its key on its own: it steals the HTTP requests that carry
+    /// `mirrord-session=<key>` in the W3C `baggage` header, because share-ingress adds that member
+    /// to every request it forwards. A custom `http_filter` still applies, so a shared session
+    /// steals a request that matches the filter or that carries the key. Without a custom filter,
+    /// a shared session steals only the requests that carry the key, not the whole port.
+    /// `http_filter.ports` still limits the ports. A session without `share` keeps its configured
+    /// filter.
+    ///
+    /// In `baggage`, the key is written as percent-encoded UTF-8 with upper-case hex digits: `%`,
+    /// a space, and every byte that a baggage value can't hold are encoded. For example,
+    /// `alice;debug` becomes `mirrord-session=alice%3Bdebug`, and a space becomes `%20`. A shared
+    /// session matches only this spelling, which is the one share-ingress writes, so a service
+    /// that forwards the member must keep its value as it is.
+    ///
     /// The key itself is [templated](#root-templating-key), so instead of a literal it can be
     /// derived from another variable. Using `git_branch` gives each branch its own session
     /// without passing a key per run:
@@ -636,6 +651,21 @@ pub struct LayerConfig {
     /// 4. Fallback: A unique key is randomly generated if no other option is provided
     #[config(nested, plan = Oss)]
     pub key: EnvKey,
+
+    /// ## share {#root-share}
+    ///
+    /// Prints a temporary HTTPS link to this session. People who open the link reach the service
+    /// on your machine. Needs the Team or Enterprise mirrord operator, share-ingress in the
+    /// cluster, and `feature.network.incoming.mode` set to `"steal"`. Share links don't work with
+    /// `feature.copy_target` yet.
+    ///
+    /// The link opens the first port in `feature.network.incoming.ports`. Without that list, the
+    /// target container must declare exactly one port that mirrord steals. mirrord prints the link
+    /// once it steals that port. The link ends when the session ends, when your application stops
+    /// listening on that port, or when the cluster loses the mirrord agent of the pod that the link
+    /// opens. Starting the session again creates a different link.
+    #[config(default = false, plan = Team)]
+    pub share: bool,
 
     /// ## traceparent {#root-traceparent}
     ///
@@ -706,13 +736,16 @@ impl LayerConfig {
     /// with `mirrord exec -f <file>`. `mirrord up` also merges its services' patches into this
     /// shape before it parses the result as a config file again.
     ///
-    /// The file schema has `deny_unknown_fields`, and it doesn't accept every field as the
-    /// resolved config holds it, so this patches just the JSON instead of the config types:
+    /// The file schema has `deny_unknown_fields`, and it doesn't accept two things that the
+    /// resolved config holds, so this patches just the JSON instead of the config types:
     /// - `key`: [`LayerConfig`] stores it as an [`EnvKey`], so normal serialization keeps whether
     ///   it was generated or provided. Config files only accept `key` as a plain string, so it is
     ///   replaced by its string. A `key_generated` field wouldn't work either: once the user saves
     ///   the output to a file, `mirrord exec` parses it as [`LayerFileConfig`], which rejects the
     ///   unknown field.
+    /// - `feature.network.incoming`: `first_configured_port` exists only in the resolved config, so
+    ///   it is removed. `ports` is written with the first configured port first, because
+    ///   [`share`](Self::share) opens that port, and the set that holds `ports` lost the order.
     ///
     /// [`Self::encode`] doesn't use this: the layer and the proxies need those fields as they are.
     pub fn as_file_config(&self) -> Result<serde_json::Value, serde_json::Error> {
@@ -722,6 +755,18 @@ impl LayerConfig {
                 "key".to_owned(),
                 serde_json::Value::String(self.key.as_str().to_owned()),
             );
+        }
+        if let Some(incoming) = value
+            .pointer_mut("/feature/network/incoming")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            incoming.remove("first_configured_port");
+            if let Some(ports) = &self.feature.network.incoming.ports {
+                let first = self.feature.network.incoming.first_configured_port;
+                let mut ports: Vec<_> = ports.iter().copied().collect();
+                ports.sort_unstable_by_key(|port| (Some(*port) != first, *port));
+                incoming.insert("ports".to_owned(), serde_json::to_value(ports)?);
+            }
         }
         Ok(value)
     }
@@ -971,10 +1016,79 @@ impl LayerConfig {
         Ok(())
     }
 
+    /// The session key that this session's HTTP filter matches in addition to its own filter, set
+    /// only for a [`share`](Self::share)d session in mode `steal` (see
+    /// [`HttpFilterConfig::for_shared_session`](feature::network::incoming::http_filter::HttpFilterConfig::for_shared_session)).
+    ///
+    /// share-ingress tags each request it forwards with this key, so a shared session must steal
+    /// those requests while other cluster traffic keeps reaching the target. Sessions that are not
+    /// shared keep their configured filter, or steal the whole port when none is set.
+    ///
+    /// It is computed from the final config instead of stored, so a profile that changes
+    /// `incoming.mode`, or a later `--share`, can't leave a stale value.
+    pub fn shared_session_key(&self) -> Option<&str> {
+        (self.share && self.feature.network.incoming.is_steal()).then(|| self.key.as_str())
+    }
+
+    /// Verifies the settings of a session started with [`share`](Self::share).
+    ///
+    /// [`Self::verify`] includes these checks. They also run on their own because they raise no
+    /// warnings: a caller can reject a misconfigured share before it starts anything, and still
+    /// report each warning of the later [`Self::verify`] once.
+    pub fn verify_share(&self) -> Result<(), ConfigError> {
+        if self.share.not() {
+            return Ok(());
+        }
+        let incoming = &self.feature.network.incoming;
+        if incoming
+            .ports
+            .as_ref()
+            .is_some_and(|ports| ports.is_empty())
+        {
+            return Err(ConfigError::Share("The share link has no port to open, because feature.network.incoming.ports is empty. Add the port that the link should open to feature.network.incoming.ports.".to_owned()));
+        }
+        if incoming.is_steal().not() {
+            return Err(ConfigError::Share("Can't share this session yet: share links need incoming mode 'steal'. Support for mirror and incoming - off is planned, contact us in case you need it sooner.".to_owned()));
+        }
+        if self.operator == Some(false) {
+            return Err(ConfigError::Share("Share links need a Team or Enterprise mirrord operator, and `operator` is `false` in your configuration. Set it to `true` to share this session.".to_owned()));
+        }
+        if self.feature.copy_target.enabled {
+            return Err(ConfigError::Share(
+                "Share links aren't supported with copy_target yet.".to_owned(),
+            ));
+        }
+        if let Some(port) = incoming.first_configured_port {
+            let reason = if port == 0 {
+                Some("it is 0")
+            } else if incoming.ignore_ports.contains(&port) {
+                Some("feature.network.incoming.ignore_ports contains it")
+            } else if incoming
+                .http_filter
+                .ports
+                .as_ref()
+                .is_some_and(|ports| ports.contains(&port).not())
+            {
+                Some("feature.network.incoming.http_filter.ports doesn't contain it")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                return Err(ConfigError::Share(format!(
+                    "The share link can't open port {port}, the first port in feature.network.incoming.ports, because {reason}. Put the port that the link should open first in feature.network.incoming.ports."
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Verifies that there are no conflicting settings in this config.
     ///
     /// Fills the given [`ConfigContext`] with warnings.
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+        self.verify_share()?;
+
         if let Some(Target::Label(target)) = &self.target.path {
             target.verify()?;
 
@@ -1985,6 +2099,7 @@ mod tests {
         let config = config_type.parse(input);
 
         let expect = LayerFileConfig {
+            share: None,
             feature: Some(FeatureFileConfig {
                 network: Some(ToggleableConfig::Config(NetworkFileConfig {
                     incoming: Some(ToggleableConfig::Config(IncomingFileConfig::Simple(Some(
@@ -2014,6 +2129,7 @@ mod tests {
         let config = config_type.parse(input);
 
         let expect = LayerFileConfig {
+            share: None,
             key: None,
             accept_invalid_certificates: Some(false),
             kubeconfig: None,

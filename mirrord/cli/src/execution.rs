@@ -664,8 +664,7 @@ impl MirrordExecution {
             .feature
             .network
             .incoming
-            .http_filter
-            .ensure_usable_with(client.protocol_version())?;
+            .ensure_usable_with(client.protocol_version(), config.shared_session_key())?;
 
         let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()

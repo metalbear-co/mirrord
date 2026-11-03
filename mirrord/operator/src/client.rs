@@ -2313,7 +2313,7 @@ impl OperatorApi<PreparedClientCert> {
                             .feature
                             .network
                             .incoming
-                            .steals_port_without_filter(*port)
+                            .steals_port_without_filter(*port, layer_config.shared_session_key())
                     })
                     .map(|p| p.to_string())
                     .collect::<Vec<_>>();
