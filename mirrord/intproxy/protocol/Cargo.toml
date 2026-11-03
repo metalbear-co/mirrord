@@ -28,9 +28,12 @@ thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tokio-util = { workspace = true, optional = true }
 
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, optional = true, features = ["fs"] }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
 
 [features]
-codec = ["dep:thiserror", "dep:bytes"]
+codec = ["dep:thiserror", "dep:bytes", "dep:nix"]
 codec-async = ["codec", "dep:bytes", "dep:futures", "dep:tokio", "dep:tokio-util"]

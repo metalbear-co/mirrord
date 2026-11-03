@@ -7,8 +7,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BranchBaseConfig, BranchPodConfig, ConnectionSource, DatabaseSourceConfig, IamAuthConfig,
-    ParamSource, SingleOrVec, SqlBranchMigrationsConfig,
+    BranchBaseConfig, BranchCopyMode, BranchPodConfig, ConnectionSource, DatabaseSourceConfig,
+    IamAuthConfig, ParamSource, SingleOrVec, SqlBranchMigrationsConfig,
 };
 use crate::config::ConfigError;
 
@@ -342,6 +342,17 @@ pub enum PgBranchCopyConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dump_args: Option<Vec<String>>,
     },
+}
+
+impl PgBranchCopyConfig {
+    /// The engine-agnostic copy mode.
+    pub fn mode(&self) -> BranchCopyMode {
+        match self {
+            PgBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
+            PgBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
+            PgBranchCopyConfig::All { .. } => BranchCopyMode::All,
+        }
+    }
 }
 
 impl Default for PgBranchCopyConfig {
