@@ -35,8 +35,7 @@ use mirrord_config::{
     feature::{
         database_branches::{
             BranchCopyMode, DatabaseBranchConfig, DatabaseBranchesConfig, SplitConfigDbBranches,
-            SplitConfigRequest, TargetPodNeed,
-            default_creation_timeout_secs,
+            SplitConfigRequest, TargetPodNeed, default_creation_timeout_secs,
         },
         split_queues::{QueueKind, QueueSplit, SplitQueuesConfig},
     },
@@ -3508,10 +3507,13 @@ impl OperatorApi<PreparedClientCert> {
 
 /// Refuses `db_branches` that cannot be provisioned for a session without a target, against
 /// the operator at `spec`. Without a target there is no pod to read connection values from, and
-/// no service account for secret managers or IAM auth to borrow, so every source must stand on
-/// its own; a Spanner branch reads the pod itself and can never run targetless. The branches are
-/// checked before the operator's `TargetlessDbBranches` gate so a config that cannot work
-/// anywhere is reported as such, not as a missing operator feature.
+/// no service account for a branch pod to borrow for secret managers or IAM auth, so every
+/// source must stand on its own; a Spanner branch reads the pod itself and can never run
+/// targetless. A branch the operator provisions without a pod (S3, turbopuffer) fetches secret
+/// manager values under the operator's own identity, so only values read off the pod count
+/// against it (see [`DatabaseBranchConfig::target_pod_need`]). The branches are checked before
+/// the operator's `TargetlessDbBranches` gate so a config that cannot work anywhere is reported
+/// as such, not as a missing operator feature.
 ///
 /// Pure, so `mirrord preview start` and `up` run it in `prepare`, before any running preview
 /// under the same key is replaced: `up` prepares every service and only then starts them all,
@@ -3530,9 +3532,10 @@ pub fn check_targetless_db_branches(
         let message = match need {
             TargetPodNeed::ConnectionValues => format!(
                 "`feature.db_branches[{position}]` needs the target pod (its env, a ConfigMap \
-                 volume, or its cloud identity for a secret manager source or IAM auth), but \
-                 this session has no target; give each connection value as a literal, a \
-                 Kubernetes Secret, or a ConfigMap named directly, or set a `target`"
+                 volume, or its cloud identity for a secret manager source or IAM auth of a \
+                 branch that runs a pod), but this session has no target; give each connection \
+                 value as a literal, a Kubernetes Secret, or a ConfigMap named directly, or set \
+                 a `target`"
             ),
             TargetPodNeed::Engine => format!(
                 "`feature.db_branches[{position}]` is a Spanner branch, which always reads the \

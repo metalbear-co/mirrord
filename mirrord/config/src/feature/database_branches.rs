@@ -1044,6 +1044,21 @@ impl DatabaseBranchConfig {
         })
     }
 
+    /// True when the operator runs a pod for this branch. S3 and turbopuffer branches have none:
+    /// the operator clones a bucket or a namespace through the provider's API and reads the
+    /// connection values itself, under its own cloud identity.
+    ///
+    /// Mirrors `BranchRuntime` in `operator-db-branching` (`Pod` against `External`), which
+    /// decides the same thing for the operator's own targetless check. The two must stay in
+    /// sync: an engine the operator provisions without a pod has to be pod-less here too, or
+    /// the CLI refuses a branch the operator would provision.
+    pub fn runs_branch_pod(&self) -> bool {
+        !matches!(
+            self,
+            DatabaseBranchConfig::S3(_) | DatabaseBranchConfig::Turbopuffer(_)
+        )
+    }
+
     /// Why this branch cannot be provisioned without the target pod, or `None` when it can. A
     /// session without a target has no pod, so the CLI refuses such a branch for it before
     /// creating anything; the operator applies the same rule to CRs created some other way
@@ -1056,28 +1071,35 @@ impl DatabaseBranchConfig {
     ///   so no connection value lifts the need
     /// - a value read from the pod: its env, `envFrom`, or a ConfigMap found through one of its
     ///   volumes
-    /// - its service account and AWS env: secret manager sources and IAM auth are fetched by
-    ///   the branch pod under the target's cloud identity
+    /// - its service account and AWS env, only for an engine that [runs a branch
+    ///   pod](Self::runs_branch_pod): that pod fetches secret manager sources and signs IAM auth
+    ///   under the target's cloud identity. A pod-less branch has the operator fetch them under
+    ///   its own identity, target or not, so they never count against it
+    ///
+    /// A `configmap` source without a locator of its own is not counted: it falls back to the
+    /// branch profile's `sourceConfigMap`, which the CLI cannot see. The operator refuses it when
+    /// that locator is a pod volume, see [`Self::relies_on_profile_source_config_map`].
     pub fn target_pod_need(&self) -> Option<TargetPodNeed> {
         if matches!(self, DatabaseBranchConfig::Spanner(_)) {
             return Some(TargetPodNeed::Engine);
         }
 
+        let borrows_pod_identity = self.runs_branch_pod();
         let params_need_pod = self.all_connection_params().any(|params| {
-            params.all_sources().any(|source| {
-                matches!(
-                    source,
-                    ParamSource::Variable(_)
-                        | ParamSource::Pattern { .. }
-                        | ParamSource::Env { value: None, .. }
-                        | ParamSource::ConfigMap {
-                            config_map: Some(ConfigMapRef::Volume { .. }),
-                            ..
-                        }
-                        | ParamSource::GcpSecretManager { .. }
-                        | ParamSource::AwsSecretsManager { .. }
-                        | ParamSource::AwsSsmParameter { .. }
-                )
+            params.all_sources().any(|source| match source {
+                ParamSource::Variable(_)
+                | ParamSource::Pattern { .. }
+                | ParamSource::Env { value: None, .. }
+                | ParamSource::ConfigMap {
+                    config_map: Some(ConfigMapRef::Volume { .. }),
+                    ..
+                } => true,
+                ParamSource::GcpSecretManager { .. }
+                | ParamSource::AwsSecretsManager { .. }
+                | ParamSource::AwsSsmParameter { .. } => borrows_pod_identity,
+                ParamSource::Secret { .. }
+                | ParamSource::Env { value: Some(_), .. }
+                | ParamSource::ConfigMap { .. } => false,
             })
         });
         // A bare `"url": "DATABASE_URL"` names a target env var too.
@@ -1088,19 +1110,43 @@ impl DatabaseBranchConfig {
             .chain(self.additional_connections())
             .any(|connection| match connection {
                 ConnectionSource::FlatUrl { .. } => true,
-                ConnectionSource::Url { url } => matches!(
-                    url,
+                ConnectionSource::Url { url } => match url {
                     TargetEnvironmentVariableSource::Env { value: None, .. }
-                        | TargetEnvironmentVariableSource::EnvFrom { .. }
-                        | TargetEnvironmentVariableSource::GcpSecretManager { .. }
-                        | TargetEnvironmentVariableSource::AwsSecretsManager { .. }
-                        | TargetEnvironmentVariableSource::AwsSsmParameter { .. }
-                ),
+                    | TargetEnvironmentVariableSource::EnvFrom { .. } => true,
+                    TargetEnvironmentVariableSource::GcpSecretManager { .. }
+                    | TargetEnvironmentVariableSource::AwsSecretsManager { .. }
+                    | TargetEnvironmentVariableSource::AwsSsmParameter { .. } => {
+                        borrows_pod_identity
+                    }
+                    TargetEnvironmentVariableSource::Env { value: Some(_), .. }
+                    | TargetEnvironmentVariableSource::Secret { .. } => false,
+                },
                 ConnectionSource::Params(_) => false,
             });
+        let iam_needs_pod = borrows_pod_identity && self.iam_auth().is_some();
 
-        (params_need_pod || urls_need_pod || self.iam_auth().is_some())
+        (params_need_pod || urls_need_pod || iam_needs_pod)
             .then_some(TargetPodNeed::ConnectionValues)
+    }
+
+    /// True when a `configmap` param source has no locator of its own, so the ConfigMap comes
+    /// from the branch profile's `sourceConfigMap`. Only a branch pod has a profile, and the CLI
+    /// cannot see it: when its locator is a pod volume, the operator refuses the branch without
+    /// a target, but only once `start` has created it. [`Self::target_pod_need`] lets such a
+    /// source through, so a preview without a target warns about it instead.
+    pub fn relies_on_profile_source_config_map(&self) -> bool {
+        self.runs_branch_pod()
+            && self.all_connection_params().any(|params| {
+                params.all_sources().any(|source| {
+                    matches!(
+                        source,
+                        ParamSource::ConfigMap {
+                            config_map: None,
+                            ..
+                        }
+                    )
+                })
+            })
     }
 
     /// True when a param or the `url` is read from AWS SSM Parameter Store. The CLI uses it to
@@ -2933,6 +2979,65 @@ mod tests {
         assert_eq!(
             branch.target_pod_need(),
             Some(TargetPodNeed::ConnectionValues)
+        );
+    }
+
+    /// S3 and turbopuffer branches run no pod: the operator clones through the provider's API
+    /// and fetches secret manager values under its own identity, so a secret manager source
+    /// needs no target for them, the way the operator's `BranchRuntime::External` lets it
+    /// through. A value read off the target pod's env still does.
+    #[rstest]
+    #[case::s3_bucket_from_secrets_manager(
+        json!({ "type": "s3", "source": { "params": { "bucket": { "aws_secrets_manager": "prod/s3", "env_var_name": "BUCKET" } } } }),
+        false
+    )]
+    #[case::s3_bucket_from_pod_env(json!({ "type": "s3", "source": { "params": { "bucket": "BUCKET" } } }), true)]
+    #[case::turbopuffer_api_key_from_secret_manager(
+        json!({ "type": "turbopuffer", "source": { "params": {
+            "namespace": { "env_var_name": "TPUF_NAMESPACE", "value": "prod" },
+            "api_key": { "gcp_secret_manager": "projects/p/secrets/tpuf" },
+            "region": { "env_var_name": "TPUF_REGION", "value": "gcp-us-central1" }
+        } } }),
+        false
+    )]
+    #[case::pg_password_from_secret_manager(
+        json!({ "type": "pg", "connection": { "params": { "host": { "secret": "pg", "key": "host" }, "password": { "gcp_secret_manager": "projects/p/secrets/pw" } } } }),
+        true
+    )]
+    fn only_a_branch_pod_borrows_the_target_identity_for_secret_managers(
+        #[case] branch: Value,
+        #[case] needs_pod: bool,
+    ) {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(branch).unwrap();
+
+        assert_eq!(
+            branch.target_pod_need(),
+            needs_pod.then_some(TargetPodNeed::ConnectionValues)
+        );
+    }
+
+    /// A `configmap` source without a locator falls back to the branch profile's
+    /// `sourceConfigMap`, which only a branch pod has and the CLI cannot see. It passes the
+    /// target pod check, so a preview without a target warns that the branch depends on the
+    /// profile instead; a source that names its ConfigMap, or a pod-less engine, does not.
+    #[rstest]
+    #[case::no_locator(json!({ "host": { "key": "host" } }), true)]
+    #[case::named_configmap(json!({ "host": { "configmap": "app-config", "key": "host" } }), false)]
+    #[case::secret(json!({ "host": { "secret": "pg", "key": "host" } }), false)]
+    fn configmap_source_without_locator_relies_on_the_profile(
+        #[case] params: Value,
+        #[case] relies_on_profile: bool,
+    ) {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
+            "type": "pg",
+            "connection": { "params": params },
+        }))
+        .unwrap();
+
+        assert_eq!(branch.target_pod_need(), None);
+        assert_eq!(
+            branch.relies_on_profile_source_config_map(),
+            relies_on_profile
         );
     }
 
