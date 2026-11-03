@@ -481,7 +481,9 @@ pub(crate) enum CliError {
     #[diagnostic(help(
         "A management-only Primary links the workload clusters but runs no workloads, so a session \
          forced onto it has nothing to target. Remove `multi_cluster: false` from your mirrord \
-         config so the session spans the workload clusters; label targets are not yet supported \
+         config, and unset `MIRRORD_MULTI_CLUSTER` (or set it to `true`) since the environment \
+         variable overrides the file, so the session spans the workload clusters; label targets \
+         are not yet supported \
          in multi-cluster sessions, so name the target instead. If the Primary does run \
          workloads, ask your cluster administrator to set \
          `operator.multiCluster.managementOnly=false` in the operator Helm values.{GENERAL_HELP}"
