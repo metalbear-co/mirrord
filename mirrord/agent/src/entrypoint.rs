@@ -17,7 +17,10 @@ use futures::{
     TryFutureExt,
     future::{BoxFuture, OptionFuture},
 };
-use metrics::{Buffered, CLIENT_COUNT, start_metrics};
+use metrics::{
+    Buffered, CLIENT_COUNT, OUTGOING_THROTTLE_PERMITS_CLIENT, OUTGOING_THROTTLE_PERMITS_DAEMON,
+    start_metrics,
+};
 use mirrord_agent_env::{checked_env::CheckedEnv, envs};
 use mirrord_agent_iptables::{
     ChainNames, IPTablesWrapper, SafeIpTables,
@@ -466,8 +469,14 @@ impl ClientConnectionHandler {
         let dns_api = Self::create_dns_api(bg_tasks.dns);
         let reverse_dns_api = ReverseDnsApi::new(&state.network_runtime);
 
-        let outgoing_to_client_throttle = Throttle::new(Self::OUTGOING_DATA_TO_CLIENT_LIMIT);
-        let outgoing_from_client_throttle = Throttle::new(Self::OUTGOING_DATA_FROM_CLIENT_LIMIT);
+        let outgoing_to_client_throttle = Throttle::new(
+            Self::OUTGOING_DATA_TO_CLIENT_LIMIT,
+            OUTGOING_THROTTLE_PERMITS_DAEMON.clone(),
+        );
+        let outgoing_from_client_throttle = Throttle::new(
+            Self::OUTGOING_DATA_FROM_CLIENT_LIMIT,
+            OUTGOING_THROTTLE_PERMITS_CLIENT.clone(),
+        );
 
         let client_handler = Self {
             id,

@@ -157,6 +157,7 @@ impl BufferedMessage for DaemonMessage {
 ///
 /// Keeps a gauge that reports memory in step with the value that holds the memory, so it cannot
 /// drift when that value is dropped on an error path.
+#[derive(Debug)]
 pub(crate) struct IntGaugeGuard {
     gauge: IntGauge,
     amount: i64,
@@ -228,6 +229,43 @@ impl<M: fmt::Debug> fmt::Debug for Buffered<M> {
     }
 }
 
+/// Memory held by the outgoing traffic [`Throttle`](crate::util::io::throttle::Throttle)s, which
+/// let each client buffer up to a fixed amount of outgoing traffic data in each direction.
+///
+/// The value is the throttles' permits in use: each chunk of data costs its length plus a fixed
+/// per-chunk overhead. `direction` uses the vocabulary of [`BUFFERED_MESSAGES_BYTES`]: `daemon`
+/// for data read from remote peers on its way to the client, `client` for data from the client on
+/// its way to remote peers.
+///
+/// Data on its way to the client stays under its permit while the agent sends the
+/// [`DaemonMessage`] that carries it, so for that time it is also counted in
+/// [`BUFFERED_MESSAGES_BYTES`] (`direction="daemon"`, `message="tcp_outgoing"` or
+/// `"udp_outgoing"`). Adding the two metrics counts those bytes twice.
+///
+/// Updated live by the throttles' permits, through [`OUTGOING_THROTTLE_PERMITS_DAEMON`] and
+/// [`OUTGOING_THROTTLE_PERMITS_CLIENT`].
+static OUTGOING_THROTTLE_PERMITS: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    prometheus::register_int_gauge_vec!(
+        "mirrord_agent_outgoing_throttle_permits",
+        "permits held by the mirrord-agent outgoing traffic throttles (data bytes plus a fixed \
+         per-chunk overhead): direction=daemon waits to be sent to the client, direction=client \
+         to the remote peer; daemon data is also in mirrord_agent_buffered_messages_bytes while \
+         it is being sent, so do not add the two metrics",
+        &["direction"]
+    )
+    .expect("OUTGOING_THROTTLE_PERMITS should be valid")
+});
+
+/// [`OUTGOING_THROTTLE_PERMITS`] child for data read from remote peers, waiting to be sent to the
+/// client. Resolved once, and each client's throttle holds a clone.
+pub(crate) static OUTGOING_THROTTLE_PERMITS_DAEMON: LazyLock<IntGauge> =
+    LazyLock::new(|| OUTGOING_THROTTLE_PERMITS.with_label_values(&["daemon"]));
+
+/// [`OUTGOING_THROTTLE_PERMITS`] child for data received from the client, waiting to be written to
+/// remote peers. Resolved once, and each client's throttle holds a clone.
+pub(crate) static OUTGOING_THROTTLE_PERMITS_CLIENT: LazyLock<IntGauge> =
+    LazyLock::new(|| OUTGOING_THROTTLE_PERMITS.with_label_values(&["client"]));
+
 /// Convenience trait for static metrics variables.
 ///
 /// We store them as [`AtomicUsize`], which is the correct type (they're all counters).
@@ -272,9 +310,11 @@ impl Metrics {
 
         let registry = prometheus::default_registry();
 
-        // Creates every `BUFFERED_MESSAGES_BYTES` series, so that each reads 0 from the first
-        // scrape instead of appearing only after its first message.
+        // Creates every `BUFFERED_MESSAGES_BYTES` and `OUTGOING_THROTTLE_PERMITS` series, so that
+        // each reads 0 from the first scrape instead of appearing only after its first message.
         LazyLock::force(&BUFFERED_MESSAGE_GAUGES);
+        LazyLock::force(&OUTGOING_THROTTLE_PERMITS_DAEMON);
+        LazyLock::force(&OUTGOING_THROTTLE_PERMITS_CLIENT);
 
         let client_count = {
             let opts = Opts::new(
