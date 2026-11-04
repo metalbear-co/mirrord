@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-11-02T00:00:00.000Z
+lastmod: 2026-11-04T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -1566,6 +1566,11 @@ Users can choose from the following copy mode to bootstrap their MariaDB branch 
 All copy modes accept `dump_args`, passed to `mariadb-dump` as-is, which can leave out what the
 copy mode copies, such as stored routines with `--skip-routines`.
 
+All copy modes also accept `exclude_tables`: table names or patterns (`*` matches any run of
+characters, `?` one character) the copy leaves out entirely. Use it for tables another service
+creates and drops while the copy runs, such as `["staging_*", "import_tmp"]`, which would
+otherwise fail the copy when they disappear mid-dump.
+
 - Empty
 
   Creates an empty database. If the source DB connection options are found from the chosen
@@ -1759,6 +1764,11 @@ Users can choose from the following copy mode to bootstrap their MySQL branch da
 
 All copy modes accept `dump_args`, passed to `mysqldump` as-is, which can leave out what the
 copy mode copies, such as stored routines with `--skip-routines`.
+
+All copy modes also accept `exclude_tables`: table names or patterns (`*` matches any run of
+characters, `?` one character) the copy leaves out entirely. Use it for tables another service
+creates and drops while the copy runs, such as `["staging_*", "import_tmp"]`, which would
+otherwise fail the copy when they disappear mid-dump.
 
 - Empty
 
@@ -4490,6 +4500,13 @@ attributes or headers, and possibly on jq filters (for SQS and other body-aware 
 The queue ids have to match those defined in the target's `MirrordSplitConfig` (or the legacy
 `MirrordWorkloadQueueRegistry` / `MirrordKafkaTopicsConsumer`).
 
+An entry that sets neither `filter`, `message_filter` nor `jq_filter` receives the messages
+carrying the session's `key`, found with the `keyJqFilter` of the `MirrordSplitConfig` queue
+entry. A filter set here takes precedence over it, unless the queue entry has `enforceFilter`,
+which rejects the session instead. An empty `message_filter` map is not rejected: it keeps
+meaning "split the queue, deliver nothing". A queue missing from `split_queues` altogether
+delivers nothing to the local application, whatever the split config says.
+
 Two shapes are accepted. The classic map form keys each entry by its queue id, which means a
 given id can appear only once:
 
@@ -4924,7 +4941,9 @@ the in-cluster config.
 
 Controls multi-cluster session behavior when connecting to a multi-cluster Primary
 operator. When set to `false`, forces a single-cluster session on the Primary cluster
-instead of creating a multi-cluster session that spans all workload clusters.
+instead of creating a multi-cluster session that spans all workload clusters. The Primary
+has to run workloads itself for that: a management-only Primary
+(`operator.multiCluster.managementOnly=true`) rejects the session.
 When `true` or unset, multi-cluster sessions are used when the operator supports them.
 
 ## operator {#root-operator}
