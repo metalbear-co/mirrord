@@ -8,6 +8,12 @@
 
 This applies to any code change which alters user-viewable behaviour, including:
 
+- The screens and tabs, and what each one shows.
+- Key bindings.
+- The layout, colors, status bar, and connection error dialog.
+- How it starts and logs, as `mirrord tui` or as the standalone binary.
+- How it connects to the cluster.
+
 ### How to update
 
 1. Make the code change.
@@ -16,7 +22,7 @@ This applies to any code change which alters user-viewable behaviour, including:
 
 ### When a code change does *not* require a SPEC.md update
 
-- Pure refactors that do not change observable behavior, module boundaries listed in the spec, or the dependency list.
+- Pure refactors that do not change observable behavior.
 - Formatting, comment, or rename changes with no behavioral effect.
 - Changes to files the spec does not describe (e.g. CI config, this file).
 

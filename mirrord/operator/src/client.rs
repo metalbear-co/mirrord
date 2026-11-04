@@ -34,7 +34,8 @@ use mirrord_config::{
     config::EnvKey,
     feature::{
         database_branches::{
-            DatabaseBranchConfig, SplitConfigDbBranches, default_creation_timeout_secs,
+            BranchCopyMode, DatabaseBranchConfig, SplitConfigDbBranches, SplitConfigRequest,
+            default_creation_timeout_secs,
         },
         split_queues::{QueueKind, QueueSplit, SplitQueuesConfig},
     },
@@ -54,6 +55,7 @@ use mirrord_kube::{
 };
 use mirrord_operator_websocket::{connection::OperatorConnection, upgrade};
 use mirrord_progress::Progress;
+use preview_sync::PreviewSyncConnection;
 use semver::Version;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tower::{buffer::BufferLayer, retry::RetryLayer};
@@ -82,13 +84,14 @@ use crate::{
         OPERATOR_STATUS_NAME, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
-            branch_database::{BranchDatabase, BranchDatabaseSpec, DatabaseDialect},
+            branch_database::{BranchDatabase, BranchDatabaseSpec, DatabaseDialect, DialectConfig},
             mongodb::MongodbBranchDatabase,
             mysql::MysqlBranchDatabase,
             pg::PgBranchDatabase,
             split_config::{
-                AllEntries, ResolveSplitConfigDbBranchesRequest,
-                ResolveSplitConfigDbBranchesResponse, SplitConfigDbBranchesRequest,
+                AllEntries, COPY_MODE_NOT_ALLOWED_REASON, ResolveSplitConfigDbBranchesRequest,
+                ResolveSplitConfigDbBranchesResponse, SplitConfigCopyMode,
+                SplitConfigDbBranchesRequest,
             },
         },
         session::{KubeResourceTarget, SessionCiInfo, SessionTarget, UpSessionInfo},
@@ -104,6 +107,7 @@ mod credentials;
 pub mod database_branches;
 mod discovery;
 pub mod error;
+pub mod preview_sync;
 mod queue_split_progress;
 pub mod split_config_branches;
 
@@ -129,7 +133,7 @@ pub fn add_baggage_header(config: &mut Config, baggage: Option<&str>) -> Operato
 pub trait ClientCertificateState: fmt::Debug {}
 
 /// Represents a [`ClientCertificateState`] where we don't have the certificate.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NoClientCert {
     /// [`Config::headers`] here contain some extra entries:
     /// 1. [`CLIENT_HOSTNAME_HEADER`] (if available)
@@ -292,6 +296,7 @@ pub struct PreparedSession {
 }
 
 /// Wrapper over mirrord operator API.
+#[derive(Clone)]
 pub struct OperatorApi<C> {
     /// For making requests to kubernetes API server.
     client: Client,
@@ -809,6 +814,29 @@ where
         Ok(response.secret_name)
     }
 
+    /// Opens the code sync websocket of the preview session `name` in `namespace`, through which
+    /// the CLI pushes its local tree into the preview pod.
+    pub async fn connect_preview_sync(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> OperatorApiResult<PreviewSyncConnection> {
+        let request = Request::builder()
+            .uri(format!(
+                "/apis/operator.metalbear.co/v1alpha1/namespaces/{namespace}/previews/{name}/sync"
+            ))
+            .body(vec![])
+            .map_err(OperatorApiError::ConnectRequestBuildError)?;
+
+        upgrade::connect_ws(&self.client, request)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::WebsocketConnection,
+            })
+            .map(PreviewSyncConnection::new)
+    }
+
     /// The workload `layer_config` targets and its namespace, as the `splitconfigdbbranches`
     /// route takes them. `None` for a target that isn't one workload (targetless, a label
     /// selector), which has no `MirrordSplitConfig` to look at.
@@ -842,12 +870,22 @@ where
     pub async fn lookup_split_config_db_branches(
         &self,
         layer_config: &LayerConfig,
-        request: &SplitConfigDbBranches,
+        request: &SplitConfigRequest,
     ) -> OperatorApiResult<ResolveSplitConfigDbBranchesResponse> {
         self.operator
             .spec
             .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
-        let request = match request {
+        let copy_mode = request.copy_mode().map(|mode| match mode {
+            BranchCopyMode::Empty => SplitConfigCopyMode::Empty,
+            BranchCopyMode::Schema => SplitConfigCopyMode::Schema,
+            BranchCopyMode::All => SplitConfigCopyMode::All,
+        });
+        if copy_mode.is_some() {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchesSplitConfigCopyMode)?;
+        }
+        let request = match request.entries() {
             SplitConfigDbBranches::All(_) => SplitConfigDbBranchesRequest::All(AllEntries::All),
             SplitConfigDbBranches::Ids(ids) => SplitConfigDbBranchesRequest::Ids(ids.clone()),
         };
@@ -867,6 +905,7 @@ where
             namespace: namespace.clone(),
             target,
             request: Some(request),
+            copy_mode,
         };
         self.post_in_namespace(&namespace, "splitconfigdbbranches", &body)
             .await
@@ -874,6 +913,9 @@ where
                 // The operator's answer says what is wrong with the request (an unknown id, a
                 // config conflict) in its own words; it is shown as it is, not inside kube's
                 // wrapping of the response.
+                kube::Error::Api(response) if response.reason == COPY_MODE_NOT_ALLOWED_REASON => {
+                    OperatorApiError::SplitConfigCopyModeNotAllowed(response.message)
+                }
                 kube::Error::Api(response) => {
                     if let Some(gate) = PaidFeatureGate::from_status(&response) {
                         OperatorApiError::FeatureNotLicensed { gate }
@@ -906,6 +948,7 @@ where
             namespace: namespace.clone(),
             target,
             request: None,
+            copy_mode: None,
         };
         match self
             .post_in_namespace::<ResolveSplitConfigDbBranchesResponse>(
@@ -1619,32 +1662,23 @@ where
                     .clone()
                     .ok_or(KubeApiError::missing_field(branch, ".metadata.name"))?;
 
-                if branch.spec.postgres_options.is_some() {
-                    names.pg.push(name);
-                } else if branch.spec.mysql_options.is_some() {
-                    names.mysql.push(name);
-                } else if branch.spec.mariadb_options.is_some() {
-                    names.mariadb.push(name);
-                } else if branch.spec.mongodb_options.is_some() {
-                    names.mongodb.push(name);
-                } else if branch.spec.mssql_options.is_some() {
-                    names.mssql.push(name);
-                } else if branch.spec.redis_options.is_some() {
-                    names.redis.push(name);
-                } else if branch.spec.dynamodb_options.is_some() {
-                    names.dynamodb.push(name);
-                } else if branch.spec.spanner_options.is_some() {
-                    names.spanner.push(name);
-                } else if branch.spec.clickhouse_options.is_some() {
-                    names.clickhouse.push(name);
-                } else if branch.spec.cockroachdb_options.is_some() {
-                    names.cockroachdb.push(name);
-                } else if branch.spec.generic_options.is_some() {
-                    names.generic.push(name);
-                } else if branch.spec.s3_options.is_some() {
-                    names.s3.push(name);
-                } else if branch.spec.turbopuffer_options.is_some() {
-                    names.turbopuffer.push(name);
+                let Some(dialect) = branch.spec.configured_dialects().next() else {
+                    continue;
+                };
+                match dialect {
+                    DialectConfig::Postgres(_) => names.pg.push(name),
+                    DialectConfig::Mysql(_) => names.mysql.push(name),
+                    DialectConfig::Mariadb(_) => names.mariadb.push(name),
+                    DialectConfig::Dynamodb(_) => names.dynamodb.push(name),
+                    DialectConfig::Mongodb(_) => names.mongodb.push(name),
+                    DialectConfig::Mssql(_) => names.mssql.push(name),
+                    DialectConfig::Redis(_) => names.redis.push(name),
+                    DialectConfig::Spanner(_) => names.spanner.push(name),
+                    DialectConfig::Clickhouse(_) => names.clickhouse.push(name),
+                    DialectConfig::Cockroachdb(_) => names.cockroachdb.push(name),
+                    DialectConfig::S3(_) => names.s3.push(name),
+                    DialectConfig::Turbopuffer(_) => names.turbopuffer.push(name),
+                    DialectConfig::Generic(_) => names.generic.push(name),
                 }
             }
             Ok(names)
@@ -1806,6 +1840,27 @@ where
         Ok((client_config, kube_context))
     }
 
+    /// Refuses a `split_queues` entry with no filter of its own when the operator cannot take the
+    /// filter from the queue's `MirrordSplitConfig` entry. Such an operator rejects the entry with
+    /// a generic error, so this names the missing feature instead. Multi-cluster sessions run it
+    /// against the primary, which reads the request before any workload cluster sees it.
+    fn check_split_config_filters_support(
+        &self,
+        layer_config: &LayerConfig,
+    ) -> OperatorApiResult<()> {
+        if layer_config
+            .feature
+            .split_queues
+            .uses_split_config_filters()
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::SplitConfigQueueFilters)?;
+        }
+
+        Ok(())
+    }
+
     /// Check the operator supports all the operator features required by the user's configuration.
     pub fn check_feature_support(
         &self,
@@ -1848,11 +1903,16 @@ where
                 .require_feature(NewOperatorFeature::KafkaBranching)?;
         }
 
+        // Checked before the auto-splitting early return: the splits `mirrord up` generates
+        // always carry a jq filter, so a filterless entry can only come from the user's
+        // `config_patch`, and an old operator must not be asked to run it.
+        self.check_split_config_filters_support(layer_config)?;
+
+        let split_queues = &layer_config.feature.split_queues;
+
         if auto_queue_splitting {
             return Ok(());
         }
-
-        let split_queues = &layer_config.feature.split_queues;
 
         // Brokers added after the first ones were born with jq, so only the early ones gate jq
         // separately.
@@ -2496,6 +2556,7 @@ impl OperatorApi<PreparedClientCert> {
             layer_config.feature.split_queues = filtered;
             progress.warning(RMQ_AUTO_SPLITS_DISABLED_WARNING);
         }
+        self.check_split_config_filters_support(layer_config)?;
         // Owned: branch preparation below edits the config while the namespace is still needed.
         let namespace = layer_config.target.namespace.clone();
 

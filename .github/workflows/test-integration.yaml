@@ -43,6 +43,9 @@ jobs:
     env:
       MIRRORD_TESTS_USE_BINARY: /workspace/mirrord/target/debug/mirrord
       MIRRORD_LAYER_FILE: /workspace/mirrord/target/debug/libmirrord_layer.so
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      # Rust links x86_64 with `rust-lld` but aarch64 with GNU ld, which is several times slower.
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -Clink-arg=-fuse-ld=mold
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Rust cache
@@ -78,95 +81,45 @@ jobs:
         with:
           command: |
             cargo build -p mirrord
-      - uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo nextest run -p mirrord-layer-lib
-      - uses: ./.github/actions/run-in-ci-runner
+      - name: mirrord layer integration tests
+        uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
             cargo nextest run -p mirrord-layer-tests --no-default-features
-      - uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo nextest run -p mirrord-layer
-      - name: mirrord protocol UT
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo nextest run -p mirrord-protocol
-      - name: mirrord config UT
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo nextest run -p mirrord-config
-      - name: mirrord progress UT
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo nextest run -p mirrord-progress
-      - name: mirrord kube UT
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo nextest run -p mirrord-kube --all-features
-      - name: mirrord intproxy UT
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo nextest run -p mirrord-intproxy
-      - name: mirrord auth UT
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo nextest run -p mirrord-auth
-      - name: mirrord operator UT
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo nextest run -p mirrord-operator --features "crd, client"
-      - name: mirrord cli UT
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo xtask test-ut
-      - name: mirrord protocol-io UT
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo nextest run -p mirrord-protocol-io
-      - name: mirrord jaq UT
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo nextest run -p mirrord-jaq
-      - name: mirrord vpn UT
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo nextest run -p mirrord-vpn
-      - name: mirrord up UT
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: |
-            cargo nextest run -p mirrord-up
+      # Runs after the integration tests, since `test-ut` (which adds `-p mirrord` with placeholder
+      # CLI assets) replaces the `target/debug/mirrord` they run.
+      #
       # Also checks the vendored docs and skills, so a release PR whose bumped corpus doesn't hold
       # up fails here.
-      - name: mirrord mcp UT
+      - name: mirrord UT
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo nextest run -p mirrord-mcp
-      - name: mirrord tui build and UT
+            cargo xtask test-ut \
+              -p mirrord-layer-lib \
+              -p mirrord-layer \
+              -p mirrord-protocol \
+              -p mirrord-config \
+              -p mirrord-progress \
+              -p mirrord-kube \
+              -p mirrord-intproxy \
+              -p mirrord-auth \
+              -p mirrord-operator \
+              -p mirrord-protocol-io \
+              -p mirrord-jaq \
+              -p mirrord-vpn \
+              -p mirrord-up \
+              -p mirrord-mcp \
+              -p mirrord-tui \
+              --features mirrord-kube/incluster,mirrord-kube/portforward,mirrord-operator/crd,mirrord-operator/client
+      # Built from its own directory, so that the crate is checked the way someone working only on
+      # it builds it, rather than with whatever features the rest of the workspace happens to turn
+      # on.
+      - name: mirrord tui standalone build
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            set -e
-            # Built from its own directory, so that the crate is checked the way someone working
-            # only on it builds it, rather than with whatever features the rest of the workspace
-            # happens to turn on.
-            (cd mirrord/tui && cargo build)
-            cargo nextest run -p mirrord-tui
+            cd mirrord/tui && cargo build
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}

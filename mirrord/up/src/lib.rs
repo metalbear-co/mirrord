@@ -18,10 +18,12 @@ use std::{
 };
 
 pub use config::{
-    COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, IncompatibleTarget, PreviewImageError,
-    PreviewImageSource, PreviewImages, SERVICE_LAYER_PATHS, SelectError, ServiceConfig,
-    ServiceError, ServiceMode, SubprocessCfg, TargetValidationError, UpConfig, WindowsSupportError,
-    preview_image_env,
+    BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, DbBranching,
+    IncompatibleTarget, InstallConfig, ModeConfig, PreviewImageError, PreviewImageSource,
+    PreviewImages, PreviewRun, QueueSplitMode, RequestOrigin, RunConfig, RunType,
+    SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SkipReason,
+    SubprocessCfg, SyncConfig, SyncEntry, SyncRunConfig, TargetValidationError, UnknownMode,
+    UpConfig, WindowsSupportError, preview_image_env,
 };
 use config::{
     ResolvedTarget, SessionKind, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets,
@@ -29,6 +31,7 @@ use config::{
 use futures::TryStreamExt;
 pub use init::{InitError, run_wizard};
 use inquire::{Confirm, Select};
+use itertools::Itertools;
 use k8s_openapi::api::core::v1::Namespace;
 pub use list::{LISTING_VERSION, UpListing};
 use miette::Diagnostic;
@@ -154,6 +157,16 @@ pub enum UpError {
     #[diagnostic(transparent)]
     Select(#[from] SelectError),
 
+    /// A custom mode is defined under a built-in mode's name.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    BuiltinModeName(#[from] BuiltinModeName),
+
+    /// A mode is selected that isn't built-in or defined under `modes`.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    UnknownMode(#[from] UnknownMode),
+
     /// One or more services cannot use their resolved targets.
     #[error("target validation failed")]
     Mode(#[related] Vec<TargetValidationError>),
@@ -230,8 +243,9 @@ pub enum UpError {
         namespace: String,
     },
 
-    /// A service previewed by `mirrord preview up` has no target (`target: none` or
-    /// `path: targetless`). A preview runs a copy of its target's pod, so there has to be one.
+    /// A service previewed by `mirrord preview up` or `mirrord preview sync` has no target
+    /// (`target: none` or `path: targetless`). A preview runs a copy of its target's pod, so there
+    /// has to be one.
     #[error("service `{service}` has no target, but a preview environment needs one")]
     PreviewTargetless {
         /// Name of the targetless service.
@@ -352,17 +366,47 @@ impl UpConfig {
     /// Doesn't look at the filesystem, so it also serves to validate a config that isn't on disk
     /// (e.g. in `mirrord mcp`); [`load_up_config`] runs it before resolving the services' paths.
     pub fn verify(&self) -> Result<(), UpError> {
-        for (service, service_config) in &self.services {
-            if service_config.run.directory.is_some()
-                && matches!(service_config.run.r#type, config::RunType::Container)
-            {
-                return Err(UpError::ContainerRunDirectory {
-                    service: service.clone(),
-                });
-            }
-        }
+        self.verify_all().into_iter().next().map_or(Ok(()), Err)
+    }
 
-        Ok(())
+    /// Every reason [`Self::verify`] rejects the config for, so `mirrord mcp` can report them all
+    /// at once.
+    pub fn verify_all(&self) -> Vec<UpError> {
+        let builtin_names = self
+            .modes
+            .iter()
+            .filter(|(name, mode)| {
+                ServiceMode::from_name(name).is_some()
+                    && (mode.incoming.is_some() || mode.queues.is_some())
+            })
+            .map(|(name, _)| BuiltinModeName(name.clone()).into());
+        // `services` is a `HashMap`, so its entries are sorted here and below: [`Self::verify`]
+        // then reports the same first error on every run.
+        let unknown_modes = self
+            .services
+            .values()
+            .map(|service| &service.default_mode)
+            .sorted()
+            .dedup()
+            .filter_map(|name| ModeConfig::named(&self.modes, name).err())
+            .map(UpError::from);
+        let container_directories = self
+            .services
+            .iter()
+            .filter(|(_, service)| {
+                service.run.directory.is_some()
+                    && matches!(service.run.r#type, config::RunType::Container)
+            })
+            .map(|(service, _)| service)
+            .sorted()
+            .map(|service| UpError::ContainerRunDirectory {
+                service: service.clone(),
+            });
+
+        builtin_names
+            .chain(unknown_modes)
+            .chain(container_directories)
+            .collect()
     }
 }
 
@@ -380,13 +424,39 @@ fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
     )
 }
 
-/// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up`.
+/// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up`, `mirrord
+/// preview sync` and `mirrord preview down`, and resolve the local directories of each service's
+/// `sync.files` and the globs of its `sync.install.on_change` against the directory of the
+/// file.
 ///
-/// Unlike [`load_up_config`], it doesn't check the services' `run`: `mirrord preview up` never
-/// launches their local commands, so a `run.directory` that only exists on a developer's machine
-/// must not stop it (e.g. in CI).
+/// Unlike [`load_up_config`], it doesn't check that the local paths exist. The `preview`
+/// commands never launch the services' local commands, so a `run.directory` that only exists on
+/// a developer's machine must not stop them (e.g. in CI). `mirrord preview up` and `mirrord
+/// preview down` never read the `sync` directories, so they must work in a checkout without
+/// them. `mirrord preview sync` checks the `sync` directories of the services that it previews.
 pub fn load_preview_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
-    template(&std::fs::read_to_string(path)?, key)
+    let mut config = template(&std::fs::read_to_string(path)?, key)?;
+    let config_directory = config_directory(path)?;
+
+    for sync in config
+        .services
+        .values_mut()
+        .filter_map(|service| service.sync.as_mut())
+    {
+        for entry in &mut sync.files {
+            entry.local = config_directory.join(&entry.local);
+        }
+
+        for glob in sync
+            .install
+            .iter_mut()
+            .flat_map(|install| &mut install.on_change)
+        {
+            *glob = config_directory.join(&*glob);
+        }
+    }
+
+    Ok(config)
 }
 
 /// Load, parse, and resolve local paths in a `mirrord-up.yaml` configuration file.
@@ -835,11 +905,11 @@ pub async fn resolve_services(
     Ok(service_configs)
 }
 
-/// Generate the [`mirrord_config::LayerConfig`] of every service's `mirrord preview up` session,
-/// resolving the targets left to the cluster like [`resolve_services`] does, but without ever
-/// prompting. The caller drops the services without an image with
-/// [`UpConfig::select_preview_images`] before calling this, and sets each config's
-/// `feature.preview.image` to the one it picked.
+/// Generate the [`mirrord_config::LayerConfig`] of every service's `mirrord preview up` or
+/// `mirrord preview sync` session, resolving the targets left to the cluster like
+/// [`resolve_services`] does, but without ever prompting. The caller drops the services that get
+/// no preview with [`UpConfig::select_preview_images`] before calling this, and sets each
+/// config's `feature.preview.image` to the one it picked.
 pub async fn resolve_preview_services(
     up_config: UpConfig,
     config_path: &Path,
@@ -916,9 +986,11 @@ fn service_commands(
                 config,
                 service_name,
                 run,
+                sync: _,
                 mode: _,
-                default_db_branches: _,
-                default_split_queues: _,
+                incoming: _,
+                db_branches_origin: _,
+                queues_origin: _,
             } = config;
             let config::RunConfig {
                 r#type,
@@ -1002,15 +1074,15 @@ mod tests {
         Some("target")
     )]
     #[case::value_typo(
-        "services:\n  api:\n    default_mode: splt\n    run:\n      command: [x]\n",
+        "modes:\n  m:\n    incoming: splt\nservices:\n  api:\n    run:\n      command: [x]\n",
         Some("split")
     )]
     #[case::value_in_uppercase(
-        "services:\n  api:\n    default_mode: MIRROR\n    run:\n      command: [x]\n",
+        "modes:\n  m:\n    incoming: MIRROR\nservices:\n  api:\n    run:\n      command: [x]\n",
         Some("mirror")
     )]
     #[case::unrelated_value(
-        "services:\n  api:\n    default_mode: zzzzzz\n    run:\n      command: [x]\n",
+        "modes:\n  m:\n    incoming: zzzzzz\nservices:\n  api:\n    run:\n      command: [x]\n",
         None
     )]
     #[case::other_error("services:\n  api:\n    default_mode: split\n", None)]
@@ -1036,7 +1108,8 @@ mod tests {
     /// The report shows the YAML snippet once: in the message, with its suggestion.
     #[test]
     fn parse_error_report_shows_the_snippet_once() {
-        let yaml = "services:\n  api:\n    default_mode: mirorr\n    run:\n      command: [x]\n";
+        let yaml =
+            "modes:\n  m:\n    incoming: mirorr\nservices:\n  api:\n    run:\n      command: [x]\n";
         let error = template(yaml, &EnvKey::Provided("key".to_owned())).unwrap_err();
 
         let mut report = String::new();
@@ -1048,6 +1121,44 @@ mod tests {
             report.matches("--> <input>").count(),
             1,
             "the parse error must not repeat as its own source:\n{report}"
+        );
+    }
+
+    /// An entry named after a built-in mode may set only `db_branching`.
+    #[rstest::rstest]
+    fn verify_rejects_builtin_entry_setting_more_than_db_branching(
+        #[values("split", "replace", "mirror")] name: &str,
+    ) {
+        let yaml = format!(
+            "modes:\n  {name}:\n    incoming: mirror\nservices:\n  api:\n    run:\n      command: [x]\n"
+        );
+        let config = template(&yaml, &EnvKey::Provided("key".to_owned())).unwrap();
+
+        let Err(UpError::BuiltinModeName(BuiltinModeName(builtin))) = config.verify() else {
+            panic!("expected a built-in name error");
+        };
+        assert_eq!(&*builtin, name);
+    }
+
+    /// An unknown `default_mode` fails `verify`, naming the closest and every known mode.
+    #[test]
+    fn verify_rejects_unknown_default_mode() {
+        let yaml = "modes:\n  fast: {}\nservices:\n  api:\n    default_mode: fsat\n    run:\n      command: [x]\n";
+        let config = template(yaml, &EnvKey::Provided("key".to_owned())).unwrap();
+
+        let Err(UpError::UnknownMode(UnknownMode {
+            name,
+            suggestion,
+            known,
+        })) = config.verify()
+        else {
+            panic!("expected an unknown mode error");
+        };
+        assert_eq!(&*name, "fsat");
+        assert_eq!(suggestion.as_deref(), Some("fast"));
+        assert_eq!(
+            known.iter().map(AsRef::as_ref).collect::<Vec<&str>>(),
+            ["split", "replace", "mirror", "fast"]
         );
     }
 
@@ -1171,6 +1282,32 @@ services:
                 ),
             ]),
             "only the services `--debug` names may wait for an IDE to release them"
+        );
+    }
+
+    /// `mirrord preview down` loads the same config as `mirrord preview up`, and must still
+    /// delete the previews in a checkout that lacks a `sync` directory.
+    #[test]
+    fn preview_config_resolves_sync_paths_without_reading_them() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let config_path = directory.path().join("mirrord-up.yaml");
+        std::fs::write(
+            &config_path,
+            "services:\n  web:\n    run:\n      command: [x]\n    sync:\n      files:\n        - local: missing\n          remote: /app\n      install:\n        command: [npm, ci]\n        on_change: [missing/package-lock.json]\n",
+        )
+        .unwrap();
+
+        let config =
+            load_preview_up_config(&config_path, &EnvKey::Provided("key".to_owned())).unwrap();
+
+        // `mirrord preview sync` translates each glob into the container by its place under a
+        // `local`, so both must be resolved against the same directory.
+        let config_directory = config_directory(&config_path).unwrap();
+        let sync = config.services["web"].sync.as_ref().unwrap();
+        assert_eq!(sync.files[0].local, config_directory.join("missing"));
+        assert_eq!(
+            sync.install.as_ref().unwrap().on_change,
+            [config_directory.join("missing/package-lock.json")]
         );
     }
 

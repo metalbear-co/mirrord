@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 
 use crate::{
     UpError,
-    config::{RunType, ServiceMode, SpecifiedTarget, TargetConfig, UpConfig},
+    config::{ModeConfig, RunType, ServiceMode, SpecifiedTarget, TargetConfig, UpConfig},
     kube_context::UpKubeContext,
 };
 
@@ -50,7 +50,11 @@ pub struct UpListing {
 struct ListedService {
     name: Arc<str>,
     skip: bool,
+    /// How the service takes incoming traffic: a custom mode's `incoming`, not its name. A custom
+    /// name would be a new value of this field, which extensions refuse (see [`LISTING_VERSION`]).
     mode: ServiceMode,
+    /// The mode the service runs in, built-in or defined under `modes`.
+    mode_name: Arc<str>,
     target: ListedTarget,
     /// The kube context `mirrord up` would use for this service, its `config_patch` included.
     context: Option<Arc<str>>,
@@ -112,21 +116,24 @@ impl UpListing {
             .services
             .iter()
             .sorted_by_key(|(name, _)| *name)
-            .map(|(name, service)| ListedService {
-                name: name.clone(),
-                skip: service.skip,
-                mode: service.default_mode,
-                target: ListedTarget::of(&service.target, service.config_patch.as_ref()),
-                context: patched_context(service.config_patch.as_ref())
-                    .unwrap_or_else(|| up_context.get_context(service.context.clone())),
-                run: ListedRun {
-                    r#type: service.run.r#type.clone(),
-                    command: service.run.command.clone(),
-                    directory: service.run.directory.clone(),
-                    pre_command: service.run.pre_command.clone(),
-                },
+            .map(|(name, service)| {
+                Ok::<_, UpError>(ListedService {
+                    name: name.clone(),
+                    skip: service.skip,
+                    mode: ModeConfig::named(&config.modes, &service.default_mode)?.incoming(),
+                    mode_name: service.default_mode.clone(),
+                    target: ListedTarget::of(&service.target, service.config_patch.as_ref()),
+                    context: patched_context(service.config_patch.as_ref())
+                        .unwrap_or_else(|| up_context.get_context(service.context.clone())),
+                    run: ListedRun {
+                        r#type: service.run.r#type.clone(),
+                        command: service.run.command.clone(),
+                        directory: service.run.directory.clone(),
+                        pre_command: service.run.pre_command.clone(),
+                    },
+                })
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         Ok(Self {
             version: LISTING_VERSION,
@@ -176,7 +183,7 @@ impl ListedService {
     fn rows(&self, config_directory: Option<&Path>) -> Vec<(&'static str, String)> {
         let mut rows = vec![
             ("target", self.target.describe(&self.name)),
-            ("mode", self.mode.to_string()),
+            ("mode", self.mode_name.to_string()),
             ("run", shown_words(&self.run.command)),
         ];
         if self.run.r#type != RunType::Exec {
@@ -362,6 +369,7 @@ mod tests {
                         "name": "api",
                         "skip": false,
                         "mode": "split",
+                        "mode_name": "split",
                         "target": {
                             "kind": "path",
                             "path": "deployment/api",
@@ -379,6 +387,7 @@ mod tests {
                         "name": "web",
                         "skip": false,
                         "mode": "split",
+                        "mode_name": "split",
                         "target": { "kind": "inferred", "namespace": "frontend" },
                         "context": null,
                         "run": {
@@ -392,6 +401,7 @@ mod tests {
                         "name": "worker",
                         "skip": true,
                         "mode": "mirror",
+                        "mode_name": "mirror",
                         "target": { "kind": "none" },
                         "context": null,
                         "run": {

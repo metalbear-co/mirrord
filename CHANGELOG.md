@@ -8,6 +8,57 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.284.0](https://github.com/metalbear-co/mirrord/tree/3.284.0) - 2026-11-02
+
+
+### Added
+
+- Added `db_branching` to `mirrord-up.yaml` modes: `empty`, `schema` or `all`
+  requests every `MirrordSplitConfig` DB branch with that copy mode, `inherit`
+  with each entry's own, `off` none. An entry named `split`, `replace` or
+  `mirror` may set it for that built-in mode. A mode without it branches like
+  the built-in mode its `incoming` names, and a mode without `queues` splits
+  them like its `incoming`: mirrored with `incoming: mirror`, stolen otherwise.
+  In `mirrord.json`, `feature.db_branches` takes `{ "entries": "*", "copy": {
+  "mode": "schema" } }` to request a copy mode. `mirrord up` fails before
+  starting any service when a mode's `db_branching` or `queues` line can't be
+  served: no usable operator (saying why), no DB branch definitions, an entry's
+  database engine turned off in the operator, a copy mode outside an entry's
+  `allowedModes`, or an operator that splits no queues. It also fails up front
+  when services sharing a DB branch ask for different copy modes.
+- Added custom modes to `mirrord-up.yaml`: a `modes` entry sets `incoming` and
+  `queues`, and is selected by name with `default_mode` or `mirrord up --mode`.
+
+
+### Changed
+
+- On Linux, `experimental.hook_libc_syscall` and
+  `experimental.old_glibc_support` are now enabled by default for OSS users.
+
+
+### Fixed
+
+- Fixed the layer losing its internal proxy connection when an application
+  reuses low fd numbers, such as the s6-overlay `/init` script.
+
+## [3.283.0](https://github.com/metalbear-co/mirrord/tree/3.283.0) - 2026-11-01
+
+
+### Added
+
+- Added `mirrord preview sync`, which previews each service with `sync` in
+  `mirrord-up.yaml` with your local code instead of a built image: the CLI
+  pushes the `sync.files` directories into the preview pod, `sync.install`
+  installs the dependencies again when they change, and `--watch` keeps pushing
+  your edits. A service runs its image from `--image` or
+  `MIRRORD_<SERVICE>_IMAGE`, or the target's own image without one. `mirrord
+  preview status` shows the sync of each session.
+
+
+### Changed
+
+- Update the bundled apple-utils to `v10`.
+
 ## [3.282.0](https://github.com/metalbear-co/mirrord/tree/3.282.0) - 2026-10-30
 
 

@@ -297,13 +297,25 @@ where
         return Err(error.into());
     }
 
-    let is_multi_cluster = api
-        .operator()
-        .spec
-        .supported_features()
-        .contains(&NewOperatorFeature::MultiClusterPrimary)
+    let supported_features = api.operator().spec.supported_features();
+    let is_multi_cluster = supported_features.contains(&NewOperatorFeature::MultiClusterPrimary)
         && layer_config.multi_cluster != Some(false)
         && matches!(layer_config.target.path, Some(Target::Label(_))).not();
+
+    // A management-only Primary links the workload clusters but runs none itself, so a session
+    // forced onto it would fail resolving the target here with a bare "not found", or, when the
+    // Primary happens to have the pods, run on a cluster whose branching and preview controllers
+    // are off. Refusing before anything is resolved names the cause instead.
+    if is_multi_cluster.not()
+        && supported_features.contains(&NewOperatorFeature::MultiClusterManagementOnly)
+    {
+        let cause = if layer_config.multi_cluster == Some(false) {
+            "`multi_cluster: false` is set"
+        } else {
+            "the target is a label target"
+        };
+        return Err(CliError::ManagementOnlyPrimarySingleClusterSession { cause });
+    }
 
     // What happens to unmatched requests on a filtered copy target depends on the operator, so the
     // warning can only be decided once we know which operator we're connected to. An operator with
@@ -775,6 +787,8 @@ fn process_config_oss<P: Progress>(config: &mut LayerConfig, progress: &mut P) -
 
     config.experimental.disable_reuseaddr = config.experimental.disable_reuseaddr.or(Some(true));
     config.experimental.go_asmcgocall = config.experimental.go_asmcgocall.or(Some(true));
+    config.experimental.hook_libc_syscall = config.experimental.hook_libc_syscall.or(Some(true));
+    config.experimental.old_glibc_support = config.experimental.old_glibc_support.or(Some(true));
 
     Ok(())
 }

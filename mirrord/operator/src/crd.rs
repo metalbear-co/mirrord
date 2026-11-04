@@ -104,6 +104,13 @@ pub const TARGET_NAMESPACE_ANNOTATION: &str = "mirrord.metalbear.co/target-names
 pub struct TargetSpec {
     /// The kubernetes resource to target.
     pub target: KubeTarget,
+
+    /// The image of the target's container, as the target's pod template names it. `mirrord
+    /// preview sync` reuses a preview that runs the target's image only while the target still
+    /// names that image. `None` for a target without a single container, such as a label target,
+    /// and from an operator that doesn't report it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
 }
 
 impl TargetCrd {
@@ -919,6 +926,11 @@ pub enum NewOperatorFeature {
     /// whether a primary streams the whole setup or just its own cluster.
     MultiClusterSubscribe,
 
+    /// This primary is management-only: it links the workload clusters but runs none itself, so a
+    /// session forced onto it (`multi_cluster: false`, a label target) has nothing to run against.
+    /// Lets the CLI refuse such a session with the cause instead of failing on target resolution.
+    MultiClusterManagementOnly,
+
     ServerlessSessionsManager,
 
     /// Reporting is available on Free so locally rejected demand can be observed without granting
@@ -947,12 +959,22 @@ pub enum NewOperatorFeature {
     /// branch carrying the source kind and never reconciles it, which surfaces only as a
     /// creation timeout.
     DbBranchSsmParameter,
+    /// This operator applies the copy mode a session requests for its `MirrordSplitConfig`
+    /// entries (`feature.db_branches: { "entries": ..., "copy": { "mode": ... } }`), refusing
+    /// one an entry's `copy.allowedModes` leaves out. Gated so the CLI fails fast: an older
+    /// operator ignores the mode and seeds each branch with the entry's own.
+    DbBranchesSplitConfigCopyMode,
 
     /// This operator runs a Redis branch as a one node Redis Cluster when
     /// `feature.db_branches[].cluster` is set. Gated so the CLI fails fast: an older operator's
     /// CRD schema prunes `redisOptions.cluster` and brings up a standalone server, which a
     /// Redis Cluster client then refuses to talk to.
     RedisClusterBranching,
+    /// This operator gives a session queue that sets no filter of its own a filter built from the
+    /// `keyJqFilter` of the matching `MirrordSplitConfig` queue entry, so the CLI sends such
+    /// entries in `queue_filters` with no filter. Gated so the CLI fails fast: an older
+    /// operator rejects a `queue_filters` entry without a `filter`.
+    SplitConfigQueueFilters,
     /// This operator drops the queue splits of a `PreviewSession` with `autoQueueSplitting` that
     /// it can't serve (a broker whose splitting is off), instead of failing the session, as it
     /// does for `mirrord up` sessions. Gated so the CLI only sends the splits `mirrord preview
@@ -962,6 +984,12 @@ pub enum NewOperatorFeature {
     /// other brokers' features, which came first, so older operators that split Azure Service Bus
     /// don't advertise it: a CLI can only take its presence as a yes, never its absence as a no.
     AzureServiceBusQueueSplitting,
+
+    /// This operator honors `sync` on a `PreviewSession`: it adds the code sync sidecar to the
+    /// preview pod and relays pushes to it. The CLI requires this feature before it sends `sync`,
+    /// because an older operator's CRD schema prunes `sync`, and the preview would then try to
+    /// run an empty image.
+    PreviewCodeSync,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
@@ -996,7 +1024,8 @@ impl NewOperatorFeature {
             | Self::NatsQueueSplitting
             | Self::NatsPubSubQueueSplitting
             | Self::AzureServiceBusQueueSplitting
-            | Self::QueueSplittingWithComposedFilters => Some("feature.split_queues"),
+            | Self::QueueSplittingWithComposedFilters
+            | Self::SplitConfigQueueFilters => Some("feature.split_queues"),
             Self::KafkaBranching => Some("feature.kafka_branch"),
             Self::MySqlBranching
             | Self::PgBranching
@@ -1017,6 +1046,7 @@ impl NewOperatorFeature {
             | Self::LiquibaseMigrations
             | Self::PgBranchAdditionalDatabases
             | Self::DbBranchesFromSplitConfig
+            | Self::DbBranchesSplitConfigCopyMode
             | Self::DbBranchSecretManagerExtract
             | Self::DbBranchSsmParameter
             | Self::DbBranchDedicatedNamespace
@@ -1027,11 +1057,13 @@ impl NewOperatorFeature {
             | Self::PreviewLabelTarget
             | Self::PreviewTlsClientAuthFromTarget
             | Self::PreviewAutoQueueSplitting
+            | Self::PreviewCodeSync
             | Self::PreviewSpecResources => Some("feature.preview"),
             Self::LabelTargeting | Self::ServerlessSessionsManager => Some("target.path"),
-            Self::MultiClusterPrimary | Self::MultiClusterRemote | Self::MultiClusterSubscribe => {
-                Some("multi_cluster")
-            }
+            Self::MultiClusterPrimary
+            | Self::MultiClusterRemote
+            | Self::MultiClusterSubscribe
+            | Self::MultiClusterManagementOnly => Some("multi_cluster"),
             Self::ProxyApi
             | Self::SessionManagement
             | Self::LayerReconnect
@@ -1118,6 +1150,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::AzureServiceBusQueueSplitting => {
                 "Azure Service Bus queue splitting"
             }
+            NewOperatorFeature::PreviewCodeSync => "code sync in preview environments",
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
@@ -1131,6 +1164,9 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
             NewOperatorFeature::MultiClusterSubscribe => "multi-cluster subscribe",
+            NewOperatorFeature::MultiClusterManagementOnly => {
+                "multi-cluster management-only primary"
+            }
             NewOperatorFeature::QueueSplittingWithComposedFilters => {
                 "queue splitting with composable message filters"
             }
@@ -1151,8 +1187,14 @@ impl Display for NewOperatorFeature {
                 "DB branches in a dedicated namespace per key"
             }
             NewOperatorFeature::RedisClusterBranching => "Redis Cluster branching",
+            NewOperatorFeature::SplitConfigQueueFilters => {
+                "queue filters set on the target's MirrordSplitConfig"
+            }
             NewOperatorFeature::DbBranchSsmParameter => {
                 "DB branching connection values from AWS SSM Parameter Store"
+            }
+            NewOperatorFeature::DbBranchesSplitConfigCopyMode => {
+                "db_branches copy mode requested for MirrordSplitConfig entries"
             }
             NewOperatorFeature::Unknown => "unknown feature",
         };
@@ -1195,7 +1237,8 @@ impl NewOperatorFeature {
             | NewOperatorFeature::PreviewCronJobTarget
             | NewOperatorFeature::PreviewLabelTarget
             | NewOperatorFeature::PreviewSpecResources
-            | NewOperatorFeature::PreviewAutoQueueSplitting => &["operator.previewEnv"],
+            | NewOperatorFeature::PreviewAutoQueueSplitting
+            | NewOperatorFeature::PreviewCodeSync => &["operator.previewEnv"],
             NewOperatorFeature::SqsQueueSplitting
             | NewOperatorFeature::SqsQueueSplittingDirect
             | NewOperatorFeature::SqsQueueSplittingWithJqFilter => &["operator.sqsSplitting"],
@@ -1245,6 +1288,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::MultiClusterRemote
             | NewOperatorFeature::MultiClusterPrimary
             | NewOperatorFeature::MultiClusterSubscribe
+            | NewOperatorFeature::MultiClusterManagementOnly
             | NewOperatorFeature::UnifiedBranchDbCrd
             | NewOperatorFeature::ConnectParamsInHeader
             | NewOperatorFeature::CopyTargetFilterIsolation
@@ -1261,8 +1305,10 @@ impl NewOperatorFeature {
             | NewOperatorFeature::KeylessCi
             | NewOperatorFeature::LicenseGateReporting
             | NewOperatorFeature::DbBranchesFromSplitConfig
+            | NewOperatorFeature::DbBranchesSplitConfigCopyMode
             | NewOperatorFeature::DbBranchSecretManagerExtract
             | NewOperatorFeature::DbBranchSsmParameter
+            | NewOperatorFeature::SplitConfigQueueFilters
             | NewOperatorFeature::Unknown => &[],
         }
     }

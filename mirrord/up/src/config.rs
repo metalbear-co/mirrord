@@ -1,12 +1,11 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     ops::Not,
     path::PathBuf,
     sync::Arc,
 };
 
-use clap::{ValueEnum, builder::PossibleValue};
 use itertools::Itertools;
 use miette::Diagnostic;
 use mirrord_analytics::{Analytics, CollectAnalytics};
@@ -16,7 +15,8 @@ use mirrord_config::{
     feature::{
         copy_target::CopyTargetConfig,
         database_branches::{
-            AllSplitConfigDbBranches, DatabaseBranchesConfig, SplitConfigDbBranches,
+            AllSplitConfigDbBranches, BranchCopyMode, DatabaseBranchesConfig, SplitConfigCopy,
+            SplitConfigDbBranches, SplitConfigRequest, SplitConfigRequestWithCopy,
         },
         env::{EnvConfig, EnvFileConfig},
         network::incoming::{
@@ -38,7 +38,7 @@ use thiserror::Error;
 
 use crate::{UpError, kube_context::UpKubeContext};
 
-/// Incoming traffic mode for a service. Also used as the mode for splitting the service's queues.
+/// A built-in mode. Also the `incoming` of a custom mode: how the service handles incoming traffic.
 #[derive(
     Clone,
     Copy,
@@ -60,10 +60,6 @@ pub enum ServiceMode {
     /// Uses the service's `http_filter` if set. Otherwise, requests with a header matching the
     /// regex `baggage: .*mirrord-session={key}.*` go to the local service, where `{key}` is the
     /// session key.
-    ///
-    /// With a workload target and no `db_branches` of its own, the service requests DB branching
-    /// (`db_branches: "*"`): it runs against branches of the databases defined on the workload's
-    /// `MirrordSplitConfig`, shared with the other services of the run that use the same ones.
     #[default]
     Split,
 
@@ -80,30 +76,23 @@ pub enum ServiceMode {
     ///
     /// Uses the service's `http_filter` if set. Otherwise, requests with a header matching the
     /// regex `baggage: .*mirrord-session={key}.*` are mirrored, where `{key}` is the session key.
-    ///
-    /// With a workload target and no `db_branches` of its own, the service requests DB branching
-    /// (`db_branches: "*"`): it runs against branches of the databases defined on the workload's
-    /// `MirrordSplitConfig`, shared with the other services of the run that use the same ones.
-    // The fallback filter and the DB branching request are built in `ServiceConfig::assemble`.
+    // The fallback filter is built in `ServiceConfig::assemble`.
     Mirror,
 }
 
-// Manual impl because we want different user-facing docs
-impl ValueEnum for ServiceMode {
-    fn value_variants<'a>() -> &'a [Self] {
-        Self::VARIANTS
+impl From<ServiceMode> for Arc<str> {
+    fn from(mode: ServiceMode) -> Self {
+        <&str>::from(mode).into()
     }
+}
 
-    fn to_possible_value(&self) -> Option<PossibleValue> {
-        let name: &'static str = self.into();
-        match self {
-            ServiceMode::Split => Some(PossibleValue::new(name).help("Incoming traffic is split between the local and original services using HTTP filtering.
-If no filter is provided, a header filter matching the regex `baggage: .*mirrord-session={session key}.*` will be used.")),
-            ServiceMode::Replace => Some(PossibleValue::new(name).help("The local service replaces the original one: the target workload is copied and scaled down to zero, so all incoming traffic reaches your local process.
-Any configured HTTP filter is ignored. Requires a target that supports copy target with scale down.")),
-            ServiceMode::Mirror => Some(PossibleValue::new(name).help("Incoming traffic is mirrored to the local service using HTTP filtering.
-If no filter is provided, a header filter matching the regex `baggage: .*mirrord-session={session key}.*` will be used.")),
-        }
+impl ServiceMode {
+    /// The built-in mode named `name`, if there is one.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::VARIANTS
+            .iter()
+            .copied()
+            .find(|mode| <&str>::from(mode) == name)
     }
 }
 
@@ -117,12 +106,130 @@ impl Into<IncomingMode> for ServiceMode {
     }
 }
 
-#[allow(clippy::from_over_into)]
-impl Into<QueueMode> for ServiceMode {
-    fn into(self) -> QueueMode {
-        match self {
-            ServiceMode::Split | ServiceMode::Replace => QueueMode::Steal,
-            ServiceMode::Mirror => QueueMode::Mirror,
+/// How a custom mode splits the service's queues.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum QueueSplitMode {
+    /// Messages matching the session are consumed by the local service only
+    /// (`queue_mode: steal`).
+    Split,
+
+    /// Messages matching the session reach both the local and the original service
+    /// (`queue_mode: mirror`).
+    Mirror,
+}
+
+impl From<QueueSplitMode> for QueueMode {
+    fn from(mode: QueueSplitMode) -> Self {
+        match mode {
+            QueueSplitMode::Split => QueueMode::Steal,
+            QueueSplitMode::Mirror => QueueMode::Mirror,
+        }
+    }
+}
+
+/// Which DB branches a mode requests.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DbBranching {
+    /// Branches of every database defined on the workload's `MirrordSplitConfig`, created empty.
+    Empty,
+    /// Like `empty`, with the source database's schema copied.
+    Schema,
+    /// Like `empty`, with the source database's schema and data copied.
+    All,
+    /// Branches of every database defined on the workload's `MirrordSplitConfig`, each copied
+    /// with its own `copy.mode`.
+    Inherit,
+    /// No branches: the service runs against the source databases.
+    Off,
+}
+
+/// A custom mode, defined under `modes` and selected by name with `default_mode` or
+/// `mirrord up --mode`.
+///
+/// An entry named after a built-in mode (`split`, `replace`, `mirror`) may set only
+/// `db_branching`, which then applies to that built-in mode for every service.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ModeConfig {
+    /// How incoming traffic is handled, as in the built-in mode of the same name. Defaults to
+    /// `split`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incoming: Option<ServiceMode>,
+
+    /// How the service's queues are split. When not set, every queue defined in the cluster is
+    /// split like `incoming`: mirrored with `incoming: mirror`, stolen (`queue_mode: steal`)
+    /// otherwise.
+    ///
+    /// Ignored with `incoming: replace`, which doesn't split queues.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queues: Option<QueueSplitMode>,
+
+    /// Which DB branches the service requests, from the `dbBranches` defined on the workload's
+    /// `MirrordSplitConfig`: `empty`, `schema` or `all` to copy every one with that copy mode,
+    /// `inherit` to copy each with its own, `off` for none. Applies whatever `incoming` is, and
+    /// is ignored with a message when the target isn't a single workload.
+    ///
+    /// When not set, a mode whose `incoming` is `split` or `mirror` requests the same branches as
+    /// `inherit` when the target is a single workload, but runs against the source databases
+    /// instead of failing when the operator can't branch or there is nothing to branch. With
+    /// `incoming: replace` it requests none. A service that sets `db_branches` itself keeps
+    /// them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub db_branching: Option<DbBranching>,
+}
+
+impl ModeConfig {
+    /// The mode named `name`: a built-in one, with the `db_branching` of its entry under
+    /// `modes` if it has one, or a custom one defined under `modes`.
+    pub fn named(modes: &BTreeMap<Arc<str>, ModeConfig>, name: &str) -> Result<Self, UnknownMode> {
+        if let Some(builtin) = ServiceMode::from_name(name) {
+            return Ok(Self {
+                db_branching: modes.get(name).and_then(|entry| entry.db_branching),
+                ..builtin.into()
+            });
+        }
+
+        if let Some(mode) = modes.get(name) {
+            return Ok(mode.clone());
+        }
+
+        let known = ServiceMode::VARIANTS
+            .iter()
+            .map(|mode| Arc::from(<&str>::from(mode)))
+            .chain(
+                modes
+                    .keys()
+                    .filter(|name| ServiceMode::from_name(name).is_none())
+                    .cloned(),
+            )
+            .collect::<Vec<_>>();
+
+        let suggestion =
+            crate::closest_name(name, &known.iter().map(AsRef::as_ref).collect::<Vec<_>>())
+                .map(Arc::from);
+
+        Err(UnknownMode {
+            name: name.into(),
+            suggestion,
+            known,
+        })
+    }
+
+    /// How incoming traffic is handled.
+    pub fn incoming(&self) -> ServiceMode {
+        self.incoming.unwrap_or_default()
+    }
+}
+
+impl From<ServiceMode> for ModeConfig {
+    /// The built-in mode as a custom one: its queues follow `incoming`, as they do for a custom
+    /// mode without `queues`.
+    fn from(incoming: ServiceMode) -> Self {
+        Self {
+            incoming: Some(incoming),
+            ..Self::default()
         }
     }
 }
@@ -443,6 +550,37 @@ fn inline_schema_without_docs<T: JsonSchema>(generator: &mut SchemaGenerator) ->
     schema
 }
 
+/// Reads a mode entry with no value (`watch:` in YAML) as a mode with every default, as
+/// `common:` with no value is. The schema accepts it too.
+fn deserialize_modes<'de, D>(deserializer: D) -> Result<BTreeMap<Arc<str>, ModeConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(
+        BTreeMap::<Arc<str>, Option<ModeConfig>>::deserialize(deserializer)?
+            .into_iter()
+            .map(|(name, mode)| (name, mode.unwrap_or_default()))
+            .collect(),
+    )
+}
+
+fn default_mode_name() -> Arc<str> {
+    ServiceMode::default().into()
+}
+
+/// A built-in mode, documented, or the name of one under `modes`.
+fn mode_name_schema(generator: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "anyOf": [
+            generator.subschema_for::<ServiceMode>(),
+            {
+                "description": "A mode defined under `modes`.",
+                "type": "string"
+            }
+        ]
+    })
+}
+
 /// Per-service configuration.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -471,11 +609,12 @@ pub struct ServiceConfig {
     pub(crate) env: EnvConfig,
 
     /// How incoming traffic and queue messages are shared between the local and the original
-    /// service. Defaults to `split`.
+    /// service: a built-in mode or one defined under `modes`. Defaults to `split`.
     ///
     /// `mirrord up --mode` overrides this for every service.
-    #[serde(default)]
-    pub(crate) default_mode: ServiceMode,
+    #[serde(default = "default_mode_name")]
+    #[schemars(schema_with = "mode_name_schema")]
+    pub(crate) default_mode: Arc<str>,
 
     /// HTTP filter that selects which requests reach the local service in `split` and `mirror`
     /// modes.
@@ -496,8 +635,10 @@ pub struct ServiceConfig {
     #[serde(default)]
     pub(crate) ignore_ports: BTreeSet<u16>,
 
-    /// Don't launch this service unless it is named on the `mirrord up` command line. Defaults to
-    /// `false`.
+    /// Don't launch this service unless it is named on the `mirrord up` command line, and don't
+    /// preview it with `mirrord preview sync` unless `--image` or `MIRRORD_<SERVICE>_IMAGE` gives
+    /// it an image. `mirrord preview up` ignores it: an image alone picks its services. Defaults
+    /// to `false`.
     #[serde(default)]
     pub(crate) skip: bool,
 
@@ -516,6 +657,126 @@ pub struct ServiceConfig {
 
     /// How to launch the service's local process.
     pub(crate) run: RunConfig,
+
+    /// How `mirrord preview sync` previews the service with local code: the local directories
+    /// that it pushes into the service's preview pod, and how the pod runs them. The preview runs
+    /// the image from `--image` or `MIRRORD_<SERVICE>_IMAGE`, or the target's image without one.
+    /// For example:
+    ///
+    /// ```yaml
+    /// sync:
+    ///   files:
+    ///     - local: frontend
+    ///       remote: /app
+    ///   run:
+    ///     command: ["npm", "run", "dev"]
+    ///     directory: /app
+    ///   install:
+    ///     command: ["npm", "ci"]
+    ///     on_change: ["frontend/package-lock.json"]
+    ///   restart_on_change: false
+    /// ```
+    ///
+    /// `mirrord up` and `mirrord preview up` ignore this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
+    pub(crate) sync: Option<SyncConfig>,
+}
+
+/// How `mirrord preview sync` previews a service with local code.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncConfig {
+    /// The local directories to push into the preview pod.
+    pub files: Vec<SyncEntry>,
+
+    /// How the preview pod runs the app on the pushed code.
+    #[serde(default)]
+    pub run: SyncRunConfig,
+
+    /// The command that installs the app's dependencies in the preview pod.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install: Option<InstallConfig>,
+
+    /// Whether the preview pod restarts the app after each push. Set it to `false` for a dev
+    /// server that reloads changed files on its own. Defaults to `true`.
+    #[serde(default = "default_restart_on_change")]
+    pub restart_on_change: bool,
+}
+
+fn default_restart_on_change() -> bool {
+    true
+}
+
+/// How the preview pod of a service with `sync` runs the app.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SyncRunConfig {
+    /// The command that runs the app in the preview's container, as a list of the program and
+    /// its arguments, e.g. `["npm", "run", "dev"]`. Defaults to `run.command`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+
+    /// The absolute working directory of `command` in the preview's container, e.g. `/app`.
+    /// When not set, `command` runs in the working directory of the container, which is `/` for
+    /// an image without a `WORKDIR`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
+}
+
+/// The command that installs a service's dependencies in its preview pod.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InstallConfig {
+    /// The command to run, as a list of the program and its arguments, e.g. `["npm", "ci"]`. It
+    /// runs in the preview's container before the app starts, and again after a push that
+    /// changes a file that `on_change` matches.
+    pub command: Vec<String>,
+
+    /// The absolute working directory of `command` in the preview's container, e.g. `/app`.
+    /// Defaults to `sync.run.directory`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
+
+    /// The files whose changes run `command` again, as globs relative to the directory that
+    /// contains `mirrord-up.yaml`, e.g. `frontend/package-lock.json`. Each must lie under the
+    /// `local` of a `sync.files` entry. The preview pod reads every file that a glob matches after
+    /// each push, including the files that `command` wrote, so a glob with `**` over a
+    /// directory such as `node_modules` hashes every match on every push. Name the files, such
+    /// as `frontend/package-lock.json` or `packages/*/package.json`, to keep that cheap.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub on_change: Vec<PathBuf>,
+
+    /// The absolute paths in the container that `command` writes to outside every `sync`
+    /// `remote`, e.g. `/usr/local/lib/python3.12/site-packages`. The preview keeps them on the
+    /// volume that holds the pushed code, so the installed files survive a restart of the pod. A
+    /// path under a `remote` is on that volume already and needs no entry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub persist: Vec<String>,
+}
+
+/// One local directory that `mirrord preview sync` pushes into a preview pod.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncEntry {
+    /// The local directory to push. A relative path is resolved against the directory that
+    /// contains `mirrord-up.yaml`. The push leaves out `.git`, `.jj`, the paths that git ignores
+    /// and the paths that `ignore` leaves out. Those paths keep what the pod has at them, such as
+    /// the image's files or what the install wrote, and every other path in `remote` holds the
+    /// local tree.
+    pub local: PathBuf,
+
+    /// The absolute path in the preview's container that holds the pushed directory. A push makes
+    /// it a mirror of `local`, so it deletes what the image has there, except at the paths that
+    /// the push leaves out (see `local`).
+    pub remote: String,
+
+    /// More paths that the push leaves out, written as the lines of a `.gitignore` in `local`,
+    /// e.g. `coverage/`. They take precedence over git's rules, so a `!` line pushes a file that
+    /// a `.gitignore` excludes, e.g. `!.env.preview`. A `!` line can't bring back a file in an
+    /// ignored directory, as in git.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore: Vec<String>,
 }
 
 /// Top-level `mirrord-up.yaml` configuration.
@@ -529,6 +790,19 @@ pub struct UpConfig {
     #[serde(default)]
     #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
     pub common: CommonConfig,
+    /// Custom modes keyed by name, selected with a service's `default_mode` or
+    /// `mirrord up --mode`. An entry named after a built-in mode (`split`, `replace`, `mirror`)
+    /// may set only `db_branching`.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_modes",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    #[schemars(
+        with = "BTreeMap<Arc<str>, Option<ModeConfig>>",
+        extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss)
+    )]
+    pub modes: BTreeMap<Arc<str>, ModeConfig>,
     /// Per-service configurations keyed by service name.
     #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Oss))]
     pub services: HashMap<Arc<str>, ServiceConfig>,
@@ -572,16 +846,23 @@ pub const SERVICE_LAYER_PATHS: &[(&str, &str)] = &[
 ];
 
 impl ServiceConfig {
+    /// The name of the mode this service runs in, unless `mirrord up --mode` overrides it.
+    pub fn default_mode(&self) -> &str {
+        &self.default_mode
+    }
+
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `base` from
     /// [`CommonConfig::base_config`].
     ///
-    /// For [`SessionKind::Preview`], the config is for the service's `mirrord preview up` session
-    /// instead: it is assembled as in `split` mode whatever the service's `default_mode`, and
-    /// without `env`.
+    /// For [`SessionKind::Preview`], the config is for the service's `mirrord preview up` or
+    /// `mirrord preview sync` session instead: it is assembled without `env`, and `mode` is the
+    /// `split` mode whatever the service's `default_mode`.
+    #[allow(clippy::too_many_arguments)]
     fn assemble(
         mut self,
         service_name: &Arc<str>,
         base: LayerConfig,
+        mode: &ModeConfig,
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
@@ -589,12 +870,12 @@ impl ServiceConfig {
     ) -> Result<SubprocessCfg, ConfigPatchErrorKind> {
         let preview = kind == SessionKind::Preview;
         if preview {
-            self.default_mode = ServiceMode::Split;
+            self.default_mode = ServiceMode::Split.into();
             self.env = EnvConfig::default();
         }
 
         let kube_context = up_context.get_context(self.context.clone());
-        let mut cfg = self.unpatched_config(base, &key, kube_context.clone());
+        let mut cfg = self.unpatched_config(base, mode, &key, kube_context.clone());
 
         // `PreviewIncomingConfig` falls back to the anchored `^baggage: ...$` filter only when
         // none is set, and share ingress only serves sessions with exactly that filter, so up's
@@ -623,25 +904,37 @@ impl ServiceConfig {
             },
         };
 
-        // The operator resolves `"*"` against the `MirrordSplitConfig` of one targeted
-        // workload, so a targetless or label-selected service has nothing to ask for. Every
-        // service of a run shares the key, so services pointing at one entry land on one branch.
-        // Branches set in the base config, or by `config_patch` below, take precedence.
-        let single_workload = cfg.target.path.as_ref().is_some_and(|path| {
-            matches!(
-                path,
-                Target::Targetless | Target::Serverless(_) | Target::Label(_)
-            )
-            .not()
-        });
-        let mut default_db_branches =
-            matches!(self.default_mode, ServiceMode::Split | ServiceMode::Mirror)
-                && single_workload
-                && cfg.feature.db_branches.is_empty();
-        if default_db_branches {
-            cfg.feature.db_branches = DatabaseBranchesConfig::FromSplitConfig(
-                SplitConfigDbBranches::All(AllSplitConfigDbBranches::All),
-            );
+        // Every service of a run shares the key, so services pointing at one entry land on one
+        // branch. Branches set in the base config, or by `config_patch` below, take precedence.
+        let single_workload = is_single_workload(cfg.target.path.as_ref());
+        let all = || SplitConfigDbBranches::All(AllSplitConfigDbBranches::All);
+        let copy = |mode| {
+            SplitConfigRequest::WithCopy(SplitConfigRequestWithCopy {
+                entries: all(),
+                copy: SplitConfigCopy { mode },
+            })
+        };
+        let shares_traffic = matches!(mode.incoming(), ServiceMode::Split | ServiceMode::Mirror);
+        let request = match mode.db_branching {
+            _ if cfg.feature.db_branches.is_empty().not() => None,
+            // A mode applies to every service on it, and the line means nothing on these.
+            Some(_) if single_workload.not() => None,
+            Some(DbBranching::Empty) => Some(copy(BranchCopyMode::Empty)),
+            Some(DbBranching::Schema) => Some(copy(BranchCopyMode::Schema)),
+            Some(DbBranching::All) => Some(copy(BranchCopyMode::All)),
+            Some(DbBranching::Inherit) => Some(SplitConfigRequest::Entries(all())),
+            Some(DbBranching::Off) => None,
+            // Without the line, modes that share traffic with the original service branch.
+            None if shares_traffic && single_workload => Some(SplitConfigRequest::Entries(all())),
+            None => None,
+        };
+        let mut db_branches_origin = match (&request, mode.db_branching) {
+            (None, _) => RequestOrigin::Config,
+            (Some(_), None) => RequestOrigin::Default,
+            (Some(_), Some(_)) => RequestOrigin::ModeLine,
+        };
+        if let Some(request) = request {
+            cfg.feature.db_branches = DatabaseBranchesConfig::FromSplitConfig(request);
         }
 
         let patch_sets_split_queues = self
@@ -656,21 +949,36 @@ impl ServiceConfig {
 
             // A patch that sets `db_branches` or `split_queues` decides them itself, `[]`
             // included, so whatever it holds afterwards was asked for by the user.
-            default_db_branches &= patch.pointer("/feature/db_branches").is_none();
+            if patch.pointer("/feature/db_branches").is_some() {
+                db_branches_origin = RequestOrigin::Config;
+                // The merge would otherwise go into an object form key by key.
+                cfg.feature.db_branches = DatabaseBranchesConfig::default();
+            }
             cfg = apply_config_patch(cfg, patch, &key)?;
         }
 
-        let default_split_queues =
-            matches!(self.default_mode, ServiceMode::Split | ServiceMode::Mirror)
-                && patch_sets_split_queues.not()
-                && matches!(cfg.target.path, Some(Target::Label(_))).not()
-                && (preview.not()
-                    || matches!(
-                        cfg.target.path,
-                        Some(Target::Deployment(_) | Target::Rollout(_) | Target::StatefulSet(_))
-                    ));
-        if default_split_queues {
-            let splits = SplitQueuesConfig::all_wildcard_with_mode(&key, self.default_mode.into());
+        // `incoming: replace` splits no queues.
+        let splits_queues = matches!(mode.incoming(), ServiceMode::Split | ServiceMode::Mirror)
+            && patch_sets_split_queues.not()
+            && matches!(cfg.target.path, Some(Target::Label(_))).not()
+            && (preview.not()
+                || matches!(
+                    cfg.target.path,
+                    Some(Target::Deployment(_) | Target::Rollout(_) | Target::StatefulSet(_))
+                ));
+        let queues_origin = match mode.queues {
+            _ if splits_queues.not() => RequestOrigin::Config,
+            Some(_) => RequestOrigin::ModeLine,
+            None => RequestOrigin::Default,
+        };
+        if splits_queues {
+            // Without the line, queue messages are shared the way incoming traffic is.
+            let queue_mode = match (mode.queues, mode.incoming()) {
+                (Some(queues), _) => queues.into(),
+                (None, ServiceMode::Mirror) => QueueMode::Mirror,
+                (None, _) => QueueMode::Steal,
+            };
+            let splits = SplitQueuesConfig::all_wildcard_with_mode(&key, queue_mode);
             // A Kafka branch serves every Kafka queue, so it does not need generated Kafka splits.
             cfg.feature.split_queues = if cfg.feature.kafka_branch {
                 SplitQueuesConfig::from_splits(
@@ -689,9 +997,11 @@ impl ServiceConfig {
             config: cfg,
             service_name: service_name.clone(),
             run: self.run,
+            sync: self.sync,
             mode: self.default_mode,
-            default_db_branches,
-            default_split_queues,
+            incoming: mode.incoming(),
+            db_branches_origin,
+            queues_origin,
         })
     }
 
@@ -706,6 +1016,7 @@ impl ServiceConfig {
         &self,
         service_name: &Arc<str>,
         common: &CommonConfig,
+        mode: &ModeConfig,
         key: &EnvKey,
     ) -> Result<serde_json::Value, UpError> {
         let base = common.base_config(&mut ConfigContext::default().strict_env(true))?;
@@ -714,7 +1025,7 @@ impl ServiceConfig {
             common_context: common.context.clone(),
         }
         .get_context(self.context.clone());
-        let config = self.unpatched_config(base, key, kube_context);
+        let config = self.unpatched_config(base, mode, key, kube_context);
         patchable(config, key).map_err(|source| {
             ConfigPatchError {
                 service: service_name.clone(),
@@ -725,18 +1036,19 @@ impl ServiceConfig {
     }
 
     /// The mirrord config of this service before its target is set and its `config_patch` is
-    /// merged in: `base` with the service's own settings and what its mode implies.
+    /// merged in: `base` with the service's own settings and what `mode` implies.
     fn unpatched_config(
         &self,
         mut cfg: LayerConfig,
+        mode: &ModeConfig,
         key: &EnvKey,
         kube_context: Option<Arc<str>>,
     ) -> LayerConfig {
         cfg.kube_context = kube_context.as_deref().map(Into::into);
         cfg.feature.env = self.env.clone();
-        cfg.feature.network.incoming.mode = self.default_mode.into();
+        cfg.feature.network.incoming.mode = mode.incoming().into();
 
-        match self.default_mode {
+        match mode.incoming() {
             ServiceMode::Split | ServiceMode::Mirror => {
                 cfg.feature.network.incoming.http_filter = if self.http_filter.is_filter_set() {
                     self.http_filter.clone()
@@ -753,8 +1065,8 @@ impl ServiceConfig {
                 cfg.feature.split_queues = SplitQueuesConfig::default();
             }
 
-            // `Replace` mode should steal all traffic from the copied target, so `http_filter` is
-            // ignored; `service_configs` tells the user.
+            // `Replace` mode should steal all traffic and messages from the copied target, so
+            // `http_filter` and `queues` are ignored; `service_configs` tells the user.
             ServiceMode::Replace => {
                 cfg.feature.copy_target = CopyTargetConfig {
                     enabled: true,
@@ -801,8 +1113,8 @@ enum ConfigPatchErrorKind {
     Validation(#[from] mirrord_config::config::ConfigError),
 
     #[error(
-        "it sets `feature.preview.image`, which `mirrord preview up` takes from `--image` or \
-         `MIRRORD_<SERVICE>_IMAGE` instead"
+        "it sets `feature.preview.image`, which `mirrord preview up` and `mirrord preview sync` \
+         take from `--image` or `MIRRORD_<SERVICE>_IMAGE` instead"
     )]
     PreviewImage,
 }
@@ -868,7 +1180,7 @@ fn patchable(config: LayerConfig, key: &EnvKey) -> Result<serde_json::Value, ser
 pub(crate) enum SessionKind {
     /// A `mirrord up` session, running the service's local process.
     Up,
-    /// A `mirrord preview up` session, running the service's image in the cluster.
+    /// A `mirrord preview up` or `mirrord preview sync` session, running in the cluster.
     Preview,
 }
 
@@ -881,16 +1193,50 @@ pub struct SubprocessCfg {
     pub service_name: Arc<str>,
     /// How to run this service (exec vs container, and the command).
     pub run: RunConfig,
-    /// Mode this service was assembled for. Its effects are already in `config`; it names the
-    /// mode in [`validate_targets`] errors and in what `mirrord up` reports about the service.
-    pub mode: ServiceMode,
-    /// `config.feature.db_branches` is the `"*"` `mirrord up` adds for this service's mode, not
-    /// one the user set. An operator that can't resolve it drops it rather than failing the run.
-    pub default_db_branches: bool,
-    /// `config.feature.split_queues` are the `"*"` splits `mirrord up` adds for this service's
-    /// mode, not ones the user set. A preview session asks its operator to drop the ones it
-    /// can't serve rather than failing.
-    pub default_split_queues: bool,
+    /// How `mirrord preview sync` previews the service with local code, if it can.
+    pub sync: Option<SyncConfig>,
+    /// Name of the mode this service was assembled for. Its effects are already in `config`; it
+    /// names the mode in [`validate_targets`] errors and in what `mirrord up` reports about the
+    /// service.
+    pub mode: Arc<str>,
+    /// How the mode handles incoming traffic, for [`validate_targets`] errors on custom modes,
+    /// whose name doesn't say it.
+    pub incoming: ServiceMode,
+    /// Where `config.feature.db_branches` came from.
+    pub db_branches_origin: RequestOrigin,
+    /// Where `config.feature.split_queues` came from. Unless it's [`RequestOrigin::Config`], they
+    /// are the `"*"` splits `mirrord up` adds, which a preview session asks its operator to drop
+    /// where it can't serve them rather than failing.
+    pub queues_origin: RequestOrigin,
+}
+
+/// Whether `target` is one workload. The operator resolves a DB branching request against the
+/// `MirrordSplitConfig` of one targeted workload, so a targetless or label-selected service has
+/// nothing to ask for.
+fn is_single_workload(target: Option<&Target>) -> bool {
+    target.is_some_and(|path| {
+        matches!(
+            path,
+            Target::Targetless | Target::Serverless(_) | Target::Label(_)
+        )
+        .not()
+    })
+}
+
+/// Where a service's DB branches or queue splits came from, which decides what `mirrord up` does
+/// when the operator can't serve them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequestOrigin {
+    /// `mirrord up` added nothing: either the service's own config or `config_patch` decides,
+    /// or the mode requests nothing, as a mode that splits no queues. Handled as in a plain
+    /// `mirrord.json`.
+    Config,
+    /// What a mode adds without the matching line (`db_branching`, `queues`): the run goes on
+    /// without it when the operator can't serve it.
+    Default,
+    /// The mode's own `db_branching` or `queues` line: the run fails when the operator can't
+    /// serve it.
+    ModeLine,
 }
 
 /// Rejects services whose resolved target cannot support the features their
@@ -915,7 +1261,8 @@ pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), Vec<TargetV
         if target_type.compatible_with(&cfg.config.feature).not() {
             incompatible.push(IncompatibleTarget {
                 service: cfg.service_name.clone(),
-                mode: cfg.mode,
+                mode: cfg.mode.clone(),
+                incoming: cfg.incoming,
                 target_type,
             });
         }
@@ -942,8 +1289,10 @@ pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), Vec<TargetV
 pub struct IncompatibleTarget {
     /// Name of the offending service.
     pub service: Arc<str>,
-    /// Mode the service was configured to run in.
-    pub mode: ServiceMode,
+    /// Name of the mode the service was configured to run in.
+    pub mode: Arc<str>,
+    /// How that mode handles incoming traffic.
+    pub incoming: ServiceMode,
     /// Kind of the target the service resolved to.
     pub target_type: TargetType,
 }
@@ -953,13 +1302,21 @@ impl std::fmt::Display for IncompatibleTarget {
         let Self {
             service,
             mode,
+            incoming,
             target_type,
         } = self;
 
-        write!(
-            f,
-            "`{service}` is `{mode}` mode with a {target_type} target"
-        )
+        // A built-in mode's name already says how it handles incoming traffic.
+        match ServiceMode::from_name(mode) {
+            Some(_) => write!(
+                f,
+                "`{service}` is `{mode}` mode with a {target_type} target"
+            ),
+            None => write!(
+                f,
+                "`{service}` is `{mode}` mode (`incoming: {incoming}`) with a {target_type} target"
+            ),
+        }
     }
 }
 
@@ -1086,9 +1443,14 @@ impl UpConfig {
         let mut errors = Vec::new();
         let mut assembled = Vec::new();
         for (service_name, service) in self.services.iter().sorted_by_key(|(name, _)| *name) {
+            // An unknown mode is reported by `verify`.
+            let Ok(mode) = ModeConfig::named(&self.modes, &service.default_mode) else {
+                continue;
+            };
             let subprocess = match service.clone().assemble(
                 service_name,
                 base.clone(),
+                &mode,
                 key.clone(),
                 &mut resolved_targets,
                 up_context.clone(),
@@ -1153,13 +1515,17 @@ impl UpConfig {
             .map_or(Ok(()), Err)
     }
 
-    /// Force services to run in `mode`, discarding the `default_mode` set in the config file.
+    /// Force services to run in the mode named `mode`, discarding the `default_mode` set in the
+    /// config file. Fails if no such mode exists.
     ///
     /// Meant for the `--mode` flag, so it should be called *after* [`Self::select_services`].
-    pub fn override_mode(&mut self, mode: ServiceMode) {
+    pub fn override_mode(&mut self, mode: &str) -> Result<(), UnknownMode> {
+        ModeConfig::named(&self.modes, mode)?;
+        let mode = Arc::<str>::from(mode);
         for svc in self.services.values_mut() {
-            svc.default_mode = mode;
+            svc.default_mode = mode.clone();
         }
+        Ok(())
     }
 
     /// Restrict which services will be launched.
@@ -1247,17 +1613,23 @@ impl UpConfig {
             .collect()
     }
 
-    /// Picks the image of every service for `mirrord preview up`, and drops the services that have
-    /// none: those get no preview.
+    /// Picks the image of every service for a `run` of `mirrord preview up` or `mirrord preview
+    /// sync`, and drops the services that get no preview.
+    ///
+    /// [`PreviewRun::Up`] previews every service with an image. [`PreviewRun::Sync`] previews only
+    /// the services with `sync`, except those with `skip` and no image, and a service without an
+    /// image runs the target's image.
     ///
     /// `flags` are the `--image <service>=<ref>` values. A service's image comes from its flag,
     /// then its `MIRRORD_<SERVICE>_IMAGE` environment variable (see [`preview_image_env`]; empty
-    /// counts as unset). `skip` doesn't apply: the images pick the services.
-    /// The variables are read through `context`.
+    /// counts as unset). For [`PreviewRun::Sync`], an image overrides `skip`, because passing one
+    /// selects the service, as naming it does in `mirrord up <service>`. The variables are read
+    /// through `context`.
     pub fn select_preview_images(
         &mut self,
         flags: &[String],
         context: &ConfigContext,
+        run: PreviewRun,
     ) -> Result<PreviewImages, PreviewImageError> {
         let mut from_flags: HashMap<&str, &str> = HashMap::new();
         for flag in flags {
@@ -1317,7 +1689,7 @@ impl UpConfig {
         }
 
         let mut images = PreviewImages::default();
-        self.services.retain(|name, _| {
+        self.services.retain(|name, service| {
             let picked = match from_flags.get(name.as_ref()) {
                 Some(image) => Some(((*image).to_owned(), PreviewImageSource::Flag)),
                 None => from_env
@@ -1325,21 +1697,28 @@ impl UpConfig {
                     .map(|image| (image, PreviewImageSource::Env)),
             };
 
-            match picked {
-                Some(picked) => {
+            let skipped = match run {
+                PreviewRun::Up if picked.is_none() => Some(SkipReason::NoImage),
+                PreviewRun::Sync if service.sync.is_none() => Some(SkipReason::NoSync),
+                PreviewRun::Sync if service.skip && picked.is_none() => Some(SkipReason::Skip),
+                PreviewRun::Up | PreviewRun::Sync => None,
+            };
+            match (skipped, picked) {
+                (Some(reason), _) => images.skipped.push((name.clone(), reason)),
+                (None, Some(picked)) => {
                     images.picked.insert(name.clone(), picked);
-                    true
                 }
-                None => {
-                    images.skipped.push(name.clone());
-                    false
-                }
+                (None, None) => {}
             }
+            skipped.is_none()
         });
         images.skipped.sort();
 
         if self.services.is_empty() {
-            return Err(PreviewImageError::NoImages);
+            return Err(match run {
+                PreviewRun::Up => PreviewImageError::NoImages,
+                PreviewRun::Sync => PreviewImageError::NothingToSync,
+            });
         }
 
         Ok(images)
@@ -1376,34 +1755,60 @@ impl UpConfig {
         kind: SessionKind,
     ) -> Result<Vec<SubprocessCfg>, UpError> {
         let base_config = self.common.base_config(context)?;
+        let modes = self.modes;
 
         self.services
             .into_iter()
             .map(|(service_name, svc)| {
-                let mode = svc.default_mode;
-                if kind == SessionKind::Up
-                    && mode == ServiceMode::Replace
-                    && svc.http_filter.is_filter_set()
-                {
-                    eprintln!(
-                        "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
-                    );
+                let mode = ModeConfig::named(&modes, &svc.default_mode)?;
+                // A preview session runs as `split` whatever the mode, so nothing below is ignored.
+                let mode = match kind {
+                    SessionKind::Up => mode,
+                    SessionKind::Preview => {
+                        ModeConfig::named(&modes, <&str>::from(ServiceMode::Split))?
+                    }
+                };
+                if kind == SessionKind::Up && mode.incoming() == ServiceMode::Replace {
+                    if svc.http_filter.is_filter_set() {
+                        eprintln!(
+                            "{service_name}: `http_filter` is ignored in `replace` mode, all incoming traffic is handled locally"
+                        );
+                    }
+                    if mode.queues.is_some() {
+                        eprintln!(
+                            "{service_name}: `queues` of mode `{}` is ignored with `incoming: replace`, all queue messages are handled locally",
+                            svc.default_mode
+                        );
+                    }
                 }
-                svc.assemble(
-                    &service_name,
-                    base_config.clone(),
-                    key.clone(),
-                    resolved_targets,
-                    up_context.clone(),
-                    kind,
-                )
-                .map_err(|source| {
-                    ConfigPatchError {
+                let mode_name = svc.default_mode.clone();
+                let service = svc
+                    .assemble(
+                        &service_name,
+                        base_config.clone(),
+                        &mode,
+                        key.clone(),
+                        resolved_targets,
+                        up_context.clone(),
+                        kind,
+                    )
+                    .map_err(|source| ConfigPatchError {
                         service: service_name.clone(),
                         source,
-                    }
-                    .into()
-                })
+                    })?;
+                let asks_for_branches = mode
+                    .db_branching
+                    .is_some_and(|branching| branching != DbBranching::Off);
+                if kind == SessionKind::Up
+                    && asks_for_branches
+                    && is_single_workload(service.config.target.path.as_ref()).not()
+                    && service.config.feature.db_branches.is_empty()
+                {
+                    eprintln!(
+                        "{service_name}: `db_branching` of mode `{mode_name}` is ignored, it needs a single workload target",
+                    );
+                }
+                Ok(service)
             })
             .collect()
     }
@@ -1433,6 +1838,34 @@ impl UpConfig {
             .iter()
             .filter_map(move |(name, svc)| svc.resolve_target(name, up_context.clone()).err())
     }
+}
+
+/// An entry named after a built-in mode sets more than `db_branching`.
+#[derive(Debug, Error, Diagnostic)]
+#[error("`modes.{0}` overrides the built-in `{0}` mode, which may only set `db_branching`")]
+#[diagnostic(help(
+    "Remove the other settings, or rename the mode to define a custom one: `split`, `replace` \
+     and `mirror` are reserved."
+))]
+pub struct BuiltinModeName(pub Arc<str>);
+
+/// A mode was selected that is neither built-in nor defined under `modes`.
+#[derive(Debug, Error, Diagnostic)]
+#[error(
+    "unknown mode `{name}`{}",
+    suggestion
+        .as_ref()
+        .map(|closest| format!("; did you mean `{closest}`?"))
+        .unwrap_or_default()
+)]
+#[diagnostic(help("Known modes: {}", known.join(", ")))]
+pub struct UnknownMode {
+    /// The name that was selected.
+    pub name: Arc<str>,
+    /// The closest known name, if one is close enough.
+    pub suggestion: Option<Arc<str>>,
+    /// Every mode that can be selected.
+    pub known: Vec<Arc<str>>,
 }
 
 /// Error produced by [`UpConfig::select_services`].
@@ -1476,9 +1909,10 @@ pub enum SelectError {
     },
 }
 
-/// The environment variable that sets the image of `service` for `mirrord preview up`:
-/// `MIRRORD_<SERVICE>_IMAGE`, with the service name in upper case and every character that isn't
-/// an ASCII letter or digit turned into `_` (`cake-maker` reads `MIRRORD_CAKE_MAKER_IMAGE`).
+/// The environment variable that sets the image of `service` for `mirrord preview up` and
+/// `mirrord preview sync`: `MIRRORD_<SERVICE>_IMAGE`, with the service name in upper case and
+/// every character that isn't an ASCII letter or digit turned into `_` (`cake-maker` reads
+/// `MIRRORD_CAKE_MAKER_IMAGE`).
 pub fn preview_image_env(service: &str) -> String {
     let service = service
         .chars()
@@ -1493,7 +1927,30 @@ pub fn preview_image_env(service: &str) -> String {
     format!("MIRRORD_{service}_IMAGE")
 }
 
-/// Where `mirrord preview up` took a service's image from.
+/// Which command picks the services to preview, see [`UpConfig::select_preview_images`]. Its
+/// static string is the command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, IntoStaticStr)]
+pub enum PreviewRun {
+    /// `mirrord preview up`: the services with an image, without code sync.
+    #[strum(serialize = "mirrord preview up")]
+    Up,
+    /// `mirrord preview sync`: the services with `sync`, with code sync.
+    #[strum(serialize = "mirrord preview sync")]
+    Sync,
+}
+
+/// Why [`UpConfig::select_preview_images`] gives a service no preview.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SkipReason {
+    /// [`PreviewRun::Up`]: the service has no image.
+    NoImage,
+    /// [`PreviewRun::Sync`]: the service has `skip: true` and no image.
+    Skip,
+    /// [`PreviewRun::Sync`]: the service has no `sync`.
+    NoSync,
+}
+
+/// Where `mirrord preview up` or `mirrord preview sync` took a service's image from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PreviewImageSource {
     /// `--image <service>=<ref>`.
@@ -1507,8 +1964,8 @@ pub enum PreviewImageSource {
 pub struct PreviewImages {
     /// The image of every service left in the config, and where it came from.
     pub picked: HashMap<Arc<str>, (String, PreviewImageSource)>,
-    /// The services dropped for having no image, sorted by name.
-    pub skipped: Vec<Arc<str>>,
+    /// The services that get no preview, and why, sorted by name.
+    pub skipped: Vec<(Arc<str>, SkipReason)>,
 }
 
 /// Error produced by [`UpConfig::select_preview_images`].
@@ -1542,10 +1999,26 @@ pub enum PreviewImageError {
         services: Vec<String>,
     },
 
-    /// No service got an image, so there is nothing to preview.
+    /// No service got an image, so `mirrord preview up` has nothing to preview.
     #[error("no service has an image to preview")]
-    #[diagnostic(help("Pass `--image <service>=<image ref>` or set `MIRRORD_<SERVICE>_IMAGE`."))]
+    #[diagnostic(help(
+        "Pass `--image <service>=<image ref>` or set `MIRRORD_<SERVICE>_IMAGE`. To preview the \
+         services with `sync` without building an image, run `mirrord preview sync`."
+    ))]
     NoImages,
+
+    /// Every service lacks `sync`, or has `sync` and `skip` but no image, so `mirrord preview
+    /// sync` has nothing to push.
+    #[error(
+        "no service to sync: no service has `sync`, or every service with `sync` is marked \
+         `skip: true` and has no image"
+    )]
+    #[diagnostic(help(
+        "Add `sync` to a service, remove `skip: true` from one, or pass `--image \
+         <service>=<image ref>` for it. `mirrord preview up` previews the services that have an \
+         image."
+    ))]
+    NothingToSync,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
@@ -1601,6 +2074,7 @@ impl CollectAnalytics for &UpConfig {
         let mut count_mode_split: u32 = 0;
         let mut count_mode_replace: u32 = 0;
         let mut count_mode_mirror: u32 = 0;
+        let mut count_mode_custom: u32 = 0;
 
         for svc in self.services.values() {
             let ServiceConfig {
@@ -1613,6 +2087,8 @@ impl CollectAnalytics for &UpConfig {
                 run,
                 context,
                 config_patch,
+                // `mirrord up` ignores it.
+                sync: _,
             } = svc;
 
             if *target != TargetConfig::UNSPECIFIED {
@@ -1621,13 +2097,16 @@ impl CollectAnalytics for &UpConfig {
             if *env != EnvConfig::default() {
                 count_env += 1;
             }
-            if *default_mode != ServiceMode::default() {
+            let builtin = ServiceMode::from_name(default_mode);
+            if builtin != Some(ServiceMode::default()) {
                 count_default_mode += 1;
             }
-            match default_mode {
-                ServiceMode::Split => count_mode_split += 1,
-                ServiceMode::Replace => count_mode_replace += 1,
-                ServiceMode::Mirror => count_mode_mirror += 1,
+            // Custom mode names are the user's, so they are only counted.
+            match builtin {
+                Some(ServiceMode::Split) => count_mode_split += 1,
+                Some(ServiceMode::Replace) => count_mode_replace += 1,
+                Some(ServiceMode::Mirror) => count_mode_mirror += 1,
+                None => count_mode_custom += 1,
             }
             if http_filter.is_filter_set() {
                 count_http_filter += 1;
@@ -1679,7 +2158,22 @@ impl CollectAnalytics for &UpConfig {
         modes.add("split", count_mode_split);
         modes.add("replace", count_mode_replace);
         modes.add("mirror", count_mode_mirror);
+        modes.add("custom", count_mode_custom);
         analytics.add("modes", modes);
+        analytics.add(
+            "num_custom_modes",
+            self.modes
+                .keys()
+                .filter(|name| ServiceMode::from_name(name).is_none())
+                .count(),
+        );
+        analytics.add(
+            "num_db_branching_modes",
+            self.modes
+                .values()
+                .filter(|mode| mode.db_branching.is_some())
+                .count(),
+        );
     }
 }
 
@@ -1866,7 +2360,7 @@ mod tests {
             svc.env.r#override.as_ref().unwrap()["NODE_ENV"],
             "development"
         );
-        assert_eq!(svc.default_mode, ServiceMode::Split);
+        assert_eq!(svc.default_mode, Arc::<str>::from(ServiceMode::Split));
         assert_eq!(
             svc.http_filter.header_filter.as_deref(),
             Some("x-session: local")
@@ -2178,7 +2672,10 @@ mod tests {
                   command: ["echo"]
             "#,
         );
-        assert_eq!(config.services["svc"].default_mode, ServiceMode::Replace);
+        assert_eq!(
+            config.services["svc"].default_mode,
+            Arc::<str>::from(ServiceMode::Replace)
+        );
     }
 
     #[test]
@@ -2275,28 +2772,275 @@ mod tests {
             "#,
         );
 
-        config.override_mode(ServiceMode::Replace);
+        config.override_mode(ServiceMode::Replace.into()).unwrap();
         assert!(
             config
                 .services
                 .values()
-                .all(|svc| svc.default_mode == ServiceMode::Replace)
+                .all(|svc| svc.default_mode == Arc::<str>::from(ServiceMode::Replace))
         );
 
-        config.override_mode(ServiceMode::Split);
+        config.override_mode(ServiceMode::Split.into()).unwrap();
         assert!(
             config
                 .services
                 .values()
-                .all(|svc| svc.default_mode == ServiceMode::Split)
+                .all(|svc| svc.default_mode == Arc::<str>::from(ServiceMode::Split))
         );
 
-        config.override_mode(ServiceMode::Mirror);
+        config.override_mode(ServiceMode::Mirror.into()).unwrap();
         assert!(
             config
                 .services
                 .values()
-                .all(|svc| svc.default_mode == ServiceMode::Mirror)
+                .all(|svc| svc.default_mode == Arc::<str>::from(ServiceMode::Mirror))
+        );
+    }
+
+    // -- Custom modes --
+
+    /// The config `mirrord up` generates for the one service of `yaml`.
+    fn only_config(yaml: &str) -> LayerConfig {
+        parse(yaml)
+            .service_configs(
+                &EnvKey::Provided("key".to_owned()),
+                &mut HashMap::new(),
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
+            .unwrap()
+            .remove(0)
+            .config
+    }
+
+    /// `incoming` and `queues` set the incoming and queue modes; `queues` defaults to following
+    /// `incoming`, and a mode without `incoming` is `split`.
+    #[rstest]
+    #[case::empty("{}", IncomingMode::Steal, QueueMode::Steal)]
+    #[case::split_queues("{ queues: split }", IncomingMode::Steal, QueueMode::Steal)]
+    #[case::mirror_queues("{ queues: mirror }", IncomingMode::Steal, QueueMode::Mirror)]
+    #[case::mirror("{ incoming: mirror }", IncomingMode::Mirror, QueueMode::Mirror)]
+    #[case::mirror_mirror_queues(
+        "{ incoming: mirror, queues: mirror }",
+        IncomingMode::Mirror,
+        QueueMode::Mirror
+    )]
+    fn custom_mode_sets_incoming_and_queue_modes(
+        #[case] mode: &str,
+        #[case] incoming: IncomingMode,
+        #[case] queues: QueueMode,
+    ) {
+        let config = only_config(&format!(
+            r#"
+            modes:
+              custom: {mode}
+            services:
+              svc:
+                default_mode: custom
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        ));
+
+        assert_eq!(config.feature.network.incoming.mode, incoming);
+        assert_eq!(
+            config
+                .feature
+                .network
+                .incoming
+                .http_filter
+                .header_filter
+                .as_deref(),
+            Some("baggage: .*mirrord-session=key.*")
+        );
+        assert!(
+            config
+                .feature
+                .split_queues
+                .is_all_wildcard_with_mode(&EnvKey::Provided("key".to_owned()), queues)
+        );
+    }
+
+    /// A custom mode without `db_branching` requests DB branching like the built-in mode its
+    /// `incoming` names: `split` and `mirror` ask for every `MirrordSplitConfig` entry, `replace`
+    /// for none. `queues` plays no part.
+    #[rstest]
+    #[case::split("{ incoming: split, queues: mirror }", true)]
+    #[case::mirror("{ incoming: mirror, queues: split }", true)]
+    #[case::replace("{ incoming: replace, queues: split }", false)]
+    fn custom_mode_db_branching_follows_incoming(#[case] mode: &str, #[case] branches: bool) {
+        let service = parse(&format!(
+            r#"
+            modes:
+              custom: {mode}
+            services:
+              svc:
+                default_mode: custom
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        ))
+        .service_configs(
+            &EnvKey::Provided("key".to_owned()),
+            &mut HashMap::new(),
+            UpKubeContext::default(),
+            &mut ConfigContext::default().strict_env(true),
+        )
+        .unwrap()
+        .remove(0);
+
+        let origin = match branches {
+            true => RequestOrigin::Default,
+            false => RequestOrigin::Config,
+        };
+        assert_eq!(service.db_branches_origin, origin);
+        assert_eq!(
+            service.config.feature.db_branches.is_empty(),
+            branches.not()
+        );
+    }
+
+    /// `incoming: replace` copies the target like built-in `replace`, and splits no queues even
+    /// when the mode sets `queues`.
+    #[test]
+    fn custom_replace_mode_ignores_queues() {
+        let config = only_config(
+            r#"
+            modes:
+              takeover:
+                incoming: replace
+                queues: mirror
+            services:
+              svc:
+                default_mode: takeover
+                target:
+                  path: "deployment/web"
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        assert!(config.feature.copy_target.enabled);
+        assert!(config.feature.copy_target.scale_down);
+        assert_eq!(config.feature.split_queues, SplitQueuesConfig::default());
+    }
+
+    /// `config_patch` is applied over what the mode sets.
+    #[test]
+    fn config_patch_overrides_custom_mode() {
+        let config = only_config(
+            r#"
+            modes:
+              custom:
+                queues: mirror
+            services:
+              svc:
+                default_mode: custom
+                target:
+                  path: "deployment/web"
+                config_patch:
+                  feature:
+                    network:
+                      incoming:
+                        mode: mirror
+                    split_queues: []
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        assert_eq!(config.feature.network.incoming.mode, IncomingMode::Mirror);
+        assert_eq!(config.feature.split_queues, SplitQueuesConfig::default());
+    }
+
+    #[test]
+    fn override_mode_selects_custom_modes() {
+        let mut config = parse(
+            r#"
+            modes:
+              custom: {}
+            services:
+              a:
+                default_mode: replace
+                run:
+                  command: ["echo"]
+              b:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        config.override_mode("custom").unwrap();
+        assert!(
+            config
+                .services
+                .values()
+                .all(|svc| &*svc.default_mode == "custom")
+        );
+    }
+
+    /// An unknown `--mode` leaves every service's mode as it was.
+    #[test]
+    fn override_mode_rejects_unknown_modes() {
+        let mut config = parse(
+            r#"
+            modes:
+              custom: {}
+            services:
+              a:
+                default_mode: replace
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let UnknownMode { name, known, .. } = config.override_mode("bogus").unwrap_err();
+        assert_eq!(&*name, "bogus");
+        assert!(known.iter().any(|mode| &**mode == "custom"));
+        assert_eq!(&*config.services["a"].default_mode, "replace");
+    }
+
+    /// `incoming: replace` on a targetless service fails the target check like built-in
+    /// `replace`, naming the custom mode.
+    #[test]
+    fn verify_services_rejects_targetless_custom_replace_mode() {
+        let config = parse(
+            r#"
+            modes:
+              takeover:
+                incoming: replace
+            services:
+              svc:
+                default_mode: takeover
+                target: none
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let errors = config
+            .verify_services(&EnvKey::Provided("key".to_owned()))
+            .unwrap();
+        let [ServiceError::IncompatibleTarget(target)] = errors.as_slice() else {
+            panic!("expected one incompatible target, got {errors:?}");
+        };
+        assert_eq!(&*target.mode, "takeover");
+        assert_eq!(target.target_type, TargetType::Targetless);
+    }
+
+    #[test]
+    fn unknown_mode_field_is_rejected() {
+        let err = serde_saphyr::from_str::<UpConfig>(
+            "modes:\n  custom:\n    incomming: mirror\nservices:\n  svc:\n    run:\n      command: [x]\n",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown field `incomming`"),
+            "{err}"
         );
     }
 
@@ -2940,6 +3684,127 @@ mod tests {
         ));
     }
 
+    // -- Preview image selection --
+
+    fn preview_fixture() -> UpConfig {
+        parse(
+            r#"
+            services:
+              built:
+                run:
+                  command: ["echo"]
+              synced:
+                run:
+                  command: ["echo"]
+                sync:
+                  files:
+                    - local: app
+                      remote: /app
+              skipped-sync:
+                skip: true
+                run:
+                  command: ["echo"]
+                sync:
+                  files:
+                    - local: app
+                      remote: /app
+              plain:
+                run:
+                  command: ["echo"]
+            "#,
+        )
+    }
+
+    /// `mirrord preview up` previews only the services with an image.
+    #[test]
+    fn preview_up_takes_only_the_services_with_an_image() {
+        let mut config = preview_fixture();
+        let context = ConfigContext::default()
+            .override_env(preview_image_env("synced"), "registry.example/synced:v1");
+
+        let images = config
+            .select_preview_images(&[], &context, PreviewRun::Up)
+            .unwrap();
+
+        assert_eq!(service_names(&config), HashSet::from(["synced".to_owned()]));
+        assert_eq!(
+            images.skipped,
+            vec![
+                (Arc::from("built"), SkipReason::NoImage),
+                (Arc::from("plain"), SkipReason::NoImage),
+                (Arc::from("skipped-sync"), SkipReason::NoImage),
+            ]
+        );
+    }
+
+    /// `mirrord preview sync` previews only the services with `sync`, each of its image or else of
+    /// the target's image, and keeps their `sync` also with an image. An image names its service,
+    /// so it previews a service with `skip` too.
+    #[test]
+    fn preview_sync_takes_only_the_services_with_sync() {
+        let mut config = preview_fixture();
+        let context = ConfigContext::default()
+            .override_env(preview_image_env("synced"), "registry.example/synced:v1");
+
+        let images = config
+            .select_preview_images(&[], &context, PreviewRun::Sync)
+            .unwrap();
+
+        assert_eq!(service_names(&config), HashSet::from(["synced".to_owned()]));
+        assert_eq!(
+            images.picked["synced"],
+            (
+                "registry.example/synced:v1".to_owned(),
+                PreviewImageSource::Env
+            )
+        );
+        assert_eq!(
+            images.skipped,
+            vec![
+                (Arc::from("built"), SkipReason::NoSync),
+                (Arc::from("plain"), SkipReason::NoSync),
+                (Arc::from("skipped-sync"), SkipReason::Skip),
+            ]
+        );
+
+        let mut config = preview_fixture();
+        let flags = ["skipped-sync=registry.example/skipped:v1".to_owned()];
+        let images = config
+            .select_preview_images(&flags, &ConfigContext::default(), PreviewRun::Sync)
+            .unwrap();
+        assert_eq!(
+            service_names(&config),
+            HashSet::from(["synced".to_owned(), "skipped-sync".to_owned()])
+        );
+        assert_eq!(
+            images.skipped,
+            vec![
+                (Arc::from("built"), SkipReason::NoSync),
+                (Arc::from("plain"), SkipReason::NoSync),
+            ]
+        );
+    }
+
+    /// A run with nothing to preview fails: `preview up` when no service has an image, and
+    /// `preview sync` when no service has `sync` without `skip`.
+    #[test]
+    fn a_run_with_nothing_to_preview_fails() {
+        let mut config = preview_fixture();
+        assert!(matches!(
+            config.select_preview_images(&[], &ConfigContext::default(), PreviewRun::Up),
+            Err(PreviewImageError::NoImages)
+        ));
+
+        let mut config = preview_fixture();
+        config
+            .services
+            .retain(|name, _| ["plain", "skipped-sync"].contains(&name.as_ref()));
+        assert!(matches!(
+            config.select_preview_images(&[], &ConfigContext::default(), PreviewRun::Sync),
+            Err(PreviewImageError::NothingToSync)
+        ));
+    }
+
     // -- Error cases --
 
     #[test]
@@ -2956,21 +3821,6 @@ mod tests {
             err.to_string().contains("missing field `run`"),
             "expected error about missing run, got: {err}"
         );
-    }
-
-    #[test]
-    fn error_invalid_mode() {
-        let result: Result<UpConfig, _> = serde_saphyr::from_str(
-            r#"
-            services:
-              svc:
-                default_mode: bogus
-                run:
-                  exec:
-                    command: ["echo"]
-            "#,
-        );
-        assert!(result.is_err());
     }
 
     /// A typo of `target: none` gets `none` added to the message as a hint.
@@ -3042,9 +3892,40 @@ mod tests {
                     "split": 1,
                     "replace": 0,
                     "mirror": 0,
+                    "custom": 0,
                 },
+                "num_custom_modes": 0,
+                "num_db_branching_modes": 0,
             }),
         );
+    }
+
+    /// Services in custom modes are counted, but the user's mode names are never sent.
+    #[test]
+    fn analytics_counts_custom_modes_without_their_names() {
+        let config = parse(
+            r#"
+            modes:
+              secret-name: {}
+              unused: {}
+            services:
+              a:
+                default_mode: secret-name
+                run:
+                  command: ["echo"]
+              b:
+                default_mode: mirror
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let analytics = collect(&config);
+        assert_eq!(analytics["modes"]["custom"], 1);
+        assert_eq!(analytics["modes"]["mirror"], 1);
+        assert_eq!(analytics["num_custom_modes"], 2);
+        assert_eq!(analytics["config_fields_used"]["default_mode"], 2);
+        assert!(analytics.to_string().contains("secret-name").not());
     }
 
     #[test]

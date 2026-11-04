@@ -457,20 +457,35 @@ impl IamAuthConfig {
 /// }
 /// ```
 ///
+/// Every entry, seeded with the `schema` copy mode instead of each entry's own `copy.mode`
+/// (`entries` takes `"*"` or a list of ids):
+/// ```json
+/// {
+///   "feature": {
+///     "db_branches": { "entries": "*", "copy": { "mode": "schema" } }
+///   }
+/// }
+/// ```
+///
 /// With `"*"` or a list of ids the operator resolves the entries, and sessions started under
 /// the same key that point at the same entry share one branch (its id is the entry id plus the
 /// key). An id that matches no entry fails the session, naming the ids the workload has; a
 /// workload with no `dbBranches` gives no branches and the session continues. An operator
 /// that cannot resolve entries fails the session before it starts. Inline definitions always
 /// win: with them, any `dbBranches` on the workload are ignored with a warning.
+///
+/// A requested `copy.mode` replaces only the `copy.mode` of each entry, and only for the entry's
+/// own database: the rest of its `copy` block and its additional databases stay as the entry
+/// defines them. The operator refuses a mode missing from the entry's `copy.allowedModes`, and
+/// ignores it for generic entries, which have no copy modes.
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize)]
 #[serde(untagged)]
 pub enum DatabaseBranchesConfig {
     /// Branches defined in this config.
     Inline(Vec<DatabaseBranchConfig>),
-    /// `"*"` or a list of entry ids, resolved by the operator against the target's
-    /// `MirrordSplitConfig`.
-    FromSplitConfig(SplitConfigDbBranches),
+    /// `"*"` or a list of entry ids, optionally with a copy mode, resolved by the operator
+    /// against the target's `MirrordSplitConfig`.
+    FromSplitConfig(SplitConfigRequest),
 }
 
 /// Dispatches on the value's shape by hand instead of `#[serde(untagged)]`: an untagged enum
@@ -485,9 +500,11 @@ impl<'de> Deserialize<'de> for DatabaseBranchesConfig {
     {
         let value = serde_json::Value::deserialize(deserializer)?;
         match value {
-            serde_json::Value::String(star) if star == "*" => Ok(Self::FromSplitConfig(
-                SplitConfigDbBranches::All(AllSplitConfigDbBranches::All),
-            )),
+            serde_json::Value::String(star) if star == "*" => {
+                Ok(Self::FromSplitConfig(SplitConfigRequest::Entries(
+                    SplitConfigDbBranches::All(AllSplitConfigDbBranches::All),
+                )))
+            }
             serde_json::Value::Array(items)
                 if items.is_empty().not() && items.iter().all(serde_json::Value::is_string) =>
             {
@@ -495,14 +512,23 @@ impl<'de> Deserialize<'de> for DatabaseBranchesConfig {
                     .into_iter()
                     .filter_map(|item| item.as_str().map(str::to_owned))
                     .collect();
-                Ok(Self::FromSplitConfig(SplitConfigDbBranches::Ids(ids)))
+                Ok(Self::FromSplitConfig(SplitConfigRequest::Entries(
+                    SplitConfigDbBranches::Ids(ids),
+                )))
+            }
+            // Only an object with `entries` is the copy form, so a single inline entry written
+            // without its list still gets the message naming every form.
+            value @ serde_json::Value::Object(_) if value.get("entries").is_some() => {
+                serde_json::from_value(value)
+                    .map(|request| Self::FromSplitConfig(SplitConfigRequest::WithCopy(request)))
+                    .map_err(D::Error::custom)
             }
             value @ serde_json::Value::Array(_) => serde_json::from_value(value)
                 .map(Self::Inline)
                 .map_err(D::Error::custom),
             other => Err(D::Error::custom(format!(
-                "expected `\"*\"`, a list of MirrordSplitConfig entry ids, or a list of branch \
-                 definitions, got {other}"
+                "expected `\"*\"`, a list of MirrordSplitConfig entry ids, an object with \
+                 `entries` and `copy`, or a list of branch definitions, got {other}"
             ))),
         }
     }
@@ -527,6 +553,55 @@ pub enum AllSplitConfigDbBranches {
     #[serde(rename = "*")]
     #[default]
     All,
+}
+
+/// <!--${internal}-->
+/// A session's request for `dbBranches` entries of the target's `MirrordSplitConfig`: just the
+/// entries, or the entries with a copy mode that replaces each one's own.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize)]
+#[serde(untagged)]
+pub enum SplitConfigRequest {
+    /// `"*"` or a list of entry ids.
+    Entries(SplitConfigDbBranches),
+    /// `{ "entries": ..., "copy": { "mode": ... } }`.
+    WithCopy(SplitConfigRequestWithCopy),
+}
+
+/// <!--${internal}-->
+/// The object form of [`SplitConfigRequest`].
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SplitConfigRequestWithCopy {
+    /// `"*"` or a list of entry ids.
+    pub entries: SplitConfigDbBranches,
+    pub copy: SplitConfigCopy,
+}
+
+/// <!--${internal}-->
+/// How the requested entries are seeded.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SplitConfigCopy {
+    /// Replaces each entry's `copy.mode`.
+    pub mode: BranchCopyMode,
+}
+
+impl SplitConfigRequest {
+    /// The entries asked for.
+    pub fn entries(&self) -> &SplitConfigDbBranches {
+        match self {
+            Self::Entries(entries) => entries,
+            Self::WithCopy(request) => &request.entries,
+        }
+    }
+
+    /// The copy mode replacing each entry's own, if any.
+    pub fn copy_mode(&self) -> Option<BranchCopyMode> {
+        match self {
+            Self::Entries(_) => None,
+            Self::WithCopy(request) => Some(request.copy.mode),
+        }
+    }
 }
 
 impl Default for DatabaseBranchesConfig {
@@ -575,7 +650,7 @@ impl DatabaseBranchesConfig {
 
     /// The request to resolve against the target's `MirrordSplitConfig`, if this config asks
     /// for one instead of defining branches inline.
-    pub fn split_config_request(&self) -> Option<&SplitConfigDbBranches> {
+    pub fn split_config_request(&self) -> Option<&SplitConfigRequest> {
         match self {
             Self::FromSplitConfig(request) => Some(request),
             Self::Inline(_) => None,
@@ -593,8 +668,10 @@ impl DatabaseBranchesConfig {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Inline(branches) => branches.is_empty(),
-            Self::FromSplitConfig(SplitConfigDbBranches::Ids(ids)) => ids.is_empty(),
-            Self::FromSplitConfig(SplitConfigDbBranches::All(_)) => false,
+            Self::FromSplitConfig(request) => match request.entries() {
+                SplitConfigDbBranches::Ids(ids) => ids.is_empty(),
+                SplitConfigDbBranches::All(_) => false,
+            },
         }
     }
 
@@ -608,7 +685,9 @@ impl DatabaseBranchesConfig {
     /// Verifies invariants that span individual branch configs (e.g. `ttl_secs`/`ttl_mins`
     /// mutual exclusion).
     pub fn verify(&self, context: &mut config::ConfigContext) -> Result<(), ConfigError> {
-        if let Some(SplitConfigDbBranches::Ids(ids)) = self.split_config_request() {
+        if let Some(SplitConfigDbBranches::Ids(ids)) =
+            self.split_config_request().map(SplitConfigRequest::entries)
+        {
             let mut seen = std::collections::BTreeSet::new();
             for id in ids {
                 if id.is_empty() {
@@ -695,9 +774,11 @@ impl DatabaseBranchesConfig {
     }
 }
 
-/// Engine-agnostic seeding mode of a branch, used for usage analytics. Engines
-/// without copy modes (generic, local Redis) have none.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Engine-agnostic seeding mode of a branch: what a split-config request asks for, and what usage
+/// analytics count. Engines without copy modes (generic, local Redis) have none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize, IntoStaticStr)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum BranchCopyMode {
     Empty,
     Schema,
@@ -879,11 +960,7 @@ impl DatabaseBranchConfig {
                 MysqlBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
                 MysqlBranchCopyConfig::All { .. } => BranchCopyMode::All,
             },
-            DatabaseBranchConfig::Pg(cfg) => match cfg.copy {
-                PgBranchCopyConfig::Empty { .. } => BranchCopyMode::Empty,
-                PgBranchCopyConfig::Schema { .. } => BranchCopyMode::Schema,
-                PgBranchCopyConfig::All { .. } => BranchCopyMode::All,
-            },
+            DatabaseBranchConfig::Pg(cfg) => cfg.copy.mode(),
             DatabaseBranchConfig::Redis(cfg) => match &**cfg {
                 RedisBranchConfig::Local(_) => return None,
                 RedisBranchConfig::Remote(remote) => match remote.copy {
@@ -4323,16 +4400,18 @@ mod tests {
 
         assert_eq!(
             parse(json!("*")).unwrap(),
-            DatabaseBranchesConfig::FromSplitConfig(SplitConfigDbBranches::All(
-                AllSplitConfigDbBranches::All
+            DatabaseBranchesConfig::FromSplitConfig(SplitConfigRequest::Entries(
+                SplitConfigDbBranches::All(AllSplitConfigDbBranches::All)
             ))
         );
         assert_eq!(
             parse(json!(["orders-pg", "sessions-redis"])).unwrap(),
-            DatabaseBranchesConfig::FromSplitConfig(SplitConfigDbBranches::Ids(vec![
-                "orders-pg".to_owned(),
-                "sessions-redis".to_owned()
-            ]))
+            DatabaseBranchesConfig::FromSplitConfig(SplitConfigRequest::Entries(
+                SplitConfigDbBranches::Ids(vec![
+                    "orders-pg".to_owned(),
+                    "sessions-redis".to_owned()
+                ])
+            ))
         );
         assert_eq!(
             parse(json!([])).unwrap(),
