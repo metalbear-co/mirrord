@@ -451,6 +451,9 @@ async fn local_share_blocked_stderr_does_not_block_failure() {
         },
         queued_output(&mut stderr).await
     );
+    // The operator serves the link as ready from the steal on, so its print is in flight while
+    // stderr is full.
+    proxy.set_share_phase(SessionSharePhase::Ready);
     proxy
         .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
             port,
@@ -480,7 +483,8 @@ async fn local_share_blocked_stderr_does_not_block_failure() {
         },
         queued_output(&mut stderr).await
     );
-    proxy.set_share_phase(SessionSharePhase::Ready);
+    // Longer than the intproxy's first wait between two reads of the link.
+    tokio::time::sleep(Duration::from_millis(300)).await;
     proxy
         .send(DaemonMessage::Close(
             "forced blocked-output failure".to_owned(),
@@ -511,6 +515,72 @@ async fn local_share_blocked_stderr_does_not_block_failure() {
         TcpListener::bind(("127.0.0.1", port))
             .expect("blocked reporting left the application listener alive"),
     );
+}
+
+/// The operator removes a link that it can't keep and then ends the session with a `Close` that
+/// says why. When the intproxy reads the removed link before the `Close` arrives, the application
+/// still prints the reason from the `Close`, and not the vaguer one that the read gives.
+#[tokio::test]
+async fn local_share_close_reason_replaces_removed_link() {
+    let scenario = tempfile::TempDir::new().unwrap();
+    let tmpdir = scenario.path().to_str().unwrap();
+    let reserved = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = reserved.local_addr().unwrap().port();
+    drop(reserved);
+    let mut config = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
+    write!(config, "share = true\n[feature]\nenv = false\nfs = 'local'\n[feature.network]\noutgoing = false\ndns = false\n[feature.network.incoming]\nmode = 'steal'\nports = [{port}]\n").unwrap();
+    let app = Application::DynamicApp(
+        "python3".to_owned(),
+        vec![
+            "-c".to_owned(),
+            format!(
+                "import socket\ns=socket.socket()\ns.bind(('127.0.0.1',{port}))\ns.listen()\nprint('APP_'+'LISTENING',flush=True)\ns.accept()"
+            ),
+        ],
+    );
+    let (mut process, mut proxy) = app
+        .start_process(vec![("TMPDIR", tmpdir)], Some(config.path()))
+        .await;
+    let subscription = timeout(Duration::from_secs(15), proxy.try_recv()).await;
+    assert!(
+        matches!(
+            subscription,
+            Ok(Some(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
+                _
+            ))))
+        ),
+        "removed stage=subscription: actual={subscription:?}, stderr={:.8192}",
+        process.get_stderr().await
+    );
+    proxy.set_share_phase(SessionSharePhase::Ended);
+    proxy
+        .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
+            port,
+        ))))
+        .await;
+    process
+        .wait_for_line_stdout(Duration::from_secs(5), "APP_LISTENING")
+        .await;
+    // Long enough for the intproxy to read the removed link, shorter than it holds that back.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    proxy
+        .send(DaemonMessage::Close("routed agent lost".to_owned()))
+        .await;
+    let status = timeout(Duration::from_secs(5), process.wait()).await;
+    assert!(
+        matches!(status, Ok(status) if status.success().not()),
+        "removed stage=application-exit: actual={status:?}, stderr={:.8192}",
+        process.get_stderr().await
+    );
+    let stderr = process.get_stderr().await;
+    assert_eq!(
+        stderr
+            .matches("Can't share this session: routed agent lost")
+            .count(),
+        1,
+        "{stderr}"
+    );
+    assert!(stderr.contains("before it was ready").not(), "{stderr}");
 }
 
 /// The intproxy of a shared session rejects a port subscription from a layer whose share control
@@ -597,9 +667,9 @@ async fn local_share_rejects_subscription_without_control() {
 
 /// The link is printed once the operator serves it as ready, which can take a few reads after
 /// the agent confirmed the steal. An application that stops listening on the port that the link
-/// opens is then told that the link ended, because the operator removes the link then while the session runs on. Its natural
-/// completion then ends the session cleanly: the intproxy exits with success, and the operator
-/// ends the link with the session's connection.
+/// opens is then told that the link ended, because the operator removes the link then while the
+/// session runs on. Its natural completion then ends the session cleanly: the intproxy exits with
+/// success, and the operator ends the link with the session's connection.
 ///
 /// With `clobber_low_fds`, the application first takes over fds 3 to 9 without asking for free
 /// numbers, as shell scripts do with `exec 3>file`. The share control connection must survive

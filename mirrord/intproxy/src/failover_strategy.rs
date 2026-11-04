@@ -320,6 +320,8 @@ impl FailoverStrategy {
                 self.layers.remove(&LayerId(id));
                 self.connected_layers.remove(&LayerId(id));
             }
+            // The share link read of a failed shared session stops by itself.
+            (MainTaskId::SharePoll, TaskUpdate::Finished(Ok(()))) => {}
             (task_id, TaskUpdate::Finished(res)) => match res {
                 Ok(()) => {
                     tracing::error!(%task_id, "One of the main tasks finished unexpectedly");

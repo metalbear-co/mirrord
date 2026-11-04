@@ -58,6 +58,7 @@ use mirrord_progress::Progress;
 use preview_sync::PreviewSyncConnection;
 use semver::Version;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use thiserror::Error;
 use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 use uuid::Uuid;
@@ -194,7 +195,7 @@ pub struct OperatorSession {
     /// URL where websocket connection request should be sent.
     connect_url: String,
     /// The namespace of the session's target, which the operator files the session's
-    /// [`SessionCrd`] view under, so [`OperatorApi::session_share`] can read the view with the
+    /// [`SessionCrd`] view under, so [`SessionShareReader`] can read the view with the
     /// namespaced route. `None` for sessions that can't be shared, such as copied targets and
     /// multi-cluster sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -254,6 +255,100 @@ impl fmt::Debug for OperatorSession {
             .field("traceparent", &self.traceparent)
             .field("baggage", &self.baggage);
         debug_struct.finish()
+    }
+}
+
+/// How long one read of a share link may take. The intproxy reads the link again after a read
+/// that timed out, so a hung request delays the link instead of stopping it.
+const SHARE_READ_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Reads the share link of a session started with `share`, as the operator serves it to the
+/// session's owner in [`Session::share`](crate::crd::Session::share).
+///
+/// It reads the session's `sessions` view through the namespaced route, because users whose
+/// roles are namespaced can't `get` the cluster-wide path. It is built once and reused, because
+/// building its client can run the kubeconfig's credential plugin, and the intproxy reads the link
+/// several times while it waits for the link to work.
+#[derive(Clone)]
+pub struct SessionShareReader {
+    api: Api<SessionCrd>,
+    name: String,
+}
+
+/// Why [`SessionShareReader::read`] failed.
+#[derive(Debug, Error)]
+pub enum SessionShareReadError {
+    /// Kubernetes refused the read because the user's roles don't allow `get` on `sessions`.
+    #[error(
+        "Share links need permission to get `sessions` in the `operator.metalbear.co` API group. Ask your platform team to update the mirrord roles."
+    )]
+    MissingPermission,
+
+    /// Kubernetes or the operator refused the read for another reason, such as credentials that
+    /// expired. Reading again doesn't help. The text is the refusal's own message.
+    #[error("The cluster refused to read this session's share link: {0}")]
+    Refused(String),
+
+    #[error("Reading this session's share link timed out.")]
+    TimedOut,
+
+    #[error(transparent)]
+    Operator(#[from] OperatorApiError),
+}
+
+impl SessionShareReader {
+    /// Builds the reader with the session's certificate.
+    ///
+    /// Only a session with a target namespace can be shared, so a session without one is an
+    /// error instead of a read through the cluster-wide route, which namespaced roles would
+    /// refuse with a misleading permission error.
+    #[mirrord_macros::boxed_future]
+    pub async fn new(
+        layer_config: &LayerConfig,
+        session: &OperatorSession,
+    ) -> OperatorApiResult<Self> {
+        let Some(namespace) = &session.namespace else {
+            return Err(OperatorApiError::LocalShare(
+                "This session has no target namespace, so it has no share link.".to_owned(),
+            ));
+        };
+        let client = OperatorApi::session_client(layer_config, session).await?;
+
+        Ok(Self {
+            api: Api::namespaced(client, namespace),
+            name: session.id.to_string(),
+        })
+    }
+
+    /// Reads the share link. `None` when the operator serves no link for the session, which
+    /// includes a session that it doesn't serve, or doesn't serve yet.
+    #[tracing::instrument(level = Level::TRACE, skip(self), fields(session = %self.name), ret)]
+    pub async fn read(&self) -> Result<Option<SessionShare>, SessionShareReadError> {
+        let result = tokio::time::timeout(SHARE_READ_TIMEOUT, self.api.get(&self.name))
+            .await
+            .map_err(|_| SessionShareReadError::TimedOut)?;
+
+        match result {
+            Ok(view) => Ok(view.spec.session.share),
+            Err(kube::Error::Api(status)) if status.code == 404 => Ok(None),
+            Err(kube::Error::Api(status))
+                if status.code == 403
+                    && status.details.as_ref().is_some_and(|details| {
+                        details.kind == SessionCrd::plural(&())
+                            && details.group == SessionCrd::group(&())
+                    }) =>
+            {
+                Err(SessionShareReadError::MissingPermission)
+            }
+            Err(kube::Error::Api(status)) if matches!(status.code, 401 | 403) => {
+                Err(SessionShareReadError::Refused(status.message.clone()))
+            }
+            Err(error) => Err(OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::ReadShareLink,
+            }
+            .into()),
+        }
     }
 }
 
@@ -3537,33 +3632,6 @@ impl OperatorApi<PreparedClientCert> {
             session,
             target_container_ports: Vec::new(),
         })
-    }
-
-    /// Reads the share link of a session started with `share`, as the operator serves it to the
-    /// session's owner.
-    ///
-    /// `None` when the operator serves no link for the session, which includes a session it no
-    /// longer serves at all. Kubernetes answers 403 before the request reaches the operator when
-    /// the user's roles don't allow `get` on `sessions`.
-    #[tracing::instrument(level = Level::TRACE, skip_all, fields(session_id = session.id), err)]
-    pub async fn session_share(
-        layer_config: &LayerConfig,
-        session: &OperatorSession,
-    ) -> OperatorApiResult<Option<SessionShare>> {
-        let client = Self::session_client(layer_config, session).await?;
-        let api = match &session.namespace {
-            Some(namespace) => Api::<SessionCrd>::namespaced(client, namespace),
-            None => Api::<SessionCrd>::all(client),
-        };
-
-        match api.get(&session.id.to_string()).await {
-            Ok(view) => Ok(view.spec.session.share),
-            Err(kube::Error::Api(status)) if status.code == 404 => Ok(None),
-            Err(error) => Err(OperatorApiError::KubeError {
-                error,
-                operation: OperatorOperation::ReadShareLink,
-            }),
-        }
     }
 
     /// Builds a client that authenticates with the session's certificate, for a process that

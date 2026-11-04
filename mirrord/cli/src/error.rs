@@ -300,12 +300,10 @@ pub(crate) enum LocalShareError {
     #[error("The internal proxy of the shared session stopped ({0}), so its share link is gone.")]
     ProxyExit(ExitStatus),
 
-    /// The intproxy reads the link from the session's `sessions` view, which Kubernetes guards
-    /// with the user's roles before the request reaches the operator.
-    #[error(
-        "Share links need permission to get `sessions` in the `operator.metalbear.co` API group. Ask your platform team to update the mirrord roles."
-    )]
-    MissingSessionPermission,
+    /// The CLI couldn't read the link from the session's `sessions` view, for example because
+    /// the user's roles don't allow `get` on `sessions`. Its text is written for the user.
+    #[error(transparent)]
+    ReadLink(mirrord_operator::client::SessionShareReadError),
 
     /// The operator, or the target that the client resolved through it, can't serve a shared
     /// session.

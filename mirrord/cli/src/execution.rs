@@ -30,7 +30,7 @@ use mirrord_intproxy::{
     share::{LOCAL_SHARE_LINK_ENV, LocalShareLink},
 };
 use mirrord_operator::{
-    client::{OperatorApi, OperatorSession, error::OperatorApiError},
+    client::{OperatorSession, SessionShareReadError, SessionShareReader},
     crd::SessionSharePhase,
 };
 use mirrord_progress::{MIRRORD_SHARE_PROGRESS_ENV, Progress, ProgressTracker};
@@ -144,22 +144,38 @@ pub(crate) struct MirrordExecution {
     share: bool,
 }
 
+/// How long [`read_share_link`] reads a link that the operator doesn't serve yet before it fails.
+const SHARE_LINK_MISSING_GRACE: Duration = Duration::from_secs(2);
+
+/// The wait between two reads of a link that the operator doesn't serve yet.
+const SHARE_LINK_MISSING_RETRY: Duration = Duration::from_millis(100);
+
 /// Reads the share link that the operator created when this shared session connected, for the
 /// internal proxy to report.
 ///
 /// It is read here, before anything starts, so that roles that don't allow reading it, or an
 /// operator that didn't create it, fail the session with an error the user sees in the terminal.
+///
+/// The operator serves the session from its watch of the session objects, which can lag behind
+/// the connect that created the session, so a missing link is read again for a short while
+/// before it counts as missing.
+#[mirrord_macros::boxed_future]
 async fn read_share_link(
     config: &LayerConfig,
     session: &OperatorSession,
 ) -> CliResult<LocalShareLink> {
-    let share = match OperatorApi::session_share(config, session).await {
-        Ok(share) => share,
-        Err(OperatorApiError::KubeError {
-            error: kube::Error::Api(status),
-            ..
-        }) if status.code == 403 => return Err(LocalShareError::MissingSessionPermission.into()),
-        Err(error) => return Err(error.into()),
+    let reader = SessionShareReader::new(config, session).await?;
+    let missing_until = tokio::time::Instant::now() + SHARE_LINK_MISSING_GRACE;
+    let share = loop {
+        match reader.read().await {
+            Ok(Some(share)) => break Some(share),
+            Ok(None) if tokio::time::Instant::now() < missing_until => {
+                tokio::time::sleep(SHARE_LINK_MISSING_RETRY).await;
+            }
+            Ok(None) => break None,
+            Err(SessionShareReadError::Operator(error)) => return Err(error.into()),
+            Err(error) => return Err(LocalShareError::ReadLink(error).into()),
+        }
     };
     let Some(share) = share.filter(|share| share.phase != SessionSharePhase::Ended) else {
         return Err(LocalShareError::Operator(

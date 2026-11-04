@@ -20,11 +20,12 @@ use futures::future::BoxFuture;
 use mirrord_config::{LayerConfig, feature::network::incoming::IncomingConfig};
 use mirrord_intproxy_protocol::{LayerId, ShareReport};
 use mirrord_operator::{
-    client::{OperatorApi, OperatorSession},
+    client::{OperatorSession, SessionShareReadError, SessionShareReader},
     crd::{SessionShare, SessionSharePhase},
 };
 use serde::{Deserialize, Serialize};
-use tokio::time::Instant;
+use thiserror::Error;
+use tokio::{sync::OnceCell, time::Instant};
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
@@ -53,6 +54,15 @@ const MAX_POLL_DELAY: Duration = Duration::from_secs(2);
 /// the operator still works on.
 const SLOW_POLL_LOG_AFTER: Duration = Duration::from_secs(30);
 
+/// How long reads of the link may keep failing before the intproxy gives up on the link. Until
+/// then a failed read is retried, because the API server or the network may come back.
+const READ_FAILURE_DEADLINE: Duration = Duration::from_secs(30);
+
+/// How long the intproxy holds back the report that the operator removed a link that wasn't ready.
+/// The operator removes the link first and then ends the session with a `Close` whose reason says
+/// why, so a read between the two would otherwise print a vaguer reason than the `Close`.
+const REMOVED_LINK_GRACE: Duration = Duration::from_secs(1);
+
 /// The share link that the operator created for this session when it connected, as the CLI read it
 /// before it started the application. It doesn't work until the operator publishes it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,8 +74,18 @@ pub struct LocalShareLink {
     pub entry_port: u16,
 }
 
-/// The error of a [`ShareStatusSource`] read. The intproxy only logs it and reads again.
-pub type ShareStatusError = Box<dyn std::error::Error + Send + Sync>;
+/// Why a [`ShareStatusSource`] read failed.
+#[derive(Debug, Error)]
+pub enum ShareStatusError {
+    /// The cluster refused the read, for example because the user's roles or credentials changed
+    /// after the session started. Reading again doesn't help, so the link fails with this text,
+    /// which is written for the user.
+    #[error("{0}")]
+    Refused(String),
+    /// The read failed in a way that may not last, so the intproxy reads again.
+    #[error(transparent)]
+    Transient(Box<dyn std::error::Error + Send + Sync>),
+}
 
 /// Where the intproxy reads the share link's phase from.
 ///
@@ -77,9 +97,13 @@ pub trait ShareStatusSource: Send + Sync {
 }
 
 /// Reads the share link from the session's `sessions` view, with the session's certificate.
+///
+/// The reader is built on the first read and reused after that, so the kubeconfig's credential
+/// plugin doesn't run for every read. A failed build is tried again on the next read.
 pub struct OperatorShareStatus {
     config: Arc<LayerConfig>,
     session: Arc<OperatorSession>,
+    reader: Arc<OnceCell<SessionShareReader>>,
 }
 
 impl OperatorShareStatus {
@@ -87,6 +111,7 @@ impl OperatorShareStatus {
         Self {
             config: Arc::new(config),
             session: Arc::new(session),
+            reader: Default::default(),
         }
     }
 }
@@ -95,10 +120,20 @@ impl ShareStatusSource for OperatorShareStatus {
     fn fetch(&self) -> BoxFuture<'static, Result<Option<SessionShare>, ShareStatusError>> {
         let config = self.config.clone();
         let session = self.session.clone();
+        let reader = self.reader.clone();
         Box::pin(async move {
-            OperatorApi::session_share(&config, &session)
+            let reader = reader
+                .get_or_try_init(|| SessionShareReader::new(&config, &session))
                 .await
-                .map_err(Into::into)
+                .map_err(|error| ShareStatusError::Transient(error.into()))?;
+            reader.read().await.map_err(|error| match error {
+                SessionShareReadError::MissingPermission | SessionShareReadError::Refused(_) => {
+                    ShareStatusError::Refused(error.to_string())
+                }
+                SessionShareReadError::TimedOut | SessionShareReadError::Operator(_) => {
+                    ShareStatusError::Transient(error.into())
+                }
+            })
         })
     }
 }
@@ -109,7 +144,10 @@ impl ShareStatusSource for OperatorShareStatus {
 pub enum SharePollOutcome {
     /// share-ingress routes the link.
     Ready,
-    /// The operator removed the link before it was ready. The message is meant for the user.
+    /// The operator removed the link before it was ready. A `Close` with the reason may follow;
+    /// see [`REMOVED_LINK_GRACE`].
+    Removed,
+    /// The intproxy can't learn whether the link works. The message is meant for the user.
     Failed(String),
 }
 
@@ -130,6 +168,7 @@ impl BackgroundTask for SharePoll {
         let started = Instant::now();
         let mut delay = FIRST_POLL_DELAY;
         let mut slow_logged = false;
+        let mut failing_since = None;
 
         loop {
             let read = tokio::select! {
@@ -141,23 +180,34 @@ impl BackgroundTask for SharePoll {
                     phase: SessionSharePhase::Ready,
                     ..
                 })) => Some(SharePollOutcome::Ready),
-                Ok(None
-                | Some(SessionShare {
-                    phase: SessionSharePhase::Ended,
-                    ..
-                })) => Some(SharePollOutcome::Failed(
-                    "The operator removed the share link before it was ready. Restart the session to get a new link."
-                        .to_owned(),
-                )),
+                Ok(
+                    None
+                    | Some(SessionShare {
+                        phase: SessionSharePhase::Ended,
+                        ..
+                    }),
+                ) => Some(SharePollOutcome::Removed),
                 // A phase from a newer operator is treated as not ready yet, because only `Ready`
                 // tells the intproxy that the link works.
                 Ok(Some(SessionShare {
                     phase: SessionSharePhase::Pending | SessionSharePhase::Unknown,
                     ..
-                })) => None,
-                Err(error) => {
-                    tracing::warn!(%error, "Failed to read the share link, reading it again");
+                })) => {
+                    failing_since = None;
                     None
+                }
+                Err(ShareStatusError::Refused(message)) => Some(SharePollOutcome::Failed(message)),
+                Err(ShareStatusError::Transient(error)) => {
+                    let since = *failing_since.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= READ_FAILURE_DEADLINE {
+                        Some(SharePollOutcome::Failed(format!(
+                            "The share link couldn't be read from the operator for {} seconds, so mirrord can't tell whether it works ({error}). Restart the session.",
+                            READ_FAILURE_DEADLINE.as_secs()
+                        )))
+                    } else {
+                        tracing::warn!(%error, "Failed to read the share link, reading it again");
+                        None
+                    }
                 }
             };
             if let Some(outcome) = outcome {
@@ -184,10 +234,27 @@ impl BackgroundTask for SharePoll {
 /// A failed link, waiting for an application to print why.
 struct Failure {
     message: String,
+    /// When an application may print the failure. It is later than the failure itself only for a
+    /// link that the operator removed, whose `Close` may still bring a better reason.
+    report_at: Instant,
     /// When the intproxy stops waiting for the application to print the failure.
     deadline: Instant,
     /// Whether an application was asked to print the failure.
     reported: bool,
+    /// Whether a later failure replaces this one while it isn't reported yet.
+    replaceable: bool,
+}
+
+impl Failure {
+    fn new(message: String, report_at: Instant, replaceable: bool) -> Self {
+        Self {
+            message,
+            report_at,
+            deadline: report_at + FAILURE_REPORT_TIMEOUT,
+            reported: false,
+            replaceable,
+        }
+    }
 }
 
 /// How far the operator got with the link.
@@ -252,20 +319,29 @@ impl LocalShareState {
         }
     }
 
-    fn is_failed(&self) -> bool {
-        matches!(self.phase, Phase::Failed(_))
-    }
-
-    /// Fails the link with `message`, which an application prints. Only the first failure counts.
+    /// Fails the link with `message`, which an application prints.
+    ///
+    /// The first failure counts, except that a failure replaces the not yet reported report of a
+    /// link that the operator removed, because it carries a more specific reason.
     pub(crate) fn fail(&mut self, message: String) {
-        if self.is_failed() {
+        if let Phase::Failed(failure) = &self.phase
+            && (failure.replaceable.not() || failure.reported)
+        {
             return;
         }
-        self.phase = Phase::Failed(Failure {
-            message,
-            deadline: Instant::now() + FAILURE_REPORT_TIMEOUT,
-            reported: false,
-        });
+        self.phase = Phase::Failed(Failure::new(message, Instant::now(), false));
+    }
+
+    /// Whether a `Close` from the operator is about this link: the link was registered and the
+    /// operator hasn't removed it for a reason that was already printed. The operator writes the
+    /// reason of such a `Close` for the user, also when the session ends for a reason other than
+    /// the link, so it is printed as it is.
+    pub(crate) fn is_live(&self) -> bool {
+        match &self.phase {
+            Phase::Accepted { .. } | Phase::Ready { .. } => true,
+            Phase::Failed(failure) => failure.replaceable && failure.reported.not(),
+            Phase::Ended { .. } => false,
+        }
     }
 
     /// Returns the task that reads the link until it is ready, when an agent confirmed that it
@@ -307,6 +383,14 @@ impl LocalShareState {
                     local_port,
                     unprinted_url: Some(self.url.clone()),
                 };
+            }
+            SharePollOutcome::Removed => {
+                self.phase = Phase::Failed(Failure::new(
+                    "The operator removed the share link before it was ready. Restart the session to get a new link."
+                        .to_owned(),
+                    Instant::now() + REMOVED_LINK_GRACE,
+                    true,
+                ));
             }
             SharePollOutcome::Failed(message) => self.fail(message),
         }
@@ -353,8 +437,9 @@ impl LocalShareState {
             Phase::Failed(Failure {
                 reported: false,
                 message,
+                report_at,
                 ..
-            }) => ShareReport::Failed {
+            }) if *report_at <= Instant::now() => ShareReport::Failed {
                 message: message.clone(),
             },
             Phase::Accepted {
@@ -388,9 +473,15 @@ impl LocalShareState {
         Some((layer, report))
     }
 
-    /// When the intproxy stops waiting for the application to print a failure.
+    /// When the intproxy next acts on a failure: it has an application print a failure that was
+    /// held back, or it stops waiting for the application to print it.
     pub(crate) fn failure_deadline(&self) -> Option<Instant> {
         match &self.phase {
+            Phase::Failed(failure)
+                if failure.reported.not() && Instant::now() < failure.report_at =>
+            {
+                Some(failure.report_at)
+            }
             Phase::Failed(failure) => Some(failure.deadline),
             _ => None,
         }

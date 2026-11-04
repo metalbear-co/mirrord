@@ -628,8 +628,10 @@ pub struct SessionHttpFilter {
 pub struct SessionShare {
     /// The URL that share-ingress routes to the session, `https://<host>`.
     pub url: String,
-    /// The port of the local application that the link opens.
+    /// The port of the target that the link opens. The local application listens on it, or on
+    /// the local port that `feature.network.incoming.port_mapping` maps it to.
     pub entry_port: u16,
+    /// Whether share-ingress routes the link yet.
     pub phase: SessionSharePhase,
 }
 
