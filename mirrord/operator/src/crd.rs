@@ -596,6 +596,13 @@ pub struct Session {
     pub http_filter: Option<SessionHttpFilter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<Time>,
+    /// The share link of a session started with `share`.
+    ///
+    /// Only a `get` of one session by its owner carries it, because the link opens the owner's
+    /// local application to anyone who has the URL. The operator leaves it out of every other
+    /// view of the session, such as [`MirrordOperatorStatus::sessions`] and the `sessions` list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share: Option<SessionShare>,
 }
 
 impl Session {
@@ -609,6 +616,38 @@ impl Session {
 pub struct SessionHttpFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub header_filter: Option<String>,
+}
+
+/// The share link of a session started with `share`, as the operator serves it to the session's
+/// owner in [`Session::share`].
+///
+/// The intproxy reads it to tell the user where the link is and when it starts working, so the
+/// share link needs no messages of its own on the session's connection.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionShare {
+    /// The URL that share-ingress routes to the session, `https://<host>`.
+    pub url: String,
+    /// The port of the local application that the link opens.
+    pub entry_port: u16,
+    pub phase: SessionSharePhase,
+}
+
+/// Where a share link is in its life. The operator creates the link when the session connects,
+/// and removes it when the session ends or the local application stops listening on the entry
+/// port.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub enum SessionSharePhase {
+    /// The link exists, but share-ingress doesn't route it yet, because no agent has confirmed
+    /// that it steals the entry port.
+    Pending,
+    /// share-ingress routes the link to the session.
+    Ready,
+    /// The operator removed the link. A link never comes back for the same session.
+    Ended,
+    /// A phase this client doesn't know, from a newer operator.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Resource used to access the operator's session management routes.

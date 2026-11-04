@@ -28,6 +28,7 @@ pub enum OperatorOperation {
     MysqlBranching,
     MongodbBranching,
     PreparingClientCertificate,
+    ReadShareLink,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -46,6 +47,7 @@ impl fmt::Display for OperatorOperation {
             Self::MysqlBranching => "MySQL branching",
             Self::MongodbBranching => "MongoDB branching",
             Self::PreparingClientCertificate => "preparing client certificate",
+            Self::ReadShareLink => "reading the share link",
         };
 
         f.write_str(as_str)

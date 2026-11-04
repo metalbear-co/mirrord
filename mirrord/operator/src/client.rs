@@ -82,7 +82,7 @@ use crate::{
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, NewOperatorFeature,
-        OPERATOR_STATUS_NAME, TargetCrd,
+        OPERATOR_STATUS_NAME, SessionCrd, SessionShare, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
             branch_database::{BranchDatabase, BranchDatabaseSpec, DatabaseDialect, DialectConfig},
@@ -194,6 +194,12 @@ pub struct OperatorSession {
     id: u64,
     /// URL where websocket connection request should be sent.
     connect_url: String,
+    /// The namespace of the session's target, which the operator files the session's
+    /// [`SessionCrd`] view under, so [`OperatorApi::session_share`] can read the view with the
+    /// namespaced route. `None` for sessions that can't be shared, such as copied targets and
+    /// multi-cluster sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    namespace: Option<String>,
     /// Base64-encoded connect query string, sent in the [`CONNECT_PARAMS_HEADER`] header.
     ///
     /// Set only when the operator advertises [`NewOperatorFeature::ConnectParamsInHeader`]. When
@@ -233,6 +239,7 @@ impl fmt::Debug for OperatorSession {
         debug_struct
             .field("id", &format!("{:X}", self.id))
             .field("connect_url", &self.connect_url)
+            .field("namespace", &self.namespace)
             .field(
                 "connect_params_in_header",
                 &self.connect_params_header.is_some(),
@@ -2365,6 +2372,7 @@ impl OperatorApi<PreparedClientCert> {
             let session = self.make_operator_session(
                 id,
                 connect_url,
+                None,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
             )?;
@@ -2430,6 +2438,7 @@ impl OperatorApi<PreparedClientCert> {
             let session = self.make_operator_session(
                 None,
                 connect_url,
+                Some(target.namespace().unwrap_or("default").to_owned()),
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
             )?;
@@ -2572,6 +2581,7 @@ impl OperatorApi<PreparedClientCert> {
         let session = self.make_operator_session(
             session_id,
             connect_url,
+            None,
             layer_config.traceparent.clone(),
             layer_config.baggage.clone(),
         )?;
@@ -2733,6 +2743,7 @@ impl OperatorApi<PreparedClientCert> {
             self.make_operator_session(
                 id,
                 connect_url,
+                None,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
             )
@@ -2755,6 +2766,7 @@ impl OperatorApi<PreparedClientCert> {
             self.make_operator_session(
                 None,
                 connect_url,
+                None,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
             )
@@ -3066,6 +3078,7 @@ impl OperatorApi<PreparedClientCert> {
         &self,
         id: Option<&str>,
         connect_url: String,
+        namespace: Option<String>,
         traceparent: Option<String>,
         baggage: Option<String>,
     ) -> OperatorApiResult<OperatorSession> {
@@ -3100,6 +3113,7 @@ impl OperatorApi<PreparedClientCert> {
         Ok(OperatorSession {
             id,
             connect_url,
+            namespace,
             connect_params_header,
             client_cert: self.client_cert.cert.clone(),
             operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
@@ -3531,21 +3545,7 @@ impl OperatorApi<PreparedClientCert> {
                 .map(|fingerprint| SanitizedString::from_base64(fingerprint)),
         });
 
-        let (mut config, _) = Self::base_client_config(layer_config).await?;
-        let cert_header = Self::make_client_cert_header(&session.client_cert)?;
-        config
-            .headers
-            .push((HeaderName::from_static(CLIENT_CERT_HEADER), cert_header));
-
-        let client = ClientBuilder::try_from(config)
-            .map_err(KubeApiError::from)
-            .map_err(OperatorApiError::CreateKubeClient)?
-            .with_layer(&BufferLayer::new(1024))
-            .with_layer(&RetryLayer::new(retry_policy_from_config(
-                &layer_config.startup_retry,
-            )?))
-            .build();
-
+        let client = Self::session_client(layer_config, &session).await?;
         let conn = Self::connect_target(&client, &session).await?;
 
         Ok(OperatorSessionConnection {
@@ -3553,6 +3553,56 @@ impl OperatorApi<PreparedClientCert> {
             session,
             target_container_ports: Vec::new(),
         })
+    }
+
+    /// Reads the share link of a session started with `share`, as the operator serves it to the
+    /// session's owner.
+    ///
+    /// `None` when the operator serves no link for the session, which includes a session it no
+    /// longer serves at all. Kubernetes answers 403 before the request reaches the operator when
+    /// the user's roles don't allow `get` on `sessions`.
+    #[tracing::instrument(level = Level::TRACE, skip_all, fields(session_id = session.id), err)]
+    pub async fn session_share(
+        layer_config: &LayerConfig,
+        session: &OperatorSession,
+    ) -> OperatorApiResult<Option<SessionShare>> {
+        let client = Self::session_client(layer_config, session).await?;
+        let api = match &session.namespace {
+            Some(namespace) => Api::<SessionCrd>::namespaced(client, namespace),
+            None => Api::<SessionCrd>::all(client),
+        };
+
+        match api.get(&session.id.to_string()).await {
+            Ok(view) => Ok(view.spec.session.share),
+            Err(kube::Error::Api(status)) if status.code == 404 => Ok(None),
+            Err(error) => Err(OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::ReadShareLink,
+            }),
+        }
+    }
+
+    /// Builds a client that authenticates with the session's certificate, for a process that
+    /// holds only the [`OperatorSession`] and not the [`OperatorApi`] that prepared it, such as
+    /// the intproxy.
+    async fn session_client(
+        layer_config: &LayerConfig,
+        session: &OperatorSession,
+    ) -> OperatorApiResult<Client> {
+        let (mut config, _) = Self::base_client_config(layer_config).await?;
+        let cert_header = Self::make_client_cert_header(&session.client_cert)?;
+        config
+            .headers
+            .push((HeaderName::from_static(CLIENT_CERT_HEADER), cert_header));
+
+        Ok(ClientBuilder::try_from(config)
+            .map_err(KubeApiError::from)
+            .map_err(OperatorApiError::CreateKubeClient)?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(retry_policy_from_config(
+                &layer_config.startup_retry,
+            )?))
+            .build())
     }
 
     /// Makes a websocket connection to the target of the given [`OperatorSession`], reusing this

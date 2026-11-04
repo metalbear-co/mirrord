@@ -1,4 +1,8 @@
 //! What a session started with `share` asks the operator for when it connects.
+//!
+//! The operator creates the share link during that connect, and serves the link back to the
+//! session's owner in the `share` field of the session's `sessions` view (`Session::share` in the
+//! `crd` module), which is where the intproxy learns the URL and when the link is ready.
 
 #[cfg(feature = "client")]
 use std::ops::Not;
