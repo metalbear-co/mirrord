@@ -1399,17 +1399,47 @@ pub(crate) fn branch_failed_error<K: ResourceExt>(
     }
 }
 
-/// The `mirrord db-branches destroy` invocation that removes a branch, for errors a user fixes
-/// by deleting it. Without a namespace the command falls back to the kubeconfig's, so the flag
-/// is only written when the branch came with one.
+/// The error for a migration run that failed on a branch the operator did not mark `Failed`.
+///
+/// A reused branch stays `Ready` when a new migration set conflicts with what is already applied:
+/// only this session aborts, and other sessions can keep using the branch. Changing the migrations
+/// starts a new run on the same branch, so that comes first. Deleting the branch is only offered
+/// as a reset, because it takes the data away from everyone sharing it.
+fn branch_migrations_failed_error(branch: &BranchDatabase, reason: &str) -> OperatorApiError {
+    let branch_failed = branch
+        .status
+        .as_ref()
+        .is_some_and(|status| status.phase == BranchDatabasePhase::Failed);
+    if branch_failed {
+        return branch_failed_error(OperatorOperation::DbBranching, branch, Some(reason));
+    }
+
+    let name = branch.name_any();
+    let destroy = destroy_branch_command(branch.namespace().as_deref(), &name);
+    OperatorApiError::BranchCreationFailed {
+        operation: OperatorOperation::DbBranching,
+        message: format!(
+            "migrations did not apply on branch database `{name}`: {reason}. The branch itself \
+             is still usable, so fix the migrations and start the session again. To reset it \
+             instead, run `{destroy}`, which deletes the branch for everyone sharing it."
+        ),
+    }
+}
+
+/// The sentence telling a user to delete a branch that blocks their next session.
 pub(crate) fn destroy_branch_hint(namespace: Option<&str>, name: &str) -> String {
+    let destroy = destroy_branch_command(namespace, name);
+    format!("Delete it with `{destroy}` and start the session again.")
+}
+
+/// The `mirrord db-branches destroy` invocation that removes a branch. Without a namespace the
+/// command falls back to the kubeconfig's, so the flag is only written when the branch came with
+/// one.
+fn destroy_branch_command(namespace: Option<&str>, name: &str) -> String {
     let namespace_flag = namespace
         .map(|namespace| format!("-n {namespace} "))
         .unwrap_or_default();
-    format!(
-        "Delete it with `mirrord db-branches {namespace_flag}destroy {name}` and start the \
-         session again."
-    )
+    format!("mirrord db-branches {namespace_flag}destroy {name}")
 }
 
 /// Wait for pending branch databases to become Ready or Failed.
@@ -1947,10 +1977,9 @@ pub async fn ensure_branch_migrations<P: Progress>(
             .and_then(|status| status.migrations.as_ref())
         && run.phase == MigrationPhase::Failed
     {
-        return Err(branch_failed_error(
-            OperatorOperation::DbBranching,
+        return Err(branch_migrations_failed_error(
             db,
-            Some(run.error.as_deref().unwrap_or("branch migrations failed")),
+            run.error.as_deref().unwrap_or("branch migrations failed"),
         ));
     }
 
@@ -2693,10 +2722,11 @@ mod test {
         BranchDatabase, BranchDatabaseId, ConfigConnectionSource, ConnectionParamsSpec,
         CrdConnectionSource, DatabaseBranchesConfig, MigrationsSpec, ObjectMeta, OperatorApiError,
         OperatorOperation, SOURCE_COMPATIBLE_CONDITION, UnifiedBranchParams,
-        UnifiedDatabaseBranchParams, branch_failed_error, build_migration_archive,
-        classify_existing_branches, convert_connection_source, create_branches,
-        extract_literal_values, read_migrations, replace_spec_values_with_secret_refs,
-        replace_values_with_secret_refs, resolve_branch_id, reused_branch_connection_sources,
+        UnifiedDatabaseBranchParams, branch_failed_error, branch_migrations_failed_error,
+        build_migration_archive, classify_existing_branches, convert_connection_source,
+        create_branches, extract_literal_values, read_migrations,
+        replace_spec_values_with_secret_refs, replace_values_with_secret_refs, resolve_branch_id,
+        reused_branch_connection_sources,
     };
     use crate::crd::{
         db_branching::{
@@ -2906,6 +2936,57 @@ mod test {
             message.contains(&format!("`mirrord db-branches -n staging destroy {name}`")),
             "{message}"
         );
+    }
+
+    /// A migration conflict on a reused branch fails only the joining session: the branch stays
+    /// `Ready` and other sessions may be using it. Leading with the delete command would send
+    /// the user to wipe a working branch over a mistake they can fix in their migrations, so the
+    /// error asks for that fix first and warns about who the delete affects.
+    #[test]
+    fn failed_migrations_on_ready_branch_suggest_fixing_before_destroying() {
+        let (name, mut branch) = found_branch("orders", Some(BranchDatabasePhase::Ready));
+        branch.metadata.namespace = Some("staging".to_owned());
+
+        let error =
+            branch_migrations_failed_error(&branch, "migrations failed:\nchecksum mismatch");
+
+        let OperatorApiError::BranchCreationFailed { message, .. } = error else {
+            panic!("expected BranchCreationFailed, got {error:?}");
+        };
+        assert!(message.contains("checksum mismatch"), "{message}");
+        assert!(
+            message.contains("fix the migrations and start the session again"),
+            "{message}"
+        );
+        assert!(
+            message.contains(&format!(
+                "`mirrord db-branches -n staging destroy {name}`, which deletes the branch for \
+                 everyone sharing it"
+            )),
+            "{message}"
+        );
+        assert!(!message.contains("Delete it with"), "{message}");
+    }
+
+    /// A branch whose own phase is `Failed` cannot serve a session anymore, so a failed migration
+    /// run on it gets the plain delete instruction and no claim that the branch still works.
+    #[test]
+    fn failed_migrations_on_failed_branch_say_to_destroy() {
+        let (name, mut branch) = found_branch("orders", Some(BranchDatabasePhase::Failed));
+        branch.metadata.namespace = Some("staging".to_owned());
+
+        let error = branch_migrations_failed_error(&branch, "migrations failed");
+
+        let OperatorApiError::BranchCreationFailed { message, .. } = error else {
+            panic!("expected BranchCreationFailed, got {error:?}");
+        };
+        assert!(
+            message.contains(&format!(
+                "Delete it with `mirrord db-branches -n staging destroy {name}`"
+            )),
+            "{message}"
+        );
+        assert!(!message.contains("still usable"), "{message}");
     }
 
     /// The lookup keeps the key the caller asked with, so the caller can subtract the result
