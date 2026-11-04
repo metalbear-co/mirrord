@@ -559,8 +559,8 @@ pub fn report_to_stderr(message: std::fmt::Arguments<'_>) {
 /// Only for the lines that a program reading mirrord's progress takes from stdout, where `Ready!`
 /// goes too. The line is written with one call, so it reaches a pipe whole.
 ///
-/// On unix this is [`ProgramStdout`](crate::program_stdout::ProgramStdout). On Windows it writes
-/// straight to the standard output handle, for the reasons at the top of this module.
+/// On unix this is [`ProgramStdout`]. On Windows it writes straight to the standard output
+/// handle, for the reasons at the top of this module.
 ///
 /// # Arguments
 ///
