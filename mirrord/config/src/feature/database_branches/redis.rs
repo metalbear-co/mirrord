@@ -39,6 +39,19 @@ Where the Redis instance should run.
                 .unwrap()
                 .insert("description".into(), DESCRIPTION.into());
 
+            // A missing `location` deserializes as `remote`, so only the remote variant may
+            // omit it. Keeping it required on the local variant stops a config without
+            // `location` from matching both variants, which fails the schema's `oneOf`.
+            let is_remote = variant
+                .get("properties")
+                .and_then(|properties| properties.get("location"))
+                .and_then(|location| location.get("const"))
+                .is_some_and(|value| value == "remote");
+
+            if !is_remote {
+                continue;
+            }
+
             let required = variant.get_mut("required").unwrap().as_array_mut().unwrap();
 
             required.retain(|field| field != "location");
