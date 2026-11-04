@@ -125,13 +125,13 @@ else:
             entry_port: 9000,
         }))
         .await;
-    let subscription = proxy.try_recv().await;
+    let subscription = timeout(Duration::from_secs(5), proxy.try_recv()).await;
     assert!(
         matches!(
             subscription,
-            Some(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
+            Ok(Some(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
                 StealType::FilteredHttpEx(9000, _)
-            )))
+            ))))
         ),
         "prints mode={mode} fork={fork} stage=subscription: actual={subscription:?}, stdout={:.8192}, stderr={:.8192}",
         process.get_stdout().await,
@@ -454,11 +454,13 @@ async fn local_share_blocked_stderr_does_not_block_failure() {
     let capacity = unsafe { libc::fcntl(stderr.as_raw_fd(), libc::F_GETPIPE_SZ) };
     assert!(capacity > 0);
     let mut proxy = TestIntProxy::new(listener, Some(config.path())).await;
-    let start = proxy.try_recv().await;
+    let start = timeout(Duration::from_secs(15), proxy.try_recv()).await;
     assert!(
         matches!(
             start,
-            Some(ClientMessage::LocalShare(LocalShareClientMessage::Start))
+            Ok(Some(ClientMessage::LocalShare(
+                LocalShareClientMessage::Start
+            )))
         ),
         "blocked mode=off fork=false stage=Start: actual={start:?}, stdout={:.8192}, stderr={:.8192}",
         {
@@ -472,11 +474,13 @@ async fn local_share_blocked_stderr_does_not_block_failure() {
             entry_port: port,
         }))
         .await;
-    let subscribe = proxy.try_recv().await;
+    let subscribe = timeout(Duration::from_secs(5), proxy.try_recv()).await;
     assert!(
         matches!(
             subscribe,
-            Some(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(_)))
+            Ok(Some(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
+                _
+            ))))
         ),
         "blocked mode=off fork=false stage=subscription: actual={subscribe:?}, stdout={:.8192}, stderr={:.8192}",
         {
@@ -584,11 +588,13 @@ async fn local_share_rejects_subscription_without_control() {
     );
     let mut process = app.get_test_process(env, Some(non_sharing.path())).await;
     let mut proxy = TestIntProxy::new(listener, Some(shared.path())).await;
-    let start = proxy.try_recv().await;
+    let start = timeout(Duration::from_secs(15), proxy.try_recv()).await;
     assert!(
         matches!(
             start,
-            Some(ClientMessage::LocalShare(LocalShareClientMessage::Start))
+            Ok(Some(ClientMessage::LocalShare(
+                LocalShareClientMessage::Start
+            )))
         ),
         "missing-control mode=default fork=false stage=Start: actual={start:?}, stdout={:.8192}, stderr={:.8192}",
         process.get_stdout().await,
@@ -676,11 +682,13 @@ async fn local_share_normal_application_exit_is_clean() {
     let (mut process, mut proxy) = app
         .start_process(vec![("TMPDIR", tmpdir)], Some(config.path()))
         .await;
-    let start = proxy.try_recv().await;
+    let start = timeout(Duration::from_secs(15), proxy.try_recv()).await;
     assert!(
         matches!(
             start,
-            Some(ClientMessage::LocalShare(LocalShareClientMessage::Start))
+            Ok(Some(ClientMessage::LocalShare(
+                LocalShareClientMessage::Start
+            )))
         ),
         "normal mode=default fork=false stage=Start: actual={start:?}, stdout={:.8192}, stderr={:.8192}",
         process.get_stdout().await,
@@ -691,11 +699,13 @@ async fn local_share_normal_application_exit_is_clean() {
             entry_port: port,
         }))
         .await;
-    let subscription = proxy.try_recv().await;
+    let subscription = timeout(Duration::from_secs(5), proxy.try_recv()).await;
     assert!(
         matches!(
             subscription,
-            Some(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(_)))
+            Ok(Some(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
+                _
+            ))))
         ),
         "normal mode=default fork=false stage=subscription: actual={subscription:?}, stdout={:.8192}, stderr={:.8192}",
         process.get_stdout().await,
