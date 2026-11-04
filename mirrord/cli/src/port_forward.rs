@@ -217,11 +217,6 @@ impl PortForwarder {
         message: DaemonMessage,
     ) -> Result<(), PortForwardError> {
         match message {
-            message @ DaemonMessage::LocalShare(_) => {
-                return Err(PortForwardError::AgentError(format!(
-                    "unexpected message from agent: {message:?}"
-                )));
-            }
             DaemonMessage::TcpOutgoing(message) => match message {
                 DaemonTcpOutgoing::Connect(..) => {
                     // Port forwarder does not use connect v1 variants.
@@ -718,8 +713,7 @@ impl ReversePortForwarder {
             DaemonMessage::Pong if self.waiting_for_pong => {
                 self.waiting_for_pong = false;
             }
-            message @ DaemonMessage::LocalShare(_)
-            | message @ DaemonMessage::UdpOutgoing(_)
+            message @ DaemonMessage::UdpOutgoing(_)
             | message @ DaemonMessage::TcpOutgoing(_)
             | message @ DaemonMessage::SeqpacketOutgoing(_)
             | message @ DaemonMessage::File(_)

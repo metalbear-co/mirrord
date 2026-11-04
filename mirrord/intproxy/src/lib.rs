@@ -1049,7 +1049,6 @@ impl IntProxy {
                     .await
             }
             message @ DaemonMessage::PauseTarget(_)
-            | message @ DaemonMessage::LocalShare(_)
             | message @ DaemonMessage::Vpn(_)
             | message @ DaemonMessage::ReverseDnsLookup(_) => {
                 Err(ProxyRuntimeError::UnexpectedAgentMessage(

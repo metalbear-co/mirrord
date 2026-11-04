@@ -1035,9 +1035,9 @@ pub enum NewOperatorFeature {
     /// run an empty image.
     PreviewCodeSync,
 
-    /// Supports `mirrord exec --share`: the operator registers a share link for the session and
-    /// keeps it while the session's connection lives and the session steals the port the link
-    /// opens.
+    /// Supports `mirrord exec --share`: the operator registers a share link for the session,
+    /// keeps it while the session's connections live and the session steals the port the link
+    /// opens, and serves it to the session's owner in [`Session::share`].
     LocalShare,
 
     /// This variant is what a client sees when the operator includes a feature the client is not

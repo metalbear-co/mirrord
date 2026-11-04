@@ -372,8 +372,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
                 handler(Ok(message))?;
                 Default::default()
             }
-            message @ (DaemonMessage::LocalShare(..)
-            | DaemonMessage::SwitchProtocolVersionResponse(..)
+            message @ (DaemonMessage::SwitchProtocolVersionResponse(..)
             | DaemonMessage::Vpn(..)
             | DaemonMessage::PauseTarget(..)
             | DaemonMessage::SeqpacketOutgoing(..)) => {
@@ -486,8 +485,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
                     .await?
                     .map_err(TaskError::io)?;
                 }
-                message @ (DaemonMessage::LocalShare(_)
-                | DaemonMessage::Tcp(_)
+                message @ (DaemonMessage::Tcp(_)
                 | DaemonMessage::TcpSteal(_)
                 | DaemonMessage::TcpOutgoing(_)
                 | DaemonMessage::UdpOutgoing(_)

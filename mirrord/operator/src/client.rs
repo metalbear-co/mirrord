@@ -55,7 +55,6 @@ use mirrord_kube::{
 };
 use mirrord_operator_websocket::{connection::OperatorConnection, upgrade};
 use mirrord_progress::Progress;
-use mirrord_protocol::local_share::LOCAL_SHARE_VERSION;
 use preview_sync::PreviewSyncConnection;
 use semver::Version;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -1899,8 +1898,8 @@ where
     }
 
     /// Refuses `share` when the operator can't serve a share link, with an upgrade error instead of
-    /// a session whose `LocalShare` messages the operator can't decode. Multi-cluster sessions run
-    /// it against the primary, which refuses a shared session itself once it supports share links.
+    /// a session whose share link nothing creates. Multi-cluster sessions run it against the
+    /// primary, which refuses a shared session itself once it supports share links.
     fn check_share_support(&self, layer_config: &LayerConfig) -> OperatorApiResult<()> {
         if layer_config.share.not() {
             return Ok(());
@@ -1909,21 +1908,6 @@ where
         self.operator
             .spec
             .require_feature(NewOperatorFeature::LocalShare)?;
-        if self
-            .operator
-            .spec
-            .protocol_version
-            .as_ref()
-            .and_then(|version| version.parse::<semver::Version>().ok())
-            .is_none_or(|version| LOCAL_SHARE_VERSION.matches(&version).not())
-        {
-            // The requirement is a single `>=` comparator, so what follows it is the oldest
-            // version that works.
-            return Err(OperatorApiError::LocalShare(format!(
-                "Share links need an operator with protocol version {} or newer. Upgrade the operator.",
-                LOCAL_SHARE_VERSION.to_string().trim_start_matches(">=")
-            )));
-        }
 
         Ok(())
     }

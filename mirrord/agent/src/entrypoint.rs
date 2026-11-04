@@ -750,13 +750,6 @@ impl ClientConnectionHandler {
                 self.respond(DaemonMessage::Close("VPN is not supported".into()))
                     .await?;
             }
-            ClientMessage::LocalShare(_) => {
-                self.respond(DaemonMessage::Close(
-                    "The mirrord agent doesn't handle share link messages; they're for the operator.".to_owned(),
-                ))
-                .await?;
-                return Ok(false);
-            }
             ClientMessage::ShareLink(update) => {
                 self.share_links.update(update);
             }

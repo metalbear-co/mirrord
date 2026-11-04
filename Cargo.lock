@@ -5768,7 +5768,6 @@ dependencies = [
  "mirrord-macros",
  "mirrord-operator-websocket",
  "mirrord-progress",
- "mirrord-protocol",
  "rand 0.10.2",
  "rstest",
  "schemars 1.2.2",
@@ -5825,7 +5824,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.31.0"
+version = "1.30.0"
 dependencies = [
  "actix-codec",
  "bincode",
