@@ -926,6 +926,11 @@ pub enum NewOperatorFeature {
     /// whether a primary streams the whole setup or just its own cluster.
     MultiClusterSubscribe,
 
+    /// This primary is management-only: it links the workload clusters but runs none itself, so a
+    /// session forced onto it (`multi_cluster: false`, a label target) has nothing to run against.
+    /// Lets the CLI refuse such a session with the cause instead of failing on target resolution.
+    MultiClusterManagementOnly,
+
     ServerlessSessionsManager,
 
     /// Reporting is available on Free so locally rejected demand can be observed without granting
@@ -1065,6 +1070,7 @@ impl NewOperatorFeature {
             Self::MultiClusterPrimary
             | Self::MultiClusterRemote
             | Self::MultiClusterSubscribe
+            | Self::MultiClusterManagementOnly
             | Self::MultiClusterQueueSplitRole => Some("multi_cluster"),
             Self::ProxyApi
             | Self::SessionManagement
@@ -1169,6 +1175,9 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
             NewOperatorFeature::MultiClusterSubscribe => "multi-cluster subscribe",
+            NewOperatorFeature::MultiClusterManagementOnly => {
+                "multi-cluster management-only primary"
+            }
             NewOperatorFeature::QueueSplittingWithComposedFilters => {
                 "queue splitting with composable message filters"
             }
@@ -1291,6 +1300,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::MultiClusterPrimary
             | NewOperatorFeature::MultiClusterSubscribe
             | NewOperatorFeature::MultiClusterQueueSplitRole
+            | NewOperatorFeature::MultiClusterManagementOnly
             | NewOperatorFeature::UnifiedBranchDbCrd
             | NewOperatorFeature::ConnectParamsInHeader
             | NewOperatorFeature::CopyTargetFilterIsolation
