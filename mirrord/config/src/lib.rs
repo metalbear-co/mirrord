@@ -1548,7 +1548,14 @@ impl LayerConfig {
     ///
     /// This is used to notify the user about settings that don't make sense in the context of
     /// preview environments, since it's already running in the cluster.
-    pub fn verify_for_preview_env(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+    ///
+    /// Clears `share`, so a config file written for `mirrord exec --share` also starts a preview:
+    /// a preview gets its link from its `PreviewSession`, and the checks and operator features
+    /// of a shared `mirrord exec` session don't apply to it.
+    pub fn verify_for_preview_env(
+        &mut self,
+        context: &mut ConfigContext,
+    ) -> Result<(), ConfigError> {
         let ignored = |field: &str| {
             format!("`{field}` is ignored in preview environments and will not be used.")
         };
@@ -1631,6 +1638,13 @@ impl LayerConfig {
 
         if self.feature.hostname != default.feature.hostname {
             context.add_warning(ignored("feature.hostname"));
+        }
+
+        // share - unsupported
+
+        if self.share {
+            context.add_warning(ignored("share"));
+            self.share = false;
         }
 
         // cronjob targets - the preview is a CronJob, not a long-running pod, so nothing can
@@ -3114,7 +3128,7 @@ mod tests {
         );
 
         let mut context = ConfigContext::default();
-        let resolved = config
+        let mut resolved = config
             .generate_config(&mut context)
             .expect("config generation should succeed before verification");
 
