@@ -922,12 +922,12 @@ pub(crate) enum CliError {
         error: notify::Error,
     },
 
-    #[error("The install command failed in the preview pod")]
+    #[error("The `sync.prepare` command failed in the preview pod")]
     #[diagnostic(help(
-        "The end of its output is above. Fix the install command, or the files that it installs \
-        from, and run `mirrord preview sync` again.{GENERAL_HELP}"
+        "The end of its output is above. Fix `sync.prepare.command`, or the files that it reads, \
+        and run `mirrord preview sync` again.{GENERAL_HELP}"
     ))]
-    PreviewSyncInstallFailed,
+    PreviewSyncPrepareFailed,
 
     #[error("{}", mirrord_operator::sync::UnpairReason::Replaced)]
     #[diagnostic(help(
@@ -980,25 +980,8 @@ pub(crate) enum CliError {
     ))]
     PreviewSyncOnWindows,
 
-    #[error("A preview environment with `sync` can't run a `run.command` of `run.type: container`")]
-    #[diagnostic(help(
-        "`run.type: container` runs `run.command` locally with `mirrord container`, but a preview \
-        with `sync` runs its command in the target's container in the preview pod. Set \
-        `sync.run.command` to the command that runs the app in that container.{GENERAL_HELP}"
-    ))]
-    PreviewSyncContainerRun,
-
-    #[error("A preview environment with `sync` doesn't run `run.pre_command`")]
-    #[diagnostic(help(
-        "`run.pre_command` runs on your machine before the local process starts, and a preview \
-        with `sync` starts no local process. Set `sync.run.command`, which the preview runs \
-        instead of `run.command` and without `run.pre_command`, or remove \
-        `run.pre_command`.{GENERAL_HELP}"
-    ))]
-    PreviewSyncPreCommand,
-
     #[error(
-        "The `sync.install.on_change` glob `{}` doesn't lie under the `local` of a `sync.files` \
+        "The `sync.prepare.triggered_by` glob `{}` doesn't lie under the `local` of a `sync.files` \
          entry",
         .0.display()
     )]
@@ -1008,7 +991,7 @@ pub(crate) enum CliError {
         `sync.files[].local` is, and each must start with the `local` of an entry spelled out, with \
         wildcards only below it.{GENERAL_HELP}"
     ))]
-    PreviewSyncOnChangeOutsideLocal(PathBuf),
+    PreviewSyncTriggeredByOutsideLocal(PathBuf),
 
     #[error("The settings of the service's preview with `sync` are invalid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]

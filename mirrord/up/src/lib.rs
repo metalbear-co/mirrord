@@ -19,11 +19,11 @@ use std::{
 
 pub use config::{
     BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, DbBranching,
-    IncompatibleTarget, InstallConfig, ModeConfig, PreviewImageError, PreviewImageSource,
+    IncompatibleTarget, ModeConfig, PrepareConfig, PreviewImageError, PreviewImageSource,
     PreviewImages, PreviewRun, QueueSplitMode, RequestOrigin, RunConfig, RunType,
     SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SkipReason,
-    SubprocessCfg, SyncConfig, SyncEntry, SyncRunConfig, TargetValidationError, UnknownMode,
-    UpConfig, WindowsSupportError, preview_image_env,
+    SubprocessCfg, SyncConfig, SyncEntry, SyncRestart, SyncRunConfig, TargetValidationError,
+    UnknownMode, UpConfig, WindowsSupportError, preview_image_env,
 };
 use config::{
     ResolvedTarget, SessionKind, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets,
@@ -426,7 +426,7 @@ fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
 
 /// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up`, `mirrord
 /// preview sync` and `mirrord preview down`, and resolve the local directories of each service's
-/// `sync.files` and the globs of its `sync.install.on_change` against the directory of the
+/// `sync.files` and the globs of its `sync.prepare.triggered_by` against the directory of the
 /// file.
 ///
 /// Unlike [`load_up_config`], it doesn't check that the local paths exist. The `preview`
@@ -448,9 +448,9 @@ pub fn load_preview_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpE
         }
 
         for glob in sync
-            .install
+            .prepare
             .iter_mut()
-            .flat_map(|install| &mut install.on_change)
+            .flat_map(|prepare| &mut prepare.triggered_by)
         {
             *glob = config_directory.join(&*glob);
         }
@@ -1293,7 +1293,7 @@ services:
         let config_path = directory.path().join("mirrord-up.yaml");
         std::fs::write(
             &config_path,
-            "services:\n  web:\n    run:\n      command: [x]\n    sync:\n      files:\n        - local: missing\n          remote: /app\n      install:\n        command: [npm, ci]\n        on_change: [missing/package-lock.json]\n",
+            "services:\n  web:\n    run:\n      command: [x]\n    sync:\n      files:\n        - local: missing\n          remote: /app\n      prepare:\n        command: [npm, ci]\n        triggered_by: [missing/package-lock.json]\n      run:\n        command: [npm, start]\n",
         )
         .unwrap();
 
@@ -1306,7 +1306,7 @@ services:
         let sync = config.services["web"].sync.as_ref().unwrap();
         assert_eq!(sync.files[0].local, config_directory.join("missing"));
         assert_eq!(
-            sync.install.as_ref().unwrap().on_change,
+            sync.prepare.as_ref().unwrap().triggered_by,
             [config_directory.join("missing/package-lock.json")]
         );
     }

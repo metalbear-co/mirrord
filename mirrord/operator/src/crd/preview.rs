@@ -35,7 +35,8 @@ use crate::crd::queue_filter::{MessageFilter, QueueType, message_filter_crd_sche
 pub mod sync_config;
 pub mod view;
 pub use sync_config::{
-    PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncInstall,
+    PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncPrepare,
+    PreviewSyncRestart, PreviewSyncRun,
 };
 use uuid::Uuid;
 
@@ -543,13 +544,14 @@ pub struct PreviewSyncStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_synced_at: Option<MicroTime>,
 
-    /// The last run of `install.command` in the preview pod, while a sidecar that relays the
+    /// The last run of `prepare.command` in the preview pod, while a sidecar that relays the
     /// supervisor's report is connected.
     #[serde(default)]
-    pub install: Option<InstallReport>,
+    pub prepare: Option<InstallReport>,
 
     /// The app, the process of `run.command` in the preview pod, while a sidecar that relays the
-    /// supervisor's report is connected.
+    /// supervisor's report is connected. `None` without `run`, because the container then runs
+    /// its own command and no supervisor reports on it.
     #[serde(default)]
     pub app: Option<AppReport>,
 }
@@ -894,13 +896,13 @@ mod tests {
     use crate::crd::session::KubeResourceTarget;
 
     /// The operator writes the status with a merge patch, which keeps a field that the patch
-    /// leaves out, so a sync status without the supervisor's report writes `install` and `app` as
+    /// leaves out, so a sync status without the supervisor's report writes `prepare` and `app` as
     /// `null`, which clears the ones that the status holds.
     #[test]
     fn a_sync_status_without_a_report_clears_the_stored_one() {
         let status = serde_json::to_value(PreviewSyncStatus::default()).unwrap();
 
-        assert_eq!(status.get("install"), Some(&serde_json::Value::Null));
+        assert_eq!(status.get("prepare"), Some(&serde_json::Value::Null));
         assert_eq!(status.get("app"), Some(&serde_json::Value::Null));
     }
 

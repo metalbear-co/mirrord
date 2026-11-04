@@ -14,7 +14,8 @@ use mirrord_operator::{
         preview_sync::PreviewSyncConnection,
     },
     crd::preview::{
-        PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncInstall,
+        PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncPrepare,
+        PreviewSyncRestart, PreviewSyncRun,
     },
     sync::{
         AppReport, AppState, InstallReport, InstallState, ManifestPath, PushMode, RejectReason,
@@ -23,8 +24,8 @@ use mirrord_operator::{
 };
 use mirrord_progress::ProgressTracker;
 use mirrord_up::{
-    InstallConfig, RequestOrigin, RunConfig, RunType, ServiceMode, SubprocessCfg, SyncConfig,
-    SyncEntry, SyncRunConfig,
+    PrepareConfig, RequestOrigin, RunConfig, RunType, ServiceMode, SubprocessCfg, SyncConfig,
+    SyncEntry, SyncRestart, SyncRunConfig,
 };
 use tokio::{io::DuplexStream, sync::mpsc, task::JoinHandle};
 use tokio_tungstenite::{
@@ -233,10 +234,23 @@ fn unpack(archive: &[u8]) -> Pushed {
         .collect()
 }
 
-/// A sync driver of `entries`, started, whose every connection reaches the test as an
-/// [`Operator`] on the returned channel.
+/// A sync driver of `entries`, for a pod whose app a supervisor runs, started, whose every
+/// connection reaches the test as an [`Operator`] on the returned channel.
 fn start(
     entries: Vec<SyncEntry>,
+    watch: bool,
+) -> (
+    JoinHandle<CliError>,
+    mpsc::UnboundedReceiver<Operator>,
+    tokio::sync::watch::Receiver<SyncActivity>,
+) {
+    start_with(entries, true, watch)
+}
+
+/// [`start`], for a pod whose app a supervisor runs only when `supervised` is set.
+fn start_with(
+    entries: Vec<SyncEntry>,
+    supervised: bool,
     watch: bool,
 ) -> (
     JoinHandle<CliError>,
@@ -260,8 +274,14 @@ fn start(
         })
     });
 
-    let (driver, activity) =
-        SyncDriver::with_connect(connect, entries.into(), watch, ProgressTracker::null()).unwrap();
+    let (driver, activity) = SyncDriver::with_connect(
+        connect,
+        entries.into(),
+        supervised,
+        watch,
+        ProgressTracker::null(),
+    )
+    .unwrap();
     (tokio::spawn(driver.run()), operators_rx, activity)
 }
 
@@ -741,7 +761,32 @@ async fn the_activity_reports_busy_work_and_counts_progress() {
     let installed = next(&mut activity).await;
     assert!(installed.busy.not());
     assert_eq!(installed.handled, Some(1));
-    assert!(installed.install_failed.not());
+    assert!(installed.prepare_failed.not());
+
+    sync.abort();
+}
+
+/// Without `run`, the preview pod runs its container's own command, and no supervisor reports
+/// which push it handled. `mirrord preview sync` returns only once a push counts as handled, so
+/// the push counts as handled as soon as the volume holds it.
+#[tokio::test]
+async fn a_push_into_a_pod_without_a_supervisor_counts_as_handled_once_applied() {
+    let local = tempfile::tempdir().unwrap();
+    write(local.path(), "index.html", "v1");
+
+    let (sync, mut operators, mut activity) = start_with(vec![entry(local.path())], false, false);
+    let mut operator = next_connection(&mut operators).await;
+    operator.pair_and_apply(1).await;
+
+    let applied = *tokio::time::timeout(
+        FRAME_TIMEOUT,
+        activity.wait_for(|activity| activity.first_push.is_some()),
+    )
+    .await
+    .expect("the push wasn't applied in time")
+    .unwrap();
+    assert_eq!(applied.first_push, Some(1));
+    assert_eq!(applied.handled, Some(1));
 
     sync.abort();
 }
@@ -1101,15 +1146,15 @@ async fn a_change_under_two_local_directories_reaches_both_remotes() {
 }
 
 /// A service of a `mirrord-up.yaml` in `/repo` with the given `sync` entries, as
-/// `(local, remote)`, and `install`.
-fn service(entries: &[(&str, &str)], install: Option<InstallConfig>) -> SubprocessCfg {
+/// `(local, remote)`, and `prepare`. The preview runs `npm run dev` in `/app`.
+fn service(entries: &[(&str, &str)], prepare: Option<PrepareConfig>) -> SubprocessCfg {
     SubprocessCfg {
         config: LayerConfig::resolve(&mut ConfigContext::default()).unwrap(),
         service_name: Arc::from("frontend"),
         run: RunConfig {
             r#type: RunType::Exec,
             directory: None,
-            command: vec!["npm".to_owned(), "run".to_owned(), "dev".to_owned()],
+            command: vec!["npm".to_owned(), "start".to_owned()],
             pre_command: Vec::new(),
         },
         sync: Some(SyncConfig {
@@ -1121,12 +1166,12 @@ fn service(entries: &[(&str, &str)], install: Option<InstallConfig>) -> Subproce
                     ignore: Vec::new(),
                 })
                 .collect(),
-            run: SyncRunConfig {
-                command: None,
+            prepare,
+            run: Some(SyncRunConfig {
+                command: vec!["npm".to_owned(), "run".to_owned(), "dev".to_owned()],
                 directory: Some("/app".to_owned()),
-            },
-            install,
-            restart_on_change: false,
+                restart: SyncRestart::OnSync,
+            }),
         }),
         mode: ServiceMode::default().into(),
         incoming: ServiceMode::default(),
@@ -1135,16 +1180,17 @@ fn service(entries: &[(&str, &str)], install: Option<InstallConfig>) -> Subproce
     }
 }
 
-/// `install.on_change` globs are local paths, which `mirrord preview sync` resolved against the
-/// directory of `mirrord-up.yaml`, but the preview pod matches them against its own files, so
-/// each must become the same glob under the `remote` that holds the files. The app runs
-/// `run.command` unless `sync.run.command` replaces it.
+/// `prepare.triggered_by` globs are local paths, which `mirrord preview sync` resolved against
+/// the directory of `mirrord-up.yaml`, but the preview pod matches them against its own files, so
+/// each must become the same glob under the `remote` that holds the files. Without `sync.run`,
+/// the preview keeps its image's command rather than taking `run.command`, which runs the service
+/// on the developer's machine.
 #[test]
-fn on_change_globs_match_the_pushed_files_in_the_container() {
-    let install = InstallConfig {
+fn triggered_by_globs_match_the_synced_files_in_the_container() {
+    let prepare = PrepareConfig {
         command: vec!["npm".to_owned(), "ci".to_owned()],
         directory: Some("/app/packages".to_owned()),
-        on_change: vec![
+        triggered_by: vec![
             "/repo/frontend/package-lock.json".into(),
             "/repo/backend/../frontend/./packages/ui/**/*.json".into(),
             "/repo/frontend/**/requirements*.txt".into(),
@@ -1153,7 +1199,7 @@ fn on_change_globs_match_the_pushed_files_in_the_container() {
     };
     let frontend = service(
         &[("frontend", "/app"), ("frontend/packages/ui", "/ui")],
-        Some(install),
+        Some(prepare),
     );
 
     let sync = ServiceSync::of_service(&frontend).unwrap().unwrap();
@@ -1170,11 +1216,14 @@ fn on_change_globs_match_the_pushed_files_in_the_container() {
                     remote: "/ui".to_owned()
                 },
             ],
-            run_command: frontend.run.command.clone(),
-            working_dir: Some("/app".to_owned()),
-            install: Some(PreviewSyncInstall {
+            run: Some(PreviewSyncRun {
+                command: vec!["npm".to_owned(), "run".to_owned(), "dev".to_owned()],
+                working_dir: Some("/app".to_owned()),
+                restart: PreviewSyncRestart::OnSync,
+            }),
+            prepare: Some(PreviewSyncPrepare {
                 command: vec!["npm".to_owned(), "ci".to_owned()],
-                on_change: vec![
+                triggered_by: vec![
                     "/app/package-lock.json".to_owned(),
                     "/ui/**/*.json".to_owned(),
                     "/app/**/requirements*.txt".to_owned(),
@@ -1182,31 +1231,28 @@ fn on_change_globs_match_the_pushed_files_in_the_container() {
                 persist: vec!["/usr/local/lib/node".to_owned()],
                 working_dir: Some("/app/packages".to_owned()),
             }),
-            restart_on_change: false,
         }
     );
 
-    let mut own_command = frontend;
-    let dev_server = vec!["npx".to_owned(), "next".to_owned(), "dev".to_owned()];
-    own_command.sync.as_mut().unwrap().run.command = Some(dev_server.clone());
-    let sync = ServiceSync::of_service(&own_command).unwrap().unwrap();
-    assert_eq!(sync.config.run_command, dev_server);
+    let mut image_command = service(&[("frontend", "/app")], None);
+    image_command.sync.as_mut().unwrap().run = None;
+    let sync = ServiceSync::of_service(&image_command).unwrap().unwrap();
+    assert_eq!(sync.config.run, None);
 }
 
-/// The preview pod only has the pushed files, runs its command itself and has no local process,
-/// and one pod gets one push, so a glob outside every `local`, a `run.command` that runs as a
-/// container or after a `pre_command` when the preview has no command of its own, settings that
-/// the pod can't mount, an idle start, more than one replica and a CronJob target must fail
-/// before anything changes in the cluster.
+/// The preview pod only has the synced files, runs `prepare` only under the supervisor that `run`
+/// starts, and the CLI syncs into one running pod, so a glob outside every `local`, a `prepare`
+/// without `run`, settings that the pod can't mount, an idle start, more than one replica and a
+/// CronJob target must fail before anything changes in the cluster.
 #[test]
 fn settings_that_a_sync_preview_cannot_run_are_refused() {
     let with_glob = |glob: &str| {
         service(
             &[("frontend", "/app")],
-            Some(InstallConfig {
+            Some(PrepareConfig {
                 command: vec!["npm".to_owned(), "ci".to_owned()],
                 directory: None,
-                on_change: vec![glob.into()],
+                triggered_by: vec![glob.into()],
                 persist: Vec::new(),
             }),
         )
@@ -1220,33 +1266,20 @@ fn settings_that_a_sync_preview_cannot_run_are_refused() {
         assert!(
             matches!(
                 ServiceSync::of_service(&with_glob(glob)),
-                Err(CliError::PreviewSyncOnChangeOutsideLocal(refused)) if refused == Path::new(glob)
+                Err(CliError::PreviewSyncTriggeredByOutsideLocal(refused)) if refused == Path::new(glob)
             ),
             "{glob}"
         );
     }
 
-    let mut container = service(&[("frontend", "/app")], None);
-    container.run.r#type = RunType::Container;
+    let mut prepare_without_run = with_glob("/repo/frontend/package-lock.json");
+    prepare_without_run.sync.as_mut().unwrap().run = None;
     assert!(matches!(
-        ServiceSync::of_service(&container),
-        Err(CliError::PreviewSyncContainerRun)
+        ServiceSync::of_service(&prepare_without_run),
+        Err(CliError::PreviewSyncConfigInvalid(
+            PreviewSyncConfigError::PrepareWithoutRun
+        ))
     ));
-
-    let mut pre_command = service(&[("frontend", "/app")], None);
-    pre_command.run.pre_command = vec!["npm".to_owned(), "run".to_owned(), "build".to_owned()];
-    assert!(matches!(
-        ServiceSync::of_service(&pre_command),
-        Err(CliError::PreviewSyncPreCommand)
-    ));
-
-    // A preview with a command of its own runs neither `run.command` nor `run.pre_command`, so
-    // they can serve `mirrord up` as they like.
-    for mut own_command in [container, pre_command] {
-        own_command.sync.as_mut().unwrap().run.command =
-            Some(vec!["npm".to_owned(), "run".to_owned(), "dev".to_owned()]);
-        assert!(ServiceSync::of_service(&own_command).is_ok());
-    }
 
     let mut start_idle = service(&[("frontend", "/app")], None);
     start_idle.config.feature.preview.idle.start_idle = true;
