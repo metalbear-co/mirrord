@@ -8,6 +8,143 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.284.0](https://github.com/metalbear-co/mirrord/tree/3.284.0) - 2026-11-02
+
+
+### Added
+
+- Added `db_branching` to `mirrord-up.yaml` modes: `empty`, `schema` or `all`
+  requests every `MirrordSplitConfig` DB branch with that copy mode, `inherit`
+  with each entry's own, `off` none. An entry named `split`, `replace` or
+  `mirror` may set it for that built-in mode. A mode without it branches like
+  the built-in mode its `incoming` names, and a mode without `queues` splits
+  them like its `incoming`: mirrored with `incoming: mirror`, stolen otherwise.
+  In `mirrord.json`, `feature.db_branches` takes `{ "entries": "*", "copy": {
+  "mode": "schema" } }` to request a copy mode. `mirrord up` fails before
+  starting any service when a mode's `db_branching` or `queues` line can't be
+  served: no usable operator (saying why), no DB branch definitions, an entry's
+  database engine turned off in the operator, a copy mode outside an entry's
+  `allowedModes`, or an operator that splits no queues. It also fails up front
+  when services sharing a DB branch ask for different copy modes.
+- Added custom modes to `mirrord-up.yaml`: a `modes` entry sets `incoming` and
+  `queues`, and is selected by name with `default_mode` or `mirrord up --mode`.
+
+
+### Changed
+
+- On Linux, `experimental.hook_libc_syscall` and
+  `experimental.old_glibc_support` are now enabled by default for OSS users.
+
+
+### Fixed
+
+- Fixed the layer losing its internal proxy connection when an application
+  reuses low fd numbers, such as the s6-overlay `/init` script.
+
+## [3.283.0](https://github.com/metalbear-co/mirrord/tree/3.283.0) - 2026-11-01
+
+
+### Added
+
+- Added `mirrord preview sync`, which previews each service with `sync` in
+  `mirrord-up.yaml` with your local code instead of a built image: the CLI
+  pushes the `sync.files` directories into the preview pod, `sync.install`
+  installs the dependencies again when they change, and `--watch` keeps pushing
+  your edits. A service runs its image from `--image` or
+  `MIRRORD_<SERVICE>_IMAGE`, or the target's own image without one. `mirrord
+  preview status` shows the sync of each session.
+
+
+### Changed
+
+- Update the bundled apple-utils to `v10`.
+
+## [3.282.0](https://github.com/metalbear-co/mirrord/tree/3.282.0) - 2026-10-30
+
+
+### Added
+
+- Experimental: `mirrord up --debug <service>` holds that service's program
+  before its own code runs, until an IDE attaches its debugger and releases it.
+  It's hidden from help on every platform, and may still change.
+- New `mirrord up list` prints every service in an up file as `mirrord up`
+  would run it: its target, mode, command and folder, without touching the
+  cluster. `--format json` prints the same for scripts and IDE extensions.
+
+
+### Changed
+
+- `mirrord up` shows in `mirrord --help` and shell completions on Windows.
+
+
+### Fixed
+
+- Calls that describe a folder above the working directory, such as `stat` and
+  `access`, now stay local by default on Linux and macOS, so resolving a local
+  path no longer fails when the target doesn't have those folders.
+- Honor workload selector expressions when selecting target pods, including
+  workloads with expression-only selectors.
+- mirrord no longer waits for many minutes, printing nothing, when the cluster
+  answers 503 for the mirrord operator. `startup_retry` alone now decides how
+  often those requests are retried.
+
+## [3.281.0](https://github.com/metalbear-co/mirrord/tree/3.281.0) - 2026-10-28
+
+
+### Added
+
+- Paid-feature errors identify the configuration key and required plan, with
+  billing guidance for cluster administrators.
+  Local paid-feature refusals are reported to operators that support
+  license-gate reporting.
+
+
+### Changed
+
+- Added sanitization to the `JDK_JAVA_OPTIONS` environment variable by removing
+  `javaagent` options.
+  This fixes some cases of injected variables pointing to non-existent files
+  and causing errors.
+  Malformed values (those with unmatched quotes) are left unchanged.
+  Set `feature.magic.java_agents` to `false` to keep the remote value
+  unchanged.
+
+
+### Fixed
+
+- Added `agent.http2_max_header_list_size` to configure the agent's HTTP/2
+  header size limit.
+- Fix the permissions of the local placeholder file created for remote files
+  when `experimental.use_dev_null` is `false`.
+- `mirrord up` no longer stops showing a service's output, and reports the
+  service as crashed, when the service prints text that isn't UTF-8, such as a
+  Windows console code page's `£`.
+- `mirrord up` now returns a helpful error when trying to use a label selector
+  target.
+
+## [3.280.0](https://github.com/metalbear-co/mirrord/tree/3.280.0) - 2026-10-27
+
+
+### Removed
+
+- Removed the `image` field from `mirrord-up.yaml` services. `mirrord preview
+  up` takes each service's image from `--image <service>=<image ref>` or
+  `MIRRORD_<SERVICE>_IMAGE`.
+
+
+### Added
+
+- Remote Redis branches accept `cluster: true` to run as a one node Redis
+  Cluster, so applications using a Redis Cluster client can connect to the
+  branch.
+
+
+### Changed
+
+- On Linux, the layer logs at startup which glibc the process runs on, which
+  glibc the executable was built against, and the kernel release, to help
+  diagnose hooks that never fire.
+
 ## [3.279.1](https://github.com/metalbear-co/mirrord/tree/3.279.1) - 2026-10-25
 
 

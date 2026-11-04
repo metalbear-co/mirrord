@@ -17,7 +17,7 @@ The map only includes connections that went through a mirrord session. To fill i
 
 The map below is from [MetalMart](https://github.com/metalbear-co/playground/tree/main/apps/shop), our open-source demo shop: its services run in the `shop` namespace, and the databases and message brokers they use run in `infra`.
 
-![Topology tab for the MetalMart demo app, showing its services, data stores, message queues and preview environments](../../.gitbook/assets/topology-map.png)
+![Topology tab for the MetalMart demo app, showing its services, databases, message queues and preview environments](../../.gitbook/assets/topology-map.png)
 
 ## Requirements
 
@@ -28,6 +28,10 @@ The map below is from [MetalMart](https://github.com/metalbear-co/playground/tre
 ## Turn it on
 
 Topology is off by default.
+
+{% hint style="warning" %}
+On the cloud dashboard the map also needs identity sharing on for the operator's API key. With it off, the operator leaves connections out of what it reports, so the map stays empty. Tick **Share identity-level usage data with mirrord cloud** on the key before expecting connections.
+{% endhint %}
 
 1. Set it in the operator's Helm values:
 
@@ -88,14 +92,14 @@ Nodes are colored by category:
 | --- | --- |
 | **Entry point** | A node marked **Discovered** (see below) that only ever calls other services and is never called |
 | **Service** | Anything that fits none of the other categories |
-| **Data store** | Reached on a well-known database port (see [Well-known ports](#well-known-ports)) |
+| **Database** | Reached on a well-known database port (see [Well-known ports](#well-known-ports)) |
 | **Queue** | Reached on a well-known message broker port (see [Well-known ports](#well-known-ports)) |
 | **Infrastructure** | Reached on a well-known infrastructure port (see [Well-known ports](#well-known-ports)) |
 | **Preview env** | A preview environment's Service, seen as the other end of a session's connection. Each one is its own node, labelled with the preview's key, and its replicas share that node. A preview environment covering three services shows as up to three nodes, one for each that appears in a connection |
 
 A service marked **Discovered** wasn't targeted by any session. The map only knows it as the other end of a connection. The map matches a Service to a workload by name and namespace. If a Service's name differs from its workload's, for example the Service `web-svc` in front of the Deployment `web`, they show up as two separate items: the workload, and the Service marked **Discovered**. Its session and user counts come from the connections around it.
 
-Categories come from ports and from which end of a connection a service was on. Service names are never used to guess them, so a Postgres served on a custom port shows up as a plain **Service**. Only the lowest port a workload reached on a Service is kept, so a database that is also reached on a lower port, such as 80, can show up as a plain **Service** too. Click a chip in the legend to hide that category.
+Categories come from ports and from which end of a connection a service was on. Service names are never used to guess them, so a Postgres served on a custom port shows up as a plain **Service**. Only the lowest port a workload reached on a Service is kept, so a database that is also reached on a lower port, such as 80, can show up as a plain **Service** too. Click a chip in the legend to hide or show that category. **Entry point** and **Preview env** start hidden, so the map opens on service-to-service traffic; turn them on from the legend when you need them. The **Advanced filters** chip opens the namespace, preview env key, **Discovered only** and **Busiest paths** filters.
 
 Other controls:
 
@@ -132,10 +136,10 @@ To see a service's connections, run a session against the workload and exercise 
 
 ## Well-known ports
 
-The ports that put a service in the **Data store**, **Queue** or **Infrastructure** category:
+The ports that put a service in the **Database**, **Queue** or **Infrastructure** category:
 
 | Category | Products (ports) |
 | --- | --- |
-| **Data store** | Postgres (5432), PgBouncer (6432), MySQL (3306, 33060), MongoDB (27017-27019), Redis (6379), Redis Sentinel (26379), Memcached (11211), Cassandra (9042), Elasticsearch (9200, 9300), ClickHouse (8123, 9440), CockroachDB (26257), SQL Server (1433), Oracle (1521), CouchDB (5984), ArangoDB (8529), Neo4j (7687), InfluxDB (8086), Qdrant (6333), Milvus (19530) |
+| **Database** | Postgres (5432), PgBouncer (6432), MySQL (3306, 33060), MongoDB (27017-27019), Redis (6379), Redis Sentinel (26379), Memcached (11211), Cassandra (9042), Elasticsearch (9200, 9300), ClickHouse (8123, 9440), CockroachDB (26257), SQL Server (1433), Oracle (1521), CouchDB (5984), ArangoDB (8529), Neo4j (7687), InfluxDB (8086), Qdrant (6333), Milvus (19530) |
 | **Queue** | Kafka (9092), RabbitMQ (5671, 5672, 15672), NATS (4222), Temporal (7233), ActiveMQ (61616), MQTT (1883, 8883), NSQ (4150), Pulsar (6650) |
 | **Infrastructure** | Vault (8200), Consul (8500), Prometheus (9090), Jaeger (14250, 14268, 16686), OpenTelemetry (4317, 4318), Zipkin (9411), StatsD (8125), Datadog APM (8126), etcd (2379), DNS (53) |

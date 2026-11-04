@@ -254,7 +254,16 @@ The `--force` flag makes repeat runs with the same key replace the existing prev
   mirrord preview stop -k "pr-${{ github.event.pull_request.number }}" || true
   ```
 
-- **Multiple services:** Use the same key for all preview pods in a PR so they form one logical environment. Run `mirrord preview start` once per service, each with `-k "pr-123"`.
+- **Multiple services:** Use the same key for all preview pods in a PR so they form one logical environment. With a [`mirrord-up.yaml`](../using-mirrord/multiple-concurrent-sessions.md) that defines them, `mirrord preview up` starts all of them in one step, with one `--image` per service you built. Run `mirrord preview down` when the PR closes. See [Previewing Several Services](preview-environments.md#previewing-several-services).
+  ```bash
+  mirrord preview up \
+    --image user-auth-service=ghcr.io/org/user-auth-service:preview-pr-123-abc1234 \
+    --image stage-user-dashboard-app=ghcr.io/org/stage-user-dashboard-app:preview-pr-123-abc1234 \
+    -k "pr-123" \
+    --timeout 600
+
+  mirrord preview down -k "pr-123"
+  ```
 
 ## Troubleshooting
 

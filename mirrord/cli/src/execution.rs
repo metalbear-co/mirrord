@@ -856,6 +856,8 @@ impl MirrordExecution {
             Default::default()
         };
 
+        config.sanitize_remote_env(&mut env_vars);
+
         if let Some(file) = &config.feature.env.env_file {
             let envs_from_file = dotenvy::from_path_iter(file)
                 .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())

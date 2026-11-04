@@ -167,6 +167,8 @@ mod integration_tests_deps {
 }
 
 mod common;
+#[cfg(target_os = "linux")]
+mod diagnostics;
 mod exec_hooks;
 #[cfg(target_os = "macos")]
 mod exec_utils;
@@ -174,6 +176,8 @@ mod file;
 mod hooks;
 mod load;
 mod macros;
+mod program_stdout;
+mod ready;
 mod socket;
 #[cfg(target_os = "macos")]
 mod tls;
@@ -296,6 +300,9 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         LoadType::SIPOnly => sip_only_layer_start(config, patch_binaries, skip_patch_binaries),
         LoadType::Skip => load_only_layer_start(&config),
     }
+
+    // Every start above, early returns included, ends here.
+    ready::layer_ready()?;
 
     Ok(())
 }
@@ -444,6 +451,8 @@ fn layer_start(config: LayerConfig) {
         .filter(|(k, _v)| k != LayerConfig::RESOLVED_CONFIG_ENV)
         .collect();
     tracing::info!("Initializing mirrord-layer!");
+    #[cfg(target_os = "linux")]
+    diagnostics::log_environment();
     tracing::debug!(
         executable = ?EXECUTABLE_PATH.get(),
         args = ?EXECUTABLE_ARGS.get(),
@@ -556,6 +565,8 @@ fn fetch_env_vars() -> HashMap<String, String> {
         Default::default()
     };
 
+    setup().layer_config().sanitize_remote_env(&mut env_vars);
+
     if let Some(file) = &setup().env_config().env_file {
         let envs_from_file = dotenvy::from_path_iter(file)
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
@@ -667,7 +678,7 @@ fn enable_hooks(state: &LayerSetup) {
         };
 
         #[cfg(target_os = "linux")]
-        if state.experimental().hook_libc_syscall {
+        if state.experimental().hook_libc_syscall.unwrap_or_default() {
             replace!(
                 &mut hook_manager,
                 "syscall",

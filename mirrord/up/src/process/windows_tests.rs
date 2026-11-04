@@ -82,6 +82,7 @@ fn service(directory: &Path, name: &str, mode: &str) -> ServiceCommands {
     command.env(NAME_ENV, name).env(MODE_ENV, mode);
     ServiceCommands {
         name: Arc::from(name),
+        debugged: false,
         pre: None,
         session: command,
     }
@@ -141,6 +142,8 @@ impl Process {
 /// - `tree`: starts a `serve` grandchild called `<name>-grandchild` first, then keeps running.
 /// - `tree-exit`: like `tree`, but exits with 0 once the test creates `release`.
 /// - `crash`: exits with 7 once the test creates `release`.
+/// - `held-crash`: like `crash`, but prints a debug hold line first, as a held program's
+///   `mirrord exec` does.
 /// - `exit`: exits with 0.
 /// - `silent`: closes its stdout and stderr first, then keeps running.
 #[test]
@@ -179,7 +182,7 @@ fn child_helper() {
             CloseHandle(GetStdHandle(STD_OUTPUT_HANDLE));
             CloseHandle(GetStdHandle(STD_ERROR_HANDLE));
         },
-        "serve" | "crash" | "exit" => {}
+        "serve" | "crash" | "held-crash" | "exit" => {}
         other => panic!("unknown child_helper mode {other}"),
     }
 
@@ -190,10 +193,13 @@ fn child_helper() {
     if mode != "silent" {
         println!("{SESSION_READY_MESSAGE}");
     }
+    if mode == "held-crash" {
+        println!("debug-hold pid={} release=test", std::process::id());
+    }
 
     match mode.as_str() {
         "tree-exit" => wait_for_file_blocking(&directory.join("release")),
-        "crash" => {
+        "crash" | "held-crash" => {
             wait_for_file_blocking(&directory.join("release"));
             std::process::exit(7);
         }
@@ -374,11 +380,72 @@ async fn crash_remains_failure_and_stops_siblings() {
     assert!(sibling.unwrap().exits());
 }
 
+/// Supervises a `serve` sibling next to a debugged service in `mode`, which exits with 7 once the
+/// sibling runs, and returns what supervision returned once the sibling is gone.
+async fn supervise_debugged_exit(mode: &str) -> Result<(), UpError> {
+    let directory = TempDir::new().unwrap();
+    let mut sibling = None;
+    let release = async {
+        sibling = Some(Process::wait_for(directory.path(), "sibling").await);
+        fs::write(directory.path().join("release"), []).unwrap();
+        std::future::pending::<io::Result<ShutdownSignal>>().await
+    };
+    let result = tokio::time::timeout(
+        TIMEOUT,
+        supervise(
+            vec![
+                service(directory.path(), "sibling", "serve"),
+                ServiceCommands {
+                    debugged: true,
+                    ..service(directory.path(), "debugged", mode)
+                },
+            ],
+            ReadyTracker::default(),
+            release,
+            TEST_GRACE,
+        ),
+    )
+    .await
+    .expect("the sibling was not stopped");
+
+    assert!(sibling.unwrap().exits());
+    result
+}
+
+/// An IDE's Stop Debugging ends a held program with a non-zero code. That ends the run, and its
+/// siblings, as any exit does, but isn't a crash.
+#[tokio::test]
+async fn debugged_service_exit_stops_siblings_without_a_crash() {
+    let result = supervise_debugged_exit("held-crash").await;
+
+    assert!(
+        result.is_ok(),
+        "the program was held, so its exit is the debugger's doing: {result:?}"
+    );
+}
+
+/// A debugged service that never printed its hold line was never held, so no debugger can have
+/// ended it: its exit is still a crash.
+#[tokio::test]
+async fn debugged_service_exit_before_its_hold_is_a_crash() {
+    let result = supervise_debugged_exit("crash").await;
+
+    assert!(
+        matches!(
+            &result,
+            Err(UpError::ServiceCrashed { name, status })
+                if &**name == "debugged" && status.code() == Some(7)
+        ),
+        "no hold line was seen, so the exit must report as a crash: {result:?}"
+    );
+}
+
 #[tokio::test]
 async fn spawn_failure_is_returned_instead_of_panicking() {
     let directory = TempDir::new().unwrap();
     let missing = ServiceCommands {
         name: Arc::from("missing"),
+        debugged: false,
         pre: None,
         session: resolve_tokio_command(directory.path().join("missing.exe")),
     };

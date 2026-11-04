@@ -7,6 +7,8 @@ tags:
   - enterprise
 ---
 
+# Generic
+
 This page covers generic DB branching - for databases, caches, and other stateful services that mirrord has no built-in engine for (InfluxDB, Valkey, an internal service, and so on). For the general concepts, the full list of config fields, and how a session behaves, see the [DB Branching overview](../db-branching.md).
 
 A generic branch runs the container image you supply and starts **empty** by default: there are no built-in copy modes, no IAM authentication, and a single redirected port. It is the fallback that unblocks you when no first-class engine exists - engines with built-in support offer copy modes, schema handling, and better errors, so prefer them when available. When an empty branch isn't useful, you can supply a [copy Job](#copying-data-into-the-branch) - your own image that fills the branch with schema and data before the session starts.

@@ -11,6 +11,7 @@ pub mod agent;
 pub mod ci;
 pub mod config;
 pub mod container;
+pub mod debug_hold;
 pub mod env_key;
 pub mod experimental;
 pub mod external_proxy;
@@ -19,6 +20,7 @@ pub mod internal_proxy;
 pub mod logfile_path;
 pub mod plan;
 pub mod retry;
+pub mod sessions_manager;
 pub mod target;
 pub mod template;
 pub mod util;
@@ -62,9 +64,11 @@ use crate::{
     feature::{
         FeatureConfig,
         fs::{READONLY_FILE_BUFFER_HARD_LIMIT, READONLY_FILE_BUFFER_WARN_LIMIT},
+        magic::{JAVA_OPTIONS_ENV, without_java_agents},
     },
     internal_proxy::InternalProxyConfig,
     retry::StartupRetryConfig,
+    sessions_manager::SessionsManagerConfig,
     target::TargetConfig,
     util::VecOrSingle,
 };
@@ -97,6 +101,32 @@ pub const MIRRORD_TEST_INTPROXY_ADDR: &str = "MIRRORD_TEST_INTPROXY_ADDR";
 
 /// Environment variable to indicate towards layer to wait for debugger.
 pub const MIRRORD_LAYER_WAIT_FOR_DEBUGGER: &str = "MIRRORD_LAYER_WAIT_FOR_DEBUGGER";
+
+/// Environment variable asking the layer to print `mirrord exec`'s `Ready!` once it has started.
+///
+/// `mirrord exec` on Linux and macOS replaces itself with the program before the layer exists, so
+/// in the progress modes machines read it leaves `Ready!` to the layer, where it means what it
+/// means on Windows: the layer is in and connected. In a terminal's `std` mode `exec` still prints
+/// it in its own tree, and never sets this. The value is `<mode>:<pid>`: the progress mode `exec`
+/// would have printed it in (`simple` or `json`, see `MIRRORD_PROGRESS_MODE`), and `exec`'s own
+/// pid, which `execve` hands to the program. The layer prints only in the process with that pid, and removes the
+/// variable, so the program's children never print it, not even one an earlier library
+/// constructor started before the variable was removed.
+pub const MIRRORD_LAYER_READY: &str = "MIRRORD_LAYER_READY";
+
+/// Environment variable asking `mirrord exec` to hold the program it starts before the program's
+/// own code runs, until an IDE releases it. `mirrord up --debug` sets it on each named service's
+/// `mirrord exec`, and only `exec` reads it.
+///
+/// Experimental, like `--debug`. [`debug_hold`] has how the hold travels on.
+pub const MIRRORD_DEBUG_HOLD: &str = "MIRRORD_DEBUG_HOLD";
+
+/// Environment variable asking the layer to hold the program for a debugger: the pid of the one
+/// process whose layer holds. Linux and macOS `mirrord exec` sets it to its own pid, which
+/// `execve` hands to the program, and the layer removes it.
+///
+/// Experimental, like `--debug`. [`debug_hold`] has how the hold travels.
+pub const MIRRORD_LAYER_DEBUG_HOLD: &str = "MIRRORD_LAYER_DEBUG_HOLD";
 
 /// Environment variable controlling Windows layer crash reporting.
 ///
@@ -410,7 +440,9 @@ pub struct LayerConfig {
     ///
     /// Controls multi-cluster session behavior when connecting to a multi-cluster Primary
     /// operator. When set to `false`, forces a single-cluster session on the Primary cluster
-    /// instead of creating a multi-cluster session that spans all workload clusters.
+    /// instead of creating a multi-cluster session that spans all workload clusters. The Primary
+    /// has to run workloads itself for that: a management-only Primary
+    /// (`operator.multiCluster.managementOnly=true`) rejects the session.
     /// When `true` or unset, multi-cluster sessions are used when the operator supports them.
     #[config(env = "MIRRORD_MULTI_CLUSTER", plan = Enterprise)]
     pub multi_cluster: Option<bool>,
@@ -560,6 +592,10 @@ pub struct LayerConfig {
     /// ## ci {#root-ci}
     #[config(nested, plan = Oss)]
     pub ci: CiConfig,
+
+    /// ## sessions_manager {#root-sessions_manager}
+    #[config(nested, plan = Enterprise)]
+    pub sessions_manager: SessionsManagerConfig,
 
     /// ## key {#root-key}
     ///
@@ -779,6 +815,16 @@ impl LayerConfig {
         }
     }
 
+    /// Applies enabled fixes to environment variables fetched from the target.
+    pub fn sanitize_remote_env(&self, env: &mut HashMap<String, String>) {
+        if self.feature.magic.java_agents
+            && let Some(options) = env.get_mut(JAVA_OPTIONS_ENV)
+            && let Some(sanitized) = without_java_agents(options)
+        {
+            *options = sanitized;
+        }
+    }
+
     /// Adds the target container's volume-mount paths to
     /// [`feature.fs.read_only`](feature::fs::advanced::FsConfig), so files mounted into the remote
     /// pod (ConfigMaps, Secrets, PVCs) are read from the remote pod while writes stay local.
@@ -916,7 +962,8 @@ impl LayerConfig {
             if self.multi_cluster == Some(true) {
                 return Err(ConfigError::Conflict(
                     "Label targets are not yet supported in multi-cluster sessions. Set \
-                     `multi_cluster = false` to use the primary cluster only."
+                     `multi_cluster = false` to use the primary cluster only, which needs a \
+                     primary that runs workloads itself (not management-only)."
                         .to_owned(),
                 ));
             }
@@ -2026,6 +2073,7 @@ mod tests {
             skip_sip: None,
             startup_retry: None,
             ci: None,
+            sessions_manager: None,
             traceparent: None,
             baggage: None,
             api: None,
@@ -3143,6 +3191,23 @@ mod tests {
     #[test]
     fn magic_auto_mount_defaults_to_enabled() {
         assert!(default_config().feature.magic.auto_mount);
+    }
+
+    #[test]
+    fn magic_java_agents_defaults_to_enabled() {
+        assert!(default_config().feature.magic.java_agents);
+    }
+
+    #[test]
+    fn java_agent_sanitisation_can_be_disabled() {
+        let mut config = default_config();
+        config.feature.magic.java_agents = false;
+        let options = "-javaagent:/agent.jar";
+        let mut env = HashMap::from([(JAVA_OPTIONS_ENV.to_owned(), options.to_owned())]);
+
+        config.sanitize_remote_env(&mut env);
+
+        assert_eq!(env.get(JAVA_OPTIONS_ENV).map(String::as_str), Some(options));
     }
 
     /// Names that aren't one of the agent's capabilities are ignored, so the user gets a warning.

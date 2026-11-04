@@ -29,6 +29,7 @@ use crate::crd::session::KubeResourceTarget;
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "dbs.mirrord.metalbear.co",
+    group_resolver = "crate::types::keyed_group",
     version = "v1alpha1",
     kind = "BranchDatabase",
     category = "mirrord",
@@ -478,6 +479,11 @@ pub struct MongodbOptions {
 pub struct RedisOptions {
     #[serde(default)]
     pub copy: RedisCopySpec,
+
+    /// Run the branch as a one node Redis Cluster that owns every hash slot, so Redis Cluster
+    /// clients can discover and use it. Only database 0 exists on such a node.
+    #[serde(default)]
+    pub cluster: bool,
 }
 
 /// DynamoDB-specific branch options.
@@ -838,32 +844,52 @@ pub struct CommonFieldsRef<'a> {
 }
 
 impl BranchDatabaseSpec {
+    /// Every dialect whose options the spec sets, in [`DatabaseDialect`] order.
+    pub fn configured_dialects(&self) -> impl Iterator<Item = DialectConfig<'_>> {
+        DatabaseDialect::VARIANTS
+            .iter()
+            .filter_map(|dialect| match dialect {
+                DatabaseDialect::Postgres => {
+                    self.postgres_options.as_ref().map(DialectConfig::Postgres)
+                }
+                DatabaseDialect::Mysql => self.mysql_options.as_ref().map(DialectConfig::Mysql),
+                DatabaseDialect::Mariadb => {
+                    self.mariadb_options.as_ref().map(DialectConfig::Mariadb)
+                }
+                DatabaseDialect::Dynamodb => {
+                    self.dynamodb_options.as_ref().map(DialectConfig::Dynamodb)
+                }
+                DatabaseDialect::Mongodb => {
+                    self.mongodb_options.as_ref().map(DialectConfig::Mongodb)
+                }
+                DatabaseDialect::Mssql => self.mssql_options.as_ref().map(DialectConfig::Mssql),
+                DatabaseDialect::Redis => self.redis_options.as_ref().map(DialectConfig::Redis),
+                DatabaseDialect::Spanner => {
+                    self.spanner_options.as_ref().map(DialectConfig::Spanner)
+                }
+                DatabaseDialect::Clickhouse => self
+                    .clickhouse_options
+                    .as_ref()
+                    .map(DialectConfig::Clickhouse),
+                DatabaseDialect::Cockroachdb => self
+                    .cockroachdb_options
+                    .as_ref()
+                    .map(DialectConfig::Cockroachdb),
+                DatabaseDialect::S3 => self.s3_options.as_ref().map(DialectConfig::S3),
+                DatabaseDialect::Turbopuffer => self
+                    .turbopuffer_options
+                    .as_ref()
+                    .map(DialectConfig::Turbopuffer),
+                DatabaseDialect::Generic => {
+                    self.generic_options.as_ref().map(DialectConfig::Generic)
+                }
+            })
+    }
+
     /// Validate and extract the dialect config from the spec.
     /// Exactly one dialect option field must be set.
     pub fn dialect(&self) -> Result<DialectConfig<'_>, DialectValidationError> {
-        let mut dialects = [
-            self.postgres_options.as_ref().map(DialectConfig::Postgres),
-            self.mysql_options.as_ref().map(DialectConfig::Mysql),
-            self.mariadb_options.as_ref().map(DialectConfig::Mariadb),
-            self.dynamodb_options.as_ref().map(DialectConfig::Dynamodb),
-            self.mongodb_options.as_ref().map(DialectConfig::Mongodb),
-            self.mssql_options.as_ref().map(DialectConfig::Mssql),
-            self.redis_options.as_ref().map(DialectConfig::Redis),
-            self.spanner_options.as_ref().map(DialectConfig::Spanner),
-            self.clickhouse_options
-                .as_ref()
-                .map(DialectConfig::Clickhouse),
-            self.cockroachdb_options
-                .as_ref()
-                .map(DialectConfig::Cockroachdb),
-            self.s3_options.as_ref().map(DialectConfig::S3),
-            self.turbopuffer_options
-                .as_ref()
-                .map(DialectConfig::Turbopuffer),
-            self.generic_options.as_ref().map(DialectConfig::Generic),
-        ]
-        .into_iter()
-        .flatten();
+        let mut dialects = self.configured_dialects();
 
         let config = dialects.next().ok_or(DialectValidationError::NoneSet)?;
         if dialects.next().is_some() {
