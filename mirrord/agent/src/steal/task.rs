@@ -2,11 +2,13 @@ use std::{
     borrow::Cow,
     collections::{HashMap, hash_map::Entry},
     fmt,
+    io::Read,
     ops::Not,
 };
 
 use futures::{StreamExt, stream::FuturesUnordered};
 use http::header::UPGRADE;
+use hyper::http::request::Parts;
 use mirrord_protocol::{
     LogMessage,
     tcp::{
@@ -22,7 +24,7 @@ use super::{
     subscriptions::{PortSubscription, PortSubscriptions},
 };
 use crate::{
-    http::filter::{HttpFilter, MatchResult},
+    http::filter::{HttpFilter, MatchResult, RequestBody},
     incoming::{RedirectedHttp, RedirectedTcp, RedirectorTaskError, StealHandle, StolenTraffic},
     util::{ChannelClosedFuture, ClientId, protocol_version::ClientProtocolVersion},
 };
@@ -41,7 +43,7 @@ pub struct TcpStealerTask {
     /// Futures that resolve when clients disconnect (drop their [`StealerMessage`] receivers).
     disconnected_clients: FuturesUnordered<ChannelClosedFuture>,
     /// For tracking http requests whose bodies are being buffered
-    ongoing_requests: JoinSet<RedirectedHttp>,
+    ongoing_requests: JoinSet<(RedirectedHttp, SettledFilters)>,
 }
 
 impl TcpStealerTask {
@@ -76,8 +78,8 @@ impl TcpStealerTask {
 
                 Some(next) = self.ongoing_requests.join_next() => {
                     match next {
-                        Ok(http) => {
-                            self.handle_buffered_http(http).await;
+                        Ok((http, settled)) => {
+                            self.handle_buffered_http(http, settled).await;
                         },
                         Err(error) => {
                             tracing::error!(
@@ -146,7 +148,7 @@ impl TcpStealerTask {
         clients: &HashMap<ClientId, Client>,
         traffic: StolenTraffic,
         subscription: &PortSubscription,
-        ongoing: &mut JoinSet<RedirectedHttp>,
+        ongoing: &mut JoinSet<(RedirectedHttp, SettledFilters)>,
     ) {
         let protocol_version_req = match &traffic {
             StolenTraffic::Tcp { conn, .. } => Self::protocol_version_req_tcp(subscription, conn),
@@ -240,13 +242,14 @@ impl TcpStealerTask {
             }
         };
 
-        match Self::decide(filters, &mut http).await {
-            StealDecision::BufferBody => {
+        let (parts, body) = http.parts_and_body();
+        match Self::decide(filters, SettledFilters::new(), parts, body).await {
+            StealDecision::BufferBody(settled) => {
                 ongoing.spawn(async move {
                     if let Err(error) = http.buffer_body().await {
                         tracing::debug!(?error, "failed to buffer request body");
                     };
-                    http
+                    (http, settled)
                 });
             }
             StealDecision::Matched(matched) => {
@@ -255,28 +258,52 @@ impl TcpStealerTask {
         }
     }
 
-    /// Runs every client's filter over a stolen request.
+    /// Runs every client's filter over a stolen request, skipping those already in `settled`.
     ///
     /// The body is buffered only when a filter asks for it, which happens when the headers alone
-    /// cannot settle that filter. After a buffering attempt the body is complete, given up on, or
-    /// broken for good, so the filters always come back with a final answer. A filter that could
-    /// not be run does not steal: the request goes where it would have gone without that client.
-    async fn decide(
+    /// cannot settle that filter. The filters that did answer keep their answer, so buffering
+    /// costs no second round of `header_jq` evaluations. After a buffering attempt the body is
+    /// complete, given up on, or broken for good, so the remaining filters always come back with a
+    /// final answer. A filter that could not be run does not steal: the request goes where it
+    /// would have gone without that client.
+    ///
+    /// `filters` is read afresh on each call: a client that unsubscribed while the body was
+    /// buffering does not get the request, and one that subscribed meanwhile gets its filter run.
+    async fn decide<T: Read + Copy>(
         filters: &HashMap<ClientId, HttpFilter>,
-        http: &mut RedirectedHttp,
+        mut settled: SettledFilters,
+        parts: &mut Parts,
+        body: RequestBody<T>,
     ) -> StealDecision {
-        let (parts, body) = http.parts_and_body();
-        let mut matched = vec![];
+        let mut needs_body = false;
 
         for (client_id, filter) in filters {
+            if settled.contains_key(client_id) {
+                continue;
+            }
+
             match filter.matches(parts, body).await {
-                MatchResult::Match => matched.push(*client_id),
-                MatchResult::NoMatch | MatchResult::Undecided => {}
-                MatchResult::NeedsBody => return StealDecision::BufferBody,
+                MatchResult::Match => {
+                    settled.insert(*client_id, true);
+                }
+                MatchResult::NoMatch | MatchResult::Undecided => {
+                    settled.insert(*client_id, false);
+                }
+                MatchResult::NeedsBody => needs_body = true,
             }
         }
 
-        StealDecision::Matched(matched)
+        if needs_body {
+            return StealDecision::BufferBody(settled);
+        }
+
+        StealDecision::Matched(
+            filters
+                .keys()
+                .filter(|client_id| settled.get(client_id).copied().unwrap_or(false))
+                .copied()
+                .collect(),
+        )
     }
 
     async fn finish_stealing(
@@ -394,7 +421,7 @@ impl TcpStealerTask {
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
-    async fn handle_buffered_http(&mut self, mut http: RedirectedHttp) {
+    async fn handle_buffered_http(&mut self, mut http: RedirectedHttp, settled: SettledFilters) {
         let Some(subscription) = self
             .subscriptions
             .get(http.info().original_destination.port())
@@ -417,11 +444,12 @@ impl TcpStealerTask {
         };
 
         let protocol_version_req = Self::protocol_version_req_http(subscription, &http);
-        match Self::decide(filters, &mut http).await {
+        let (parts, body) = http.parts_and_body();
+        match Self::decide(filters, settled, parts, body).await {
             StealDecision::Matched(matched) => {
                 Self::finish_stealing(&self.clients, matched, http, protocol_version_req).await
             }
-            StealDecision::BufferBody => {
+            StealDecision::BufferBody(..) => {
                 tracing::error!(
                     ?http,
                     "A filter asked to buffer a request body that was already buffered or given up on. \
@@ -433,14 +461,18 @@ impl TcpStealerTask {
     }
 }
 
+/// What each client's filter answered about one request, `true` meaning it steals. Filters that
+/// still need the body are missing.
+type SettledFilters = HashMap<ClientId, bool>;
+
 /// Outcome of running the clients' filters over a stolen request.
 #[derive(Debug, PartialEq, Eq)]
 enum StealDecision {
     /// Clients whose filter matches, in filter map order. The first connected one with a good
     /// enough protocol version gets the request, the rest are told another user took it.
     Matched(Vec<ClientId>),
-    /// Some filter can only decide once the body is buffered.
-    BufferBody,
+    /// Some filter can only decide once the body is buffered. Carries the answers of the others.
+    BufferBody(SettledFilters),
 }
 
 impl fmt::Debug for TcpStealerTask {
@@ -456,4 +488,103 @@ impl fmt::Debug for TcpStealerTask {
 struct Client {
     message_tx: mpsc::Sender<StealerMessage>,
     protocol_version: ClientProtocolVersion,
+}
+
+#[cfg(test)]
+mod test {
+    use std::collections::HashMap;
+
+    use hyper::Request;
+    use mirrord_protocol::tcp::{self, Filter, JsonPathQuery};
+
+    use super::{SettledFilters, StealDecision, TcpStealerTask};
+    use crate::http::filter::{HttpFilter, RequestBody};
+
+    fn tenant_header_filter() -> HttpFilter {
+        let filter = tcp::HttpFilter::Header(Filter::new("x-tenant: preview".to_owned()).unwrap());
+        HttpFilter::try_from(&filter).unwrap()
+    }
+
+    fn tenant_body_filter() -> HttpFilter {
+        let filter = tcp::HttpFilter::Body(tcp::HttpBodyFilter::Json {
+            query: JsonPathQuery::new("$.tenant".to_owned()).unwrap(),
+            matches: Filter::new("preview".to_owned()).unwrap(),
+        });
+        HttpFilter::try_from(&filter).unwrap()
+    }
+
+    fn sorted(decision: StealDecision) -> Vec<u32> {
+        let StealDecision::Matched(mut matched) = decision else {
+            panic!("expected a final decision, got {decision:?}");
+        };
+        matched.sort();
+        matched
+    }
+
+    /// On a port with header and body filters, a POST goes through the filters twice: once on the
+    /// head and once after buffering. Every `header_jq` evaluation costs a blocking task and up to
+    /// the jq time limit, so the second pass runs only the filters that asked for the body. The
+    /// answers from the first pass are kept, here including a `Match` next to a `NeedsBody`.
+    #[tokio::test]
+    async fn only_filters_that_asked_for_the_body_run_after_buffering() {
+        let filters = HashMap::from([
+            (1, tenant_header_filter()),
+            (2, tenant_body_filter()),
+            (3, tenant_header_filter()),
+        ]);
+        let mut parts = Request::builder()
+            .uri("/orders")
+            .header("x-tenant", "preview")
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0;
+
+        let decision = TcpStealerTask::decide(
+            &filters,
+            SettledFilters::new(),
+            &mut parts,
+            RequestBody::<&[u8]>::Pending,
+        )
+        .await;
+        let StealDecision::BufferBody(mut settled) = decision else {
+            panic!("expected a request to buffer the body, got {decision:?}");
+        };
+        assert_eq!(settled, HashMap::from([(1, true), (3, true)]));
+
+        // Flip the kept answer of client 3: a filter that ran again would answer `true`.
+        settled.insert(3, false);
+        let decision = TcpStealerTask::decide(
+            &filters,
+            settled,
+            &mut parts,
+            RequestBody::Complete(br#"{"tenant":"preview"}"#.as_slice()),
+        )
+        .await;
+        assert_eq!(sorted(decision), [1, 2]);
+    }
+
+    /// Buffering takes a while and clients come and go. A client that left does not get the
+    /// request even though its filter matched on the head, and one that subscribed in the
+    /// meantime has its filter run.
+    #[tokio::test]
+    async fn clients_changing_during_buffering_are_respected() {
+        let filters = HashMap::from([(2, tenant_header_filter())]);
+        let mut parts = Request::builder()
+            .uri("/orders")
+            .header("x-tenant", "preview")
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0;
+
+        let decision = TcpStealerTask::decide(
+            &filters,
+            HashMap::from([(1, true)]),
+            &mut parts,
+            RequestBody::Complete(b"".as_slice()),
+        )
+        .await;
+        assert_eq!(sorted(decision), [2]);
+    }
 }

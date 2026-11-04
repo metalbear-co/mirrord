@@ -35,7 +35,7 @@ use serde_json_path::{
 };
 use strum_macros::{AsRefStr, EnumString};
 
-use crate::{ConnectionId, Payload, Port, RemoteResult, RequestId};
+use crate::{ConnectionId, Payload, Port, RemoteError, RemoteResult, RequestId};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnectionV1 {
@@ -454,6 +454,10 @@ pub enum HttpBodyFilter {
 /// session on the target down with it. Real filters are shallow: the deepest one mirrord itself
 /// builds is a preview pod's `not (any_of [session filter, header])` over a user's `all_of` or
 /// `any_of`, four levels. This is a correctness floor nobody needs to tune, so it is a constant.
+///
+/// A decode failure takes the whole message and the client's connection with it, so the decoder
+/// is only the backstop. Whoever sends a subscription checks [`HttpFilter::check_depth`] first,
+/// which fails just that subscription with a clear error.
 pub const MAX_HTTP_FILTER_DEPTH: usize = 16;
 
 /// Describes different types of HTTP filtering available
@@ -489,6 +493,39 @@ pub enum HttpFilter {
 }
 
 impl HttpFilter {
+    /// How deep the [`HttpFilter::Composite`] and [`HttpFilter::Not`] nesting goes, counting this
+    /// filter as level 1.
+    pub fn depth(&self) -> usize {
+        match self {
+            Self::Composite { filters, .. } => filters
+                .iter()
+                .map(Self::depth)
+                .max()
+                .unwrap_or_default()
+                .saturating_add(1),
+            Self::Not(filter) => filter.depth().saturating_add(1),
+            Self::Header(..)
+            | Self::Path(..)
+            | Self::Method(..)
+            | Self::Body(..)
+            | Self::HeaderJq(..) => 1,
+        }
+    }
+
+    /// Fails a filter the agent would refuse to decode for going over [`MAX_HTTP_FILTER_DEPTH`].
+    /// Meant to run before the subscription is sent.
+    pub fn check_depth(&self) -> Result<(), RemoteError> {
+        let depth = self.depth();
+        if depth > MAX_HTTP_FILTER_DEPTH {
+            return Err(RemoteError::HttpFilterTooDeep {
+                depth: u32::try_from(depth).unwrap_or(u32::MAX),
+                limit: MAX_HTTP_FILTER_DEPTH as u32,
+            });
+        }
+
+        Ok(())
+    }
+
     /// Decodes one filter the way `#[derive(Decode)]` would (a `u32` variant index, then the
     /// fields in order), refusing to go deeper than [`MAX_HTTP_FILTER_DEPTH`].
     ///
@@ -1074,6 +1111,42 @@ mod test {
             filters: vec![],
         };
         assert_eq!(roundtrip(&empty).unwrap(), empty);
+    }
+
+    /// A sender learns about a filter that is too deep from this check, on just that subscription,
+    /// instead of from the agent failing to decode the whole message. It has to agree with the
+    /// decoder about where the limit is.
+    #[test]
+    fn depth_check_agrees_with_the_decoder() {
+        for filter in [
+            nested_not(MAX_HTTP_FILTER_DEPTH),
+            nested_composite(MAX_HTTP_FILTER_DEPTH),
+        ] {
+            assert_eq!(filter.depth(), MAX_HTTP_FILTER_DEPTH);
+            filter.check_depth().unwrap();
+            roundtrip(&filter).unwrap();
+        }
+
+        for filter in [
+            nested_not(MAX_HTTP_FILTER_DEPTH + 1),
+            nested_composite(MAX_HTTP_FILTER_DEPTH + 1),
+        ] {
+            let error = filter.check_depth().unwrap_err();
+            assert_eq!(
+                error,
+                RemoteError::HttpFilterTooDeep {
+                    depth: MAX_HTTP_FILTER_DEPTH as u32 + 1,
+                    limit: MAX_HTTP_FILTER_DEPTH as u32,
+                }
+            );
+            roundtrip(&filter).unwrap_err();
+        }
+
+        let empty = HttpFilter::Composite {
+            all: true,
+            filters: vec![],
+        };
+        assert_eq!(empty.depth(), 1);
     }
 
     /// A `not` or a composite level costs a few bytes on the wire but a stack frame on decode and

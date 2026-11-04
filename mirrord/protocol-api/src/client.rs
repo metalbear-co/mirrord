@@ -9,7 +9,7 @@ use std::{
 
 use futures::{FutureExt, future::Shared};
 use mirrord_protocol::{
-    LogMessage,
+    LogMessage, ResponseError,
     outgoing::UnixAddr,
     tcp::{
         HTTP_BODY_JSON_FILTER_VERSION, HTTP_COMPOSITE_FILTER_VERSION,
@@ -317,6 +317,10 @@ impl MirrordClient {
                 }
                 _ => {}
             }
+        }
+
+        if let Some(used_filter) = &filter {
+            used_filter.check_depth().map_err(ResponseError::from)?;
         }
 
         // The server hands a request matching several clients' filters to whichever it checks

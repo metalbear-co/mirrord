@@ -14,12 +14,12 @@ use mirrord_intproxy_protocol::{
     ProxyToLayerMessage,
 };
 use mirrord_protocol::{
-    ClientMessage,
+    ClientMessage, RemoteError,
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, ChunkedResponse, DaemonTcp,
         HttpFilter, HttpMethodFilter, HttpRequestMetadata, IncomingTrafficTransportType,
-        InternalHttpBodyFrame, InternalHttpBodyNew, InternalHttpRequest, LayerTcpSteal, StealType,
-        TcpClose,
+        InternalHttpBodyFrame, InternalHttpBodyNew, InternalHttpRequest, LayerTcpSteal,
+        MAX_HTTP_FILTER_DEPTH, StealType, TcpClose,
     },
 };
 use mirrord_protocol_io::Connection;
@@ -214,4 +214,63 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
     if let Some(Err(error)) = receive_frames.now_or_never() {
         panic!("{error}");
     }
+}
+
+/// A filter the agent would refuse to decode must not reach it: the failed decode would drop the
+/// whole connection, taking the session's other subscriptions along. The layer that asked gets a
+/// clear error on its own subscription and nothing goes out to the agent.
+#[tokio::test]
+async fn subscription_with_a_filter_nested_too_deep_is_rejected_locally() {
+    let (conn, _, out) = Connection::dummy();
+    let (monitor_tx, _monitor_rx) = tokio::sync::broadcast::channel(8);
+    let proxy = IncomingProxy::new(
+        Duration::from_secs(3),
+        LocalTlsSetup::from_config(Default::default()),
+        MonitorTx::from_sender(monitor_tx),
+    );
+    let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =
+        BackgroundTasks::new(conn.tx_handle());
+    let proxy = background_tasks.register(proxy, (), 8);
+
+    proxy
+        .send(IncomingProxyMessage::AgentProtocolVersion(
+            mirrord_protocol::VERSION.clone(),
+        ))
+        .await;
+
+    let too_deep = (0..MAX_HTTP_FILTER_DEPTH)
+        .fold(HttpFilter::Method(HttpMethodFilter::Get), |inner, _| {
+            HttpFilter::Not(Box::new(inner))
+        });
+    proxy
+        .send(IncomingProxyMessage::LayerRequest(
+            0,
+            LayerId(0),
+            IncomingRequest::PortSubscribe(PortSubscribe {
+                listening_on: "127.0.0.1:1"
+                    .parse::<std::net::SocketAddr>()
+                    .unwrap()
+                    .into(),
+                subscription: PortSubscription::Steal(StealType::FilteredHttpEx(80, too_deep)),
+            }),
+        ))
+        .await;
+
+    assert_eq!(
+        background_tasks.next().await.unwrap().1.unwrap_message(),
+        ProxyMessage::ToLayer(ToLayer {
+            message_id: 0,
+            layer_id: LayerId(0),
+            message: ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(Err(
+                RemoteError::HttpFilterTooDeep {
+                    depth: MAX_HTTP_FILTER_DEPTH as u32 + 1,
+                    limit: MAX_HTTP_FILTER_DEPTH as u32,
+                }
+                .into()
+            ))),
+        }),
+    );
+
+    // Only the local answer above: a subscribe to the agent would show up here first.
+    assert!(out.next().now_or_never().is_none());
 }

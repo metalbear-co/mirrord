@@ -441,10 +441,10 @@ mod test {
     }
 
     /// The mirror checks a request against its filter as soon as the head arrives, before the
-    /// body is complete. With only part of the body in hand, a body filter cannot match, and a
-    /// `Not` over it used to read that as "body does not match" and mirror the request right
-    /// away. The decision has to wait for the rest of the body, and once the full body does
-    /// match the inner filter, the request must not be mirrored.
+    /// body is complete. With only part of the body in hand, a `Not` over a body filter must not
+    /// read that as "body does not match" and mirror the request right away. The decision waits
+    /// for the rest of the body, and once the full body does match the inner filter, the request
+    /// is not mirrored.
     #[tokio::test]
     async fn not_over_body_filter_decides_only_on_the_full_body() {
         let filter = not_preview_tenant();
@@ -499,10 +499,9 @@ mod test {
         assert_eq!(check(&filter, &mut http).await, MatchResult::Match);
     }
 
-    /// `next` used to drop every buffered request whose body did not finish, before the filter saw
-    /// it. A body that buffering gave up on never finishes, so `not (body ...)` never mirrored such
-    /// a request, while the steal path took it. The filter gets to decide: a given-up body matches
-    /// the negation and the request is mirrored, body unfinished.
+    /// A body that buffering gave up on never finishes, but `next` still shows the request to the
+    /// filter, the same way the steal path does. A given-up body matches `not (body ...)`, so the
+    /// request is mirrored with its body unfinished.
     #[tokio::test]
     async fn next_mirrors_a_request_whose_body_buffering_gave_up() {
         let mut http = split_body_request(br#"{"tenant":"pre"#, []);

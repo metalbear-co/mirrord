@@ -60,11 +60,10 @@ pub enum MatchResult {
     /// The headers alone cannot decide and the body is still [`RequestBody::Pending`]. Buffer it
     /// and ask again.
     NeedsBody,
-    /// The filter could not be run: a jq query that fails or times out, a regex that hits its
-    /// backtrack limit, a JSON body filter over a body that is not JSON, or a body that broke
-    /// mid-transfer. This is not a verdict on the request, so `Not` passes it through unchanged
-    /// instead of turning a broken filter into "steal everything". The callers resolve it as no
-    /// match, which is what a failed plain filter always did.
+    /// The filter could not be run: a jq query that does not compile, panics or runs past the time
+    /// limit, a regex that hits its backtrack limit, or a body that broke mid-transfer. This is
+    /// not a verdict on the request, so `Not` passes it through unchanged instead of turning a
+    /// broken filter into "steal everything". The callers resolve it as no match.
     Undecided,
 }
 
@@ -319,11 +318,14 @@ impl HttpFilter {
 
                 match filter {
                     HttpBodyFilter::Json { query, matches } => {
+                        // A body that is not JSON (an empty GET, a form post) has no value for the
+                        // query to find, which is a definite "no match". A `Not` over it matches,
+                        // so a preview pod sends the request back to the stable pods.
                         let json = match serde_json::from_reader::<_, Value>(body) {
                             Ok(json) => json,
                             Err(error) => {
                                 tracing::debug!(?error, "json filter failed to parse body json");
-                                return MatchResult::Undecided;
+                                return MatchResult::NoMatch;
                             }
                         };
 
@@ -367,9 +369,14 @@ impl HttpFilter {
     }
 }
 
-/// Runs the query over one header. A query that does not compile, errors on this input, panics or
-/// runs past [`JAQ_TIME_LIMIT`] is an `Err`, so the filter can stay undecided instead of
-/// answering "no match" for a header it never really checked.
+/// Runs the query over one header. The first boolean in the query's output is the answer, and an
+/// output without one counts as `false`.
+///
+/// An error raised while the query runs is not a failure: a query like
+/// `split(": ")[1] | fromjson | .tenant == "preview"` errors on every header it does not target,
+/// so that header simply does not match. Only a query that does not compile, panics or runs past
+/// [`JAQ_TIME_LIMIT`] is an `Err`, so the filter can stay undecided instead of answering "no
+/// match" for a header it never really checked.
 async fn eval_jaq(query: JqQuery, payload: String) -> Result<bool, String> {
     static TIME_LIMIT: LazyLock<Duration> = LazyLock::new(|| {
         Duration::from_secs(JAQ_TIME_LIMIT.try_from_env().ok().flatten().unwrap_or(500))
@@ -396,22 +403,18 @@ async fn eval_jaq(query: JqQuery, payload: String) -> Result<bool, String> {
             .map_err(|errors| format!("failed to compile the filter: {errors:?}"))?;
 
         let inputs = RcIter::new(core::iter::empty());
-        let out = filter.run((Ctx::new([], &inputs), Val::from(payload)));
+        let mut out = filter.run((Ctx::new([], &inputs), Val::from(payload)));
 
-        // A `true` anywhere in the output wins; otherwise an error in the output means the query
-        // broke on this input, which is not the same as it answering `false`.
-        let mut error = None;
-        for item in out {
-            match item {
-                Ok(Val::Bool(true)) => return Ok(true),
-                Ok(..) => {}
-                Err(err) => {
-                    error.get_or_insert_with(|| format!("the filter failed: {err:?}"));
+        let found_match = out
+            .find_map(|item| {
+                if let Ok(Val::Bool(value)) = &item {
+                    Some(*value)
+                } else {
+                    None
                 }
-            }
-        }
-
-        error.map_or(Ok(false), Err)
+            })
+            .unwrap_or(false);
+        Ok(found_match)
     });
 
     tokio::select! {
@@ -508,9 +511,19 @@ mod test {
         tcp::HttpFilter::Header(Filter::new(header.to_owned()).unwrap())
     }
 
-    /// A jq query that compiles but fails on every header it is run over.
-    fn failing_jq_filter() -> tcp::HttpFilter {
-        tcp::HttpFilter::HeaderJq(JqQuery::new("error").unwrap())
+    /// A jq filter that cannot be run, because its query does not compile. Deserializing skips
+    /// the compile check of [`JqQuery::new`], and building the agent filter directly skips the one
+    /// in [`HttpFilter::try_from`].
+    fn broken_jq_filter() -> HttpFilter {
+        HttpFilter::HeaderJq(serde_json::from_value(serde_json::json!("not a ( query")).unwrap())
+    }
+
+    fn jq_filter(query: &str) -> tcp::HttpFilter {
+        tcp::HttpFilter::HeaderJq(JqQuery::new(query).unwrap())
+    }
+
+    fn agent_filter(filter: tcp::HttpFilter) -> HttpFilter {
+        HttpFilter::try_from(&filter).unwrap()
     }
 
     fn not(filter: tcp::HttpFilter) -> tcp::HttpFilter {
@@ -595,37 +608,37 @@ mod test {
         );
     }
 
-    /// A JSON body filter cannot say anything about a body that is not JSON: a GET with an empty
-    /// body, a form post, plain text. That used to count as "no match", which a `Not` turned into
-    /// a match, so `not (body json ...)` stole every such request. The filter is undecided
-    /// instead, and `Not` leaves undecided alone, so neither side steals it.
+    /// A body that is not JSON (a GET with an empty body, a form post, plain text) has no value
+    /// for a JSON body filter to find, so the filter does not match and its negation does. A
+    /// preview pod stealing with `not (body json ...)` sends such a request back to the stable
+    /// pods instead of serving it with preview code.
     #[tokio::test]
-    async fn not_over_json_body_filter_stays_undecided_on_a_body_that_is_not_json() {
-        let plain = HttpFilter::try_from(&body_filter("preview")).unwrap();
-        let negated = HttpFilter::try_from(&not(body_filter("preview"))).unwrap();
+    async fn json_body_filter_does_not_match_a_body_that_is_not_json() {
+        let plain = agent_filter(body_filter("preview"));
+        let negated = agent_filter(not(body_filter("preview")));
 
         for body in [b"".as_slice(), b"tenant=preview", b"hello there"] {
             let mut parts = head("/orders", &[]);
             assert_eq!(
                 plain.matches(&mut parts, RequestBody::Complete(body)).await,
-                MatchResult::Undecided
+                MatchResult::NoMatch
             );
             assert_eq!(
                 negated
                     .matches(&mut parts, RequestBody::Complete(body))
                     .await,
-                MatchResult::Undecided
+                MatchResult::Match
             );
         }
     }
 
-    /// A jq query that fails at runtime (and the same goes for a compile error or running past
-    /// the time limit) checked nothing, so its answer must not be flipped by `Not` into stealing
-    /// every request on the port. Both the plain filter and its negation stay undecided.
+    /// A jq query that cannot be run checked nothing, so its answer must not be flipped by `Not`
+    /// into stealing every request on the port. Both the plain filter and its negation stay
+    /// undecided.
     #[tokio::test]
-    async fn jq_error_under_not_stays_undecided() {
-        let plain = HttpFilter::try_from(&failing_jq_filter()).unwrap();
-        let negated = HttpFilter::try_from(&not(failing_jq_filter())).unwrap();
+    async fn jq_query_that_cannot_run_stays_undecided_under_not() {
+        let plain = broken_jq_filter();
+        let negated = HttpFilter::Not(Box::new(broken_jq_filter()));
 
         let mut parts = head("/orders", &[("x-tenant", "live")]);
         assert_eq!(
@@ -638,14 +651,75 @@ mod test {
         );
 
         // A query that does run still decides as usual, in both directions.
-        let working = not(tcp::HttpFilter::HeaderJq(
-            JqQuery::new(r#"test("x-tenant: live")"#).unwrap(),
-        ));
-        let working = HttpFilter::try_from(&working).unwrap();
+        let working = agent_filter(not(jq_filter(r#"test("x-tenant: live")"#)));
         assert_eq!(
             working.matches(&mut parts, NO_BODY).await,
             MatchResult::NoMatch
         );
+    }
+
+    /// This query errors on every header but the one it targets, because the other values are not
+    /// JSON objects. Those errors say nothing about the request: the targeted header decides, and
+    /// a request without it does not match, so a `Not` over the query takes it away from the
+    /// preview pod.
+    #[tokio::test]
+    async fn jq_errors_on_other_headers_do_not_stop_the_filter_from_deciding() {
+        let query = r#"split(": ")[1] | fromjson | .tenant == "preview""#;
+        let plain = agent_filter(jq_filter(query));
+        let negated = agent_filter(not(jq_filter(query)));
+
+        let cases = [
+            (
+                head(
+                    "/orders",
+                    &[
+                        ("user-agent", "curl/8"),
+                        ("x-ctx", r#"{"tenant":"preview"}"#),
+                    ],
+                ),
+                MatchResult::Match,
+            ),
+            (
+                head(
+                    "/orders",
+                    &[("user-agent", "curl/8"), ("x-ctx", r#"{"tenant":"live"}"#)],
+                ),
+                MatchResult::NoMatch,
+            ),
+            (
+                head("/orders", &[("user-agent", "curl/8")]),
+                MatchResult::NoMatch,
+            ),
+        ];
+
+        for (mut parts, expected) in cases {
+            assert_eq!(plain.matches(&mut parts, NO_BODY).await, expected);
+            assert_eq!(negated.matches(&mut parts, NO_BODY).await, !expected);
+        }
+    }
+
+    /// Existing `header_jq` filters rely on the first boolean a query outputs being its answer:
+    /// whatever comes after it, a later `true` or an error, does not count, and an error before
+    /// it is skipped.
+    #[tokio::test]
+    async fn jq_query_answers_with_its_first_boolean() {
+        for (query, expected) in [
+            ("false, true", MatchResult::NoMatch),
+            ("false, error", MatchResult::NoMatch),
+            ("true, false", MatchResult::Match),
+            ("error, true", MatchResult::Match),
+            ("1, true", MatchResult::Match),
+            ("1, 2", MatchResult::NoMatch),
+            ("error", MatchResult::NoMatch),
+        ] {
+            let filter = agent_filter(jq_filter(query));
+            let mut parts = head("/orders", &[("x-tenant", "live")]);
+            assert_eq!(
+                filter.matches(&mut parts, NO_BODY).await,
+                expected,
+                "{query}"
+            );
+        }
     }
 
     /// A body that broke mid-transfer is a request nobody can serve. Unlike a body that was too
@@ -671,33 +745,29 @@ mod test {
         );
     }
 
-    /// A failed child counts the way it always did inside a composite: it cannot satisfy an
-    /// `all`, and an `any` ignores it as long as another child matches. What changes is the
-    /// answer when the failed child was the deciding one: undecided, not "no match", so a `Not`
-    /// around the composite does not turn a broken filter into a match. A child that still waits
-    /// for the body is asked for it first, because its answer can still settle the composite.
+    /// A failed child cannot satisfy an `all`, and an `any` ignores it as long as another child
+    /// matches. When the failed child is the deciding one the composite is undecided, not "no
+    /// match", so a `Not` around it does not turn a broken filter into a match. A child that still
+    /// waits for the body is asked for it first, because its answer can still settle the
+    /// composite.
     #[tokio::test]
     async fn composites_do_not_let_a_failed_child_decide() {
-        let all = |filters| {
-            HttpFilter::try_from(&not(tcp::HttpFilter::Composite { all: true, filters })).unwrap()
-        };
+        let all = |filters| HttpFilter::Not(Box::new(HttpFilter::Composite { all: true, filters }));
         let any = |filters| {
-            HttpFilter::try_from(&not(tcp::HttpFilter::Composite {
+            HttpFilter::Not(Box::new(HttpFilter::Composite {
                 all: false,
                 filters,
             }))
-            .unwrap()
         };
+        let header = || agent_filter(header_filter("x-tenant: preview"));
+        let body = || agent_filter(body_filter("preview"));
 
-        // Both requests carry a header, so the failing jq query has something to fail on.
+        // Both requests carry a header, so the broken jq query has something to run over.
         let mut with_header = head("/orders", &[("x-tenant", "preview")]);
         let mut without_header = head("/orders", &[("x-request-id", "42")]);
 
         // `all`: a definite "no match" from the header wins over the failure; otherwise undecided.
-        let filter = all(vec![
-            header_filter("x-tenant: preview"),
-            failing_jq_filter(),
-        ]);
+        let filter = all(vec![header(), broken_jq_filter()]);
         assert_eq!(
             filter.matches(&mut without_header, NO_BODY).await,
             MatchResult::Match
@@ -708,10 +778,7 @@ mod test {
         );
 
         // `any`: a match from the header wins over the failure; otherwise undecided.
-        let filter = any(vec![
-            header_filter("x-tenant: preview"),
-            failing_jq_filter(),
-        ]);
+        let filter = any(vec![header(), broken_jq_filter()]);
         assert_eq!(
             filter.matches(&mut with_header, NO_BODY).await,
             MatchResult::NoMatch
@@ -722,12 +789,12 @@ mod test {
         );
 
         // A pending body is asked for before the failure gets the last word, in both composites.
-        let filter = all(vec![body_filter("preview"), failing_jq_filter()]);
+        let filter = all(vec![body(), broken_jq_filter()]);
         assert_eq!(
             filter.matches(&mut with_header, NO_BODY).await,
             MatchResult::NeedsBody
         );
-        let filter = any(vec![body_filter("preview"), failing_jq_filter()]);
+        let filter = any(vec![body(), broken_jq_filter()]);
         assert_eq!(
             filter.matches(&mut with_header, NO_BODY).await,
             MatchResult::NeedsBody
