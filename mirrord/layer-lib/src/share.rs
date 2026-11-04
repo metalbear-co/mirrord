@@ -14,6 +14,7 @@ use std::os::fd::AsRawFd;
 use std::{
     net::{Shutdown, SocketAddr, TcpStream},
     ops::Not,
+    sync::Arc,
     thread,
     time::Duration,
 };
@@ -44,21 +45,21 @@ const REGISTRATION_TIMEOUT: Duration = Duration::from_secs(30);
 /// the internal proxy learns that the process exited.
 #[derive(Debug)]
 pub struct ShareControl {
-    socket: TcpStream,
-    /// The copy of `socket` that the printing thread reads.
-    #[cfg(unix)]
-    reader_fd: std::os::fd::RawFd,
+    /// Shared with the printing thread, which reads it. Holding it here keeps its fd open for as
+    /// long as this exists, even after the thread stopped, so the application can't get the number
+    /// back while [`ShareControl::reset_after_fork`] may still close it.
+    socket: Arc<TcpStream>,
 }
 
 impl ShareControl {
-    /// The printing thread doesn't survive fork, so close only this child's descriptor copies.
+    /// The printing thread doesn't survive fork, so close only this child's descriptor copy.
     #[cfg(unix)]
     pub fn reset_after_fork(self) {
         let inherited = std::mem::ManuallyDrop::new(self);
-        // SAFETY: these descriptors were copied by fork, but the thread that used them did not.
-        // close, unlike shutdown, does not affect the parent's socket connection.
+        // SAFETY: this descriptor was copied by fork, but the thread that shares it did not, so
+        // nothing else in the child uses it. close, unlike shutdown, does not affect the parent's
+        // socket connection.
         unsafe {
-            libc::close(inherited.reader_fd);
             libc::close(inherited.socket.as_raw_fd());
         }
     }
@@ -96,11 +97,9 @@ pub fn start_share_control(
             inner: LayerToProxyMessage::OpenShareControl { layer_id },
         })
         .map_err(ProxyError::from)?;
-    let reader = socket.try_clone().map_err(ProxyError::from)?;
-    #[cfg(unix)]
-    let reader_fd = reader.as_raw_fd();
-    let mut decoder = SyncDecoder::<LocalMessage<ProxyToLayerMessage>, _>::new(reader);
-    let first = decoder.receive().map_err(ProxyError::from)?;
+    let first = SyncDecoder::<LocalMessage<ProxyToLayerMessage>, _>::new(&socket)
+        .receive()
+        .map_err(ProxyError::from)?;
     if matches!(
         first,
         Some(LocalMessage {
@@ -116,10 +115,13 @@ pub fn start_share_control(
         .into());
     }
     socket.set_read_timeout(None).map_err(ProxyError::from)?;
+    let socket = Arc::new(socket);
+    let reader = Arc::clone(&socket);
     thread::Builder::new()
         .name("mirrord-share".to_owned())
         .spawn(move || {
             let _guard = DetourGuard::new();
+            let mut decoder = SyncDecoder::<LocalMessage<ProxyToLayerMessage>, _>::new(&*reader);
             // The thread stops when the internal proxy closes the connection, and leaves ending
             // the application to the internal proxy.
             while let Ok(Some(message)) = decoder.receive() {
@@ -148,9 +150,5 @@ pub fn start_share_control(
             }
         })
         .map_err(ProxyError::from)?;
-    Ok(ShareControl {
-        socket,
-        #[cfg(unix)]
-        reader_fd,
-    })
+    Ok(ShareControl { socket })
 }
