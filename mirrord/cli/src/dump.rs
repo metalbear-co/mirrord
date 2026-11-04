@@ -26,7 +26,10 @@ use tracing::info;
 
 use super::config::DumpArgs;
 use crate::{
-    CliError, connection::create_and_connect, data::UserData, error::CliResult,
+    CliError,
+    connection::create_and_connect,
+    data::UserData,
+    error::{CliResult, LocalShareError},
     kube::kube_client_from_layer_config,
 };
 
@@ -46,6 +49,9 @@ pub async fn dump_command(
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
 
     let mut config = crate::util::resolve_layer_config(&mut cfg_context).await?;
+    if config.share {
+        return Err(LocalShareError::UnsupportedCommand("dump").into());
+    }
 
     let mut progress = ProgressTracker::from_env("mirrord dump");
     let mut analytics = AnalyticsReporter::new(

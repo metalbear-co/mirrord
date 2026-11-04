@@ -282,6 +282,13 @@ pub(crate) enum LocalShareError {
     )]
     UnsupportedPortForward,
 
+    /// `mirrord dump`, `mirrord vpn` and `mirrord diagnose` connect to the target with the config
+    /// file, but run no local application whose port the link could share.
+    #[error(
+        "`mirrord {0}` can't create a share link, because it runs no local application. Use `mirrord exec --share`."
+    )]
+    UnsupportedCommand(&'static str),
+
     #[error("The internal proxy of the shared session stopped ({0}), so its share link is gone.")]
     ProxyExit(ExitStatus),
 
