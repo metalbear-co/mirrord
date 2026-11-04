@@ -20,7 +20,7 @@ use futures::future::BoxFuture;
 use mirrord_config::{LayerConfig, feature::network::incoming::IncomingConfig};
 use mirrord_intproxy_protocol::{LayerId, ShareReport};
 use mirrord_operator::{
-    client::{OperatorSession, SessionShareReadError, SessionShareReader},
+    client::{OperatorSession, SessionShareReadError, SessionShareReader, error::OperatorApiError},
     crd::{SessionShare, SessionSharePhase},
 };
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,9 @@ const MAX_POLL_DELAY: Duration = Duration::from_secs(2);
 /// go on: the operator ends a link that it can't publish, so a link that stays pending is one that
 /// the operator still works on.
 const SLOW_POLL_LOG_AFTER: Duration = Duration::from_secs(30);
+
+/// How long one [`OperatorShareStatus::fetch`] may take, building its client included.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How long reads of the link may keep failing before the intproxy gives up on the link. Until
 /// then a failed read is retried, because the API server or the network may come back.
@@ -99,7 +102,12 @@ pub trait ShareStatusSource: Send + Sync {
 /// Reads the share link from the session's `sessions` view, with the session's certificate.
 ///
 /// The reader is built on the first read and reused after that, so the kubeconfig's credential
-/// plugin doesn't run for every read. A failed build is tried again on the next read.
+/// plugin doesn't run for every read. A failed build is tried again on the next read, except for a
+/// session that can't have a link at all. Other build failures, such as a credential plugin that
+/// fails, can pass, and the kubeconfig itself already worked for the CLI moments before.
+///
+/// One timeout covers the build and the read, so a credential plugin that hangs can't hold the
+/// poll past [`READ_FAILURE_DEADLINE`].
 pub struct OperatorShareStatus {
     config: Arc<LayerConfig>,
     session: Arc<OperatorSession>,
@@ -121,11 +129,14 @@ impl ShareStatusSource for OperatorShareStatus {
         let config = self.config.clone();
         let session = self.session.clone();
         let reader = self.reader.clone();
-        Box::pin(async move {
+        let fetch = async move {
             let reader = reader
                 .get_or_try_init(|| SessionShareReader::new(&config, &session))
                 .await
-                .map_err(|error| ShareStatusError::Transient(error.into()))?;
+                .map_err(|error| match error {
+                    OperatorApiError::LocalShare(message) => ShareStatusError::Refused(message),
+                    error => ShareStatusError::Transient(error.into()),
+                })?;
             reader.read().await.map_err(|error| match error {
                 SessionShareReadError::MissingPermission | SessionShareReadError::Refused(_) => {
                     ShareStatusError::Refused(error.to_string())
@@ -134,6 +145,15 @@ impl ShareStatusSource for OperatorShareStatus {
                     ShareStatusError::Transient(error.into())
                 }
             })
+        };
+        Box::pin(async move {
+            tokio::time::timeout(FETCH_TIMEOUT, fetch)
+                .await
+                .unwrap_or_else(|_| {
+                    Err(ShareStatusError::Transient(
+                        SessionShareReadError::TimedOut.into(),
+                    ))
+                })
         })
     }
 }
@@ -171,6 +191,7 @@ impl BackgroundTask for SharePoll {
         let mut failing_since = None;
 
         loop {
+            let read_started = Instant::now();
             let read = tokio::select! {
                 None = message_bus.recv() => return Ok(()),
                 read = self.source.fetch() => read,
@@ -198,7 +219,7 @@ impl BackgroundTask for SharePoll {
                 }
                 Err(ShareStatusError::Refused(message)) => Some(SharePollOutcome::Failed(message)),
                 Err(ShareStatusError::Transient(error)) => {
-                    let since = *failing_since.get_or_insert_with(Instant::now);
+                    let since = *failing_since.get_or_insert(read_started);
                     if since.elapsed() >= READ_FAILURE_DEADLINE {
                         Some(SharePollOutcome::Failed(format!(
                             "The share link couldn't be read from the operator for {} seconds, so mirrord can't tell whether it works ({error}). Restart the session.",
@@ -332,11 +353,12 @@ impl LocalShareState {
         self.phase = Phase::Failed(Failure::new(message, Instant::now(), false));
     }
 
-    /// Whether a `Close` from the operator is about this link: the link was registered and the
-    /// operator hasn't removed it for a reason that was already printed. The operator writes the
-    /// reason of such a `Close` for the user, also when the session ends for a reason other than
-    /// the link, so it is printed as it is.
-    pub(crate) fn is_live(&self) -> bool {
+    /// Whether the reason of a `Close` from the operator is printed as it is, as the share
+    /// failure: while the link is registered or ready, or removed with its report still held back.
+    /// The operator words the reason of such a `Close` for the user, also when the session ends
+    /// for a reason other than the link. After the link ended or its failure was printed, a
+    /// `Close` is about the session alone.
+    pub(crate) fn prints_close_reason(&self) -> bool {
         match &self.phase {
             Phase::Accepted { .. } | Phase::Ready { .. } => true,
             Phase::Failed(failure) => failure.replaceable && failure.reported.not(),

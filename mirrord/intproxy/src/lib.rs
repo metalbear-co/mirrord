@@ -946,13 +946,14 @@ impl IntProxy {
             // The operator ends a shared session with the reason its link failed, such as the loss
             // of the agent that the link routes to, and words the reason of any other end of the
             // session for the user too. That reason is all the user reads, so it reaches the
-            // application without the text that frames other agent failures. Once the link ended,
-            // a `Close` is about the session alone and keeps that text.
+            // application without the "agent closed connection with error" text that frames other
+            // agent failures. Once the link ended, a `Close` is about the session alone and keeps
+            // that text.
             DaemonMessage::Close(reason)
                 if self
                     .share
                     .as_ref()
-                    .is_some_and(share::LocalShareState::is_live) =>
+                    .is_some_and(share::LocalShareState::prints_close_reason) =>
             {
                 Err(ProxyRuntimeError::LocalShare(reason))?
             }

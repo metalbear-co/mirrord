@@ -286,12 +286,19 @@ pub enum SessionShareReadError {
 
     /// Kubernetes or the operator refused the read for another reason, such as credentials that
     /// expired. Reading again doesn't help. The text is the refusal's own message.
-    #[error("The cluster refused to read this session's share link: {0}")]
+    #[error(
+        "The cluster refused to read this session's share link: {0}. Check that you're logged in to the cluster and that your roles allow it, then restart the session."
+    )]
     Refused(String),
 
-    #[error("Reading this session's share link timed out.")]
+    /// The cluster didn't answer the read in time. A later read may work.
+    #[error(
+        "Reading this session's share link timed out. Check your connection to the cluster, then restart the session."
+    )]
     TimedOut,
 
+    /// The read failed for a reason the client can't tell apart from a passing one, such as a
+    /// lost connection.
     #[error(transparent)]
     Operator(#[from] OperatorApiError),
 }

@@ -451,9 +451,6 @@ async fn local_share_blocked_stderr_does_not_block_failure() {
         },
         queued_output(&mut stderr).await
     );
-    // The operator serves the link as ready from the steal on, so its print is in flight while
-    // stderr is full.
-    proxy.set_share_phase(SessionSharePhase::Ready);
     proxy
         .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
             port,
@@ -483,8 +480,11 @@ async fn local_share_blocked_stderr_does_not_block_failure() {
         },
         queued_output(&mut stderr).await
     );
-    // Longer than the intproxy's first wait between two reads of the link.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // The operator serves the link as ready only once stderr is full, and the wait is longer than
+    // the intproxy's longest wait between two reads, so the link's print is in flight and blocked
+    // when the failure arrives.
+    proxy.set_share_phase(SessionSharePhase::Ready);
+    tokio::time::sleep(Duration::from_millis(2500)).await;
     proxy
         .send(DaemonMessage::Close(
             "forced blocked-output failure".to_owned(),
@@ -519,9 +519,14 @@ async fn local_share_blocked_stderr_does_not_block_failure() {
 
 /// The operator removes a link that it can't keep and then ends the session with a `Close` that
 /// says why. When the intproxy reads the removed link before the `Close` arrives, the application
-/// still prints the reason from the `Close`, and not the vaguer one that the read gives.
+/// still prints the reason from the `Close`, and not the vaguer one that the read gives. Without a
+/// `Close`, the application prints that the link was removed, once the intproxy stopped holding
+/// that back, and the session ends.
+#[rstest::rstest]
+#[case::close(true)]
+#[case::no_close(false)]
 #[tokio::test]
-async fn local_share_close_reason_replaces_removed_link() {
+async fn local_share_close_reason_replaces_removed_link(#[case] close: bool) {
     let scenario = tempfile::TempDir::new().unwrap();
     let tmpdir = scenario.path().to_str().unwrap();
     let reserved = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -561,26 +566,34 @@ async fn local_share_close_reason_replaces_removed_link() {
     process
         .wait_for_line_stdout(Duration::from_secs(5), "APP_LISTENING")
         .await;
-    // Long enough for the intproxy to read the removed link, shorter than it holds that back.
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    proxy
-        .send(DaemonMessage::Close("routed agent lost".to_owned()))
-        .await;
+    let removed = "Can't share this session: The operator removed the share link before it was ready. Restart the session to get a new link.";
+    let closed = "Can't share this session: routed agent lost";
+    if close {
+        // Long enough for the intproxy to read the removed link, shorter than it holds that back.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        proxy
+            .send(DaemonMessage::Close("routed agent lost".to_owned()))
+            .await;
+    }
     let status = timeout(Duration::from_secs(5), process.wait()).await;
     assert!(
         matches!(status, Ok(status) if status.success().not()),
-        "removed stage=application-exit: actual={status:?}, stderr={:.8192}",
+        "removed close={close} stage=application-exit: actual={status:?}, stderr={:.8192}",
         process.get_stderr().await
     );
     let stderr = process.get_stderr().await;
-    assert_eq!(
-        stderr
-            .matches("Can't share this session: routed agent lost")
-            .count(),
-        1,
-        "{stderr}"
+    let (expected, unexpected) = if close {
+        (closed, removed)
+    } else {
+        (removed, closed)
+    };
+    assert_eq!(stderr.matches(expected).count(), 1, "{stderr}");
+    assert!(stderr.contains(unexpected).not(), "{stderr}");
+    let completion = timeout(Duration::from_secs(5), proxy.wait()).await;
+    assert!(
+        matches!(completion, Ok(Err(_))),
+        "removed close={close} stage=proxy-exit: actual={completion:?}"
     );
-    assert!(stderr.contains("before it was ready").not(), "{stderr}");
 }
 
 /// The intproxy of a shared session rejects a port subscription from a layer whose share control

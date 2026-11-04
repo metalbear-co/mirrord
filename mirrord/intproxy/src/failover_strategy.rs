@@ -320,7 +320,8 @@ impl FailoverStrategy {
                 self.layers.remove(&LayerId(id));
                 self.connected_layers.remove(&LayerId(id));
             }
-            // The share link read of a failed shared session stops by itself.
+            // The share link read exits once it sent its outcome, which can be after the shared
+            // session failed.
             (MainTaskId::SharePoll, TaskUpdate::Finished(Ok(()))) => {}
             (task_id, TaskUpdate::Finished(res)) => match res {
                 Ok(()) => {
