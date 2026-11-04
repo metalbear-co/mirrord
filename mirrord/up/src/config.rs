@@ -941,6 +941,10 @@ impl ServiceConfig {
             .config_patch
             .as_ref()
             .is_some_and(|patch| patch.pointer("/feature/split_queues").is_some());
+        let patch_sets_incoming = self
+            .config_patch
+            .as_ref()
+            .is_some_and(|patch| patch.pointer("/feature/network/incoming").is_some());
 
         if let Some(patch) = self.config_patch {
             if preview && patch.pointer("/feature/preview/image").is_some() {
@@ -955,6 +959,17 @@ impl ServiceConfig {
                 cfg.feature.db_branches = DatabaseBranchesConfig::default();
             }
             cfg = apply_config_patch(cfg, patch, &key)?;
+        }
+
+        // A preview without a target runs no pod to receive traffic. The mode comes from the
+        // `split` mode every preview session runs as, not from the service, so it goes back to
+        // the default and the targetless check doesn't report it as ignored. A `http_filter`,
+        // `ignore_ports` or `config_patch` the service did set stays, and is reported.
+        if preview
+            && patch_sets_incoming.not()
+            && matches!(cfg.target.path, None | Some(Target::Targetless))
+        {
+            cfg.feature.network.incoming.mode = IncomingMode::default();
         }
 
         // `incoming: replace` splits no queues.
@@ -3682,6 +3697,112 @@ mod tests {
             config.select_services(&[], &[]).unwrap_err(),
             SelectError::AllSkipped
         ));
+    }
+
+    // -- Preview without a target --
+
+    /// The config `mirrord preview up` generates for the one service of `yaml`.
+    fn preview_service(yaml: &str) -> LayerConfig {
+        parse(yaml)
+            .assemble_services(
+                &EnvKey::Provided("key".to_owned()),
+                &mut HashMap::new(),
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+                SessionKind::Preview,
+            )
+            .unwrap()
+            .remove(0)
+            .config
+    }
+
+    /// Whether the targetless check reports `feature.network.incoming` as ignored for `config`.
+    fn warns_about_incoming(config: &LayerConfig) -> bool {
+        let mut context = ConfigContext::default().strict_env(true);
+        config.verify_for_targetless_preview(&mut context).unwrap();
+        context
+            .into_warnings()
+            .iter()
+            .any(|warning| warning.contains("`feature.network.incoming` is ignored"))
+    }
+
+    /// A service under `mirrord preview up`, with `extra` as more settings of the service. Its
+    /// branch comes from `config_patch`, as `mirrord up` adds none to a service without a target.
+    fn preview_yaml(target: &str, extra: &str) -> String {
+        format!(
+            r#"
+            services:
+              svc:
+                target: {target}
+                run:
+                  command: ["echo"]
+                {extra}
+                config_patch:
+                  feature:
+                    db_branches:
+                      - type: pg
+                        connection:
+                          url:
+                            type: secret
+                            name: pg
+                            key: url
+            "#
+        )
+    }
+
+    /// Every preview session runs as the `split` mode, which sets the incoming mode to steal. A
+    /// service without a target has nothing to steal for, and the targetless check compares
+    /// incoming against the default, so every such service was told `feature.network.incoming`
+    /// is ignored although nobody set it.
+    #[test]
+    fn targetless_preview_does_not_report_incoming_nobody_set() {
+        let config = preview_service(&preview_yaml("none", ""));
+
+        assert!(!warns_about_incoming(&config));
+    }
+
+    /// Incoming the service did set is still reported, and a patch keeps the mode it asked for.
+    #[test]
+    fn targetless_preview_reports_incoming_the_service_set() {
+        let filter = preview_service(&preview_yaml(
+            "none",
+            r#"http_filter: { header_filter: "x-user: me" }"#,
+        ));
+        assert!(warns_about_incoming(&filter));
+
+        let ignore_ports = preview_service(&preview_yaml("none", "ignore_ports: [8080]"));
+        assert!(warns_about_incoming(&ignore_ports));
+
+        let patched = preview_service(
+            r#"
+            services:
+              svc:
+                target: none
+                run:
+                  command: ["echo"]
+                config_patch:
+                  feature:
+                    network:
+                      incoming: off
+                    db_branches:
+                      - type: pg
+                        connection:
+                          url:
+                            type: secret
+                            name: pg
+                            key: url
+            "#,
+        );
+        assert_eq!(patched.feature.network.incoming.mode, IncomingMode::Off);
+        assert!(warns_about_incoming(&patched));
+    }
+
+    /// A preview with a target keeps the mode its pods need to get traffic.
+    #[test]
+    fn targeted_preview_keeps_the_split_incoming_mode() {
+        let config = preview_service(&preview_yaml("{ path: \"deployment/web\" }", ""));
+
+        assert_eq!(config.feature.network.incoming.mode, IncomingMode::Steal);
     }
 
     // -- Preview image selection --

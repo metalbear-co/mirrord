@@ -275,6 +275,7 @@ struct PreparedSync {
 fn drop_pod_settings(layer_config: &mut LayerConfig, auto_queue_splitting: &mut bool) {
     layer_config.feature.split_queues = Default::default();
     layer_config.feature.kafka_branch = false;
+    layer_config.feature.preview.image = None;
     layer_config.feature.preview.secret_mounts.clear();
     layer_config.feature.preview.config_mounts.clear();
     *auto_queue_splitting = false;
@@ -336,11 +337,7 @@ impl PreparedPreview {
                 return Err(CliError::PreviewTargetRequired);
             }
             if !sources.is_empty() {
-                return Err(CliError::UnsupportedTargetConfig(
-                    "`--resource` and `--chart` need a target workload to run the manifests \
-                     against; set a `target` or leave them out"
-                        .to_owned(),
-                ));
+                return Err(manifests_need_a_target());
             }
             if sync.is_some() {
                 return Err(CliError::UnsupportedTargetConfig(
@@ -2397,10 +2394,22 @@ fn session_has_target(session: &PreviewSession, target: &SessionTarget) -> bool 
     session.spec.target == *target
 }
 
-/// `--resource` compares the files with one workload's live pod template, and a label target
-/// matches pods of any number of workloads.
+/// What `start` and `diff` refuse `--resource` and `--chart` with when there is no target.
+fn manifests_need_a_target() -> CliError {
+    CliError::UnsupportedTargetConfig(
+        "`--resource` and `--chart` need a target workload to run the manifests against; set a \
+         `target` or leave them out"
+            .to_owned(),
+    )
+}
+
+/// `--resource` compares the files with one workload's live pod template. A label target matches
+/// pods of any number of workloads, and the placeholder of a preview without a target names none.
 fn resources_target(target: &SessionTarget) -> CliResult<&KubeResourceTarget> {
     match target {
+        SessionTarget::KubeResource(target) if target.is_targetless() => {
+            Err(manifests_need_a_target())
+        }
         SessionTarget::KubeResource(target) => Ok(target),
         SessionTarget::PodSet(_) => Err(CliError::UnsupportedTargetConfig(format!(
             "`--resource` and `--chart` do not support label target `{}`; target a single \
@@ -2868,15 +2877,34 @@ mod tests {
         let mut layer_config = LayerConfig::resolve(&mut ConfigContext::default().strict_env(true))
             .expect("the default config is valid");
         layer_config.feature.kafka_branch = true;
+        layer_config.feature.preview.image = Some("myapp:v2".to_owned());
         let mut auto_queue_splitting = true;
 
         drop_pod_settings(&mut layer_config, &mut auto_queue_splitting);
 
         assert!(!auto_queue_splitting);
         assert!(!layer_config.feature.kafka_branch);
+        assert_eq!(layer_config.feature.preview.image, None);
         assert!(!layer_config.feature.split_queues.is_set());
         assert!(layer_config.feature.preview.secret_mounts.is_empty());
         assert!(layer_config.feature.preview.config_mounts.is_empty());
+    }
+
+    /// `preview diff -t targetless --resource m.yaml` takes the placeholder from
+    /// `resolve_config_target`. As a plain kube resource it went on to GET a `Targetless` named
+    /// `""` from the API server, and the user saw a `LiveRead` error about that object instead
+    /// of being told the manifests need a target, as `start` tells them.
+    #[test]
+    fn manifests_are_refused_without_a_target() {
+        let branch_set = targetless_session_target(&branches(serde_json::json!([{
+            "type": "pg",
+            "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } },
+        }])));
+
+        for target in [SessionTarget::targetless(), branch_set] {
+            let error = resources_target(&target).expect_err("no workload to compare with");
+            assert_eq!(error.to_string(), manifests_need_a_target().to_string());
+        }
     }
 
     fn branches(json: serde_json::Value) -> DatabaseBranchesConfig {
