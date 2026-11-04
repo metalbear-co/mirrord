@@ -676,6 +676,7 @@ mod tests {
                 accept_invalid_certificates: Some(true),
                 telemetry: None,
                 context: None,
+                baggage: Some("mirrord-session=abc".into()),
             },
             modes: Default::default(),
             services: [("api".into(), sample_service())].into_iter().collect(),
@@ -693,6 +694,10 @@ mod tests {
         assert_eq!(parsed.common.operator, Some(false));
         assert_eq!(parsed.common.accept_invalid_certificates, Some(true));
         assert_eq!(parsed.common.telemetry, None);
+        assert_eq!(
+            parsed.common.baggage.as_deref(),
+            Some("mirrord-session=abc")
+        );
         assert_eq!(parsed.services["api"], sample_service());
     }
 
