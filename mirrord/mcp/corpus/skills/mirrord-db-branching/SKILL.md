@@ -3,7 +3,7 @@ name: mirrord-db-branching
 description: Helps users configure mirrord.json for database branching, enabling isolated database copies for safe development and testing. Use when the user wants to set up MySQL, MariaDB, PostgreSQL, MSSQL, MongoDB, Redis, DynamoDB, ClickHouse, Google Spanner, Amazon S3, turbopuffer, or generic branches, configure copy modes, connection sources, schema migrations, IAM authentication, or manage database branches.
 metadata:
   author: MetalBear
-  version: "2.11"
+  version: "2.12"
 ---
 
 # Mirrord DB Branching Skill
@@ -130,6 +130,7 @@ If neither is available, validate against `references/schema.json` in the mirror
 | `emulator_host` | spanner | Name of the env var mirrord sets to the emulator address (default `SPANNER_EMULATOR_HOST`). |
 | `location` | redis | `"remote"` (default) or `"local"`. |
 | `local` | redis | Local Redis runtime config (see [Redis](#redis)). |
+| `cluster` | redis | Remote only. `true` runs the branch as a one-node Redis Cluster instead of a standalone `redis-server`, for apps using a Redis Cluster client. See [Redis Cluster Clients](#redis-cluster-clients). |
 | `image` / `port` / `command` / `args` / `env` / `readiness` / `copy` / `profile` | generic | See [Generic Branches](#generic-branches). |
 
 ### Version Requirements
@@ -144,6 +145,7 @@ Enable the matching Helm value on the operator chart, and meet the minimum versi
 | MongoDB | 3.137.0 | 3.183.0 | 1.44.0 | `operator.mongoBranching: true` |
 | Redis (remote) | 3.168.0 | 3.217.0 | 3.168.0 | `operator.redisBranching: true` |
 | Redis (local) | — | 3.180.0 | — | none (runs on your machine) |
+| Redis Cluster branches (`cluster: true`) | 3.225.0 | 3.279.0 | 3.225.0 | `operator.redisBranching: true` |
 | DynamoDB | 3.179.0 | 3.228.0 | 3.179.0 | `operator.dynamodbBranching: true` |
 | ClickHouse | 3.182.0 | 3.230.0 | 3.182.0 | `operator.clickhouseBranching: true` |
 | Google Spanner | 3.182.0 | 3.230.0 | 3.182.0 | `operator.spannerBranching: true` |
@@ -585,6 +587,32 @@ Spawns a Redis instance on your machine and redirects the app's Redis traffic to
 - `local.runtime`: `"container"` (default), `"redis_server"`, or `"auto"`.
 - `local.container_runtime`: `"docker"` (default), `"podman"`, or `"nerdctl"`.
 - `local.port`: sessions on the same port share one local Redis DB; a new session on that port replaces it.
+
+### Redis Cluster Clients
+
+A remote branch is a standalone `redis-server` by default. An app that connects with a Redis Cluster client (one that runs `CLUSTER SLOTS` or `CLUSTER SHARDS` on connect, as cluster clients in go-redis, ioredis, Lettuce, redis-py and others do) refuses such a server. Set `"cluster": true` to run the branch as a one-node Redis Cluster instead:
+
+```json mirrord
+{
+  "feature": { "db_branches": [ {
+    "id": "cache-redis",
+    "type": "redis",
+    "cluster": true,
+    "connection": { "url": "REDIS_URL" },
+    "copy": { "mode": "all" }
+  } ] }
+}
+```
+
+The branch node owns all 16384 hash slots, so every key the app uses lands on it, and normal Redis Cluster rules apply:
+
+- Only database `0` exists. Leave `name` out or set it to `"0"`; any other index is rejected.
+- Multi-key commands (`MGET`, `MSET`, transactions, Lua scripts) must keep all their keys in one hash slot, same as against the real cluster.
+- The node announces its own pod IP, which a cluster client dials after `CLUSTER SLOTS`. Through mirrord that address is reachable from your machine like any pod in the cluster.
+
+With `"mode": "all"` the source may be standalone Redis or a Redis Cluster. From a cluster, keys are copied from every master node, following the addresses the cluster announces, with the same credentials and TLS settings as the source connection; `patterns` applies the same way. A standalone source needs only read access (`+@read`); a cluster source user also needs `cluster|slots` and `cluster|nodes`, used to find the masters and confirm no slot moved while the copy ran — if the cluster is resharding during the copy, the branch fails to start instead of coming up with missing keys, so retry once resharding finishes.
+
+`"cluster": true` only applies to remote branches; a local branch always runs a standalone instance.
 
 ### Copying from a TLS source
 
