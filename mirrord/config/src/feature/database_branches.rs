@@ -11,6 +11,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize, de::Error as _, ser::SerializeMap};
 use strum::IntoEnumIterator;
 use strum_macros::{EnumDiscriminants, EnumIter, IntoStaticStr};
+use wildmatch::WildMatch;
 
 use crate::config::{self, ConfigError};
 
@@ -764,6 +765,24 @@ impl DatabaseBranchesConfig {
                     branch.verify_shared()?;
                     cfg.verify_additional_databases()?;
                 }
+                // The MySQL family can leave tables out of the copy, which must not contradict
+                // the rest of the copy config.
+                DatabaseBranchConfig::Mysql(cfg) => {
+                    branch.verify_shared()?;
+                    verify_exclude_tables(
+                        branch.copy_mode(),
+                        cfg.copy.exclude_tables(),
+                        cfg.copy.tables(),
+                    )?;
+                }
+                DatabaseBranchConfig::Mariadb(cfg) => {
+                    branch.verify_shared()?;
+                    verify_exclude_tables(
+                        branch.copy_mode(),
+                        cfg.copy.exclude_tables(),
+                        cfg.copy.tables(),
+                    )?;
+                }
                 // Same for turbopuffer's namespace/api_key/region params.
                 DatabaseBranchConfig::Turbopuffer(cfg) => cfg.verify()?,
                 other => other.verify_shared()?,
@@ -772,6 +791,73 @@ impl DatabaseBranchesConfig {
 
         Ok(())
     }
+}
+
+/// Rejects `exclude_tables` entries the copy could not act on: a pattern that matches every
+/// table (the copy would copy nothing), an empty entry (nothing to match), a database-qualified
+/// entry (the operator matches bare table names, so it would match nothing), and a table that is
+/// both filtered through `tables` and left out. Patterns are matched against the `tables` keys
+/// the way the operator matches them against the source tables: `*` any run of characters, `?`
+/// one character, case-insensitive.
+///
+/// The match-all check only applies to the modes that copy tables (`schema`, `all`): `empty`
+/// copies nothing beyond the filtered `tables`, which the overlap check already guards, so a
+/// match-all entry there is harmless.
+fn verify_exclude_tables(
+    mode: Option<BranchCopyMode>,
+    exclude_tables: &[String],
+    tables: Option<&BTreeMap<String, BranchItemCopyConfig>>,
+) -> Result<(), ConfigError> {
+    let copies_tables = mode.is_some_and(|mode| mode != BranchCopyMode::Empty);
+
+    for pattern in exclude_tables {
+        if pattern.is_empty() {
+            return Err(ConfigError::Conflict(
+                "`feature.db_branches[].copy.exclude_tables` has an empty entry; name a table \
+                 or give a `*`/`?` pattern, such as `staging_*`."
+                    .to_owned(),
+            ));
+        }
+
+        if pattern.contains('.') {
+            return Err(ConfigError::Conflict(format!(
+                "`feature.db_branches[].copy.exclude_tables` has the entry `{pattern}`, which \
+                 has a `.`; entries are bare table names of the database being copied, so drop \
+                 the database prefix, such as `staging_*`. For a table with a `.` in its name, \
+                 use `?` in its place."
+            )));
+        }
+
+        if copies_tables && matches_every_table(pattern) {
+            return Err(ConfigError::Conflict(format!(
+                "`feature.db_branches[].copy.exclude_tables` has the entry `{pattern}`, which \
+                 matches every table, so the copy would copy nothing; narrow it to the tables to \
+                 leave out, such as `staging_*`, or drop the copy by using `mode: empty`."
+            )));
+        }
+
+        let matcher = WildMatch::new_case_insensitive(pattern);
+        if let Some(table) = tables
+            .into_iter()
+            .flat_map(BTreeMap::keys)
+            .find(|table| matcher.matches(table))
+        {
+            return Err(ConfigError::Conflict(format!(
+                "`feature.db_branches[].copy.exclude_tables` entry `{pattern}` matches `{table}`, \
+                 which `copy.tables` also lists; a table cannot be both copied with a filter and \
+                 left out, so remove it from one of the two."
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Whether a `*`/`?` pattern matches every table name. Any mix of the two wildcards with at least
+/// one `*` does (`*`, `**`, `*?`, `?*`, `*?*`); `?` alone only matches names of that exact
+/// length, so `??` does not count.
+fn matches_every_table(pattern: &str) -> bool {
+    pattern.contains('*') && pattern.chars().all(|c| c == '*' || c == '?')
 }
 
 /// Engine-agnostic seeding mode of a branch: what a split-config request asks for, and what usage
@@ -920,6 +1006,28 @@ impl DatabaseBranchConfig {
         }
 
         Ok(())
+    }
+
+    /// The table names and `*`/`?` patterns the copy leaves out. Only the MySQL family takes
+    /// them; every other engine copies all of its tables. The match is exhaustive on purpose:
+    /// the operator feature gate in the CLI reads this, so an engine gaining the field has to
+    /// show up here instead of silently bypassing the gate.
+    pub fn exclude_tables(&self) -> &[String] {
+        match self {
+            DatabaseBranchConfig::Mariadb(cfg) => cfg.copy.exclude_tables(),
+            DatabaseBranchConfig::Mysql(cfg) => cfg.copy.exclude_tables(),
+            DatabaseBranchConfig::Clickhouse(_)
+            | DatabaseBranchConfig::Cockroachdb(_)
+            | DatabaseBranchConfig::Dynamodb(_)
+            | DatabaseBranchConfig::Generic(_)
+            | DatabaseBranchConfig::Mongodb(_)
+            | DatabaseBranchConfig::Mssql(_)
+            | DatabaseBranchConfig::Pg(_)
+            | DatabaseBranchConfig::Redis(_)
+            | DatabaseBranchConfig::S3(_)
+            | DatabaseBranchConfig::Spanner(_)
+            | DatabaseBranchConfig::Turbopuffer(_) => &[],
+        }
     }
 
     /// The engine-agnostic copy mode of this branch, or [`None`] for engines that
@@ -3714,7 +3822,8 @@ mod tests {
                         filter: Some("active = true".to_owned())
                     }
                 )])),
-                dump_args: Some(vec!["--single-transaction".to_owned()])
+                dump_args: Some(vec!["--single-transaction".to_owned()]),
+                exclude_tables: None,
             }
         );
 
@@ -3724,19 +3833,220 @@ mod tests {
             schema,
             MysqlBranchCopyConfig::Schema {
                 tables: None,
-                dump_args: Some(vec![])
+                dump_args: Some(vec![]),
+                exclude_tables: None,
             }
         );
 
-        let all: MysqlBranchCopyConfig =
-            serde_json::from_str(r#"{ "mode": "all", "dump_args": ["--no-tablespaces"] }"#)
-                .unwrap();
+        let all: MysqlBranchCopyConfig = serde_json::from_str(
+            r#"{
+                "mode": "all",
+                "dump_args": ["--no-tablespaces"],
+                "exclude_tables": ["staging_*", "import_tmp"]
+            }"#,
+        )
+        .unwrap();
         assert_eq!(
             all,
             MysqlBranchCopyConfig::All {
-                dump_args: Some(vec!["--no-tablespaces".to_owned()])
+                dump_args: Some(vec!["--no-tablespaces".to_owned()]),
+                exclude_tables: Some(vec!["staging_*".to_owned(), "import_tmp".to_owned()]),
             }
         );
+    }
+
+    /// The MariaDB copy config takes the same `exclude_tables` as MySQL's, in every mode, so the
+    /// two engines of the MySQL family read alike.
+    #[test]
+    fn mariadb_copy_exclude_tables_parse_for_all_modes() {
+        let empty: MariadbBranchCopyConfig =
+            serde_json::from_str(r#"{ "mode": "empty", "exclude_tables": ["staging_*"] }"#)
+                .unwrap();
+        assert_eq!(
+            empty,
+            MariadbBranchCopyConfig::Empty {
+                tables: None,
+                dump_args: None,
+                exclude_tables: Some(vec!["staging_*".to_owned()]),
+            }
+        );
+
+        let schema: MariadbBranchCopyConfig =
+            serde_json::from_str(r#"{ "mode": "schema", "exclude_tables": [] }"#).unwrap();
+        assert_eq!(
+            schema,
+            MariadbBranchCopyConfig::Schema {
+                tables: None,
+                dump_args: None,
+                exclude_tables: Some(vec![]),
+            }
+        );
+
+        let all: MariadbBranchCopyConfig = serde_json::from_str(
+            r#"{ "mode": "all", "exclude_tables": ["staging_*", "import_tmp"] }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            all,
+            MariadbBranchCopyConfig::All {
+                dump_args: None,
+                exclude_tables: Some(vec!["staging_*".to_owned(), "import_tmp".to_owned()]),
+            }
+        );
+    }
+
+    /// A MySQL-family branch with the given copy config, for the `exclude_tables` checks that
+    /// hold for MySQL and MariaDB alike.
+    fn mysql_family_branches(engine: &str, copy: Value) -> DatabaseBranchesConfig {
+        serde_json::from_value(json!([{
+            "id": "b",
+            "type": engine,
+            "connection": { "url": { "type": "env", "variable": "DATABASE_URL" } },
+            "copy": copy,
+        }]))
+        .unwrap()
+    }
+
+    /// A pattern made only of wildcards with at least one `*` (`*`, `*?`, `?*`, `*?*`) leaves out
+    /// every table, so `schema` and `all` would copy nothing and the user would only find out
+    /// from an empty branch; the config is rejected instead.
+    #[rstest]
+    #[case::mysql_star("mysql", "all", "*")]
+    #[case::mysql_double_star("mysql", "all", "**")]
+    #[case::mysql_star_question("mysql", "all", "*?")]
+    #[case::mysql_question_star("mysql", "schema", "?*")]
+    #[case::mysql_star_question_star("mysql", "schema", "*?*")]
+    #[case::mariadb_star("mariadb", "all", "*")]
+    fn exclude_tables_rejects_pattern_matching_every_table(
+        #[case] engine: &str,
+        #[case] mode: &str,
+        #[case] pattern: &str,
+    ) {
+        let error =
+            mysql_family_branches(engine, json!({ "mode": mode, "exclude_tables": [pattern] }))
+                .verify(&mut config::ConfigContext::default())
+                .expect_err("a match-everything pattern must be rejected");
+        assert!(
+            error.to_string().contains("matches every table"),
+            "error should say the pattern leaves nothing to copy: {error}"
+        );
+    }
+
+    /// `??` only matches two-character names, so it is a narrow exclusion and passes.
+    #[rstest]
+    #[case::mysql("mysql")]
+    #[case::mariadb("mariadb")]
+    fn exclude_tables_accepts_question_marks_only(#[case] engine: &str) {
+        mysql_family_branches(engine, json!({ "mode": "all", "exclude_tables": ["??"] }))
+            .verify(&mut config::ConfigContext::default())
+            .expect("a `?`-only pattern matches names of one length, not every table");
+    }
+
+    /// `empty` copies nothing beyond the filtered `tables`, so a match-all exclusion there is
+    /// harmless and must not be rejected with a hint to switch to the mode already in use.
+    #[rstest]
+    #[case::mysql("mysql")]
+    #[case::mariadb("mariadb")]
+    fn exclude_tables_accepts_pattern_matching_every_table_in_empty_mode(#[case] engine: &str) {
+        mysql_family_branches(engine, json!({ "mode": "empty", "exclude_tables": ["*"] }))
+            .verify(&mut config::ConfigContext::default())
+            .expect("`empty` copies no tables, so a match-all exclusion changes nothing");
+    }
+
+    /// `exclude_tables: [""]` is a typo with nothing to match; rejecting it beats letting the
+    /// operator build a pattern out of it.
+    #[rstest]
+    #[case::mysql("mysql")]
+    #[case::mariadb("mariadb")]
+    fn exclude_tables_rejects_empty_entry(#[case] engine: &str) {
+        let error = mysql_family_branches(
+            engine,
+            json!({ "mode": "schema", "exclude_tables": ["staging_*", ""] }),
+        )
+        .verify(&mut config::ConfigContext::default())
+        .expect_err("an empty entry must be rejected");
+        assert!(
+            error.to_string().contains("empty entry"),
+            "error should name the empty entry: {error}"
+        );
+    }
+
+    /// `appdb.staging_*` is how `mysqldump --ignore-table` spells a table, but the operator
+    /// matches entries against bare table names, so it would match nothing and the copy would
+    /// keep failing on the table the user meant to leave out. It is rejected in every mode.
+    #[rstest]
+    #[case::mysql_all("mysql", "all", "appdb.staging_*")]
+    #[case::mysql_schema("mysql", "schema", "appdb.import_tmp")]
+    #[case::mysql_wildcard_db("mysql", "all", "*.staging_*")]
+    #[case::mariadb_empty("mariadb", "empty", "appdb.staging_*")]
+    fn exclude_tables_rejects_database_qualified_entry(
+        #[case] engine: &str,
+        #[case] mode: &str,
+        #[case] pattern: &str,
+    ) {
+        let error =
+            mysql_family_branches(engine, json!({ "mode": mode, "exclude_tables": [pattern] }))
+                .verify(&mut config::ConfigContext::default())
+                .expect_err("a database-qualified entry must be rejected");
+        assert!(
+            error.to_string().contains("drop the database prefix"),
+            "error should say how to fix the entry: {error}"
+        );
+    }
+
+    /// A table listed under `tables` with a filter and also matched by `exclude_tables` has two
+    /// contradictory instructions, and whichever the operator picks silently drops the other.
+    /// Patterns are matched against the `tables` keys the way the operator matches them against
+    /// the source tables: `*`/`?` wildcards, case-insensitive.
+    #[rstest]
+    #[case::mysql_exact_name("mysql", "users")]
+    #[case::mysql_pattern("mysql", "user*")]
+    #[case::mysql_single_char_pattern("mysql", "user?")]
+    #[case::mysql_other_case("mysql", "USERS")]
+    #[case::mariadb_pattern("mariadb", "u*")]
+    fn exclude_tables_rejects_table_also_filtered(#[case] engine: &str, #[case] pattern: &str) {
+        let error = mysql_family_branches(
+            engine,
+            json!({
+                "mode": "empty",
+                "tables": { "users": { "filter": "active = true" } },
+                "exclude_tables": ["staging_*", pattern],
+            }),
+        )
+        .verify(&mut config::ConfigContext::default())
+        .expect_err("a table both filtered and excluded must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains(&format!("`{pattern}` matches `users`")),
+            "error should name the pattern and the table it hits: {error}"
+        );
+    }
+
+    /// Exclusions that name tables other than the filtered ones are the intended use and pass,
+    /// in every copy mode.
+    #[rstest]
+    #[case::mysql_empty("mysql", "empty")]
+    #[case::mysql_schema("mysql", "schema")]
+    #[case::mysql_all("mysql", "all")]
+    #[case::mariadb_schema("mariadb", "schema")]
+    fn exclude_tables_accepts_patterns_disjoint_from_filtered_tables(
+        #[case] engine: &str,
+        #[case] mode: &str,
+    ) {
+        // `all` copies every table, so it takes no `tables` filters.
+        let copy = if mode == "all" {
+            json!({ "mode": mode, "exclude_tables": ["staging_*", "import_tmp"] })
+        } else {
+            json!({
+                "mode": mode,
+                "tables": { "users": { "filter": "active = true" } },
+                "exclude_tables": ["staging_*", "import_tmp"],
+            })
+        };
+
+        mysql_family_branches(engine, copy)
+            .verify(&mut config::ConfigContext::default())
+            .expect("exclusions disjoint from the filtered tables should verify");
     }
 
     #[test]
