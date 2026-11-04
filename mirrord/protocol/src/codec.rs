@@ -1,7 +1,8 @@
 use std::{
     collections::{HashMap, HashSet},
-    io,
+    fmt, io,
     marker::PhantomData,
+    ops::Deref,
     sync::LazyLock,
 };
 
@@ -272,6 +273,68 @@ pub enum DaemonMessage {
     SeqpacketOutgoing(DaemonSeqpacket),
 }
 
+/// The feature a [`ClientMessage`] or [`DaemonMessage`] belongs to, for reporting how much memory
+/// messages take.
+///
+/// Only the features that can move a lot of data get their own kind, and every other message is
+/// [`MessageKind::Other`], so the kinds of one direction add up to its total. The agent and the
+/// operator both report buffered message bytes by kind, so the grouping lives here, where they
+/// cannot drift apart. It is not part of the wire format.
+///
+/// Its [`strum::IntoEnumIterator::iter`] lists every kind, generated from the variants, so code
+/// that has to visit each kind, such as removing a series per kind, cannot miss one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum_macros::EnumIter)]
+pub enum MessageKind {
+    Tcp,
+    TcpSteal,
+    TcpOutgoing,
+    UdpOutgoing,
+    File,
+    Other,
+}
+
+impl MessageKind {
+    /// A `snake_case` name for the kind, used as a metric label value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Tcp => "tcp",
+            Self::TcpSteal => "tcp_steal",
+            Self::TcpOutgoing => "tcp_outgoing",
+            Self::UdpOutgoing => "udp_outgoing",
+            Self::File => "file",
+            Self::Other => "other",
+        }
+    }
+}
+
+impl ClientMessage {
+    /// The [`MessageKind`] this message is reported under.
+    pub fn kind(&self) -> MessageKind {
+        match self {
+            Self::Tcp(..) => MessageKind::Tcp,
+            Self::TcpSteal(..) => MessageKind::TcpSteal,
+            Self::TcpOutgoing(..) => MessageKind::TcpOutgoing,
+            Self::UdpOutgoing(..) => MessageKind::UdpOutgoing,
+            Self::FileRequest(..) => MessageKind::File,
+            _ => MessageKind::Other,
+        }
+    }
+}
+
+impl DaemonMessage {
+    /// The [`MessageKind`] this message is reported under.
+    pub fn kind(&self) -> MessageKind {
+        match self {
+            Self::Tcp(..) => MessageKind::Tcp,
+            Self::TcpSteal(..) => MessageKind::TcpSteal,
+            Self::TcpOutgoing(..) => MessageKind::TcpOutgoing,
+            Self::UdpOutgoing(..) => MessageKind::UdpOutgoing,
+            Self::File(..) => MessageKind::File,
+            _ => MessageKind::Other,
+        }
+    }
+}
+
 #[derive(Encode, Decode, PartialEq, Eq, Clone, From, Into, Deref)]
 pub struct RemoteEnvVars(pub HashMap<String, String>);
 
@@ -384,15 +447,7 @@ where
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
-        // We don't know the length of the message, so we can't do borrow decoding here.
-        match DecodeCtx::decode_from_data_stream::<I>(src) {
-            Ok((message, consumed)) => {
-                src.advance(consumed);
-                Ok(Some(message))
-            }
-            Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
-            Err(error) => Err(io::Error::other(error)),
-        }
+        Ok(decode_frame(src)?.map(|(message, _)| message))
     }
 }
 
@@ -400,37 +455,317 @@ impl<I, O: bincode::Encode> Encoder<O> for ProtocolCodec<I, O> {
     type Error = io::Error;
 
     fn encode(&mut self, msg: O, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        // First, calculate the size of encoded message, and eagerly reserve enough space in the
-        // buffer. This guarantees at most one allocation.
-        let size = {
-            let mut size_writer =
-                EncoderImpl::new(SizeWriter::default(), bincode::config::standard());
-            msg.encode(&mut size_writer).map_err(io::Error::other)?;
-            size_writer.into_writer().bytes_written
-        };
-        dst.reserve(size);
-
-        /// Allows using [`BytesMut`] as bincode's [`Writer`].
-        struct WriterAdapter<'a>(&'a mut BytesMut);
-
-        impl Writer for WriterAdapter<'_> {
-            fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
-                self.0.extend_from_slice(bytes);
-                Ok(())
-            }
-        }
-
-        bincode::encode_into_writer(msg, WriterAdapter(dst), bincode::config::standard())
-            .map_err(io::Error::other)
+        let size = encoded_size(&msg).map_err(io::Error::other)?;
+        encode_reserved(msg, size, dst)
     }
+}
+
+/// A mirrord-protocol message together with its bincode-encoded size.
+///
+/// Lets components account for the memory that messages hold (for metrics) without encoding
+/// them twice: the size comes from the decoder, or is computed once in [`Measured::new`], and
+/// [`MeasuredCodec`] reuses it to reserve the output buffer. It derefs to the message, but gives
+/// no mutable access to it, so the size cannot go stale.
+pub struct Measured<M> {
+    message: M,
+    encoded_len: usize,
+}
+
+impl<M: Encode> Measured<M> {
+    /// Measures `message` with a bincode encoding pass that only counts the bytes.
+    ///
+    /// If the message cannot be encoded, the size is 0. Encoding it later fails with the same
+    /// error, so a wrong size only affects the memory accounting and the buffer reservation.
+    pub fn new(message: M) -> Self {
+        let encoded_len = encoded_size(&message).unwrap_or(0);
+        Self {
+            message,
+            encoded_len,
+        }
+    }
+}
+
+impl<M> Measured<M> {
+    /// The number of bytes this message takes when bincode-encoded.
+    pub fn encoded_len(&self) -> usize {
+        self.encoded_len
+    }
+
+    /// Returns the message, dropping its size.
+    pub fn into_inner(self) -> M {
+        self.message
+    }
+}
+
+impl<M> Deref for Measured<M> {
+    type Target = M;
+
+    fn deref(&self) -> &Self::Target {
+        &self.message
+    }
+}
+
+impl<M: fmt::Debug> fmt::Debug for Measured<M> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(f)
+    }
+}
+
+/// [`ProtocolCodec`] that decodes [`Measured`] messages and encodes them reusing their size.
+///
+/// The decoded size is the number of bytes the frame took in the stream. The wire format is the
+/// same as [`ProtocolCodec`]'s, so either side of a connection can use either codec.
+pub struct MeasuredCodec<I, O> {
+    /// Phantom fields to make this struct generic over message types.
+    _phantom_incoming_message: PhantomData<I>,
+    _phantom_outgoing_message: PhantomData<O>,
+}
+
+/// [`MeasuredCodec`] to be used when receiving [`DaemonMessage`]s and sending [`ClientMessage`]s.
+pub type MeasuredClientCodec = MeasuredCodec<DaemonMessage, ClientMessage>;
+
+/// [`MeasuredCodec`] to be used when receiving [`ClientMessage`]s and sending [`DaemonMessage`]s.
+pub type MeasuredDaemonCodec = MeasuredCodec<ClientMessage, DaemonMessage>;
+
+impl<I, O> Default for MeasuredCodec<I, O> {
+    fn default() -> Self {
+        Self {
+            _phantom_incoming_message: Default::default(),
+            _phantom_outgoing_message: Default::default(),
+        }
+    }
+}
+
+impl<I, O> Decoder for MeasuredCodec<I, O>
+where
+    I: for<'de> bincode::BorrowDecode<'de, DecodeCtx>,
+{
+    type Item = Measured<I>;
+    type Error = io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<Self::Item>> {
+        Ok(decode_frame(src)?.map(|(message, encoded_len)| Measured {
+            message,
+            encoded_len,
+        }))
+    }
+}
+
+impl<I, O: bincode::Encode> Encoder<Measured<O>> for MeasuredCodec<I, O> {
+    type Error = io::Error;
+
+    fn encode(&mut self, msg: Measured<O>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        encode_reserved(msg.message, msg.encoded_len, dst)
+    }
+}
+
+/// Decodes one message from the start of `src` and removes its bytes from `src`.
+///
+/// Returns the message with the number of bytes it took, or [`None`] when `src` does not hold a
+/// whole message yet.
+fn decode_frame<M>(src: &mut BytesMut) -> io::Result<Option<(M, usize)>>
+where
+    M: for<'de> bincode::BorrowDecode<'de, DecodeCtx>,
+{
+    // We don't know the length of the message, so we can't do borrow decoding here.
+    match DecodeCtx::decode_from_data_stream::<M>(src) {
+        Ok((message, consumed)) => {
+            src.advance(consumed);
+            Ok(Some((message, consumed)))
+        }
+        Err(DecodeError::UnexpectedEnd { .. }) => Ok(None),
+        Err(error) => Err(io::Error::other(error)),
+    }
+}
+
+/// Computes the bincode-encoded size of `message` without allocating the encoded bytes.
+fn encoded_size<M: Encode>(message: &M) -> Result<usize, EncodeError> {
+    let mut size_writer = EncoderImpl::new(SizeWriter::default(), bincode::config::standard());
+    message.encode(&mut size_writer)?;
+    Ok(size_writer.into_writer().bytes_written)
+}
+
+/// Encodes `message` into `dst`, reserving `size` bytes first.
+///
+/// With the exact encoded size, the reservation guarantees at most one allocation. A wrong `size`
+/// only costs extra allocations; the encoded bytes are the same.
+fn encode_reserved<M: Encode>(message: M, size: usize, dst: &mut BytesMut) -> io::Result<()> {
+    dst.reserve(size);
+
+    /// Allows using [`BytesMut`] as bincode's [`Writer`].
+    struct WriterAdapter<'a>(&'a mut BytesMut);
+
+    impl Writer for WriterAdapter<'_> {
+        fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
+            self.0.extend_from_slice(bytes);
+            Ok(())
+        }
+    }
+
+    bincode::encode_into_writer(message, WriterAdapter(dst), bincode::config::standard())
+        .map_err(io::Error::other)
 }
 
 #[cfg(test)]
 mod tests {
     use bytes::{BufMut, BytesMut};
+    use hyper::{HeaderMap, Method, Version, header};
 
     use super::*;
-    use crate::tcp::TcpData;
+    use crate::{
+        outgoing::LayerClose,
+        tcp::{ChunkedRequest, HttpRequest, InternalHttpBodyFrame, InternalHttpRequest, TcpData},
+    };
+
+    /// Messages whose encoding includes the parts of the format that vary in length: payloads,
+    /// variable-length integers, and HTTP heads with headers.
+    fn measured_test_messages() -> (Vec<ClientMessage>, Vec<DaemonMessage>) {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, "example.com".parse().unwrap());
+        headers.insert(header::TRANSFER_ENCODING, "chunked".parse().unwrap());
+
+        let client_messages = vec![
+            ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
+                connection_id: u64::MAX,
+                bytes: vec![7; 1024].into(),
+            })),
+            ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
+                remote_fd: 3,
+                buffer_size: 4096,
+            })),
+        ];
+        let daemon_messages = vec![
+            DaemonMessage::File(FileResponse::Read(Ok(ReadFileResponse {
+                bytes: b"file contents".to_vec().into(),
+                read_amount: 13,
+            }))),
+            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV1(
+                HttpRequest {
+                    internal_request: InternalHttpRequest {
+                        method: Method::POST,
+                        uri: "/upload?id=1".parse().unwrap(),
+                        headers,
+                        version: Version::HTTP_11,
+                        body: vec![InternalHttpBodyFrame::Data(b"first chunk".to_vec().into())],
+                    },
+                    connection_id: 1,
+                    request_id: 2,
+                    port: 80,
+                },
+            ))),
+        ];
+
+        (client_messages, daemon_messages)
+    }
+
+    /// Encodes `messages` back to back with [`ProtocolCodec`], then checks that [`MeasuredCodec`]
+    /// decodes each with its own frame's length as the size, not the length of whatever else is
+    /// buffered behind it.
+    fn assert_decoded_sizes_are_frame_lengths<M>(messages: Vec<M>)
+    where
+        M: Encode + Clone + PartialEq + fmt::Debug + for<'de> BorrowDecode<'de, DecodeCtx>,
+    {
+        let mut buf = BytesMut::new();
+        let mut frame_lens = Vec::new();
+        for message in &messages {
+            let before = buf.len();
+            ProtocolCodec::<(), M>::default()
+                .encode(message.clone(), &mut buf)
+                .unwrap();
+            frame_lens.push(buf.len() - before);
+        }
+
+        let mut codec = MeasuredCodec::<M, ()>::default();
+        for (message, frame_len) in messages.into_iter().zip(frame_lens) {
+            let decoded = codec.decode(&mut buf).unwrap().unwrap();
+            assert_eq!(decoded.encoded_len(), frame_len, "{message:?}");
+            assert_eq!(
+                decoded.encoded_len(),
+                Measured::new(message.clone()).encoded_len()
+            );
+            assert_eq!(decoded.into_inner(), message);
+        }
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn measured_codec_decoded_size_is_frame_length() {
+        let (client_messages, daemon_messages) = measured_test_messages();
+
+        assert_decoded_sizes_are_frame_lengths(client_messages);
+        assert_decoded_sizes_are_frame_lengths(daemon_messages);
+    }
+
+    /// Consumers report each kind as its own series, so each feature's messages must map to its
+    /// kind.
+    #[test]
+    fn message_kind_mapping() {
+        let tcp_data = TcpData {
+            connection_id: 1,
+            bytes: Default::default(),
+        };
+
+        let client_messages = [
+            (
+                ClientMessage::Tcp(LayerTcp::PortSubscribe(80)),
+                MessageKind::Tcp,
+            ),
+            (
+                ClientMessage::TcpSteal(LayerTcpSteal::Data(tcp_data.clone())),
+                MessageKind::TcpSteal,
+            ),
+            (
+                ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose {
+                    connection_id: 1,
+                })),
+                MessageKind::TcpOutgoing,
+            ),
+            (
+                ClientMessage::UdpOutgoing(LayerUdpOutgoing::Close(LayerClose {
+                    connection_id: 1,
+                })),
+                MessageKind::UdpOutgoing,
+            ),
+            (
+                ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 3 })),
+                MessageKind::File,
+            ),
+            (ClientMessage::Ping, MessageKind::Other),
+        ];
+        for (message, kind) in client_messages {
+            assert_eq!(message.kind(), kind, "{message:?}");
+        }
+
+        let daemon_messages = [
+            (
+                DaemonMessage::Tcp(DaemonTcp::Data(tcp_data.clone())),
+                MessageKind::Tcp,
+            ),
+            (
+                DaemonMessage::TcpSteal(DaemonTcp::Data(tcp_data)),
+                MessageKind::TcpSteal,
+            ),
+            (
+                DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(1)),
+                MessageKind::TcpOutgoing,
+            ),
+            (
+                DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(1)),
+                MessageKind::UdpOutgoing,
+            ),
+            (
+                DaemonMessage::File(FileResponse::Read(Ok(ReadFileResponse {
+                    bytes: Default::default(),
+                    read_amount: 0,
+                }))),
+                MessageKind::File,
+            ),
+            (DaemonMessage::Pong, MessageKind::Other),
+        ];
+        for (message, kind) in daemon_messages {
+            assert_eq!(message.kind(), kind, "{message:?}");
+        }
+    }
 
     #[test]
     fn sanity_client_encode_decode() {
