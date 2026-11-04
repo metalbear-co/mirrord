@@ -1,5 +1,7 @@
 use std::{
+    fmt,
     net::SocketAddr,
+    ops::Deref,
     sync::{
         Arc, LazyLock,
         atomic::{AtomicUsize, Ordering},
@@ -7,8 +9,10 @@ use std::{
 };
 
 use axum::{Router, extract::State, routing::get};
+use bincode::Encode;
 use http::StatusCode;
-use prometheus::{GaugeVec, IntGauge, Registry, proto::MetricFamily};
+use mirrord_protocol::{ClientMessage, DaemonMessage, Measured, MessageKind};
+use prometheus::{GaugeVec, IntGauge, IntGaugeVec, Registry, proto::MetricFamily};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
@@ -60,6 +64,170 @@ pub(crate) static BYPASSED_REQUESTS: LazyLock<prometheus::GaugeVec> = LazyLock::
     .expect("BYPASSED_REQUESTS should be valid")
 });
 
+/// Memory held by mirrord-protocol messages. Messages pile up in the agent when a client reads
+/// slowly or traffic comes in bursts, and this shows how much of the agent's memory they take.
+///
+/// Updated live by [`Buffered`] messages, through [`BUFFERED_MESSAGE_GAUGES`].
+pub(crate) static BUFFERED_MESSAGES_BYTES: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    prometheus::register_int_gauge_vec!(
+        "mirrord_agent_buffered_messages_bytes",
+        "bincode-encoded size of mirrord-protocol messages held in mirrord-agent memory, while \
+         queued, being handled, or being sent; the sum over all labels is the agent's total",
+        &["direction", "message"]
+    )
+    .expect("BUFFERED_MESSAGES_BYTES should be valid")
+});
+
+/// The children of [`BUFFERED_MESSAGES_BYTES`], resolved once, so that counting a message does
+/// not look its series up by label values.
+static BUFFERED_MESSAGE_GAUGES: LazyLock<BufferedMessageGauges> =
+    LazyLock::new(|| BufferedMessageGauges {
+        client: MessageGauges::new("client"),
+        daemon: MessageGauges::new("daemon"),
+    });
+
+/// [`BUFFERED_MESSAGES_BYTES`] children by `direction`: `client` for [`ClientMessage`]s and
+/// `daemon` for [`DaemonMessage`]s.
+struct BufferedMessageGauges {
+    client: MessageGauges,
+    daemon: MessageGauges,
+}
+
+/// [`BUFFERED_MESSAGES_BYTES`] children of one `direction`, one per [`MessageKind`].
+///
+/// Named fields rather than an array indexed by the kind, so a new [`MessageKind`] fails to
+/// compile in [`Self::get`] until it has a gauge, instead of indexing out of bounds at runtime.
+struct MessageGauges {
+    tcp: IntGauge,
+    tcp_steal: IntGauge,
+    tcp_outgoing: IntGauge,
+    udp_outgoing: IntGauge,
+    file: IntGauge,
+    other: IntGauge,
+}
+
+impl MessageGauges {
+    fn new(direction: &str) -> Self {
+        let gauge = |kind: MessageKind| {
+            BUFFERED_MESSAGES_BYTES.with_label_values(&[direction, kind.as_str()])
+        };
+
+        Self {
+            tcp: gauge(MessageKind::Tcp),
+            tcp_steal: gauge(MessageKind::TcpSteal),
+            tcp_outgoing: gauge(MessageKind::TcpOutgoing),
+            udp_outgoing: gauge(MessageKind::UdpOutgoing),
+            file: gauge(MessageKind::File),
+            other: gauge(MessageKind::Other),
+        }
+    }
+
+    fn get(&self, kind: MessageKind) -> &IntGauge {
+        match kind {
+            MessageKind::Tcp => &self.tcp,
+            MessageKind::TcpSteal => &self.tcp_steal,
+            MessageKind::TcpOutgoing => &self.tcp_outgoing,
+            MessageKind::UdpOutgoing => &self.udp_outgoing,
+            MessageKind::File => &self.file,
+            MessageKind::Other => &self.other,
+        }
+    }
+}
+
+/// A mirrord-protocol message type whose buffered bytes are reported in
+/// [`BUFFERED_MESSAGES_BYTES`].
+pub(crate) trait BufferedMessage {
+    /// The [`BUFFERED_MESSAGES_BYTES`] child that counts this message.
+    fn gauge(&self) -> &'static IntGauge;
+}
+
+impl BufferedMessage for ClientMessage {
+    fn gauge(&self) -> &'static IntGauge {
+        BUFFERED_MESSAGE_GAUGES.client.get(self.kind())
+    }
+}
+
+impl BufferedMessage for DaemonMessage {
+    fn gauge(&self) -> &'static IntGauge {
+        BUFFERED_MESSAGE_GAUGES.daemon.get(self.kind())
+    }
+}
+
+/// Adds an amount to an [`IntGauge`] while alive, and subtracts it on drop.
+///
+/// Keeps a gauge that reports memory in step with the value that holds the memory, so it cannot
+/// drift when that value is dropped on an error path.
+pub(crate) struct IntGaugeGuard {
+    gauge: IntGauge,
+    amount: i64,
+}
+
+impl IntGaugeGuard {
+    /// Adds `amount` to `gauge`, saturating at [`i64::MAX`].
+    pub(crate) fn new(gauge: IntGauge, amount: usize) -> Self {
+        let amount = amount.try_into().unwrap_or(i64::MAX);
+        gauge.add(amount);
+
+        Self { gauge, amount }
+    }
+}
+
+impl Drop for IntGaugeGuard {
+    fn drop(&mut self) {
+        self.gauge.sub(self.amount);
+    }
+}
+
+/// A mirrord-protocol message whose encoded size is counted in [`BUFFERED_MESSAGES_BYTES`] while
+/// it exists.
+///
+/// Holds a [`Measured`] message, so the size counted here is the one the codec reuses when it
+/// encodes the message.
+pub(crate) struct Buffered<M> {
+    message: Measured<M>,
+    guard: IntGaugeGuard,
+}
+
+impl<M: Encode + BufferedMessage> Buffered<M> {
+    pub(crate) fn new(message: M) -> Self {
+        Self::from_measured(Measured::new(message))
+    }
+}
+
+impl<M: BufferedMessage> Buffered<M> {
+    /// Counts a message that already has its size, such as one from
+    /// [`MeasuredCodec`](mirrord_protocol::MeasuredCodec).
+    pub(crate) fn from_measured(message: Measured<M>) -> Self {
+        let guard = IntGaugeGuard::new(message.gauge().clone(), message.encoded_len());
+        Self { message, guard }
+    }
+}
+
+impl<M> Buffered<M> {
+    /// Splits the message from its guard.
+    ///
+    /// The message's bytes are still in memory after the message is moved into a codec or a
+    /// handler, so the caller should keep the guard until they are gone: sent and flushed, or
+    /// handled.
+    pub(crate) fn into_parts(self) -> (Measured<M>, IntGaugeGuard) {
+        (self.message, self.guard)
+    }
+}
+
+impl<M> Deref for Buffered<M> {
+    type Target = M;
+
+    fn deref(&self) -> &Self::Target {
+        &self.message
+    }
+}
+
+impl<M: fmt::Debug> fmt::Debug for Buffered<M> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(f)
+    }
+}
+
 /// Convenience trait for static metrics variables.
 ///
 /// We store them as [`AtomicUsize`], which is the correct type (they're all counters).
@@ -103,6 +271,10 @@ impl Metrics {
         use prometheus::Opts;
 
         let registry = prometheus::default_registry();
+
+        // Creates every `BUFFERED_MESSAGES_BYTES` series, so that each reads 0 from the first
+        // scrape instead of appearing only after its first message.
+        LazyLock::force(&BUFFERED_MESSAGE_GAUGES);
 
         let client_count = {
             let opts = Opts::new(
