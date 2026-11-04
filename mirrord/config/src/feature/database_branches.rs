@@ -794,7 +794,8 @@ impl DatabaseBranchesConfig {
 }
 
 /// Rejects `exclude_tables` entries the copy could not act on: a pattern that matches every
-/// table (the copy would copy nothing), an empty entry (nothing to match), and a table that is
+/// table (the copy would copy nothing), an empty entry (nothing to match), a database-qualified
+/// entry (the operator matches bare table names, so it would match nothing), and a table that is
 /// both filtered through `tables` and left out. Patterns are matched against the `tables` keys
 /// the way the operator matches them against the source tables: `*` any run of characters, `?`
 /// one character, case-insensitive.
@@ -816,6 +817,15 @@ fn verify_exclude_tables(
                  or give a `*`/`?` pattern, such as `staging_*`."
                     .to_owned(),
             ));
+        }
+
+        if pattern.contains('.') {
+            return Err(ConfigError::Conflict(format!(
+                "`feature.db_branches[].copy.exclude_tables` has the entry `{pattern}`, which \
+                 has a `.`; entries are bare table names of the database being copied, so drop \
+                 the database prefix, such as `staging_*`. For a table with a `.` in its name, \
+                 use `?` in its place."
+            )));
         }
 
         if copies_tables && matches_every_table(pattern) {
@@ -3958,6 +3968,29 @@ mod tests {
         assert!(
             error.to_string().contains("empty entry"),
             "error should name the empty entry: {error}"
+        );
+    }
+
+    /// `appdb.staging_*` is how `mysqldump --ignore-table` spells a table, but the operator
+    /// matches entries against bare table names, so it would match nothing and the copy would
+    /// keep failing on the table the user meant to leave out. It is rejected in every mode.
+    #[rstest]
+    #[case::mysql_all("mysql", "all", "appdb.staging_*")]
+    #[case::mysql_schema("mysql", "schema", "appdb.import_tmp")]
+    #[case::mysql_wildcard_db("mysql", "all", "*.staging_*")]
+    #[case::mariadb_empty("mariadb", "empty", "appdb.staging_*")]
+    fn exclude_tables_rejects_database_qualified_entry(
+        #[case] engine: &str,
+        #[case] mode: &str,
+        #[case] pattern: &str,
+    ) {
+        let error =
+            mysql_family_branches(engine, json!({ "mode": mode, "exclude_tables": [pattern] }))
+                .verify(&mut config::ConfigContext::default())
+                .expect_err("a database-qualified entry must be rejected");
+        assert!(
+            error.to_string().contains("drop the database prefix"),
+            "error should say how to fix the entry: {error}"
         );
     }
 

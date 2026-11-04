@@ -1468,6 +1468,13 @@ where
                         requested,
                         api_namespace,
                     )?;
+                    if let Some(warning) = database_branches::exclude_tables_mismatch_warning(
+                        branch,
+                        requested,
+                        api_namespace,
+                    ) {
+                        subtask.warning(&warning);
+                    }
                 }
             }
 
@@ -1535,6 +1542,13 @@ where
                         requested,
                         api_namespace,
                     )?;
+                    if let Some(warning) = database_branches::exclude_tables_mismatch_warning(
+                        branch,
+                        requested,
+                        api_namespace,
+                    ) {
+                        subtask.warning(&warning);
+                    }
                 }
             }
 
