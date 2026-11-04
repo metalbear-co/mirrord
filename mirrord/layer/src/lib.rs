@@ -996,7 +996,6 @@ unsafe fn fork_with_detour_guard() -> pid_t {
                     }
                 };
 
-                parent_connection.reset_share_after_fork();
                 let new_connection = ProxyConnection::new(
                     parent_connection.proxy_addr(),
                     NewSessionRequest {
@@ -1017,6 +1016,11 @@ unsafe fn fork_with_detour_guard() -> pid_t {
                         .start_share_control()
                         .expect("failed to attach the share connection to the internal proxy");
                 }
+                // The parent's control connection ends its layer once the parent exits, and the
+                // internal proxy copies the parent's subscriptions to the child only when it
+                // registers the child. So the child keeps the parent's copy open until its own
+                // control connection is confirmed, which happens after that registration.
+                parent_connection.reset_share_after_fork();
                 #[allow(static_mut_refs)]
                 PROXY_CONNECTION
                     .set(new_connection)
