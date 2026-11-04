@@ -440,7 +440,9 @@ pub struct LayerConfig {
     ///
     /// Controls multi-cluster session behavior when connecting to a multi-cluster Primary
     /// operator. When set to `false`, forces a single-cluster session on the Primary cluster
-    /// instead of creating a multi-cluster session that spans all workload clusters.
+    /// instead of creating a multi-cluster session that spans all workload clusters. The Primary
+    /// has to run workloads itself for that: a management-only Primary
+    /// (`operator.multiCluster.managementOnly=true`) rejects the session.
     /// When `true` or unset, multi-cluster sessions are used when the operator supports them.
     #[config(env = "MIRRORD_MULTI_CLUSTER", plan = Enterprise)]
     pub multi_cluster: Option<bool>,
@@ -1101,7 +1103,8 @@ impl LayerConfig {
             if self.multi_cluster == Some(true) {
                 return Err(ConfigError::Conflict(
                     "Label targets are not yet supported in multi-cluster sessions. Set \
-                     `multi_cluster = false` to use the primary cluster only."
+                     `multi_cluster = false` to use the primary cluster only, which needs a \
+                     primary that runs workloads itself (not management-only)."
                         .to_owned(),
                 ));
             }
