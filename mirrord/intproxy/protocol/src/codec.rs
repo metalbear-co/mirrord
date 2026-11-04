@@ -157,7 +157,7 @@ where
     }
 }
 
-/// Lowest fd number for the streams of [`make_sync_framed`].
+/// Lowest fd number for the streams of [`make_sync_framed`] and [`move_to_high_fd`].
 ///
 /// In a fresh process the layer's connection to the internal proxy would take fds 3 and 4 because
 /// a new fd gets the lowest free number. Applications use these low numbers without asking for a
@@ -169,9 +169,12 @@ const SYNC_FRAMED_MIN_FD: RawFd = 100;
 /// Moves `stream` to the lowest free fd at or above [`SYNC_FRAMED_MIN_FD`], and closes its
 /// original fd, so the application gets that number back.
 ///
+/// For a layer connection to the internal proxy that doesn't go through [`make_sync_framed`],
+/// such as the share control connection.
+///
 /// Keeps the original fd when the move fails.
 #[cfg(unix)]
-fn move_to_high_fd(stream: std::net::TcpStream) -> std::net::TcpStream {
+pub fn move_to_high_fd(stream: std::net::TcpStream) -> std::net::TcpStream {
     let Ok(fd) = fcntl(&stream, FcntlArg::F_DUPFD_CLOEXEC(SYNC_FRAMED_MIN_FD)) else {
         return stream;
     };

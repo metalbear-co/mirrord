@@ -661,8 +661,15 @@ async fn local_share_rejects_subscription_without_control() {
 /// ended, because the operator removes the link then while the session runs on. Its natural
 /// completion then ends the session cleanly: the intproxy exits with success, and the operator
 /// ends the link with the session's connection.
+///
+/// With `clobber_low_fds`, the application first takes over fds 3 to 9 without asking for free
+/// numbers, as shell scripts do with `exec 3>file`. The share control connection must survive
+/// that, because its EOF ends the application's layer in the internal proxy.
+#[rstest::rstest]
+#[case::default(false)]
+#[case::clobber_low_fds(true)]
 #[tokio::test]
-async fn local_share_normal_application_exit_is_clean() {
+async fn local_share_normal_application_exit_is_clean(#[case] clobber_low_fds: bool) {
     let scenario = tempfile::TempDir::new().unwrap();
     let tmpdir = scenario.path().to_str().unwrap();
     let reserved = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -670,12 +677,17 @@ async fn local_share_normal_application_exit_is_clean() {
     drop(reserved);
     let mut config = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
     write!(config, "share = true\n[feature]\nenv = false\nfs = 'local'\n[feature.network]\noutgoing = false\ndns = false\n[feature.network.incoming]\nmode = 'steal'\nports = [{port}]\n").unwrap();
+    let clobber = if clobber_low_fds {
+        "d=os.open('/dev/null',os.O_RDWR)\nfor f in range(3,10):\n if f!=d: os.dup2(d,f)\nfor f in range(3,10): os.close(f)\nif d>=10: os.close(d)\n"
+    } else {
+        ""
+    };
     let app = Application::DynamicApp(
         "python3".to_owned(),
         vec![
             "-c".to_owned(),
             format!(
-                "import os,socket,sys\ns=socket.socket()\ns.bind(('127.0.0.1',{port}))\ns.listen()\nprint('APP_'+'LISTENING',flush=True)\nsys.stdin.readline()\ns.close()\nprint('APP_'+'CLOSED',flush=True)\nsys.stdin.readline()\nos._exit(0)"
+                "import os,socket,sys\n{clobber}s=socket.socket()\ns.bind(('127.0.0.1',{port}))\ns.listen()\nprint('APP_'+'LISTENING',flush=True)\nsys.stdin.readline()\ns.close()\nprint('APP_'+'CLOSED',flush=True)\nsys.stdin.readline()\nos._exit(0)"
             ),
         ],
     );

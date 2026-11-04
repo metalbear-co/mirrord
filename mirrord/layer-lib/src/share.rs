@@ -87,6 +87,10 @@ pub fn start_share_control(
         .and_then(|value| LineMode::from_name(&value))
         .unwrap_or(LineMode::Simple);
     let socket = TcpStream::connect(proxy_addr).map_err(ProxyError::from)?;
+    // Like the request connection, so that the application's own use of low fd numbers can't
+    // replace the socket, whose EOF ends this process's layer in the internal proxy.
+    #[cfg(unix)]
+    let socket = mirrord_intproxy_protocol::codec::move_to_high_fd(socket);
     socket.set_nodelay(true).map_err(ProxyError::from)?;
     socket
         .set_read_timeout(Some(REGISTRATION_TIMEOUT))
