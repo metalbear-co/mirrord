@@ -1863,32 +1863,43 @@ where
         Ok(())
     }
 
+    /// Refuses `share` when the operator can't serve a share link, with an upgrade error instead of
+    /// a session whose `LocalShare` messages the operator can't decode. Multi-cluster sessions run
+    /// it against the primary, which refuses a shared session itself once it supports share links.
+    fn check_share_support(&self, layer_config: &LayerConfig) -> OperatorApiResult<()> {
+        if layer_config.share.not() {
+            return Ok(());
+        }
+
+        self.operator
+            .spec
+            .require_feature(NewOperatorFeature::LocalShare)?;
+        if self
+            .operator
+            .spec
+            .protocol_version
+            .as_ref()
+            .and_then(|version| version.parse::<semver::Version>().ok())
+            .is_none_or(|version| LOCAL_SHARE_VERSION.matches(&version).not())
+        {
+            // The requirement is a single `>=` comparator, so what follows it is the oldest
+            // version that works.
+            return Err(OperatorApiError::LocalShare(format!(
+                "Share links need an operator with protocol version {} or newer. Upgrade the operator.",
+                LOCAL_SHARE_VERSION.to_string().trim_start_matches(">=")
+            )));
+        }
+
+        Ok(())
+    }
+
     /// Check the operator supports all the operator features required by the user's configuration.
     pub fn check_feature_support(
         &self,
         layer_config: &LayerConfig,
         auto_queue_splitting: bool,
     ) -> OperatorApiResult<()> {
-        if layer_config.share {
-            self.operator
-                .spec
-                .require_feature(NewOperatorFeature::LocalShare)?;
-            if self
-                .operator
-                .spec
-                .protocol_version
-                .as_ref()
-                .and_then(|version| version.parse::<semver::Version>().ok())
-                .is_none_or(|version| LOCAL_SHARE_VERSION.matches(&version).not())
-            {
-                // The requirement is a single `>=` comparator, so what follows it is the oldest
-                // version that works.
-                return Err(OperatorApiError::LocalShare(format!(
-                    "Share links need an operator with protocol version {} or newer. Upgrade the operator.",
-                    LOCAL_SHARE_VERSION.to_string().trim_start_matches(">=")
-                )));
-            }
-        }
+        self.check_share_support(layer_config)?;
         if matches!(layer_config.target.path, Some(Target::Label(_))) {
             self.operator
                 .spec
@@ -2604,6 +2615,7 @@ impl OperatorApi<PreparedClientCert> {
             progress.warning(RMQ_AUTO_SPLITS_DISABLED_WARNING);
         }
         self.check_split_config_filters_support(layer_config)?;
+        self.check_share_support(layer_config)?;
         // Owned: branch preparation below edits the config while the namespace is still needed.
         let namespace = layer_config.target.namespace.clone();
 
