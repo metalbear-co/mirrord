@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, hash_map::Entry},
     env::home_dir,
     fmt::Debug,
-    io::ErrorKind,
+    io::{self, ErrorKind},
     path::PathBuf,
     sync::LazyLock,
 };
@@ -25,6 +25,9 @@ use crate::{
     error::CredentialStoreError,
     key_pair::KeyPair,
 };
+
+#[cfg(test)]
+mod tests;
 
 /// "~/.mirrord"
 static CREDENTIALS_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
@@ -303,8 +306,8 @@ impl CredentialStoreSync {
         New: for<'de> Deserialize<'de>,
         New::DynamicType: Default,
     {
-        self.store_file
-            .lock_exclusive()
+        lock_exclusive(&self.store_file)
+            .await
             .map_err(CredentialStoreError::Lockfile)?;
 
         let result = self
@@ -323,4 +326,20 @@ impl CredentialStoreSync {
 
         result
     }
+}
+
+/// Takes the exclusive lock on `file`, and waits while another open file holds it.
+///
+/// `flock` blocks its thread until the lock is free, so it runs on a blocking thread. The CLI runs
+/// on a single-threaded runtime, and the other holder can be a task of the same process, such as
+/// the session of another service of `mirrord preview sync`, which holds the lock while it awaits
+/// the operator. A `flock` on the runtime's thread would stop that task too, so it could never
+/// release the lock. The clone shares `file`'s open file description, which the lock belongs to,
+/// so unlocking `file` releases it.
+async fn lock_exclusive(file: &fs::File) -> io::Result<()> {
+    let file = file.try_clone().await?.into_std().await;
+
+    tokio::task::spawn_blocking(move || fs4::fs_std::FileExt::lock_exclusive(&file))
+        .await
+        .map_err(io::Error::other)?
 }
