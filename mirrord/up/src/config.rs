@@ -774,24 +774,24 @@ pub enum SyncRestart {
     OnSync,
 }
 
-/// One local directory that `mirrord preview sync` pushes into a preview pod.
+/// One local directory that `mirrord preview sync` syncs into a preview pod.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SyncEntry {
-    /// The local directory to push. A relative path is resolved against the directory that
-    /// contains `mirrord-up.yaml`. The push leaves out `.git`, `.jj`, the paths that git ignores
+    /// The local directory to sync. A relative path is resolved against the directory that
+    /// contains `mirrord-up.yaml`. A sync leaves out `.git`, `.jj`, the paths that git ignores
     /// and the paths that `ignore` leaves out. Those paths keep what the pod has at them, such as
     /// the image's files or what `prepare` wrote, and every other path in `remote` holds the
     /// local tree.
     pub local: PathBuf,
 
-    /// The absolute path in the preview's container that holds the pushed directory. A push makes
+    /// The absolute path in the preview's container that holds the synced directory. A sync makes
     /// it a mirror of `local`, so it deletes what the image has there, except at the paths that
-    /// the push leaves out (see `local`).
+    /// the sync leaves out (see `local`).
     pub remote: String,
 
-    /// More paths that the push leaves out, written as the lines of a `.gitignore` in `local`,
-    /// e.g. `coverage/`. They take precedence over git's rules, so a `!` line pushes a file that
+    /// More paths that a sync leaves out, written as the lines of a `.gitignore` in `local`,
+    /// e.g. `coverage/`. They take precedence over git's rules, so a `!` line syncs a file that
     /// a `.gitignore` excludes, e.g. `!.env.preview`. A `!` line can't bring back a file in an
     /// ignored directory, as in git.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2028,7 +2028,7 @@ pub enum PreviewImageError {
     NoImages,
 
     /// Every service lacks `sync`, or has `sync` and `skip` but no image, so `mirrord preview
-    /// sync` has nothing to push.
+    /// sync` has nothing to sync.
     #[error(
         "no service to sync: no service has `sync`, or every service with `sync` is marked \
          `skip: true` and has no image"

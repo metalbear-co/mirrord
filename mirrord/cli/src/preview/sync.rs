@@ -511,7 +511,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                 // restart or upgrade breaks the connection meanwhile.
                 Stop::Disconnected(error) if self.watcher.is_some() => {
                     self.progress.warning(&format!(
-                        "{}; reconnecting in {} seconds to push the code again",
+                        "{}; reconnecting in {} seconds to sync the code again",
                         with_causes(&error),
                         reconnect_delay.as_secs()
                     ));
@@ -521,7 +521,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                 Stop::Disconnected(error) | Stop::Transient(error) if may_retry => {
                     may_retry = false;
                     self.progress.warning(&format!(
-                        "{}; reconnecting to push the code again",
+                        "{}; reconnecting to sync the code again",
                         with_causes(&error)
                     ));
                 }
@@ -578,7 +578,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                         }
                         Pairing::Idle if pending.is_empty().not() => {
                             self.pairing = Pairing::Waking;
-                            self.progress.info("waking the idle preview to push the change");
+                            self.progress.info("waking the idle preview to sync the change");
                             connection.wake().await.map_err(Stop::from)
                         }
                         // The next `Paired` brings a full push, which holds these changes.
@@ -834,7 +834,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
         };
 
         self.progress
-            .info(&format!("pushed the local code (generation {generation})"));
+            .info(&format!("synced the local code (generation {generation})"));
 
         Ok(Pushed::Applied(generation))
     }
@@ -853,7 +853,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
             .send_modify(|activity| activity.first_push = None);
         self.publish(false);
         self.progress
-            .info(&format!("waiting to push again: {reason}"));
+            .info(&format!("waiting to sync again: {reason}"));
     }
 
     /// Reports `event`, and records what it says about the preview pod's work.

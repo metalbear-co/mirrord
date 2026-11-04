@@ -293,23 +293,23 @@ pub struct EntryCounts {
 pub enum RejectReason {
     /// An incremental push named a base generation that the volume no longer holds. The CLI
     /// should send a full push instead.
-    #[strum(to_string = "the push was based on a generation that the volume no longer holds")]
+    #[strum(to_string = "the sync was based on a generation that the volume no longer holds")]
     StaleBase,
 
     /// The sidecar isn't ready for a push yet: it waits for the code volume, or copies the
     /// image's files to it.
-    #[strum(to_string = "the preview pod's sync sidecar isn't ready for a push yet")]
+    #[strum(to_string = "the preview pod's sync sidecar isn't ready for a sync yet")]
     NotReady,
 
     /// The push breaks the protocol, for example with a path that leaves its entry.
-    #[strum(to_string = "the push is invalid: {0}")]
+    #[strum(to_string = "the sync is invalid: {0}")]
     Invalid(String),
 
     /// Applying the push at this path would destroy paths that the rules ignore, such as a file
     /// that replaces an ignored directory, or a directory with ignored paths in it.
     #[strum(
-        to_string = "`{0}` would replace a directory that the push's rules ignore, or that holds \
-                     ignored paths, which a push never deletes; ignore `{0}`, or remove that \
+        to_string = "`{0}` would replace a directory that the sync's rules ignore, or that holds \
+                     ignored paths, which a sync never deletes; ignore `{0}`, or remove that \
                      directory in the preview pod"
     )]
     Conflict(String),
@@ -319,7 +319,7 @@ pub enum RejectReason {
     Space,
 
     /// The push is larger than the sidecar accepts.
-    #[strum(to_string = "the push is too large: {0}")]
+    #[strum(to_string = "the sync is too large: {0}")]
     Limit(String),
 
     /// The sidecar failed to read or write the volume.
@@ -346,7 +346,7 @@ pub enum SidecarState {
     Seeding,
 
     /// The volume has no push yet.
-    #[strum(to_string = "waiting for the first push")]
+    #[strum(to_string = "waiting for the first sync")]
     AwaitingFirstPush,
 
     /// The volume holds the push of generation `generation`.

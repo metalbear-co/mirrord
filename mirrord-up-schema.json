@@ -887,22 +887,22 @@
       ]
     },
     "SyncEntry": {
-      "description": "One local directory that `mirrord preview sync` pushes into a preview pod.",
+      "description": "One local directory that `mirrord preview sync` syncs into a preview pod.",
       "type": "object",
       "properties": {
         "ignore": {
-          "description": "More paths that the push leaves out, written as the lines of a `.gitignore` in `local`,\ne.g. `coverage/`. They take precedence over git's rules, so a `!` line pushes a file that\na `.gitignore` excludes, e.g. `!.env.preview`. A `!` line can't bring back a file in an\nignored directory, as in git.",
+          "description": "More paths that a sync leaves out, written as the lines of a `.gitignore` in `local`,\ne.g. `coverage/`. They take precedence over git's rules, so a `!` line syncs a file that\na `.gitignore` excludes, e.g. `!.env.preview`. A `!` line can't bring back a file in an\nignored directory, as in git.",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "local": {
-          "description": "The local directory to push. A relative path is resolved against the directory that\ncontains `mirrord-up.yaml`. The push leaves out `.git`, `.jj`, the paths that git ignores\nand the paths that `ignore` leaves out. Those paths keep what the pod has at them, such as\nthe image's files or what `prepare` wrote, and every other path in `remote` holds the\nlocal tree.",
+          "description": "The local directory to sync. A relative path is resolved against the directory that\ncontains `mirrord-up.yaml`. A sync leaves out `.git`, `.jj`, the paths that git ignores\nand the paths that `ignore` leaves out. Those paths keep what the pod has at them, such as\nthe image's files or what `prepare` wrote, and every other path in `remote` holds the\nlocal tree.",
           "type": "string"
         },
         "remote": {
-          "description": "The absolute path in the preview's container that holds the pushed directory. A push makes\nit a mirror of `local`, so it deletes what the image has there, except at the paths that\nthe push leaves out (see `local`).",
+          "description": "The absolute path in the preview's container that holds the synced directory. A sync makes\nit a mirror of `local`, so it deletes what the image has there, except at the paths that\nthe sync leaves out (see `local`).",
           "type": "string"
         }
       },

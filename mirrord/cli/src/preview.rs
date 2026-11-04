@@ -978,7 +978,7 @@ async fn wait_until_started(
                 entries,
                 supervised,
                 watch_files,
-                progress.subtask("pushing the local code"),
+                progress.subtask("syncing the local code"),
             ) {
                 Ok(driver) => driver,
                 Err(error) => return Err(fail(error, &mut subtask).await),
@@ -1682,12 +1682,12 @@ fn describe_sync_status(sync: &PreviewSyncStatus) -> String {
                 .map(|ago| format!("{ago} ago"))
                 .unwrap_or_else(|_| "just now".to_owned());
             lines.push(match generation {
-                Some(generation) => format!("last push {ago} (generation {generation})"),
-                None => format!("last push {ago}"),
+                Some(generation) => format!("last sync {ago} (generation {generation})"),
+                None => format!("last sync {ago}"),
             });
         }
         (None, Some(generation)) => lines.push(format!("holds generation {generation}")),
-        (None, None) => lines.push("no push yet".to_owned()),
+        (None, None) => lines.push("no sync yet".to_owned()),
     }
 
     if let Some(prepare) = &sync.prepare {
