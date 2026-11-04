@@ -1,14 +1,11 @@
-use std::{ops::Not, str::FromStr, sync::LazyLock};
+use std::{fmt::Write, ops::Not, str::FromStr, sync::LazyLock};
 
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
-use mirrord_protocol::{
-    local_share::baggage_session_value,
-    tcp::{
-        Filter, HTTP_BODY_JSON_FILTER_VERSION, HTTP_COMPOSITE_FILTER_VERSION,
-        HTTP_HEADER_JQ_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION, HttpBodyFilter, HttpFilter,
-        HttpMethodFilter, JqQuery, JsonPathQuery,
-    },
+use mirrord_protocol::tcp::{
+    Filter, HTTP_BODY_JSON_FILTER_VERSION, HTTP_COMPOSITE_FILTER_VERSION,
+    HTTP_HEADER_JQ_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION, HttpBodyFilter, HttpFilter,
+    HttpMethodFilter, JqQuery, JsonPathQuery,
 };
 use schemars::JsonSchema;
 use semver::{Version, VersionReq};
@@ -19,6 +16,25 @@ use crate::{
     config::{ConfigContext, ConfigError, from_env::FromEnv, source::MirrordConfigSource},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
+
+/// Spells a session key as the value of the `mirrord-session` member of a W3C `baggage` header.
+///
+/// share-ingress puts this value on every request it forwards, and a shared session's HTTP filter
+/// ([`HttpFilterConfig::for_shared_session`]) matches exactly this value, so both sides must use
+/// this function. Bytes that a baggage value can't hold, and `%` itself, are percent-encoded, so
+/// any key reaches the filter intact: the key `alice;debug` becomes `alice%3Bdebug`.
+pub fn baggage_session_value(key: &str) -> String {
+    let mut value = String::with_capacity(key.len());
+    for byte in key.bytes() {
+        if matches!(byte, 0x21 | 0x23..=0x24 | 0x26..=0x2B | 0x2D..=0x3A | 0x3C..=0x5B | 0x5D..=0x7E)
+        {
+            value.push(char::from(byte));
+        } else {
+            write!(value, "%{byte:02X}").expect("writing into a String cannot fail");
+        }
+    }
+    value
+}
 
 /// Filter configuration for the HTTP traffic stealer feature.
 ///
