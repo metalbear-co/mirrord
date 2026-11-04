@@ -13,8 +13,7 @@ use mirrord_config::{
     feature::network::incoming::IncomingConfig,
 };
 use mirrord_protocol::{
-    ClientMessage, DaemonMessage,
-    local_share::{LocalShareClientMessage, LocalShareEvent},
+    ClientMessage,
     tcp::{Filter, HttpBodyFilter, HttpFilter, JqQuery, JsonPathQuery, LayerTcpSteal, StealType},
 };
 use rstest::rstest;
@@ -69,20 +68,6 @@ fn assert_fixture_session(filter: HttpFilter, custom: Option<HttpFilter>) {
     ] {
         assert_eq!(regex.is_match(header).unwrap(), expected, "{header}");
     }
-}
-
-/// A shared session announces itself with `Start` before any subscription; answer it the way the
-/// operator does, so the layer's subscription is the next message.
-async fn accept_share(intproxy: &mut TestIntProxy, entry_port: u16) {
-    assert_matches!(
-        intproxy.recv().await,
-        ClientMessage::LocalShare(LocalShareClientMessage::Start)
-    );
-    intproxy
-        .send(DaemonMessage::LocalShare(LocalShareEvent::Accepted {
-            entry_port,
-        }))
-        .await;
 }
 
 fn build_config(
@@ -343,7 +328,6 @@ async fn filter_ports_preserves_custom_ast_and_mapping(
             Some(&config_dir.join(fixture)),
         )
         .await;
-    accept_share(&mut intproxy, 23456).await;
     let ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
         23456,
         filter,
@@ -374,6 +358,7 @@ async fn filter_ports_session_key_wire_contract(#[case] key: &str) {
         "share": true,
         "feature": {"network": {"incoming": {
             "mode": "steal",
+            "ports": [54321],
             "http_filter": {"path_filter": "^/independent$"}
         }}}
     });
@@ -384,7 +369,6 @@ async fn filter_ports_session_key_wire_contract(#[case] key: &str) {
     let (_process, mut intproxy) = Application::RustListenPorts
         .start_process(vec![("APP_PORTS", "54321")], Some(config_file.path()))
         .await;
-    accept_share(&mut intproxy, 54321).await;
     let ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
         54321,
         filter,

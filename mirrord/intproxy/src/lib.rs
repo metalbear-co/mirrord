@@ -23,7 +23,6 @@ use mirrord_intproxy_protocol::{
 };
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
-    local_share::LocalShareClientMessage,
 };
 use mirrord_protocol_io::{Client, TxHandle};
 use ping_pong::{PingPong, PingPongMessage};
@@ -68,7 +67,7 @@ pub mod proxies;
 mod remote_resources;
 mod request_queue;
 pub mod session_monitor;
-mod share;
+pub mod share;
 pub mod sidecar_protocol;
 
 /// Extracts the primary file path from a [`FileRequest`] variant, if one exists.
@@ -118,6 +117,8 @@ pub(crate) struct LayerInitializerTask {
 struct TaskTxs {
     layers: HashMap<LayerId, TaskSender<LayerConnection>>,
     controls: HashMap<LayerId, TaskSender<LayerConnection>>,
+    /// The task that reads a shared session's link until it is ready; see [`share::SharePoll`].
+    share_poll: Option<TaskSender<share::SharePoll>>,
     layer_initializer: LayerInitializerTask,
     agent: TaskSender<RestartableBackgroundTaskWrapper<AgentConnection>>,
     simple: TaskSender<SimpleProxy>,
@@ -442,6 +443,7 @@ impl IntProxy {
             task_txs: TaskTxs {
                 layers: Default::default(),
                 controls: Default::default(),
+                share_poll: None,
                 layer_initializer: LayerInitializerTask {
                     _sender: layer_initializer,
                     shutdown: layer_initializer_shutdown,
@@ -466,14 +468,20 @@ impl IntProxy {
         }
     }
 
-    /// Makes this a shared session: once the agent protocol is negotiated, the intproxy asks the
-    /// operator for a share link; see [`share`]. `incoming` is the session's incoming config,
-    /// which says which port the link opens and where the application listens for it.
+    /// Makes this a shared session, whose `link` the operator created when the session connected;
+    /// see [`share`]. `incoming` is the session's incoming config, which says where the
+    /// application listens for the link's port, and `source` is where the intproxy reads whether
+    /// the link works yet.
     ///
     /// A shared session doesn't reconnect: the operator removes the link when the session's
-    /// connection ends, so a reconnected session would have no link.
-    pub fn enable_local_share(&mut self, incoming: &IncomingConfig) {
-        self.share = Some(share::LocalShareState::new(incoming));
+    /// connections end, so a reconnected session would have no link.
+    pub fn enable_local_share(
+        &mut self,
+        incoming: &IncomingConfig,
+        link: share::LocalShareLink,
+        source: Box<dyn share::ShareStatusSource>,
+    ) {
+        self.share = Some(share::LocalShareState::new(incoming, link, source));
     }
 
     /// Sends what the share state has for an application to print, and returns the error that
@@ -803,9 +811,29 @@ impl IntProxy {
                 }
             }
             ProxyMessage::ConnectionRefresh(kind) => self.handle_connection_refresh(kind).await?,
-            ProxyMessage::PortReleased(port) => {
+            ProxyMessage::PortSubscribed(port) => {
+                if let Some(poll) = self
+                    .share
+                    .as_mut()
+                    .and_then(|share| share.port_subscribed(port))
+                {
+                    self.task_txs.share_poll = Some(self.background_tasks.register(
+                        poll,
+                        MainTaskId::SharePoll,
+                        Self::CHANNEL_SIZE,
+                    ));
+                }
+            }
+            ProxyMessage::ShareStatus(outcome) => {
                 if let Some(share) = self.share.as_mut() {
-                    share.port_released(port);
+                    share.poll_finished(outcome);
+                }
+            }
+            ProxyMessage::PortReleased(port) => {
+                if let Some(share) = self.share.as_mut()
+                    && share.port_released(port)
+                {
+                    self.task_txs.share_poll = None;
                 }
             }
         }
@@ -820,6 +848,9 @@ impl IntProxy {
         update: TaskUpdate<ProxyMessage, ProxyRuntimeError>,
     ) -> Result<(), ProxyRuntimeError> {
         match (task_id, update) {
+            (MainTaskId::SharePoll, TaskUpdate::Finished(Ok(()))) => {
+                self.task_txs.share_poll = None;
+            }
             (MainTaskId::ShareControl(layer), TaskUpdate::Finished(_)) => {
                 self.task_txs.controls.remove(&layer);
                 // A forked child can keep a copy of its parent's request connection open after the
@@ -912,6 +943,12 @@ impl IntProxy {
             DaemonMessage::OperatorPing(id) => {
                 self.agent_tx.send(ClientMessage::OperatorPong(id)).await
             }
+            // The operator ends a shared session with the reason its link failed, such as the loss
+            // of the agent that the link routes to. That reason is all the user reads, so it
+            // reaches the application without the text that frames other agent failures.
+            DaemonMessage::Close(reason) if self.share.is_some() => {
+                Err(ProxyRuntimeError::LocalShare(reason))?
+            }
             DaemonMessage::Close(reason) => Err(ProxyRuntimeError::AgentFailed(reason))?,
             DaemonMessage::TcpOutgoing(msg) => {
                 self.task_txs
@@ -955,24 +992,7 @@ impl IntProxy {
                     .send(IncomingProxyMessage::AgentSteal(msg))
                     .await
             }
-            DaemonMessage::LocalShare(event) => {
-                let Some(share) = self.share.as_mut() else {
-                    return Err(
-                        UnexpectedAgentMessage(Box::new(DaemonMessage::LocalShare(event))).into(),
-                    );
-                };
-                share.handle_event(event)?;
-            }
             DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
-                // The CLI checked the operator's protocol version before it started the session, and
-                // the operator checks the client's, so this version, the oldest of the agents',
-                // doesn't decide whether the operator handles share links.
-                if self.share.is_some() {
-                    self.agent_tx
-                        .send(ClientMessage::LocalShare(LocalShareClientMessage::Start))
-                        .await;
-                }
-
                 let previous = self.protocol_version.replace(protocol_version.clone());
                 if previous.is_none() {
                     // We can now process layers' requests.
@@ -1029,6 +1049,7 @@ impl IntProxy {
                     .await
             }
             message @ DaemonMessage::PauseTarget(_)
+            | message @ DaemonMessage::LocalShare(_)
             | message @ DaemonMessage::Vpn(_)
             | message @ DaemonMessage::ReverseDnsLookup(_) => {
                 Err(ProxyRuntimeError::UnexpectedAgentMessage(

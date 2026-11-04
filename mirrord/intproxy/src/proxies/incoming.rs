@@ -721,10 +721,14 @@ impl IncomingProxy {
             }
 
             DaemonTcp::SubscribeResult(result) => {
+                let stolen_port = result.as_ref().ok().copied().filter(|_| is_steal);
                 let msgs = self.subscriptions.agent_responded(result)?;
 
                 for msg in msgs {
                     message_bus.send(msg).await;
+                }
+                if let Some(port) = stolen_port {
+                    message_bus.send(ProxyMessage::PortSubscribed(port)).await;
                 }
             }
         }

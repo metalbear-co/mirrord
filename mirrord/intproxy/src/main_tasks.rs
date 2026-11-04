@@ -7,6 +7,8 @@ use mirrord_protocol::{DaemonMessage, Port};
 use mirrord_protocol_io::{Client, TxHandle};
 use tokio::net::TcpStream;
 
+use crate::share::SharePollOutcome;
+
 /// Messages sent back to the [`IntProxy`](crate::IntProxy) from the main background tasks. See
 /// [`MainTaskId`].
 #[derive(Debug)]
@@ -25,6 +27,11 @@ pub enum ProxyMessage {
     NewShareControl(NewShareControl),
     /// Connection to agent was dropped and needs reload.
     ConnectionRefresh(ConnectionRefresh),
+    /// An agent confirmed that it steals this port. A shared session's link starts working on
+    /// the same confirmation when this is its entry port; see [`crate::share`].
+    PortSubscribed(Port),
+    /// What [`crate::share::SharePoll`] found out about a shared session's link.
+    ShareStatus(SharePollOutcome),
     /// The incoming proxy asked the agent to stop stealing this port, because no layer listens
     /// on it anymore. A shared session's link ends then; see [`crate::share`].
     PortReleased(Port),
@@ -113,6 +120,7 @@ pub enum MainTaskId {
     FilesProxy,
     LayerConnection(LayerId),
     ShareControl(LayerId),
+    SharePoll,
 }
 
 impl fmt::Display for MainTaskId {
@@ -124,6 +132,7 @@ impl fmt::Display for MainTaskId {
             Self::PingPong => f.write_str("PING_PONG"),
             Self::AgentConnection => f.write_str("AGENT_CONNECTION"),
             Self::ShareControl(id) => write!(f, "SHARE_CONTROL_{}", id.0),
+            Self::SharePoll => f.write_str("SHARE_POLL"),
             Self::LayerConnection(id) => write!(f, "LAYER_CONNECTION_{}", id.0),
             Self::IncomingProxy => f.write_str("INCOMING_PROXY"),
             Self::FilesProxy => f.write_str("FILES_PROXY"),

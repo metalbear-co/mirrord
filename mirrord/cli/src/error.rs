@@ -249,6 +249,14 @@ pub(crate) enum InternalProxyError {
     #[error("Initial ping pong with the agent failed: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     InitialPingPongFailed(String),
+
+    #[error("The CLI didn't hand this shared session's link to the internal proxy")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    MissingShareLink,
+
+    #[error("Failed to deserialize the share link `{0}`: {1}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    DeserializeShareLink(String, serde_json::Error),
 }
 
 /// Errors that can occur when executing the `mirrord operator setup` command.
@@ -291,6 +299,13 @@ pub(crate) enum LocalShareError {
 
     #[error("The internal proxy of the shared session stopped ({0}), so its share link is gone.")]
     ProxyExit(ExitStatus),
+
+    /// The intproxy reads the link from the session's `sessions` view, which Kubernetes guards
+    /// with the user's roles before the request reaches the operator.
+    #[error(
+        "Share links need permission to get `sessions` in the `operator.metalbear.co` API group. Ask your platform team to update the mirrord roles."
+    )]
+    MissingSessionPermission,
 
     /// The operator, or the target that the client resolved through it, can't serve a shared
     /// session.

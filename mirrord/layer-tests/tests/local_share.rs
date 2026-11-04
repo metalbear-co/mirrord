@@ -9,9 +9,10 @@ use mirrord_config::{
     LayerConfig, LayerFileConfig,
     config::{ConfigContext, MirrordConfig},
 };
+use mirrord_layer_tests::intproxy::TEST_SHARE_URL;
+use mirrord_operator::crd::SessionSharePhase;
 use mirrord_protocol::{
     ClientMessage, DaemonMessage,
-    local_share::{LocalShareClientMessage, LocalShareEvent},
     tcp::{DaemonTcp, LayerTcpSteal, StealType},
 };
 use tokio::{
@@ -39,6 +40,10 @@ async fn queued_output(pipe: &mut (impl AsyncRead + AsRawFd + Unpin)) -> String 
 /// The application prints that the link waits for it to listen, then the link once, in the progress
 /// mode `mirrord exec` runs in, and then the failure that ends the session, while it is idle in
 /// accept.
+///
+/// The operator serves the link as ready from the start here, so a link printed before the agent
+/// confirmed the steal would show up. The failure arrives as the operator sends it, in the
+/// reason of `Close`, and the application prints that reason alone.
 ///
 /// `mirrord exec` starts the application with progress output off, so the layer prints in the mode
 /// that `exec` itself ran in: `json` lines on stdout, where `Ready!` goes too, and simple text on
@@ -108,24 +113,8 @@ else:
             Some(config.path()),
         )
         .await;
-    let start = timeout(Duration::from_secs(15), proxy.try_recv()).await;
-    assert!(
-        matches!(
-            start,
-            Ok(Some(ClientMessage::LocalShare(
-                LocalShareClientMessage::Start
-            )))
-        ),
-        "prints mode={mode} fork={fork} stage=Start: actual={start:?}, stdout={:.8192}, stderr={:.8192}",
-        process.get_stdout().await,
-        process.get_stderr().await
-    );
-    proxy
-        .send(DaemonMessage::LocalShare(LocalShareEvent::Accepted {
-            entry_port: 9000,
-        }))
-        .await;
-    let subscription = timeout(Duration::from_secs(5), proxy.try_recv()).await;
+    proxy.set_share_phase(SessionSharePhase::Ready);
+    let subscription = timeout(Duration::from_secs(15), proxy.try_recv()).await;
     assert!(
         matches!(
             subscription,
@@ -147,8 +136,10 @@ else:
             .wait_for_line(Duration::from_secs(5), &waiting)
             .await;
     }
+    // Longer than the intproxy's first wait between two reads of the link.
+    tokio::time::sleep(Duration::from_millis(500)).await;
     for output in [process.get_stdout().await, process.get_stderr().await] {
-        assert!(output.contains("https://test.example").not(), "{output}");
+        assert!(output.contains(TEST_SHARE_URL).not(), "{output}");
     }
     proxy
         .send(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(
@@ -166,18 +157,13 @@ else:
             .lines()
             .find(|line| *line == "APP_LISTENING")
     );
-    proxy
-        .send(DaemonMessage::LocalShare(LocalShareEvent::Ready {
-            url: "https://test.example".to_owned(),
-        }))
-        .await;
     if json {
         process
-            .wait_for_line_stdout(Duration::from_secs(5), "https://test.example")
+            .wait_for_line_stdout(Duration::from_secs(5), TEST_SHARE_URL)
             .await;
     } else {
         process
-            .wait_for_line(Duration::from_secs(5), "https://test.example")
+            .wait_for_line(Duration::from_secs(5), TEST_SHARE_URL)
             .await;
     }
     if fork {
@@ -230,9 +216,7 @@ else:
         );
     }
     proxy
-        .send(DaemonMessage::LocalShare(LocalShareEvent::Failed {
-            message: "share registration failed".to_owned(),
-        }))
+        .send(DaemonMessage::Close("share registration failed".to_owned()))
         .await;
     let status = timeout(Duration::from_secs(5), process.wait()).await;
     assert!(
@@ -248,7 +232,7 @@ else:
     };
     for (report, count) in [
         (waiting.as_str(), 1),
-        ("https://test.example", 1),
+        (TEST_SHARE_URL, 1),
         (
             "Note: people who open this link reach the service running on your machine until you stop this session. Who can open it is set by your cluster's access rules.",
             1,
@@ -264,13 +248,11 @@ else:
     }
     let link_line = reports
         .lines()
-        .find(|line| line.contains("https://test.example"))
+        .find(|line| line.contains(TEST_SHARE_URL))
         .unwrap();
     if json {
         for line in reports.lines().filter(|line| {
-            line.contains(&waiting)
-                || line.contains("https://test.example")
-                || line.contains("Can't share")
+            line.contains(&waiting) || line.contains(TEST_SHARE_URL) || line.contains("Can't share")
         }) {
             let message: serde_json::Value = serde_json::from_str(line)
                 .unwrap_or_else(|error| panic!("{error}: {line:?}, stdout={reports}"));
@@ -285,11 +267,11 @@ else:
             message
                 .get("message")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|text| text.starts_with("https://test.example\n")),
+                .is_some_and(|text| text.starts_with(&format!("{TEST_SHARE_URL}\n"))),
             "{reports}"
         );
     } else {
-        assert_eq!(link_line, "https://test.example", "{reports}");
+        assert_eq!(link_line, TEST_SHARE_URL, "{reports}");
     }
     let completion = timeout(Duration::from_secs(5), proxy.wait()).await;
     assert!(
@@ -454,27 +436,7 @@ async fn local_share_blocked_stderr_does_not_block_failure() {
     let capacity = unsafe { libc::fcntl(stderr.as_raw_fd(), libc::F_GETPIPE_SZ) };
     assert!(capacity > 0);
     let mut proxy = TestIntProxy::new(listener, Some(config.path())).await;
-    let start = timeout(Duration::from_secs(15), proxy.try_recv()).await;
-    assert!(
-        matches!(
-            start,
-            Ok(Some(ClientMessage::LocalShare(
-                LocalShareClientMessage::Start
-            )))
-        ),
-        "blocked mode=off fork=false stage=Start: actual={start:?}, stdout={:.8192}, stderr={:.8192}",
-        {
-            eprintln!("blocked failure observation start={:?}", start);
-            queued_output(&mut stdout).await
-        },
-        queued_output(&mut stderr).await
-    );
-    proxy
-        .send(DaemonMessage::LocalShare(LocalShareEvent::Accepted {
-            entry_port: port,
-        }))
-        .await;
-    let subscribe = timeout(Duration::from_secs(5), proxy.try_recv()).await;
+    let subscribe = timeout(Duration::from_secs(15), proxy.try_recv()).await;
     assert!(
         matches!(
             subscribe,
@@ -518,15 +480,11 @@ async fn local_share_blocked_stderr_does_not_block_failure() {
         },
         queued_output(&mut stderr).await
     );
+    proxy.set_share_phase(SessionSharePhase::Ready);
     proxy
-        .send(DaemonMessage::LocalShare(LocalShareEvent::Ready {
-            url: "https://blocked.example".to_owned(),
-        }))
-        .await;
-    proxy
-        .send(DaemonMessage::LocalShare(LocalShareEvent::Failed {
-            message: "forced blocked-output failure".to_owned(),
-        }))
+        .send(DaemonMessage::Close(
+            "forced blocked-output failure".to_owned(),
+        ))
         .await;
     let status = timeout(Duration::from_secs(5), child.wait()).await;
     assert!(
@@ -588,18 +546,6 @@ async fn local_share_rejects_subscription_without_control() {
     );
     let mut process = app.get_test_process(env, Some(non_sharing.path())).await;
     let mut proxy = TestIntProxy::new(listener, Some(shared.path())).await;
-    let start = timeout(Duration::from_secs(15), proxy.try_recv()).await;
-    assert!(
-        matches!(
-            start,
-            Ok(Some(ClientMessage::LocalShare(
-                LocalShareClientMessage::Start
-            )))
-        ),
-        "missing-control mode=default fork=false stage=Start: actual={start:?}, stdout={:.8192}, stderr={:.8192}",
-        process.get_stdout().await,
-        process.get_stderr().await
-    );
     process
         .wait_for_line_stdout(Duration::from_secs(5), "APPLICATION_ENTRY_SENTINEL")
         .await;
@@ -610,11 +556,6 @@ async fn local_share_rejects_subscription_without_control() {
             .lines()
             .any(|line| line == "APPLICATION_ENTRY_SENTINEL")
     );
-    proxy
-        .send(DaemonMessage::LocalShare(LocalShareEvent::Accepted {
-            entry_port: port,
-        }))
-        .await;
     process
         .child
         .stdin
@@ -623,27 +564,24 @@ async fn local_share_rejects_subscription_without_control() {
         .write_all(b"listen\n")
         .await
         .unwrap();
-    let status = timeout(Duration::from_secs(5), process.wait()).await;
+    // The fake agent answers the protocol version negotiation while the application runs, because
+    // the intproxy holds the layer's requests until then.
+    let (status, to_agent) = tokio::join!(
+        timeout(Duration::from_secs(5), process.wait()),
+        timeout(Duration::from_secs(5), proxy.try_recv())
+    );
+    assert!(
+        matches!(to_agent, Ok(None) | Err(_)),
+        "missing-control mode=default fork=false stage=agent: actual={to_agent:?}"
+    );
     assert!(
         matches!(status, Ok(status) if status.success().not()),
         "missing-control mode=default fork=false stage=application-exit: actual={status:?}, stdout={:.8192}, stderr={:.8192}",
         process.get_stdout().await,
         process.get_stderr().await
     );
-    assert!(
-        process
-            .get_stdout()
-            .await
-            .contains("https://missing-control.example")
-            .not()
-    );
-    assert!(
-        process
-            .get_stderr()
-            .await
-            .contains("https://missing-control.example")
-            .not()
-    );
+    assert!(process.get_stdout().await.contains(TEST_SHARE_URL).not());
+    assert!(process.get_stderr().await.contains(TEST_SHARE_URL).not());
     let completion = timeout(Duration::from_secs(5), proxy.wait()).await;
     assert!(
         matches!(&completion, Ok(Err(error)) if error.to_string().contains("The application subscribed to a port before its share connection was attached.")),
@@ -657,8 +595,9 @@ async fn local_share_rejects_subscription_without_control() {
     );
 }
 
-/// An application that stops listening on the port that the link opens is told that the link
-/// ended, because the operator removes the link then while the session runs on. Its natural
+/// The link is printed once the operator serves it as ready, which can take a few reads after
+/// the agent confirmed the steal. An application that stops listening on the port that the link
+/// opens is then told that the link ended, because the operator removes the link then while the session runs on. Its natural
 /// completion then ends the session cleanly: the intproxy exits with success, and the operator
 /// ends the link with the session's connection.
 ///
@@ -694,24 +633,7 @@ async fn local_share_normal_application_exit_is_clean(#[case] clobber_low_fds: b
     let (mut process, mut proxy) = app
         .start_process(vec![("TMPDIR", tmpdir)], Some(config.path()))
         .await;
-    let start = timeout(Duration::from_secs(15), proxy.try_recv()).await;
-    assert!(
-        matches!(
-            start,
-            Ok(Some(ClientMessage::LocalShare(
-                LocalShareClientMessage::Start
-            )))
-        ),
-        "normal mode=default fork=false stage=Start: actual={start:?}, stdout={:.8192}, stderr={:.8192}",
-        process.get_stdout().await,
-        process.get_stderr().await
-    );
-    proxy
-        .send(DaemonMessage::LocalShare(LocalShareEvent::Accepted {
-            entry_port: port,
-        }))
-        .await;
-    let subscription = timeout(Duration::from_secs(5), proxy.try_recv()).await;
+    let subscription = timeout(Duration::from_secs(15), proxy.try_recv()).await;
     assert!(
         matches!(
             subscription,
@@ -739,13 +661,16 @@ async fn local_share_normal_application_exit_is_clean(#[case] clobber_low_fds: b
             .lines()
             .find(|line| *line == "APP_LISTENING")
     );
-    proxy
-        .send(DaemonMessage::LocalShare(LocalShareEvent::Ready {
-            url: "https://normal.example".to_owned(),
-        }))
-        .await;
+    // The intproxy reads the link again while the operator still serves it as pending.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        process.get_stderr().await.contains(TEST_SHARE_URL).not(),
+        "normal mode=default fork=false stage=pending: stderr={:.8192}",
+        process.get_stderr().await
+    );
+    proxy.set_share_phase(SessionSharePhase::Ready);
     process
-        .wait_for_line(Duration::from_secs(5), "https://normal.example")
+        .wait_for_line(Duration::from_secs(5), TEST_SHARE_URL)
         .await;
     process
         .child
@@ -808,7 +733,7 @@ async fn local_share_normal_application_exit_is_clean(#[case] clobber_low_fds: b
     let stderr = process.get_stderr().await;
     for report in [
         format!("Waiting for your application to listen on port {port} to share it."),
-        "https://normal.example".to_owned(),
+        TEST_SHARE_URL.to_owned(),
         ended,
     ] {
         assert_eq!(stderr.matches(&report).count(), 1, "{report}: {stderr}");

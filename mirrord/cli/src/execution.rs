@@ -25,7 +25,14 @@ use mirrord_config::{
 };
 #[cfg(windows)]
 use mirrord_config::{MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR};
-use mirrord_intproxy::agent_conn::AgentConnectInfo;
+use mirrord_intproxy::{
+    agent_conn::AgentConnectInfo,
+    share::{LOCAL_SHARE_LINK_ENV, LocalShareLink},
+};
+use mirrord_operator::{
+    client::{OperatorApi, OperatorSession, error::OperatorApiError},
+    crd::SessionSharePhase,
+};
 use mirrord_progress::{MIRRORD_SHARE_PROGRESS_ENV, Progress, ProgressTracker};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use mirrord_protocol_api::client::{MirrordClient, MirrordClientRetry};
@@ -135,6 +142,50 @@ pub(crate) struct MirrordExecution {
     /// Not serialized: it only matters in the process that runs [`Self::wait`].
     #[serde(skip)]
     share: bool,
+}
+
+/// Reads the share link that the operator created when this shared session connected, for the
+/// internal proxy to report.
+///
+/// It is read here, before anything starts, so that roles that don't allow reading it, or an
+/// operator that didn't create it, fail the session with an error the user sees in the terminal.
+async fn read_share_link(
+    config: &LayerConfig,
+    session: &OperatorSession,
+) -> CliResult<LocalShareLink> {
+    let share = match OperatorApi::session_share(config, session).await {
+        Ok(share) => share,
+        Err(OperatorApiError::KubeError {
+            error: kube::Error::Api(status),
+            ..
+        }) if status.code == 403 => return Err(LocalShareError::MissingSessionPermission.into()),
+        Err(error) => return Err(error.into()),
+    };
+    let Some(share) = share.filter(|share| share.phase != SessionSharePhase::Ended) else {
+        return Err(LocalShareError::Operator(
+            "The operator didn't return this session's share link. Restart the session.".to_owned(),
+        )
+        .into());
+    };
+    if share.entry_port == 0
+        || config
+            .feature
+            .network
+            .incoming
+            .first_configured_port
+            .is_some_and(|expected| expected != share.entry_port)
+    {
+        return Err(LocalShareError::Operator(format!(
+            "The operator registered the share link on port {}, which isn't the port this session shares.",
+            share.entry_port
+        ))
+        .into());
+    }
+
+    Ok(LocalShareLink {
+        url: share.url,
+        entry_port: share.entry_port,
+    })
 }
 
 /// Struct that when dropped will cancel the token and wait on the join handle
@@ -682,6 +733,13 @@ impl MirrordExecution {
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
+        let share_link = match &connect_info {
+            AgentConnectInfo::Operator(session) if config.share => {
+                Some(read_share_link(config, session).await?)
+            }
+            _ => None,
+        };
+
         let mut client = connector.into_client().await?;
 
         config
@@ -751,6 +809,10 @@ impl MirrordExecution {
             )
             .env(MIRRORD_KUBE_VERSION_MAJOR_ENV, api_version.0.to_string())
             .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string());
+
+        if let Some(link) = &share_link {
+            proxy_command.env(LOCAL_SHARE_LINK_ENV, serde_json::to_string(link)?);
+        }
 
         #[cfg(unix)]
         if let Some(directory) = prefetch_guard.as_ref().map(|guard| guard.path()) {
