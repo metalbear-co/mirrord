@@ -261,6 +261,10 @@ struct PreparedPreview {
 struct PreparedSync {
     /// The service's `sync` entries, in the order of `spec.sync`.
     entries: Vec<SyncEntry>,
+
+    /// Whether a supervisor runs the app in the preview pod, which `spec.sync.run` asks for.
+    supervised: bool,
+
     /// The client of the sync websocket, with the user's certificate if the user has one.
     api: OperatorApi<MaybeClientCert>,
 }
@@ -575,6 +579,9 @@ impl PreparedPreview {
         }
 
         let (sync_entries, sync_config) = sync.map(|sync| (sync.entries, sync.config)).unzip();
+        let supervised = sync_config
+            .as_ref()
+            .is_some_and(|config| config.run.is_some());
         let spec = PreviewSessionSpec {
             image,
             key: layer_config.key.as_str().to_owned(),
@@ -607,6 +614,7 @@ impl PreparedPreview {
             None => None,
             Some(entries) => Some(PreparedSync {
                 entries,
+                supervised,
                 api: operator_api
                     .clone()
                     .with_client_certificate(&mut analytics, progress, &layer_config)
@@ -958,6 +966,7 @@ async fn wait_until_started(
         None => (None, None),
         Some(PreparedSync {
             entries,
+            supervised,
             api: sync_api,
         }) => {
             // The driver creates the watcher of `--watch`, which can fail after this run created
@@ -967,8 +976,9 @@ async fn wait_until_started(
                 session_namespace.to_owned(),
                 session_name.to_owned(),
                 entries,
+                supervised,
                 watch_files,
-                progress.subtask("pushing the local code"),
+                progress.subtask("syncing the local code"),
             ) {
                 Ok(driver) => driver,
                 Err(error) => return Err(fail(error, &mut subtask).await),
@@ -990,7 +1000,7 @@ async fn wait_until_started(
     let mut started = None;
     let (share_host, idle) = loop {
         // The `Ready` of a reused session predates the push, and the volume holds the push
-        // before the supervisor ran its install and restarted the app, so the first push only
+        // before the supervisor ran `prepare` and restarted the app, so the first push only
         // counts once the supervisor is done with it. The `changed` arm below only wakes the
         // loop, so the loop hands each activity that it reads to the deadline here, and the
         // deadline sees every change of the sync's work.
@@ -1001,9 +1011,9 @@ async fn wait_until_started(
                 deadline.on_activity(&activity);
                 match activity.first_push {
                     Some(first_push) if activity.handled >= Some(first_push) => {
-                        if activity.install_failed {
+                        if activity.prepare_failed {
                             return Err(
-                                fail(CliError::PreviewSyncInstallFailed, &mut subtask).await
+                                fail(CliError::PreviewSyncPrepareFailed, &mut subtask).await
                             );
                         }
                         true
@@ -1655,8 +1665,8 @@ async fn preview_status(
 }
 
 /// The code sync of a session in `mirrord preview status`, one line per fact: whether a CLI is
-/// attached, when the last push was applied and its generation, the install with the last line of its
-/// error, the app, and why idle mode is off.
+/// attached, when the last sync was applied and its generation, the state of `prepare` with the
+/// last line of its error, the app, and why idle mode is off.
 fn describe_sync_status(sync: &PreviewSyncStatus) -> String {
     let mut lines = Vec::new();
 
@@ -1672,22 +1682,22 @@ fn describe_sync_status(sync: &PreviewSyncStatus) -> String {
                 .map(|ago| format!("{ago} ago"))
                 .unwrap_or_else(|_| "just now".to_owned());
             lines.push(match generation {
-                Some(generation) => format!("last push {ago} (generation {generation})"),
-                None => format!("last push {ago}"),
+                Some(generation) => format!("last sync {ago} (generation {generation})"),
+                None => format!("last sync {ago}"),
             });
         }
         (None, Some(generation)) => lines.push(format!("holds generation {generation}")),
-        (None, None) => lines.push("no push yet".to_owned()),
+        (None, None) => lines.push("no sync yet".to_owned()),
     }
 
-    if let Some(install) = &sync.install {
-        let last_error_line = install.error.as_deref().and_then(|error| {
+    if let Some(prepare) = &sync.prepare {
+        let last_error_line = prepare.error.as_deref().and_then(|error| {
             error
                 .lines()
                 .rev()
                 .find(|line| line.trim().is_empty().not())
         });
-        lines.extend(sync::describe_install(install, last_error_line));
+        lines.extend(sync::describe_prepare(prepare, last_error_line));
     }
 
     if let Some(app) = &sync.app {
@@ -2744,7 +2754,7 @@ mod tests {
             "ttlSecs": 3600,
             "sync": {
                 "entries": [{ "remote": "/app" }],
-                "runCommand": ["npm", "run", "dev"],
+                "run": { "command": ["npm", "run", "dev"] },
             },
         }))
         .unwrap()
@@ -3039,10 +3049,8 @@ mod tests {
                 entries: vec![PreviewSyncEntry {
                     remote: "/app".to_owned(),
                 }],
-                run_command: vec!["npm".to_owned(), "start".to_owned()],
-                working_dir: None,
-                install: None,
-                restart_on_change: true,
+                run: None,
+                prepare: None,
             },
         };
         let existing_dir = sync(local.path().to_owned());

@@ -49,18 +49,18 @@ pub enum PreviewSyncError {
     #[error("the sync stopped: {0}")]
     Operator(String),
 
-    #[error("the preview pod rejected the push: {0}")]
+    #[error("the preview pod rejected the sync: {0}")]
     Rejected(RejectReason),
 
     #[error("the operator stopped the sync: {0}")]
     Unpaired(UnpairReason),
 
-    #[error("the operator answered a push with an unexpected frame: {0:?}")]
+    #[error("the operator answered a sync with an unexpected frame: {0:?}")]
     Unexpected(SyncFrame),
 
     #[error(
-        "the ignore rules of the push take {0} bytes, more than the {MAX_RULES_BYTES} bytes that \
-         one push can carry; the `.gitignore` files, the excludes files and the `ignore` lists of \
+        "the ignore rules of the sync take {0} bytes, more than the {MAX_RULES_BYTES} bytes that \
+         one sync can carry; the `.gitignore` files, the excludes files and the `ignore` lists of \
          the synced directories hold too many lines"
     )]
     RulesTooLarge(usize),

@@ -25,14 +25,16 @@ use mirrord_operator::{
             TreeListing, UpgradedConnection, pack_changes,
         },
     },
-    crd::preview::{PreviewSyncConfig, PreviewSyncEntry, PreviewSyncInstall},
+    crd::preview::{
+        PreviewSyncConfig, PreviewSyncEntry, PreviewSyncPrepare, PreviewSyncRestart, PreviewSyncRun,
+    },
     sync::{
         AppReport, InstallReport, InstallState, ManifestPath, PushMode, RejectReason, SidecarState,
         SupervisorReport, UnpairReason, rules::IgnoreRules,
     },
 };
 use mirrord_progress::{Progress, ProgressTracker};
-use mirrord_up::{InstallConfig, RunType, SubprocessCfg, SyncEntry};
+use mirrord_up::{PrepareConfig, SubprocessCfg, SyncEntry, SyncRestart, SyncRunConfig};
 use notify::{
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
     event::{MetadataKind, ModifyKind},
@@ -69,7 +71,7 @@ pub(super) struct ServiceSync {
 impl ServiceSync {
     /// The code sync of `service`, or `None` when it has no `sync`.
     ///
-    /// Translates each `sync.install.on_change` glob into the container, under the `remote` of
+    /// Translates each `sync.prepare.triggered_by` glob into the container, under the `remote` of
     /// the entry whose `local` holds it, and refuses the settings that a sync preview can't run,
     /// before anything changes in the cluster.
     pub(super) fn of_service(service: &SubprocessCfg) -> CliResult<Option<Self>> {
@@ -78,22 +80,10 @@ impl ServiceSync {
         };
 
         // A Windows tree has no Unix permissions, so a push would drop the executable bit of
-        // every script, and the translated `on_change` globs would hold `\`, which the pod
+        // every script, and the translated `triggered_by` globs would hold `\`, which the pod
         // doesn't read as a separator.
         if cfg!(windows) {
             return Err(CliError::PreviewSyncOnWindows);
-        }
-
-        // Without a command of its own, the preview runs `run.command`, which `mirrord up` runs
-        // with `mirrord container`, or after `run.pre_command`, on the developer's machine.
-        if sync.run.command.is_none() {
-            if service.run.r#type == RunType::Container {
-                return Err(CliError::PreviewSyncContainerRun);
-            }
-
-            if service.run.pre_command.is_empty().not() {
-                return Err(CliError::PreviewSyncPreCommand);
-            }
         }
 
         // A session that starts idle has no pod to push into, and the pod that the first request
@@ -113,30 +103,46 @@ impl ServiceSync {
             return Err(CliError::PreviewSyncCronJobTarget);
         }
 
-        let install = match &sync.install {
+        let prepare = match &sync.prepare {
             None => None,
-            Some(InstallConfig {
+            Some(PrepareConfig {
                 command,
                 directory,
-                on_change,
+                triggered_by,
                 persist,
             }) => {
-                let on_change = on_change
+                let triggered_by = triggered_by
                     .iter()
                     .map(|glob| {
-                        container_glob(glob, &sync.files)
-                            .ok_or_else(|| CliError::PreviewSyncOnChangeOutsideLocal(glob.clone()))
+                        container_glob(glob, &sync.files).ok_or_else(|| {
+                            CliError::PreviewSyncTriggeredByOutsideLocal(glob.clone())
+                        })
                     })
                     .collect::<CliResult<_>>()?;
 
-                Some(PreviewSyncInstall {
+                Some(PreviewSyncPrepare {
                     command: command.clone(),
-                    on_change,
+                    triggered_by,
                     persist: persist.clone(),
                     working_dir: directory.clone(),
                 })
             }
         };
+
+        let run = sync.run.as_ref().map(
+            |SyncRunConfig {
+                 command,
+                 directory,
+                 restart,
+             }| PreviewSyncRun {
+                command: command.clone(),
+                working_dir: directory.clone(),
+                restart: match restart {
+                    SyncRestart::OnPrepare => PreviewSyncRestart::OnPrepare,
+                    SyncRestart::OnSync => PreviewSyncRestart::OnSync,
+                },
+            },
+        );
 
         let config = PreviewSyncConfig {
             entries: sync
@@ -146,14 +152,8 @@ impl ServiceSync {
                     remote: entry.remote.clone(),
                 })
                 .collect(),
-            run_command: sync
-                .run
-                .command
-                .clone()
-                .unwrap_or_else(|| service.run.command.clone()),
-            working_dir: sync.run.directory.clone(),
-            install,
-            restart_on_change: sync.restart_on_change,
+            prepare,
+            run,
         };
         config.check()?;
 
@@ -216,20 +216,21 @@ pub(super) struct SyncActivity {
     /// Whether the sync does work whose length the CLI can't predict, during which no creation
     /// timeout runs: the sidecar waits for the code volume or copies the image's files to it,
     /// the CLI lists, hashes or packs the trees of a push, the push is being sent or applied, or
-    /// the install runs.
+    /// `prepare` runs.
     pub(super) busy: bool,
 
-    /// Counts the reports of progress: a new state of the sidecar, of the install or of the app,
+    /// Counts the reports of progress: a new state of the sidecar, of `prepare` or of the app,
     /// a new handled push, and every applied push. A failed restart of the app isn't progress,
     /// because the supervisor retries it for as long as the app fails to start.
     pub(super) progress: u64,
 
-    /// The generation of the last push that the preview pod's supervisor acted on, from its last
-    /// report. Once it reaches `first_push`, the supervisor is done with the first push.
+    /// The generation of the last push that the preview pod acted on: from the supervisor's last
+    /// report, or, in a pod without a supervisor, the last push that the volume holds. Once it
+    /// reaches `first_push`, the pod is done with the first push.
     pub(super) handled: Option<u64>,
 
-    /// Whether the supervisor's last report says that the last install failed.
-    pub(super) install_failed: bool,
+    /// Whether the supervisor's last report says that the last `prepare` failed.
+    pub(super) prepare_failed: bool,
 
     /// Whether the operator unpaired the CLI because a `mirrord exec` session paused the
     /// preview, so the preview pod applies no push until that session ends.
@@ -271,6 +272,11 @@ pub(super) struct SyncDriver<S> {
 
     activity: watch::Sender<SyncActivity>,
     progress: ProgressTracker,
+
+    /// Whether a supervisor runs the app in the preview pod, as `spec.sync.run` asks for. Without
+    /// one, nothing in the pod reports on a push, so a push counts as handled once the volume
+    /// holds it.
+    supervised: bool,
 
     /// The id of the next push. The ids of one CLI start at a random number, so that they
     /// don't repeat the ids of an earlier CLI, whose pushes the operator and the sidecar may
@@ -396,13 +402,15 @@ impl From<OperatorApiError> for Stop {
 
 impl SyncDriver<UpgradedConnection> {
     /// The driver of the sync of the session `name` in `namespace`, which pushes `entries`, the
-    /// service's `sync` entries in the order of the session's `spec.sync`. With `watch_files`, it
-    /// creates the watcher here, and each listing then watches the directories that it reads.
+    /// service's `sync` entries in the order of the session's `spec.sync`, into a pod whose app a
+    /// supervisor runs when `supervised` is set. With `watch_files`, it creates the watcher here,
+    /// and each listing then watches the directories that it reads.
     pub(super) fn new(
         operator_api: Arc<OperatorApi<MaybeClientCert>>,
         namespace: String,
         name: String,
         entries: Vec<SyncEntry>,
+        supervised: bool,
         watch_files: bool,
         progress: ProgressTracker,
     ) -> CliResult<(Self, watch::Receiver<SyncActivity>)> {
@@ -418,7 +426,7 @@ impl SyncDriver<UpgradedConnection> {
             })
         });
 
-        Self::with_connect(connect, entries.into(), watch_files, progress)
+        Self::with_connect(connect, entries.into(), supervised, watch_files, progress)
     }
 }
 
@@ -426,6 +434,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
     fn with_connect(
         connect: Connect<S>,
         entries: Arc<[SyncEntry]>,
+        supervised: bool,
         watch_files: bool,
         progress: ProgressTracker,
     ) -> CliResult<(Self, watch::Receiver<SyncActivity>)> {
@@ -453,6 +462,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
             watcher,
             activity,
             progress,
+            supervised,
             next_push_id: rand::random(),
             applied_pushes: 0,
             pairing: Pairing::Waiting,
@@ -501,7 +511,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                 // restart or upgrade breaks the connection meanwhile.
                 Stop::Disconnected(error) if self.watcher.is_some() => {
                     self.progress.warning(&format!(
-                        "{}; reconnecting in {} seconds to push the code again",
+                        "{}; reconnecting in {} seconds to sync the code again",
                         with_causes(&error),
                         reconnect_delay.as_secs()
                     ));
@@ -511,7 +521,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                 Stop::Disconnected(error) | Stop::Transient(error) if may_retry => {
                     may_retry = false;
                     self.progress.warning(&format!(
-                        "{}; reconnecting to push the code again",
+                        "{}; reconnecting to sync the code again",
                         with_causes(&error)
                     ));
                 }
@@ -568,7 +578,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                         }
                         Pairing::Idle if pending.is_empty().not() => {
                             self.pairing = Pairing::Waking;
-                            self.progress.info("waking the idle preview to push the change");
+                            self.progress.info("waking the idle preview to sync the change");
                             connection.wake().await.map_err(Stop::from)
                         }
                         // The next `Paired` brings a full push, which holds these changes.
@@ -805,6 +815,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
         let result = connection
             .push(push_id, mode, packed, |event| self.observe(&event))
             .await;
+        // Without a supervisor, the applied generation is what `publish` reports as handled.
+        if let Ok(generation) = &result {
+            self.generation = Some(*generation);
+            self.applied_pushes += 1;
+        }
         self.publish(result.is_ok());
 
         let generation = match result {
@@ -818,10 +833,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
             Err(error) => return Err(error.into()),
         };
 
-        self.generation = Some(generation);
-        self.applied_pushes += 1;
         self.progress
-            .info(&format!("pushed the local code (generation {generation})"));
+            .info(&format!("synced the local code (generation {generation})"));
 
         Ok(Pushed::Applied(generation))
     }
@@ -840,7 +853,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
             .send_modify(|activity| activity.first_push = None);
         self.publish(false);
         self.progress
-            .info(&format!("waiting to push again: {reason}"));
+            .info(&format!("waiting to sync again: {reason}"));
     }
 
     /// Reports `event`, and records what it says about the preview pod's work.
@@ -865,7 +878,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                 }
                 if report.install != self.supervisor.install
                     && let Some(message) =
-                        describe_install(&report.install, report.install.error.as_deref())
+                        describe_prepare(&report.install, report.install.error.as_deref())
                 {
                     self.progress.info(&message);
                 }
@@ -899,8 +912,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
 
         self.activity.send_modify(|activity| {
             activity.busy = busy;
-            activity.handled = self.supervisor.handled;
-            activity.install_failed = self.supervisor.install.state == InstallState::Failed;
+            activity.handled = if self.supervised {
+                self.supervisor.handled
+            } else {
+                self.generation
+            };
+            activity.prepare_failed = self.supervisor.install.state == InstallState::Failed;
             activity.paused = self.pairing == Pairing::Paused;
             if progressed {
                 activity.progress += 1;
@@ -1364,17 +1381,17 @@ fn changes_the_tree(kind: &EventKind) -> bool {
     }
 }
 
-/// The install's state in the words of `mirrord preview sync` and `mirrord preview status`, or
-/// `None` when the install didn't run. `error` is the part of the install's error to show, which
-/// starts on a line of its own when it has more than one line.
-pub(super) fn describe_install(install: &InstallReport, error: Option<&str>) -> Option<String> {
-    match (install.state, error) {
+/// The state of `prepare` in the words of `mirrord preview sync` and `mirrord preview status`, or
+/// `None` when it didn't run. `error` is the part of its error to show, which starts on a line of
+/// its own when it has more than one line.
+pub(super) fn describe_prepare(prepare: &InstallReport, error: Option<&str>) -> Option<String> {
+    match (prepare.state, error) {
         (InstallState::NotRun, _) => None,
         (InstallState::Failed, Some(error)) if error.contains('\n') => {
-            Some(format!("install: failed:\n{error}"))
+            Some(format!("prepare: failed:\n{error}"))
         }
-        (InstallState::Failed, Some(error)) => Some(format!("install: failed: {error}")),
-        (state, _) => Some(format!("install: {state}")),
+        (InstallState::Failed, Some(error)) => Some(format!("prepare: failed: {error}")),
+        (state, _) => Some(format!("prepare: {state}")),
     }
 }
 

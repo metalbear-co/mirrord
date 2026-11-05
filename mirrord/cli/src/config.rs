@@ -1627,18 +1627,18 @@ pub(super) enum PreviewCommand {
     ///
     /// Each service's image comes from `--image <service>=<image ref>`, then
     /// `MIRRORD_<SERVICE>_IMAGE`. Services without one are skipped. `sync` is ignored: `mirrord
-    /// preview sync` previews the services with `sync` and pushes their local directories, and
+    /// preview sync` previews the services with `sync` and syncs their local directories, and
     /// running both commands for one service under one key replaces one preview with the other.
     /// All sessions run under one key: `--key`, then `MIRRORD_KEY`, then the git branch
     /// (`GITHUB_HEAD_REF` when set), or a random key on `main`, `master` or without a branch.
     Up(PreviewUpArgs),
     /// Start a preview environment for every service of a mirrord-up.yaml with `sync` and without
-    /// `skip`, and push its `sync` directories into the preview pod.
+    /// `skip`, and sync the service's `sync.files` directories into its preview pod.
     ///
     /// Each preview runs the service's image (`--image <service>=<image ref>`, then
     /// `MIRRORD_<SERVICE>_IMAGE`) or, without one, the target's image, with the local directories
-    /// in it. An image also previews a service with `skip`. The command pushes the local code and
-    /// returns when every preview is ready; with `--watch`, it then keeps pushing changes. A later
+    /// in it. An image also previews a service with `skip`. The command syncs the local code and
+    /// returns when every preview is ready; with `--watch`, it then keeps syncing changes. A later
     /// run for a service without an image reuses a live session with the same settings and takes
     /// over its sync from an earlier `mirrord preview sync`, and a service with an image always
     /// gets a new session, which pulls the image again. `mirrord preview up` for the same service
@@ -1854,9 +1854,9 @@ pub(super) struct PreviewUpArgs {
     /// If a session hasn't reached `Ready` within this time, the CLI deletes it, unless `mirrord
     /// preview sync` reused the session from an earlier run. For `mirrord preview sync`, it is the
     /// longest time without progress: each new state of the session or of the preview pod, and
-    /// each applied push, starts it again, and it doesn't run while the pod copies the image's
-    /// files to the code volume, while the CLI lists, packs or sends a push, while the pod applies
-    /// it or while an install runs.
+    /// each applied sync, starts it again, and it doesn't run while the pod copies the image's
+    /// files to the code volume, while the CLI lists, packs or sends the files of a sync, while the
+    /// pod applies them or while `sync.prepare` runs.
     #[arg(long)]
     pub timeout: Option<u64>,
 }
@@ -1867,9 +1867,9 @@ pub(super) struct PreviewSyncArgs {
     #[command(flatten)]
     pub up: PreviewUpArgs,
 
-    /// Keep running after the previews are up, and push each change under the `sync` directories
-    /// into the preview pods. A change to `.git`, or to a path that git or the entry's `ignore`
-    /// leaves out, pushes nothing.
+    /// Keep running after the previews are up, and sync each change under the `sync` directories
+    /// into the preview pods, so one run performs many syncs. A change to `.git`, or to a
+    /// path that git or the entry's `ignore` leaves out, syncs nothing.
     #[arg(long)]
     pub watch: bool,
 }
