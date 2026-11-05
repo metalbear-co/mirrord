@@ -164,7 +164,8 @@ impl ClientConnection {
     ///
     /// The message's bytes stay counted in the buffered bytes metric until the returned
     /// [`Buffered`] is dropped, so the caller should keep its guard (see [`Buffered::into_parts`])
-    /// while it handles the message.
+    /// while it handles the message. A protocol-io [`Connection`] decodes messages ahead into its
+    /// own receive channel, and they are counted only once this returns them.
     #[tracing::instrument(level = "trace", err)]
     pub async fn receive(&mut self) -> io::Result<Option<Buffered<ClientMessage>>> {
         let message = match &mut self.framed {

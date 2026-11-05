@@ -67,6 +67,10 @@ pub(crate) static BYPASSED_REQUESTS: LazyLock<prometheus::GaugeVec> = LazyLock::
 /// Memory held by mirrord-protocol messages. Messages pile up in the agent when a client reads
 /// slowly or traffic comes in bursts, and this shows how much of the agent's memory they take.
 ///
+/// Workload-companion connections go through protocol-io, a shared crate whose queues hold
+/// encoded bytes and decoded messages rather than [`Buffered`] ones, so what waits in them is not
+/// counted: about 16 KiB plus one message on its way to the client, and up to 64 messages from it.
+///
 /// Updated live by [`Buffered`] messages, through [`BUFFERED_MESSAGE_GAUGES`].
 pub(crate) static BUFFERED_MESSAGES_BYTES: LazyLock<IntGaugeVec> = LazyLock::new(|| {
     prometheus::register_int_gauge_vec!(
