@@ -1,17 +1,11 @@
-const EXTENSION_ID = 'bijejadnnfgjkfdocgocklekjhnhkhkf'
+import {
+  hasChromeRuntime,
+  isFirefox,
+  sendToExtension,
+} from './extensionTransport'
 
-interface ChromeRuntime {
-  sendMessage: (
-    extensionId: string,
-    message: unknown,
-    callback?: (response: unknown) => void,
-  ) => void
-  lastError?: { message?: string }
-}
-
-interface ChromeGlobal {
-  runtime?: ChromeRuntime
-}
+const CONFIGURE_TIMEOUT_MS = 1500
+const FIREFOX_CONFIGURE_TIMEOUT_MS = 5000
 
 // The token arrives as a `?token=` query param the first time `mirrord ui` hands the user its
 // URL. When the page is opened without it — the extension's "Open mirrord ui" button links to the
@@ -34,27 +28,24 @@ async function resolveToken(): Promise<string | null> {
 }
 
 export async function autoConfigureExtension(): Promise<void> {
-  const chromeGlobal = (window as unknown as { chrome?: ChromeGlobal }).chrome
-  const runtime = chromeGlobal?.runtime
-  // Bail before fetching the token when there's no extension to receive it.
-  if (!runtime || typeof runtime.sendMessage !== 'function') return
-
-  const token = await resolveToken()
-  if (!token) return
-
-  try {
-    runtime.sendMessage(
-      EXTENSION_ID,
+  if (hasChromeRuntime()) {
+    const token = await resolveToken()
+    if (!token) return
+    await sendToExtension(
       {
         type: 'mirrord-ui-configure',
         backend: window.location.origin,
         token,
       },
-      () => {
-        void runtime.lastError
-      },
+      CONFIGURE_TIMEOUT_MS,
     )
-  } catch {
     return
   }
+  if (!isFirefox()) return
+  // The Firefox content script reads the token from this origin itself, so it never goes
+  // through page messages that other scripts on the page could observe.
+  await sendToExtension(
+    { type: 'mirrord-ui-configure' },
+    FIREFOX_CONFIGURE_TIMEOUT_MS,
+  )
 }
