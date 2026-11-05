@@ -43,6 +43,11 @@ pub struct MysqlBranchConfig {
 /// All copy modes accept `dump_args`, passed to `mysqldump` as-is, which can leave out what the
 /// copy mode copies, such as stored routines with `--skip-routines`.
 ///
+/// All copy modes also accept `exclude_tables`: table names or patterns (`*` matches any run of
+/// characters, `?` one character) the copy leaves out entirely. Use it for tables another service
+/// creates and drops while the copy runs, such as `["staging_*", "import_tmp"]`, which would
+/// otherwise fail the copy when they disappear mid-dump.
+///
 /// - Empty
 ///
 ///   Creates an empty database. If the source DB connection options are found from the chosen
@@ -65,17 +70,23 @@ pub enum MysqlBranchCopyConfig {
         tables: Option<BTreeMap<String, MysqlBranchTableCopyConfig>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dump_args: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exclude_tables: Option<Vec<String>>,
     },
 
     Schema {
         tables: Option<BTreeMap<String, MysqlBranchTableCopyConfig>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dump_args: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exclude_tables: Option<Vec<String>>,
     },
 
     All {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dump_args: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exclude_tables: Option<Vec<String>>,
     },
 }
 
@@ -84,6 +95,28 @@ impl Default for MysqlBranchCopyConfig {
         MysqlBranchCopyConfig::Empty {
             tables: Default::default(),
             dump_args: None,
+            exclude_tables: None,
+        }
+    }
+}
+
+impl MysqlBranchCopyConfig {
+    /// The table names and `*`/`?` patterns the copy leaves out. Every mode takes them, since
+    /// a table another service drops mid-dump breaks the schema pass as much as the data pass.
+    pub fn exclude_tables(&self) -> &[String] {
+        match self {
+            Self::Empty { exclude_tables, .. }
+            | Self::Schema { exclude_tables, .. }
+            | Self::All { exclude_tables, .. } => exclude_tables.as_deref().unwrap_or_default(),
+        }
+    }
+
+    /// The per-table copy filters. Only the modes that copy no data by default take them;
+    /// `all` already copies every table.
+    pub fn tables(&self) -> Option<&BTreeMap<String, MysqlBranchTableCopyConfig>> {
+        match self {
+            Self::Empty { tables, .. } | Self::Schema { tables, .. } => tables.as_ref(),
+            Self::All { .. } => None,
         }
     }
 }

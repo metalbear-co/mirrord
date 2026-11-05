@@ -313,6 +313,11 @@ pub struct CommonConfig {
     /// over both. When none is set, the global config's `kube_context` is used, then the
     /// kubeconfig's current context.
     pub(crate) context: Option<Arc<str>>,
+
+    /// Sets the OpenTelemetry baggage value for every service. The `BAGGAGE` environment
+    /// variable takes precedence.
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Team))]
+    pub(crate) baggage: Option<String>,
 }
 
 impl CommonConfig {
@@ -323,6 +328,7 @@ impl CommonConfig {
             accept_invalid_certificates: self.accept_invalid_certificates,
             operator: self.operator,
             telemetry: self.telemetry,
+            baggage: self.baggage.clone(),
             ..Default::default()
         }
         .generate_config(context)
@@ -829,6 +835,7 @@ pub const COMMON_LAYER_PATHS: &[(&str, &str)] = &[
     ("operator", "operator"),
     ("telemetry", "telemetry"),
     ("context", "kube_context"),
+    ("baggage", "baggage"),
 ];
 
 /// The settings of a service in a `mirrord-up.yaml` that [`ServiceConfig::assemble`] copies into
@@ -2055,6 +2062,7 @@ impl CollectAnalytics for &CommonConfig {
             operator,
             telemetry,
             context,
+            baggage,
         } = self;
 
         analytics.add(
@@ -2064,6 +2072,7 @@ impl CollectAnalytics for &CommonConfig {
         analytics.add("operator", operator.is_some());
         analytics.add("telemetry", telemetry.is_some());
         analytics.add("context", context.is_some());
+        analytics.add("baggage", baggage.is_some());
     }
 }
 
@@ -2246,6 +2255,7 @@ mod tests {
             "accept_invalid_certificates" => "true",
             "operator" | "telemetry" => "false",
             "context" => "my-context",
+            "baggage" => "mirrord-session=abc",
             "target" => "{ path: deployment/api }",
             "env" => "{ include: A }",
             "default_mode" => "mirror",
@@ -2319,6 +2329,7 @@ mod tests {
               operator: false
               telemetry: false
               context: "minikube"
+              baggage: "mirrord-session=abc"
             services:
               my-svc:
                 run:
@@ -2331,7 +2342,8 @@ mod tests {
                 accept_invalid_certificates: Some(true),
                 operator: Some(false),
                 telemetry: Some(false),
-                context: Some("minikube".into())
+                context: Some("minikube".into()),
+                baggage: Some("mirrord-session=abc".into()),
             }
         );
     }
@@ -3992,6 +4004,7 @@ mod tests {
                     "operator": false,
                     "telemetry": false,
                     "context": false,
+                    "baggage": false,
                 },
                 "config_fields_used": {
                     "target": 0,
@@ -4056,6 +4069,7 @@ mod tests {
             common:
               accept_invalid_certificates: true
               telemetry: false
+              baggage: "secret-baggage"
             services:
               svc:
                 run:
@@ -4070,6 +4084,8 @@ mod tests {
         );
         assert_eq!(result["common_fields_used"]["operator"], false);
         assert_eq!(result["common_fields_used"]["telemetry"], true);
+        assert_eq!(result["common_fields_used"]["baggage"], true);
+        assert!(result.to_string().contains("secret-baggage").not());
     }
 
     #[test]

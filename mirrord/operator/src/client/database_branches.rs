@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     iter,
     time::Duration,
 };
@@ -35,10 +35,11 @@ use crate::{
     crd::db_branching::{
         branch_database::{
             BranchDatabase, BranchDatabaseSpec, ClickhouseOptions, CockroachdbOptions,
-            DynamodbOptions, GenericCopySpec, GenericExecProbeSpec, GenericHttpGetProbeSpec,
-            GenericOptions, GenericReadinessSpec, MariadbOptions, MigrationsSpec, MongodbOptions,
-            MssqlOptions, MysqlOptions, PgAdditionalDatabase, PostgresOptions, RedisOptions,
-            S3Options, SpannerOptions, SqlBranchCopyConfig, TurbopufferOptions,
+            DialectConfig, DynamodbOptions, GenericCopySpec, GenericExecProbeSpec,
+            GenericHttpGetProbeSpec, GenericOptions, GenericReadinessSpec, MariadbOptions,
+            MigrationsSpec, MongodbOptions, MssqlOptions, MysqlOptions, PgAdditionalDatabase,
+            PostgresOptions, RedisOptions, S3Options, SpannerOptions, SqlBranchCopyConfig,
+            TurbopufferOptions,
         },
         core::{
             BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
@@ -1066,6 +1067,41 @@ pub fn check_attach_namespace<P: Progress>(
                 ),
             })
         }
+    }
+}
+
+/// A branch keeps the tables it was copied with, so a session reusing it under a different
+/// `exclude_tables` gets the copy as it is, whatever it asked for. `exclude_tables` is usually
+/// added to fix a copy, so the warning says what to do for it to take effect. Order does not
+/// matter, and other engines have no list to compare.
+pub fn exclude_tables_mismatch_warning(
+    existing: &BranchDatabase,
+    requested: &BranchDatabaseSpec,
+    api_namespace: &str,
+) -> Option<String> {
+    let existing_tables = exclude_tables(&existing.spec);
+    let requested_tables = exclude_tables(requested);
+    if existing_tables.iter().collect::<BTreeSet<_>>()
+        == requested_tables.iter().collect::<BTreeSet<_>>()
+    {
+        return None;
+    }
+
+    let name = existing.meta().name.as_deref().unwrap_or_default();
+    let id = &existing.spec.id;
+    Some(format!(
+        "branch database `{name}` (id `{id}`) was copied with `exclude_tables` \
+         {existing_tables:?}, and this session asks for {requested_tables:?}; the session uses \
+         the copy as it is. For this session's list to take effect, delete the branch with \
+         `mirrord db-branches -n {api_namespace} destroy {name}`, or give the entry another `id`"
+    ))
+}
+
+fn exclude_tables(spec: &BranchDatabaseSpec) -> &[String] {
+    match spec.dialect() {
+        Ok(DialectConfig::Mysql(options)) => &options.copy.exclude_tables,
+        Ok(DialectConfig::Mariadb(options)) => &options.copy.exclude_tables,
+        _ => &[],
     }
 }
 
@@ -2681,7 +2717,7 @@ mod test {
         CrdConnectionSource, DatabaseBranchesConfig, MigrationsSpec, ObjectMeta, OperatorApiError,
         SOURCE_COMPATIBLE_CONDITION, UnifiedBranchParams, UnifiedDatabaseBranchParams,
         build_migration_archive, classify_existing_branches, convert_connection_source,
-        create_branches, extract_literal_values, read_migrations,
+        create_branches, exclude_tables_mismatch_warning, extract_literal_values, read_migrations,
         replace_spec_values_with_secret_refs, replace_values_with_secret_refs, resolve_branch_id,
         reused_branch_connection_sources,
     };
@@ -3426,5 +3462,53 @@ mod test {
             "{:?}",
             result.err()
         );
+    }
+
+    /// A session adding `exclude_tables` to a config whose branch already exists gets the copy
+    /// made without them, which looks like the setting does nothing. The warning names both lists
+    /// and the way out. The same list in another order is no mismatch.
+    #[test]
+    fn reusing_a_branch_with_other_exclude_tables_warns() {
+        let branch = |engine: &str, exclude_tables: serde_json::Value| {
+            let params = branches_params(serde_json::json!([{
+                "id": "b",
+                "type": engine,
+                "connection": { "url": "DATABASE_URL" },
+                "copy": { "mode": "all", "exclude_tables": exclude_tables }
+            }]))
+            .unwrap();
+            let (name, params) = params.branches.into_iter().next().unwrap();
+            BranchDatabase {
+                metadata: ObjectMeta {
+                    name: Some(name),
+                    ..Default::default()
+                },
+                spec: params.spec,
+                status: None,
+            }
+        };
+        let warning = |existing: &BranchDatabase, requested: &BranchDatabase| {
+            exclude_tables_mismatch_warning(existing, &requested.spec, "default")
+        };
+
+        for engine in ["mysql", "mariadb"] {
+            let without = branch(engine, serde_json::json!([]));
+            let with = branch(engine, serde_json::json!(["staging_*", "import_tmp"]));
+            let reordered = branch(engine, serde_json::json!(["import_tmp", "staging_*"]));
+
+            assert_eq!(warning(&with, &reordered), None);
+            assert_eq!(warning(&without, &without), None);
+
+            let message = warning(&without, &with).expect("the session adds a list");
+            assert!(
+                message.contains(r#"["staging_*", "import_tmp"]"#),
+                "{message}"
+            );
+            assert!(
+                message.contains("mirrord db-branches -n default destroy"),
+                "{message}"
+            );
+            assert!(warning(&with, &without).is_some());
+        }
     }
 }

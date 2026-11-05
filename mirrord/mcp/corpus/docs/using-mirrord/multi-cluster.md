@@ -72,7 +72,7 @@ If the Primary cluster only orchestrates and doesn't run application workloads, 
 
 In management-only mode, the Primary resolves multi-cluster targets against the Default cluster, doesn't run [preview environment](../use-cases/preview-environments.md) controllers, and doesn't get the RBAC it needs to tunnel to branch databases locally.
 
-Leave `managementOnly` set to `false` if the Primary runs application workloads, even when most sessions run on other clusters. Sessions started with `multi_cluster: false` always run on the Primary as regular single-cluster sessions, using its local queue splitting and database branching controllers.
+Set `managementOnly` to `false` if the Primary runs application workloads, even when most sessions run on other clusters. With `managementOnly: false`, sessions started with `multi_cluster: false` run on the Primary as regular single-cluster sessions, using its local queue splitting and database branching controllers. With `managementOnly: true`, `multi_cluster: false` is not supported.
 
 ***
 
@@ -183,6 +183,8 @@ Use `replicas` when preview traffic enters through a load balancer spanning your
 
 * [Targetless mode](targetless.md) is not supported in multi-cluster sessions — a target is required so the operator can resolve it on each Workload cluster.
 * Multi-cluster sessions only start when connecting to the Primary cluster. Connecting directly to a downstream cluster starts a regular single-cluster session there.
+* Every workload cluster must run the target. A multi-cluster session starts a child session on each workload cluster and fails if any of them cannot resolve the target, so clusters that run different services are not supported.
+* `multi_cluster: false` is not supported with `managementOnly: true`. See [Management-Only Mode](#management-only-mode).
 * The per-target RBAC check does not apply — see [Access Control](#access-control) and use [MirrordPolicy](../sharing-the-cluster/policies.md) to restrict operations per target.
 
 ***

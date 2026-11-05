@@ -474,6 +474,22 @@ pub(crate) enum CliError {
         enable_hint: String,
     },
 
+    #[error(
+        "The mirrord operator is a management-only multi-cluster Primary and cannot run a \
+         single-cluster session on itself ({cause})."
+    )]
+    #[diagnostic(help(
+        "A management-only Primary links the workload clusters but runs no workloads, so a session \
+         forced onto it has nothing to target. Remove `multi_cluster: false` from your mirrord \
+         config, and unset `MIRRORD_MULTI_CLUSTER` (or set it to `true`) since the environment \
+         variable overrides the file, so the session spans the workload clusters; label targets \
+         are not yet supported \
+         in multi-cluster sessions, so name the target instead. If the Primary does run \
+         workloads, ask your cluster administrator to set \
+         `operator.multiCluster.managementOnly=false` in the operator Helm values.{GENERAL_HELP}"
+    ))]
+    ManagementOnlyPrimarySingleClusterSession { cause: &'static str },
+
     #[error("mirrord operator does not serve the operator-hosted sessions-manager.")]
     #[diagnostic(help(
         "Serverless targets with `operator: true` connect through the sessions-manager hosted by \
