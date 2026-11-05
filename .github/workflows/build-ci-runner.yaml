@@ -125,14 +125,6 @@ jobs:
         if: ${{ inputs.blacksmith }}
         continue-on-error: true
         run: docker buildx prune --force --max-used-space 40GB
-      # Deleting files frees space in the filesystem but not on the storage behind the sticky
-      # disk, which is mounted without `discard`. Trim hands the freed blocks back.
-      - name: Return freed blocks to the sticky disk
-        if: ${{ inputs.blacksmith }}
-        continue-on-error: true
-        run: |
-          lsblk --discard "$(findmnt -n -o SOURCE /var/lib/buildkit)"
-          sudo fstrim -v /var/lib/buildkit
       - name: Upload the CI runner image
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
