@@ -18,8 +18,8 @@
 //!   `OsThreadId` instead.
 //! - `std::io::stderr` and `std::io::stdout`, and the `println!`, `print!`, `eprintln!`, `eprint!`
 //!   and `dbg!` macros, which take a reentrant lock that asks for the thread id. Use
-//!   [`report_to_stderr`] instead, which is a `std::io::stderr` write on unix and a raw
-//!   standard-error write on Windows.
+//!   [`report_to_stderr`] instead, which is `eprintln!` on unix and a raw standard-error write on
+//!   Windows.
 //!
 //! Writing to a [`File`] is safe, and so is allocating and formatting.
 //!
@@ -41,8 +41,6 @@ use std::{
 };
 
 use chrono::Local;
-#[cfg(not(windows))]
-use std::io::Write as _;
 use tracing_subscriber::{EnvFilter, filter::Directive, fmt::format::FmtSpan, prelude::*};
 #[cfg(windows)]
 use {
@@ -528,10 +526,8 @@ use windows_support::{
 /// On Windows this runs on the `DllMain` path, so it writes straight to the standard error handle
 /// instead of using `eprintln!`. See the warning at the top of this module.
 ///
-/// On platforms other than Windows there is no loader lock and no `DllMain`, so this writes
-/// through `std::io::stderr`. It drops a line that can't be written, where `eprintln!` would panic,
-/// so a closed stderr pipe doesn't end the layer thread that reports, such as the one that prints
-/// share links.
+/// On platforms other than Windows there is no loader lock and no `DllMain`, so `eprintln!`
+/// stays the right call.
 ///
 /// # Arguments
 ///
@@ -539,7 +535,7 @@ use windows_support::{
 #[cfg_attr(
     not(windows),
     allow(
-        clippy::disallowed_methods,
+        clippy::disallowed_macros,
         reason = "no DllMain or loader lock outside Windows"
     )
 )]
@@ -551,7 +547,7 @@ pub fn report_to_stderr(message: std::fmt::Arguments<'_>) {
     }
 
     #[cfg(not(windows))]
-    let _ = writeln!(std::io::stderr(), "{message}");
+    eprintln!("{message}");
 }
 
 /// Initialize logger. Set the logs to go according to the layer's config either to a trace

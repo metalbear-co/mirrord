@@ -2,9 +2,8 @@
 
 use std::io;
 
-/// Writes to the program's stdout, fd 1: only the lines `mirrord up` and the IDEs read from it,
-/// `Ready!`, the debug hold's `debug-hold …`, and a shared session's link in `json` mode. Nothing
-/// else the layer says goes to stdout.
+/// Writes to the program's stdout, fd 1: only the lines `mirrord up` reads from it, `Ready!` and
+/// the debug hold's `debug-hold …`. Nothing else the layer says goes to stdout.
 ///
 /// The layer runs inside the program, from its constructor, before `main`. Each write is one
 /// `write(2)` straight to fd 1, so a line can't sit in a buffer (Rust's or the program's libc
@@ -18,7 +17,7 @@ use std::io;
 /// `layer-lib::logging`).
 ///
 /// Write lines with `write_all`, which retries short and interrupted (`EINTR`) writes.
-pub struct ProgramStdout;
+pub(crate) struct ProgramStdout;
 
 impl io::Write for ProgramStdout {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {

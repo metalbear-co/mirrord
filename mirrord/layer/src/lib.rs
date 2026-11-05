@@ -176,6 +176,7 @@ mod file;
 mod hooks;
 mod load;
 mod macros;
+mod program_stdout;
 mod ready;
 mod socket;
 #[cfg(target_os = "macos")]
