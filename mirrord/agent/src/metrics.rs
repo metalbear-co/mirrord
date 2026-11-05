@@ -1,5 +1,7 @@
 use std::{
+    fmt,
     net::SocketAddr,
+    ops::Deref,
     sync::{
         Arc, LazyLock,
         atomic::{AtomicUsize, Ordering},
@@ -7,8 +9,10 @@ use std::{
 };
 
 use axum::{Router, extract::State, routing::get};
+use bincode::Encode;
 use http::StatusCode;
-use prometheus::{GaugeVec, IntGauge, Registry, proto::MetricFamily};
+use mirrord_protocol::{ClientMessage, DaemonMessage, Measured, MessageKind};
+use prometheus::{GaugeVec, IntGauge, IntGaugeVec, Registry, proto::MetricFamily};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
@@ -60,6 +64,219 @@ pub(crate) static BYPASSED_REQUESTS: LazyLock<prometheus::GaugeVec> = LazyLock::
     .expect("BYPASSED_REQUESTS should be valid")
 });
 
+/// Memory held by mirrord-protocol messages. Messages pile up in the agent when a client reads
+/// slowly or traffic comes in bursts, and this shows how much of the agent's memory they take.
+///
+/// Workload-companion connections go through protocol-io, a shared crate whose queues hold
+/// encoded bytes and decoded messages rather than [`Buffered`] ones, so what waits in them is not
+/// counted: about 16 KiB plus one message on its way to the client, and up to 64 messages from it.
+///
+/// Updated live by [`Buffered`] messages, through [`BUFFERED_MESSAGE_GAUGES`].
+pub(crate) static BUFFERED_MESSAGES_BYTES: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    prometheus::register_int_gauge_vec!(
+        "mirrord_agent_buffered_messages_bytes",
+        "bincode-encoded size of mirrord-protocol messages held in mirrord-agent memory, while \
+         queued, being handled, or being sent; the sum over all labels is the agent's total",
+        &["direction", "message"]
+    )
+    // The name, help and label names are constants, and the `LazyLock` registers once, so this
+    // fails only on a programming error: an invalid name or a duplicate registration.
+    .expect("BUFFERED_MESSAGES_BYTES should be valid")
+});
+
+/// The children of [`BUFFERED_MESSAGES_BYTES`], resolved once, so that counting a message does
+/// not look its series up by label values.
+static BUFFERED_MESSAGE_GAUGES: LazyLock<BufferedMessageGauges> =
+    LazyLock::new(|| BufferedMessageGauges {
+        client: MessageGauges::new("client"),
+        daemon: MessageGauges::new("daemon"),
+    });
+
+/// [`BUFFERED_MESSAGES_BYTES`] children by `direction`: `client` for [`ClientMessage`]s and
+/// `daemon` for [`DaemonMessage`]s.
+struct BufferedMessageGauges {
+    client: MessageGauges,
+    daemon: MessageGauges,
+}
+
+/// [`BUFFERED_MESSAGES_BYTES`] children of one `direction`, one per [`MessageKind`].
+///
+/// Named fields rather than an array indexed by the kind, so a new [`MessageKind`] fails to
+/// compile in [`Self::get`] until it has a gauge, instead of indexing out of bounds at runtime.
+struct MessageGauges {
+    tcp: IntGauge,
+    tcp_steal: IntGauge,
+    tcp_outgoing: IntGauge,
+    udp_outgoing: IntGauge,
+    seqpacket_outgoing: IntGauge,
+    file: IntGauge,
+    other: IntGauge,
+}
+
+impl MessageGauges {
+    fn new(direction: &str) -> Self {
+        let gauge = |kind: MessageKind| {
+            BUFFERED_MESSAGES_BYTES.with_label_values(&[direction, kind.as_str()])
+        };
+
+        Self {
+            tcp: gauge(MessageKind::Tcp),
+            tcp_steal: gauge(MessageKind::TcpSteal),
+            tcp_outgoing: gauge(MessageKind::TcpOutgoing),
+            udp_outgoing: gauge(MessageKind::UdpOutgoing),
+            seqpacket_outgoing: gauge(MessageKind::SeqpacketOutgoing),
+            file: gauge(MessageKind::File),
+            other: gauge(MessageKind::Other),
+        }
+    }
+
+    fn get(&self, kind: MessageKind) -> &IntGauge {
+        match kind {
+            MessageKind::Tcp => &self.tcp,
+            MessageKind::TcpSteal => &self.tcp_steal,
+            MessageKind::TcpOutgoing => &self.tcp_outgoing,
+            MessageKind::UdpOutgoing => &self.udp_outgoing,
+            MessageKind::SeqpacketOutgoing => &self.seqpacket_outgoing,
+            MessageKind::File => &self.file,
+            MessageKind::Other => &self.other,
+        }
+    }
+}
+
+/// A mirrord-protocol message type whose buffered bytes are reported in
+/// [`BUFFERED_MESSAGES_BYTES`].
+pub(crate) trait BufferedMessage {
+    /// The [`BUFFERED_MESSAGES_BYTES`] child that counts this message.
+    fn gauge(&self) -> &'static IntGauge;
+}
+
+impl BufferedMessage for ClientMessage {
+    fn gauge(&self) -> &'static IntGauge {
+        BUFFERED_MESSAGE_GAUGES.client.get(self.kind())
+    }
+}
+
+impl BufferedMessage for DaemonMessage {
+    fn gauge(&self) -> &'static IntGauge {
+        BUFFERED_MESSAGE_GAUGES.daemon.get(self.kind())
+    }
+}
+
+/// Adds an amount to an [`IntGauge`] while alive, and subtracts it on drop.
+///
+/// Keeps a gauge that reports memory in step with the value that holds the memory, so it cannot
+/// drift when that value is dropped on an error path.
+#[derive(Debug)]
+pub(crate) struct IntGaugeGuard {
+    gauge: IntGauge,
+    amount: i64,
+}
+
+impl IntGaugeGuard {
+    /// Adds `amount` to `gauge`, saturating at [`i64::MAX`].
+    pub(crate) fn new(gauge: IntGauge, amount: usize) -> Self {
+        let amount = amount.try_into().unwrap_or(i64::MAX);
+        gauge.add(amount);
+
+        Self { gauge, amount }
+    }
+}
+
+impl Drop for IntGaugeGuard {
+    fn drop(&mut self) {
+        self.gauge.sub(self.amount);
+    }
+}
+
+/// A mirrord-protocol message whose encoded size is counted in [`BUFFERED_MESSAGES_BYTES`] while
+/// it exists.
+///
+/// Holds a [`Measured`] message, so the size counted here is the one the codec reuses when it
+/// encodes the message.
+pub(crate) struct Buffered<M> {
+    message: Measured<M>,
+    guard: IntGaugeGuard,
+}
+
+impl<M: Encode + BufferedMessage> Buffered<M> {
+    pub(crate) fn new(message: M) -> Self {
+        Self::from_measured(Measured::new(message))
+    }
+}
+
+impl<M: BufferedMessage> Buffered<M> {
+    /// Counts a message that already has its size, such as one from
+    /// [`MeasuredCodec`](mirrord_protocol::MeasuredCodec).
+    pub(crate) fn from_measured(message: Measured<M>) -> Self {
+        let guard = IntGaugeGuard::new(message.gauge().clone(), message.encoded_len());
+        Self { message, guard }
+    }
+}
+
+impl<M> Buffered<M> {
+    /// Splits the message from its guard.
+    ///
+    /// The message's bytes are still in memory after the message is moved into a codec or a
+    /// handler, so the caller should keep the guard until they are gone: sent and flushed, or
+    /// handled.
+    pub(crate) fn into_parts(self) -> (Measured<M>, IntGaugeGuard) {
+        (self.message, self.guard)
+    }
+}
+
+impl<M> Deref for Buffered<M> {
+    type Target = M;
+
+    fn deref(&self) -> &Self::Target {
+        &self.message
+    }
+}
+
+impl<M: fmt::Debug> fmt::Debug for Buffered<M> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(f)
+    }
+}
+
+/// Memory held by the outgoing traffic [`Throttle`](crate::util::io::throttle::Throttle)s, which
+/// let each client buffer up to a fixed amount of outgoing traffic data in each direction.
+///
+/// The value is the throttles' permits in use: each chunk of data costs its length plus a fixed
+/// per-chunk overhead. `direction` uses the vocabulary of [`BUFFERED_MESSAGES_BYTES`]: `daemon`
+/// for data read from remote peers on its way to the client, `client` for data from the client on
+/// its way to remote peers.
+///
+/// Data on its way to the client stays under its permit while the agent sends the
+/// [`DaemonMessage`] that carries it, so for that time it is also counted in
+/// [`BUFFERED_MESSAGES_BYTES`] (`direction="daemon"`, `message="tcp_outgoing"`,
+/// `"udp_outgoing"` or `"seqpacket_outgoing"`). Adding the two metrics counts those bytes twice.
+///
+/// Updated live by the throttles' permits, through [`OUTGOING_THROTTLE_PERMITS_DAEMON`] and
+/// [`OUTGOING_THROTTLE_PERMITS_CLIENT`].
+static OUTGOING_THROTTLE_PERMITS: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    prometheus::register_int_gauge_vec!(
+        "mirrord_agent_outgoing_throttle_permits",
+        "permits held by the mirrord-agent outgoing traffic throttles (data bytes plus a fixed \
+         per-chunk overhead): direction=daemon waits to be sent to the client, direction=client \
+         to the remote peer; daemon data is also in mirrord_agent_buffered_messages_bytes while \
+         it is being sent, so do not add the two metrics",
+        &["direction"]
+    )
+    // The name, help and label names are constants, and the `LazyLock` registers once, so this
+    // fails only on a programming error: an invalid name or a duplicate registration.
+    .expect("OUTGOING_THROTTLE_PERMITS should be valid")
+});
+
+/// [`OUTGOING_THROTTLE_PERMITS`] child for data read from remote peers, waiting to be sent to the
+/// client. Resolved once, and each client's throttle holds a clone.
+pub(crate) static OUTGOING_THROTTLE_PERMITS_DAEMON: LazyLock<IntGauge> =
+    LazyLock::new(|| OUTGOING_THROTTLE_PERMITS.with_label_values(&["daemon"]));
+
+/// [`OUTGOING_THROTTLE_PERMITS`] child for data received from the client, waiting to be written to
+/// remote peers. Resolved once, and each client's throttle holds a clone.
+pub(crate) static OUTGOING_THROTTLE_PERMITS_CLIENT: LazyLock<IntGauge> =
+    LazyLock::new(|| OUTGOING_THROTTLE_PERMITS.with_label_values(&["client"]));
+
 /// Convenience trait for static metrics variables.
 ///
 /// We store them as [`AtomicUsize`], which is the correct type (they're all counters).
@@ -103,6 +320,12 @@ impl Metrics {
         use prometheus::Opts;
 
         let registry = prometheus::default_registry();
+
+        // Creates every `BUFFERED_MESSAGES_BYTES` and `OUTGOING_THROTTLE_PERMITS` series, so that
+        // each reads 0 from the first scrape instead of appearing only after its first message.
+        LazyLock::force(&BUFFERED_MESSAGE_GAUGES);
+        LazyLock::force(&OUTGOING_THROTTLE_PERMITS_DAEMON);
+        LazyLock::force(&OUTGOING_THROTTLE_PERMITS_CLIENT);
 
         let client_count = {
             let opts = Opts::new(

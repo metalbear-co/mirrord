@@ -34,6 +34,7 @@ use crate::{
         ConnError, IncomingStream, IncomingStreamItem, RedirectorTaskConfig, ResponseBodyProvider,
         ResponseProvider, StolenHttp, StolenTcp,
     },
+    metrics::Buffered,
     steal::api::wait_body::WaitForFullBody,
     task::status::BgTaskStatus,
     util::{ClientId, protocol_version::ClientProtocolVersion},
@@ -76,7 +77,7 @@ pub struct TcpStealerApi {
     /// [`Self::recv`] and [`Self::handle_client_message`] can result in more than one message.
     ///
     /// We use this queue to store them and return from [`Self::recv`] one by one.
-    queued_messages: VecDeque<DaemonMessage>,
+    queued_messages: VecDeque<Buffered<DaemonMessage>>,
 }
 
 impl TcpStealerApi {
@@ -143,9 +144,15 @@ impl TcpStealerApi {
         }
     }
 
+    /// Queues a [`DaemonMessage`] to be returned from [`Self::recv`], counting its bytes as
+    /// buffered while it waits.
+    fn queue(&mut self, message: DaemonMessage) {
+        self.queued_messages.push_back(Buffered::new(message));
+    }
+
     /// Returns a [`DaemonMessage`] to be sent to the client.
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
-    pub(crate) async fn recv(&mut self) -> AgentResult<DaemonMessage> {
+    pub(crate) async fn recv(&mut self) -> AgentResult<Buffered<DaemonMessage>> {
         loop {
             if let Some(message) = self.queued_messages.pop_front() {
                 return Ok(message);
@@ -161,10 +168,12 @@ impl TcpStealerApi {
 
                     match message {
                         StealerMessage::Log(log) => {
-                            break Ok(DaemonMessage::LogMessage(log));
+                            break Ok(Buffered::new(DaemonMessage::LogMessage(log)));
                         },
                         StealerMessage::PortSubscribed(port) => {
-                            break Ok(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(port))));
+                            let message =
+                                DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(port)));
+                            break Ok(Buffered::new(message));
                         },
                         StealerMessage::StolenHttp(http) => self.handle_request(http)?,
                         StealerMessage::StolenTcp(tcp) => self.handle_connection(tcp)?,
@@ -236,7 +245,7 @@ impl TcpStealerApi {
                         .unwrap_or(IncomingTrafficTransportType::Tcp),
                 }),
             ));
-            self.queued_messages.push_back(message);
+            self.queue(message);
         } else if self.protocol_version.matches(&HTTP_CHUNKED_REQUEST_VERSION) {
             let message = DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
                 ChunkedRequest::StartV1(HttpRequest {
@@ -252,7 +261,7 @@ impl TcpStealerApi {
                     port: info.original_destination.port(),
                 }),
             ));
-            self.queued_messages.push_back(message);
+            self.queue(message);
 
             if request_head.body_finished {
                 let message = DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
@@ -263,7 +272,7 @@ impl TcpStealerApi {
                         request_id: Self::REQUEST_ID,
                     }),
                 ));
-                self.queued_messages.push_back(message);
+                self.queue(message);
             }
         } else if self.protocol_version.matches(&HTTP_FRAMED_VERSION) {
             let message = DaemonMessage::TcpSteal(DaemonTcp::HttpRequestFramed(HttpRequest {
@@ -278,7 +287,7 @@ impl TcpStealerApi {
                 request_id: Self::REQUEST_ID,
                 port: info.original_destination.port(),
             }));
-            self.queued_messages.push_back(message);
+            self.queue(message);
         } else {
             let message = DaemonMessage::TcpSteal(DaemonTcp::HttpRequest(HttpRequest {
                 internal_request: InternalHttpRequest {
@@ -292,7 +301,7 @@ impl TcpStealerApi {
                 request_id: Self::REQUEST_ID,
                 port: info.original_destination.port(),
             }));
-            self.queued_messages.push_back(message);
+            self.queue(message);
         }
 
         self.incoming_streams.insert(connection_id, stream);
@@ -344,8 +353,7 @@ impl TcpStealerApi {
             DaemonTcp::NewConnectionV1(new_connection)
         };
 
-        self.queued_messages
-            .push_back(DaemonMessage::TcpSteal(message));
+        self.queue(DaemonMessage::TcpSteal(message));
 
         Ok(())
     }
@@ -355,41 +363,39 @@ impl TcpStealerApi {
     fn handle_incoming_item(&mut self, connection_id: ConnectionId, item: IncomingStreamItem) {
         match item {
             IncomingStreamItem::Frame(frame) => {
-                self.queued_messages.push_back(DaemonMessage::TcpSteal(
-                    DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                self.queue(DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
+                    ChunkedRequest::Body(ChunkedRequestBodyV1 {
                         frames: vec![frame],
                         is_last: false,
                         connection_id,
                         request_id: Self::REQUEST_ID,
-                    })),
-                ));
+                    }),
+                )));
             }
 
             IncomingStreamItem::NoMoreFrames => {
-                self.queued_messages.push_back(DaemonMessage::TcpSteal(
-                    DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                self.queue(DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
+                    ChunkedRequest::Body(ChunkedRequestBodyV1 {
                         frames: Default::default(),
                         is_last: true,
                         connection_id,
                         request_id: Self::REQUEST_ID,
-                    })),
-                ));
+                    }),
+                )));
             }
 
             IncomingStreamItem::Data(bytes) => {
-                self.queued_messages
-                    .push_back(DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
-                        connection_id,
-                        bytes: bytes.into(),
-                    })));
+                self.queue(DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
+                    connection_id,
+                    bytes: bytes.into(),
+                })));
             }
 
             IncomingStreamItem::NoMoreData => {
-                self.queued_messages
-                    .push_back(DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
-                        connection_id,
-                        bytes: Default::default(),
-                    })))
+                self.queue(DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
+                    connection_id,
+                    bytes: Default::default(),
+                })))
             }
 
             IncomingStreamItem::Finished(result) => {
@@ -397,17 +403,15 @@ impl TcpStealerApi {
                 self.connections.remove(&connection_id);
 
                 if let Err(error) = result {
-                    self.queued_messages
-                        .push_back(DaemonMessage::LogMessage(LogMessage::warn(format!(
-                            "Stolen connection {connection_id} failed: {}",
-                            Report::new(error),
-                        ))));
+                    self.queue(DaemonMessage::LogMessage(LogMessage::warn(format!(
+                        "Stolen connection {connection_id} failed: {}",
+                        Report::new(error),
+                    ))));
                 }
 
-                self.queued_messages
-                    .push_back(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
-                        connection_id,
-                    })));
+                self.queue(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
+                    connection_id,
+                })));
             }
         }
     }
@@ -461,15 +465,13 @@ impl TcpStealerApi {
                         port: request.info.original_destination.port(),
                     })
                 };
-                self.queued_messages
-                    .push_back(DaemonMessage::TcpSteal(message));
+                self.queue(DaemonMessage::TcpSteal(message));
             }
             Err(error) => {
-                self.queued_messages
-                    .push_back(DaemonMessage::LogMessage(LogMessage::warn(format!(
-                        "Stolen request failed: {}",
-                        Report::new(error),
-                    ))));
+                self.queue(DaemonMessage::LogMessage(LogMessage::warn(format!(
+                    "Stolen request failed: {}",
+                    Report::new(error),
+                ))));
             }
         }
 
@@ -544,11 +546,10 @@ impl TcpStealerApi {
                     tracing::debug!(
                         "connection terminated by http client before response could be sent"
                     );
-                    self.queued_messages
-                        .push_back(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
-                            connection_id: *connection.key(),
-                        })));
-                    connection.remove();
+                    let (connection_id, _) = connection.remove_entry();
+                    self.queue(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
+                        connection_id,
+                    })));
                 };
             }
 
@@ -571,11 +572,10 @@ impl TcpStealerApi {
                     tracing::debug!(
                         "connection terminated by http client before response could be sent"
                     );
-                    self.queued_messages
-                        .push_back(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
-                            connection_id: *connection.key(),
-                        })));
-                    connection.remove();
+                    let (connection_id, _) = connection.remove_entry();
+                    self.queue(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
+                        connection_id,
+                    })));
                 };
             }
 
@@ -597,11 +597,10 @@ impl TcpStealerApi {
                         tracing::debug!(
                             "connection terminated by http client before response could be sent"
                         );
-                        self.queued_messages
-                            .push_back(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
-                                connection_id: *connection.key(),
-                            })));
-                        connection.remove();
+                        let (connection_id, _) = connection.remove_entry();
+                        self.queue(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
+                            connection_id,
+                        })));
                     };
                 }
                 ChunkedResponse::Body(body) => {
@@ -633,11 +632,10 @@ impl TcpStealerApi {
                         tracing::debug!(
                             "connection terminated by http client while sending response chunks"
                         );
-                        self.queued_messages
-                            .push_back(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
-                                connection_id: *connection.key(),
-                            })));
-                        connection.remove();
+                        let (connection_id, _) = connection.remove_entry();
+                        self.queue(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
+                            connection_id,
+                        })));
                     }
                 }
                 ChunkedResponse::Error(error) => {
