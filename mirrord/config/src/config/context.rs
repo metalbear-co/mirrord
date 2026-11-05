@@ -5,6 +5,7 @@ use std::{
     env::VarError,
     ffi::{OsStr, OsString},
     ops::Not,
+    path::{Path, PathBuf},
 };
 
 /// Context for generating and verifying a [`MirrordConfig`](super::MirrordConfig).
@@ -30,6 +31,14 @@ pub struct ConfigContext {
 
     /// Warnings collected during config verification.
     warnings: Vec<String>,
+
+    /// The directory mirrord is started from (`mirrord exec` or `mirrord up`).
+    /// `payload_protobuf` resolves its relative paths from it with [`Self::resolve_path`]. When
+    /// [`None`], they resolve from the working directory of this process.
+    ///
+    /// Set when the config is checked by a process that doesn't run in that directory, such as
+    /// `mirrord mcp`, whose working directory is chosen by the MCP client.
+    invocation_directory: Option<PathBuf>,
 }
 
 impl ConfigContext {
@@ -101,6 +110,30 @@ impl ConfigContext {
     pub fn empty_target_final(mut self, value: bool) -> Self {
         self.empty_target_final = value;
         self
+    }
+
+    /// Sets the directory mirrord is started from, which [`Self::resolve_path`] resolves relative
+    /// paths from. [`None`] keeps the working directory of this process.
+    pub fn invocation_directory(mut self, directory: Option<PathBuf>) -> Self {
+        self.invocation_directory = directory;
+        self
+    }
+
+    /// The absolute path of a path given in the config, which is relative to the directory set
+    /// with [`Self::invocation_directory`] or else to the working directory of this process.
+    ///
+    /// The result is absolute in both cases, so code that compares paths with each other, such as
+    /// protox matching a `.proto` file with its include directories, sees the same paths whether
+    /// or not a directory is set.
+    pub fn resolve_path(&self, path: &Path) -> PathBuf {
+        // Joined to `.` rather than left as it is, so an empty path is the directory itself in
+        // both cases, where `std::path::absolute` would reject it.
+        let path = self
+            .invocation_directory
+            .as_deref()
+            .unwrap_or(Path::new("."))
+            .join(path);
+        std::path::absolute(&path).unwrap_or(path)
     }
 
     /// Returns value of an environment variable with the given name.

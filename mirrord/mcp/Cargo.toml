@@ -47,3 +47,4 @@ tar.workspace = true
 [dev-dependencies]
 rmcp = { workspace = true, features = ["client"] }
 rstest.workspace = true
+tempfile.workspace = true
