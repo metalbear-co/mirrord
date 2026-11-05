@@ -79,6 +79,8 @@ pub(crate) static BUFFERED_MESSAGES_BYTES: LazyLock<IntGaugeVec> = LazyLock::new
          queued, being handled, or being sent; the sum over all labels is the agent's total",
         &["direction", "message"]
     )
+    // The name, help and label names are constants, and the `LazyLock` registers once, so this
+    // fails only on a programming error: an invalid name or a duplicate registration.
     .expect("BUFFERED_MESSAGES_BYTES should be valid")
 });
 
@@ -260,6 +262,8 @@ static OUTGOING_THROTTLE_PERMITS: LazyLock<IntGaugeVec> = LazyLock::new(|| {
          it is being sent, so do not add the two metrics",
         &["direction"]
     )
+    // The name, help and label names are constants, and the `LazyLock` registers once, so this
+    // fails only on a programming error: an invalid name or a duplicate registration.
     .expect("OUTGOING_THROTTLE_PERMITS should be valid")
 });
 
