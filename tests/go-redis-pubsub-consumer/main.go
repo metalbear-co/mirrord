@@ -65,15 +65,18 @@ func main() {
 	// the subscription is live. Print a marker so tests can wait for this exact
 	// point before publishing: Redis Pub/Sub drops messages sent while nobody is
 	// subscribed, so publishing any earlier would lose them.
-	deadline := time.Now().Add(subscribeRetryLimit)
+	// The limit bounds each attempt too, so a Receive that hangs instead of failing cannot hold
+	// the consumer past it.
+	subscribeCtx, cancelSubscribe := context.WithTimeout(ctx, subscribeRetryLimit)
+	defer cancelSubscribe()
 	pubsub := subscribe()
 	for {
-		_, err := pubsub.Receive(ctx)
+		_, err := pubsub.Receive(subscribeCtx)
 		if err == nil {
 			break
 		}
 		pubsub.Close()
-		if time.Now().After(deadline) {
+		if subscribeCtx.Err() != nil {
 			log.Fatalf("Subscribe failed: %v", err)
 		}
 		log.Printf("Subscribe failed, retrying: %v", err)
