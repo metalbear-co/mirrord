@@ -150,6 +150,7 @@ jobs:
             package.json
             pnpm-lock.yaml
             pnpm-workspace.yaml
+            .github/workflows/build-ci-runner.yaml
           files_ignore: |
             tests/src/**
             tests/README.md
