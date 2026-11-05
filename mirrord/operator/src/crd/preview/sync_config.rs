@@ -78,6 +78,12 @@ pub enum PreviewSyncRestart {
 
     /// After every sync.
     OnSync,
+
+    /// A value that a newer CLI sends, which this version doesn't know. The operator restarts the
+    /// app as with [`PreviewSyncRestart::OnPrepare`].
+    #[schemars(skip)]
+    #[serde(other, skip_serializing)]
+    Unknown,
 }
 
 /// The command that prepares the code for the app in the preview pod.
