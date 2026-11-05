@@ -137,9 +137,11 @@ pub(crate) struct MirrordExecution {
 
     /// The link that the operator created for this run, when it started with `share`.
     ///
-    /// [`report_share_link`] prints it before the application starts. [`Self::wait`] reports an
-    /// internal proxy that failed while it is set, because the operator removes the link when the
-    /// session's connections end.
+    /// [`report_share_link`] prints it before the application starts. On Windows, where the
+    /// internal proxy stays the CLI's child, [`Self::wait`] reports an internal proxy that failed
+    /// while it is set, because the operator removes the link when the session's connections end.
+    /// On Unix the internal proxy is reparented to init, so a failure there shows only in the
+    /// internal proxy log.
     ///
     /// Not serialized: the IDEs get the link from [`report_share_link`], so the execution JSON
     /// that they parse has no field for it.
@@ -1090,6 +1092,10 @@ impl MirrordExecution {
     /// cleans up the process when the parent process exits, so we need the parent to stay alive
     /// while the internal proxy is running.
     /// See <https://github.com/metalbear-co/mirrord/issues/1211>
+    ///
+    /// On Unix `child` is the intermediate process that `reparent_to_init` lets exit right after
+    /// the fork, and it was already awaited, so this returns at once and the share link check
+    /// below only catches a failed internal proxy on Windows.
     pub(crate) async fn wait(mut self) -> CliResult<()> {
         if let Some(child) = self.child.as_mut() {
             let status = child
