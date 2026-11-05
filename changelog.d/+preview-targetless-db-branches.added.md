@@ -1,0 +1,1 @@
+`mirrord preview start` can now run without a target to provision branch databases alone: with `feature.db_branches` and no `target`, the operator creates the branches and keeps them for the preview's TTL. Branch connection values must then come from a literal, a Kubernetes Secret or ConfigMap, or a secret manager, since there is no target pod to read them from.

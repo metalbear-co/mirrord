@@ -990,6 +990,13 @@ pub enum NewOperatorFeature {
     /// don't advertise it: a CLI can only take its presence as a yes, never its absence as a no.
     AzureServiceBusQueueSplitting,
 
+    /// This operator provisions branch databases for a session without a target
+    /// ([`KubeResourceTarget::targetless`](crate::crd::session::KubeResourceTarget::targetless)),
+    /// such as `mirrord preview start` with `feature.db_branches` and no `target`. Gated so the
+    /// CLI fails fast: an older operator does not know the placeholder target and never
+    /// reconciles the branch, which surfaces only as a creation timeout.
+    TargetlessDbBranches,
+
     /// This operator honors `sync` on a `PreviewSession`: it adds the code sync sidecar to the
     /// preview pod and relays pushes to it. The CLI requires this feature before it sends `sync`,
     /// because an older operator's CRD schema prunes `sync`, and the preview would then try to
@@ -1056,7 +1063,8 @@ impl NewOperatorFeature {
             | Self::DbBranchSsmParameter
             | Self::DbBranchDedicatedNamespace
             | Self::MysqlBranchExcludeTables
-            | Self::RedisClusterBranching => Some("feature.db_branches"),
+            | Self::RedisClusterBranching
+            | Self::TargetlessDbBranches => Some("feature.db_branches"),
             Self::PreviewEnv
             | Self::PreviewTlsDelivery
             | Self::PreviewCronJobTarget
@@ -1203,6 +1211,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::DbBranchesSplitConfigCopyMode => {
                 "db_branches copy mode requested for MirrordSplitConfig entries"
             }
+            NewOperatorFeature::TargetlessDbBranches => "DB branching without a target",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -1315,6 +1324,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::DbBranchesSplitConfigCopyMode
             | NewOperatorFeature::DbBranchSecretManagerExtract
             | NewOperatorFeature::DbBranchSsmParameter
+            | NewOperatorFeature::TargetlessDbBranches
             | NewOperatorFeature::MysqlBranchExcludeTables
             | NewOperatorFeature::SplitConfigQueueFilters
             | NewOperatorFeature::Unknown => &[],

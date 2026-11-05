@@ -676,6 +676,14 @@ impl DatabaseBranchesConfig {
         }
     }
 
+    /// `true` when at least one inline branch is provisioned by the operator. Local Redis
+    /// branches are not: mirrord runs them on the user's machine, so a config holding only
+    /// those asks the operator for nothing. A `"*"` / ids request is `false` too, since it
+    /// holds no branches until the operator's lookup resolves it.
+    pub fn any_provisioned_by_operator(&self) -> bool {
+        self.iter().any(|branch| branch.base().is_some())
+    }
+
     /// Counts branches matching a predicate. The building block for the usage
     /// analytics counters in [`CollectAnalytics`], so each new counter is one
     /// `count_branches` call instead of its own iteration method.
@@ -869,6 +877,18 @@ pub enum BranchCopyMode {
     Empty,
     Schema,
     All,
+}
+
+/// Why a branch needs the target pod, see [`DatabaseBranchConfig::target_pod_need`]. The two
+/// cases get different advice: a pod-bound value can be sourced from somewhere else, an engine
+/// that reads the pod itself cannot run without a target at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetPodNeed {
+    /// A connection value is read off the pod, or a secret manager source or IAM auth borrows
+    /// its cloud identity.
+    ConnectionValues,
+    /// The engine itself reads the pod, so only setting a target helps.
+    Engine,
 }
 
 impl DatabaseBranchConfig {
@@ -1130,6 +1150,111 @@ impl DatabaseBranchConfig {
                 .all_sources()
                 .any(|source| matches!(source, ParamSource::ConfigMap { .. }))
         })
+    }
+
+    /// True when the operator runs a pod for this branch. S3 and turbopuffer branches have none:
+    /// the operator clones a bucket or a namespace through the provider's API and reads the
+    /// connection values itself, under its own cloud identity.
+    ///
+    /// Mirrors `BranchRuntime` in `operator-db-branching` (`Pod` against `External`), which
+    /// decides the same thing for the operator's own targetless check. The two must stay in
+    /// sync: an engine the operator provisions without a pod has to be pod-less here too, or
+    /// the CLI refuses a branch the operator would provision.
+    pub fn runs_branch_pod(&self) -> bool {
+        !matches!(
+            self,
+            DatabaseBranchConfig::S3(_) | DatabaseBranchConfig::Turbopuffer(_)
+        )
+    }
+
+    /// Why this branch cannot be provisioned without the target pod, or `None` when it can. A
+    /// session without a target has no pod, so the CLI refuses such a branch for it before
+    /// creating anything; the operator applies the same rule to CRs created some other way
+    /// (`targetless_refusal` in `operator-db-branching`), so both sides agree.
+    ///
+    /// Literal values, Secrets and ConfigMaps named directly resolve without a pod. Checked,
+    /// first match wins:
+    /// - an engine that reads the pod itself: Spanner finds the database it copies from through
+    ///   the app's emulator-host var on the pod and signs in with the pod's Google credentials,
+    ///   so no connection value lifts the need
+    /// - a value read from the pod: its env, `envFrom`, or a ConfigMap found through one of its
+    ///   volumes
+    /// - its service account and AWS env, only for an engine that [runs a branch
+    ///   pod](Self::runs_branch_pod): that pod fetches secret manager sources and signs IAM auth
+    ///   under the target's cloud identity. A pod-less branch has the operator fetch them under
+    ///   its own identity, target or not, so they never count against it
+    ///
+    /// A `configmap` source without a locator of its own is not counted: it falls back to the
+    /// branch profile's `sourceConfigMap`, which the CLI cannot see. The operator refuses it when
+    /// that locator is a pod volume, see [`Self::relies_on_profile_source_config_map`].
+    pub fn target_pod_need(&self) -> Option<TargetPodNeed> {
+        if matches!(self, DatabaseBranchConfig::Spanner(_)) {
+            return Some(TargetPodNeed::Engine);
+        }
+
+        let borrows_pod_identity = self.runs_branch_pod();
+        let params_need_pod = self.all_connection_params().any(|params| {
+            params.all_sources().any(|source| match source {
+                ParamSource::Variable(_)
+                | ParamSource::Pattern { .. }
+                | ParamSource::Env { value: None, .. }
+                | ParamSource::ConfigMap {
+                    config_map: Some(ConfigMapRef::Volume { .. }),
+                    ..
+                } => true,
+                ParamSource::GcpSecretManager { .. }
+                | ParamSource::AwsSecretsManager { .. }
+                | ParamSource::AwsSsmParameter { .. } => borrows_pod_identity,
+                ParamSource::Secret { .. }
+                | ParamSource::Env { value: Some(_), .. }
+                | ParamSource::ConfigMap { .. } => false,
+            })
+        });
+        // A bare `"url": "DATABASE_URL"` names a target env var too.
+        let urls_need_pod = self
+            .database()
+            .map(|database| &database.connection)
+            .into_iter()
+            .chain(self.additional_connections())
+            .any(|connection| match connection {
+                ConnectionSource::FlatUrl { .. } => true,
+                ConnectionSource::Url { url } => match url {
+                    TargetEnvironmentVariableSource::Env { value: None, .. }
+                    | TargetEnvironmentVariableSource::EnvFrom { .. } => true,
+                    TargetEnvironmentVariableSource::GcpSecretManager { .. }
+                    | TargetEnvironmentVariableSource::AwsSecretsManager { .. }
+                    | TargetEnvironmentVariableSource::AwsSsmParameter { .. } => {
+                        borrows_pod_identity
+                    }
+                    TargetEnvironmentVariableSource::Env { value: Some(_), .. }
+                    | TargetEnvironmentVariableSource::Secret { .. } => false,
+                },
+                ConnectionSource::Params(_) => false,
+            });
+        let iam_needs_pod = borrows_pod_identity && self.iam_auth().is_some();
+
+        (params_need_pod || urls_need_pod || iam_needs_pod)
+            .then_some(TargetPodNeed::ConnectionValues)
+    }
+
+    /// True when a `configmap` param source has no locator of its own, so the ConfigMap comes
+    /// from the branch profile's `sourceConfigMap`. Only a branch pod has a profile, and the CLI
+    /// cannot see it: when its locator is a pod volume, the operator refuses the branch without
+    /// a target, but only once `start` has created it. [`Self::target_pod_need`] lets such a
+    /// source through, so a preview without a target warns about it instead.
+    pub fn relies_on_profile_source_config_map(&self) -> bool {
+        self.runs_branch_pod()
+            && self.all_connection_params().any(|params| {
+                params.all_sources().any(|source| {
+                    matches!(
+                        source,
+                        ParamSource::ConfigMap {
+                            config_map: None,
+                            ..
+                        }
+                    )
+                })
+            })
     }
 
     /// True when a param or the `url` is read from AWS SSM Parameter Store. The CLI uses it to
@@ -2900,6 +3025,152 @@ mod tests {
         assert_eq!(local.local.port, 6380);
     }
 
+    /// A session without a target can only provision branches whose every value resolves
+    /// without a pod (literals, Secrets, ConfigMaps named directly) and that borrow nothing
+    /// from the pod's cloud identity (no secret manager sources, no IAM auth).
+    #[rstest]
+    #[case::flat_url(json!({ "url": "DATABASE_URL" }), true)]
+    #[case::env_url(json!({ "url": { "type": "env", "variable": "DATABASE_URL" } }), true)]
+    #[case::literal_url(
+        json!({ "url": { "type": "env", "variable": "DATABASE_URL", "value": "postgres://db/app" } }),
+        false
+    )]
+    #[case::secret_url(json!({ "url": { "type": "secret", "name": "pg", "key": "url" } }), false)]
+    #[case::variable_param(
+        json!({ "params": { "host": { "secret": "pg", "key": "host" }, "password": "DB_PASSWORD" } }),
+        true
+    )]
+    #[case::secret_params(
+        json!({ "params": { "host": { "secret": "pg", "key": "host" }, "password": { "secret": "pg", "key": "password" } } }),
+        false
+    )]
+    #[case::configmap_by_name(
+        json!({ "params": { "host": { "configmap": "app-config", "key": "host" } } }),
+        false
+    )]
+    #[case::configmap_by_volume(
+        json!({ "params": { "host": { "configmap": { "volume": "app-config" }, "key": "host" } } }),
+        true
+    )]
+    #[case::secret_manager_param(
+        json!({ "params": { "host": { "secret": "pg", "key": "host" }, "password": { "gcp_secret_manager": "projects/p/secrets/pw" } } }),
+        true
+    )]
+    #[case::secret_manager_url(
+        json!({ "url": { "type": "aws_secrets_manager", "secret_ref": "prod/pg" } }),
+        true
+    )]
+    fn target_pod_need_names_pod_bound_sources(#[case] connection: Value, #[case] needs_pod: bool) {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
+            "type": "pg",
+            "connection": connection,
+        }))
+        .unwrap();
+
+        assert_eq!(
+            branch.target_pod_need(),
+            needs_pod.then_some(TargetPodNeed::ConnectionValues)
+        );
+    }
+
+    /// IAM auth signs with the target pod's keys or runs the branch pod under its service
+    /// account, so a Secret-sourced connection still needs the pod once `iam_auth` is set.
+    #[test]
+    fn target_pod_need_for_iam_auth() {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
+            "type": "pg",
+            "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } },
+            "iam_auth": { "type": "aws_rds" },
+        }))
+        .unwrap();
+
+        assert_eq!(
+            branch.target_pod_need(),
+            Some(TargetPodNeed::ConnectionValues)
+        );
+    }
+
+    /// S3 and turbopuffer branches run no pod: the operator clones through the provider's API
+    /// and fetches secret manager values under its own identity, so a secret manager source
+    /// needs no target for them, the way the operator's `BranchRuntime::External` lets it
+    /// through. A value read off the target pod's env still does.
+    #[rstest]
+    #[case::s3_bucket_from_secrets_manager(
+        json!({ "type": "s3", "source": { "params": { "bucket": { "aws_secrets_manager": "prod/s3", "env_var_name": "BUCKET" } } } }),
+        false
+    )]
+    #[case::s3_bucket_from_pod_env(json!({ "type": "s3", "source": { "params": { "bucket": "BUCKET" } } }), true)]
+    #[case::turbopuffer_api_key_from_secret_manager(
+        json!({ "type": "turbopuffer", "source": { "params": {
+            "namespace": { "env_var_name": "TPUF_NAMESPACE", "value": "prod" },
+            "api_key": { "gcp_secret_manager": "projects/p/secrets/tpuf" },
+            "region": { "env_var_name": "TPUF_REGION", "value": "gcp-us-central1" }
+        } } }),
+        false
+    )]
+    #[case::pg_password_from_secret_manager(
+        json!({ "type": "pg", "connection": { "params": { "host": { "secret": "pg", "key": "host" }, "password": { "gcp_secret_manager": "projects/p/secrets/pw" } } } }),
+        true
+    )]
+    fn only_a_branch_pod_borrows_the_target_identity_for_secret_managers(
+        #[case] branch: Value,
+        #[case] needs_pod: bool,
+    ) {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(branch).unwrap();
+
+        assert_eq!(
+            branch.target_pod_need(),
+            needs_pod.then_some(TargetPodNeed::ConnectionValues)
+        );
+    }
+
+    /// A `configmap` source without a locator falls back to the branch profile's
+    /// `sourceConfigMap`, which only a branch pod has and the CLI cannot see. It passes the
+    /// target pod check, so a preview without a target warns that the branch depends on the
+    /// profile instead; a source that names its ConfigMap, or a pod-less engine, does not.
+    #[rstest]
+    #[case::no_locator(json!({ "host": { "key": "host" } }), true)]
+    #[case::named_configmap(json!({ "host": { "configmap": "app-config", "key": "host" } }), false)]
+    #[case::secret(json!({ "host": { "secret": "pg", "key": "host" } }), false)]
+    fn configmap_source_without_locator_relies_on_the_profile(
+        #[case] params: Value,
+        #[case] relies_on_profile: bool,
+    ) {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
+            "type": "pg",
+            "connection": { "params": params },
+        }))
+        .unwrap();
+
+        assert_eq!(branch.target_pod_need(), None);
+        assert_eq!(
+            branch.relies_on_profile_source_config_map(),
+            relies_on_profile
+        );
+    }
+
+    /// A Spanner branch has no password: the operator always reads the app's emulator-host var
+    /// and Google credentials off the target pod. With only the connection sources checked, a
+    /// Secret-only Spanner branch passed here, the CLI created the branch and preview CRs, and
+    /// the operator failed the branch late with `MalformedResource`. The engine rule refuses it
+    /// before anything is created.
+    #[test]
+    fn spanner_always_needs_the_target_pod() {
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
+            "type": "spanner",
+            "connection": {
+                "params": {
+                    "project": { "secret": "spanner", "key": "project" },
+                    "instance": { "secret": "spanner", "key": "instance" },
+                    "database_id": { "secret": "spanner", "key": "database" }
+                }
+            },
+        }))
+        .unwrap();
+
+        assert_eq!(branch.target_pod_need(), Some(TargetPodNeed::Engine));
+    }
+
     /// A Redis Cluster node only has database 0, so `cluster: true` pairs with no `name` or
     /// `name: "0"` and nothing else.
     #[test]
@@ -3725,6 +3996,30 @@ mod tests {
         let json = serde_json::to_string(&source).unwrap();
         let deserialized: ConnectionSource = serde_json::from_str(&json).unwrap();
         assert_eq!(source, deserialized, "json was: {json}");
+    }
+
+    /// A preview without a target is allowed only to have the operator provision branch
+    /// databases. A local Redis branch is provisioned by mirrord on the user's machine and never
+    /// reaches the operator, so a config holding only those is no branch request at all: the
+    /// preview would be a session with no branches, no pod and nothing to do for its whole TTL.
+    /// A `"*"` request holds no branches either until the operator resolves it.
+    #[test]
+    fn only_local_redis_branches_are_not_provisioned_by_the_operator() {
+        let local_redis = json!({
+            "type": "redis",
+            "location": "local",
+            "connection": { "url": { "type": "env", "variable": "REDIS_URL" } },
+        });
+        let remote_pg = json!({
+            "type": "pg",
+            "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } },
+        });
+        let parse = |value: Value| serde_json::from_value::<DatabaseBranchesConfig>(value).unwrap();
+
+        assert!(!parse(json!([local_redis])).any_provisioned_by_operator());
+        assert!(!parse(json!("*")).any_provisioned_by_operator());
+        assert!(!parse(json!([])).any_provisioned_by_operator());
+        assert!(parse(json!([local_redis, remote_pg])).any_provisioned_by_operator());
     }
 
     /// A ConfigMap source with both extractors has two candidate values and no rule to pick

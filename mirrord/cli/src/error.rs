@@ -865,7 +865,10 @@ pub(crate) enum CliError {
 
     #[error("No target specified for preview environment")]
     #[diagnostic(help(
-        "Specify the target using `-t <target>` or set `target.path` in your mirrord config file."
+        "Specify the target using `-t <target>` or set `target.path` in your mirrord config \
+         file. A preview may run without a target only to have the operator provision branch \
+         databases: set `feature.db_branches` to do that. A local Redis branch runs on your \
+         machine, so it does not count."
     ))]
     PreviewTargetRequired,
 

@@ -39,6 +39,7 @@ use mirrord_config::{
     LayerConfig,
     config::{ConfigContext, ConfigError, EnvKey},
     feature::{
+        database_branches::{DatabaseBranchEngine, DatabaseBranchesConfig},
         network::incoming::tls_delivery::{
             LocalTlsDelivery, TlsClientCertSource, TlsDeliveryProtocol,
         },
@@ -50,8 +51,8 @@ use mirrord_config::{
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
     client::{
-        MaybeClientCert, NoClientCert, OperatorApi, connect_params::BranchDbNames,
-        error::OperatorApiError, temporal_mirror_warning,
+        MaybeClientCert, NoClientCert, OperatorApi, check_targetless_db_branches,
+        connect_params::BranchDbNames, error::OperatorApiError, temporal_mirror_warning,
     },
     crd::{
         MirrordOperatorSpec, NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
@@ -265,6 +266,21 @@ struct PreparedSync {
     api: OperatorApi<MaybeClientCert>,
 }
 
+/// Drops what only a preview pod could use from the config and flags of a preview without a
+/// target, which the targetless config check already reported as ignored. Done before the
+/// feature check and the file reads of `prepare`, so an unused queue split is not held against
+/// the operator and an unused mount file is never opened. `auto_queue_splitting` is `mirrord up`
+/// asking the operator to split queues by default; with no pod to consume them it goes off too,
+/// otherwise the operator would set up splits for a session that never reads a message.
+fn drop_pod_settings(layer_config: &mut LayerConfig, auto_queue_splitting: &mut bool) {
+    layer_config.feature.split_queues = Default::default();
+    layer_config.feature.kafka_branch = false;
+    layer_config.feature.preview.image = None;
+    layer_config.feature.preview.secret_mounts.clear();
+    layer_config.feature.preview.config_mounts.clear();
+    *auto_queue_splitting = false;
+}
+
 impl PreparedPreview {
     /// Runs every check `mirrord preview start` can run before it changes anything in the
     /// cluster, against the operator and API from [`create_preview_api`].
@@ -284,11 +300,63 @@ impl PreparedPreview {
         api: Api<PreviewSession>,
         sources: &ManifestSources,
         mut supplied_objects: Option<Vec<resources::SuppliedObject>>,
-        auto_queue_splitting: bool,
+        mut auto_queue_splitting: bool,
         sync: Option<sync::ServiceSync>,
         progress: &ProgressTracker,
         mut analytics: AnalyticsReporter,
     ) -> CliResult<Self> {
+        // A preview without a target is its branch databases: the operator provisions them and
+        // keeps them for the preview's TTL, and runs no pod. So the target may only be left out
+        // when there are branches for the operator to provision, and nothing that needs a pod
+        // can come along.
+        let config_target = layer_config
+            .target
+            .path
+            .clone()
+            .unwrap_or(Target::Targetless);
+        let targetless = matches!(config_target, Target::Targetless);
+        if targetless {
+            if layer_config
+                .feature
+                .db_branches
+                .split_config_request()
+                .is_some()
+            {
+                return Err(CliError::UnsupportedTargetConfig(
+                    "`feature.db_branches` as `\"*\"` or a list of ids is looked up in the target \
+                     workload's `MirrordSplitConfig`, so it needs a target; define the branches \
+                     inline or set a `target`"
+                        .to_owned(),
+                ));
+            }
+            if !layer_config
+                .feature
+                .db_branches
+                .any_provisioned_by_operator()
+            {
+                return Err(CliError::PreviewTargetRequired);
+            }
+            if !sources.is_empty() {
+                return Err(manifests_need_a_target());
+            }
+            if sync.is_some() {
+                return Err(CliError::UnsupportedTargetConfig(
+                    "`mirrord preview sync` needs a target workload to run the synced code in; \
+                     set a `target`"
+                        .to_owned(),
+                ));
+            }
+            // Run here, not with the general config check: that one also loads the config for
+            // `preview stop` and friends, where a missing `-t` is not a preview without a target.
+            let mut context = ConfigContext::default();
+            let verified = layer_config.verify_for_targetless_preview(&mut context);
+            for warning in context.into_warnings() {
+                progress.warning(&warning);
+            }
+            verified?;
+            drop_pod_settings(&mut layer_config, &mut auto_queue_splitting);
+        }
+
         let is_cronjob_target = matches!(layer_config.target.path, Some(Target::CronJob(_)));
         let feature_support = async {
             operator_api.check_feature_support(&layer_config, auto_queue_splitting)?;
@@ -375,6 +443,16 @@ impl PreparedPreview {
                     .spec
                     .require_feature(NewOperatorFeature::DbBranchesFromSplitConfig)?;
             }
+            // Same reason: a branch that needs the target pod, or an operator without targetless
+            // branching, must fail before `start` replaces anything. `mirrord up` prepares every
+            // service and then starts them all, so a refusal in `start` would come after a targeted
+            // service already replaced its preview.
+            if targetless {
+                check_targetless_db_branches(
+                    &operator_api.operator().spec,
+                    &layer_config.feature.db_branches,
+                )?;
+            }
 
             Ok::<(), CliError>(())
         };
@@ -394,13 +472,9 @@ impl PreparedPreview {
 
         let mut subtask = progress.subtask("preparing preview session");
 
-        // Owned, like the image below: `PreparedPreview` keeps them for `start`.
-        let config_target = layer_config.target.path.clone().ok_or_else(|| {
-            subtask.failure(None);
-            CliError::PreviewTargetRequired
-        })?;
-
-        // An empty image, such as from `-i ""`, counts as no image.
+        // Owned, like the target above: `PreparedPreview` keeps them for `start`. With no pod to
+        // run there is no image to run it from. An empty image, such as from `-i ""`, counts as
+        // no image.
         let image = match layer_config
             .feature
             .preview
@@ -409,7 +483,7 @@ impl PreparedPreview {
             .filter(|image| image.is_empty().not())
         {
             Some(image) => image,
-            None if sync.is_some() => String::new(),
+            None if targetless || sync.is_some() => String::new(),
             None => {
                 subtask.failure(None);
                 return Err(CliError::PreviewImageRequired);
@@ -433,6 +507,8 @@ impl PreparedPreview {
                         .then_some(false),
                 }),
             )
+        } else if targetless {
+            (None, None)
         } else {
             let mut incoming = PreviewIncomingConfig::from_config(
                 &layer_config.feature.network.incoming,
@@ -481,13 +557,20 @@ impl PreparedPreview {
             (incoming, None)
         };
 
-        let (session_target, target_image) = resolve_config_target(
-            &config_target,
-            operator_api.client(),
-            layer_config.target.namespace.as_deref(),
-        )
-        .await
-        .inspect_err(|_| subtask.failure(None))?;
+        let (session_target, target_image) = if targetless {
+            (
+                targetless_session_target(&layer_config.feature.db_branches),
+                None,
+            )
+        } else {
+            resolve_config_target(
+                &config_target,
+                operator_api.client(),
+                layer_config.target.namespace.as_deref(),
+            )
+            .await
+            .inspect_err(|_| subtask.failure(None))?
+        };
 
         // Planned before an existing session is replaced. `plan` dry-runs the manifests and rejects
         // a template that would widen the preview's access, so either failure leaves the running
@@ -543,7 +626,11 @@ impl PreparedPreview {
             std::mem::take(&mut layer_config.feature.preview.secret_mounts),
             &mut secret_values,
         )?;
-        let env =
+        // Env vars go to the preview pod, so without one there is nothing to send and no env
+        // file to read.
+        let env = if targetless {
+            None
+        } else {
             PreviewEnvVarsConfig::from_config(&layer_config.feature.env).map_err(|error| {
                 CliError::EnvFileAccessError(
                     layer_config
@@ -554,7 +641,8 @@ impl PreparedPreview {
                         .unwrap_or_default(),
                     error,
                 )
-            })?;
+            })?
+        };
         let config_mounts = std::mem::take(&mut layer_config.feature.preview.config_mounts)
             .into_iter()
             .map(|m| m.resolve().map(Into::into))
@@ -580,7 +668,14 @@ impl PreparedPreview {
             key: layer_config.key.as_str().to_owned(),
             target: session_target,
             ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
-            replicas: layer_config.feature.preview.replicas,
+            // Both only shape the preview pods, which a session without a target has none of,
+            // and the config check already reported them as ignored, so the CR doesn't carry
+            // what the user was just told is ignored.
+            replicas: if targetless {
+                PreviewSessionSpec::default_replicas()
+            } else {
+                layer_config.feature.preview.replicas
+            },
             incoming,
             queue_splitting: PreviewQueueSplittingConfig::from_config(
                 &layer_config.feature.split_queues,
@@ -588,7 +683,11 @@ impl PreparedPreview {
             ),
             db_branching: None,
             env,
-            labels: PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),
+            labels: if targetless {
+                None
+            } else {
+                PreviewLabelFilter::from_config(&layer_config.feature.preview.labels)
+            },
             config_mounts,
             secret_mounts,
             idle,
@@ -1767,7 +1866,7 @@ async fn preview_logs(
         .filter(|session| {
             session_target
                 .as_ref()
-                .is_none_or(|target| session.spec.target == *target)
+                .is_none_or(|target| session_has_target(session, target))
         })
         .collect();
 
@@ -1910,7 +2009,7 @@ async fn preview_stop(
         .filter(|session| {
             session_target
                 .as_ref()
-                .is_none_or(|target| session.spec.target == *target)
+                .is_none_or(|target| session_has_target(session, target))
         })
         .collect();
 
@@ -2256,10 +2355,61 @@ fn reject_management_only(spec: &MirrordOperatorSpec) -> CliResult<()> {
     Ok(())
 }
 
-/// `--resource` compares the files with one workload's live pod template, and a label target
-/// matches pods of any number of workloads.
+/// The placeholder target of a preview without a target, named after the branches it
+/// provisions. Sessions under one key and target replace each other, and a preview without a
+/// target is its branches: two `mirrord up` services with different branch sets under one key
+/// (a pg branch for one, a remote redis branch for the other) are different previews and run
+/// side by side, while a rerun with the same branches replaces the earlier session, the way a
+/// rerun against the same workload does. Each branch is listed as its `type`, or `type/id` when
+/// it has an id, sorted, so the order the config lists them in doesn't matter. Local Redis
+/// branches never reach the operator and don't count. The operator only reads the kind.
+fn targetless_session_target(db_branches: &DatabaseBranchesConfig) -> SessionTarget {
+    let mut branches = db_branches
+        .iter()
+        .filter_map(|branch| {
+            let engine: &'static str = DatabaseBranchEngine::from(branch).into();
+            match branch.base()?.id.as_deref() {
+                Some(id) => Some(format!("{engine}/{id}")),
+                None => Some(engine.to_owned()),
+            }
+        })
+        .collect::<Vec<_>>();
+    branches.sort();
+    branches.dedup();
+
+    SessionTarget::KubeResource(KubeResourceTarget {
+        name: branches.join(","),
+        ..KubeResourceTarget::targetless()
+    })
+}
+
+/// Whether `target`, as `stop`, `logs` or `status` resolved it from the config or `-t`, names
+/// `session`. The placeholder of a preview without a target carries its branches in its name
+/// (see [`targetless_session_target`]), and a config without a target, or `-t targetless`,
+/// means every such preview under the key.
+fn session_has_target(session: &PreviewSession, target: &SessionTarget) -> bool {
+    if target.is_targetless() {
+        return session.spec.target.is_targetless();
+    }
+    session.spec.target == *target
+}
+
+/// What `start` and `diff` refuse `--resource` and `--chart` with when there is no target.
+fn manifests_need_a_target() -> CliError {
+    CliError::UnsupportedTargetConfig(
+        "`--resource` and `--chart` need a target workload to run the manifests against; set a \
+         `target` or leave them out"
+            .to_owned(),
+    )
+}
+
+/// `--resource` compares the files with one workload's live pod template. A label target matches
+/// pods of any number of workloads, and the placeholder of a preview without a target names none.
 fn resources_target(target: &SessionTarget) -> CliResult<&KubeResourceTarget> {
     match target {
+        SessionTarget::KubeResource(target) if target.is_targetless() => {
+            Err(manifests_need_a_target())
+        }
         SessionTarget::KubeResource(target) => Ok(target),
         SessionTarget::PodSet(_) => Err(CliError::UnsupportedTargetConfig(format!(
             "`--resource` and `--chart` do not support label target `{}`; target a single \
@@ -2300,6 +2450,12 @@ async fn resolve_config_target(
 ) -> CliResult<(SessionTarget, Option<String>)> {
     if let Target::Label(label_target) = config_target {
         return Ok((label_session_target(label_target), None));
+    }
+    // A branch-only preview has no workload to look up. `start` names its placeholder after its
+    // branches (`targetless_session_target`); `stop`, `logs` and `status` get the bare one, which
+    // `session_has_target` matches against every session without a target under the key.
+    if matches!(config_target, Target::Targetless) {
+        return Ok((SessionTarget::targetless(), None));
     }
 
     let ns = namespace.unwrap_or(client.default_namespace());
@@ -2710,6 +2866,111 @@ mod tests {
     use mirrord_operator::crd::preview::{PreviewSyncConfig, PreviewSyncEntry};
 
     use super::*;
+
+    /// `mirrord up` turns `auto_queue_splitting` on whenever the operator advertises
+    /// `PreviewAutoQueueSplitting`, and `prepare` clears the queue splits of a preview without a
+    /// target but used to pass that flag through. The session then asked the operator to split
+    /// queues by default for a preview with no pod to consume them. Everything only a pod could
+    /// use goes, the flag included.
+    #[test]
+    fn targetless_preview_never_asks_for_auto_queue_splitting() {
+        let mut layer_config = LayerConfig::resolve(&mut ConfigContext::default().strict_env(true))
+            .expect("the default config is valid");
+        layer_config.feature.kafka_branch = true;
+        layer_config.feature.preview.image = Some("myapp:v2".to_owned());
+        let mut auto_queue_splitting = true;
+
+        drop_pod_settings(&mut layer_config, &mut auto_queue_splitting);
+
+        assert!(!auto_queue_splitting);
+        assert!(!layer_config.feature.kafka_branch);
+        assert_eq!(layer_config.feature.preview.image, None);
+        assert!(!layer_config.feature.split_queues.is_set());
+        assert!(layer_config.feature.preview.secret_mounts.is_empty());
+        assert!(layer_config.feature.preview.config_mounts.is_empty());
+    }
+
+    /// `preview diff -t targetless --resource m.yaml` takes the placeholder from
+    /// `resolve_config_target`. As a plain kube resource it went on to GET a `Targetless` named
+    /// `""` from the API server, and the user saw a `LiveRead` error about that object instead
+    /// of being told the manifests need a target, as `start` tells them.
+    #[test]
+    fn manifests_are_refused_without_a_target() {
+        let branch_set = targetless_session_target(&branches(serde_json::json!([{
+            "type": "pg",
+            "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } },
+        }])));
+
+        for target in [SessionTarget::targetless(), branch_set] {
+            let error = resources_target(&target).expect_err("no workload to compare with");
+            assert_eq!(error.to_string(), manifests_need_a_target().to_string());
+        }
+    }
+
+    fn branches(json: serde_json::Value) -> DatabaseBranchesConfig {
+        serde_json::from_value(json).expect("a valid db_branches config")
+    }
+
+    /// Every preview without a target used to get one placeholder target, so `mirrord up` saw
+    /// two targetless services under one key (`orders-db` with a pg branch, `cache-db` with a
+    /// redis one) as the same preview and refused the run, and `preview start -k K` with the
+    /// second config replaced the first one's session. The placeholder is named after the branch
+    /// set, so different branch sets coexist and the same set, in any order, still replaces.
+    #[test]
+    fn targetless_placeholder_is_named_after_the_branch_set() {
+        let pg = serde_json::json!({
+            "type": "pg",
+            "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+        });
+        let redis = serde_json::json!({
+            "id": "cache",
+            "type": "redis",
+            "connection": { "url": { "type": "secret", "name": "redis", "key": "url" } }
+        });
+        let local_redis = serde_json::json!({
+            "id": "scratch",
+            "type": "redis",
+            "location": "local",
+            "connection": { "url": { "type": "env", "variable": "REDIS_URL" } }
+        });
+
+        let orders = targetless_session_target(&branches(serde_json::json!([pg])));
+        let cache = targetless_session_target(&branches(serde_json::json!([redis])));
+        let both = targetless_session_target(&branches(serde_json::json!([pg, redis])));
+        let both_reordered =
+            targetless_session_target(&branches(serde_json::json!([redis, local_redis, pg])));
+
+        assert!(orders.is_targetless() && cache.is_targetless() && both.is_targetless());
+        assert_ne!(orders, cache);
+        assert_ne!(orders, both);
+        assert_eq!(both, both_reordered);
+        assert_eq!(both.display_name(), "pg,redis/cache");
+    }
+
+    /// `preview stop -t targetless` (or a config with `target: "targetless"`) has no branch set
+    /// to name a placeholder after, so it means every preview without a target under the key,
+    /// while a workload target still matches only its own sessions.
+    #[test]
+    fn a_bare_targetless_target_matches_every_session_without_a_target() {
+        let mut session = session(
+            &sync_spec(),
+            PreviewSessionPhase::Ready,
+            "2026-10-30T01:00:00Z",
+        );
+        let workload = session.spec.target.clone();
+        session.spec.target = targetless_session_target(&branches(serde_json::json!([{
+            "type": "pg",
+            "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+        }])));
+
+        assert!(session_has_target(&session, &SessionTarget::targetless()));
+        assert!(session_has_target(&session, &session.spec.target.clone()));
+        assert!(!session_has_target(&session, &workload));
+
+        session.spec.target = workload.clone();
+        assert!(!session_has_target(&session, &SessionTarget::targetless()));
+        assert!(session_has_target(&session, &workload));
+    }
 
     /// A sync session of the key `pr-123` with `spec`'s settings, in `phase`, whose TTL runs out
     /// at `expires_at`.

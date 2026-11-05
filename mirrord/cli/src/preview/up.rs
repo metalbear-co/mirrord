@@ -22,6 +22,7 @@ use mirrord_config::{
         database_branches::{DatabaseBranchesConfig, SplitConfigDbBranches, SplitConfigRequest},
         split_queues::SplitQueuesConfig,
     },
+    target::Target,
     util::GIT_BRANCH,
 };
 use mirrord_operator::{
@@ -394,7 +395,7 @@ async fn prepare_service(
         ..
     } = service;
     let default_db_branches = db_branches_origin == RequestOrigin::Default;
-    let default_split_queues = queues_origin == RequestOrigin::Default;
+    let mut default_split_queues = queues_origin == RequestOrigin::Default;
 
     // Set over the patched config, so they take precedence over the service's `config_patch`.
     if let Some(ttl) = args.ttl {
@@ -407,6 +408,15 @@ async fn prepare_service(
 
     if let Some(target) = &config.target.path {
         progress.info(&format!("target: {target}"));
+    }
+
+    // A service without a target runs no pod to consume split queues, so the splits `mirrord up`
+    // adds by default are dropped before any check sees them: nothing to warn about or to ask
+    // the operator for. Splits the user set stay, and `prepare` reports them as ignored.
+    let targetless = matches!(config.target.path, None | Some(Target::Targetless));
+    if default_split_queues && targetless {
+        config.feature.split_queues = SplitQueuesConfig::default();
+        default_split_queues = false;
     }
 
     // `mirrord up` assembles the config without it, so the preview checks below would take
