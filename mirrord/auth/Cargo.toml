@@ -46,7 +46,7 @@ k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, optional = true }
 serde.workspace = true
 serde-saphyr = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["fs", "rt"], optional = true  }
+tokio = { workspace = true, features = ["fs", "time"], optional = true  }
 thiserror = { workspace = true, optional = true }
 x509-certificate.workspace = true
 reqwest = { workspace = true, optional = true }

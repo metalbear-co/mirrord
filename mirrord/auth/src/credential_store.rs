@@ -3,8 +3,10 @@ use std::{
     env::home_dir,
     fmt::Debug,
     io::{self, ErrorKind},
+    ops::Not,
     path::PathBuf,
     sync::LazyLock,
+    time::Duration,
 };
 
 use base64::{Engine, prelude::BASE64_STANDARD_NO_PAD};
@@ -28,6 +30,9 @@ use crate::{
 
 #[cfg(test)]
 mod tests;
+
+/// How often a caller that waits for the credential store's lock tries to take it again.
+const LOCK_RETRY: Duration = Duration::from_millis(50);
 
 /// "~/.mirrord"
 static CREDENTIALS_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
@@ -330,16 +335,17 @@ impl CredentialStoreSync {
 
 /// Takes the exclusive lock on `file`, and waits while another open file holds it.
 ///
-/// `flock` blocks its thread until the lock is free, so it runs on a blocking thread. The CLI runs
-/// on a single-threaded runtime, and the other holder can be a task of the same process, such as
-/// the session of another service of `mirrord preview sync`, which holds the lock while it awaits
-/// the operator. A `flock` on the runtime's thread would stop that task too, so it could never
-/// release the lock. The clone shares `file`'s open file description, which the lock belongs to,
-/// so unlocking `file` releases it.
+/// It tries the lock without blocking, and sleeps between tries. The CLI runs on a single-threaded
+/// runtime, and the other holder can be a task of the same process, such as the session of another
+/// service of `mirrord preview sync`, which holds the lock while it awaits the operator. A blocking
+/// `flock` on the runtime's thread would stop that task too, so it could never release the lock.
+/// On a blocking thread, a `flock` that another process keeps waiting would hold up the runtime's
+/// shutdown, because the runtime waits for its blocking threads, while a sleep ends when its
+/// caller is dropped.
 async fn lock_exclusive(file: &fs::File) -> io::Result<()> {
-    let file = file.try_clone().await?.into_std().await;
+    while file.try_lock_exclusive()?.not() {
+        tokio::time::sleep(LOCK_RETRY).await;
+    }
 
-    tokio::task::spawn_blocking(move || fs4::fs_std::FileExt::lock_exclusive(&file))
-        .await
-        .map_err(io::Error::other)?
+    Ok(())
 }
