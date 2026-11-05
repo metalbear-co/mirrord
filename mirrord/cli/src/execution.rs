@@ -136,7 +136,8 @@ pub(crate) struct MirrordExecution {
     ///
     /// [`report_share_link`] prints it before the application starts. On Windows, where the
     /// internal proxy stays the CLI's child, [`Self::wait`] reports an internal proxy that failed
-    /// while it is set, because the operator removes the link when the session's connections end.
+    /// while it is set, because the link no longer reaches the application once the session's
+    /// connections end.
     /// On Unix the internal proxy is reparented to init, so a failure there shows only in the
     /// internal proxy log.
     ///
@@ -146,8 +147,9 @@ pub(crate) struct MirrordExecution {
     pub share_link: Option<LocalShareLink>,
 }
 
-/// The share link that the operator created for this session when it connected. It doesn't work
-/// until the operator publishes it, once the application listens on the port that the link opens.
+/// The share link that the operator recorded for this session when it connected. Requests to it
+/// reach the application while the application listens on the port that the link opens, and the
+/// target's own service otherwise.
 #[derive(Debug)]
 pub(crate) struct LocalShareLink {
     /// The URL that share-ingress routes to the session.
@@ -223,8 +225,8 @@ const SHARE_LINK_IDE_ID: &str = "share_link";
 /// application starts.
 ///
 /// Nothing reports on the link after that: on Unix the CLI becomes the application, and the
-/// internal proxy runs detached, so the text says up front when the link routes, when it ends, and
-/// where a failure is logged.
+/// internal proxy runs detached, so the text says up front where requests to the link go, how long
+/// the link lasts, and where a failure is logged.
 ///
 /// `line_mode` is the tracker's [`ProgressTracker::line_mode`]. A line mode prints the text as an
 /// `info` line. A spinner keeps the text for after its task finishes, because a spinner drops its
@@ -244,9 +246,10 @@ pub(crate) fn report_share_link<P: Progress>(
         .copied()
         .unwrap_or(link.entry_port);
     let text = format!(
-        "Share link: {url}\nIt routes to your application once it listens on port {local_port}, \
-and ends when your application stops listening on that port or exits. If the link fails, mirrord \
-stops your application and writes why to the internal proxy log at {log}.\n{LOCAL_SHARE_NOTE}",
+        "Share link: {url}\nRequests to it reach your application while it listens on port \
+{local_port}, and the service running in the cluster otherwise. The link lasts as long as this \
+session. If the session fails, mirrord stops your application and writes why to the internal \
+proxy log at {log}.\n{LOCAL_SHARE_NOTE}",
         url = link.url,
         log = config.internal_proxy.log_destination.display(),
     );

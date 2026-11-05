@@ -289,7 +289,9 @@ pub(crate) enum LocalShareError {
     )]
     UnsupportedCommand(&'static str),
 
-    #[error("The internal proxy of the shared session stopped ({0}), so its share link is gone.")]
+    #[error(
+        "The internal proxy of the shared session stopped ({0}), so the share link no longer reaches your application."
+    )]
     ProxyExit(ExitStatus),
 
     /// The CLI couldn't read the link from the session's `sessions` view, for example because

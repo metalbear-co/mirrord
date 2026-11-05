@@ -662,11 +662,12 @@ pub struct LayerConfig {
     /// `feature.copy_target` yet.
     ///
     /// The link opens the first port in `feature.network.incoming.ports`. Without that list, the
-    /// target container must declare exactly one port that mirrord steals. mirrord prints the link
-    /// before your application starts, and the link works once your application listens on that
-    /// port. The link ends when the session ends, when your application stops listening on that
-    /// port, or when the cluster loses the mirrord agent of the pod that the link opens. Starting
-    /// the session again creates a different link.
+    /// target container must declare exactly one port that mirrord steals. The link reaches the
+    /// target through the Kubernetes Service named after it, so the target must be a workload or
+    /// Service with a Service of the same name that exposes that port. mirrord prints the link
+    /// before your application starts. Requests through the link reach your application while it
+    /// listens on that port, and the service running in the cluster otherwise. The link lasts as
+    /// long as the session; starting the session again creates a different link.
     #[config(default = false, plan = Team)]
     pub share: bool,
 
