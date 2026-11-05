@@ -621,8 +621,9 @@ pub struct SessionHttpFilter {
 /// The share link of a session started with `share`, as the operator serves it to the session's
 /// owner in [`Session::share`].
 ///
-/// The CLI reads it once, before it starts the application, to print the link, so the share link
-/// needs no messages of its own on the session's connection.
+/// The operator records the link in the session when the session connects, and the link lasts as
+/// long as the session. The CLI reads it once, before it starts the application, to print the
+/// link, so the share link needs no messages of its own on the session's connection.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionShare {
@@ -631,25 +632,6 @@ pub struct SessionShare {
     /// The port of the target that the link opens. The local application listens on it, or on
     /// the local port that `feature.network.incoming.port_mapping` maps it to.
     pub entry_port: u16,
-    /// Whether share-ingress routes the link yet.
-    pub phase: SessionSharePhase,
-}
-
-/// Where a share link is in its life. The operator creates the link when the session connects,
-/// and removes it when the session ends or the local application stops listening on the entry
-/// port.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub enum SessionSharePhase {
-    /// The link exists, but share-ingress doesn't route it yet, because no agent has confirmed
-    /// that it steals the entry port.
-    Pending,
-    /// share-ingress routes the link to the session.
-    Ready,
-    /// The operator removed the link. A link never comes back for the same session.
-    Ended,
-    /// A phase this client doesn't know, from a newer operator.
-    #[serde(other)]
-    Unknown,
 }
 
 /// Resource used to access the operator's session management routes.
@@ -1037,9 +1019,9 @@ pub enum NewOperatorFeature {
     /// run an empty image.
     PreviewCodeSync,
 
-    /// Supports `mirrord exec --share`: the operator registers a share link for the session,
-    /// keeps it while the session's connections live and the session steals the port the link
-    /// opens, and serves it to the session's owner in [`Session::share`].
+    /// Supports `mirrord exec --share`: the operator records a share link for the session when it
+    /// connects, routes it through share-ingress while the session lives, and serves it to the
+    /// session's owner in [`Session::share`].
     LocalShare,
 
     /// This variant is what a client sees when the operator includes a feature the client is not

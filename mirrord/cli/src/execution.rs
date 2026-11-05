@@ -26,10 +26,7 @@ use mirrord_config::{
 #[cfg(windows)]
 use mirrord_config::{MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
-use mirrord_operator::{
-    client::{OperatorSession, SessionShareReadError, SessionShareReader},
-    crd::SessionSharePhase,
-};
+use mirrord_operator::client::{OperatorSession, SessionShareReadError, SessionShareReader};
 use mirrord_progress::{
     IdeAction, IdeMessage, LineMode, NotificationLevel, Progress, ProgressTracker,
     messages::LOCAL_SHARE_NOTE,
@@ -192,7 +189,7 @@ async fn read_share_link(
             Err(error) => return Err(LocalShareError::ReadLink(error).into()),
         }
     };
-    let Some(share) = share.filter(|share| share.phase != SessionSharePhase::Ended) else {
+    let Some(share) = share else {
         return Err(LocalShareError::Operator(
             "The operator didn't return this session's share link. Restart the session.".to_owned(),
         )
