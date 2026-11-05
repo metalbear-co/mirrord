@@ -71,6 +71,10 @@ Download the accompanying `values.yaml`:
 curl https://raw.githubusercontent.com/metalbear-co/charts/main/mirrord-operator/values.yaml --output values.yaml
 ```
 
+{% hint style="info" %}
+To let developers target [serverless workloads](../using-mirrord/serverless/README.md) running outside Kubernetes, such as Amazon ECS tasks, set `operator.sessionsManager: true`. This experimental feature runs sessions-manager inside the Operator. See [Operator-Hosted Sessions-Manager](../using-mirrord/serverless/operator-hosted.md).
+{% endhint %}
+
 ### Cloud API key
 
 The Operator authenticates to the mirrord cloud with a **cloud API key** and uses it to obtain its license over the API. This is the default way to install the Operator. Generate a key in the dashboard under **Settings** at [app.metalbear.com](https://app.metalbear.com) — it's shown only once, so store it then.
