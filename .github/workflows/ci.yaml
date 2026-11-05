@@ -358,6 +358,50 @@ jobs:
           shared-key: mirrord
       - run: cargo xtask corpus check
 
+  # The next release PR bumps the corpus pins to upstream HEAD, so this checks the config blocks in
+  # the skills repo at HEAD against the schemas of this PR, to fail a schema change that breaks
+  # them here rather than on the release PR. A change the skills repo can only follow once it ships,
+  # such as renaming an option, can't pass: add the `skip-corpus-upstream` label, re-run the failed
+  # jobs, and update the skills repo before the next release. The label is read when the job runs,
+  # since a re-run gets the labels of the original event. The merge queue doesn't run it, as a PR
+  # in the queue has already passed it or been labeled to skip it.
+  corpus_upstream_check:
+    needs: [plan]
+    if: ${{ github.event_name == 'pull_request' && (needs.plan.outputs.config_schema_changed == 'true' || needs.plan.outputs.corpus_changed == 'true' || needs.plan.outputs.ci_changed == 'true') }}
+    runs-on: ${{ needs.plan.outputs.runner_4 }}
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check for the skip label
+        id: skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          labels=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
+          if grep -qx skip-corpus-upstream <<< "$labels"; then
+            echo "Skipped by the skip-corpus-upstream label."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: ${{ steps.skip.outputs.skip != 'true' }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - if: ${{ steps.skip.outputs.skip != 'true' }}
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - if: ${{ steps.skip.outputs.skip != 'true' }}
+        uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+        with:
+          cache: false
+      - name: Rust cache
+        if: ${{ steps.skip.outputs.skip != 'true' }}
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
+        with:
+          shared-key: mirrord
+      - if: ${{ steps.skip.outputs.skip != 'true' }}
+        run: cargo xtask corpus check-upstream
+
   install_script:
     needs: [plan]
     if: ${{ needs.plan.outputs.install_script_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
@@ -512,6 +556,7 @@ jobs:
         windows_tests,
         install_script,
         corpus_check,
+        corpus_upstream_check,
       ]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
