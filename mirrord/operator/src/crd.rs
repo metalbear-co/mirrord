@@ -996,6 +996,14 @@ pub enum NewOperatorFeature {
     /// run an empty image.
     PreviewCodeSync,
 
+    /// This operator understands the queue split role a multi-cluster primary writes on its child
+    /// session when a `MirrordSplitConfig` names a `consumerCluster`: the consumer cluster runs
+    /// the queue split and owns its resources, the others run plain sessions. A primary refuses a
+    /// workload cluster that does not advertise it. An older operator knows no role: as a
+    /// bystander it gets no queues, so it runs a plain session or refuses under `requireFilter`,
+    /// and as a non-Default consumer it fails looking for the Default's temporary resources.
+    MultiClusterQueueSplitRole,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -1069,7 +1077,8 @@ impl NewOperatorFeature {
             Self::MultiClusterPrimary
             | Self::MultiClusterRemote
             | Self::MultiClusterSubscribe
-            | Self::MultiClusterManagementOnly => Some("multi_cluster"),
+            | Self::MultiClusterManagementOnly
+            | Self::MultiClusterQueueSplitRole => Some("multi_cluster"),
             Self::ProxyApi
             | Self::SessionManagement
             | Self::LayerReconnect
@@ -1157,6 +1166,9 @@ impl Display for NewOperatorFeature {
                 "Azure Service Bus queue splitting"
             }
             NewOperatorFeature::PreviewCodeSync => "code sync in preview environments",
+            NewOperatorFeature::MultiClusterQueueSplitRole => {
+                "one consumer cluster for multi-cluster queue splitting"
+            }
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
@@ -1295,6 +1307,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::MultiClusterRemote
             | NewOperatorFeature::MultiClusterPrimary
             | NewOperatorFeature::MultiClusterSubscribe
+            | NewOperatorFeature::MultiClusterQueueSplitRole
             | NewOperatorFeature::MultiClusterManagementOnly
             | NewOperatorFeature::UnifiedBranchDbCrd
             | NewOperatorFeature::ConnectParamsInHeader
