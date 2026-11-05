@@ -277,7 +277,7 @@ use db_branches::db_branches_command;
 use debug_hold::ExecHold;
 use diagnose::diagnose_command;
 use dump::dump_command;
-use execution::{CrashReporting, MirrordExecution};
+use execution::{CrashReporting, MirrordExecution, report_share_link};
 use extension::extension_exec;
 use extract::extract_library;
 use mirrord_analytics::{
@@ -571,6 +571,9 @@ async fn exec_process(
     // print an invitation to the newsletter on certain run count numbers
     suggest_newsletter_signup(run_count, progress);
 
+    // Read before the task below: on Windows that task borrows `progress` until the handoff.
+    let line_mode = progress.line_mode();
+
     #[cfg(not(target_os = "windows"))]
     let mut sub_progress = progress.subtask(EXEC_RUNNING_TASK);
     #[cfg(target_os = "windows")]
@@ -591,6 +594,10 @@ async fn exec_process(
         mirrord_for_ci.is_some(),
         &mut sub_progress,
     );
+
+    if let Some(link) = &execution_info.share_link {
+        report_share_link(&mut sub_progress, line_mode, link, &config)?;
+    }
 
     // `None` when no layer will load, or when `sub_progress` is for a person or prints nothing:
     // `exec` then reports `Ready!` through it as before, so a terminal keeps its whole tree.
