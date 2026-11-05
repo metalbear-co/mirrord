@@ -289,6 +289,7 @@ pub enum MessageKind {
     TcpSteal,
     TcpOutgoing,
     UdpOutgoing,
+    SeqpacketOutgoing,
     File,
     Other,
 }
@@ -301,6 +302,7 @@ impl MessageKind {
             Self::TcpSteal => "tcp_steal",
             Self::TcpOutgoing => "tcp_outgoing",
             Self::UdpOutgoing => "udp_outgoing",
+            Self::SeqpacketOutgoing => "seqpacket_outgoing",
             Self::File => "file",
             Self::Other => "other",
         }
@@ -315,6 +317,7 @@ impl ClientMessage {
             Self::TcpSteal(..) => MessageKind::TcpSteal,
             Self::TcpOutgoing(..) => MessageKind::TcpOutgoing,
             Self::UdpOutgoing(..) => MessageKind::UdpOutgoing,
+            Self::SeqpacketOutgoing(..) => MessageKind::SeqpacketOutgoing,
             Self::FileRequest(..) => MessageKind::File,
             _ => MessageKind::Other,
         }
@@ -329,6 +332,7 @@ impl DaemonMessage {
             Self::TcpSteal(..) => MessageKind::TcpSteal,
             Self::TcpOutgoing(..) => MessageKind::TcpOutgoing,
             Self::UdpOutgoing(..) => MessageKind::UdpOutgoing,
+            Self::SeqpacketOutgoing(..) => MessageKind::SeqpacketOutgoing,
             Self::File(..) => MessageKind::File,
             _ => MessageKind::Other,
         }
@@ -727,6 +731,12 @@ mod tests {
                 MessageKind::UdpOutgoing,
             ),
             (
+                ClientMessage::SeqpacketOutgoing(LayerSeqpacket::Close(LayerClose {
+                    connection_id: 1,
+                })),
+                MessageKind::SeqpacketOutgoing,
+            ),
+            (
                 ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 3 })),
                 MessageKind::File,
             ),
@@ -752,6 +762,10 @@ mod tests {
             (
                 DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(1)),
                 MessageKind::UdpOutgoing,
+            ),
+            (
+                DaemonMessage::SeqpacketOutgoing(DaemonSeqpacket::Close(1)),
+                MessageKind::SeqpacketOutgoing,
             ),
             (
                 DaemonMessage::File(FileResponse::Read(Ok(ReadFileResponse {

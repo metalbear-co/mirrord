@@ -106,6 +106,7 @@ struct MessageGauges {
     tcp_steal: IntGauge,
     tcp_outgoing: IntGauge,
     udp_outgoing: IntGauge,
+    seqpacket_outgoing: IntGauge,
     file: IntGauge,
     other: IntGauge,
 }
@@ -121,6 +122,7 @@ impl MessageGauges {
             tcp_steal: gauge(MessageKind::TcpSteal),
             tcp_outgoing: gauge(MessageKind::TcpOutgoing),
             udp_outgoing: gauge(MessageKind::UdpOutgoing),
+            seqpacket_outgoing: gauge(MessageKind::SeqpacketOutgoing),
             file: gauge(MessageKind::File),
             other: gauge(MessageKind::Other),
         }
@@ -132,6 +134,7 @@ impl MessageGauges {
             MessageKind::TcpSteal => &self.tcp_steal,
             MessageKind::TcpOutgoing => &self.tcp_outgoing,
             MessageKind::UdpOutgoing => &self.udp_outgoing,
+            MessageKind::SeqpacketOutgoing => &self.seqpacket_outgoing,
             MessageKind::File => &self.file,
             MessageKind::Other => &self.other,
         }
@@ -243,8 +246,8 @@ impl<M: fmt::Debug> fmt::Debug for Buffered<M> {
 ///
 /// Data on its way to the client stays under its permit while the agent sends the
 /// [`DaemonMessage`] that carries it, so for that time it is also counted in
-/// [`BUFFERED_MESSAGES_BYTES`] (`direction="daemon"`, `message="tcp_outgoing"` or
-/// `"udp_outgoing"`). Adding the two metrics counts those bytes twice.
+/// [`BUFFERED_MESSAGES_BYTES`] (`direction="daemon"`, `message="tcp_outgoing"`,
+/// `"udp_outgoing"` or `"seqpacket_outgoing"`). Adding the two metrics counts those bytes twice.
 ///
 /// Updated live by the throttles' permits, through [`OUTGOING_THROTTLE_PERMITS_DAEMON`] and
 /// [`OUTGOING_THROTTLE_PERMITS_CLIENT`].
