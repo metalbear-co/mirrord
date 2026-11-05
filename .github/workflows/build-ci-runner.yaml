@@ -123,6 +123,7 @@ jobs:
       # every build recompiles from scratch.
       - name: Trim the build cache
         if: ${{ inputs.blacksmith }}
+        continue-on-error: true
         run: docker buildx prune --force --max-used-space 40GB
       - name: Upload the CI runner image
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
