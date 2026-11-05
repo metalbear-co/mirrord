@@ -742,6 +742,21 @@ impl IncomingProxy {
         match message {
             IncomingProxyMessage::LayerRequest(message_id, layer_id, req) => match req {
                 IncomingRequest::PortSubscribe(subscribe) => {
+                    // The agent cannot decode a filter this deep and would drop the connection, so
+                    // only the layer asking for it hears about the problem.
+                    if let Err(error) = subscribe.subscription.check_filter_depth() {
+                        message_bus
+                            .send(ToLayer {
+                                message_id,
+                                layer_id,
+                                message: ProxyToLayerMessage::Incoming(
+                                    IncomingResponse::PortSubscribe(Err(error.into())),
+                                ),
+                            })
+                            .await;
+                        return Ok(());
+                    }
+
                     let port = subscribe.subscription.port();
                     let mode = match &subscribe.subscription {
                         PortSubscription::Steal(..) => "steal",

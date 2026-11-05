@@ -2,7 +2,7 @@
 
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
-    ClientMessage, Port,
+    ClientMessage, Port, RemoteError,
     tcp::{LayerTcp, LayerTcpSteal, MIRROR_HTTP_FILTER_VERSION, MirrorType, StealType},
 };
 
@@ -21,6 +21,9 @@ pub trait PortSubscriptionExt {
     /// Returns the subscribed port.
     fn port(&self) -> Port;
 
+    /// Fails when the agent would refuse to decode this subscription's HTTP filter.
+    fn check_filter_depth(&self) -> Result<(), RemoteError>;
+
     /// Returns a subscribe request to be sent to the agent.
     fn agent_subscribe(&self, protocol_version: Option<&semver::Version>) -> ClientMessage;
 
@@ -33,6 +36,15 @@ impl PortSubscriptionExt for PortSubscription {
         match self {
             Self::Mirror(mirror_type) => mirror_type.get_port(),
             Self::Steal(steal_type) => get_port(steal_type),
+        }
+    }
+
+    fn check_filter_depth(&self) -> Result<(), RemoteError> {
+        match self {
+            Self::Mirror(MirrorType::FilteredHttp(_, filter))
+            | Self::Steal(StealType::FilteredHttpEx(_, filter)) => filter.check_depth(),
+            Self::Mirror(MirrorType::All(..))
+            | Self::Steal(StealType::All(..) | StealType::FilteredHttp(..)) => Ok(()),
         }
     }
 

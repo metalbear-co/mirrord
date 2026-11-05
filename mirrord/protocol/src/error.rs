@@ -187,6 +187,14 @@ pub enum RemoteError {
 
     #[error(r#"Got bad regex "{0:?}" for http filter subscriptions. Regex error: `{1}`."#)]
     BadHttpFilterExRegex(HttpFilter, String),
+
+    /// Produced by the sending side from [`HttpFilter::check_depth`], before the subscription
+    /// leaves for the agent, so no peer on an older protocol version ever has to decode it.
+    #[error(
+        "HTTP filter is nested {depth} levels deep and the limit is {limit}, flatten the \
+         all_of/any_of/not nesting"
+    )]
+    HttpFilterTooDeep { depth: u32, limit: u32 },
 }
 
 impl From<AddrParseError> for RemoteError {

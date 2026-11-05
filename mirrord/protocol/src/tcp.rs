@@ -9,7 +9,11 @@ use std::{
     task::{Context, Poll},
 };
 
-use bincode::{BorrowDecode, Decode, Encode};
+use bincode::{
+    BorrowDecode, Decode, Encode,
+    de::{BorrowDecoder, Decoder},
+    error::{AllowedEnumVariants, DecodeError},
+};
 use bytes::Bytes;
 use derive_more::{Deref, Display};
 use http_body_util::BodyExt;
@@ -31,7 +35,7 @@ use serde_json_path::{
 };
 use strum_macros::{AsRefStr, EnumString};
 
-use crate::{ConnectionId, Payload, Port, RemoteResult, RequestId};
+use crate::{ConnectionId, Payload, Port, RemoteError, RemoteResult, RequestId};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnectionV1 {
@@ -441,8 +445,26 @@ pub enum HttpBodyFilter {
     },
 }
 
+/// Deepest nesting of [`HttpFilter::Composite`] and [`HttpFilter::Not`] a decoded filter may have,
+/// counting the outermost filter as level 1.
+///
+/// Both variants recurse when the filter is decoded and on every later walk over it, one stack
+/// frame per level. Without a cap, a few kilobytes of `not (not (not ...))` on the wire overflow
+/// the stack of whoever decodes the message, and in the agent that abort takes every client's
+/// session on the target down with it. Real filters are shallow: the deepest one mirrord itself
+/// builds is a preview pod's `not (any_of [session filter, header])` over a user's `all_of` or
+/// `any_of`, four levels. This is a correctness floor nobody needs to tune, so it is a constant.
+///
+/// A decode failure takes the whole message and the client's connection with it, so the decoder
+/// is only the backstop. Whoever sends a subscription checks [`HttpFilter::check_depth`] first,
+/// which fails just that subscription with a clear error.
+pub const MAX_HTTP_FILTER_DEPTH: usize = 16;
+
 /// Describes different types of HTTP filtering available
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
+///
+/// Decoding is hand-written to enforce [`MAX_HTTP_FILTER_DEPTH`]; it keeps the exact wire format
+/// of the derived [`Encode`].
+#[derive(Encode, Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub enum HttpFilter {
     /// Filter by header ("User-Agent: B")
     Header(Filter),
@@ -463,6 +485,102 @@ pub enum HttpFilter {
 
     /// Filter by header using JQ
     HeaderJq(JqQuery),
+
+    /// Matches every request the inner filter does not. A preview environment's own pods steal
+    /// with the preview filter negated, so traffic a platform load balancer sends them directly
+    /// goes back to the stable pods instead of being served by preview code.
+    Not(Box<HttpFilter>),
+}
+
+impl HttpFilter {
+    /// How deep the [`HttpFilter::Composite`] and [`HttpFilter::Not`] nesting goes, counting this
+    /// filter as level 1.
+    pub fn depth(&self) -> usize {
+        match self {
+            Self::Composite { filters, .. } => filters
+                .iter()
+                .map(Self::depth)
+                .max()
+                .unwrap_or_default()
+                .saturating_add(1),
+            Self::Not(filter) => filter.depth().saturating_add(1),
+            Self::Header(..)
+            | Self::Path(..)
+            | Self::Method(..)
+            | Self::Body(..)
+            | Self::HeaderJq(..) => 1,
+        }
+    }
+
+    /// Fails a filter the agent would refuse to decode for going over [`MAX_HTTP_FILTER_DEPTH`].
+    /// Meant to run before the subscription is sent.
+    pub fn check_depth(&self) -> Result<(), RemoteError> {
+        let depth = self.depth();
+        if depth > MAX_HTTP_FILTER_DEPTH {
+            return Err(RemoteError::HttpFilterTooDeep {
+                depth: u32::try_from(depth).unwrap_or(u32::MAX),
+                limit: MAX_HTTP_FILTER_DEPTH as u32,
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Decodes one filter the way `#[derive(Decode)]` would (a `u32` variant index, then the
+    /// fields in order), refusing to go deeper than [`MAX_HTTP_FILTER_DEPTH`].
+    ///
+    /// The variant indices must follow the declaration order of the enum. The `decode` tests
+    /// roundtrip every variant through the derived [`Encode`] to keep the two in sync.
+    fn decode_at_depth<D: Decoder>(decoder: &mut D, depth: usize) -> Result<Self, DecodeError> {
+        if depth > MAX_HTTP_FILTER_DEPTH {
+            return Err(DecodeError::OtherString(format!(
+                "HTTP filter is nested more than {MAX_HTTP_FILTER_DEPTH} levels deep, \
+                 flatten the all_of/any_of/not nesting"
+            )));
+        }
+
+        let variant_index = u32::decode(decoder)?;
+        match variant_index {
+            0 => Ok(Self::Header(Filter::decode(decoder)?)),
+            1 => Ok(Self::Path(Filter::decode(decoder)?)),
+            2 => {
+                let all = bool::decode(decoder)?;
+                let len = u64::decode(decoder)?;
+                let len = usize::try_from(len).map_err(|_| DecodeError::OutsideUsizeRange(len))?;
+                decoder.claim_container_read::<Self>(len)?;
+                let filters = (0..len)
+                    .map(|_| Self::decode_at_depth(decoder, depth + 1))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Self::Composite { all, filters })
+            }
+            3 => Ok(Self::Method(HttpMethodFilter::decode(decoder)?)),
+            4 => Ok(Self::Body(HttpBodyFilter::decode(decoder)?)),
+            5 => Ok(Self::HeaderJq(JqQuery::decode(decoder)?)),
+            6 => Ok(Self::Not(Box::new(Self::decode_at_depth(
+                decoder,
+                depth + 1,
+            )?))),
+            found => Err(DecodeError::UnexpectedVariant {
+                type_name: "HttpFilter",
+                allowed: &AllowedEnumVariants::Range { min: 0, max: 6 },
+                found,
+            }),
+        }
+    }
+}
+
+impl<C> Decode<C> for HttpFilter {
+    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Self::decode_at_depth(decoder, 1)
+    }
+}
+
+impl<'de, C> BorrowDecode<'de, C> for HttpFilter {
+    fn borrow_decode<D: BorrowDecoder<'de, Context = C>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
+        Self::decode_at_depth(decoder, 1)
+    }
 }
 
 impl Display for HttpFilter {
@@ -501,6 +619,7 @@ impl Display for HttpFilter {
             },
             HttpFilter::Body(filter) => write!(f, "body={filter}"),
             HttpFilter::HeaderJq(filter) => write!(f, "header_jq={filter}"),
+            HttpFilter::Not(filter) => write!(f, "not ({filter})"),
         }
     }
 }
@@ -718,6 +837,10 @@ pub static HTTP_BODY_JSON_FILTER_VERSION: LazyLock<VersionReq> =
 pub static HTTP_HEADER_JQ_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.26.0".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that allows negating an HTTP filter ([`HttpFilter::Not`]).
+pub static HTTP_NOT_FILTER_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.31.0".parse().expect("Bad Identifier"));
+
 /// Minimal mirrord-protocol version that allows [`IncomingTrafficTransportType::TlsV2`].
 pub static TLS_CLIENT_IDENTITY_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.30.0".parse().expect("Bad Identifier"));
@@ -929,5 +1052,115 @@ impl<B> HttpResponse<B> {
             port: self.port,
             internal_response: self.internal_response.map_body(cb),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn roundtrip(filter: &HttpFilter) -> Result<HttpFilter, DecodeError> {
+        let bytes = bincode::encode_to_vec(filter, bincode::config::standard()).unwrap();
+        bincode::decode_from_slice(&bytes, bincode::config::standard()).map(|(filter, _)| filter)
+    }
+
+    fn nested_not(depth: usize) -> HttpFilter {
+        (1..depth).fold(
+            HttpFilter::Path(Filter::new("/orders".to_owned()).unwrap()),
+            |inner, _| HttpFilter::Not(Box::new(inner)),
+        )
+    }
+
+    fn nested_composite(depth: usize) -> HttpFilter {
+        (1..depth).fold(
+            HttpFilter::Path(Filter::new("/orders".to_owned()).unwrap()),
+            |inner, _| HttpFilter::Composite {
+                all: true,
+                filters: vec![inner],
+            },
+        )
+    }
+
+    /// The decoder is written by hand, so this pins it to the derived encoder: every variant,
+    /// nested the way the operator and users nest them, comes back as it went in.
+    #[test]
+    fn every_filter_variant_decodes_as_encoded() {
+        let filter = HttpFilter::Not(Box::new(HttpFilter::Composite {
+            all: false,
+            filters: vec![
+                HttpFilter::Composite {
+                    all: true,
+                    filters: vec![
+                        HttpFilter::Header(Filter::new("x-tenant: preview".to_owned()).unwrap()),
+                        HttpFilter::Path(Filter::new("/api/.*".to_owned()).unwrap()),
+                        HttpFilter::Method(HttpMethodFilter::Post),
+                        HttpFilter::Body(HttpBodyFilter::Json {
+                            query: JsonPathQuery::new("$.tenant".to_owned()).unwrap(),
+                            matches: Filter::new("preview".to_owned()).unwrap(),
+                        }),
+                        HttpFilter::HeaderJq(JqQuery::new(".[0] == \"x-tenant\"").unwrap()),
+                    ],
+                },
+                HttpFilter::Header(Filter::new("^user-agent: kube-probe/".to_owned()).unwrap()),
+            ],
+        }));
+        assert_eq!(roundtrip(&filter).unwrap(), filter);
+
+        let empty = HttpFilter::Composite {
+            all: true,
+            filters: vec![],
+        };
+        assert_eq!(roundtrip(&empty).unwrap(), empty);
+    }
+
+    /// A sender learns about a filter that is too deep from this check, on just that subscription,
+    /// instead of from the agent failing to decode the whole message. It has to agree with the
+    /// decoder about where the limit is.
+    #[test]
+    fn depth_check_agrees_with_the_decoder() {
+        for filter in [
+            nested_not(MAX_HTTP_FILTER_DEPTH),
+            nested_composite(MAX_HTTP_FILTER_DEPTH),
+        ] {
+            assert_eq!(filter.depth(), MAX_HTTP_FILTER_DEPTH);
+            filter.check_depth().unwrap();
+            roundtrip(&filter).unwrap();
+        }
+
+        for filter in [
+            nested_not(MAX_HTTP_FILTER_DEPTH + 1),
+            nested_composite(MAX_HTTP_FILTER_DEPTH + 1),
+        ] {
+            let error = filter.check_depth().unwrap_err();
+            assert_eq!(
+                error,
+                RemoteError::HttpFilterTooDeep {
+                    depth: MAX_HTTP_FILTER_DEPTH as u32 + 1,
+                    limit: MAX_HTTP_FILTER_DEPTH as u32,
+                }
+            );
+            roundtrip(&filter).unwrap_err();
+        }
+
+        let empty = HttpFilter::Composite {
+            all: true,
+            filters: vec![],
+        };
+        assert_eq!(empty.depth(), 1);
+    }
+
+    /// A `not` or a composite level costs a few bytes on the wire but a stack frame on decode and
+    /// on every match, so a message nesting thousands of them would overflow the agent's stack and
+    /// abort it. The decoder refuses anything deeper than [`MAX_HTTP_FILTER_DEPTH`], for both
+    /// recursive variants, and accepts the limit itself.
+    #[test]
+    fn filters_nested_too_deep_are_rejected_on_decode() {
+        assert!(roundtrip(&nested_not(MAX_HTTP_FILTER_DEPTH)).is_ok());
+        assert!(roundtrip(&nested_composite(MAX_HTTP_FILTER_DEPTH)).is_ok());
+
+        let error = roundtrip(&nested_not(MAX_HTTP_FILTER_DEPTH + 1)).unwrap_err();
+        assert!(error.to_string().contains("nested more than"), "{error}");
+        let error = roundtrip(&nested_composite(MAX_HTTP_FILTER_DEPTH + 1)).unwrap_err();
+        assert!(error.to_string().contains("nested more than"), "{error}");
     }
 }
