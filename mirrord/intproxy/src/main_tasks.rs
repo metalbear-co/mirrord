@@ -3,11 +3,9 @@ use std::fmt;
 use mirrord_intproxy_protocol::{
     LayerId, LayerToProxyMessage, MessageId, ProcessInfo, ProxyToLayerMessage,
 };
-use mirrord_protocol::{DaemonMessage, Port};
+use mirrord_protocol::DaemonMessage;
 use mirrord_protocol_io::{Client, TxHandle};
 use tokio::net::TcpStream;
-
-use crate::share::SharePollOutcome;
 
 /// Messages sent back to the [`IntProxy`](crate::IntProxy) from the main background tasks. See
 /// [`MainTaskId`].
@@ -23,18 +21,8 @@ pub enum ProxyMessage {
     FromLayer(FromLayer),
     /// New layer instance to serve.
     NewLayer(NewLayer),
-    /// A registered layer opened its share control connection; see [`NewShareControl`].
-    NewShareControl(NewShareControl),
     /// Connection to agent was dropped and needs reload.
     ConnectionRefresh(ConnectionRefresh),
-    /// An agent confirmed that it steals this port. A shared session's link starts working on
-    /// the same confirmation when this is its entry port; see [`crate::share`].
-    PortSubscribed(Port),
-    /// What [`crate::share::SharePoll`] found out about a shared session's link.
-    ShareStatus(SharePollOutcome),
-    /// The incoming proxy asked the agent to stop stealing this port, because no layer listens
-    /// on it anymore. A shared session's link ends then; see [`crate::share`].
-    PortReleased(Port),
 }
 
 #[cfg(test)]
@@ -119,8 +107,6 @@ pub enum MainTaskId {
     AgentConnection,
     FilesProxy,
     LayerConnection(LayerId),
-    ShareControl(LayerId),
-    SharePoll,
 }
 
 impl fmt::Display for MainTaskId {
@@ -131,8 +117,6 @@ impl fmt::Display for MainTaskId {
             Self::OutgoingProxy => f.write_str("OUTGOING_PROXY"),
             Self::PingPong => f.write_str("PING_PONG"),
             Self::AgentConnection => f.write_str("AGENT_CONNECTION"),
-            Self::ShareControl(id) => write!(f, "SHARE_CONTROL_{}", id.0),
-            Self::SharePoll => f.write_str("SHARE_POLL"),
             Self::LayerConnection(id) => write!(f, "LAYER_CONNECTION_{}", id.0),
             Self::IncomingProxy => f.write_str("INCOMING_PROXY"),
             Self::FilesProxy => f.write_str("FILES_PROXY"),
@@ -174,21 +158,3 @@ impl ConnectionRefresh {
         }
     }
 }
-
-/// The share control connection of a registered layer in a session started with `share`.
-///
-/// The internal proxy sends the share link, or the reason it failed, over it for the application
-/// to print, and treats its EOF as the end of that layer's process.
-#[derive(Debug)]
-pub struct NewShareControl {
-    pub stream: TcpStream,
-    pub layer_id: LayerId,
-}
-#[cfg(test)]
-impl PartialEq for NewShareControl {
-    fn eq(&self, other: &Self) -> bool {
-        self.layer_id == other.layer_id
-    }
-}
-#[cfg(test)]
-impl Eq for NewShareControl {}

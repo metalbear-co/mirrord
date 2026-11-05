@@ -2,7 +2,7 @@
 //!
 //! The operator creates the share link during that connect, and serves the link back to the
 //! session's owner in the `share` field of the session's `sessions` view (`Session::share` in the
-//! `crd` module), which is where the intproxy learns the URL and when the link is ready.
+//! `crd` module), where the CLI reads the URL before it starts the application, to print it.
 
 #[cfg(feature = "client")]
 use std::ops::Not;

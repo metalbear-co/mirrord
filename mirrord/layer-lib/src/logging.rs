@@ -41,6 +41,8 @@ use std::{
 };
 
 use chrono::Local;
+#[cfg(not(windows))]
+use std::io::Write as _;
 use tracing_subscriber::{EnvFilter, filter::Directive, fmt::format::FmtSpan, prelude::*};
 #[cfg(windows)]
 use {
@@ -62,14 +64,10 @@ use {
         registry::LookupSpan,
     },
     winapi::um::{
-        fileapi::WriteFile,
-        processenv::GetStdHandle,
-        processthreadsapi::GetCurrentThreadId,
-        winbase::{STD_ERROR_HANDLE, STD_OUTPUT_HANDLE},
+        fileapi::WriteFile, processenv::GetStdHandle, processthreadsapi::GetCurrentThreadId,
+        winbase::STD_ERROR_HANDLE,
     },
 };
-#[cfg(not(windows))]
-use {crate::program_stdout::ProgramStdout, std::io::Write as _};
 
 /// Environment variable for specifying layer log directory path
 pub const MIRRORD_LAYER_LOG_PATH: &str = "MIRRORD_LAYER_LOG_PATH";
@@ -554,40 +552,6 @@ pub fn report_to_stderr(message: std::fmt::Arguments<'_>) {
 
     #[cfg(not(windows))]
     let _ = writeln!(std::io::stderr(), "{message}");
-}
-
-/// Writes one line to the program's standard output, safely from anywhere this module runs.
-///
-/// Only for the lines that a program reading mirrord's progress takes from stdout, where `Ready!`
-/// goes too. The line is written with one call, so it reaches a pipe whole.
-///
-/// On unix this is [`ProgramStdout`]. On Windows it writes straight to the standard output
-/// handle, for the reasons at the top of this module.
-///
-/// # Arguments
-///
-/// * `message` - the line to write, without a trailing newline.
-pub fn report_to_stdout(message: std::fmt::Arguments<'_>) {
-    let line = format!("{message}\n");
-
-    #[cfg(windows)]
-    {
-        let mut written = 0u32;
-        // SAFETY: `line` is valid for `line.len()` bytes, and `WriteFile` reports a missing or
-        // closed handle as a failure.
-        unsafe {
-            WriteFile(
-                GetStdHandle(STD_OUTPUT_HANDLE),
-                line.as_ptr().cast(),
-                line.len() as u32,
-                &mut written,
-                std::ptr::null_mut(),
-            )
-        };
-    }
-
-    #[cfg(not(windows))]
-    let _ = ProgramStdout.write_all(line.as_bytes());
 }
 
 /// Initialize logger. Set the logs to go according to the layer's config either to a trace

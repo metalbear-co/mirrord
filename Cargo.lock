@@ -5656,7 +5656,6 @@ dependencies = [
  "mirrord-config",
  "mirrord-intproxy",
  "mirrord-intproxy-protocol",
- "mirrord-operator",
  "mirrord-protocol",
  "mirrord-sip",
  "mirrord-test-utils",

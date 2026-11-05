@@ -187,7 +187,7 @@
     },
     "share": {
       "title": "share {#root-share}",
-      "description": "Prints a temporary HTTPS link to this session. People who open the link reach the service\non your machine. Needs the Team or Enterprise mirrord operator, share-ingress in the\ncluster, and `feature.network.incoming.mode` set to `\"steal\"`. Share links don't work with\n`feature.copy_target` yet.\n\nThe link opens the first port in `feature.network.incoming.ports`. Without that list, the\ntarget container must declare exactly one port that mirrord steals. mirrord prints the link\nonce it steals that port. The link ends when the session ends, when your application stops\nlistening on that port, or when the cluster loses the mirrord agent of the pod that the link\nopens. Starting the session again creates a different link.",
+      "description": "Prints a temporary HTTPS link to this session. People who open the link reach the service\non your machine. Needs the Team or Enterprise mirrord operator, share-ingress in the\ncluster, and `feature.network.incoming.mode` set to `\"steal\"`. Share links don't work with\n`feature.copy_target` yet.\n\nThe link opens the first port in `feature.network.incoming.ports`. Without that list, the\ntarget container must declare exactly one port that mirrord steals. mirrord prints the link\nbefore your application starts, and the link works once your application listens on that\nport. The link ends when the session ends, when your application stops listening on that\nport, or when the cluster loses the mirrord agent of the pod that the link opens. Starting\nthe session again creates a different link.",
       "type": [
         "boolean",
         "null"

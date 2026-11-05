@@ -721,35 +721,15 @@ impl IncomingProxy {
             }
 
             DaemonTcp::SubscribeResult(result) => {
-                let stolen_port = result.as_ref().ok().copied().filter(|_| is_steal);
                 let msgs = self.subscriptions.agent_responded(result)?;
 
                 for msg in msgs {
                     message_bus.send(msg).await;
                 }
-                if let Some(port) = stolen_port {
-                    message_bus.send(ProxyMessage::PortSubscribed(port)).await;
-                }
             }
         }
 
         Ok(())
-    }
-
-    /// Sends the agent `unsubscribe`, which [`SubscriptionsManager`] returns once no layer
-    /// listens on its port anymore.
-    ///
-    /// A stopped steal also goes to the main task: a shared session's link ends with the steal on
-    /// its port, and the main task has the application print that.
-    async fn release_port(unsubscribe: ClientMessage, message_bus: &mut MessageBus<Self>) {
-        let stolen_port = match &unsubscribe {
-            ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(port)) => Some(*port),
-            _ => None,
-        };
-        message_bus.send_agent(unsubscribe).await;
-        if let Some(port) = stolen_port {
-            message_bus.send(ProxyMessage::PortReleased(port)).await;
-        }
     }
 
     /// Handles all messages from this task's [`MessageBus`].
@@ -789,7 +769,7 @@ impl IncomingProxy {
                     let msg = self.subscriptions.layer_unsubscribed(layer_id, unsubscribe);
 
                     if let Some(msg) = msg {
-                        Self::release_port(msg, message_bus).await;
+                        message_bus.send_agent(msg).await;
                     }
                 }
                 IncomingRequest::ConnMetadata(req) => {
@@ -818,7 +798,7 @@ impl IncomingProxy {
                 let msgs = self.subscriptions.layer_closed(msg.id);
 
                 for msg in msgs {
-                    Self::release_port(msg, message_bus).await;
+                    message_bus.send_agent(msg).await;
                 }
             }
 

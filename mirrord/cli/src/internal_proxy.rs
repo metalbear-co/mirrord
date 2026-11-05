@@ -39,7 +39,6 @@ use mirrord_intproxy::{
         MonitorTx,
         chaos::{ChaosWatcherRx, ChaosWatcherTx, analytics::ChaosAnalyticsReporter},
     },
-    share::{LOCAL_SHARE_LINK_ENV, LocalShareLink, OperatorShareStatus},
 };
 use mirrord_kube::api::kubernetes::create_kube_config_with_context;
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
@@ -335,26 +334,6 @@ pub(crate) async fn proxy(
             })
         })?;
 
-    // Read before the address is printed, so that a broken handover fails the CLI before it
-    // starts the application.
-    let share = if config.share {
-        let link = env::var(LOCAL_SHARE_LINK_ENV)
-            .map_err(|_| InternalProxyError::MissingShareLink)
-            .and_then(|var| {
-                serde_json::from_str::<LocalShareLink>(&var)
-                    .map_err(|error| InternalProxyError::DeserializeShareLink(var, error))
-            })?;
-        let AgentConnectInfo::Operator(session) = &agent_connect_info else {
-            return Err(InternalProxyError::MissingShareLink);
-        };
-        Some((
-            link,
-            OperatorShareStatus::new(config.clone(), (**session).clone()),
-        ))
-    } else {
-        None
-    };
-
     let execution_kind = std::env::var(MIRRORD_EXECUTION_KIND_ENV)
         .ok()
         .and_then(|execution_kind| execution_kind.parse().ok())
@@ -458,7 +437,7 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let mut proxy = IntProxy::new_with_connection(
+    let res = IntProxy::new_with_connection(
         agent_conn,
         listener,
         config.feature.fs.readonly_file_buffer,
@@ -467,9 +446,7 @@ pub(crate) async fn proxy(
             .network
             .incoming
             .tls_delivery
-            .as_ref()
-            .or(config.feature.network.incoming.https_delivery.as_ref())
-            .cloned()
+            .or(config.feature.network.incoming.https_delivery)
             .unwrap_or_default(),
         IntProxyIntervals {
             ping: ping_interval,
@@ -478,18 +455,14 @@ pub(crate) async fn proxy(
         &config.experimental,
         monitor_tx,
         chaos_rx,
-    );
-    if let Some((link, source)) = share {
-        proxy.enable_local_share(&config.feature.network.incoming, link, Box::new(source));
-    }
-    let res = proxy
-        .run_with_shutdown(
-            first_connection_timeout,
-            consecutive_connection_timeout,
-            shutdown,
-        )
-        .await
-        .map_err(From::from);
+    )
+    .run_with_shutdown(
+        first_connection_timeout,
+        consecutive_connection_timeout,
+        shutdown,
+    )
+    .await
+    .map_err(From::from);
 
     if res.is_err()
         && tokio::time::timeout(Duration::from_secs(1), async {

@@ -621,8 +621,8 @@ pub struct SessionHttpFilter {
 /// The share link of a session started with `share`, as the operator serves it to the session's
 /// owner in [`Session::share`].
 ///
-/// The intproxy reads it to tell the user where the link is and when it starts working, so the
-/// share link needs no messages of its own on the session's connection.
+/// The CLI reads it once, before it starts the application, to print the link, so the share link
+/// needs no messages of its own on the session's connection.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionShare {

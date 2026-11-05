@@ -25,17 +25,14 @@ use mirrord_config::{
 };
 #[cfg(windows)]
 use mirrord_config::{MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR};
-use mirrord_intproxy::{
-    agent_conn::AgentConnectInfo,
-    share::{LOCAL_SHARE_LINK_ENV, LocalShareLink},
-};
+use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_operator::{
     client::{OperatorSession, SessionShareReadError, SessionShareReader},
     crd::SessionSharePhase,
 };
 use mirrord_progress::{
-    IdeAction, IdeMessage, LineMode, MIRRORD_SHARE_PROGRESS_ENV, NotificationLevel, Progress,
-    ProgressTracker, messages::LOCAL_SHARE_NOTE,
+    IdeAction, IdeMessage, LineMode, NotificationLevel, Progress, ProgressTracker,
+    messages::LOCAL_SHARE_NOTE,
 };
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use mirrord_protocol_api::client::{MirrordClient, MirrordClientRetry};
@@ -141,13 +138,23 @@ pub(crate) struct MirrordExecution {
     /// The link that the operator created for this run, when it started with `share`.
     ///
     /// [`report_share_link`] prints it before the application starts. [`Self::wait`] reports an
-    /// internal proxy that failed while it is set, because that proxy owns the link, and a shared
-    /// session that lost it ended for a reason the user must see.
+    /// internal proxy that failed while it is set, because the operator removes the link when the
+    /// session's connections end.
     ///
     /// Not serialized: the IDEs get the link from [`report_share_link`], so the execution JSON
     /// that they parse has no field for it.
     #[serde(skip)]
     pub share_link: Option<LocalShareLink>,
+}
+
+/// The share link that the operator created for this session when it connected. It doesn't work
+/// until the operator publishes it, once the application listens on the port that the link opens.
+#[derive(Debug)]
+pub(crate) struct LocalShareLink {
+    /// The URL that share-ingress routes to the session.
+    pub url: String,
+    /// The port of the target that the link opens.
+    pub entry_port: u16,
 }
 
 /// How long [`read_share_link`] reads a link that the operator doesn't serve yet before it fails.
@@ -157,7 +164,7 @@ const SHARE_LINK_MISSING_GRACE: Duration = Duration::from_secs(2);
 const SHARE_LINK_MISSING_RETRY: Duration = Duration::from_millis(100);
 
 /// Reads the share link that the operator created when this shared session connected, so that the
-/// CLI can print it before the application starts, and hands it to the internal proxy.
+/// CLI can print it before the application starts.
 ///
 /// It is read here, before anything starts, so that roles that don't allow reading it, or an
 /// operator that didn't create it, fail the session with an error the user sees in the terminal.
@@ -439,15 +446,6 @@ impl MirrordExecution {
                     (env_vars, Some(child), uses_operator, share_link)
                 }
             };
-
-        if config.share
-            && let Some(mode) = progress.line_mode()
-        {
-            env_vars.insert(
-                MIRRORD_SHARE_PROGRESS_ENV.to_owned(),
-                mode.as_str().to_owned(),
-            );
-        }
 
         #[cfg(target_os = "macos")]
         {
@@ -907,10 +905,6 @@ impl MirrordExecution {
             )
             .env(MIRRORD_KUBE_VERSION_MAJOR_ENV, api_version.0.to_string())
             .env(MIRRORD_KUBE_VERSION_MINOR_ENV, api_version.1.to_string());
-
-        if let Some(link) = &share_link {
-            proxy_command.env(LOCAL_SHARE_LINK_ENV, serde_json::to_string(link)?);
-        }
 
         #[cfg(unix)]
         if let Some(directory) = prefetch_guard.as_ref().map(|guard| guard.path()) {

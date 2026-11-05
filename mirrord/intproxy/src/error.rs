@@ -26,11 +26,6 @@ pub struct UnexpectedAgentMessage(
 /// according to [`crate::FailoverStrategy`]
 #[derive(Error, Debug)]
 pub enum ProxyRuntimeError {
-    /// The share link of a session started with `share` failed. The message is written for the
-    /// user, who reads it after the layer's "Can't share this session:" prefix, so it is text and
-    /// not the error it may come from.
-    #[error("{0}")]
-    LocalShare(String),
     #[error("layer sent unexpected message: {0:?}")]
     UnexpectedLayerMessage(LayerToProxyMessage),
 
@@ -78,9 +73,6 @@ impl ProxyRuntimeError {
 /// exist a failover strategy, so facing this error the proxy stops working.
 #[derive(Error, Debug)]
 pub enum ProxyStartupError {
-    /// The session ended because of [`ProxyRuntimeError::LocalShare`], with its message.
-    #[error("{0}")]
-    LocalShare(String),
     #[error("waiting for the first layer connection timed out")]
     ConnectionAcceptTimeout,
     #[error("layer initializer failed while quiescing: {0}")]

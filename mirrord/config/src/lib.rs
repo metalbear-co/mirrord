@@ -663,9 +663,10 @@ pub struct LayerConfig {
     ///
     /// The link opens the first port in `feature.network.incoming.ports`. Without that list, the
     /// target container must declare exactly one port that mirrord steals. mirrord prints the link
-    /// once it steals that port. The link ends when the session ends, when your application stops
-    /// listening on that port, or when the cluster loses the mirrord agent of the pod that the link
-    /// opens. Starting the session again creates a different link.
+    /// before your application starts, and the link works once your application listens on that
+    /// port. The link ends when the session ends, when your application stops listening on that
+    /// port, or when the cluster loses the mirrord agent of the pod that the link opens. Starting
+    /// the session again creates a different link.
     #[config(default = false, plan = Team)]
     pub share: bool,
 

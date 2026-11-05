@@ -21,14 +21,6 @@ use crate::json::ProgressMessage;
 /// to determine the mode of progress reporting
 pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_PROGRESS_MODE";
 
-/// The [`LineMode`] in which the layer prints the share link of a session started with `share`,
-/// spelled as [`LineMode::as_str`]. When it is missing, the layer prints simple lines.
-///
-/// `mirrord exec` starts the program with [`MIRRORD_PROGRESS_ENV`] set to `off`, so the mode that
-/// `exec` itself ran in reaches the layer under this name. The program's children inherit it,
-/// because any process of the session may print the link.
-pub const MIRRORD_SHARE_PROGRESS_ENV: &str = "MIRRORD_SHARE_PROGRESS_MODE";
-
 /// A progress mode that prints one line per event, the modes machines read: `simple` for
 /// `mirrord up`, `json` for the IDEs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,18 +62,6 @@ pub fn finished_task_line(mode: LineMode, task: &str, message: &str) -> String {
             "{}\n",
             ProgressMessage::finished_task(task, true, Some(message)).to_line()
         ),
-    }
-}
-
-/// Formats `message`, text that doesn't belong to a task, as one line in the format of `mode`,
-/// without the newline: what `SimpleProgress` and `JsonProgress` print for `info(message)`.
-pub fn message_line(mode: LineMode, message: &str) -> String {
-    match mode {
-        LineMode::Simple => message.to_owned(),
-        LineMode::Json => ProgressMessage::Info {
-            message: message.to_owned(),
-        }
-        .to_line(),
     }
 }
 

@@ -20,7 +20,6 @@ workspace = true
 mirrord-config = { path = "../config" }
 mirrord-intproxy = { path = "../intproxy" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec-async"] }
-mirrord-operator = { path = "../operator", features = ["crd"] }
 mirrord-protocol = { path = "../protocol" }
 
 actix-codec.workspace = true

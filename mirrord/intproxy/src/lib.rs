@@ -3,7 +3,7 @@
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    ops::{ControlFlow, Not},
+    ops::ControlFlow,
     time::Duration,
 };
 
@@ -14,12 +14,10 @@ use layer_conn::LayerConnection;
 use layer_initializer::{LayerInitializer, LayerInitializerShutdown};
 use main_tasks::{FromLayer, LayerForked, MainTaskId, NewLayer, ProxyMessage, ToLayer};
 use mirrord_config::{
-    experimental::ExperimentalConfig,
-    feature::network::incoming::{IncomingConfig, tls_delivery::LocalTlsDelivery},
+    experimental::ExperimentalConfig, feature::network::incoming::tls_delivery::LocalTlsDelivery,
 };
 use mirrord_intproxy_protocol::{
     IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
-    ProxyToLayerMessage, ShareControlEvent,
 };
 use mirrord_protocol::{
     CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, LogLevel,
@@ -67,7 +65,6 @@ pub mod proxies;
 mod remote_resources;
 mod request_queue;
 pub mod session_monitor;
-pub mod share;
 pub mod sidecar_protocol;
 
 /// Extracts the primary file path from a [`FileRequest`] variant, if one exists.
@@ -116,9 +113,6 @@ pub(crate) struct LayerInitializerTask {
 
 struct TaskTxs {
     layers: HashMap<LayerId, TaskSender<LayerConnection>>,
-    controls: HashMap<LayerId, TaskSender<LayerConnection>>,
-    /// The task that reads a shared session's link until it is ready; see [`share::SharePoll`].
-    share_poll: Option<TaskSender<share::SharePoll>>,
     layer_initializer: LayerInitializerTask,
     agent: TaskSender<RestartableBackgroundTaskWrapper<AgentConnection>>,
     simple: TaskSender<SimpleProxy>,
@@ -134,7 +128,6 @@ struct TaskTxs {
 /// Utilizes multiple [`BackgroundTask`](background_tasks::BackgroundTask)s to split logic of
 /// different mirrod features (e.g. file operations and incoming traffic).
 pub struct IntProxy {
-    share: Option<share::LocalShareState>,
     any_connection_accepted: bool,
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, ProxyRuntimeError>,
     task_txs: TaskTxs,
@@ -437,13 +430,10 @@ impl IntProxy {
         process_logging_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         Self {
-            share: None,
             any_connection_accepted: false,
             background_tasks,
             task_txs: TaskTxs {
                 layers: Default::default(),
-                controls: Default::default(),
-                share_poll: None,
                 layer_initializer: LayerInitializerTask {
                     _sender: layer_initializer,
                     shutdown: layer_initializer_shutdown,
@@ -466,44 +456,6 @@ impl IntProxy {
             agent_tx,
             monitor_tx,
         }
-    }
-
-    /// Makes this a shared session, whose `link` the operator created when the session connected;
-    /// see [`share`]. `incoming` is the session's incoming config, which says where the
-    /// application listens for the link's port, and `source` is where the intproxy reads whether
-    /// the link works yet.
-    ///
-    /// A shared session doesn't reconnect: the operator removes the link when the session's
-    /// connections end, so a reconnected session would have no link.
-    pub fn enable_local_share(
-        &mut self,
-        incoming: &IncomingConfig,
-        link: share::LocalShareLink,
-        source: Box<dyn share::ShareStatusSource>,
-    ) {
-        self.share = Some(share::LocalShareState::new(incoming, link, source));
-    }
-
-    /// Sends what the share state has for an application to print, and returns the error that
-    /// ends a failed shared session.
-    ///
-    /// The send waits for room in the channel, like every other message the intproxy forwards, so
-    /// a busy connection delays the report without failing the share.
-    async fn drive_share(&mut self) -> Result<(), ProxyRuntimeError> {
-        let Some(share) = self.share.as_mut() else {
-            return Ok(());
-        };
-        if let Some((layer, report)) = share.next_report(self.task_txs.controls.keys())
-            && let Some(sender) = self.task_txs.controls.get(&layer)
-        {
-            sender
-                .send(LocalMessage {
-                    message_id: 0,
-                    inner: ProxyToLayerMessage::ShareControl(ShareControlEvent::Report(report)),
-                })
-                .await;
-        }
-        share.terminal_error().map_or(Ok(()), Err)
     }
 
     /// Check if any layer connections are still alive
@@ -584,10 +536,6 @@ impl IntProxy {
         // must stop acceptance and drain that registration before dropping the layer connection.
         let exit_result: Option<Result<(), ProxyStartupError>> = loop {
             idle.observe(proxy.has_layer_connections() || proxy.has_queued_layers());
-            let share_failure_deadline = proxy
-                .share
-                .as_ref()
-                .and_then(share::LocalShareState::failure_deadline);
 
             tokio::select! {
                 biased;
@@ -606,17 +554,6 @@ impl IntProxy {
                     }
                     if let Err(error) = proxy.handle_task_update(task_id, task_update).await {
                         tracing::error!(%error, "Proxy encountered a critical error, and is entering the failover state...");
-                        let Some(share) = proxy.share.as_mut() else {
-                            return ControlFlow::Continue(FailoverStrategy::from_failed_proxy(proxy, error));
-                        };
-                        // A shared session first has the application print why it ends, which is
-                        // all the user reads, so only the error's own text goes there.
-                        share.fail(error.to_string());
-                    }
-                    // Share state changes only when a task update arrives or when the failure
-                    // deadline passes, so `drive_share` runs after each update and from the
-                    // deadline arm below.
-                    if let Err(error) = proxy.drive_share().await {
                         return ControlFlow::Continue(FailoverStrategy::from_failed_proxy(proxy, error));
                     }
                 }
@@ -625,13 +562,6 @@ impl IntProxy {
                     proxy.ping_pong_update_allowed = true;
                 }
 
-                _ = time::sleep_until(share_failure_deadline.unwrap_or_else(time::Instant::now)),
-                    if share_failure_deadline.is_some() =>
-                {
-                    if let Err(error) = proxy.drive_share().await {
-                        return ControlFlow::Continue(FailoverStrategy::from_failed_proxy(proxy, error));
-                    }
-                }
                 _ = proxy.process_logging_interval.tick() => {
                     // Always log this, even if there are no connected layers.
                     // This way we can be sure that intproxy's Tokio runtime is making progress.
@@ -690,36 +620,6 @@ impl IntProxy {
     /// [`ProxyMessage::NewLayer`] is handled here, as an exception.
     async fn handle(&mut self, msg: ProxyMessage) -> Result<(), ProxyRuntimeError> {
         match msg {
-            ProxyMessage::NewShareControl(control) => {
-                if self.share.is_none() {
-                    return Err(ProxyRuntimeError::LocalShare(
-                        "A layer opened a share connection in a session without `share`."
-                            .to_owned(),
-                    ));
-                }
-                if self.connected_layers.contains_key(&control.layer_id).not()
-                    || self.task_txs.controls.contains_key(&control.layer_id)
-                {
-                    return Err(ProxyRuntimeError::LocalShare(format!(
-                        "Layer {} opened a share connection, but it isn't registered or already has one.",
-                        control.layer_id.0
-                    )));
-                }
-                let tx = self.background_tasks.register(
-                    LayerConnection::new(control.stream, control.layer_id),
-                    MainTaskId::ShareControl(control.layer_id),
-                    Self::CHANNEL_SIZE,
-                );
-                // The layer accepts a control connection only after `Registered`, so it goes first
-                // even when the link already failed: the failure report that follows is then
-                // printed by this process.
-                tx.send(LocalMessage {
-                    message_id: 0,
-                    inner: ProxyToLayerMessage::ShareControl(ShareControlEvent::Registered),
-                })
-                .await;
-                self.task_txs.controls.insert(control.layer_id, tx);
-            }
             ProxyMessage::NewLayer(_) | ProxyMessage::FromLayer(_)
                 if self.reconnect_task_queue.is_some() =>
             {
@@ -774,18 +674,6 @@ impl IntProxy {
             }
             ProxyMessage::FromAgent(msg) => self.handle_agent_message(msg).await?,
             ProxyMessage::FromLayer(msg) => {
-                if self.share.is_some()
-                    && self.task_txs.controls.contains_key(&msg.layer_id).not()
-                    && matches!(
-                        msg.message,
-                        LayerToProxyMessage::Incoming(IncomingRequest::PortSubscribe(_))
-                    )
-                {
-                    return Err(ProxyRuntimeError::LocalShare(
-                        "The application subscribed to a port before its share connection was attached."
-                            .to_owned(),
-                    ));
-                }
                 if !matches!(
                     msg.message,
                     LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
@@ -811,31 +699,6 @@ impl IntProxy {
                 }
             }
             ProxyMessage::ConnectionRefresh(kind) => self.handle_connection_refresh(kind).await?,
-            ProxyMessage::PortSubscribed(port) => {
-                if let Some(poll) = self
-                    .share
-                    .as_mut()
-                    .and_then(|share| share.port_subscribed(port))
-                {
-                    self.task_txs.share_poll = Some(self.background_tasks.register(
-                        poll,
-                        MainTaskId::SharePoll,
-                        Self::CHANNEL_SIZE,
-                    ));
-                }
-            }
-            ProxyMessage::ShareStatus(outcome) => {
-                if let Some(share) = self.share.as_mut() {
-                    share.poll_finished(outcome);
-                }
-            }
-            ProxyMessage::PortReleased(port) => {
-                if let Some(share) = self.share.as_mut()
-                    && share.port_released(port)
-                {
-                    self.task_txs.share_poll = None;
-                }
-            }
         }
 
         Ok(())
@@ -848,16 +711,6 @@ impl IntProxy {
         update: TaskUpdate<ProxyMessage, ProxyRuntimeError>,
     ) -> Result<(), ProxyRuntimeError> {
         match (task_id, update) {
-            (MainTaskId::SharePoll, TaskUpdate::Finished(Ok(()))) => {
-                self.task_txs.share_poll = None;
-            }
-            (MainTaskId::ShareControl(layer), TaskUpdate::Finished(_)) => {
-                self.task_txs.controls.remove(&layer);
-                // A forked child can keep a copy of its parent's request connection open after the
-                // parent exits. The control connection belongs to one process, so its EOF ends the
-                // layer through the ordinary connection-closed path.
-                self.task_txs.layers.remove(&layer);
-            }
             (MainTaskId::LayerConnection(LayerId(id)), TaskUpdate::Finished(result)) => {
                 match result {
                     Ok(()) => {
@@ -889,7 +742,6 @@ impl IntProxy {
                     .send(OutgoingProxyMessage::LayerClosed(msg))
                     .await;
 
-                self.task_txs.controls.remove(&LayerId(id));
                 self.task_txs.layers.remove(&LayerId(id));
                 self.connected_layers.remove(&LayerId(id));
                 self.pending_layers.retain(|(layer_id, _)| layer_id.0 != id);
@@ -942,20 +794,6 @@ impl IntProxy {
             }
             DaemonMessage::OperatorPing(id) => {
                 self.agent_tx.send(ClientMessage::OperatorPong(id)).await
-            }
-            // The operator ends a shared session with the reason its link failed, such as the loss
-            // of the agent that the link routes to, and words the reason of any other end of the
-            // session for the user too. That reason is all the user reads, so it reaches the
-            // application without the "agent closed connection with error" text that frames other
-            // agent failures. Once the link ended, a `Close` is about the session alone and keeps
-            // that text.
-            DaemonMessage::Close(reason)
-                if self
-                    .share
-                    .as_ref()
-                    .is_some_and(share::LocalShareState::prints_close_reason) =>
-            {
-                Err(ProxyRuntimeError::LocalShare(reason))?
             }
             DaemonMessage::Close(reason) => Err(ProxyRuntimeError::AgentFailed(reason))?,
             DaemonMessage::TcpOutgoing(msg) => {
@@ -1102,9 +940,6 @@ impl IntProxy {
                     .send(OutgoingProxyMessage::Layer(req, message_id, layer_id))
                     .await
             }
-            message @ LayerToProxyMessage::OpenShareControl { .. } => {
-                return Err(ProxyRuntimeError::UnexpectedLayerMessage(message));
-            }
             LayerToProxyMessage::Incoming(req) => {
                 self.task_txs
                     .incoming
@@ -1139,12 +974,6 @@ impl IntProxy {
         &mut self,
         kind: ConnectionRefresh,
     ) -> Result<(), ProxyRuntimeError> {
-        if self.share.is_some() {
-            return Err(ProxyRuntimeError::LocalShare(
-                "The connection to the operator was interrupted. Restart the session to create a new link."
-                    .to_owned(),
-            ));
-        }
         self.task_txs
             .ping_pong
             .send(PingPongMessage::ConnectionRefresh(

@@ -258,17 +258,17 @@ impl fmt::Debug for OperatorSession {
     }
 }
 
-/// How long one read of a share link may take. The intproxy reads the link again after a read
-/// that timed out, so a hung request delays the link instead of stopping it.
+/// How long one read of a share link may take, so that a hung read fails the CLI's read instead
+/// of hanging it.
 const SHARE_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Reads the share link of a session started with `share`, as the operator serves it to the
 /// session's owner in [`Session::share`](crate::crd::Session::share).
 ///
 /// It reads the session's `sessions` view through the namespaced route, because users whose
-/// roles are namespaced can't `get` the cluster-wide path. It is built once and reused, because
-/// building its client can run the kubeconfig's credential plugin, and the intproxy reads the link
-/// several times while it waits for the link to work.
+/// roles are namespaced can't `get` the cluster-wide path. The CLI builds one for its read loop
+/// and reuses it, because building its client can run the kubeconfig's credential plugin, and the
+/// CLI reads the link again while the operator's watch catches up with the session.
 #[derive(Clone)]
 pub struct SessionShareReader {
     api: Api<SessionCrd>,

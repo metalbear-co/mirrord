@@ -7,19 +7,16 @@ use std::{
 };
 
 use actix_codec::Framed;
-use futures::{SinkExt, StreamExt, future::BoxFuture};
+use futures::{SinkExt, StreamExt};
 use mirrord_config::{
     LayerFileConfig,
     config::{ConfigContext, MirrordConfig},
     experimental::ExperimentalFileConfig,
 };
 use mirrord_intproxy::{
-    IntProxy, IntProxyIntervals,
-    agent_conn::AgentConnection,
+    IntProxy, IntProxyIntervals, agent_conn::AgentConnection,
     session_monitor::chaos::ChaosWatcherRx,
-    share::{LocalShareLink, ShareStatusError, ShareStatusSource},
 };
-use mirrord_operator::crd::{SessionShare, SessionSharePhase};
 use mirrord_protocol::{
     ClientMessage, ConnectionId, DaemonCodec, DaemonMessage, FileRequest, FileResponse, Payload,
     file::{
@@ -41,33 +38,9 @@ use tokio::{
     sync::watch,
 };
 
-/// The URL of the share link that [`TestIntProxy`] gives a session started with `share`.
-pub const TEST_SHARE_URL: &str = "https://share.example";
-
-/// Stands in for the operator's `sessions` view of a shared session: it serves the link with the
-/// phase that the test last set with [`TestIntProxy::set_share_phase`].
-struct FakeShareStatus {
-    link: LocalShareLink,
-    phase: watch::Receiver<SessionSharePhase>,
-}
-
-impl ShareStatusSource for FakeShareStatus {
-    fn fetch(&self) -> BoxFuture<'static, Result<Option<SessionShare>, ShareStatusError>> {
-        let share = SessionShare {
-            url: self.link.url.clone(),
-            entry_port: self.link.entry_port,
-            phase: *self.phase.borrow(),
-        };
-        Box::pin(async move { Ok(Some(share)) })
-    }
-}
-
 pub struct TestIntProxy {
     codec: Framed<TcpStream, DaemonCodec>,
     num_connections: u64,
-    task: tokio::task::JoinHandle<Result<(), mirrord_intproxy::error::ProxyStartupError>>,
-    /// The phase of a shared session's link, which starts `Pending`. `None` for other sessions.
-    share_phase: Option<watch::Sender<SessionSharePhase>>,
 }
 
 impl TestIntProxy {
@@ -75,47 +48,26 @@ impl TestIntProxy {
         let fake_agent_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let fake_agent_address = fake_agent_listener.local_addr().unwrap();
         let mut context = ConfigContext::default();
-        let (experimental_config, shared_incoming) = match config {
+        let experimental_config = match config {
             Some(path) => {
-                let config = LayerFileConfig::from_path(path, &mut context)
+                LayerFileConfig::from_path(path, &mut context)
                     .unwrap()
                     .generate_config(&mut context)
-                    .unwrap();
-                let shared_incoming = config.share.then_some(config.feature.network.incoming);
-                (config.experimental, shared_incoming)
+                    .unwrap()
+                    .experimental
             }
-            None => (
-                ExperimentalFileConfig::default()
-                    .generate_config(&mut context)
-                    .unwrap(),
-                None,
-            ),
+            None => ExperimentalFileConfig::default()
+                .generate_config(&mut context)
+                .unwrap(),
         };
 
         let (_, chaos_rx) = watch::channel(Default::default());
-        let (share_phase, share) = match shared_incoming {
-            Some(incoming) => {
-                let (phase_tx, phase_rx) = watch::channel(SessionSharePhase::Pending);
-                let link = LocalShareLink {
-                    url: TEST_SHARE_URL.to_owned(),
-                    entry_port: incoming
-                        .first_configured_port
-                        .expect("a shared test session lists the port that its link opens"),
-                };
-                let source = FakeShareStatus {
-                    link: link.clone(),
-                    phase: phase_rx,
-                };
-                (Some(phase_tx), Some((incoming, link, source)))
-            }
-            None => (None, None),
-        };
 
-        let task = tokio::spawn(async move {
+        tokio::spawn(async move {
             let agent_conn = AgentConnection::new_for_raw_address(fake_agent_address)
                 .await
                 .unwrap();
-            let mut intproxy = IntProxy::new_with_connection(
+            let intproxy = IntProxy::new_with_connection(
                 agent_conn,
                 listener,
                 0,
@@ -128,12 +80,11 @@ impl TestIntProxy {
                 mirrord_intproxy::session_monitor::MonitorTx::disabled(),
                 ChaosWatcherRx::new(chaos_rx),
             );
-            if let Some((incoming, link, source)) = share {
-                intproxy.enable_local_share(&incoming, link, Box::new(source));
-            }
             intproxy
                 .run(Duration::from_secs(15), Duration::from_secs(5))
                 .await
+                .unwrap();
+            println!("test IntProxy finished");
         });
 
         let (stream, _buffer_size) = fake_agent_listener.accept().await.unwrap();
@@ -142,21 +93,7 @@ impl TestIntProxy {
         Self {
             codec,
             num_connections: 0,
-            task,
-            share_phase,
         }
-    }
-
-    /// Sets the phase in which the operator serves the shared session's link from now on.
-    pub fn set_share_phase(&self, phase: SessionSharePhase) {
-        self.share_phase
-            .as_ref()
-            .expect("only a session started with `share` has a link")
-            .send_replace(phase);
-    }
-
-    pub async fn wait(self) -> Result<(), mirrord_intproxy::error::ProxyStartupError> {
-        self.task.await.expect("intproxy task panicked")
     }
 
     pub async fn recv(&mut self) -> ClientMessage {

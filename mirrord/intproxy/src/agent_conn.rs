@@ -210,6 +210,9 @@ impl AgentConnection {
                         .await?;
                 (
                     Connection::from_channel(connection.conn),
+                    // A shared session doesn't reconnect: the operator removes its share link
+                    // when the session's connections end, and refuses to reconnect a shared
+                    // session, so a reconnected session would have no link.
                     if session.allow_reconnect && config.share.not() {
                         ReconnectFlow::ConnectInfo {
                             config: Box::new(config.clone()),
