@@ -3,6 +3,8 @@ import { emitUserBlocked } from './analytics'
 
 const PING_TIMEOUT_MS = 250
 const REQUEST_TIMEOUT_MS = 1500
+// The extension answers a join only after mirrord ui's operator lookups, each capped at 10s.
+const JOIN_TIMEOUT_MS = 30_000
 
 export interface ExtensionState {
   installed: boolean
@@ -60,11 +62,14 @@ export async function joinViaExtension(
     ok?: boolean
     joinedKey?: string | null
     error?: string
-  }>({
-    type: 'join',
-    key,
-    ...(context && { context }),
-  })
+  }>(
+    {
+      type: 'join',
+      key,
+      ...(context && { context }),
+    },
+    JOIN_TIMEOUT_MS,
+  )
   if (!response) {
     emitUserBlocked('extension_bridge_failed', {
       action: 'join',
