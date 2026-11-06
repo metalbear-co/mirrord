@@ -657,17 +657,22 @@ pub struct LayerConfig {
     /// ## share {#root-share}
     ///
     /// Prints a temporary HTTPS link to this session. People who open the link reach the service
-    /// on your machine. Needs the Team or Enterprise mirrord operator, share-ingress in the
-    /// cluster, and `feature.network.incoming.mode` set to `"steal"`. Share links don't work with
+    /// on your machine, and the target's own service in the cluster whenever a request doesn't
+    /// reach your machine, so the cluster's access rules for share links protect both. Needs the
+    /// Team or Enterprise mirrord operator, share-ingress in the cluster, and
+    /// `feature.network.incoming.mode` set to `"steal"`. Share links don't work with
     /// `feature.copy_target` yet.
     ///
     /// The link opens the first port in `feature.network.incoming.ports`. Without that list, the
     /// target container must declare exactly one port that mirrord steals. The link reaches the
-    /// target through the Kubernetes Service named after it, so the target must be a workload or
-    /// Service with a Service of the same name that exposes that port. mirrord prints the link
-    /// before your application starts. Requests through the link reach your application while it
-    /// listens on that port, and the service running in the cluster otherwise. The link lasts as
-    /// long as the session; starting the session again creates a different link.
+    /// target through the Kubernetes Service named after it, so the namespace must have a Service
+    /// with the target's name that exposes that port, such as Service `web` for target
+    /// `deployment/web`. mirrord prints the link before your application starts. Requests through
+    /// the link reach your application while it listens on that port, and the service running in
+    /// the cluster otherwise: before your application listens, after it stops listening, until
+    /// the session ends after mirrord exits, and on target pods that the session's agent doesn't
+    /// run on. The link lasts as long as the session; starting the session again creates a
+    /// different link.
     #[config(default = false, plan = Team)]
     pub share: bool,
 
