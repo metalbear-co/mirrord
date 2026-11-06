@@ -1,4 +1,4 @@
-use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
+use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf, process::ExitStatus};
 
 use kube::{self, Error, client::AuthError};
 use miette::Diagnostic;
@@ -20,6 +20,7 @@ use mirrord_operator::{
         NewOperatorFeature,
         preview::{PreviewPodLogs, PreviewSyncConfigError},
     },
+    share::LOCAL_SHARE_REJECTED_REASON,
     types::PaidFeatureGate,
 };
 use mirrord_progress::messages::AGENT_OPERATOR_HINT;
@@ -260,8 +261,55 @@ pub(crate) enum OperatorSetupError {
     Deleted,
 }
 
+/// Why a session started with `share` can't run. Each message is written for the user, so it is
+/// shown as it is.
+#[derive(Debug, Error, Diagnostic)]
+pub(crate) enum LocalShareError {
+    /// The config has a setting that a shared session can't use.
+    #[error(transparent)]
+    Config(ConfigError),
+
+    #[error(
+        "Share links need a Kubernetes target, and a serverless sessions-manager target can't be shared."
+    )]
+    UnsupportedSessionsManagerTarget,
+
+    #[error("Share links work only with `mirrord exec`, not with `mirrord container`.")]
+    UnsupportedContainer,
+
+    #[error(
+        "`mirrord port-forward` can't create a share link, because no local application listens in it. Use `mirrord exec --share`."
+    )]
+    UnsupportedPortForward,
+
+    /// `mirrord dump`, `mirrord vpn` and `mirrord diagnose` connect to the target with the config
+    /// file, but run no local application whose port the link could share.
+    #[error(
+        "`mirrord {0}` can't create a share link, because it runs no local application. Use `mirrord exec --share`."
+    )]
+    UnsupportedCommand(&'static str),
+
+    #[error(
+        "The internal proxy of the shared session stopped ({0}), so the share link no longer reaches your application."
+    )]
+    ProxyExit(ExitStatus),
+
+    /// The CLI couldn't read the link from the session's `sessions` view, for example because
+    /// the user's roles don't allow `get` on `sessions`. Its text is written for the user.
+    #[error(transparent)]
+    ReadLink(mirrord_operator::client::SessionShareReadError),
+
+    /// The operator, or the target that the client resolved through it, can't serve a shared
+    /// session.
+    #[error("{0}")]
+    Operator(String),
+}
+
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum CliError {
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    LocalShare(#[from] LocalShareError),
     /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
     /// for more granular error detection.
     #[error("Failed to create Kubernetes API client: {0}")]
@@ -341,7 +389,7 @@ pub(crate) enum CliError {
 
     #[error("Failed to verify mirrord config: {0}")]
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
-    ConfigError(#[from] mirrord_config::config::ConfigError),
+    ConfigError(mirrord_config::config::ConfigError),
 
     #[cfg(unix)]
     #[error("Failed to set up the local directory for prefetched files: {0}")]
@@ -1266,6 +1314,16 @@ impl From<crate::preview::resources::ResourcesError> for CliError {
     }
 }
 
+/// A share error is written for the user, so it isn't framed as a failed config verification.
+impl From<ConfigError> for CliError {
+    fn from(error: ConfigError) -> Self {
+        match error {
+            ConfigError::Share(_) => Self::LocalShare(LocalShareError::Config(error)),
+            error => Self::ConfigError(error),
+        }
+    }
+}
+
 impl From<mirrord_up::UpError> for CliError {
     fn from(error: mirrord_up::UpError) -> Self {
         Self::PreviewUpConfig(Box::new(error))
@@ -1290,6 +1348,11 @@ impl From<OperatorApiError> for CliError {
         };
         if let Some(gate) = status.and_then(PaidFeatureGate::from_status) {
             return Self::PaidFeatureRequiresPlan { gate };
+        }
+        if let Some(status) = status
+            && status.reason == LOCAL_SHARE_REJECTED_REASON
+        {
+            return Self::LocalShare(LocalShareError::Operator(status.message.clone()));
         }
 
         match value {
@@ -1388,6 +1451,7 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorTargetResolution(KubeApiError::MalformedResource(msg))
             }
             OperatorApiError::UnsupportedTargetConfig(msg) => Self::UnsupportedTargetConfig(msg),
+            OperatorApiError::LocalShare(msg) => Self::LocalShare(LocalShareError::Operator(msg)),
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }

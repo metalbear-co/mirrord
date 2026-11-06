@@ -1946,6 +1946,7 @@ mod tests {
                 key: Some(key.to_owned()),
                 http_filter: None,
                 created_at: None,
+                share: None,
             }
         }
 

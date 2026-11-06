@@ -1,4 +1,4 @@
-use std::{ops::Not, str::FromStr, sync::LazyLock};
+use std::{fmt::Write, ops::Not, str::FromStr, sync::LazyLock};
 
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
@@ -16,6 +16,25 @@ use crate::{
     config::{ConfigContext, ConfigError, from_env::FromEnv, source::MirrordConfigSource},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
+
+/// Spells a session key as the value of the `mirrord-session` member of a W3C `baggage` header.
+///
+/// share-ingress puts this value on every request it forwards, and a shared session's HTTP filter
+/// ([`HttpFilterConfig::for_shared_session`]) matches exactly this value, so both sides must use
+/// this function. Bytes that a baggage value can't hold, and `%` itself, are percent-encoded, so
+/// any key reaches the filter intact: the key `alice;debug` becomes `alice%3Bdebug`.
+pub fn baggage_session_value(key: &str) -> String {
+    let mut value = String::with_capacity(key.len());
+    for byte in key.bytes() {
+        if matches!(byte, 0x21 | 0x23..=0x24 | 0x26..=0x2B | 0x2D..=0x3A | 0x3C..=0x5B | 0x5D..=0x7E)
+        {
+            value.push(char::from(byte));
+        } else {
+            write!(value, "%{byte:02X}").expect("writing into a String cannot fail");
+        }
+    }
+    value
+}
 
 /// Filter configuration for the HTTP traffic stealer feature.
 ///
@@ -100,6 +119,10 @@ use crate::{
 ///  ]
 /// }
 /// ```
+///
+/// A session started with [`share`](#root-share) steals a request that matches the filter above,
+/// or that carries the session key in `baggage` (see [`key`](#root-key)). The examples above
+/// describe the filter on its own.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
@@ -338,6 +361,34 @@ impl HttpFilterConfig {
                 Some(list) => list.len() as u16,
                 None => u16::MAX,
             }
+        }
+    }
+
+    /// The filter of a shared session: this filter, or a `baggage` header that carries
+    /// `mirrord-session=<key>`, because share-ingress tags every request it forwards with that
+    /// member. The configured filter stays whole, so requests that match it still arrive.
+    pub fn for_shared_session(&self, key: &str) -> Result<HttpFilter, HttpFilterParseError> {
+        // The agent matches a header as `<lower-case name>: <value>`, case-insensitively, but a
+        // baggage member name and its value are case-sensitive. The member must be a whole member
+        // of the list, so a key doesn't match a longer key or another member's value. The member
+        // is matched only as share-ingress writes it, `mirrord-session=` and the value from
+        // `baggage_session_value`, so the two sides agree.
+        //
+        // The pattern starts with `^baggage: ` and holds `mirrord-session=<value>` as it is,
+        // because a `MirrordPolicy` header filter is a regex matched against this pattern, and
+        // one written for the documented filter, `^baggage: .*mirrord-session=<key>.*$`, must
+        // accept it.
+        let value = regex::escape(&baggage_session_value(key));
+        let session = HttpFilter::Header(Filter::new(format!(
+            r"^baggage: (?:[^,\r\n]*,[ \t]*)*(?-i:mirrord-session={value})[ \t]*(?:;[^,\r\n]*)?(?:,[^\r\n]*)?$"
+        ))?);
+        if self.is_filter_set() {
+            Ok(HttpFilter::Composite {
+                all: false,
+                filters: vec![self.as_protocol_http_filter()?, session],
+            })
+        } else {
+            Ok(session)
         }
     }
 

@@ -1168,7 +1168,7 @@ fn apply_config_patch(
 
 /// `config` as the JSON a `config_patch` is merged into.
 fn patchable(config: LayerConfig, key: &EnvKey) -> Result<serde_json::Value, serde_json::Error> {
-    let mut json = serde_json::to_value(config)?;
+    let mut json = config.as_file_config()?;
 
     // `LayerConfig` preserves whether a key was provided or generated in its serialized form,
     // while a user-facing mirrord config represents it as a string.

@@ -14,13 +14,61 @@ use mirrord_config::{
 };
 use mirrord_protocol::{
     ClientMessage,
-    tcp::{Filter, HttpFilter, LayerTcpSteal, StealType},
+    tcp::{Filter, HttpBodyFilter, HttpFilter, JqQuery, JsonPathQuery, LayerTcpSteal, StealType},
 };
 use rstest::rstest;
 use serde_json::{Value, json};
 use tokio::{io::AsyncWriteExt, net::TcpStream, time::timeout};
 
 const BIND_ATTEMPTS: usize = 5;
+
+// The agent prepends (?i) when compiling headers. Exercise that same regex engine and
+// input format without exposing the agent binary's private matcher API.
+fn session_regex(filter: HttpFilter, custom: Option<HttpFilter>) -> fancy_regex::Regex {
+    let session = if let Some(custom) = custom {
+        let HttpFilter::Composite {
+            all: false,
+            mut filters,
+        } = filter
+        else {
+            panic!("custom expression must remain an independent OR branch");
+        };
+        assert_eq!(filters.len(), 2);
+        let session = filters.pop().unwrap();
+        assert_eq!(filters.pop().unwrap(), custom);
+        session
+    } else {
+        filter
+    };
+    let HttpFilter::Header(pattern) = session else {
+        panic!("expected baggage header filter")
+    };
+    // A `MirrordPolicy` header filter is a regex matched against this pattern, so a policy written
+    // for the documented filter, `^baggage: .*mirrord-session=<key>.*$`, must accept it.
+    let documented_policy = fancy_regex::Regex::new(r"^\^baggage: .*mirrord-session=").unwrap();
+    assert!(
+        documented_policy.is_match(&pattern.to_string()).unwrap(),
+        "{pattern}"
+    );
+    fancy_regex::Regex::new(&format!("(?i){pattern}")).unwrap()
+}
+
+fn assert_fixture_session(filter: HttpFilter, custom: Option<HttpFilter>) {
+    let regex = session_regex(filter, custom);
+    for (header, expected) in [
+        ("baggage: mirrord-session=dev.[A]+", true),
+        (
+            "BAGGAGE: other=1, mirrord-session=dev.[A]+;prop=yes, next=2",
+            true,
+        ),
+        ("baggage: mirrord-session=dev.%5BA%5D%2B", false),
+        ("baggage: mirrord-session=dev.[a]+", false),
+        ("baggage: mirrord-session=dev.[A]+suffix", false),
+        ("baggage: other=dev.[A]+", false),
+    ] {
+        assert_eq!(regex.is_match(header).unwrap(), expected, "{header}");
+    }
+}
 
 fn build_config(
     incoming_ports: Option<&[u16]>,
@@ -247,4 +295,146 @@ async fn excluded_port_in_use_fails_bind() {
     timeout(Duration::from_secs(5), test_process.wait_assert_fail())
         .await
         .expect("application did not exit after AddrInUse");
+}
+
+/// In a shared session, a custom AST must survive session widening, and filter scope follows the
+/// mapped remote port.
+#[rstest]
+#[case::body("session_body.toml", HttpFilter::Body(HttpBodyFilter::Json {
+    query: JsonPathQuery::new_unchecked("$.selected".to_owned()),
+    matches: Filter::new("^true$".to_owned()).unwrap(),
+}))]
+#[case::jq("session_jq.toml", HttpFilter::HeaderJq(JqQuery::new("contains(\"x-team: local\")").unwrap()))]
+#[case::composite("session_composite.toml", HttpFilter::Composite {
+    all: true,
+    filters: vec![
+        HttpFilter::Path(Filter::new("^/custom$".to_owned()).unwrap()),
+        HttpFilter::Body(HttpBodyFilter::Json {
+            query: JsonPathQuery::new_unchecked("$.selected".to_owned()),
+            matches: Filter::new("^true$".to_owned()).unwrap(),
+        }),
+        HttpFilter::HeaderJq(JqQuery::new("contains(\"x-team: local\")").unwrap()),
+    ],
+})]
+#[tokio::test]
+async fn filter_ports_preserves_custom_ast_and_mapping(
+    config_dir: &std::path::Path,
+    #[case] fixture: &str,
+    #[case] custom: HttpFilter,
+) {
+    let (_process, mut intproxy) = Application::RustListenPorts
+        .start_process(
+            vec![("APP_PORTS", "54321")],
+            Some(&config_dir.join(fixture)),
+        )
+        .await;
+    let ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
+        23456,
+        filter,
+    ))) = intproxy.recv().await
+    else {
+        panic!("expected mapped filtered subscription")
+    };
+    assert_fixture_session(filter, Some(custom));
+}
+
+/// A shared session's subscription must select exactly the requests whose `baggage` carries its
+/// key as `baggage_session_value` spells it, which is how share-ingress tags them, and keep
+/// arbitrary keys apart.
+/// This fake-agent harness checks the generated regex, not cluster request routing.
+#[rstest]
+#[case("alice")]
+#[case("alice;debug")]
+#[case("alice,debug=1")]
+#[case("alice%3Bdebug")]
+#[case(" alice ")]
+#[case("café")]
+#[case("")]
+#[case("Alice")]
+#[tokio::test]
+async fn filter_ports_session_key_wire_contract(#[case] key: &str) {
+    let config = json!({
+        "key": key,
+        "share": true,
+        "feature": {"network": {"incoming": {
+            "mode": "steal",
+            "ports": [54321],
+            "http_filter": {"path_filter": "^/independent$"}
+        }}}
+    });
+    let mut config_file = tempfile::NamedTempFile::with_suffix(".json").unwrap();
+    config_file
+        .write_all(serde_json::to_string(&config).unwrap().as_bytes())
+        .unwrap();
+    let (_process, mut intproxy) = Application::RustListenPorts
+        .start_process(vec![("APP_PORTS", "54321")], Some(config_file.path()))
+        .await;
+    let ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
+        54321,
+        filter,
+    ))) = intproxy.recv().await
+    else {
+        panic!("expected filtered subscription")
+    };
+    let custom = HttpFilter::Path(Filter::new("^/independent$".to_owned()).unwrap());
+    // Check the complete OR composition, then its independently matching custom path.
+    let HttpFilter::Composite { filters, .. } = &filter else {
+        panic!("expected custom OR session")
+    };
+    let Some(HttpFilter::Path(path)) = filters.first() else {
+        panic!("expected custom path")
+    };
+    let custom_regex = fancy_regex::Regex::new(&format!("(?i){path}")).unwrap();
+    let session = session_regex(filter, Some(custom));
+    // `selected_key` is the key that the header carries in the one spelling share-ingress writes,
+    // or `None` when the header carries no key in that spelling.
+    for (header, selected_key) in [
+        ("baggage: mirrord-session=alice", Some("alice")),
+        ("baggage: mirrord-session=alice;debug", Some("alice")),
+        ("baggage: mirrord-session=alice,debug=1", Some("alice")),
+        (
+            "baggage: mirrord-session=alice%3Bdebug",
+            Some("alice;debug"),
+        ),
+        (
+            "BAGGAGE: upstream=1, mirrord-session=alice%3Bdebug;prop=yes, next=2",
+            Some("alice;debug"),
+        ),
+        (
+            "baggage: mirrord-session=alice%2Cdebug=1",
+            Some("alice,debug=1"),
+        ),
+        (
+            "baggage: mirrord-session=alice%253Bdebug",
+            Some("alice%3Bdebug"),
+        ),
+        ("baggage: mirrord-session=Alice", Some("Alice")),
+        ("baggage: mirrord-session=alice-suffix", None),
+        ("baggage: mirrord-session=alice ", Some("alice")),
+        ("baggage: mirrord-session= alice", None),
+        ("baggage: mirrord-session=%20alice%20", Some(" alice ")),
+        ("baggage: mirrord-session=caf%C3%A9", Some("café")),
+        ("baggage: mirrord-session=;debug, next=2", Some("")),
+        ("baggage: mirrord-session=", Some("")),
+        ("baggage: other=alice;mirrord-session=alice", None),
+        ("baggage: Mirrord-session=alice", None),
+        ("baggage: mirrord-session =alice", None),
+        // Other spellings of a key don't match: lower-case hex digits, an encoded byte that a
+        // baggage value can hold, and a raw byte that it can't.
+        ("baggage: mirrord-session=alice%3bdebug", None),
+        ("baggage: mirrord-session=%61lice", None),
+        ("baggage: mirrord-session=caf%c3%a9", None),
+        ("baggage: mirrord-session=café", None),
+    ] {
+        let matches = session.is_match(header).unwrap();
+        assert_eq!(
+            matches,
+            selected_key == Some(key),
+            "key={key:?}, header={header:?}"
+        );
+        assert_eq!(
+            matches || custom_regex.is_match("/unmatched").unwrap(),
+            selected_key == Some(key)
+        );
+    }
 }
