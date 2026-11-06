@@ -478,6 +478,10 @@ jobs:
         env:
           RUN_URL: ${{ steps.dispatch.outputs.run_url }}
         run: |
+          if [ -z "$RUN_URL" ]; then
+            echo "::error::The operator check didn't start. The \"Start the operator check\" step says why."
+            exit 0
+          fi
           echo "::error::The operator doesn't compile with the mirrord crates of this PR: $RUN_URL." \
             "Push an operator branch named like this PR's branch that fixes it, and re-run the failed jobs." \
             "If operator main is already broken by an earlier mirrord PR, add the skip-operator-check label instead."
