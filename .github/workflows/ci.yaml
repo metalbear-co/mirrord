@@ -445,7 +445,7 @@ jobs:
         with:
           # `OPERATOR_E2E_PAT` needs `Actions: read` and `Actions: write` on `metalbear-co/operator`.
           token: ${{ secrets.OPERATOR_E2E_PAT }}
-          ref: main
+          ref: aregh/operator-compat-check
           repo: operator
           owner: metalbear-co
           workflow: check-mirrord-compat.yaml
