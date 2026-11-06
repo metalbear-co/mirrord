@@ -109,7 +109,7 @@ pub fn compile_jq(code: &str) -> Result<jaq_core::Filter<jaq_core::Native<jaq_js
 }
 
 #[cfg(feature = "eval")]
-pub async fn evaluate_jq(
+pub async fn evaluate_jq_filter(
     jq_code: &str,
     payload: &serde_json::Value,
     timeout_duration: std::time::Duration,
@@ -275,7 +275,7 @@ mod tests {
             {"snow": 20, "wind": 10}
         ]);
 
-        let result = evaluate_jq(jq_code, &payload, std::time::Duration::from_millis(500))
+        let result = evaluate_jq_filter(jq_code, &payload, std::time::Duration::from_millis(500))
             .await
             .expect("JQ evaluation failed");
         assert!(
@@ -295,7 +295,7 @@ mod tests {
             {"snow": 20, "wind": 10}
         ]);
 
-        let result = evaluate_jq(jq_code, &payload, std::time::Duration::from_millis(500))
+        let result = evaluate_jq_filter(jq_code, &payload, std::time::Duration::from_millis(500))
             .await
             .expect("JQ evaluation failed");
         assert!(
@@ -313,7 +313,7 @@ mod tests {
 
         assert!(
             matches!(
-                evaluate_jq(jq_code, &payload, std::time::Duration::from_secs(1)).await,
+                evaluate_jq_filter(jq_code, &payload, std::time::Duration::from_secs(1)).await,
                 Err(JqError::Timeout { .. })
             ),
             "Expected jq evaluation to timeout but it didn't"
