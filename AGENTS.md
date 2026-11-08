@@ -70,7 +70,9 @@ cargo xtask test-ut -- resolve_url_happy_path -- --nocapture
 cargo xtask in-runner -- cargo xtask test-e2e
 ```
 
-Never write unit tests unless explicitly asked. Run the existing tests to verify a change.
+A unit test in a PR is never a review finding for being there. As a coding agent writing a change, add unit tests only
+when explicitly asked to by the developer you work for, the change's requirements, or a review comment you're told to
+address, never just because you can. Run the existing tests to verify a change.
 
 Prefer an integration test (`mirrord-layer-tests`, which stands in for the agent) to an end-to-end test, which needs a
 cluster. Don't add the `#[timeout]` of `rstest`: `.config/nextest.toml` already times out every test and reports it as

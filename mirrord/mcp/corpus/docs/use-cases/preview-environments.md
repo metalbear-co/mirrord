@@ -283,7 +283,9 @@ The preview URL works with any HTTP filter. A preview with a custom filter (a pa
 
 ### How it works
 
-`mirrord-share-ingress` runs as its own Deployment and Service. It watches Preview Environments and, on each request, matches the request host to a live preview, injects `baggage: mirrord-session=<key>`, and forwards to that preview's target Service in-cluster. The operator's filtered steal at the target then routes the request to the preview pod, exactly as the browser extension's header would - the operator matches the injected header in addition to the session's own filter.
+`mirrord-share-ingress` runs as its own Deployment and Service. It watches Preview Environments and, on each request, matches the request host to a live preview, injects `baggage: mirrord-session=<key>`, and forwards in-cluster to the Service named after the preview's target. The operator's filtered steal at the target then routes the request to the preview pod, exactly as the browser extension's header would - the operator matches the injected header in addition to the session's own filter.
+
+Share-ingress uses the Service port whose `targetPort` is a port the preview steals on, preferring the first port in `feature.network.incoming.ports`, or Service port `80` when it is unset. For a headless Service, it uses the stolen port itself. This requires mirrord operator and the share-ingress chart `3.230.0` or later. Earlier versions use the first port in `feature.network.incoming.ports`, or `80` when it is unset. A target without such a Service can't be reached through its link. When share-ingress can't connect to the target within five seconds, the link returns a 502. To log where each request is forwarded, set the share-ingress chart's `server.logLevel` to `share_ingress=debug,mirrord=info,warn`.
 
 TLS and the public-facing ingress are owned by your platform team. You put an Ingress (or equivalent gateway) in front of the share-ingress Service that terminates TLS with a wildcard `*.<shareDomain>` certificate, preserves the `Host` header, and routes to the Service. Access control to the link is your responsibility as part of configuring that ingress.
 

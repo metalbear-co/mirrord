@@ -41,6 +41,7 @@ Set the key as an environment variable named `MIRRORD_CI_API_KEY` in the agent e
 
 Install the mirrord CLI in the environment that the agents start from. Then tell the agent when to run its code with mirrord, the same way you do for an agent on a laptop:
 
+- Register the [mirrord MCP server](./mcp-server.md), if the agent platform supports MCP servers.
 - Install the [mirrord agent skills](./ai-skills-plugin.md).
 - Generate an `AGENTS.md` file with the [meta-prompt](./the-meta-prompt.md).
 - Point the agent at [metalbear.com/agents.md](https://metalbear.com/agents.md).
