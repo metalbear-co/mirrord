@@ -1638,9 +1638,10 @@ impl UpConfig {
     /// Picks the image of every service for a `run` of `mirrord preview up` or `mirrord preview
     /// sync`, and drops the services that get no preview.
     ///
-    /// [`PreviewRun::Up`] previews every service with an image. [`PreviewRun::Sync`] previews only
-    /// the services with `sync`, except those with `skip` and no image, and a service without an
-    /// image runs the target's image.
+    /// [`PreviewRun::Up`] previews every service with an image, and every service with
+    /// `target: none`: such a preview is its branch databases and runs no pod, so it has no image
+    /// by design. [`PreviewRun::Sync`] previews only the services with `sync`, except those with
+    /// `skip` and no image, and a service without an image runs the target's image.
     ///
     /// `flags` are the `--image <service>=<ref>` values. A service's image comes from its flag,
     /// then its `MIRRORD_<SERVICE>_IMAGE` environment variable (see [`preview_image_env`]; empty
@@ -1719,8 +1720,9 @@ impl UpConfig {
                     .map(|image| (image, PreviewImageSource::Env)),
             };
 
+            let targetless = matches!(service.target, TargetConfig::Targetless);
             let skipped = match run {
-                PreviewRun::Up if picked.is_none() => Some(SkipReason::NoImage),
+                PreviewRun::Up if picked.is_none() && targetless.not() => Some(SkipReason::NoImage),
                 PreviewRun::Sync if service.sync.is_none() => Some(SkipReason::NoSync),
                 PreviewRun::Sync if service.skip && picked.is_none() => Some(SkipReason::Skip),
                 PreviewRun::Up | PreviewRun::Sync => None,
@@ -1964,7 +1966,7 @@ pub enum PreviewRun {
 /// Why [`UpConfig::select_preview_images`] gives a service no preview.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SkipReason {
-    /// [`PreviewRun::Up`]: the service has no image.
+    /// [`PreviewRun::Up`]: the service has a target and no image.
     NoImage,
     /// [`PreviewRun::Sync`]: the service has `skip: true` and no image.
     Skip,
@@ -3867,6 +3869,39 @@ mod tests {
                 (Arc::from("plain"), SkipReason::NoImage),
                 (Arc::from("skipped-sync"), SkipReason::NoImage),
             ]
+        );
+    }
+
+    /// A service with `target: none` is its branch databases: no pod runs, so there is no image
+    /// to wait for, and `mirrord preview up` previews it as it is. Only a service with a target
+    /// is skipped for lack of an image.
+    #[test]
+    fn preview_up_keeps_a_service_without_a_target_without_an_image() {
+        let mut config = parse(
+            r#"
+            services:
+              orders-db:
+                target: none
+                run:
+                  command: ["echo"]
+              web:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let images = config
+            .select_preview_images(&[], &ConfigContext::default(), PreviewRun::Up)
+            .unwrap();
+
+        assert_eq!(
+            service_names(&config),
+            HashSet::from(["orders-db".to_owned()])
+        );
+        assert!(images.picked.is_empty());
+        assert_eq!(
+            images.skipped,
+            vec![(Arc::from("web"), SkipReason::NoImage)]
         );
     }
 
