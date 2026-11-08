@@ -2132,7 +2132,7 @@ pub(super) struct UpArgs {
     /// Can also be set with the `MIRRORD_KEY` environment variable.
     /// If not provided here or through `MIRRORD_KEY`, a key is generated automatically from the
     /// system username.
-    #[arg(short = 'k', long, global = true)]
+    #[arg(short = 'k', long, env = env_key::MIRRORD_ENV_KEY, global = true)]
     pub key: Option<String>,
 
     /// Start `mirrord ui` in the background.
