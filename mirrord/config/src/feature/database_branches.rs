@@ -879,14 +879,18 @@ pub enum BranchCopyMode {
     All,
 }
 
-/// Why a branch needs the target pod, see [`DatabaseBranchConfig::target_pod_need`]. The two
-/// cases get different advice: a pod-bound value can be sourced from somewhere else, an engine
-/// that reads the pod itself cannot run without a target at all.
+/// Why a branch needs the target pod, see [`DatabaseBranchConfig::target_pod_need`]. Each case
+/// gets its own advice: a pod-bound value can be sourced from somewhere else, IAM auth can be
+/// dropped for credentials in a Secret, an engine that reads the pod itself cannot run without a
+/// target at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetPodNeed {
-    /// A connection value is read off the pod, or a secret manager source or IAM auth borrows
-    /// its cloud identity.
+    /// A connection value is read off the pod, or a secret manager source borrows its cloud
+    /// identity.
     ConnectionValues,
+    /// `iam_auth` runs the branch pod under the target pod's service account. The values may
+    /// already be Secrets, so only dropping `iam_auth` or setting a target helps.
+    IamAuth,
     /// The engine itself reads the pod, so only setting a target helps.
     Engine,
 }
@@ -1231,10 +1235,10 @@ impl DatabaseBranchConfig {
                 },
                 ConnectionSource::Params(_) => false,
             });
-        let iam_needs_pod = borrows_pod_identity && self.iam_auth().is_some();
-
-        (params_need_pod || urls_need_pod || iam_needs_pod)
-            .then_some(TargetPodNeed::ConnectionValues)
+        if params_need_pod || urls_need_pod {
+            return Some(TargetPodNeed::ConnectionValues);
+        }
+        (borrows_pod_identity && self.iam_auth().is_some()).then_some(TargetPodNeed::IamAuth)
     }
 
     /// True when a `configmap` param source has no locator of its own, so the ConfigMap comes
@@ -3074,16 +3078,27 @@ mod tests {
     }
 
     /// IAM auth signs with the target pod's keys or runs the branch pod under its service
-    /// account, so a Secret-sourced connection still needs the pod once `iam_auth` is set.
+    /// account, so a Secret-sourced connection still needs the pod once `iam_auth` is set. It is
+    /// its own verdict: the values are already Secrets, so advice to move them there would send
+    /// the user in a circle. A value read off the pod is reported first, as moving it is the
+    /// first thing to fix either way.
     #[test]
     fn target_pod_need_for_iam_auth() {
+        let secret_url = json!({ "url": { "type": "secret", "name": "pg", "key": "url" } });
         let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
             "type": "pg",
-            "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } },
+            "connection": secret_url,
             "iam_auth": { "type": "aws_rds" },
         }))
         .unwrap();
+        assert_eq!(branch.target_pod_need(), Some(TargetPodNeed::IamAuth));
 
+        let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({
+            "type": "pg",
+            "connection": { "url": "DATABASE_URL" },
+            "iam_auth": { "type": "aws_rds" },
+        }))
+        .unwrap();
         assert_eq!(
             branch.target_pod_need(),
             Some(TargetPodNeed::ConnectionValues)
