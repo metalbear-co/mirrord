@@ -3575,10 +3575,16 @@ impl OperatorApi<PreparedClientCert> {
 /// so a refusal that waited for `start` would land after a targeted service already replaced
 /// its preview. [`OperatorApi::prepare_branch_dbs`] runs it again for the branches a `"*"` / ids
 /// request resolved to, and for `mirrord exec`.
+///
+/// Branches only mirrord itself runs (a local Redis branch) never reach the operator, so a
+/// config made only of those passes whatever the operator supports.
 pub fn check_targetless_db_branches(
     spec: &MirrordOperatorSpec,
     db_branches: &DatabaseBranchesConfig,
 ) -> OperatorApiResult<()> {
+    if db_branches.any_provisioned_by_operator().not() {
+        return Ok(());
+    }
     if let Some((position, need)) = db_branches
         .iter()
         .enumerate()
@@ -3591,6 +3597,11 @@ pub fn check_targetless_db_branches(
                  branch that runs a pod), but this session has no target; give each connection \
                  value as a literal, a Kubernetes Secret, or a ConfigMap named directly, or set \
                  a `target`"
+            ),
+            TargetPodNeed::IamAuth => format!(
+                "`feature.db_branches[{position}]` has `iam_auth`, which signs in with the target \
+                 pod's cloud identity, but this session has no target; drop `iam_auth` and give \
+                 the credentials as a literal or a Kubernetes Secret, or set a `target`"
             ),
             TargetPodNeed::Engine => format!(
                 "`feature.db_branches[{position}]` is a Spanner branch, which always reads the \
@@ -3709,6 +3720,17 @@ mod test {
         ));
         check_targetless_db_branches(&spec(&["TargetlessDbBranches"]), &secret_only)
             .expect("Secret-backed values need no pod");
+
+        // A local Redis branch is run by mirrord itself, so a targetless `mirrord exec` with
+        // nothing else does not ask the operator for anything, whatever it supports.
+        let local_only = branches(serde_json::json!([{
+            "id": "scratch",
+            "type": "redis",
+            "location": "local",
+            "connection": { "url": { "type": "env", "variable": "REDIS_URL" } },
+        }]));
+        check_targetless_db_branches(&spec(&[]), &local_only)
+            .expect("a local branch needs nothing from the operator");
     }
 
     #[tokio::test]
