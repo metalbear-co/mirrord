@@ -39,7 +39,6 @@ use mirrord_config::{
     LayerConfig,
     config::{ConfigContext, ConfigError, EnvKey},
     feature::{
-        database_branches::{DatabaseBranchEngine, DatabaseBranchesConfig},
         network::incoming::tls_delivery::{
             LocalTlsDelivery, TlsClientCertSource, TlsDeliveryProtocol,
         },
@@ -182,6 +181,7 @@ async fn preview_start(
         supplied_objects,
         false,
         None,
+        None,
         &progress,
         analytics,
     )
@@ -289,7 +289,9 @@ impl PreparedPreview {
     /// `sources.chart` is rendered here. With `auto_queue_splitting`, `feature.split_queues` are
     /// defaults the operator drops what it can't serve of, so they aren't checked against its
     /// features. A session with `sync` needs no `feature.preview.image`, because without
-    /// one it runs the target's image.
+    /// one it runs the target's image. `up_service` is the `mirrord preview up` service this
+    /// config belongs to, which names the placeholder target of a preview without a target (see
+    /// [`targetless_session_target`]).
     #[allow(
         clippy::too_many_arguments,
         reason = "The prepared session owns its reporter so branch refusals during startup can be attributed."
@@ -302,6 +304,7 @@ impl PreparedPreview {
         mut supplied_objects: Option<Vec<resources::SuppliedObject>>,
         mut auto_queue_splitting: bool,
         sync: Option<sync::ServiceSync>,
+        up_service: Option<&str>,
         progress: &ProgressTracker,
         mut analytics: AnalyticsReporter,
     ) -> CliResult<Self> {
@@ -558,10 +561,7 @@ impl PreparedPreview {
         };
 
         let (session_target, target_image) = if targetless {
-            (
-                targetless_session_target(&layer_config.feature.db_branches),
-                None,
-            )
+            (targetless_session_target(up_service), None)
         } else {
             resolve_config_target(
                 &config_target,
@@ -2355,38 +2355,25 @@ fn reject_management_only(spec: &MirrordOperatorSpec) -> CliResult<()> {
     Ok(())
 }
 
-/// The placeholder target of a preview without a target, named after the branches it
-/// provisions. Sessions under one key and target replace each other, and a preview without a
-/// target is its branches: two `mirrord up` services with different branch sets under one key
-/// (a pg branch for one, a remote redis branch for the other) are different previews and run
-/// side by side, while a rerun with the same branches replaces the earlier session, the way a
-/// rerun against the same workload does. Each branch is listed as its `type`, or `type/id` when
-/// it has an id, sorted, so the order the config lists them in doesn't matter. Local Redis
-/// branches never reach the operator and don't count. The operator only reads the kind.
-fn targetless_session_target(db_branches: &DatabaseBranchesConfig) -> SessionTarget {
-    let mut branches = db_branches
-        .iter()
-        .filter_map(|branch| {
-            let engine: &'static str = DatabaseBranchEngine::from(branch).into();
-            match branch.base()?.id.as_deref() {
-                Some(id) => Some(format!("{engine}/{id}")),
-                None => Some(engine.to_owned()),
-            }
-        })
-        .collect::<Vec<_>>();
-    branches.sort();
-    branches.dedup();
-
+/// The placeholder target of a preview without a target. Sessions under one key and target
+/// replace each other, and what stands in for the workload here is the config the preview came
+/// from: a `mirrord preview start` config is one preview, so a rerun under the same key replaces
+/// the earlier session whatever its branches are, the way editing the branches of a config with
+/// a target does. `mirrord preview up` names the placeholder after the service (`up_service`),
+/// so two services without a target under one key (a pg branch for `orders-db`, a redis branch
+/// for `cache-db`) run side by side, and a rerun of a service with a changed branch set still
+/// replaces its own earlier session. The operator only reads the kind.
+fn targetless_session_target(up_service: Option<&str>) -> SessionTarget {
     SessionTarget::KubeResource(KubeResourceTarget {
-        name: branches.join(","),
+        name: up_service.unwrap_or_default().to_owned(),
         ..KubeResourceTarget::targetless()
     })
 }
 
 /// Whether `target`, as `stop`, `logs` or `status` resolved it from the config or `-t`, names
-/// `session`. The placeholder of a preview without a target carries its branches in its name
-/// (see [`targetless_session_target`]), and a config without a target, or `-t targetless`,
-/// means every such preview under the key.
+/// `session`. The placeholder of a preview without a target may carry the `mirrord preview up`
+/// service in its name (see [`targetless_session_target`]), and a config without a target, or
+/// `-t targetless`, means every such preview under the key.
 fn session_has_target(session: &PreviewSession, target: &SessionTarget) -> bool {
     if target.is_targetless() {
         return session.spec.target.is_targetless();
@@ -2451,8 +2438,8 @@ async fn resolve_config_target(
     if let Target::Label(label_target) = config_target {
         return Ok((label_session_target(label_target), None));
     }
-    // A branch-only preview has no workload to look up. `start` names its placeholder after its
-    // branches (`targetless_session_target`); `stop`, `logs` and `status` get the bare one, which
+    // A branch-only preview has no workload to look up. `start` builds its placeholder with
+    // `targetless_session_target`; `stop`, `logs` and `status` get the bare one, which
     // `session_has_target` matches against every session without a target under the key.
     if matches!(config_target, Target::Targetless) {
         return Ok((SessionTarget::targetless(), None));
@@ -2896,59 +2883,37 @@ mod tests {
     /// of being told the manifests need a target, as `start` tells them.
     #[test]
     fn manifests_are_refused_without_a_target() {
-        let branch_set = targetless_session_target(&branches(serde_json::json!([{
-            "type": "pg",
-            "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } },
-        }])));
-
-        for target in [SessionTarget::targetless(), branch_set] {
+        for target in [
+            SessionTarget::targetless(),
+            targetless_session_target(Some("orders-db")),
+        ] {
             let error = resources_target(&target).expect_err("no workload to compare with");
             assert_eq!(error.to_string(), manifests_need_a_target().to_string());
         }
     }
 
-    fn branches(json: serde_json::Value) -> DatabaseBranchesConfig {
-        serde_json::from_value(json).expect("a valid db_branches config")
-    }
-
-    /// Every preview without a target used to get one placeholder target, so `mirrord up` saw
-    /// two targetless services under one key (`orders-db` with a pg branch, `cache-db` with a
-    /// redis one) as the same preview and refused the run, and `preview start -k K` with the
-    /// second config replaced the first one's session. The placeholder is named after the branch
-    /// set, so different branch sets coexist and the same set, in any order, still replaces.
+    /// A placeholder named after the branch set let a rerun of a config leak its earlier session:
+    /// `preview start -k K` with a pg branch, then again with pg and redis, left the pg session
+    /// running until its TTL, both holding the same pg branch. The placeholder stands for the
+    /// config instead: `start` has one, so a rerun replaces whatever branches it had, and a
+    /// `mirrord preview up` service keeps its own, so two services without a target coexist
+    /// under one key while a service with a changed branch set replaces only itself.
     #[test]
-    fn targetless_placeholder_is_named_after_the_branch_set() {
-        let pg = serde_json::json!({
-            "type": "pg",
-            "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
-        });
-        let redis = serde_json::json!({
-            "id": "cache",
-            "type": "redis",
-            "connection": { "url": { "type": "secret", "name": "redis", "key": "url" } }
-        });
-        let local_redis = serde_json::json!({
-            "id": "scratch",
-            "type": "redis",
-            "location": "local",
-            "connection": { "url": { "type": "env", "variable": "REDIS_URL" } }
-        });
+    fn targetless_placeholder_stands_for_the_config_not_its_branches() {
+        let start = targetless_session_target(None);
+        let orders = targetless_session_target(Some("orders-db"));
+        let cache = targetless_session_target(Some("cache-db"));
 
-        let orders = targetless_session_target(&branches(serde_json::json!([pg])));
-        let cache = targetless_session_target(&branches(serde_json::json!([redis])));
-        let both = targetless_session_target(&branches(serde_json::json!([pg, redis])));
-        let both_reordered =
-            targetless_session_target(&branches(serde_json::json!([redis, local_redis, pg])));
-
-        assert!(orders.is_targetless() && cache.is_targetless() && both.is_targetless());
+        assert!(start.is_targetless() && orders.is_targetless() && cache.is_targetless());
+        assert_eq!(start, SessionTarget::targetless());
+        assert_eq!(start, targetless_session_target(None));
+        assert_eq!(orders, targetless_session_target(Some("orders-db")));
         assert_ne!(orders, cache);
-        assert_ne!(orders, both);
-        assert_eq!(both, both_reordered);
-        assert_eq!(both.display_name(), "pg,redis/cache");
+        assert_ne!(orders, start);
     }
 
-    /// `preview stop -t targetless` (or a config with `target: "targetless"`) has no branch set
-    /// to name a placeholder after, so it means every preview without a target under the key,
+    /// `preview stop -t targetless` (or a config with `target: "targetless"`) names no `mirrord
+    /// preview up` service, so it means every preview without a target under the key,
     /// while a workload target still matches only its own sessions.
     #[test]
     fn a_bare_targetless_target_matches_every_session_without_a_target() {
@@ -2958,10 +2923,7 @@ mod tests {
             "2026-10-30T01:00:00Z",
         );
         let workload = session.spec.target.clone();
-        session.spec.target = targetless_session_target(&branches(serde_json::json!([{
-            "type": "pg",
-            "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
-        }])));
+        session.spec.target = targetless_session_target(Some("orders-db"));
 
         assert!(session_has_target(&session, &SessionTarget::targetless()));
         assert!(session_has_target(&session, &session.spec.target.clone()));
